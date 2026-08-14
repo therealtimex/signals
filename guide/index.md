@@ -1,11 +1,11 @@
-# OpenVolo User Guide
+# Signals User Guide
 
-**AI-Native Social CRM for X/Twitter + LinkedIn**
+**AI-Native Social GTM & Relationship Knowledge Graph**
 
 One command. Your own CRM. AI agents that actually do the work.
 
-![OpenVolo Dashboard — your CRM at a glance](assets/dashboard-overview.png)
-*The OpenVolo dashboard: contacts, workflows, tasks, and content pipeline in a single view.*
+![Signals Dashboard — your CRM at a glance](assets/dashboard-overview.png)
+*The Signals dashboard: contacts, workflows, tasks, and content pipeline in a single view.*
 
 ---
 
@@ -15,11 +15,11 @@ According to Carta, [36% of new startups in 2025 are solo-founded](https://carta
 
 Social CRM is one of those tools. You know the problem: your X followers live in one silo, LinkedIn connections in another, and the relationship context — who you've talked to, what they care about, when to follow up — exists only in your head. Traditional CRMs charge $100+/month, require weeks of setup, and assume you have a sales team to manage.
 
-OpenVolo takes a different approach. It's an AI-native CRM built for founders and builders who live on X/Twitter and LinkedIn. It runs locally on your machine with a single command. AI agents handle the tedious work — enriching contacts, generating content, discovering prospects — while you focus on building relationships that matter.
+Signals takes a different approach. It's an AI-native CRM built for founders and builders who live on X/Twitter and LinkedIn. It runs locally on your machine with a single command. AI agents handle the tedious work — enriching contacts, generating content, discovering prospects — while you focus on building relationships that matter.
 
-## What Makes OpenVolo Different
+## What Makes Signals Different
 
-- **One command to start** — `npx openvolo` boots a full CRM with zero configuration. No Docker, no cloud accounts, no waiting.
+- **One command to start** — `npx @realtimex/signals` boots a full CRM with zero configuration. No Docker, no cloud accounts, no waiting.
 - **Local-first, your data** — Everything lives on your machine in SQLite. No vendor lock-in, no data hostage situations. Encrypted credentials, portable database.
 - **AI agents that work** — 10 pre-built agents for prospecting, enrichment, content creation, and engagement. Not chatbot theater — real tool-using agents that search the web, scrape profiles, and take actions.
 - **Browser-based publishing** — Post to X and LinkedIn through actual browser automation. Bypasses expensive APIs and platform restrictions. Choose between full auto or human-in-the-loop review mode.
@@ -41,11 +41,11 @@ OpenVolo takes a different approach. It's an AI-native CRM built for founders an
 ## Quick Start
 
 ```bash
-npx openvolo
+npx @realtimex/signals
 ```
 
 That's it. Open `http://localhost:3000` and you're in. Head to [Getting Started](01-getting-started.md) to configure your API keys and connect your platforms.
 
 ---
 
-*OpenVolo is open source. Built with Next.js, SQLite, and the Vercel AI SDK.*
+*Signals is open source. Built with Next.js, SQLite, and the Vercel AI SDK.*

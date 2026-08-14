@@ -8,7 +8,7 @@
 
 Paul Graham wrote that [AI is the missing piece in important, almost-completed puzzles](http://www.paulgraham.com/ace.html). Managing contacts across X and LinkedIn has been one of those puzzles for years. You know the pain: someone DMs you on X, you connect on LinkedIn, you exchange emails — and now that person exists in three places with no unified view. Traditional CRMs tried to solve this with manual data entry and expensive integrations. AI enrichment is the missing piece that finally makes it work.
 
-OpenVolo treats every person as a single record with multiple **identities** — their X handle, LinkedIn profile, email address — all linked to one contact. When an AI agent enriches a contact, it doesn't just add a field; it searches the web, scrapes profiles, and fills in the gaps automatically.
+Signals treats every person as a single record with multiple **identities** — their X handle, LinkedIn profile, email address — all linked to one contact. When an AI agent enriches a contact, it doesn't just add a field; it searches the web, scrapes profiles, and fills in the gaps automatically.
 
 ## The Contacts List
 
@@ -27,7 +27,7 @@ Key features of the contacts list:
 
 ### Understanding Enrichment Scores
 
-Every contact has an enrichment score that reflects how much OpenVolo knows about them. The score is computed on every write — creating a contact, updating fields, adding identities — so it's always current.
+Every contact has an enrichment score that reflects how much Signals knows about them. The score is computed on every write — creating a contact, updating fields, adding identities — so it's always current.
 
 Scores break down intuitively:
 
@@ -61,14 +61,14 @@ A contact's linked profiles across platforms. One person might have:
 - A LinkedIn identity (profile URL)
 - A Gmail identity (email address)
 
-Identities are how OpenVolo maintains the golden record. When an agent discovers that a contact's X bio mentions their LinkedIn, it can link them automatically.
+Identities are how Signals maintains the golden record. When an agent discovers that a contact's X bio mentions their LinkedIn, it can link them automatically.
 
 ### Tasks Tab
 Action items associated with this contact — follow-up reminders, outreach tasks, demo scheduling. Tasks have priority levels (high, medium, low) and due dates.
 
 ## AI-Powered Enrichment
 
-Here's where OpenVolo diverges from every traditional CRM. Instead of paying for a data provider or manually researching each contact, you deploy AI agents.
+Here's where Signals diverges from every traditional CRM. Instead of paying for a data provider or manually researching each contact, you deploy AI agents.
 
 Navigate to **Automation** and look at the **Enrich** category.
 
@@ -105,9 +105,9 @@ This is the AI equivalent of regularly cleaning your Rolodex, except the AI does
 
 ## Multi-Platform Golden Record
 
-The real power of OpenVolo's contact system is the unified view. A founder you follow on X, connected with on LinkedIn, and emailed through Gmail shows up as **one contact** with three identities. Agents can enrich from any platform and the score reflects the combined data.
+The real power of Signals's contact system is the unified view. A founder you follow on X, connected with on LinkedIn, and emailed through Gmail shows up as **one contact** with three identities. Agents can enrich from any platform and the score reflects the combined data.
 
-This matters because relationships don't live on one platform. The person who engages with your X thread might be the same person your LinkedIn connection introduced you to. OpenVolo keeps that context intact.
+This matters because relationships don't live on one platform. The person who engages with your X thread might be the same person your LinkedIn connection introduced you to. Signals keeps that context intact.
 
 ## What's Next
 

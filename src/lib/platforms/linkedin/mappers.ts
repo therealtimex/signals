@@ -15,7 +15,7 @@ function extractPhotoUrl(
   return lastElement?.identifiers?.[0]?.identifier ?? null;
 }
 
-/** Map a LinkedIn profile (userinfo or legacy) to OpenVolo contact fields. */
+/** Map a LinkedIn profile (userinfo or legacy) to Signals contact fields. */
 export function mapLinkedInProfileToContact(
   profile: LinkedInProfile,
   email?: string | null
@@ -73,7 +73,7 @@ export function mapLinkedInProfileToIdentity(
   };
 }
 
-/** Map a LinkedIn connection to OpenVolo contact fields. */
+/** Map a LinkedIn connection to Signals contact fields. */
 export function mapLinkedInConnectionToContact(
   connection: LinkedInConnection
 ): Omit<NewContact, "id"> {

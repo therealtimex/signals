@@ -5,8 +5,8 @@ import { homedir } from "os";
 import { encrypt, decrypt } from "@/lib/auth/crypto";
 
 const dataDir =
-  process.env.OPENVOLO_DATA_DIR?.replace("~", homedir()) ??
-  join(homedir(), ".openvolo");
+  process.env.SIGNALS_DATA_DIR?.replace("~", homedir()) ??
+  join(homedir(), ".signals");
 const configPath = join(dataDir, "config.json");
 
 function readConfig(): Record<string, unknown> {

@@ -9,7 +9,7 @@ import { mkdirSync, existsSync } from "fs";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export function runMigrations(dataDir?: string) {
-  const dir = dataDir ?? join(homedir(), ".openvolo");
+  const dir = dataDir ?? process.env.SIGNALS_DATA_DIR?.replace("~", homedir()) ?? join(homedir(), ".signals");
 
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });

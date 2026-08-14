@@ -14,7 +14,7 @@ import type { LinkedInConnection } from "@/lib/platforms/linkedin/client";
 import type { SyncResult } from "@/lib/platforms/adapter";
 
 /**
- * Sync contacts from LinkedIn connections into OpenVolo.
+ * Sync contacts from LinkedIn connections into Signals.
  * Uses offset-based pagination (not cursor-based like X).
  * Cross-platform dedup: matches by LinkedIn ID, then by email.
  */

@@ -3,7 +3,7 @@ import { join } from "path";
 import { homedir } from "os";
 import { encrypt, decrypt } from "./crypto";
 
-interface OpenVoloConfig {
+interface SignalsConfig {
   anthropicApiKey?: string; // encrypted
   xClientId?: string;
   xClientSecret?: string; // encrypted
@@ -12,16 +12,16 @@ interface OpenVoloConfig {
   authMethod?: "api_key";
 }
 
-const dataDir = process.env.OPENVOLO_DATA_DIR?.replace("~", homedir()) ?? join(homedir(), ".openvolo");
+const dataDir = process.env.SIGNALS_DATA_DIR?.replace("~", homedir()) ?? join(homedir(), ".signals");
 const configPath = join(dataDir, "config.json");
 
-function readConfig(): OpenVoloConfig {
+function readConfig(): SignalsConfig {
   if (!existsSync(configPath)) return {};
   const raw = readFileSync(configPath, "utf-8");
   return JSON.parse(raw);
 }
 
-function writeConfig(config: OpenVoloConfig) {
+function writeConfig(config: SignalsConfig) {
   writeFileSync(configPath, JSON.stringify(config, null, 2), "utf-8");
 }
 

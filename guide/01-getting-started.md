@@ -8,7 +8,7 @@
 
 Traditional CRMs take weeks to deploy. You evaluate vendors, sign contracts, configure integrations, import data, train your team. The setup cost alone kills adoption for solo founders and small teams.
 
-OpenVolo takes a page from the indie hacker playbook. Pieter Levels runs [multiple profitable products on SQLite](https://x.com/levelsio/status/1727382446563840368) — no Postgres cluster, no managed database service, just a file on disk. The [local-first software movement](https://www.inkandswitch.com/local-first/), pioneered by Ink & Switch and Martin Kleppmann, argues that the best software owns its data locally and syncs on your terms. OpenVolo embraces both ideas: your CRM is a SQLite file on your machine, your credentials are AES-256 encrypted in a local config, and no data leaves your computer unless you explicitly tell an agent to go fetch something.
+Signals takes a page from the indie hacker playbook. Pieter Levels runs [multiple profitable products on SQLite](https://x.com/levelsio/status/1727382446563840368) — no Postgres cluster, no managed database service, just a file on disk. The [local-first software movement](https://www.inkandswitch.com/local-first/), pioneered by Ink & Switch and Martin Kleppmann, argues that the best software owns its data locally and syncs on your terms. Signals embraces both ideas: your CRM is a SQLite file on your machine, your credentials are AES-256 encrypted in a local config, and no data leaves your computer unless you explicitly tell an agent to go fetch something.
 
 ## Prerequisites
 
@@ -22,12 +22,12 @@ OpenVolo takes a page from the indie hacker playbook. Pieter Levels runs [multip
 ## Installation
 
 ```bash
-npx openvolo
+npx @realtimex/signals
 ```
 
 This single command:
-1. Downloads the OpenVolo package
-2. Creates `~/.openvolo/` — your data directory
+1. Downloads the Signals package
+2. Creates `~/.signals/` — your data directory
 3. Runs database migrations automatically
 4. Starts the Next.js server on `http://localhost:3000`
 
@@ -35,10 +35,10 @@ No Docker. No cloud account. No `.env` file to wrestle with (though you can use 
 
 ### Your Data Directory
 
-Everything lives in `~/.openvolo/`:
+Everything lives in `~/.signals/`:
 
 ```
-~/.openvolo/
+~/.signals/
   data.db          # SQLite database — your entire CRM
   config.json      # Encrypted API keys and settings
   sessions/        # Browser automation sessions
@@ -49,14 +49,14 @@ This is your data. Back it up, move it between machines, or delete it entirely �
 
 ## Configuring API Keys
 
-Navigate to **Settings** in the sidebar. This is where you connect OpenVolo to the services it needs.
+Navigate to **Settings** in the sidebar. This is where you connect Signals to the services it needs.
 
 ![Settings page — API keys and platform connections](assets/settings-page.png)
 *The Settings page: configure API keys, connect platforms, and manage browser sessions.*
 
 ### Anthropic API Key
 
-This powers everything AI in OpenVolo — agents, chat, content generation. You can configure it two ways:
+This powers everything AI in Signals — agents, chat, content generation. You can configure it two ways:
 
 - **Environment variable**: Set `ANTHROPIC_API_KEY` in your shell or in a `.env.local` file
 - **Settings page**: Enter it directly in the UI (stored encrypted in `config.json`)
@@ -65,7 +65,7 @@ The Settings page shows detection status — green badges for keys found via env
 
 ### Search API Keys (Optional)
 
-OpenVolo uses a smart dual-search system:
+Signals uses a smart dual-search system:
 
 - **Serper** — Google-based broad discovery. Great for prospecting and finding new contacts. 2,500 free queries (one-time).
 - **Tavily** — Deep research engine. Better for enrichment and detailed person lookup. 1,000 free searches per month.
@@ -74,7 +74,7 @@ The agent routing engine automatically picks the right search provider based on 
 
 ## Connecting Platforms
 
-Below the API key section, you'll find **Platform Connections**. OpenVolo supports three platforms:
+Below the API key section, you'll find **Platform Connections**. Signals supports three platforms:
 
 - **X / Twitter** — OAuth connection for contact sync and engagement tracking
 - **LinkedIn** — OAuth connection for professional network integration

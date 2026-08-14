@@ -16,7 +16,7 @@ function extractWebsite(xUser: XUser): string | null {
   return null;
 }
 
-/** Map an X user profile to OpenVolo contact fields. */
+/** Map an X user profile to Signals contact fields. */
 export function mapXUserToContact(xUser: XUser): Omit<NewContact, "id"> {
   const { firstName, lastName } = splitName(xUser.name);
 

@@ -1,10 +1,10 @@
 {
-  "name": "openvolo",
+  "name": "@realtimex/signals",
   "version": "0.1.8",
-  "description": "Agentic AI-Native Social CRM — manage X/Twitter and LinkedIn with Claude-powered agents",
+  "description": "Signals — Local-first Social GTM & Relationship Knowledge Graph",
   "type": "module",
   "bin": {
-    "openvolo": "./dist/cli.js"
+    "signals": "./dist/cli.js"
   },
   "scripts": {
     "dev": "next dev --turbopack",
@@ -79,10 +79,15 @@
     "vitest": "^3.0.0"
   },
   "keywords": [
+    "signals",
+    "social-gtm",
+    "knowledge-graph",
+    "relationship-management",
     "crm",
     "social-media",
     "ai-agents",
     "claude",
+    "x",
     "twitter",
     "linkedin",
     "automation"
@@ -90,7 +95,7 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/navam-io/openvolo.git"
+    "url": "https://github.com/therealtimex/signals.git"
   },
-  "homepage": "https://openvolo.com/"
+  "homepage": "https://github.com/therealtimex/signals"
 }

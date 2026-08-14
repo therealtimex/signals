@@ -9,7 +9,7 @@ import {
 } from "@/lib/db/queries/platform-accounts";
 import type { PlatformCredentials } from "@/lib/platforms/adapter";
 
-const dataDir = process.env.OPENVOLO_DATA_DIR?.replace("~", homedir()) ?? join(homedir(), ".openvolo");
+const dataDir = process.env.SIGNALS_DATA_DIR?.replace("~", homedir()) ?? join(homedir(), ".signals");
 const configPath = join(dataDir, "config.json");
 
 /** Read X client credentials from env vars, falling back to config.json. */

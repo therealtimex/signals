@@ -10,7 +10,7 @@ import type { XUser } from "@/lib/platforms/x/client";
 import type { SyncResult } from "@/lib/platforms/adapter";
 
 /**
- * Sync contacts from a platform account's following list into OpenVolo.
+ * Sync contacts from a platform account's following list into Signals.
  * Deduplicates by (platform, platformUserId) via the contactIdentities table.
  */
 export async function syncContactsFromPlatform(

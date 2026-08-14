@@ -183,16 +183,16 @@ function GettingStartedTab() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Rocket className="h-5 w-5" />
-            Welcome to OpenVolo
+            Welcome to Signals
           </CardTitle>
           <CardDescription>
-            AI-Native Social CRM for X/Twitter + LinkedIn + Gmail
+            AI-Native Social GTM &amp; Relationship Knowledge Graph
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3 text-sm text-muted-foreground">
           <p>
-            OpenVolo helps you manage contacts from social platforms, track
-            engagement, and leverage AI-powered agents for outreach. Everything
+            Signals helps you manage contacts from social platforms, track
+            engagement, build living knowledge graphs, and leverage AI-powered agents. Everything
             runs locally on your machine with SQLite — your data never leaves
             your computer.
           </p>
@@ -221,7 +221,7 @@ function GettingStartedTab() {
             Quick Setup Checklist
           </CardTitle>
           <CardDescription>
-            Complete these steps to get the most out of OpenVolo.
+            Complete these steps to get the most out of Signals.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -355,7 +355,7 @@ function XSetupTab() {
             Configure User Authentication
           </CardTitle>
           <CardDescription>
-            This generates the OAuth 2.0 credentials that OpenVolo uses.
+            This generates the OAuth 2.0 credentials that Signals uses.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3 text-sm text-muted-foreground">
@@ -407,7 +407,7 @@ function XSetupTab() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <StepNumber n={3} />
-            Configure OpenVolo
+            Configure Signals
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3 text-sm text-muted-foreground">
@@ -423,7 +423,7 @@ X_CLIENT_SECRET="your-oauth2-client-secret"`}</CodeBlock>
           <div className="rounded-lg border bg-muted/50 p-3 text-xs">
             <strong className="text-foreground">Note:</strong> The OAuth 2.0
             Client ID/Secret (from User Authentication setup) are different from
-            the API Key/Secret shown on the Keys tab. OpenVolo uses OAuth 2.0.
+            the API Key/Secret shown on the Keys tab. Signals uses OAuth 2.0.
           </div>
         </CardContent>
       </Card>
@@ -591,7 +591,7 @@ function LinkedInSetupTab() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <StepNumber n={3} />
-            Configure OpenVolo
+            Configure Signals
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3 text-sm text-muted-foreground">
@@ -633,7 +633,7 @@ LINKEDIN_CLIENT_SECRET="your-linkedin-client-secret"`}</CodeBlock>
               &rarr; Platform Connections &rarr; Click{" "}
               <strong className="text-foreground">Connect</strong> on LinkedIn
             </li>
-            <li>Authorize OpenVolo on LinkedIn</li>
+            <li>Authorize Signals on LinkedIn</li>
             <li>
               Click{" "}
               <strong className="text-foreground">Sync Now</strong> to import
@@ -687,7 +687,7 @@ LINKEDIN_CLIENT_SECRET="your-linkedin-client-secret"`}</CodeBlock>
               minutes)
             </li>
             <li>
-              In OpenVolo{" "}
+              In Signals{" "}
               <Link
                 href="/dashboard/settings"
                 className="text-primary underline underline-offset-2"
@@ -872,7 +872,7 @@ function GmailSetupTab() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <StepNumber n={4} />
-            Configure OpenVolo
+            Configure Signals
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3 text-sm text-muted-foreground">
@@ -909,7 +909,7 @@ GOOGLE_CLIENT_SECRET="your-google-client-secret"`}</CodeBlock>
               &rarr; Platform Connections &rarr; Click{" "}
               <strong className="text-foreground">Connect</strong> on Gmail
             </li>
-            <li>Authorize OpenVolo on your Google account</li>
+            <li>Authorize Signals on your Google account</li>
             <li>
               Click{" "}
               <strong className="text-foreground">Sync Now</strong> to import
@@ -936,7 +936,7 @@ GOOGLE_CLIENT_SECRET="your-google-client-secret"`}</CodeBlock>
             If your app is in &ldquo;Testing&rdquo; mode, you will see an
             &ldquo;unverified app&rdquo; warning. Click{" "}
             <strong>Advanced</strong> &rarr;{" "}
-            <strong>Go to OpenVolo (unsafe)</strong> to proceed.
+            <strong>Go to Signals (unsafe)</strong> to proceed.
           </div>
         </CardContent>
       </Card>
@@ -1090,7 +1090,7 @@ function FaqTab() {
       q: "Where is my data stored?",
       a: (
         <>
-          SQLite at <Code>~/.openvolo/data.db</Code>. All data stays on your
+          SQLite at <Code>~/.signals/data.db</Code>. All data stays on your
           machine — nothing is sent to external servers.
         </>
       ),
@@ -1101,7 +1101,7 @@ function FaqTab() {
       a: (
         <>
           AES-256-GCM encryption tied to your machine identity. Stored in{" "}
-          <Code>~/.openvolo/config.json</Code>.
+          <Code>~/.signals/config.json</Code>.
         </>
       ),
     },
@@ -1117,7 +1117,7 @@ function FaqTab() {
         <>
           The API Key/Secret (Keys tab) are OAuth 1.0a credentials. The Client
           ID/Secret (from User Authentication setup) are OAuth 2.0 credentials.
-          OpenVolo uses OAuth 2.0.
+          Signals uses OAuth 2.0.
         </>
       ),
     },

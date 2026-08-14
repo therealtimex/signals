@@ -38,7 +38,7 @@ export function GuideIndexClient({ guides }: GuideIndexClientProps) {
       <div>
         <h1 className="text-heading-1">User Guide</h1>
         <p className="text-muted-foreground mt-1">
-          In-depth tutorials covering every OpenVolo feature.
+          In-depth tutorials covering every Signals feature.
         </p>
       </div>
 

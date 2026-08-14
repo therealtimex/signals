@@ -11,8 +11,9 @@ import { getMediaAsset, MEDIA_DIR } from "@/lib/db/queries/media";
 import { PublishError } from "@/lib/browser/publishers/types";
 import type { PublishMode } from "@/lib/browser/publishers/types";
 
-const PROFILES_DIR = join(homedir(), ".openvolo", "browser-profiles");
-const SCREENSHOTS_DIR = join(homedir(), ".openvolo", "media");
+const dataDir = process.env.SIGNALS_DATA_DIR?.replace("~", homedir()) ?? join(homedir(), ".signals");
+const PROFILES_DIR = join(dataDir, "browser-profiles");
+const SCREENSHOTS_DIR = join(dataDir, "media");
 
 const STEALTH_ARGS = [
   "--disable-blink-features=AutomationControlled",

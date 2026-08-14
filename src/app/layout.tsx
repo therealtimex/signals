@@ -20,8 +20,8 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "OpenVolo — AI-Native Social CRM",
-  description: "Manage X/Twitter and LinkedIn with Claude-powered agents",
+  title: "Signals — Social GTM & Relationship Knowledge Graph",
+  description: "Local-first multi-source knowledge graph for audience simulation and relationship management",
   icons: {
     icon: [
       { url: "/favicon.ico", sizes: "any" },

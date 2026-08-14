@@ -6,8 +6,9 @@ import { encrypt, decrypt } from "@/lib/auth/crypto";
 import { randomViewport } from "@/lib/browser/anti-detection";
 import type { BrowserPlatform, BrowserSession, CookieData } from "@/lib/browser/types";
 
-const SESSIONS_DIR = join(homedir(), ".openvolo", "sessions");
-const PROFILES_DIR = join(homedir(), ".openvolo", "browser-profiles");
+const dataDir = process.env.SIGNALS_DATA_DIR?.replace("~", homedir()) ?? join(homedir(), ".signals");
+const SESSIONS_DIR = join(dataDir, "sessions");
+const PROFILES_DIR = join(dataDir, "browser-profiles");
 
 /** Chromium args that remove automation fingerprints X/Twitter checks for. */
 const STEALTH_ARGS = [

@@ -1,5 +1,21 @@
 export async function register() {
   if (process.env.NEXT_RUNTIME === "nodejs") {
+    // Run base schema migrations
+    try {
+      const { runMigrations } = await import("@/lib/db/migrate");
+      runMigrations();
+    } catch (e) {
+      console.warn("[instrumentation] Base schema migrations skipped:", (e as Error).message);
+    }
+
+    // Run identity migration
+    try {
+      const { migrateContactIdentities } = await import("@/lib/db/migrate-identities");
+      migrateContactIdentities();
+    } catch (e) {
+      console.warn("[instrumentation] Identity migration skipped:", (e as Error).message);
+    }
+
     // Run idempotent migrations before anything else
     try {
       const { migrateTemplateUserColumns } = await import("@/lib/db/migrations/add-template-user-columns");

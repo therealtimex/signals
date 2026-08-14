@@ -20,8 +20,8 @@ const TAVILY_API_URL = "https://api.tavily.com/search";
 
 function getConfigPath(): string {
   const dataDir =
-    process.env.OPENVOLO_DATA_DIR?.replace("~", homedir()) ??
-    join(homedir(), ".openvolo");
+    process.env.SIGNALS_DATA_DIR?.replace("~", homedir()) ??
+    join(homedir(), ".signals");
   return join(dataDir, "config.json");
 }
 

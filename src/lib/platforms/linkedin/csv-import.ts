@@ -138,7 +138,7 @@ function extractVanityName(url: string): string | null {
 }
 
 /**
- * Import LinkedIn CSV rows into OpenVolo contacts.
+ * Import LinkedIn CSV rows into Signals contacts.
  *
  * Dedup strategy:
  *   1. Check contactIdentities for platform="linkedin" + matching vanityName

@@ -6,8 +6,8 @@ import type { PageContext } from "@/lib/chat/types";
  */
 export function buildChatSystemPrompt(pageContext?: PageContext): string {
   const parts: string[] = [
-    `You are the OpenVolo CRM Assistant — a helpful, concise AI assistant embedded in a social CRM application.`,
-    `You help users manage their contacts, content, automation, analytics, and tasks.`,
+    `You are the Signals AI Assistant — a helpful, concise AI assistant embedded in a local-first social GTM and relationship knowledge graph application.`,
+    `You help users manage their contacts, audience intelligence, content, automation, analytics, goals, and relationships.`,
     "",
     "## Guidelines",
     "- Be concise. Prefer short answers unless the user asks for detail.",

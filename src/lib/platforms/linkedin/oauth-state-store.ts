@@ -13,7 +13,8 @@ interface StateEntry {
 }
 
 const TTL_MS = 10 * 60 * 1000; // 10 minutes
-const STATE_FILE = join(homedir(), ".openvolo", "linkedin-oauth-state.json");
+const dataDir = process.env.SIGNALS_DATA_DIR?.replace("~", homedir()) ?? join(homedir(), ".signals");
+const STATE_FILE = join(dataDir, "linkedin-oauth-state.json");
 
 /** Read store from disk, returning empty object on any failure. */
 function readStore(): Record<string, StateEntry> {
@@ -28,7 +29,7 @@ function readStore(): Record<string, StateEntry> {
 /** Write store to disk. */
 function writeStore(store: Record<string, StateEntry>): void {
   try {
-    mkdirSync(join(homedir(), ".openvolo"), { recursive: true });
+    mkdirSync(dataDir, { recursive: true });
     writeFileSync(STATE_FILE, JSON.stringify(store), "utf-8");
   } catch {
     // Best-effort — if disk write fails, OAuth will fail with invalid_state

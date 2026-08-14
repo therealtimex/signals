@@ -14,7 +14,7 @@ import type { GooglePerson } from "@/lib/platforms/gmail/client";
 import type { SyncResult } from "@/lib/platforms/adapter";
 
 /**
- * Sync contacts from Google People API into OpenVolo.
+ * Sync contacts from Google People API into Signals.
  * Uses token-based pagination (pageToken, not offset-based like LinkedIn).
  * 2-tier dedup: gmail identity match → email match → create new.
  */

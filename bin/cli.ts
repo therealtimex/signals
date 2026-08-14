@@ -16,7 +16,7 @@ const pkg = JSON.parse(
 );
 
 const DEFAULT_PORT = 3000;
-const DATA_DIR = join(homedir(), ".openvolo");
+const DATA_DIR = process.env.SIGNALS_DATA_DIR?.replace("~", homedir()) ?? join(homedir(), ".signals");
 
 function findLocalBin(name: string, fromDir: string): string {
   let dir = fromDir;
@@ -51,7 +51,7 @@ function findAvailablePort(preferred: number): Promise<number> {
 }
 
 async function startApp(port: number) {
-  console.log("\n  🚀 OpenVolo — Agentic AI-Native Social CRM\n");
+  console.log("\n  🚀 Signals — Local-first Social GTM & Relationship Knowledge Graph\n");
   console.log(`  Version:  ${pkg.version}`);
   console.log(`  Data dir: ${DATA_DIR}`);
 
@@ -177,7 +177,7 @@ async function startApp(port: number) {
   const child = spawn(nextBin, ["dev", "--turbopack", "--port", String(actualPort)], {
     cwd: effectiveCwd,
     stdio: "inherit",
-    env: { ...process.env, OPENVOLO_DATA_DIR: DATA_DIR, PORT: String(actualPort) },
+    env: { ...process.env, SIGNALS_DATA_DIR: DATA_DIR, PORT: String(actualPort) },
   });
 
   // Open browser after a short delay
@@ -218,25 +218,26 @@ Features:
 
 Getting started:
   1. Set ANTHROPIC_API_KEY in your environment
-  2. Run npx openvolo
-  3. Connect X or LinkedIn in Settings > Platforms
+  2. Run npx @realtimex/signals (or npx signals)
+  3. Connect X, LinkedIn, or Gmail in Settings > Platforms
   4. Sync contacts and run your first workflow
 
 Data:
-  Database        ~/.openvolo/data.db
-  Config          ~/.openvolo/config.json
-  Sessions        ~/.openvolo/sessions/
-  Media           ~/.openvolo/media/
+  Database        ~/.signals/data.db
+  Config          ~/.signals/config.json
+  Sessions        ~/.signals/sessions/
+  Media           ~/.signals/media/
 
 Environment variables:
   ANTHROPIC_API_KEY    Claude AI (required for agents + chat)
   SERPER_API_KEY       Serper Search (broad discovery)
   TAVILY_API_KEY       Tavily Search (deep research)
+  SIGNALS_DATA_DIR     Data directory override (default: ~/.signals)
 `;
 
 program
-  .name("openvolo")
-  .description("Agentic AI-Native Social CRM")
+  .name("signals")
+  .description("Signals — Local-first Social GTM & Relationship Knowledge Graph")
   .version(pkg.version)
   .addHelpText("after", FEATURES_HELP);
 

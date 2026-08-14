@@ -8,7 +8,7 @@
 
 Running agents is activity. Generating leads, publishing content, and building relationships are outcomes. Most CRMs blur this distinction — they show you dashboards full of activity metrics (emails sent, calls logged, workflows run) without connecting them to business results.
 
-Sam Blond, former CRO of Brex, has [argued](https://www.saastr.com/5-interesting-learnings-brex/) that today's top CRM players were built in another era — before AI, before solo founders, before the metrics that matter changed. OpenVolo's analytics and goals system is designed for the way builders actually work: set a target, link the workflows that drive it, and watch auto-computed progress close the gap.
+Sam Blond, former CRO of Brex, has [argued](https://www.saastr.com/5-interesting-learnings-brex/) that today's top CRM players were built in another era — before AI, before solo founders, before the metrics that matter changed. Signals's analytics and goals system is designed for the way builders actually work: set a target, link the workflows that drive it, and watch auto-computed progress close the gap.
 
 ## The Analytics Dashboard
 
@@ -119,7 +119,7 @@ The detail page has three sections:
 An area chart showing goal value tracked over the last 30 days. This shows whether you're on pace — a flat line means stalled progress, a steep curve means you're ahead of schedule.
 
 ### Linked Workflows
-The most powerful feature: **connecting workflows to goals**. Click **Link Workflow** to attach an agent template. When a linked workflow completes a run, OpenVolo automatically computes progress and updates the goal.
+The most powerful feature: **connecting workflows to goals**. Click **Link Workflow** to attach an agent template. When a linked workflow completes a run, Signals automatically computes progress and updates the goal.
 
 The auto-progress system counts specific workflow step types per goal type:
 

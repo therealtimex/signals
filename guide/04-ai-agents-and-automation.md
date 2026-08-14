@@ -6,9 +6,9 @@
 
 ## What an Agent Actually Is
 
-The word "agent" gets thrown around a lot. Most products slap it on a chatbot and call it a day. Simon Willison, one of the sharpest voices in AI tooling, offers a [clear definition](https://simonwillison.net/2024/Oct/17/agents/): "An LLM agent runs tools in a loop to achieve a goal." That's what OpenVolo ships — not conversational widgets, but tool-using AI systems that search the web, scrape profiles, update your CRM, and report what they did.
+The word "agent" gets thrown around a lot. Most products slap it on a chatbot and call it a day. Simon Willison, one of the sharpest voices in AI tooling, offers a [clear definition](https://simonwillison.net/2024/Oct/17/agents/): "An LLM agent runs tools in a loop to achieve a goal." That's what Signals ships — not conversational widgets, but tool-using AI systems that search the web, scrape profiles, update your CRM, and report what they did.
 
-Benedict Evans at a16z has argued that [AI agents represent the next computing platform](https://www.ben-evans.com/benedictevans/2024/01/ai-and-everything-else). The bet is that software shifts from "user clicks buttons in a UI" to "user sets a goal and an agent figures out the steps." OpenVolo is built on this premise. The 10 agents it ships aren't features bolted onto a CRM — they're the core architecture. The UI exists to configure, observe, and override them.
+Benedict Evans at a16z has argued that [AI agents represent the next computing platform](https://www.ben-evans.com/benedictevans/2024/01/ai-and-everything-else). The bet is that software shifts from "user clicks buttons in a UI" to "user sets a goal and an agent figures out the steps." Signals is built on this premise. The 10 agents it ships aren't features bolted onto a CRM — they're the core architecture. The UI exists to configure, observe, and override them.
 
 ## The Agent Gallery
 
@@ -76,7 +76,7 @@ Under the hood, agents use Claude via the Vercel AI SDK's `generateText()` with 
 
 ### Smart Search Routing
 
-When an agent needs to search the web, OpenVolo's routing engine automatically picks the best provider:
+When an agent needs to search the web, Signals's routing engine automatically picks the best provider:
 
 | Agent Type | Primary Provider | Why |
 |-----------|-----------------|-----|
@@ -119,7 +119,7 @@ Toggle between **Timeline** (chronological list) and **Graph** (visual dependenc
 
 ## Workflow Scheduling
 
-Agents don't have to be manually triggered. OpenVolo includes a cron-based scheduler that runs agents on a recurring basis.
+Agents don't have to be manually triggered. Signals includes a cron-based scheduler that runs agents on a recurring basis.
 
 From the Automation page, click the schedule icon on any agent to configure:
 

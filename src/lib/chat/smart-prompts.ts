@@ -88,14 +88,14 @@ const PAGE_PROMPTS: Record<string, PromptTuple[]> = {
     ["How many contacts do I have?", Users],
   ],
   "/dashboard/guide": [
-    ["How do I get started with OpenVolo?", BookOpen],
+    ["How do I get started with Signals?", BookOpen],
     ["What AI agents are available?", Zap],
     ["How does contact enrichment work?", Users],
   ],
   "/dashboard/guide/[slug]": [
     ["Summarize this guide for me", BookOpen],
     ["What are the key steps in this tutorial?", BookOpen],
-    ["How does this feature connect to other parts of OpenVolo?", Zap],
+    ["How does this feature connect to other parts of Signals?", Zap],
   ],
 };
 

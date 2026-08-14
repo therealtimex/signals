@@ -8,7 +8,7 @@
 
 If you're building a startup, content is how the world finds out. X threads, LinkedIn posts, build-in-public updates — this is the engine that turns followers into customers and connections into collaborators. But the content loop has always been a grind: write, format for each platform, publish, track, repeat. For solo founders, it's the first thing that gets dropped when shipping takes priority.
 
-OpenVolo makes the content loop AI-native. Write once, adapt across platforms, publish through browser automation, and track everything in one library. The AI doesn't replace your voice — it handles the mechanical parts so you can focus on what you actually want to say.
+Signals makes the content loop AI-native. Write once, adapt across platforms, publish through browser automation, and track everything in one library. The AI doesn't replace your voice — it handles the mechanical parts so you can focus on what you actually want to say.
 
 ## The Content Library
 
@@ -85,7 +85,7 @@ Paste existing text and the AI improves it — tightening language, strengthenin
 
 ## Cross-Platform Adaptation
 
-One of OpenVolo's most practical features: the **Adapt** button (swap icon) in the compose area. Write a post for X, click Adapt, and the AI reformats it for LinkedIn — or vice versa. This isn't just word count adjustment. The AI restructures the content:
+One of Signals's most practical features: the **Adapt** button (swap icon) in the compose area. Write a post for X, click Adapt, and the AI reformats it for LinkedIn — or vice versa. This isn't just word count adjustment. The AI restructures the content:
 
 - **X → LinkedIn**: Expands the tight X format into LinkedIn's hook-story-insight structure, adds paragraph breaks, extends the narrative
 - **LinkedIn → X**: Distills the key insight into 280 characters, sharpens the hook, drops the filler
@@ -94,7 +94,7 @@ One click. No copy-paste between tabs. No manual rewriting.
 
 ## Browser-Based Publishing
 
-This is where OpenVolo breaks from every other content tool. Instead of requiring expensive API access ($200/month for X API Basic, no LinkedIn write API at all), OpenVolo publishes through actual browser automation.
+This is where Signals breaks from every other content tool. Instead of requiring expensive API access ($200/month for X API Basic, no LinkedIn write API at all), Signals publishes through actual browser automation.
 
 Here's what happens when you click **Publish**:
 

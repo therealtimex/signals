@@ -1,6 +1,6 @@
 /**
  * File-persisted PKCE state store for OAuth 2.0 flows.
- * Writes to ~/.openvolo/pkce-state.json so state survives Turbopack hot reloads.
+ * Writes to ~/.signals/pkce-state.json so state survives Turbopack hot reloads.
  * Safe for single-user local app — transient OAuth state only.
  */
 
@@ -15,7 +15,8 @@ interface PkceEntry {
 }
 
 const TTL_MS = 10 * 60 * 1000; // 10 minutes
-const STATE_FILE = join(homedir(), ".openvolo", "pkce-state.json");
+const dataDir = process.env.SIGNALS_DATA_DIR?.replace("~", homedir()) ?? join(homedir(), ".signals");
+const STATE_FILE = join(dataDir, "pkce-state.json");
 
 /** Read store from disk, returning empty object on any failure. */
 function readStore(): Record<string, PkceEntry> {
@@ -30,7 +31,7 @@ function readStore(): Record<string, PkceEntry> {
 /** Write store to disk. */
 function writeStore(store: Record<string, PkceEntry>): void {
   try {
-    mkdirSync(join(homedir(), ".openvolo"), { recursive: true });
+    mkdirSync(dataDir, { recursive: true });
     writeFileSync(STATE_FILE, JSON.stringify(store), "utf-8");
   } catch {
     // Best-effort — if disk write fails, OAuth will fail with invalid_state

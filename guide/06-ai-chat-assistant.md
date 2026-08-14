@@ -8,7 +8,7 @@
 
 Traditional CRMs are menu-driven. You click Contacts, then filter, then search, then click into a record, then navigate to a tab. Every action is a sequence of clicks through a hierarchy someone else designed. It works, but it's slow — especially when you know exactly what you want.
 
-OpenVolo's AI Chat Assistant flips this model. Press **Cmd+K** from any page and a conversational panel opens. Ask a question in plain English and the AI queries your CRM, runs tools, and returns structured answers. It's the same Claude model that powers the agents, but wired directly to your CRM data for real-time, interactive use.
+Signals's AI Chat Assistant flips this model. Press **Cmd+K** from any page and a conversational panel opens. Ask a question in plain English and the AI queries your CRM, runs tools, and returns structured answers. It's the same Claude model that powers the agents, but wired directly to your CRM data for real-time, interactive use.
 
 ## Opening the Assistant
 
@@ -117,7 +117,7 @@ Calls `start_workflow` twice. Monitor progress from Automation or ask the assist
 
 Every feature described in every guide in this series — contacts, content, publishing, agents, analytics, goals — is accessible through the chat assistant. The assistant is the universal interface that wraps the entire CRM.
 
-![Dashboard with chat panel — the full OpenVolo experience](assets/dashboard-overview.png)
+![Dashboard with chat panel — the full Signals experience](assets/dashboard-overview.png)
 *The Dashboard and CRM Assistant together: visual overview on the left, conversational interface on the right. Two ways to interact with the same system.*
 
 This is what an AI-native CRM looks like. The traditional UI exists for visual overview and direct manipulation. The chat exists for speed, natural language queries, and actions that would take multiple clicks to accomplish through menus. Use whichever fits the moment — or both at once.
@@ -126,7 +126,7 @@ This is what an AI-native CRM looks like. The traditional UI exists for visual o
 
 ## Guide Directory
 
-You've reached the end of the OpenVolo User Guide series. Here's the full set for reference:
+You've reached the end of the Signals User Guide series. Here's the full set for reference:
 
 1. [Getting Started](01-getting-started.md) — Installation, API keys, platform connections
 2. [Contacts and Enrichment](02-contacts-and-enrichment.md) — Multi-platform contacts and AI enrichment
@@ -135,4 +135,4 @@ You've reached the end of the OpenVolo User Guide series. Here's the full set fo
 5. [Analytics and Goals](05-analytics-and-goals.md) — Dashboard analytics and demand generation goals
 6. [AI Chat Assistant](06-ai-chat-assistant.md) — Natural language CRM interface *(you are here)*
 
-**Back to: [OpenVolo User Guide](index.md)**
+**Back to: [Signals User Guide](index.md)**

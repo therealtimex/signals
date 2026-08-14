@@ -5,7 +5,7 @@ import { homedir } from "os";
 import { mkdirSync, existsSync } from "fs";
 import * as schema from "./schema";
 
-const dataDir = process.env.OPENVOLO_DATA_DIR?.replace("~", homedir()) ?? join(homedir(), ".openvolo");
+const dataDir = process.env.SIGNALS_DATA_DIR?.replace("~", homedir()) ?? join(homedir(), ".signals");
 
 // Ensure data directory exists
 if (!existsSync(dataDir)) {

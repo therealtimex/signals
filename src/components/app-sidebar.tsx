@@ -45,14 +45,14 @@ export function AppSidebar() {
       <SidebarHeader className="border-b border-sidebar-border px-6 py-4">
         <Link href="/dashboard" className="flex items-center gap-3">
           <Image
-            src="/assets/openvolo-logo-transparent.png"
-            alt="OpenVolo"
+            src="/favicon-32x32.png"
+            alt="Signals"
             width={32}
             height={32}
             className="rounded-lg"
           />
           <span className="text-lg font-bold text-gradient-brand font-display">
-            OpenVolo
+            Signals
           </span>
         </Link>
       </SidebarHeader>

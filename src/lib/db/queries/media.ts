@@ -7,7 +7,8 @@ import { db } from "@/lib/db/client";
 import { mediaAssets, contentItems } from "@/lib/db/schema";
 import type { MediaAsset, NewMediaAsset, PaginatedResult } from "@/lib/db/types";
 
-export const MEDIA_DIR = join(homedir(), ".openvolo", "media");
+const dataDir = process.env.SIGNALS_DATA_DIR?.replace("~", homedir()) ?? join(homedir(), ".signals");
+export const MEDIA_DIR = join(dataDir, "media");
 
 export function createMediaAsset(
   data: Omit<NewMediaAsset, "id">,

@@ -13,7 +13,7 @@ function extractResourceId(resourceName: string): string {
   return resourceName.replace(/^people\//, "");
 }
 
-/** Map a Google People API person to OpenVolo contact fields. */
+/** Map a Google People API person to Signals contact fields. */
 export function mapGooglePersonToContact(person: GooglePerson): Omit<NewContact, "id"> {
   const primaryName = findPrimary(person.names);
   const primaryEmail = findPrimary(person.emailAddresses);

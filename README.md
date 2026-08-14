@@ -1,11 +1,9 @@
-<p align="center">
-  <img src="https://raw.githubusercontent.com/navam-io/openvolo/main/public/assets/openvolo-logo-name.png" alt="OpenVolo" width="200" />
-</p>
+# Signals
 
-<h3 align="center">Agentic AI-Native Social CRM</h3>
+<h3 align="center">Local-First Social GTM &amp; Relationship Knowledge Graph</h3>
 
 <p align="center">
-  Manage contacts, content, and engagement across X/Twitter, LinkedIn, and Gmail — powered by Claude AI agents.
+  Unified multi-source knowledge graph across X/Twitter, LinkedIn, and Gmail — powered by Claude AI agents and audience simulation.
   <br />
   All data stays on your machine. One command to start.
 </p>
@@ -19,11 +17,11 @@
 
 ---
 
-**One-command boot** — `npx openvolo` starts everything
+**One-command boot** — `npx @realtimex/signals` starts everything
 &nbsp;&bull;&nbsp;
 **Local-first** — SQLite database, data never leaves your machine
 &nbsp;&bull;&nbsp;
-**Multi-platform** — X + LinkedIn + Gmail in one CRM
+**Multi-platform** — X + LinkedIn + Gmail in one living graph
 &nbsp;&bull;&nbsp;
 **AI-powered** — Claude AI via Vercel AI SDK
 
@@ -79,10 +77,10 @@ AES-256 encrypted credential storage. All data stored locally in SQLite — no c
 ## Quick Start
 
 ```bash
-npx openvolo
+npx @realtimex/signals
 ```
 
-On first run, OpenVolo creates `~/.openvolo/` for your database and config, runs schema migrations, and starts the dashboard at `http://localhost:3000`.
+On first run, Signals creates `~/.signals/` for your database and config, runs schema migrations, and starts the dashboard at `http://localhost:3000`.
 
 ### Environment Variables
 
@@ -107,6 +105,9 @@ GOOGLE_CLIENT_SECRET=
 # Web search (optional — for agent workflows)
 SERPER_API_KEY=
 TAVILY_API_KEY=
+
+# Optional data directory override
+SIGNALS_DATA_DIR=~/.signals
 ```
 
 ## Platform Setup
@@ -121,13 +122,13 @@ TAVILY_API_KEY=
 
 ## Architecture
 
-**Boot flow** — `npx openvolo` runs `bin/cli.ts`, which ensures `~/.openvolo/` directories exist, pushes the latest schema to SQLite, and spawns Next.js.
+**Boot flow** — `npx @realtimex/signals` runs `bin/cli.ts`, which ensures `~/.signals/` directories exist, pushes the latest schema to SQLite, and spawns Next.js.
 
 **Rendering boundary** — Server Components read the database directly (better-sqlite3 is synchronous). Client Components call API routes via `fetch`.
 
 **AI** — Vercel AI SDK 6 powers both streaming chat in the UI and background agent workflows using Claude models.
 
-**Data layer** — SQLite database at `~/.openvolo/data.db` managed by Drizzle ORM. Credentials are AES-256 encrypted in `~/.openvolo/config.json`.
+**Data layer** — SQLite database at `~/.signals/data.db` managed by Drizzle ORM. Credentials are AES-256 encrypted in `~/.signals/config.json`.
 
 ## Tech Stack
 
@@ -214,4 +215,4 @@ npm run lint             # ESLint
 
 ## License
 
-[Apache License 2.0](LICENSE)
+[Apache License 2.0](LICENSE) © 2026 @realtimex
