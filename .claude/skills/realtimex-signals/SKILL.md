@@ -131,6 +131,12 @@ flowchart TD
 
 ## Install on an RTX workspace
 
+**Package for upload** (preserves `+x` on `scripts/*.sh`):
+
+```bash
+./scripts/package-realtimex-signals-skill.sh /tmp/realtimex-signals.zip
+```
+
 **Option A — link from this repo** (development):
 
 Copy or symlink `.claude/skills/realtimex-signals` into the workspace skills directory, or register via RealtimeX admin skills UI.

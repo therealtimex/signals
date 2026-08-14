@@ -101,6 +101,14 @@ Install the **`realtimex-signals`** skill for chat-linked terminal agents:
 .claude/skills/realtimex-signals/
 ```
 
+Package for workspace upload (keeps script execute bits):
+
+```bash
+./scripts/package-realtimex-signals-skill.sh
+```
+
+Dev RTX API is typically `http://127.0.0.1:3101` (not `3001` from the packaged app). Point `realtimex-pp-cli` with `REALTIMEX_BASE_URL=http://127.0.0.1:3101/cli` when managing the Dev workspace.
+
 It resolves the Local App URL, loads the tool manifest, and wraps invoke calls. See the skill's [SKILL.md](../.claude/skills/realtimex-signals/SKILL.md) and [issue #21](https://github.com/therealtimex/signals/issues/21).
 
 Quick start from repo root:
