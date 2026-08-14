@@ -386,6 +386,49 @@ Dual-write starts populating them immediately; **`backfill-interaction-read-pari
 
 End state: grep for `from(engagements)` / `FROM engagements` outside the write path and migrations returns nothing; enforced by a lint-style test so regressions can't sneak in.
 
+### 6.3 Actor-only platform events — Amendment A (2026-08-14, ADR-022-8)
+
+*Added after Review pass 3 on PR #38 escalated a contract conflict: slice 2.5 implementation relaxed `interactions.contact_id` to nullable (migration 0008 table rebuild) to represent contactless platform actions — owner outbound likes/replies via `x/engage`, anonymous inbound engagements — because `engagements.contact_id` is nullable but `interactions.contact_id` is not.*
+
+**Ruling: the NOT NULL relaxation is rejected; contactless events get their own additive table.** Relaxing an existing NOT NULL is data-preserving DDL but violates rule 8, not just on paper: the shipped N-1 binary's `backfillEngagedWithEdges()` passes a NULL `contact_id` to `upsertGraphEdge()`, which throws `Graph edge source not found: contact:null` and aborts the startup backfill chain — a demonstrated rollback crash we cannot retroactively patch. The deeper issue is a category error: `interactions` is the **contact-relationship event log** (it feeds timelines, health scoring, `lastInteractionAt`); an action with no counterparty is **content activity**, not a relationship event. Model it where it belongs:
+
+```ts
+// --- Content Activities (contactless platform actions on content; ADR-022-8) ---
+// Owner outbound actions (like/reply/share via engage routes) and anonymous
+// inbound engagements. NOT a relationship event: no contact FK, never touches
+// timelines, health, lastInteractionAt, or top-engaged analytics.
+
+export const contentActivities = sqliteTable("content_activities", {
+  id: text("id").primaryKey(),
+  activityType: text("activity_type").notNull(), // same open vocabulary + mapping as interaction_type
+  direction: text("direction", { enum: ["inbound", "outbound", "mutual"] }),
+    // outbound = the workspace owner acting; inbound = anonymous counterparty
+  summary: text("summary"),
+  occurredAt: integer("occurred_at").notNull(),
+  scope: text("scope", { enum: ["shared", "local_only"] })
+    .notNull().default("shared"),          // platform-derived, like sync interactions
+  source: text("source").notNull(),        // "sync:<platform>" | "backfill:engagements" | "agent"
+  engagementId: text("engagement_id").references(() => engagements.id), // 1:1 provenance
+  contentItemId: text("content_item_id").references(() => contentItems.id, { onDelete: "set null" }),
+  contentPostId: text("content_post_id").references(() => contentPosts.id),
+  platform: text("platform"),              // open text validated against PLATFORMS
+  workflowRunId: text("workflow_run_id").references(() => workflowRuns.id),
+  metadata: text("metadata").default("{}"),
+  createdAt: integer("created_at").notNull().default(sql`(unixepoch())`),
+}, (table) => [
+  index("idx_content_activities_post").on(table.contentPostId),
+  index("idx_content_activities_item_time").on(table.contentItemId, table.occurredAt),
+  uniqueIndex("idx_content_activities_engagement").on(table.engagementId),
+]);
+```
+
+Rules:
+
+- **Routing at write time.** `syncInteractionFromEngagement` becomes a router: resolve the counterparty (direct `contact_id`, else content-post author via `resolveEngagementTargetContact`) — resolved → `interactions` row (with `contact_id` NOT NULL intact), unresolved → `content_activities` row. Idempotency: an engagement lands in exactly one table, checked by `engagement_id` in both before insert. `backfill-interactions` routes identically, which lands legacy contactless X actions in `content_activities` (keeps them visible in content history, per Review). Write-time resolution is final in Phase 2; promoting a later-identified counterparty from `content_activities` to `interactions` is optional `graph-integrity` future work, not a slice requirement.
+- **Reader rules.** Contact-centric readers (relationship timeline, top-engaged contacts, `lastInteractionAt` projection, `engaged_with` edge aggregation) read `interactions` only — the exclusion of actor-only rows is now structural, not a WHERE clause. Content history and volume analytics (per-post activity list, inbound/outbound trends, goal engagement counts) read the **union** of both tables. Parity property: `interactions ∪ content_activities` reproduces the legacy `engagements` read set exactly, so the §6.2 parity tests need no NULL special-casing.
+- **Migration mechanics.** PR #38 is unmerged, so migration 0008 never reached `main`: regenerate it as the `content_activities` CREATE TABLE, revert `interactions.contact_id` to `.notNull()` in `schema.ts`, and drop the table rebuild entirely. N-1 safety is restored by construction — old binaries can't see the new table (rule 8's design), and `interactions` is byte-identical to what they expect.
+- Preserved from the pass-3 implementation: no synthetic self-contact, no CRM/top-contact pollution, counterparty resolution from content-post authorship, legacy contactless actions in content history.
+
 ---
 
 ## 7. Sync Adapter Stubs (instagram / facebook / threads)
@@ -436,7 +479,7 @@ Each slice = one Dev child issue = DDL (if any) + query layer + tests + agent to
 | **2.2 Launches & variants** | `launches` + `variants` DDL; `targets` / `published_as` edge support; publish flow creates content link + edge; `query_launches` / `upsert_launch` / `upsert_variant` tools | — | A |
 | **2.3 Embeddings** | `embeddings` DDL; vector query layer + cosine search + latency regression test; embed-on-demand helper; `semantic_search` tool; §6 privacy invariant extension | — (embeds niches too if 2.1 landed) | B |
 | **2.4 Org identities** | `org_identities` + `org_identity_metrics` DDL; `org_identity` enum widen on `graph_edges`; dedup-vs-contact guard; query layer; stats population hook in sync/enrichment | — | B |
-| **2.5 Engagements read retirement** | `interactions` parity columns DDL; dual-write extension; `backfill-interaction-read-parity`; port analytics/goals/content readers with parity tests; no-direct-reads lint test | — | A |
+| **2.5 Engagements read retirement** | `interactions` parity columns DDL; `content_activities` DDL for contactless events (§6.3, Amendment A); routed dual-write + `backfill-interaction-read-parity`; port analytics/goals/content readers (union reads per §6.3) with parity tests; no-direct-reads lint test | — | A |
 | **2.6 Adapter stubs** | adapter `platform` type widen + `capabilities` contract; instagram/facebook/threads stubs; connect-UI gating | — | B |
 
 All six slices are mutually independent at the schema level (Phase 1 already reserved the node-type enum values), so ordering is a review-bandwidth choice; the suggested sequence is 2.1 → 2.5 → 2.2 → 2.4 → 2.3 → 2.6, front-loading the two slices that unblock follow-on epics (clustering needs 2.1; single read model de-risks everything else). Recommended: land 2.1 and 2.5 first (group A), then the rest in any order.
@@ -452,3 +495,5 @@ All six slices are mutually independent at the schema level (Phase 1 already res
 **ADR-022-6: Niche membership as graph edges; clustering computation is workflow-owned.** — Proposed. Context: niches must be queryable across contacts *and* orgs with confidence and provenance; clustering algorithms/models will change frequently. Decision: `niches` stores results with provenance (`source`), membership is `belongs_to_niche` edges (edge overlay is the junction — scope, weight, provenance, indexes for free); the clustering job is a workflow (`workflow_runs`-tracked) outside this schema, and persona `interests` JSON becomes a maintained projection seeded backward via backfill. Consequences: schema survives algorithm churn; bad clustering runs are surgically deletable by `source` tag; cost is that "interests" exist in two places until Phase 3 UI reads edges, governed by the projection rule.
 
 **ADR-022-7: Launches/variants as typed nodes joined to the existing content pipeline; simulation storage deferred.** — Proposed. Context: GTM flow needs brief → variants → publish → outcomes with goal linkage; `workflow_templates` conflates automation config with campaign identity; full Wind Tunnel storage is not in scope. Decision: `launches` (with optional `workflow_template_id` provenance) and `variants` (FK to launch — intra-aggregate, so a real FK, not an edge); publishing materializes a variant into `content_items` + `published_as` edge so real outcomes flow through existing interactions/metrics/goal machinery; latest prediction values live on the variant row as a projection-in-waiting for Phase 3 simulation runs. Consequences: variant comparison is one indexed read and no metrics duplication; cost is prediction history absent until simulation-run storage lands, and the launch/template split must be explained in docs.
+
+**ADR-022-8: Contactless platform events in a separate `content_activities` table; `interactions.contact_id` stays NOT NULL.** — Accepted (Amendment A, resolves Review pass-3 escalation on PR #38). Context: owner outbound actions and anonymous engagements have no counterparty contact; `engagements.contact_id` is nullable but `interactions.contact_id` is not, and slice 2.5 needs these events in the product read model. Options: (a) relax `interactions.contact_id` to nullable — rejected: the table rebuild violates rule 1's spirit and rule 8's letter, with a demonstrated N-1 rollback crash (`backfillEngagedWithEdges` → `upsertGraphEdge('contact:null')` aborts the shipped binary's startup backfill chain, unpatchable retroactively); (b) synthetic self-contact — rejected in review pass 2: pollutes CRM lists and top-engaged analytics; (c) permanent read carve-out on `engagements` — rejected: makes the enum-locked sync ledger load-bearing forever and forecloses its Phase 4+ drop. Decision: (d) additive `content_activities` table; write path routes each engagement by counterparty resolution; contact-centric readers stay `interactions`-only (structural exclusion), content/volume readers union both tables. Consequences: N-1 safe by construction (new tables are invisible to old binaries); legacy parity is exact (`interactions ∪ content_activities` = legacy `engagements` reads); the domain distinction relationship-event vs content-activity is now in the schema, not in WHERE clauses; cost is a second event table and a routed write path with two-table idempotency checks.
