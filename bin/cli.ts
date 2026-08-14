@@ -18,6 +18,15 @@ const pkg = JSON.parse(
 const DEFAULT_PORT = 3000;
 const DATA_DIR = process.env.SIGNALS_DATA_DIR?.replace("~", homedir()) ?? join(homedir(), ".signals");
 
+function resolveStartPort(requested: number): number {
+  const rtxPort = process.env.RTX_PORT?.trim();
+  if (rtxPort) {
+    const parsed = Number.parseInt(rtxPort, 10);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return requested;
+}
+
 function findLocalBin(name: string, fromDir: string): string {
   let dir = fromDir;
   while (dir !== dirname(dir)) {
@@ -54,6 +63,11 @@ async function startApp(port: number) {
   console.log("\n  🚀 Signals — Local-first Social GTM & Relationship Knowledge Graph\n");
   console.log(`  Version:  ${pkg.version}`);
   console.log(`  Data dir: ${DATA_DIR}`);
+  if (process.env.RTX_APP_ID) {
+    console.log(`  RTX mode: embedded (app id ${process.env.RTX_APP_ID})`);
+  } else {
+    console.log(`  RTX mode: standalone`);
+  }
 
   // Ensure data directories exist
   ensureDataDir();
@@ -109,9 +123,10 @@ async function startApp(port: number) {
   }
 
   // Find available port
-  const actualPort = await findAvailablePort(port);
-  if (actualPort !== port) {
-    console.log(`\n  Port ${port} in use, using ${actualPort}`);
+  const requestedPort = resolveStartPort(port);
+  const actualPort = await findAvailablePort(requestedPort);
+  if (actualPort !== requestedPort) {
+    console.log(`\n  Port ${requestedPort} in use, using ${actualPort}`);
   }
 
   // Check if Playwright Chromium browser is installed (needed for browser enrichment)
@@ -177,18 +192,24 @@ async function startApp(port: number) {
   const child = spawn(nextBin, ["dev", "--turbopack", "--port", String(actualPort)], {
     cwd: effectiveCwd,
     stdio: "inherit",
-    env: { ...process.env, SIGNALS_DATA_DIR: DATA_DIR, PORT: String(actualPort) },
+    env: {
+      ...process.env,
+      SIGNALS_DATA_DIR: DATA_DIR,
+      PORT: String(actualPort),
+    },
   });
 
-  // Open browser after a short delay
-  setTimeout(async () => {
-    try {
-      const open = (await import("open")).default;
-      await open(`http://localhost:${actualPort}`);
-    } catch {
-      console.log(`  Open http://localhost:${actualPort} in your browser`);
-    }
-  }, 3000);
+  // Open browser in standalone mode only (RTX shell embeds the UI).
+  if (!process.env.RTX_APP_ID) {
+    setTimeout(async () => {
+      try {
+        const open = (await import("open")).default;
+        await open(`http://localhost:${actualPort}`);
+      } catch {
+        console.log(`  Open http://localhost:${actualPort} in your browser`);
+      }
+    }, 3000);
+  }
 
   // Handle graceful shutdown
   process.on("SIGINT", () => {
@@ -233,6 +254,10 @@ Environment variables:
   SERPER_API_KEY       Serper Search (broad discovery)
   TAVILY_API_KEY       Tavily Search (deep research)
   SIGNALS_DATA_DIR     Data directory override (default: ~/.signals)
+  RTX_APP_ID           RealTimeX Local App id (injected by RTX Electron)
+  RTX_APP_NAME         RealTimeX Local App display name
+  RTX_PORT             Preferred port when launched by RealTimeX
+  SERVER_URL           RealTimeX Main App API base (inherited in RTX runtime)
 `;
 
 program

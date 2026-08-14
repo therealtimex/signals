@@ -33,6 +33,7 @@ CI runs `npm run check` on every pull request and push to `main` (see `.github/w
 | `npm run test:run` | Vitest single run (no coverage) |
 | `npm run test:coverage` | Vitest with coverage thresholds (CI gate) |
 | `npm run smoke:core` | E2E smoke tests (Playwright; see [smoke-tests.md](./smoke-tests.md)) |
+| Local App bootstrap | See [local-app.md](./local-app.md) |
 | `npm run test:e2e` | Full Playwright suite |
 | `npm run doctor` | React Doctor advisory scan (not part of gate) |
 

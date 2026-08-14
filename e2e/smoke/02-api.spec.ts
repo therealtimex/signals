@@ -9,7 +9,22 @@ test.describe("smoke:core API", () => {
     expect(body).toMatchObject({
       status: "ok",
       app: "signals",
+      rtx: {
+        mode: "standalone",
+        appId: null,
+        manifest: "signals",
+      },
     });
+  });
+
+  test("rtx status endpoint exposes manifest", async ({ request }) => {
+    const response = await request.get("/api/rtx/status");
+    expect(response.ok()).toBeTruthy();
+
+    const body = await response.json();
+    expect(body.manifest.id).toBe("signals");
+    expect(body.permissions).toContain("credentials.use");
+    expect(body.permissions).not.toContain("llm.chat");
   });
 
   test("contacts API supports list and create", async ({ request }) => {
@@ -94,12 +109,15 @@ test.describe("smoke:core API", () => {
 test.describe("smoke: RTX Local App mode", () => {
   test.skip(
     !process.env.RTX_APP_ID,
-    "RTX_APP_ID not set — enable when Local App bootstrap (#2) lands"
+    "RTX_APP_ID not set — run with embedded env to exercise RTX registration"
   );
 
-  test("health reports RTX app id when embedded", async ({ request }) => {
+  test("health reports embedded RTX mode when RTX_APP_ID is set", async ({ request }) => {
     const response = await request.get("/api/health");
     const body = await response.json();
-    expect(body.rtxAppId).toBe(process.env.RTX_APP_ID);
+    expect(body.rtx).toMatchObject({
+      mode: "embedded",
+      appId: process.env.RTX_APP_ID,
+    });
   });
 });

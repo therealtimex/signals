@@ -9,6 +9,9 @@ const COVERAGE_INCLUDE = [
   "src/lib/workflows/format-error.ts",
   "src/lib/db/queries/contacts.ts",
   "src/lib/db/queries/goals.ts",
+  "src/lib/rtx/env.ts",
+  "src/lib/rtx/sdk.ts",
+  "src/lib/rtx/bootstrap.ts",
 ];
 
 export default defineConfig({

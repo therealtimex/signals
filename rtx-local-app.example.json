@@ -1,0 +1,7 @@
+{
+  "command": "npx",
+  "args": ["-y", "@realtimex/signals", "--port", "3000"],
+  "env": {},
+  "working_dir": "",
+  "home_url": "http://localhost:{port}/dashboard"
+}
