@@ -4,7 +4,7 @@ import { contactIdentities } from "@/lib/db/schema";
 import { createContact, updateContact, recalcEnrichment } from "@/lib/db/queries/contacts";
 import { createIdentity } from "@/lib/db/queries/identities";
 import { updatePlatformAccount } from "@/lib/db/queries/platform-accounts";
-import { mapXUserToContact, mapXUserToIdentity } from "@/lib/platforms/x/mappers";
+import { mapXUserToContact, mapXUserToIdentity, xUserIdentitySyncPatch } from "@/lib/platforms/x/mappers";
 import { getFollowing, getAuthenticatedUser } from "@/lib/platforms/x/client";
 import type { XUser } from "@/lib/platforms/x/client";
 import type { SyncResult } from "@/lib/platforms/adapter";
@@ -91,12 +91,10 @@ function processXUser(xUser: XUser, result: SyncResult): void {
       avatarUrl: contactData.avatarUrl,
     });
 
-    // Update identity with latest platform data
+    // Update identity with latest platform data + explore-card stat columns
     db.update(contactIdentities)
       .set({
-        platformHandle: `@${xUser.username}`,
-        platformData: mapXUserToIdentity(xUser, existingIdentity.contactId).platformData,
-        lastSyncedAt: Math.floor(Date.now() / 1000),
+        ...xUserIdentitySyncPatch(xUser, existingIdentity.contactId),
         updatedAt: Math.floor(Date.now() / 1000),
       })
       .where(eq(contactIdentities.id, existingIdentity.id))

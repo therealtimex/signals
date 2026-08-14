@@ -2,6 +2,7 @@ import { eq, and } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db/client";
 import { contactIdentities } from "@/lib/db/schema";
+import { liftIdentityStatsFromPlatformData } from "@/lib/db/identity-stats";
 import type { ContactIdentity, NewContactIdentity } from "@/lib/db/types";
 
 export function listIdentitiesByContact(contactId: string): ContactIdentity[] {
@@ -18,7 +19,10 @@ export function getIdentityById(id: string): ContactIdentity | undefined {
 
 export function createIdentity(data: Omit<NewContactIdentity, "id">): ContactIdentity {
   const id = nanoid();
-  db.insert(contactIdentities).values({ ...data, id }).run();
+  const lifted = liftIdentityStatsFromPlatformData(data.platformData, {
+    statsUpdatedAt: data.lastSyncedAt ?? undefined,
+  });
+  db.insert(contactIdentities).values({ ...data, ...lifted, id }).run();
   return getIdentityById(id)!;
 }
 
@@ -29,8 +33,19 @@ export function updateIdentity(
   const existing = getIdentityById(id);
   if (!existing) return undefined;
 
+  const lifted =
+    data.platformData !== undefined
+      ? liftIdentityStatsFromPlatformData(data.platformData, {
+          statsUpdatedAt: data.lastSyncedAt ?? existing.lastSyncedAt ?? undefined,
+        })
+      : {};
+
   db.update(contactIdentities)
-    .set({ ...data, updatedAt: Math.floor(Date.now() / 1000) })
+    .set({
+      ...data,
+      ...lifted,
+      updatedAt: Math.floor(Date.now() / 1000),
+    })
     .where(eq(contactIdentities.id, id))
     .run();
 

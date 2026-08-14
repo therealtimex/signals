@@ -46,6 +46,14 @@ Then pass `Authorization: Bearer your-secret-token` on each request.
 | `query_content` | content | List content items |
 | `query_goals` | goals | List goals |
 | `create_task` | tasks | Create a follow-up task |
+| `get_persona` | contacts | Get active AI persona for a contact |
+| `upsert_persona` | contacts | Save versioned persona (supersedes prior active) |
+| `query_orgs` | graph | Search organization nodes |
+| `query_graph` | graph | 1-hop graph traversal from a node |
+| `upsert_edge` | graph | Create/update typed graph edge |
+| `log_interaction` | graph | Append interaction event for a contact |
+
+`create_contact` / `update_contact` with a `company` field also dual-write an `orgs` row and `works_at` edge (contacts projection unchanged).
 
 Tools that require browser/LLM (web search, scrape, publish, etc.) are **not** exposed here — RTX terminal agents should use platform credentials and their own tools for those operations.
 

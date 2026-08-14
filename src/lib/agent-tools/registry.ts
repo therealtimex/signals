@@ -12,7 +12,22 @@ import {
   queryWorkflowsSchema,
   startWorkflowSchema,
   updateContactSchema,
+  getPersonaSchema,
+  upsertPersonaSchema,
 } from "@/lib/agent-tools/schemas";
+import {
+  logInteractionSchema,
+  queryGraphSchema,
+  queryOrgsSchema,
+  upsertEdgeSchema,
+} from "@/lib/agent-tools/graph-schemas";
+import {
+  handleLogInteraction,
+  handleQueryGraph,
+  handleQueryOrgs,
+  handleUpsertEdge,
+} from "@/lib/agent-tools/graph-handlers";
+import { zodToParameters } from "@/lib/agent-tools/json-schema";
 import {
   handleArchiveContact,
   handleCreateContact,
@@ -27,8 +42,9 @@ import {
   handleQueryWorkflows,
   handleStartWorkflow,
   handleUpdateContact,
+  handleGetPersona,
+  handleUpsertPersona,
 } from "@/lib/agent-tools/handlers";
-import { zodToParameters } from "@/lib/agent-tools/json-schema";
 import type { AgentToolDefinition } from "@/lib/agent-tools/types";
 
 export const AGENT_TOOL_VERSION = "1";
@@ -142,6 +158,56 @@ export const AGENT_TOOLS: Record<string, AgentToolDefinition> = {
     schema: createTaskSchema,
     parameters: zodToParameters(createTaskSchema),
     execute: handleCreateTask,
+  },
+  get_persona: {
+    name: "get_persona",
+    description:
+      "Get the active AI persona for a contact (archetype, tone, interests, conversion triggers).",
+    category: "contacts",
+    schema: getPersonaSchema,
+    parameters: zodToParameters(getPersonaSchema),
+    execute: handleGetPersona,
+  },
+  upsert_persona: {
+    name: "upsert_persona",
+    description:
+      "Save a new active persona for a contact; supersedes any previous active persona (versioned history).",
+    category: "contacts",
+    schema: upsertPersonaSchema,
+    parameters: zodToParameters(upsertPersonaSchema),
+    execute: handleUpsertPersona,
+  },
+  query_orgs: {
+    name: "query_orgs",
+    description: "Search organization nodes in the graph.",
+    category: "graph",
+    schema: queryOrgsSchema,
+    parameters: zodToParameters(queryOrgsSchema),
+    execute: handleQueryOrgs,
+  },
+  query_graph: {
+    name: "query_graph",
+    description: "Traverse 1-hop graph edges from a node. Private edges excluded unless includeLocalOnly is true.",
+    category: "graph",
+    schema: queryGraphSchema,
+    parameters: zodToParameters(queryGraphSchema),
+    execute: handleQueryGraph,
+  },
+  upsert_edge: {
+    name: "upsert_edge",
+    description: "Create or update a typed graph edge between two nodes.",
+    category: "graph",
+    schema: upsertEdgeSchema,
+    parameters: zodToParameters(upsertEdgeSchema),
+    execute: handleUpsertEdge,
+  },
+  log_interaction: {
+    name: "log_interaction",
+    description: "Append an interaction event for a contact (meetings, calls, messages, notes).",
+    category: "graph",
+    schema: logInteractionSchema,
+    parameters: zodToParameters(logInteractionSchema),
+    execute: handleLogInteraction,
   },
 };
 

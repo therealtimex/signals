@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { PLATFORMS } from "@/lib/db/platforms";
 
 const funnelStage = z.enum([
   "prospect",
@@ -9,7 +10,7 @@ const funnelStage = z.enum([
   "advocate",
 ]);
 
-const platform = z.enum(["x", "linkedin", "gmail", "substack"]);
+const platform = z.enum(PLATFORMS as unknown as [string, ...string[]]);
 
 export const queryContactsSchema = z.object({
   search: z.string().optional(),
@@ -109,3 +110,41 @@ export const startWorkflowSchema = z.object({
   templateId: z.string().min(1),
   workflowType: z.enum(["search", "enrich", "prune", "agent"]).optional(),
 });
+
+export const getPersonaSchema = z.object({
+  contactId: z.string().min(1),
+  includeLocalOnly: z.boolean().optional(),
+});
+
+export const upsertPersonaSchema = z
+  .object({
+    contactId: z.string().min(1),
+    archetype: z.string().optional(),
+    tone: z.string().optional(),
+    summary: z.string().optional(),
+    description: z.string().optional(),
+    interests: z.array(z.string()).optional(),
+    conversionTriggers: z.array(z.string()).optional(),
+    engagementFormats: z.array(z.string()).optional(),
+    confidence: z.number().min(0).max(1).optional(),
+    scope: z.enum(["shared", "local_only"]).optional(),
+    model: z.string().optional(),
+    sourceWindow: z.record(z.unknown()).optional(),
+    workflowRunId: z.string().optional(),
+  })
+  .refine(
+    (data) =>
+      data.archetype !== undefined ||
+      data.tone !== undefined ||
+      data.summary !== undefined ||
+      data.description !== undefined ||
+      data.interests !== undefined ||
+      data.conversionTriggers !== undefined ||
+      data.engagementFormats !== undefined ||
+      data.confidence !== undefined ||
+      data.scope !== undefined ||
+      data.model !== undefined ||
+      data.sourceWindow !== undefined ||
+      data.workflowRunId !== undefined,
+    { message: "At least one persona field is required besides contactId" },
+  );

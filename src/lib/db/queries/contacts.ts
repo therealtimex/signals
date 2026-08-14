@@ -2,6 +2,7 @@ import { eq, like, and, or, desc, count, inArray, isNotNull, sql, SQL } from "dr
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db/client";
 import { contacts, contactIdentities, contentItems, tasks, workflowSteps } from "@/lib/db/schema";
+import { deleteEdgesTouchingContact } from "@/lib/db/graph-integrity";
 import { calculateEnrichmentScore } from "@/lib/db/enrichment";
 import type { Contact, NewContact, ContactWithIdentities, PaginatedResult } from "@/lib/db/types";
 
@@ -246,7 +247,12 @@ export function archiveContact(
     ...(workflowRunId ? { archiveWorkflowRunId: workflowRunId } : {}),
   });
 
-  return updateContact(id, { metadata });
+  const updated = updateContact(id, { metadata });
+  if (updated) {
+    deleteEdgesTouchingContact(id);
+  }
+
+  return updated;
 }
 
 /** Restore a previously archived contact by clearing archive keys from metadata. */

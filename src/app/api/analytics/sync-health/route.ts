@@ -5,6 +5,7 @@ import {
   getSyncActivityOverTime,
   getRecentSyncErrors,
 } from "@/lib/db/queries/analytics";
+import { getGraphIntegritySummary } from "@/lib/db/graph-integrity";
 
 /**
  * GET /api/analytics/sync-health?range=30d
@@ -18,5 +19,6 @@ export async function GET(req: NextRequest) {
     platformHealth: getSyncHealthByPlatform(),
     syncActivity: getSyncActivityOverTime(since),
     recentErrors: getRecentSyncErrors(),
+    graphIntegrity: getGraphIntegritySummary(),
   });
 }

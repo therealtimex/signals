@@ -16,6 +16,43 @@ export async function register() {
       console.warn("[instrumentation] Identity migration skipped:", (e as Error).message);
     }
 
+    try {
+      const { migrateIdentityStats } = await import("@/lib/db/migrate-identity-stats");
+      const statsResult = migrateIdentityStats();
+      if (statsResult.migrated > 0) {
+        console.log(`[instrumentation] Lifted identity stats for ${statsResult.migrated} identities`);
+      }
+    } catch (e) {
+      console.warn("[instrumentation] Identity stats migration skipped:", (e as Error).message);
+    }
+
+    try {
+      const { runGraphBackfills } = await import("@/lib/db/backfills");
+      const graphBackfill = runGraphBackfills();
+      const total =
+        graphBackfill.orgs.inserted +
+        graphBackfill.worksAt.upserted +
+        graphBackfill.interactions.inserted +
+        graphBackfill.engagedWith.upserted;
+      if (total > 0) {
+        console.log("[instrumentation] Graph backfills applied:", graphBackfill);
+      }
+    } catch (e) {
+      console.warn("[instrumentation] Graph backfill skipped:", (e as Error).message);
+    }
+
+    try {
+      const { runGraphIntegrityJob } = await import("@/lib/db/graph-integrity");
+      const integrity = runGraphIntegrityJob({ repair: true });
+      if (integrity.repairedCount > 0) {
+        console.log(
+          `[instrumentation] Graph integrity repaired ${integrity.repairedCount} edge(s)`,
+        );
+      }
+    } catch (e) {
+      console.warn("[instrumentation] Graph integrity job skipped:", (e as Error).message);
+    }
+
     // Run idempotent migrations before anything else
     try {
       const { migrateTemplateUserColumns } = await import("@/lib/db/migrations/add-template-user-columns");
