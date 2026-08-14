@@ -66,6 +66,8 @@ export function listContacts(opts?: {
   if (!opts?.includeArchived) {
     conditions.push(sql`json_extract(${contacts.metadata}, '$.archived') IS NOT 1`);
   }
+  // Exclude platform-actor shadow contacts (legacy workaround cleanup)
+  conditions.push(sql`json_extract(${contacts.metadata}, '$.platformActor') IS NOT 1`);
 
   if (opts?.search) {
     const pattern = `%${opts.search}%`;

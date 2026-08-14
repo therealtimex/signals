@@ -663,9 +663,7 @@ export const graphEdges = sqliteTable("graph_edges", {
 
 export const interactions = sqliteTable("interactions", {
   id: text("id").primaryKey(),
-  contactId: text("contact_id")
-    .notNull()
-    .references(() => contacts.id, { onDelete: "cascade" }),
+  contactId: text("contact_id").references(() => contacts.id, { onDelete: "cascade" }),
   orgId: text("org_id").references(() => orgs.id, { onDelete: "set null" }),
   interactionType: text("interaction_type").notNull(),
   direction: text("direction", { enum: ["inbound", "outbound", "mutual"] }),

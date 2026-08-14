@@ -263,7 +263,7 @@ export function getTopEngagedContacts(since: number, limit = 10): {
          COUNT(*) AS count
        FROM interactions i
        JOIN contacts c ON c.id = i.contact_id
-       WHERE i.occurred_at >= ?
+       WHERE i.occurred_at >= ? AND i.contact_id IS NOT NULL
        GROUP BY i.contact_id
        ORDER BY count DESC
        LIMIT ?`

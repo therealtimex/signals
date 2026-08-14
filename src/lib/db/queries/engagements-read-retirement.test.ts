@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { nanoid } from "nanoid";
 import { eq } from "drizzle-orm";
-import { createContact } from "@/lib/db/queries/contacts";
+import { createContact, listContacts } from "@/lib/db/queries/contacts";
 import { createEngagement, listEngagementsByContentPost } from "@/lib/db/queries/engagements";
 import {
   getEngagementDirectionSummary,
@@ -10,7 +10,7 @@ import {
   getTopEngagedContacts,
 } from "@/lib/db/queries/analytics";
 import { listInteractionsByContentPost, logInteraction } from "@/lib/db/queries/interactions";
-import { ensurePlatformActorContact } from "@/lib/db/queries/platform-actor-contact";
+import { backfillInteractions } from "@/lib/db/backfills/interactions";
 import { backfillInteractionReadParity } from "@/lib/db/backfills/interaction-read-parity";
 import { db } from "@/lib/db/client";
 import {
@@ -172,7 +172,7 @@ describe("engagements read retirement", () => {
     expect(getEngagementTypeBreakdown(since)).toEqual([{ type: "meeting", count: 1 }]);
   });
 
-  it("surfaces X manual actions in content history via interactions", () => {
+  it("surfaces X manual actions in content history via actor-only interactions", () => {
     const platformAccountId = nanoid();
     db.insert(platformAccounts)
       .values({
@@ -197,15 +197,8 @@ describe("engagements read retirement", () => {
       })
       .run();
 
-    const actorContactId = ensurePlatformActorContact({
-      platform: "x",
-      platformUserId: "x-me",
-      displayName: "Me",
-      platformHandle: "me",
-    });
-
     createEngagement({
-      contactId: actorContactId,
+      contactId: null,
       platformAccountId,
       engagementType: "like",
       direction: "outbound",
@@ -217,16 +210,61 @@ describe("engagements read retirement", () => {
       platformEngagementId: null,
       threadId: null,
       source: "manual",
-      platformData: JSON.stringify({
-        action: "like",
-        tweetId: "tweet-1",
-        actorPlatformUserId: "x-me",
-      }),
+      platformData: JSON.stringify({ action: "like", tweetId: "tweet-1" }),
     });
+
+    expect(listContacts().total).toBe(0);
 
     const history = listEngagementsByContentPost(contentPostId);
     expect(history).toHaveLength(1);
     expect(history[0]?.engagementType).toBe("like");
     expect(history[0]?.source).toBe("manual");
+    expect(getTopEngagedContacts(Math.floor(Date.now() / 1000) - 60)).toHaveLength(0);
+  });
+
+  it("backfills pre-upgrade contactless X rows into readable content history", () => {
+    const platformAccountId = nanoid();
+    const contentItemId = nanoid();
+    const contentPostId = nanoid();
+    db.insert(platformAccounts)
+      .values({
+        id: platformAccountId,
+        platform: "x",
+        displayName: "@me",
+        authType: "oauth",
+      })
+      .run();
+    db.insert(contentItems)
+      .values({ id: contentItemId, contentType: "post", status: "imported" })
+      .run();
+    db.insert(contentPosts)
+      .values({
+        id: contentPostId,
+        contentItemId,
+        platformAccountId,
+        status: "imported",
+      })
+      .run();
+
+    const engagementId = nanoid();
+    db.insert(engagements)
+      .values({
+        id: engagementId,
+        contactId: null,
+        engagementType: "like",
+        direction: "outbound",
+        contentPostId,
+        platform: "x",
+        source: "manual",
+        platformData: JSON.stringify({ action: "like", tweetId: "legacy-tweet" }),
+        createdAt: 1_700_000_000,
+      })
+      .run();
+
+    backfillInteractions();
+
+    const history = listEngagementsByContentPost(contentPostId);
+    expect(history).toHaveLength(1);
+    expect(history[0]?.engagementType).toBe("like");
   });
 });

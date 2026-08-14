@@ -7,9 +7,9 @@ import { logInteraction } from "@/lib/db/queries/interactions";
 import * as projection from "@/lib/db/queries/contact-interaction-projection";
 import { recomputeContactLastInteraction } from "@/lib/db/queries/contact-interaction-projection";
 import { syncInteractionFromEngagement } from "@/lib/db/engagement-interaction-sync";
-import { ensurePlatformActorContact } from "@/lib/db/queries/platform-actor-contact";
+import { backfillInteractions } from "@/lib/db/backfills/interactions";
 import { db } from "@/lib/db/client";
-import { contacts, engagements, interactions } from "@/lib/db/schema";
+import { contacts, contentItems, contentPosts, engagements, interactions, platformAccounts } from "@/lib/db/schema";
 import { resetCoreTables } from "@/test/db";
 
 describe("engagement → interaction dual-write", () => {
@@ -106,7 +106,7 @@ describe("engagement → interaction dual-write", () => {
     expect(recomputed?.lastInteractionAt).toBe(1_700_000_500);
   });
 
-  it("skips interaction dual-write when actor cannot be resolved", () => {
+  it("projects actor-only engagement without a contact", () => {
     const engagement = createEngagement({
       contactId: null,
       platformAccountId: null,
@@ -120,35 +120,7 @@ describe("engagement → interaction dual-write", () => {
       platformEngagementId: null,
       threadId: null,
       source: "manual",
-      platformData: "{}",
-    });
-
-    expect(db.select().from(interactions).all()).toHaveLength(0);
-    expect(syncInteractionFromEngagement(engagement)).toBeNull();
-  });
-
-  it("projects contactless engagement when actor platform identity is embedded", () => {
-    ensurePlatformActorContact({
-      platform: "x",
-      platformUserId: "actor-1",
-      displayName: "Me",
-      platformHandle: "me",
-    });
-
-    const engagement = createEngagement({
-      contactId: null,
-      platformAccountId: null,
-      engagementType: "like",
-      direction: "outbound",
-      content: null,
-      templateId: null,
-      workflowRunId: null,
-      contentPostId: null,
-      platform: "x",
-      platformEngagementId: null,
-      threadId: null,
-      source: "manual",
-      platformData: JSON.stringify({ actorPlatformUserId: "actor-1", action: "like" }),
+      platformData: JSON.stringify({ action: "like", tweetId: "1" }),
     });
 
     const interaction = db
@@ -158,7 +130,60 @@ describe("engagement → interaction dual-write", () => {
       .get();
 
     expect(interaction).toBeTruthy();
+    expect(interaction?.contactId).toBeNull();
     expect(interaction?.source).toBe("manual");
+    expect(db.select().from(contacts).all()).toHaveLength(0);
+  });
+
+  it("backfills legacy contactless X engagements into interactions", () => {
+    const platformAccountId = nanoid();
+    const contentItemId = nanoid();
+    const contentPostId = nanoid();
+    db.insert(platformAccounts)
+      .values({
+        id: platformAccountId,
+        platform: "x",
+        displayName: "@me",
+        authType: "oauth",
+      })
+      .run();
+    db.insert(contentItems)
+      .values({ id: contentItemId, contentType: "post", status: "imported" })
+      .run();
+    db.insert(contentPosts)
+      .values({
+        id: contentPostId,
+        contentItemId,
+        platformAccountId,
+        status: "imported",
+      })
+      .run();
+
+    const engagementId = nanoid();
+    db.insert(engagements)
+      .values({
+        id: engagementId,
+        contactId: null,
+        engagementType: "like",
+        direction: "outbound",
+        contentPostId,
+        platform: "x",
+        source: "manual",
+        platformData: JSON.stringify({ action: "like", tweetId: "legacy-1" }),
+        createdAt: 1_700_000_000,
+      })
+      .run();
+
+    const result = backfillInteractions();
+    expect(result.inserted).toBe(1);
+
+    const interaction = db
+      .select()
+      .from(interactions)
+      .where(eq(interactions.engagementId, engagementId))
+      .get();
+    expect(interaction?.contentPostId).toBe(contentPostId);
+    expect(interaction?.contactId).toBeNull();
   });
 
   it("rolls back logInteraction when projection update fails", () => {

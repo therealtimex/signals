@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { getPlatformAccountByPlatform } from "@/lib/db/queries/platform-accounts";
 import { createEngagement } from "@/lib/db/queries/engagements";
-import { ensurePlatformActorContact } from "@/lib/db/queries/platform-actor-contact";
+import { resolveEngagementTargetContact } from "@/lib/db/queries/engagement-target-contact";
 import {
   getAuthenticatedUser,
   likeTweet,
@@ -75,15 +75,12 @@ export async function POST(req: NextRequest) {
       reply: "reply",
     } as const;
 
-    const actorContactId = ensurePlatformActorContact({
-      platform: "x",
-      platformUserId: me.id,
-      displayName: me.name,
-      platformHandle: me.username,
-    });
+    const targetContactId = contentPostId
+      ? resolveEngagementTargetContact(contentPostId)
+      : null;
 
     createEngagement({
-      contactId: actorContactId,
+      contactId: targetContactId,
       platformAccountId: account.id,
       engagementType: engagementTypeMap[action],
       direction: "outbound",
@@ -95,12 +92,7 @@ export async function POST(req: NextRequest) {
       platformEngagementId: null,
       threadId: null,
       source: "manual",
-      platformData: JSON.stringify({
-        action,
-        tweetId,
-        result,
-        actorPlatformUserId: me.id,
-      }),
+      platformData: JSON.stringify({ action, tweetId, result }),
     });
 
     return NextResponse.json({ success: true, action, result });
