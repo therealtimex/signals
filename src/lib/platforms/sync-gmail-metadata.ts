@@ -124,7 +124,6 @@ export async function syncGmailMetadata(
             contactId: contact.id,
             interactionType: "email",
             occurredAt: lastMessageAt,
-            scope: "shared",
             source: "sync:gmail",
             metadata: { sent30d, received30d },
           });

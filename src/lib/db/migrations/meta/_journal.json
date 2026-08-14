@@ -50,6 +50,13 @@
       "when": 1786739116853,
       "tag": "0006_demonic_retro_girl",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1786740927295,
+      "tag": "0007_clumsy_korath",
+      "breakpoints": true
     }
   ]
 }

@@ -650,7 +650,7 @@ export const interactions = sqliteTable("interactions", {
     .default("local_only"),
   source: text("source").notNull(),
   engagementId: text("engagement_id").references(() => engagements.id),
-  contentItemId: text("content_item_id").references(() => contentItems.id),
+  contentItemId: text("content_item_id").references(() => contentItems.id, { onDelete: "set null" }),
   metadata: text("metadata").default("{}"),
   createdAt: integer("created_at")
     .notNull()
