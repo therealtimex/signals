@@ -1,0 +1,74 @@
+{
+  "uuid": "c8f5b0d3-4e2e-5b9f-0d66-1b2c3d4e5f6a",
+  "name": "Signals — CRM Agent Task",
+  "description": "Delegates CRM work to a workspace terminal agent with instructions to call the Signals agent-tools REST API.",
+  "active": false,
+  "steps": [
+    {
+      "id": "start",
+      "type": "start",
+      "config": {
+        "mode": "manual",
+        "timezone": "UTC",
+        "variables": [
+          {
+            "name": "signals_base_url",
+            "value": "http://localhost:3010"
+          },
+          {
+            "name": "workspace_slug",
+            "value": ""
+          },
+          {
+            "name": "contact_name",
+            "value": "Alex Rivera"
+          },
+          {
+            "name": "contact_company",
+            "value": "Northwind"
+          },
+          {
+            "name": "contact_title",
+            "value": "Director of Partnerships"
+          },
+          {
+            "name": "contact_email",
+            "value": "alex@northwind.example"
+          },
+          {
+            "name": "contact_platform",
+            "value": "linkedin"
+          }
+        ]
+      }
+    },
+    {
+      "id": "fetch_manifest",
+      "type": "apiCall",
+      "config": {
+        "url": "{{ $signals_base_url }}/api/agent-tools",
+        "method": "GET",
+        "responseVariable": "signals_tools",
+        "timeout": 30
+      }
+    },
+    {
+      "id": "crm_agent",
+      "type": "workspaceAgentTask",
+      "config": {
+        "workspaceSlug": "{{ $workspace_slug }}",
+        "taskName": "Signals CRM update",
+        "prompt": "You are updating the Signals CRM via its local agent-tools REST API.\n\nBase URL: {{ $signals_base_url }}\n\n1. Read the tool manifest (already fetched in flow variable `signals_tools` if available, otherwise GET /api/agent-tools).\n2. Create a contact with create_contact using:\n   - name: {{ $contact_name }}\n   - company: {{ $contact_company }}\n   - platform: {{ $contact_platform }}\n3. Enrich the new contact with enrich_contact (fill gaps only) using title {{ $contact_title }} and email {{ $contact_email }}.\n4. Verify with get_contact.\n5. Reply with a short summary: contact id, fields set, enrichment score, and any follow-up task you recommend.\n\nAPI contract:\n- Manifest: GET {{ $signals_base_url }}/api/agent-tools\n- Invoke: POST {{ $signals_base_url }}/api/agent-tools/invoke with JSON body {\"tool\":\"<name>\",\"input\":{...}}\n\nUse curl from the shell. The API is localhost-only unless SIGNALS_AGENT_TOOL_TOKEN is configured.",
+        "resultVariable": "crm_agent_result"
+      }
+    },
+    {
+      "id": "finish",
+      "type": "finish",
+      "config": {
+        "message": "Signals CRM agent task dispatched.",
+        "outputVariable": "crm_agent_result"
+      }
+    }
+  ]
+}

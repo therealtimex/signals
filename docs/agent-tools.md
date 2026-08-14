@@ -99,6 +99,23 @@ curl -s -X POST http://localhost:3010/api/agent-tools/invoke \
 
 The in-app agent runner (`/api/chat`) remains available; this API is the stable integration surface for external agents (#3).
 
+## RTX Agent Flows
+
+Ready-to-import flows live in [`flows/`](../flows/):
+
+| Flow | Type |
+|------|------|
+| `signals-create-enrich-contact.agent-flow.json` | Deterministic `apiCall` steps (manifest → create → enrich → verify) |
+| `signals-crm-agent-task.agent-flow.json` | `workspaceAgentTask` — terminal agent uses curl against this API |
+
+Import via **Admin → Agents → Agent Flows**, set `signals_base_url` to your Local App port (e.g. `http://localhost:3010`), then run manually. See [`flows/README.md`](../flows/README.md).
+
+For `runCommand` nodes or shell scripts, use [`scripts/invoke-agent-tool.sh`](../scripts/invoke-agent-tool.sh):
+
+```bash
+./scripts/invoke-agent-tool.sh create_contact '{"name":"Alex Rivera","company":"Northwind"}'
+```
+
 ## Smoke tests
 
 ```bash

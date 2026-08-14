@@ -1,0 +1,114 @@
+{
+  "uuid": "b7e4a9c2-3f1d-4a8e-9c55-0a1b2c3d4e5f",
+  "name": "Signals — Create & Enrich Contact",
+  "description": "Calls the Signals Local App /api/agent-tools API to create a contact, enrich missing fields, and verify the record.",
+  "active": false,
+  "steps": [
+    {
+      "id": "start",
+      "type": "start",
+      "config": {
+        "mode": "manual",
+        "timezone": "UTC",
+        "variables": [
+          {
+            "name": "signals_base_url",
+            "value": "http://localhost:3010"
+          },
+          {
+            "name": "contact_name",
+            "value": "Alex Rivera"
+          },
+          {
+            "name": "contact_company",
+            "value": "Northwind"
+          },
+          {
+            "name": "contact_platform",
+            "value": "linkedin"
+          },
+          {
+            "name": "contact_title",
+            "value": "Director of Partnerships"
+          },
+          {
+            "name": "contact_email",
+            "value": "alex@northwind.example"
+          }
+        ]
+      }
+    },
+    {
+      "id": "fetch_manifest",
+      "type": "apiCall",
+      "config": {
+        "url": "{{ $signals_base_url }}/api/agent-tools",
+        "method": "GET",
+        "responseVariable": "signals_tools",
+        "timeout": 30
+      }
+    },
+    {
+      "id": "create_contact",
+      "type": "apiCall",
+      "config": {
+        "url": "{{ $signals_base_url }}/api/agent-tools/invoke",
+        "method": "POST",
+        "headers": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "bodyType": "json",
+        "body": "{\"tool\":\"create_contact\",\"input\":{\"name\":\"{{ $contact_name }}\",\"company\":\"{{ $contact_company }}\",\"platform\":\"{{ $contact_platform }}\"}}",
+        "responseVariable": "create_contact",
+        "timeout": 30
+      }
+    },
+    {
+      "id": "enrich_contact",
+      "type": "apiCall",
+      "config": {
+        "url": "{{ $signals_base_url }}/api/agent-tools/invoke",
+        "method": "POST",
+        "headers": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "bodyType": "json",
+        "body": "{\"tool\":\"enrich_contact\",\"input\":{\"contactId\":\"{{ $create_contact.result.id }}\",\"title\":\"{{ $contact_title }}\",\"email\":\"{{ $contact_email }}\"}}",
+        "responseVariable": "enrich_contact",
+        "timeout": 30
+      }
+    },
+    {
+      "id": "verify_contact",
+      "type": "apiCall",
+      "config": {
+        "url": "{{ $signals_base_url }}/api/agent-tools/invoke",
+        "method": "POST",
+        "headers": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "bodyType": "json",
+        "body": "{\"tool\":\"get_contact\",\"input\":{\"contactId\":\"{{ $create_contact.result.id }}\"}}",
+        "responseVariable": "verified_contact",
+        "timeout": 30
+      }
+    },
+    {
+      "id": "finish",
+      "type": "finish",
+      "config": {
+        "message": "Signals contact created and enriched.",
+        "outputVariable": "verified_contact"
+      }
+    }
+  ]
+}
