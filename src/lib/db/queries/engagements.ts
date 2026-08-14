@@ -9,13 +9,15 @@ type NewEngagementData = Omit<Engagement, "id" | "createdAt">;
 
 /** Record a new engagement action and dual-write to `interactions`. */
 export function createEngagement(data: NewEngagementData): Engagement {
-  const id = nanoid();
-  db.insert(engagements)
-    .values({ ...data, id })
-    .run();
-  const engagement = db.select().from(engagements).where(eq(engagements.id, id)).get()!;
-  syncInteractionFromEngagement(engagement);
-  return engagement;
+  return db.transaction((tx) => {
+    const id = nanoid();
+    tx.insert(engagements)
+      .values({ ...data, id })
+      .run();
+    const engagement = tx.select().from(engagements).where(eq(engagements.id, id)).get()!;
+    syncInteractionFromEngagement(engagement, undefined, tx);
+    return engagement;
+  });
 }
 
 /** List engagements for a content post. */

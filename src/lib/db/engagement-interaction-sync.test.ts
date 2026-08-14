@@ -1,13 +1,14 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { createContact } from "@/lib/db/queries/contacts";
 import { createEngagement } from "@/lib/db/queries/engagements";
 import { logInteraction } from "@/lib/db/queries/interactions";
+import * as projection from "@/lib/db/queries/contact-interaction-projection";
 import { recomputeContactLastInteraction } from "@/lib/db/queries/contact-interaction-projection";
 import { syncInteractionFromEngagement } from "@/lib/db/engagement-interaction-sync";
 import { db } from "@/lib/db/client";
-import { contacts, interactions } from "@/lib/db/schema";
+import { contacts, engagements, interactions } from "@/lib/db/schema";
 import { resetCoreTables } from "@/test/db";
 
 describe("engagement → interaction dual-write", () => {
@@ -123,5 +124,56 @@ describe("engagement → interaction dual-write", () => {
 
     expect(db.select().from(interactions).all()).toHaveLength(0);
     expect(syncInteractionFromEngagement(engagement)).toBeNull();
+  });
+
+  it("rolls back logInteraction when projection update fails", () => {
+    vi.spyOn(projection, "touchContactLastInteraction").mockImplementation(() => {
+      throw new Error("projection failed");
+    });
+
+    const contact = createContact({ name: "Rollback", platform: "x", platformUserId: "rb1" });
+
+    expect(() =>
+      logInteraction({
+        contactId: contact.id,
+        interactionType: "meeting",
+        occurredAt: 1_700_000_100,
+        scope: "shared",
+        source: "test",
+      }),
+    ).toThrow(/projection failed/);
+
+    expect(db.select().from(interactions).all()).toHaveLength(0);
+    expect(db.select().from(contacts).where(eq(contacts.id, contact.id)).get()?.lastInteractionAt).toBeNull();
+  });
+
+  it("rolls back createEngagement when projection update fails", () => {
+    vi.spyOn(projection, "touchContactLastInteraction").mockImplementation(() => {
+      throw new Error("projection failed");
+    });
+
+    const contact = createContact({ name: "Eng Rollback", platform: "x", platformUserId: "rb2" });
+
+    expect(() =>
+      createEngagement({
+        contactId: contact.id,
+        platformAccountId: null,
+        engagementType: "like",
+        direction: "outbound",
+        content: null,
+        templateId: null,
+        workflowRunId: null,
+        contentPostId: null,
+        platform: "x",
+        platformEngagementId: null,
+        threadId: null,
+        source: "manual",
+        platformData: "{}",
+      }),
+    ).toThrow(/projection failed/);
+
+    expect(db.select().from(engagements).all()).toHaveLength(0);
+    expect(db.select().from(interactions).all()).toHaveLength(0);
+    expect(db.select().from(contacts).where(eq(contacts.id, contact.id)).get()?.lastInteractionAt).toBeNull();
   });
 });

@@ -2,6 +2,7 @@ import { db } from "@/lib/db/client";
 import {
   contactIdentities,
   contacts,
+  engagements,
   goalProgress,
   goalWorkflows,
   goals,
@@ -25,6 +26,7 @@ export function resetCoreTables(): void {
   db.delete(contactPersonas).run();
   db.delete(identityMetrics).run();
   db.delete(interactions).run();
+  db.delete(engagements).run();
   db.delete(graphEdges).run();
   db.delete(orgs).run();
   db.delete(contactIdentities).run();

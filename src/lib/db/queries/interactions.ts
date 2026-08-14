@@ -39,8 +39,10 @@ export function logInteraction(input: LogInteractionInput): Interaction {
     metadata: JSON.stringify(input.metadata ?? {}),
   };
 
-  db.insert(interactions).values(values).run();
-  const interaction = db.select().from(interactions).where(eq(interactions.id, id)).get()!;
-  touchContactLastInteraction(input.contactId, interaction.occurredAt);
-  return interaction;
+  return db.transaction((tx) => {
+    tx.insert(interactions).values(values).run();
+    const interaction = tx.select().from(interactions).where(eq(interactions.id, id)).get()!;
+    touchContactLastInteraction(input.contactId, interaction.occurredAt, tx);
+    return interaction;
+  });
 }

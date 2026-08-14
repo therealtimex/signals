@@ -181,4 +181,19 @@ describe("graph backfills", () => {
     const beta = db.select().from(orgs).where(eq(orgs.name, "Beta LLC")).get();
     expect(worksAt[0]?.dstId).toBe(beta?.id);
   });
+
+  it("backfillWorksAt retires works_at edges after company is cleared", () => {
+    const contact = createContact({
+      name: "Clearer",
+      company: "Alpha Corp",
+      platform: "x",
+      platformUserId: "cl1",
+    });
+
+    backfillWorksAt();
+    updateContact(contact.id, { company: "" });
+    backfillWorksAt();
+
+    expect(db.select().from(graphEdges).all()).toHaveLength(0);
+  });
 });

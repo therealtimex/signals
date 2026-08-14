@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import { db } from "@/lib/db/client";
+import { db, type DbRunner } from "@/lib/db/client";
 import { contentPosts, interactions } from "@/lib/db/schema";
 import type { Engagement, Interaction } from "@/lib/db/types";
 import { touchContactLastInteraction } from "@/lib/db/queries/contact-interaction-projection";
@@ -21,9 +21,9 @@ export function interactionSourceFromEngagement(engagement: Engagement): string 
   return engagement.source ? `sync:${engagement.source}` : "sync:unknown";
 }
 
-function resolveContentItemId(engagement: Engagement): string | null {
+function resolveContentItemId(engagement: Engagement, runner: DbRunner = db): string | null {
   if (!engagement.contentPostId) return null;
-  const post = db
+  const post = runner
     .select({ contentItemId: contentPosts.contentItemId })
     .from(contentPosts)
     .where(eq(contentPosts.id, engagement.contentPostId))
@@ -38,23 +38,25 @@ function resolveContentItemId(engagement: Engagement): string | null {
 export function syncInteractionFromEngagement(
   engagement: Engagement,
   opts?: { source?: string },
+  runner: DbRunner = db,
 ): Interaction | null {
   if (!engagement.contactId) return null;
 
-  const existing = db
+  const existing = runner
     .select()
     .from(interactions)
     .where(eq(interactions.engagementId, engagement.id))
     .get();
   if (existing) {
-    touchContactLastInteraction(engagement.contactId, existing.occurredAt);
+    touchContactLastInteraction(engagement.contactId, existing.occurredAt, runner);
     return existing;
   }
 
   const id = nanoid();
   const occurredAt = engagement.createdAt;
 
-  db.insert(interactions)
+  runner
+    .insert(interactions)
     .values({
       id,
       contactId: engagement.contactId,
@@ -67,12 +69,12 @@ export function syncInteractionFromEngagement(
       scope: "shared",
       source: opts?.source ?? interactionSourceFromEngagement(engagement),
       engagementId: engagement.id,
-      contentItemId: resolveContentItemId(engagement),
+      contentItemId: resolveContentItemId(engagement, runner),
       metadata: engagement.platformData ?? "{}",
     })
     .run();
 
-  const interaction = db.select().from(interactions).where(eq(interactions.id, id)).get()!;
-  touchContactLastInteraction(engagement.contactId, occurredAt);
+  const interaction = runner.select().from(interactions).where(eq(interactions.id, id)).get()!;
+  touchContactLastInteraction(engagement.contactId, occurredAt, runner);
   return interaction;
 }

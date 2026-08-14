@@ -46,15 +46,47 @@ export function upsertPersona(input: UpsertPersonaInput): ContactPersona {
   const now = nowUnix();
   const id = nanoid();
 
-  db.transaction((tx) => {
-    const active = tx
-      .select()
-      .from(contactPersonas)
-      .where(
-        and(eq(contactPersonas.contactId, input.contactId), eq(contactPersonas.status, "active")),
-      )
-      .get();
+  const active = db
+    .select()
+    .from(contactPersonas)
+    .where(
+      and(eq(contactPersonas.contactId, input.contactId), eq(contactPersonas.status, "active")),
+    )
+    .get();
 
+  const merged = {
+    archetype: input.archetype !== undefined ? (input.archetype ?? null) : (active?.archetype ?? null),
+    tone: input.tone !== undefined ? (input.tone ?? null) : (active?.tone ?? null),
+    summary: input.summary !== undefined ? (input.summary ?? null) : (active?.summary ?? null),
+    description:
+      input.description !== undefined ? (input.description ?? null) : (active?.description ?? null),
+    interests:
+      input.interests !== undefined
+        ? input.interests
+        : JSON.parse(active?.interests ?? "[]") as string[],
+    conversionTriggers:
+      input.conversionTriggers !== undefined
+        ? input.conversionTriggers
+        : (JSON.parse(active?.conversionTriggers ?? "[]") as string[]),
+    engagementFormats:
+      input.engagementFormats !== undefined
+        ? input.engagementFormats
+        : (JSON.parse(active?.engagementFormats ?? "[]") as string[]),
+    confidence:
+      input.confidence !== undefined ? (input.confidence ?? null) : (active?.confidence ?? null),
+    scope: input.scope ?? active?.scope ?? "shared",
+    model: input.model !== undefined ? (input.model ?? null) : (active?.model ?? null),
+    sourceWindow:
+      input.sourceWindow !== undefined
+        ? input.sourceWindow
+        : (JSON.parse(active?.sourceWindow ?? "{}") as Record<string, unknown>),
+    workflowRunId:
+      input.workflowRunId !== undefined
+        ? (input.workflowRunId ?? null)
+        : (active?.workflowRunId ?? null),
+  };
+
+  db.transaction((tx) => {
     if (active) {
       tx.update(contactPersonas)
         .set({
@@ -71,18 +103,18 @@ export function upsertPersona(input: UpsertPersonaInput): ContactPersona {
         id,
         contactId: input.contactId,
         status: "active",
-        archetype: input.archetype ?? null,
-        tone: input.tone ?? null,
-        summary: input.summary ?? null,
-        description: input.description ?? null,
-        interests: JSON.stringify(input.interests ?? []),
-        conversionTriggers: JSON.stringify(input.conversionTriggers ?? []),
-        engagementFormats: JSON.stringify(input.engagementFormats ?? []),
-        confidence: input.confidence ?? null,
-        scope: input.scope ?? "shared",
-        model: input.model ?? null,
-        sourceWindow: JSON.stringify(input.sourceWindow ?? {}),
-        workflowRunId: input.workflowRunId ?? null,
+        archetype: merged.archetype,
+        tone: merged.tone,
+        summary: merged.summary,
+        description: merged.description,
+        interests: JSON.stringify(merged.interests),
+        conversionTriggers: JSON.stringify(merged.conversionTriggers),
+        engagementFormats: JSON.stringify(merged.engagementFormats),
+        confidence: merged.confidence,
+        scope: merged.scope,
+        model: merged.model,
+        sourceWindow: JSON.stringify(merged.sourceWindow),
+        workflowRunId: merged.workflowRunId,
         generatedAt: now,
         supersededAt: null,
       })

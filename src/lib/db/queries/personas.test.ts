@@ -71,4 +71,41 @@ describe("get_persona agent tool", () => {
       interests: ["devtools", "startups"],
     });
   });
+
+  it("rejects upsert_persona with only contactId", async () => {
+    const contact = createContact({ name: "Guarded", platform: "x", platformUserId: "p4" });
+
+    await invokeAgentTool("upsert_persona", {
+      contactId: contact.id,
+      archetype: "Founder",
+    });
+
+    await expect(invokeAgentTool("upsert_persona", { contactId: contact.id })).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+    });
+
+    const persona = await invokeAgentTool("get_persona", { contactId: contact.id });
+    expect(persona).toMatchObject({ archetype: "Founder" });
+  });
+
+  it("merges partial persona updates with the active persona", async () => {
+    const contact = createContact({ name: "Partial", platform: "x", platformUserId: "p5" });
+
+    await invokeAgentTool("upsert_persona", {
+      contactId: contact.id,
+      archetype: "Founder",
+      tone: "Direct",
+    });
+
+    await invokeAgentTool("upsert_persona", {
+      contactId: contact.id,
+      tone: "Warm",
+    });
+
+    const result = await invokeAgentTool("get_persona", { contactId: contact.id });
+    expect(result).toMatchObject({
+      archetype: "Founder",
+      tone: "Warm",
+    });
+  });
 });

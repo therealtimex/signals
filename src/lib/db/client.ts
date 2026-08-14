@@ -19,5 +19,6 @@ sqlite.pragma("foreign_keys = ON");
 sqlite.pragma("busy_timeout = 10000");
 
 export const db = drizzle(sqlite, { schema });
+export type DbRunner = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
 export { schema };
 export { dataDir, dbPath };
