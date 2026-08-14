@@ -1,5 +1,6 @@
 import { sqliteTable, text, integer, real, index, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
+import { PLATFORM_ENUM } from "./platforms";
 
 // Helper for default timestamps (unix epoch seconds)
 const timestamps = {
@@ -15,7 +16,7 @@ const timestamps = {
 
 export const platformAccounts = sqliteTable("platform_accounts", {
   id: text("id").primaryKey(),
-  platform: text("platform", { enum: ["x", "linkedin", "gmail", "substack"] }).notNull(),
+  platform: text("platform", { enum: PLATFORM_ENUM }).notNull(),
   displayName: text("display_name").notNull(),
   authType: text("auth_type", { enum: ["oauth", "session", "api_key"] }).notNull(),
   credentialsEncrypted: text("credentials_encrypted"), // JSON string, AES-256
@@ -38,7 +39,7 @@ export const contacts = sqliteTable("contacts", {
   company: text("company"),
   title: text("title"),
   // Deprecated: use contactIdentities table instead
-  platform: text("platform", { enum: ["x", "linkedin", "gmail", "substack"] }),
+  platform: text("platform", { enum: PLATFORM_ENUM }),
   platformUserId: text("platform_user_id"),
   profileUrl: text("profile_url"),
   avatarUrl: text("avatar_url"),
@@ -73,11 +74,23 @@ export const contactIdentities = sqliteTable("contact_identities", {
   contactId: text("contact_id")
     .notNull()
     .references(() => contacts.id, { onDelete: "cascade" }),
-  platform: text("platform", { enum: ["x", "linkedin", "gmail", "substack"] }).notNull(),
+  platform: text("platform", { enum: PLATFORM_ENUM }).notNull(),
   platformUserId: text("platform_user_id").notNull(),
   platformHandle: text("platform_handle"),
   platformUrl: text("platform_url"),
   platformData: text("platform_data").default("{}"), // JSON
+  displayName: text("display_name"),
+  bio: text("bio"),
+  avatarUrl: text("avatar_url"),
+  location: text("location"),
+  websiteUrl: text("website_url"),
+  isVerified: integer("is_verified", { mode: "boolean" }),
+  followersCount: integer("followers_count"),
+  followingCount: integer("following_count"),
+  postsCount: integer("posts_count"),
+  listedCount: integer("listed_count"),
+  platformCreatedAt: integer("platform_created_at"),
+  statsUpdatedAt: integer("stats_updated_at"),
   isPrimary: integer("is_primary").notNull().default(0),
   isActive: integer("is_active").notNull().default(1),
   lastSyncedAt: integer("last_synced_at"),
@@ -86,6 +99,27 @@ export const contactIdentities = sqliteTable("contact_identities", {
 }, (table) => [
   uniqueIndex("idx_identity_platform_user").on(table.platform, table.platformUserId),
   index("idx_identity_contact").on(table.contactId),
+  index("idx_identity_followers").on(table.followersCount),
+]);
+
+// --- Identity Metrics (time-series stat snapshots per platform identity) ---
+
+export const identityMetrics = sqliteTable("identity_metrics", {
+  id: text("id").primaryKey(),
+  contactIdentityId: text("contact_identity_id")
+    .notNull()
+    .references(() => contactIdentities.id, { onDelete: "cascade" }),
+  snapshotAt: integer("snapshot_at")
+    .notNull()
+    .default(sql`(unixepoch())`),
+  followersCount: integer("followers_count"),
+  followingCount: integer("following_count"),
+  postsCount: integer("posts_count"),
+  listedCount: integer("listed_count"),
+  engagementRate: real("engagement_rate"),
+  metadata: text("metadata").default("{}"),
+}, (table) => [
+  index("idx_identity_metrics_identity_time").on(table.contactIdentityId, table.snapshotAt),
 ]);
 
 // --- Workflow Templates (formerly "campaigns") ---
@@ -94,7 +128,7 @@ export const workflowTemplates = sqliteTable("workflow_templates", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   description: text("description"),
-  platform: text("platform", { enum: ["x", "linkedin", "gmail", "substack"] }),
+  platform: text("platform", { enum: PLATFORM_ENUM }),
   templateType: text("template_type", {
     enum: ["outreach", "engagement", "content", "nurture", "prospecting", "enrichment", "pruning"],
   }).notNull(),
@@ -201,7 +235,7 @@ export const mediaAssets = sqliteTable("media_assets", {
   width: integer("width"), // images only
   height: integer("height"), // images only
   contentItemId: text("content_item_id").references(() => contentItems.id, { onDelete: "set null" }),
-  platformTarget: text("platform_target", { enum: ["x", "linkedin"] }),
+  platformTarget: text("platform_target", { enum: PLATFORM_ENUM }),
   ...timestamps,
 }, (table) => [
   index("idx_media_assets_content_item").on(table.contentItemId),
@@ -263,7 +297,7 @@ export const engagements = sqliteTable("engagements", {
   workflowRunId: text("workflow_run_id").references(() => workflowRuns.id),
   // Phase 2 additions
   contentPostId: text("content_post_id").references(() => contentPosts.id),
-  platform: text("platform", { enum: ["x", "linkedin", "gmail", "substack"] }),
+  platform: text("platform", { enum: PLATFORM_ENUM }),
   platformEngagementId: text("platform_engagement_id"), // dedup key
   threadId: text("thread_id"),
   source: text("source"), // e.g. "timeline", "notification", "search"
@@ -481,7 +515,7 @@ export const goals = sqliteTable("goals", {
   goalType: text("goal_type", {
     enum: ["audience_growth", "lead_generation", "content_engagement", "pipeline_progression"],
   }).notNull(),
-  platform: text("platform", { enum: ["x", "linkedin"] }), // nullable — null = cross-platform
+  platform: text("platform", { enum: PLATFORM_ENUM }), // nullable — null = cross-platform
   targetValue: integer("target_value").notNull(),
   currentValue: integer("current_value").notNull().default(0),
   unit: text("unit").notNull(), // e.g. "contacts", "followers", "engagements", "leads"
@@ -509,6 +543,156 @@ export const goalWorkflows = sqliteTable("goal_workflows", {
     .default("primary"),
   ...timestamps,
 });
+
+// --- Orgs (first-class organization nodes) ---
+
+export const orgs = sqliteTable("orgs", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  orgType: text("org_type", {
+    enum: ["company", "fund", "team", "community", "other"],
+  })
+    .notNull()
+    .default("company"),
+  domain: text("domain"),
+  website: text("website"),
+  description: text("description"),
+  location: text("location"),
+  avatarUrl: text("avatar_url"),
+  enrichmentScore: integer("enrichment_score").notNull().default(0),
+  scope: text("scope", { enum: ["shared", "local_only"] })
+    .notNull()
+    .default("shared"),
+  metadata: text("metadata").default("{}"),
+  source: text("source"),
+  ...timestamps,
+}, (table) => [
+  index("idx_orgs_name").on(table.name),
+  uniqueIndex("idx_orgs_domain").on(table.domain),
+]);
+
+// --- Graph Edges (polymorphic typed-edge overlay) ---
+
+export const graphEdges = sqliteTable("graph_edges", {
+  id: text("id").primaryKey(),
+  srcType: text("src_type", {
+    enum: [
+      "contact",
+      "org",
+      "content",
+      "goal",
+      "niche",
+      "launch",
+      "variant",
+      "interaction",
+      "workflow_run",
+      "platform_identity",
+    ],
+  }).notNull(),
+  srcId: text("src_id").notNull(),
+  dstType: text("dst_type", {
+    enum: [
+      "contact",
+      "org",
+      "content",
+      "goal",
+      "niche",
+      "launch",
+      "variant",
+      "interaction",
+      "workflow_run",
+      "platform_identity",
+    ],
+  }).notNull(),
+  dstId: text("dst_id").notNull(),
+  edgeType: text("edge_type").notNull(),
+  weight: real("weight"),
+  properties: text("properties").default("{}"),
+  propertiesPrivate: text("properties_private"),
+  scope: text("scope", { enum: ["shared", "local_only"] })
+    .notNull()
+    .default("shared"),
+  source: text("source"),
+  firstSeenAt: integer("first_seen_at")
+    .notNull()
+    .default(sql`(unixepoch())`),
+  lastSeenAt: integer("last_seen_at")
+    .notNull()
+    .default(sql`(unixepoch())`),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex("idx_edge_identity").on(
+    table.edgeType,
+    table.srcType,
+    table.srcId,
+    table.dstType,
+    table.dstId,
+  ),
+  index("idx_edge_src").on(table.srcType, table.srcId, table.edgeType),
+  index("idx_edge_dst").on(table.dstType, table.dstId, table.edgeType),
+]);
+
+// --- Interactions (append-only event log) ---
+
+export const interactions = sqliteTable("interactions", {
+  id: text("id").primaryKey(),
+  contactId: text("contact_id")
+    .notNull()
+    .references(() => contacts.id, { onDelete: "cascade" }),
+  orgId: text("org_id").references(() => orgs.id, { onDelete: "set null" }),
+  interactionType: text("interaction_type").notNull(),
+  direction: text("direction", { enum: ["inbound", "outbound", "mutual"] }),
+  summary: text("summary"),
+  isMeaningful: integer("is_meaningful", { mode: "boolean" }).notNull().default(false),
+  occurredAt: integer("occurred_at").notNull(),
+  scope: text("scope", { enum: ["shared", "local_only"] })
+    .notNull()
+    .default("local_only"),
+  source: text("source").notNull(),
+  engagementId: text("engagement_id").references(() => engagements.id),
+  contentItemId: text("content_item_id").references(() => contentItems.id),
+  metadata: text("metadata").default("{}"),
+  createdAt: integer("created_at")
+    .notNull()
+    .default(sql`(unixepoch())`),
+}, (table) => [
+  index("idx_interactions_contact_time").on(table.contactId, table.occurredAt),
+  index("idx_interactions_org").on(table.orgId),
+  uniqueIndex("idx_interactions_engagement").on(table.engagementId),
+]);
+
+// --- Contact Personas (AI-derived, versioned, cross-platform) ---
+
+export const contactPersonas = sqliteTable("contact_personas", {
+  id: text("id").primaryKey(),
+  contactId: text("contact_id")
+    .notNull()
+    .references(() => contacts.id, { onDelete: "cascade" }),
+  status: text("status", { enum: ["active", "superseded"] })
+    .notNull()
+    .default("active"),
+  archetype: text("archetype"),
+  tone: text("tone"),
+  summary: text("summary"),
+  description: text("description"),
+  interests: text("interests").default("[]"),
+  conversionTriggers: text("conversion_triggers").default("[]"),
+  engagementFormats: text("engagement_formats").default("[]"),
+  confidence: real("confidence"),
+  scope: text("scope", { enum: ["shared", "local_only"] })
+    .notNull()
+    .default("shared"),
+  model: text("model"),
+  sourceWindow: text("source_window").default("{}"),
+  workflowRunId: text("workflow_run_id").references(() => workflowRuns.id),
+  generatedAt: integer("generated_at")
+    .notNull()
+    .default(sql`(unixepoch())`),
+  supersededAt: integer("superseded_at"),
+  ...timestamps,
+}, (table) => [
+  index("idx_personas_contact_status").on(table.contactId, table.status),
+]);
 
 // --- Goal Progress (time-series snapshots) ---
 

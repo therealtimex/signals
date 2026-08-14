@@ -5,6 +5,8 @@ import { listTemplates } from "@/lib/db/queries/workflow-templates";
 import { listContentItems } from "@/lib/db/queries/content";
 import { listGoals } from "@/lib/db/queries/goals";
 import { createTask } from "@/lib/db/queries/tasks";
+import { getActivePersona, upsertPersona } from "@/lib/db/queries/personas";
+import { assertPlatform } from "@/lib/db/platforms";
 import { startAgentWorkflow } from "@/lib/agents/run-agent-workflow";
 import { enrichContact } from "@/lib/agents/tools/enrich-contact";
 import { archiveContactTool } from "@/lib/agents/tools/archive-contact";
@@ -23,6 +25,8 @@ import type {
   queryWorkflowsSchema,
   startWorkflowSchema,
   updateContactSchema,
+  getPersonaSchema,
+  upsertPersonaSchema,
 } from "@/lib/agent-tools/schemas";
 import type { z } from "zod";
 
@@ -91,7 +95,7 @@ export async function handleCreateContact(input: z.infer<typeof createContactSch
     email: input.email || null,
     company: input.company ?? null,
     title: input.title ?? null,
-    platform: input.platform ?? "x",
+    platform: assertPlatform(input.platform ?? "x"),
     funnelStage: input.funnelStage ?? "prospect",
   });
 
@@ -281,5 +285,60 @@ export async function handleCreateTask(input: z.infer<typeof createTaskSchema>) 
     priority: task.priority,
     status: task.status,
     message: `Task "${task.title}" created successfully.`,
+  };
+}
+
+export async function handleGetPersona(input: z.infer<typeof getPersonaSchema>) {
+  const persona = getActivePersona(input.contactId, {
+    includeLocalOnly: input.includeLocalOnly ?? false,
+  });
+
+  if (!persona) {
+    return { error: `No persona found for contact: ${input.contactId}` };
+  }
+
+  return {
+    id: persona.id,
+    contactId: persona.contactId,
+    archetype: persona.archetype,
+    tone: persona.tone,
+    summary: persona.summary,
+    description: persona.description,
+    interests: JSON.parse(persona.interests ?? "[]"),
+    conversionTriggers: JSON.parse(persona.conversionTriggers ?? "[]"),
+    engagementFormats: JSON.parse(persona.engagementFormats ?? "[]"),
+    confidence: persona.confidence,
+    scope: persona.scope,
+    model: persona.model,
+    sourceWindow: JSON.parse(persona.sourceWindow ?? "{}"),
+    workflowRunId: persona.workflowRunId,
+    generatedAt: persona.generatedAt,
+  };
+}
+
+export async function handleUpsertPersona(input: z.infer<typeof upsertPersonaSchema>) {
+  const persona = upsertPersona({
+    contactId: input.contactId,
+    archetype: input.archetype,
+    tone: input.tone,
+    summary: input.summary,
+    description: input.description,
+    interests: input.interests,
+    conversionTriggers: input.conversionTriggers,
+    engagementFormats: input.engagementFormats,
+    confidence: input.confidence,
+    scope: input.scope,
+    model: input.model,
+    sourceWindow: input.sourceWindow,
+    workflowRunId: input.workflowRunId,
+  });
+
+  return {
+    id: persona.id,
+    contactId: persona.contactId,
+    archetype: persona.archetype,
+    tone: persona.tone,
+    summary: persona.summary,
+    message: "Persona saved (previous active persona superseded if present).",
   };
 }

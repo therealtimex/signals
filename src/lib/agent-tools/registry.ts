@@ -12,6 +12,8 @@ import {
   queryWorkflowsSchema,
   startWorkflowSchema,
   updateContactSchema,
+  getPersonaSchema,
+  upsertPersonaSchema,
 } from "@/lib/agent-tools/schemas";
 import {
   handleArchiveContact,
@@ -27,6 +29,8 @@ import {
   handleQueryWorkflows,
   handleStartWorkflow,
   handleUpdateContact,
+  handleGetPersona,
+  handleUpsertPersona,
 } from "@/lib/agent-tools/handlers";
 import { zodToParameters } from "@/lib/agent-tools/json-schema";
 import type { AgentToolDefinition } from "@/lib/agent-tools/types";
@@ -142,6 +146,24 @@ export const AGENT_TOOLS: Record<string, AgentToolDefinition> = {
     schema: createTaskSchema,
     parameters: zodToParameters(createTaskSchema),
     execute: handleCreateTask,
+  },
+  get_persona: {
+    name: "get_persona",
+    description:
+      "Get the active AI persona for a contact (archetype, tone, interests, conversion triggers).",
+    category: "contacts",
+    schema: getPersonaSchema,
+    parameters: zodToParameters(getPersonaSchema),
+    execute: handleGetPersona,
+  },
+  upsert_persona: {
+    name: "upsert_persona",
+    description:
+      "Save a new active persona for a contact; supersedes any previous active persona (versioned history).",
+    category: "contacts",
+    schema: upsertPersonaSchema,
+    parameters: zodToParameters(upsertPersonaSchema),
+    execute: handleUpsertPersona,
   },
 };
 

@@ -1,4 +1,5 @@
 import type { NewContact, NewContactIdentity, NewContentItem, NewContentPost } from "@/lib/db/types";
+import { liftIdentityStatsFromPlatformData } from "@/lib/db/identity-stats";
 import type { XUser, XTweet } from "@/lib/platforms/x/client";
 
 /** Split a display name into firstName/lastName. */
@@ -40,24 +41,59 @@ export function mapXUserToIdentity(
   xUser: XUser,
   contactId: string
 ): Omit<NewContactIdentity, "id"> {
+  const now = Math.floor(Date.now() / 1000);
+  const platformData = JSON.stringify({
+    followersCount: xUser.public_metrics?.followers_count ?? 0,
+    followingCount: xUser.public_metrics?.following_count ?? 0,
+    tweetCount: xUser.public_metrics?.tweet_count ?? 0,
+    listedCount: xUser.public_metrics?.listed_count ?? 0,
+    verified: xUser.verified ?? false,
+    createdAt: xUser.created_at ?? null,
+  });
+
+  const lifted = liftIdentityStatsFromPlatformData(platformData, { statsUpdatedAt: now });
+
   return {
     contactId,
     platform: "x" as const,
     platformUserId: xUser.id,
     platformHandle: `@${xUser.username}`,
     platformUrl: `https://x.com/${xUser.username}`,
-    platformData: JSON.stringify({
-      followersCount: xUser.public_metrics?.followers_count ?? 0,
-      followingCount: xUser.public_metrics?.following_count ?? 0,
-      tweetCount: xUser.public_metrics?.tweet_count ?? 0,
-      listedCount: xUser.public_metrics?.listed_count ?? 0,
-      verified: xUser.verified ?? false,
-      createdAt: xUser.created_at ?? null,
-    }),
+    platformData,
+    displayName: xUser.name,
+    bio: xUser.description || null,
+    avatarUrl: xUser.profile_image_url || null,
+    location: xUser.location || null,
+    websiteUrl: extractWebsite(xUser),
+    isVerified: xUser.verified ?? false,
+    followersCount: xUser.public_metrics?.followers_count ?? null,
+    followingCount: xUser.public_metrics?.following_count ?? null,
+    postsCount: xUser.public_metrics?.tweet_count ?? null,
+    listedCount: xUser.public_metrics?.listed_count ?? null,
+    platformCreatedAt: isoToUnix(xUser.created_at),
+    statsUpdatedAt: now,
+    ...lifted,
     isPrimary: 1,
     isActive: 1,
-    lastSyncedAt: Math.floor(Date.now() / 1000),
+    lastSyncedAt: now,
   };
+}
+
+/** Fields to patch on an existing identity during sync (excludes immutable keys). */
+export function xUserIdentitySyncPatch(
+  xUser: XUser,
+  contactId: string
+): Partial<Omit<NewContactIdentity, "id" | "contactId" | "platform" | "platformUserId">> {
+  const full = mapXUserToIdentity(xUser, contactId);
+  const {
+    contactId: _contactId,
+    platform: _platform,
+    platformUserId: _platformUserId,
+    isPrimary: _isPrimary,
+    isActive: _isActive,
+    ...patch
+  } = full;
+  return patch;
 }
 
 /** Parse an ISO date string to unix epoch seconds. */

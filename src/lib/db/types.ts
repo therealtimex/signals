@@ -20,6 +20,11 @@ import {
   goals,
   goalWorkflows,
   goalProgress,
+  orgs,
+  graphEdges,
+  interactions,
+  identityMetrics,
+  contactPersonas,
 } from "./schema";
 
 // Contact types
@@ -102,3 +107,24 @@ export interface PaginatedResult<T> {
   data: T[];
   total: number;
 }
+
+// Org types
+export type Org = InferSelectModel<typeof orgs>;
+export type NewOrg = InferInsertModel<typeof orgs>;
+
+// Graph edge types
+export type GraphEdge = InferSelectModel<typeof graphEdges>;
+export type NewGraphEdge = InferInsertModel<typeof graphEdges>;
+export type GraphNodeType = GraphEdge["srcType"];
+
+// Interaction types
+export type Interaction = InferSelectModel<typeof interactions>;
+export type NewInteraction = InferInsertModel<typeof interactions>;
+
+// Identity metrics types
+export type IdentityMetric = InferSelectModel<typeof identityMetrics>;
+export type NewIdentityMetric = InferInsertModel<typeof identityMetrics>;
+
+// Contact persona types
+export type ContactPersona = InferSelectModel<typeof contactPersonas>;
+export type NewContactPersona = InferInsertModel<typeof contactPersonas>;
