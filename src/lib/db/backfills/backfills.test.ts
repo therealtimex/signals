@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { nanoid } from "nanoid";
 import { eq } from "drizzle-orm";
-import { createContact } from "@/lib/db/queries/contacts";
+import { createContact, updateContact } from "@/lib/db/queries/contacts";
 import { runGraphBackfills } from "@/lib/db/backfills";
 import { backfillOrgs } from "@/lib/db/backfills/orgs";
+import { backfillWorksAt } from "@/lib/db/backfills/works-at";
 import { backfillEngagedWithEdges } from "@/lib/db/backfills/engaged-with";
 import { backfillInteractions } from "@/lib/db/backfills/interactions";
 import { db } from "@/lib/db/client";
@@ -157,5 +158,27 @@ describe("graph backfills", () => {
     const result = backfillEngagedWithEdges();
     expect(result.upserted).toBe(0);
     expect(db.select().from(graphEdges).all()).toHaveLength(0);
+  });
+
+  it("backfillWorksAt reconciles stale employers after direct contact company update", () => {
+    const contact = createContact({
+      name: "Mover",
+      company: "Alpha Corp",
+      platform: "x",
+      platformUserId: "bm1",
+    });
+
+    backfillWorksAt();
+    updateContact(contact.id, { company: "Beta LLC" });
+    backfillWorksAt();
+
+    const worksAt = db
+      .select()
+      .from(graphEdges)
+      .where(eq(graphEdges.edgeType, "works_at"))
+      .all();
+    expect(worksAt).toHaveLength(1);
+    const beta = db.select().from(orgs).where(eq(orgs.name, "Beta LLC")).get();
+    expect(worksAt[0]?.dstId).toBe(beta?.id);
   });
 });

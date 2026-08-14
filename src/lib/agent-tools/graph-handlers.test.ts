@@ -126,4 +126,38 @@ describe("graph agent tools", () => {
       edgeType: "had_interaction",
     });
   });
+
+  it("query_graph omits private properties by default and includes them when opted in", async () => {
+    const alice = createContact({ name: "Alice", platform: "x", platformUserId: "qa1" });
+    const bob = createContact({ name: "Bob", platform: "x", platformUserId: "qb1" });
+
+    await invokeAgentTool("upsert_edge", {
+      srcType: "contact",
+      srcId: alice.id,
+      dstType: "contact",
+      dstId: bob.id,
+      edgeType: "relationship",
+      propertiesPrivate: { private_notes: "secret dinner plans" },
+      scope: "local_only",
+    });
+
+    const publicView = await invokeAgentTool("query_graph", {
+      nodeType: "contact",
+      nodeId: alice.id,
+      edgeTypes: ["relationship"],
+      direction: "outgoing",
+    });
+    expect((publicView as { edgeCount: number }).edgeCount).toBe(0);
+
+    const privateView = await invokeAgentTool("query_graph", {
+      nodeType: "contact",
+      nodeId: alice.id,
+      edgeTypes: ["relationship"],
+      direction: "outgoing",
+      includeLocalOnly: true,
+    });
+    const edges = (privateView as { edges: { propertiesPrivate?: Record<string, string> }[] }).edges;
+    expect(edges).toHaveLength(1);
+    expect(edges[0]?.propertiesPrivate).toEqual({ private_notes: "secret dinner plans" });
+  });
 });

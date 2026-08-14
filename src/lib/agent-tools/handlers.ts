@@ -90,20 +90,24 @@ export async function handleGetContact(input: z.infer<typeof getContactSchema>) 
 }
 
 export async function handleCreateContact(input: z.infer<typeof createContactSchema>) {
-  const contact = createContact({
-    name: input.name,
-    firstName: input.firstName,
-    lastName: input.lastName,
-    email: input.email || null,
-    company: input.company ?? null,
-    title: input.title ?? null,
-    platform: assertPlatform(input.platform ?? "x"),
-    funnelStage: input.funnelStage ?? "prospect",
-  });
+  const contact = db.transaction(() => {
+    const created = createContact({
+      name: input.name,
+      firstName: input.firstName,
+      lastName: input.lastName,
+      email: input.email || null,
+      company: input.company ?? null,
+      title: input.title ?? null,
+      platform: assertPlatform(input.platform ?? "x"),
+      funnelStage: input.funnelStage ?? "prospect",
+    });
 
-  if (input.company) {
-    dualWriteContactCompany(contact.id, input.company, input.title);
-  }
+    if (input.company) {
+      dualWriteContactCompany(created.id, input.company, input.title);
+    }
+
+    return created;
+  });
 
   return {
     id: contact.id,
@@ -129,20 +133,22 @@ export async function handleUpdateContact(input: z.infer<typeof updateContactSch
     }
   }
 
-  const updated =
-    fields.company !== undefined
-      ? db.transaction(() => {
-          const contact = updateContact(contactId, updates);
-          if (!contact) return undefined;
-          syncContactCompanyGraph(
-            contactId,
-            fields.company,
-            fields.title ?? contact.title,
-            "agent:update_contact",
-          );
-          return contact;
-        })
-      : updateContact(contactId, updates);
+  const shouldSyncCompanyGraph =
+    fields.company !== undefined || fields.title !== undefined;
+
+  const updated = shouldSyncCompanyGraph
+    ? db.transaction(() => {
+        const contact = updateContact(contactId, updates);
+        if (!contact) return undefined;
+        syncContactCompanyGraph(
+          contactId,
+          contact.company,
+          contact.title,
+          "agent:update_contact",
+        );
+        return contact;
+      })
+    : updateContact(contactId, updates);
   if (!updated) {
     return { error: `Failed to update contact: ${contactId}` };
   }

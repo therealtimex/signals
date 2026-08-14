@@ -30,10 +30,11 @@ export async function handleQueryOrgs(input: z.infer<typeof queryOrgsSchema>) {
 }
 
 export async function handleQueryGraph(input: z.infer<typeof queryGraphSchema>) {
+  const includeLocalOnly = input.includeLocalOnly ?? false;
   const edges = getNeighbors(input.nodeType, input.nodeId, {
     edgeTypes: input.edgeTypes,
     direction: input.direction,
-    includeLocalOnly: input.includeLocalOnly ?? false,
+    includeLocalOnly,
   });
 
   return {
@@ -49,6 +50,9 @@ export async function handleQueryGraph(input: z.infer<typeof queryGraphSchema>) 
       dstId: edge.dstId,
       weight: edge.weight,
       properties: JSON.parse(edge.properties ?? "{}"),
+      ...(includeLocalOnly && edge.propertiesPrivate
+        ? { propertiesPrivate: JSON.parse(edge.propertiesPrivate) }
+        : {}),
       scope: edge.scope,
     })),
   };
