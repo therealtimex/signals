@@ -412,6 +412,38 @@ function SyncHealthTab({ data }: { data: any }) {
         </Card>
       )}
 
+      {data.graphIntegrity && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-heading-3">Graph Integrity</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2 text-sm">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Total edges</span>
+                <span className="font-mono">{data.graphIntegrity.totalEdges}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Issues</span>
+                <Badge variant={data.graphIntegrity.issueCount > 0 ? "destructive" : "default"}>
+                  {data.graphIntegrity.issueCount}
+                </Badge>
+              </div>
+              {data.graphIntegrity.issueCount > 0 && (
+                <div className="mt-3 space-y-1 text-xs text-muted-foreground">
+                  {data.graphIntegrity.sampleIssues.map((issue: any) => (
+                    <div key={`${issue.edgeId}-${issue.endpoint}`}>
+                      {issue.edgeType}: {issue.endpoint} {issue.nodeType}:{issue.nodeId.slice(0, 8)}… (
+                      {issue.reason})
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <BarChartCard
         title="Sync Activity Over Time"
         description="Sync runs per day"
