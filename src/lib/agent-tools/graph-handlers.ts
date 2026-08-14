@@ -14,6 +14,7 @@ export async function handleQueryOrgs(input: z.infer<typeof queryOrgsSchema>) {
     search: input.search,
     page: input.page,
     pageSize: input.pageSize,
+    includeLocalOnly: input.includeLocalOnly ?? false,
   });
 
   return {

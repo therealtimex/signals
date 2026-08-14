@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { createContact } from "@/lib/db/queries/contacts";
 import { runGraphBackfills } from "@/lib/db/backfills";
 import { backfillOrgs } from "@/lib/db/backfills/orgs";
+import { backfillEngagedWithEdges } from "@/lib/db/backfills/engaged-with";
 import { backfillInteractions } from "@/lib/db/backfills/interactions";
 import { db } from "@/lib/db/client";
 import {
@@ -127,5 +128,34 @@ describe("graph backfills", () => {
     expect(second.orgs.inserted).toBe(0);
     expect(db.select().from(orgs).all()).toHaveLength(1);
     expect(db.select().from(graphEdges).all()).toHaveLength(1);
+  });
+
+  it("does not aggregate local_only interactions into shared engaged_with edges", () => {
+    const contact = createContact({ name: "Private", platform: "x", platformUserId: "p1" });
+    const contentItemId = nanoid();
+    db.insert(contentItems)
+      .values({
+        id: contentItemId,
+        contentType: "post",
+        status: "imported",
+      })
+      .run();
+
+    db.insert(interactions)
+      .values({
+        id: nanoid(),
+        contactId: contact.id,
+        interactionType: "like",
+        occurredAt: 1_700_000_000,
+        scope: "local_only",
+        source: "test",
+        contentItemId,
+        metadata: "{}",
+      })
+      .run();
+
+    const result = backfillEngagedWithEdges();
+    expect(result.upserted).toBe(0);
+    expect(db.select().from(graphEdges).all()).toHaveLength(0);
   });
 });

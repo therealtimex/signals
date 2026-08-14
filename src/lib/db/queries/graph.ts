@@ -7,6 +7,7 @@ import {
   contactIdentities,
   goals,
   graphEdges,
+  interactions,
   orgs,
   workflowRuns,
 } from "@/lib/db/schema";
@@ -77,6 +78,8 @@ function nodeTable(type: GraphNodeType) {
       return workflowRuns;
     case "platform_identity":
       return contactIdentities;
+    case "interaction":
+      return interactions;
     default:
       return null;
   }

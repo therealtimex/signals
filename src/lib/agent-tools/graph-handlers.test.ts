@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
+import { nanoid } from "nanoid";
 import { invokeAgentTool } from "@/lib/agent-tools/invoke";
 import { createContact } from "@/lib/db/queries/contacts";
 import { db } from "@/lib/db/client";
@@ -70,6 +71,59 @@ describe("graph agent tools", () => {
     expect(result).toMatchObject({
       interactionType: "meeting",
       scope: "shared",
+    });
+  });
+
+  it("query_orgs excludes local_only orgs unless opted in", async () => {
+    db.insert(orgs)
+      .values({
+        id: nanoid(),
+        name: "Secret Org",
+        scope: "local_only",
+        source: "test",
+      })
+      .run();
+    db.insert(orgs)
+      .values({
+        id: nanoid(),
+        name: "Public Org",
+        scope: "shared",
+        source: "test",
+      })
+      .run();
+
+    const defaultView = await invokeAgentTool("query_orgs", {});
+    expect(defaultView).toMatchObject({ total: 1 });
+    expect((defaultView as { orgs: { name: string }[] }).orgs[0]?.name).toBe("Public Org");
+
+    const privateView = await invokeAgentTool("query_orgs", { includeLocalOnly: true });
+    expect(privateView).toMatchObject({ total: 2 });
+  });
+
+  it("upsert_edge accepts interaction node endpoints", async () => {
+    const created = await invokeAgentTool("create_contact", { name: "Interactor" });
+    const contactId = (created as { id: string }).id;
+
+    const interaction = await invokeAgentTool("log_interaction", {
+      contactId,
+      interactionType: "email",
+      scope: "shared",
+    });
+    const interactionId = (interaction as { id: string }).id;
+
+    const edge = await invokeAgentTool("upsert_edge", {
+      srcType: "contact",
+      srcId: contactId,
+      dstType: "interaction",
+      dstId: interactionId,
+      edgeType: "had_interaction",
+      scope: "shared",
+    });
+
+    expect(edge).toMatchObject({
+      srcType: "contact",
+      dstType: "interaction",
+      edgeType: "had_interaction",
     });
   });
 });

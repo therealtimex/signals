@@ -7,7 +7,8 @@ import { listGoals } from "@/lib/db/queries/goals";
 import { createTask } from "@/lib/db/queries/tasks";
 import { getActivePersona, upsertPersona } from "@/lib/db/queries/personas";
 import { assertPlatform } from "@/lib/db/platforms";
-import { dualWriteContactCompany } from "@/lib/db/contact-org-dual-write";
+import { db } from "@/lib/db/client";
+import { dualWriteContactCompany, syncContactCompanyGraph } from "@/lib/db/contact-org-dual-write";
 import { startAgentWorkflow } from "@/lib/agents/run-agent-workflow";
 import { enrichContact } from "@/lib/agents/tools/enrich-contact";
 import { archiveContactTool } from "@/lib/agents/tools/archive-contact";
@@ -128,13 +129,22 @@ export async function handleUpdateContact(input: z.infer<typeof updateContactSch
     }
   }
 
-  const updated = updateContact(contactId, updates);
+  const updated =
+    fields.company !== undefined
+      ? db.transaction(() => {
+          const contact = updateContact(contactId, updates);
+          if (!contact) return undefined;
+          syncContactCompanyGraph(
+            contactId,
+            fields.company,
+            fields.title ?? contact.title,
+            "agent:update_contact",
+          );
+          return contact;
+        })
+      : updateContact(contactId, updates);
   if (!updated) {
     return { error: `Failed to update contact: ${contactId}` };
-  }
-
-  if (fields.company !== undefined) {
-    dualWriteContactCompany(contactId, fields.company, fields.title ?? updated.title);
   }
 
   return {

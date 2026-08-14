@@ -1,4 +1,4 @@
-import { isNotNull } from "drizzle-orm";
+import { and, eq, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { interactions } from "@/lib/db/schema";
 import { upsertGraphEdge } from "@/lib/db/queries/graph";
@@ -13,7 +13,7 @@ export function backfillEngagedWithEdges(): { upserted: number } {
       contentItemId: interactions.contentItemId,
     })
     .from(interactions)
-    .where(isNotNull(interactions.contentItemId))
+    .where(and(isNotNull(interactions.contentItemId), eq(interactions.scope, "shared")))
     .all();
 
   const counts = new Map<string, { contactId: string; contentItemId: string; count: number }>();

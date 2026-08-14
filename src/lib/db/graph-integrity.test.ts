@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { createContact, archiveContact } from "@/lib/db/queries/contacts";
+import { logInteraction } from "@/lib/db/queries/interactions";
 import { upsertGraphEdge } from "@/lib/db/queries/graph";
 import {
   auditGraphIntegrity,
@@ -102,5 +103,25 @@ describe("graph integrity", () => {
     expect(first.repairedCount).toBe(1);
     expect(second.repairedCount).toBe(0);
     expect(second.issueCount).toBe(0);
+  });
+
+  it("treats interaction endpoints as valid when the row exists", () => {
+    const contact = createContact({ name: "Alice", platform: "x", platformUserId: "a3" });
+    const interaction = logInteraction({
+      contactId: contact.id,
+      interactionType: "call",
+      scope: "shared",
+    });
+
+    upsertGraphEdge({
+      srcType: "contact",
+      srcId: contact.id,
+      dstType: "interaction",
+      dstId: interaction.id,
+      edgeType: "had_interaction",
+    });
+
+    const report = auditGraphIntegrity();
+    expect(report.issueCount).toBe(0);
   });
 });

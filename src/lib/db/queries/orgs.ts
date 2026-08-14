@@ -1,4 +1,4 @@
-import { eq, like, desc, count, SQL } from "drizzle-orm";
+import { and, eq, like, desc, count, SQL } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db/client";
 import { orgs } from "@/lib/db/schema";
@@ -9,16 +9,21 @@ export function listOrgs(opts?: {
   search?: string;
   page?: number;
   pageSize?: number;
+  includeLocalOnly?: boolean;
 }): PaginatedResult<Org> {
   const page = opts?.page ?? 1;
   const pageSize = opts?.pageSize ?? 20;
   const conditions: SQL[] = [];
 
+  if (!opts?.includeLocalOnly) {
+    conditions.push(eq(orgs.scope, "shared"));
+  }
+
   if (opts?.search) {
     conditions.push(like(orgs.name, `%${opts.search}%`));
   }
 
-  const where = conditions.length ? conditions[0] : undefined;
+  const where = conditions.length ? and(...conditions) : undefined;
   const total = db.select({ value: count() }).from(orgs).where(where).get()?.value ?? 0;
   const data = db
     .select()

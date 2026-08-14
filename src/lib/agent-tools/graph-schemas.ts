@@ -17,6 +17,7 @@ export const queryOrgsSchema = z.object({
   search: z.string().optional(),
   page: z.number().int().positive().optional(),
   pageSize: z.number().int().positive().max(100).optional(),
+  includeLocalOnly: z.boolean().optional(),
 });
 
 export const queryGraphSchema = z.object({
