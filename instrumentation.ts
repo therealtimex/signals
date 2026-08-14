@@ -26,6 +26,21 @@ export async function register() {
       console.warn("[instrumentation] Identity stats migration skipped:", (e as Error).message);
     }
 
+    try {
+      const { runGraphBackfills } = await import("@/lib/db/backfills");
+      const graphBackfill = runGraphBackfills();
+      const total =
+        graphBackfill.orgs.inserted +
+        graphBackfill.worksAt.upserted +
+        graphBackfill.interactions.inserted +
+        graphBackfill.engagedWith.upserted;
+      if (total > 0) {
+        console.log("[instrumentation] Graph backfills applied:", graphBackfill);
+      }
+    } catch (e) {
+      console.warn("[instrumentation] Graph backfill skipped:", (e as Error).message);
+    }
+
     // Run idempotent migrations before anything else
     try {
       const { migrateTemplateUserColumns } = await import("@/lib/db/migrations/add-template-user-columns");
