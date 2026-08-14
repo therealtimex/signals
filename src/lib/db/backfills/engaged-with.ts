@@ -16,7 +16,6 @@ export function backfillEngagedWithEdges(): { upserted: number } {
     .where(
       and(
         isNotNull(interactions.contentItemId),
-        isNotNull(interactions.contactId),
         eq(interactions.scope, "shared"),
       ),
     )

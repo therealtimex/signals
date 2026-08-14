@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "32587d77-1a54-4248-9c28-d0bb3d98e2d3",
+  "id": "7849c4cc-fc8f-4378-bf35-5e1fcdcbcbfc",
   "prevId": "21b311b2-0ed0-4b0d-91f3-6afed107c543",
   "tables": {
     "chat_conversations": {
@@ -692,6 +692,193 @@
         }
       },
       "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "content_activities": {
+      "name": "content_activities",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "activity_type": {
+          "name": "activity_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "direction": {
+          "name": "direction",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "summary": {
+          "name": "summary",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "occurred_at": {
+          "name": "occurred_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "scope": {
+          "name": "scope",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'shared'"
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "engagement_id": {
+          "name": "engagement_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "content_item_id": {
+          "name": "content_item_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "content_post_id": {
+          "name": "content_post_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "platform": {
+          "name": "platform",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "workflow_run_id": {
+          "name": "workflow_run_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "metadata": {
+          "name": "metadata",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false,
+          "default": "'{}'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch())"
+        }
+      },
+      "indexes": {
+        "idx_content_activities_post": {
+          "name": "idx_content_activities_post",
+          "columns": [
+            "content_post_id"
+          ],
+          "isUnique": false
+        },
+        "idx_content_activities_item_time": {
+          "name": "idx_content_activities_item_time",
+          "columns": [
+            "content_item_id",
+            "occurred_at"
+          ],
+          "isUnique": false
+        },
+        "idx_content_activities_engagement": {
+          "name": "idx_content_activities_engagement",
+          "columns": [
+            "engagement_id"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "content_activities_engagement_id_engagements_id_fk": {
+          "name": "content_activities_engagement_id_engagements_id_fk",
+          "tableFrom": "content_activities",
+          "tableTo": "engagements",
+          "columnsFrom": [
+            "engagement_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "content_activities_content_item_id_content_items_id_fk": {
+          "name": "content_activities_content_item_id_content_items_id_fk",
+          "tableFrom": "content_activities",
+          "tableTo": "content_items",
+          "columnsFrom": [
+            "content_item_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "content_activities_content_post_id_content_posts_id_fk": {
+          "name": "content_activities_content_post_id_content_posts_id_fk",
+          "tableFrom": "content_activities",
+          "tableTo": "content_posts",
+          "columnsFrom": [
+            "content_post_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "content_activities_workflow_run_id_workflow_runs_id_fk": {
+          "name": "content_activities_workflow_run_id_workflow_runs_id_fk",
+          "tableFrom": "content_activities",
+          "tableTo": "workflow_runs",
+          "columnsFrom": [
+            "workflow_run_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}
@@ -1860,7 +2047,7 @@
           "name": "contact_id",
           "type": "text",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "autoincrement": false
         },
         "org_id": {

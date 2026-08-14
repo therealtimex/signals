@@ -26,6 +26,7 @@ import {
   identityMetrics,
   contactPersonas,
   niches,
+  contentActivities,
 } from "./schema";
 
 // Contact types
@@ -125,6 +126,10 @@ export type GraphNodeType = GraphEdge["srcType"];
 // Interaction types
 export type Interaction = InferSelectModel<typeof interactions>;
 export type NewInteraction = InferInsertModel<typeof interactions>;
+
+// Content activity types (ADR-022-8)
+export type ContentActivity = InferSelectModel<typeof contentActivities>;
+export type NewContentActivity = InferInsertModel<typeof contentActivities>;
 
 // Identity metrics types
 export type IdentityMetric = InferSelectModel<typeof identityMetrics>;

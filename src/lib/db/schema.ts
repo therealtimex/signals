@@ -311,6 +311,33 @@ export const engagements = sqliteTable("engagements", {
   index("idx_engagements_platform_id").on(table.platformEngagementId),
 ]);
 
+// --- Content Activities (contactless platform actions on content; ADR-022-8) ---
+
+export const contentActivities = sqliteTable("content_activities", {
+  id: text("id").primaryKey(),
+  activityType: text("activity_type").notNull(),
+  direction: text("direction", { enum: ["inbound", "outbound", "mutual"] }),
+  summary: text("summary"),
+  occurredAt: integer("occurred_at").notNull(),
+  scope: text("scope", { enum: ["shared", "local_only"] })
+    .notNull()
+    .default("shared"),
+  source: text("source").notNull(),
+  engagementId: text("engagement_id").references(() => engagements.id),
+  contentItemId: text("content_item_id").references(() => contentItems.id, { onDelete: "set null" }),
+  contentPostId: text("content_post_id").references(() => contentPosts.id),
+  platform: text("platform", { enum: PLATFORM_ENUM }),
+  workflowRunId: text("workflow_run_id").references(() => workflowRuns.id),
+  metadata: text("metadata").default("{}"),
+  createdAt: integer("created_at")
+    .notNull()
+    .default(sql`(unixepoch())`),
+}, (table) => [
+  index("idx_content_activities_post").on(table.contentPostId),
+  index("idx_content_activities_item_time").on(table.contentItemId, table.occurredAt),
+  uniqueIndex("idx_content_activities_engagement").on(table.engagementId),
+]);
+
 // --- Tasks ---
 
 export const tasks = sqliteTable("tasks", {
@@ -663,7 +690,9 @@ export const graphEdges = sqliteTable("graph_edges", {
 
 export const interactions = sqliteTable("interactions", {
   id: text("id").primaryKey(),
-  contactId: text("contact_id").references(() => contacts.id, { onDelete: "cascade" }),
+  contactId: text("contact_id")
+    .notNull()
+    .references(() => contacts.id, { onDelete: "cascade" }),
   orgId: text("org_id").references(() => orgs.id, { onDelete: "set null" }),
   interactionType: text("interaction_type").notNull(),
   direction: text("direction", { enum: ["inbound", "outbound", "mutual"] }),

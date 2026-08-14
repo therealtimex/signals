@@ -8,6 +8,7 @@ import {
   goals,
   graphEdges,
   interactions,
+  contentActivities,
   identityMetrics,
   contactPersonas,
   niches,
@@ -27,6 +28,7 @@ export function resetCoreTables(): void {
   db.delete(contactPersonas).run();
   db.delete(identityMetrics).run();
   db.delete(interactions).run();
+  db.delete(contentActivities).run();
   db.delete(engagements).run();
   db.delete(graphEdges).run();
   db.delete(niches).run();

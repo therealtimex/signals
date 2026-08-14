@@ -1,8 +1,8 @@
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db, type DbRunner } from "@/lib/db/client";
-import { contentPosts, interactions } from "@/lib/db/schema";
-import type { Engagement, Interaction } from "@/lib/db/types";
+import { contentActivities, contentPosts, interactions } from "@/lib/db/schema";
+import type { ContentActivity, Engagement, Interaction } from "@/lib/db/types";
 import { touchContactLastInteraction } from "@/lib/db/queries/contact-interaction-projection";
 import { resolveEngagementTargetContact } from "@/lib/db/queries/engagement-target-contact";
 
@@ -43,47 +43,90 @@ function resolveContactIdForEngagement(
   return null;
 }
 
+export type EngagementSyncResult =
+  | { kind: "interaction"; row: Interaction }
+  | { kind: "activity"; row: ContentActivity };
+
 /**
- * Dual-write an engagement into `interactions` (1:1 via `engagement_id`).
- * Actor-only platform actions may omit `contact_id` when no counterparty is known.
+ * Route an engagement into `interactions` (counterparty known) or
+ * `content_activities` (actor-only / anonymous). Idempotent via `engagement_id`.
  */
 export function syncInteractionFromEngagement(
   engagement: Engagement,
   opts?: { source?: string },
   runner: DbRunner = db,
-): Interaction | null {
-  const contactId = resolveContactIdForEngagement(engagement, runner);
-
-  const existing = runner
+): EngagementSyncResult | null {
+  const existingInteraction = runner
     .select()
     .from(interactions)
     .where(eq(interactions.engagementId, engagement.id))
     .get();
-  if (existing) {
-    if (existing.contactId) {
-      touchContactLastInteraction(existing.contactId, existing.occurredAt, runner);
-    }
-    return existing;
+  if (existingInteraction) {
+    touchContactLastInteraction(
+      existingInteraction.contactId,
+      existingInteraction.occurredAt,
+      runner,
+    );
+    return { kind: "interaction", row: existingInteraction };
   }
 
-  const id = nanoid();
-  const occurredAt = engagement.createdAt;
+  const existingActivity = runner
+    .select()
+    .from(contentActivities)
+    .where(eq(contentActivities.engagementId, engagement.id))
+    .get();
+  if (existingActivity) {
+    return { kind: "activity", row: existingActivity };
+  }
 
+  const contactId = resolveContactIdForEngagement(engagement, runner);
+  const occurredAt = engagement.createdAt;
+  const source = opts?.source ?? interactionSourceFromEngagement(engagement);
+  const contentItemId = resolveContentItemId(engagement, runner);
+  const eventType = mapEngagementTypeToInteractionType(engagement.engagementType);
+
+  if (contactId) {
+    const id = nanoid();
+    runner
+      .insert(interactions)
+      .values({
+        id,
+        contactId,
+        orgId: null,
+        interactionType: eventType,
+        direction: engagement.direction,
+        summary: engagement.content,
+        isMeaningful: false,
+        occurredAt,
+        scope: "shared",
+        source,
+        engagementId: engagement.id,
+        contentItemId,
+        contentPostId: engagement.contentPostId ?? null,
+        platform: engagement.platform ?? null,
+        workflowRunId: engagement.workflowRunId ?? null,
+        metadata: engagement.platformData ?? "{}",
+      })
+      .run();
+
+    const interaction = runner.select().from(interactions).where(eq(interactions.id, id)).get()!;
+    touchContactLastInteraction(contactId, occurredAt, runner);
+    return { kind: "interaction", row: interaction };
+  }
+
+  const activityId = nanoid();
   runner
-    .insert(interactions)
+    .insert(contentActivities)
     .values({
-      id,
-      contactId,
-      orgId: null,
-      interactionType: mapEngagementTypeToInteractionType(engagement.engagementType),
+      id: activityId,
+      activityType: eventType,
       direction: engagement.direction,
       summary: engagement.content,
-      isMeaningful: false,
       occurredAt,
       scope: "shared",
-      source: opts?.source ?? interactionSourceFromEngagement(engagement),
+      source,
       engagementId: engagement.id,
-      contentItemId: resolveContentItemId(engagement, runner),
+      contentItemId,
       contentPostId: engagement.contentPostId ?? null,
       platform: engagement.platform ?? null,
       workflowRunId: engagement.workflowRunId ?? null,
@@ -91,9 +134,10 @@ export function syncInteractionFromEngagement(
     })
     .run();
 
-  const interaction = runner.select().from(interactions).where(eq(interactions.id, id)).get()!;
-  if (contactId) {
-    touchContactLastInteraction(contactId, occurredAt, runner);
-  }
-  return interaction;
+  const activity = runner
+    .select()
+    .from(contentActivities)
+    .where(eq(contentActivities.id, activityId))
+    .get()!;
+  return { kind: "activity", row: activity };
 }

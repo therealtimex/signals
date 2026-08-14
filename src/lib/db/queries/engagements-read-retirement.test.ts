@@ -172,7 +172,7 @@ describe("engagements read retirement", () => {
     expect(getEngagementTypeBreakdown(since)).toEqual([{ type: "meeting", count: 1 }]);
   });
 
-  it("surfaces X manual actions in content history via actor-only interactions", () => {
+  it("surfaces X manual actions in content history via content_activities", () => {
     const platformAccountId = nanoid();
     db.insert(platformAccounts)
       .values({
