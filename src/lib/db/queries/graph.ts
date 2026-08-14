@@ -8,6 +8,7 @@ import {
   goals,
   graphEdges,
   interactions,
+  niches,
   orgs,
   workflowRuns,
 } from "@/lib/db/schema";
@@ -70,6 +71,8 @@ function nodeTable(type: GraphNodeType) {
       return contacts;
     case "org":
       return orgs;
+    case "niche":
+      return niches;
     case "content":
       return contentItems;
     case "goal":

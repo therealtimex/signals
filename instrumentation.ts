@@ -33,7 +33,10 @@ export async function register() {
         graphBackfill.orgs.inserted +
         graphBackfill.worksAt.upserted +
         graphBackfill.interactions.inserted +
-        graphBackfill.engagedWith.upserted;
+        graphBackfill.engagedWith.upserted +
+        graphBackfill.niches.nichesCreated +
+        graphBackfill.niches.edgesUpserted +
+        graphBackfill.interactionParity.updated;
       if (total > 0) {
         console.log("[instrumentation] Graph backfills applied:", graphBackfill);
       }

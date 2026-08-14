@@ -1,10 +1,13 @@
 import { and, eq, or } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { contacts, graphEdges } from "@/lib/db/schema";
+import { contacts, graphEdges, niches } from "@/lib/db/schema";
 import { nodeExists } from "@/lib/db/queries/graph";
 import type { GraphEdge, GraphNodeType } from "@/lib/db/types";
 
-export type GraphIntegrityIssueReason = "missing_endpoint" | "archived_contact";
+export type GraphIntegrityIssueReason =
+  | "missing_endpoint"
+  | "archived_contact"
+  | "stale_niche_membership";
 
 export type GraphIntegrityIssue = {
   edgeId: string;
@@ -65,6 +68,24 @@ function endpointIssue(
       nodeId,
       reason: "archived_contact",
     };
+  }
+
+  if (
+    edge.edgeType === "belongs_to_niche" &&
+    nodeType === "niche" &&
+    endpoint === "dst"
+  ) {
+    const niche = db.select().from(niches).where(eq(niches.id, nodeId)).get();
+    if (niche && (niche.status === "merged" || niche.status === "archived")) {
+      return {
+        edgeId: edge.id,
+        edgeType: edge.edgeType,
+        endpoint,
+        nodeType,
+        nodeId,
+        reason: "stale_niche_membership",
+      };
+    }
   }
 
   return null;

@@ -1,11 +1,14 @@
 import { listOrgs } from "@/lib/db/queries/orgs";
+import { listNiches, upsertNiche } from "@/lib/db/queries/niches";
 import { getNeighbors, upsertGraphEdge } from "@/lib/db/queries/graph";
 import { logInteraction } from "@/lib/db/queries/interactions";
 import type {
   logInteractionSchema,
   queryGraphSchema,
+  queryNichesSchema,
   queryOrgsSchema,
   upsertEdgeSchema,
+  upsertNicheSchema,
 } from "@/lib/agent-tools/graph-schemas";
 import type { z } from "zod";
 
@@ -108,5 +111,50 @@ export async function handleLogInteraction(input: z.infer<typeof logInteractionS
     occurredAt: interaction.occurredAt,
     scope: interaction.scope,
     message: "Interaction logged.",
+  };
+}
+
+export async function handleQueryNiches(input: z.infer<typeof queryNichesSchema>) {
+  const result = listNiches({
+    search: input.search,
+    status: input.status,
+    page: input.page,
+    pageSize: input.pageSize,
+    includeLocalOnly: input.includeLocalOnly ?? false,
+  });
+
+  return {
+    total: result.total,
+    niches: result.data.map((niche) => ({
+      id: niche.id,
+      name: niche.name,
+      slug: niche.slug,
+      nicheType: niche.nicheType,
+      status: niche.status,
+      scope: niche.scope,
+      memberCount: niche.memberCount,
+    })),
+  };
+}
+
+export async function handleUpsertNiche(input: z.infer<typeof upsertNicheSchema>) {
+  const niche = upsertNiche({
+    id: input.id,
+    name: input.name,
+    description: input.description,
+    nicheType: input.nicheType,
+    status: input.status,
+    scope: input.scope,
+    source: "agent",
+    metadata: input.metadata,
+  });
+
+  return {
+    id: niche.id,
+    name: niche.name,
+    slug: niche.slug,
+    status: niche.status,
+    scope: niche.scope,
+    message: "Niche upserted.",
   };
 }

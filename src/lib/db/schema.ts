@@ -571,6 +571,33 @@ export const orgs = sqliteTable("orgs", {
   uniqueIndex("idx_orgs_domain").on(table.domain),
 ]);
 
+// --- Niches (derived interest / firmographic clusters; spec §3 Niche node) ---
+
+export const niches = sqliteTable("niches", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  slug: text("slug").notNull(),
+  description: text("description"),
+  nicheType: text("niche_type", {
+    enum: ["interest", "firmographic", "behavioral", "custom"],
+  })
+    .notNull()
+    .default("interest"),
+  status: text("status", { enum: ["candidate", "active", "merged", "archived"] })
+    .notNull()
+    .default("active"),
+  mergedIntoNicheId: text("merged_into_niche_id"),
+  scope: text("scope", { enum: ["shared", "local_only"] })
+    .notNull()
+    .default("shared"),
+  source: text("source"),
+  metadata: text("metadata").default("{}"),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex("idx_niches_slug").on(table.slug),
+  index("idx_niches_status").on(table.status),
+]);
+
 // --- Graph Edges (polymorphic typed-edge overlay) ---
 
 export const graphEdges = sqliteTable("graph_edges", {
@@ -651,6 +678,9 @@ export const interactions = sqliteTable("interactions", {
   source: text("source").notNull(),
   engagementId: text("engagement_id").references(() => engagements.id),
   contentItemId: text("content_item_id").references(() => contentItems.id, { onDelete: "set null" }),
+  contentPostId: text("content_post_id").references(() => contentPosts.id),
+  platform: text("platform", { enum: PLATFORM_ENUM }),
+  workflowRunId: text("workflow_run_id").references(() => workflowRuns.id),
   metadata: text("metadata").default("{}"),
   createdAt: integer("created_at")
     .notNull()
@@ -658,6 +688,7 @@ export const interactions = sqliteTable("interactions", {
 }, (table) => [
   index("idx_interactions_contact_time").on(table.contactId, table.occurredAt),
   index("idx_interactions_org").on(table.orgId),
+  index("idx_interactions_content_post").on(table.contentPostId),
   uniqueIndex("idx_interactions_engagement").on(table.engagementId),
 ]);
 

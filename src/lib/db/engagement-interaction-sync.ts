@@ -70,6 +70,9 @@ export function syncInteractionFromEngagement(
       source: opts?.source ?? interactionSourceFromEngagement(engagement),
       engagementId: engagement.id,
       contentItemId: resolveContentItemId(engagement, runner),
+      contentPostId: engagement.contentPostId ?? null,
+      platform: engagement.platform ?? null,
+      workflowRunId: engagement.workflowRunId ?? null,
       metadata: engagement.platformData ?? "{}",
     })
     .run();

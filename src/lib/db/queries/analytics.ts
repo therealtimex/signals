@@ -204,52 +204,52 @@ export function getAvgDurationByType(since: number): { workflowType: string; avg
 
 // ── Engagement Queries ────────────────────────────
 
-/** Engagement volume over time, grouped by day + type. */
+/** Engagement volume over time, grouped by day + type (reads `interactions`). */
 export function getEngagementVolume(since: number): { date: string; type: string; count: number }[] {
   return raw
     .prepare(
       `SELECT
-         date(created_at, 'unixepoch') AS date,
-         engagement_type AS type,
+         date(occurred_at, 'unixepoch') AS date,
+         interaction_type AS type,
          COUNT(*) AS count
-       FROM engagements
-       WHERE created_at >= ?
-       GROUP BY date, engagement_type
+       FROM interactions
+       WHERE occurred_at >= ? AND scope = 'shared'
+       GROUP BY date, interaction_type
        ORDER BY date ASC`
     )
     .all(since) as { date: string; type: string; count: number }[];
 }
 
-/** Inbound vs outbound engagements, grouped by week. */
+/** Inbound vs outbound interactions, grouped by week. */
 export function getEngagementDirectionSummary(since: number): { period: string; inbound: number; outbound: number }[] {
   return raw
     .prepare(
       `SELECT
-         strftime('%Y-W%W', created_at, 'unixepoch') AS period,
+         strftime('%Y-W%W', occurred_at, 'unixepoch') AS period,
          SUM(CASE WHEN direction = 'inbound' THEN 1 ELSE 0 END) AS inbound,
          SUM(CASE WHEN direction = 'outbound' THEN 1 ELSE 0 END) AS outbound
-       FROM engagements
-       WHERE created_at >= ?
+       FROM interactions
+       WHERE occurred_at >= ? AND scope = 'shared'
        GROUP BY period
        ORDER BY period ASC`
     )
     .all(since) as { period: string; inbound: number; outbound: number }[];
 }
 
-/** Engagement type breakdown (pie/bar chart). */
+/** Interaction type breakdown (pie/bar chart). */
 export function getEngagementTypeBreakdown(since: number): { type: string; count: number }[] {
   return raw
     .prepare(
-      `SELECT engagement_type AS type, COUNT(*) AS count
-       FROM engagements
-       WHERE created_at >= ?
-       GROUP BY engagement_type
+      `SELECT interaction_type AS type, COUNT(*) AS count
+       FROM interactions
+       WHERE occurred_at >= ? AND scope = 'shared'
+       GROUP BY interaction_type
        ORDER BY count DESC`
     )
     .all(since) as { type: string; count: number }[];
 }
 
-/** Top engaged contacts by engagement count. */
+/** Top engaged contacts by interaction count. */
 export function getTopEngagedContacts(since: number, limit = 10): {
   contactId: string;
   name: string;
@@ -258,13 +258,13 @@ export function getTopEngagedContacts(since: number, limit = 10): {
   return raw
     .prepare(
       `SELECT
-         e.contact_id AS contactId,
+         i.contact_id AS contactId,
          c.name,
          COUNT(*) AS count
-       FROM engagements e
-       JOIN contacts c ON c.id = e.contact_id
-       WHERE e.created_at >= ? AND e.contact_id IS NOT NULL
-       GROUP BY e.contact_id
+       FROM interactions i
+       JOIN contacts c ON c.id = i.contact_id
+       WHERE i.occurred_at >= ? AND i.scope = 'shared'
+       GROUP BY i.contact_id
        ORDER BY count DESC
        LIMIT ?`
     )

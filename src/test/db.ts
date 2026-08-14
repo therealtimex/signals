@@ -10,6 +10,7 @@ import {
   interactions,
   identityMetrics,
   contactPersonas,
+  niches,
   orgs,
   workflowRuns,
   workflowSteps,
@@ -28,6 +29,7 @@ export function resetCoreTables(): void {
   db.delete(interactions).run();
   db.delete(engagements).run();
   db.delete(graphEdges).run();
+  db.delete(niches).run();
   db.delete(orgs).run();
   db.delete(contactIdentities).run();
   db.delete(contacts).run();

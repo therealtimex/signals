@@ -25,6 +25,7 @@ import {
   interactions,
   identityMetrics,
   contactPersonas,
+  niches,
 } from "./schema";
 
 // Contact types
@@ -111,6 +112,10 @@ export interface PaginatedResult<T> {
 // Org types
 export type Org = InferSelectModel<typeof orgs>;
 export type NewOrg = InferInsertModel<typeof orgs>;
+
+// Niche types
+export type Niche = InferSelectModel<typeof niches>;
+export type NewNiche = InferInsertModel<typeof niches>;
 
 // Graph edge types
 export type GraphEdge = InferSelectModel<typeof graphEdges>;

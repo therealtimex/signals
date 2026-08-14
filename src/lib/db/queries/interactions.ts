@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, desc } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db/client";
 import { interactions } from "@/lib/db/schema";
@@ -45,4 +45,14 @@ export function logInteraction(input: LogInteractionInput): Interaction {
     touchContactLastInteraction(input.contactId, interaction.occurredAt, tx);
     return interaction;
   });
+}
+
+/** List sync-derived and manual interactions for a content post. */
+export function listInteractionsByContentPost(contentPostId: string): Interaction[] {
+  return db
+    .select()
+    .from(interactions)
+    .where(eq(interactions.contentPostId, contentPostId))
+    .orderBy(desc(interactions.occurredAt))
+    .all();
 }
