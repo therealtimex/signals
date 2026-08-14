@@ -37,3 +37,4 @@ sessions/
 # runtime data
 data/
 .ci/
+coverage/
