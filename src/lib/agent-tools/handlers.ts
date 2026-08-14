@@ -7,6 +7,7 @@ import { listGoals } from "@/lib/db/queries/goals";
 import { createTask } from "@/lib/db/queries/tasks";
 import { getActivePersona, upsertPersona } from "@/lib/db/queries/personas";
 import { assertPlatform } from "@/lib/db/platforms";
+import { dualWriteContactCompany } from "@/lib/db/contact-org-dual-write";
 import { startAgentWorkflow } from "@/lib/agents/run-agent-workflow";
 import { enrichContact } from "@/lib/agents/tools/enrich-contact";
 import { archiveContactTool } from "@/lib/agents/tools/archive-contact";
@@ -99,6 +100,10 @@ export async function handleCreateContact(input: z.infer<typeof createContactSch
     funnelStage: input.funnelStage ?? "prospect",
   });
 
+  if (input.company) {
+    dualWriteContactCompany(contact.id, input.company, input.title);
+  }
+
   return {
     id: contact.id,
     name: contact.name,
@@ -126,6 +131,10 @@ export async function handleUpdateContact(input: z.infer<typeof updateContactSch
   const updated = updateContact(contactId, updates);
   if (!updated) {
     return { error: `Failed to update contact: ${contactId}` };
+  }
+
+  if (fields.company !== undefined) {
+    dualWriteContactCompany(contactId, fields.company, fields.title ?? updated.title);
   }
 
   return {
