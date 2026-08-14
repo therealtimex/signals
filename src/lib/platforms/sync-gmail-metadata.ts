@@ -2,6 +2,7 @@ import { eq, and, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { contacts, contactIdentities } from "@/lib/db/schema";
 import { updateContact } from "@/lib/db/queries/contacts";
+import { logInteraction } from "@/lib/db/queries/interactions";
 import { updatePlatformAccount } from "@/lib/db/queries/platform-accounts";
 import { getSyncCursor, updateSyncCursor } from "@/lib/db/queries/sync";
 import {
@@ -116,12 +117,19 @@ export async function syncGmailMetadata(
           metadata: JSON.stringify(updatedMetadata),
         };
 
-        // Update lastInteractionAt if we found a more recent message
+        updateContact(contact.id, updates);
+
         if (lastMessageAt && (!contact.lastInteractionAt || lastMessageAt > contact.lastInteractionAt)) {
-          updates.lastInteractionAt = lastMessageAt;
+          logInteraction({
+            contactId: contact.id,
+            interactionType: "email",
+            occurredAt: lastMessageAt,
+            scope: "shared",
+            source: "sync:gmail",
+            metadata: { sent30d, received30d },
+          });
         }
 
-        updateContact(contact.id, updates);
         result.updated++;
         processed++;
       } catch (err) {

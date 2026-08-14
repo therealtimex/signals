@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db/client";
 import { interactions } from "@/lib/db/schema";
+import { touchContactLastInteraction } from "@/lib/db/queries/contact-interaction-projection";
 import type { Interaction, NewInteraction } from "@/lib/db/types";
 
 export type LogInteractionInput = {
@@ -39,5 +40,7 @@ export function logInteraction(input: LogInteractionInput): Interaction {
   };
 
   db.insert(interactions).values(values).run();
-  return db.select().from(interactions).where(eq(interactions.id, id)).get()!;
+  const interaction = db.select().from(interactions).where(eq(interactions.id, id)).get()!;
+  touchContactLastInteraction(input.contactId, interaction.occurredAt);
+  return interaction;
 }
