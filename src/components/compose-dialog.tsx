@@ -98,7 +98,7 @@ export function ComposeDialog({
       try {
         const res = await fetch(`/api/media?contentItemId=${contentItemId}`);
         const data = await res.json();
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         return (data.assets || []).map((a: any) => ({
           id: a.id,
           previewUrl: `/api/media/${a.id}`,
@@ -156,7 +156,7 @@ export function ComposeDialog({
           const threadRes = await fetch(`/api/content?threadId=${item.threadId}&status=draft`);
           const threadData = await threadRes.json();
           const items: PostItem[] = await Promise.all(
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+             
             (threadData.items || []).map(async (ti: any) => ({
               id: ti.id,
               body: ti.body || "",

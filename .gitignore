@@ -36,3 +36,4 @@ sessions/
 
 # runtime data
 data/
+.ci/

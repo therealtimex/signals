@@ -7,7 +7,6 @@ import * as schema from "./schema";
 
 const dataDir = process.env.SIGNALS_DATA_DIR?.replace("~", homedir()) ?? join(homedir(), ".signals");
 
-// Ensure data directory exists
 if (!existsSync(dataDir)) {
   mkdirSync(dataDir, { recursive: true });
 }
@@ -15,9 +14,9 @@ if (!existsSync(dataDir)) {
 const dbPath = join(dataDir, "data.db");
 const sqlite = new Database(dbPath);
 
-// Enable WAL mode for better concurrent read performance
 sqlite.pragma("journal_mode = WAL");
 sqlite.pragma("foreign_keys = ON");
+sqlite.pragma("busy_timeout = 10000");
 
 export const db = drizzle(sqlite, { schema });
 export { schema };

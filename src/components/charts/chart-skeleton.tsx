@@ -7,6 +7,8 @@ interface ChartSkeletonProps {
   className?: string;
 }
 
+const SKELETON_BAR_HEIGHTS = ["45%", "62%", "38%", "71%", "55%", "48%", "66%", "42%"] as const;
+
 export function ChartSkeleton({ className }: ChartSkeletonProps) {
   return (
     <Card className={className}>
@@ -20,7 +22,7 @@ export function ChartSkeleton({ className }: ChartSkeletonProps) {
             <Skeleton
               key={i}
               className="flex-1 rounded-t-sm"
-              style={{ height: `${30 + Math.random() * 70}%` }}
+              style={{ height: SKELETON_BAR_HEIGHTS[i] }}
             />
           ))}
         </div>

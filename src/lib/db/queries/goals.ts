@@ -180,10 +180,12 @@ export function listGoalProgress(
   goalId: string,
   since?: number
 ): GoalProgressType[] {
-  const conditions: SQL[] = [eq(goalProgress.goalId, goalId)];
-  if (since) {
-    conditions.push(gte(goalProgress.snapshotAt, since));
-  }
+  const effectiveSince =
+    since ?? Math.floor(Date.now() / 1000) - 30 * 86400;
+  const conditions: SQL[] = [
+    eq(goalProgress.goalId, goalId),
+    gte(goalProgress.snapshotAt, effectiveSince),
+  ];
 
   return db
     .select()

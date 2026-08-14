@@ -1,0 +1,35 @@
+# Blocking quality gate — typecheck, ESLint, Vitest, production build.
+# See: https://github.com/therealtimex/signals/issues/15
+
+name: CI
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: ["main"]
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Quality gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run quality gate
+        run: npm run check
+        env:
+          # Boot/migrate touches ~/.signals — keep CI hermetic under the workspace.
+          SIGNALS_DATA_DIR: ${{ github.workspace }}/.ci/signals-data

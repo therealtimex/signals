@@ -193,14 +193,18 @@ src/
 
 ```bash
 npm run dev              # Next.js dev server (Turbopack)
+npm run check            # Quality gate: typecheck, lint, test, migrate, build
 npm run build            # Production build
 npm run build:cli        # Compile CLI entry point
 npm run db:generate      # Generate Drizzle migrations from schema
 npm run db:migrate       # Apply pending migrations
 npm run db:studio        # Open Drizzle Studio (DB browser)
-npm run test             # Run Vitest
+npm run test             # Run Vitest (watch mode)
+npm run test:run         # Run Vitest once (CI)
 npm run lint             # ESLint
 ```
+
+See [docs/qa/README.md](./docs/qa/README.md) for CI and quality gate details.
 
 ## Roadmap
 

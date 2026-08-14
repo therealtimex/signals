@@ -31,7 +31,7 @@ import {
 type TimeRange = "7d" | "30d" | "90d" | "all";
 type TabId = "overview" | "agents" | "engagement" | "content" | "sync-health";
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 export function AnalyticsDashboard() {
   const [range, setRange] = useState<TimeRange>("30d");
