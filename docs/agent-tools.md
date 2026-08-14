@@ -93,8 +93,28 @@ curl -s -X POST http://localhost:3010/api/agent-tools/invoke \
 
 ## RTX terminal agent integration
 
+### Agent skill (recommended)
+
+Install the **`realtimex-signals`** skill for chat-linked terminal agents:
+
+```
+.claude/skills/realtimex-signals/
+```
+
+It resolves the Local App URL, loads the tool manifest, and wraps invoke calls. See the skill's [SKILL.md](../.claude/skills/realtimex-signals/SKILL.md) and [issue #21](https://github.com/therealtimex/signals/issues/21).
+
+Quick start from repo root:
+
+```bash
+export SIGNALS_BASE_URL="$(.claude/skills/realtimex-signals/scripts/resolve-base-url.sh)"
+.claude/skills/realtimex-signals/scripts/list-tools.sh | jq '.tools[].name'
+.claude/skills/realtimex-signals/scripts/invoke-tool.sh query_analytics
+```
+
+### Direct API
+
 1. Configure the Signals Local App in RTX (see [local-app.md](./local-app.md)).
-2. From a terminal agent flow, `POST` to `http://localhost:{port}/api/agent-tools/invoke` with structured JSON.
+2. `POST` to `http://localhost:{port}/api/agent-tools/invoke` with structured JSON.
 3. Use `GET /api/agent-tools` at session start to discover tool names and parameter schemas.
 
 The in-app agent runner (`/api/chat`) remains available; this API is the stable integration surface for external agents (#3).
