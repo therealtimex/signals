@@ -16,7 +16,8 @@
     "db:studio": "drizzle-kit studio",
     "lint": "next lint",
     "test": "vitest",
-    "prepublishOnly": "npm run build:cli"
+    "prepublishOnly": "npm run build:cli",
+    "doctor": "npx react-doctor@latest"
   },
   "files": [
     "dist/",
@@ -75,6 +76,7 @@
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.0",
     "drizzle-kit": "^0.31.8",
+    "react-doctor": "^0.9.12",
     "tsup": "^8.5.1",
     "vitest": "^3.0.0"
   },
