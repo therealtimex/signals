@@ -19,6 +19,7 @@ import {
   engagements,
   interactions,
   platformAccounts,
+  workflowRuns,
 } from "@/lib/db/schema";
 import { resetCoreTables } from "@/test/db";
 
@@ -85,6 +86,79 @@ describe("engagements read retirement", () => {
 
     expect(interaction?.contentPostId).toBe(contentPostId);
     expect(interaction?.platform).toBe("x");
+  });
+
+  it("preserves workflowRunId in content history for interactions and content_activities", () => {
+    const workflowRunId = nanoid();
+    const platformAccountId = nanoid();
+    db.insert(platformAccounts)
+      .values({
+        id: platformAccountId,
+        platform: "x",
+        displayName: "@me",
+        authType: "oauth",
+      })
+      .run();
+    db.insert(workflowRuns)
+      .values({
+        id: workflowRunId,
+        workflowType: "agent",
+        status: "completed",
+      })
+      .run();
+
+    const contentItemId = nanoid();
+    const contentPostId = nanoid();
+    db.insert(contentItems)
+      .values({ id: contentItemId, contentType: "post", status: "imported" })
+      .run();
+    db.insert(contentPosts)
+      .values({
+        id: contentPostId,
+        contentItemId,
+        platformAccountId,
+        status: "imported",
+      })
+      .run();
+
+    const contact = createContact({ name: "Counterparty", platform: "x", platformUserId: "wf1" });
+    createEngagement({
+      contactId: contact.id,
+      platformAccountId: null,
+      engagementType: "comment",
+      direction: "outbound",
+      content: "workflow-backed reply",
+      templateId: null,
+      workflowRunId,
+      contentPostId,
+      platform: "x",
+      platformEngagementId: nanoid(),
+      threadId: null,
+      source: "agent",
+      platformData: "{}",
+    });
+
+    createEngagement({
+      contactId: null,
+      platformAccountId,
+      engagementType: "like",
+      direction: "outbound",
+      content: null,
+      templateId: null,
+      workflowRunId,
+      contentPostId,
+      platform: "x",
+      platformEngagementId: null,
+      threadId: null,
+      source: "agent",
+      platformData: JSON.stringify({ action: "like", tweetId: "wf-tweet" }),
+    });
+
+    const history = listEngagementsByContentPost(contentPostId);
+    expect(history).toHaveLength(2);
+    for (const row of history) {
+      expect(row.workflowRunId).toBe(workflowRunId);
+    }
   });
 
   it("backfills parity columns for legacy interaction rows", () => {

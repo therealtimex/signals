@@ -40,7 +40,7 @@ function eventToEngagementView(
     direction: event.direction === "mutual" ? "inbound" : (event.direction ?? "outbound"),
     content: event.summary,
     templateId: null,
-    workflowRunId: null,
+    workflowRunId: event.workflowRunId,
     contentPostId: event.contentPostId,
     platform: event.platform as Engagement["platform"],
     platformEngagementId: null,

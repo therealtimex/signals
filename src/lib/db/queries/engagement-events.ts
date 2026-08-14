@@ -11,6 +11,7 @@ export type EngagementEventRow = {
   source: string;
   contentPostId: string | null;
   platform: string | null;
+  workflowRunId: string | null;
   metadata: string | null;
   contactId: string | null;
 };
@@ -27,6 +28,7 @@ export function listEngagementEventsByContentPost(contentPostId: string): Engage
     source: row.source,
     contentPostId: row.contentPostId,
     platform: row.platform,
+    workflowRunId: row.workflowRunId,
     metadata: row.metadata,
     contactId: row.contactId,
   }));
@@ -41,6 +43,7 @@ export function listEngagementEventsByContentPost(contentPostId: string): Engage
     source: row.source,
     contentPostId: row.contentPostId,
     platform: row.platform,
+    workflowRunId: row.workflowRunId,
     metadata: row.metadata,
     contactId: null,
   }));
