@@ -82,4 +82,28 @@ describe("niche queries", () => {
     expect(updated.name).toBe("Growth Marketing");
     expect(updated.slug).toBe("growth-marketing");
   });
+
+  it("forwards includeLocalOnly to niche member counts", () => {
+    const contact = createContact({ name: "Local", platform: "x", platformUserId: "loc-n" });
+    const niche = ensureNicheByName("Private Club", {
+      source: "test",
+      scope: "local_only",
+    });
+
+    upsertGraphEdge({
+      srcType: "contact",
+      srcId: contact.id,
+      dstType: "niche",
+      dstId: niche.id,
+      edgeType: "belongs_to_niche",
+      scope: "local_only",
+      source: "test",
+    });
+
+    const publicView = listNiches({ includeLocalOnly: false });
+    expect(publicView.data).toHaveLength(0);
+
+    const privateView = listNiches({ includeLocalOnly: true });
+    expect(privateView.data[0]?.memberCount).toBe(1);
+  });
 });

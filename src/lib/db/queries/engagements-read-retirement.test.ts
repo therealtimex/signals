@@ -2,14 +2,15 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { nanoid } from "nanoid";
 import { eq } from "drizzle-orm";
 import { createContact } from "@/lib/db/queries/contacts";
-import { createEngagement } from "@/lib/db/queries/engagements";
+import { createEngagement, listEngagementsByContentPost } from "@/lib/db/queries/engagements";
 import {
   getEngagementDirectionSummary,
   getEngagementTypeBreakdown,
   getEngagementVolume,
   getTopEngagedContacts,
 } from "@/lib/db/queries/analytics";
-import { listInteractionsByContentPost } from "@/lib/db/queries/interactions";
+import { listInteractionsByContentPost, logInteraction } from "@/lib/db/queries/interactions";
+import { ensurePlatformActorContact } from "@/lib/db/queries/platform-actor-contact";
 import { backfillInteractionReadParity } from "@/lib/db/backfills/interaction-read-parity";
 import { db } from "@/lib/db/client";
 import {
@@ -156,5 +157,76 @@ describe("engagements read retirement", () => {
     expect(getEngagementTypeBreakdown(since)).toEqual([{ type: "like", count: 1 }]);
     expect(getEngagementDirectionSummary(since)[0]?.outbound).toBe(1);
     expect(getTopEngagedContacts(since)[0]?.count).toBe(1);
+  });
+
+  it("includes local-only interactions in local analytics dashboards", () => {
+    const contact = createContact({ name: "Private", platform: "x", platformUserId: "loc1" });
+    logInteraction({
+      contactId: contact.id,
+      interactionType: "meeting",
+      scope: "local_only",
+      source: "agent",
+    });
+
+    const since = Math.floor(Date.now() / 1000) - 60;
+    expect(getEngagementTypeBreakdown(since)).toEqual([{ type: "meeting", count: 1 }]);
+  });
+
+  it("surfaces X manual actions in content history via interactions", () => {
+    const platformAccountId = nanoid();
+    db.insert(platformAccounts)
+      .values({
+        id: platformAccountId,
+        platform: "x",
+        displayName: "@me",
+        authType: "oauth",
+      })
+      .run();
+
+    const contentItemId = nanoid();
+    const contentPostId = nanoid();
+    db.insert(contentItems)
+      .values({ id: contentItemId, contentType: "post", status: "imported" })
+      .run();
+    db.insert(contentPosts)
+      .values({
+        id: contentPostId,
+        contentItemId,
+        platformAccountId,
+        status: "imported",
+      })
+      .run();
+
+    const actorContactId = ensurePlatformActorContact({
+      platform: "x",
+      platformUserId: "x-me",
+      displayName: "Me",
+      platformHandle: "me",
+    });
+
+    createEngagement({
+      contactId: actorContactId,
+      platformAccountId,
+      engagementType: "like",
+      direction: "outbound",
+      content: null,
+      templateId: null,
+      workflowRunId: null,
+      contentPostId,
+      platform: "x",
+      platformEngagementId: null,
+      threadId: null,
+      source: "manual",
+      platformData: JSON.stringify({
+        action: "like",
+        tweetId: "tweet-1",
+        actorPlatformUserId: "x-me",
+      }),
+    });
+
+    const history = listEngagementsByContentPost(contentPostId);
+    expect(history).toHaveLength(1);
+    expect(history[0]?.engagementType).toBe("like");
+    expect(history[0]?.source).toBe("manual");
   });
 });

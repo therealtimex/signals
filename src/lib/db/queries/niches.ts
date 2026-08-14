@@ -42,7 +42,9 @@ export function listNiches(opts?: {
 
   const data = rows.map((niche) => ({
     ...niche,
-    memberCount: countNicheMembers(niche.id),
+    memberCount: countNicheMembers(niche.id, {
+      includeLocalOnly: opts?.includeLocalOnly,
+    }),
   }));
 
   return { data, total };

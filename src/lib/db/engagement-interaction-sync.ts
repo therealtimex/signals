@@ -4,6 +4,7 @@ import { db, type DbRunner } from "@/lib/db/client";
 import { contentPosts, interactions } from "@/lib/db/schema";
 import type { Engagement, Interaction } from "@/lib/db/types";
 import { touchContactLastInteraction } from "@/lib/db/queries/contact-interaction-projection";
+import { getContactIdByPlatformIdentity } from "@/lib/db/queries/platform-actor-contact";
 
 export function mapEngagementTypeToInteractionType(engagementType: string): string {
   if (engagementType === "connection_request") return "intro";
@@ -31,6 +32,24 @@ function resolveContentItemId(engagement: Engagement, runner: DbRunner = db): st
   return post?.contentItemId ?? null;
 }
 
+function resolveContactIdForEngagement(engagement: Engagement): string | null {
+  if (engagement.contactId) return engagement.contactId;
+  if (!engagement.platform) return null;
+
+  try {
+    const data = JSON.parse(engagement.platformData ?? "{}") as {
+      actorPlatformUserId?: string;
+    };
+    if (data.actorPlatformUserId) {
+      return getContactIdByPlatformIdentity(engagement.platform, data.actorPlatformUserId) ?? null;
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
 /**
  * Dual-write an engagement into `interactions` (1:1 via `engagement_id`).
  * Idempotent — safe to call on every engagement insert.
@@ -40,7 +59,8 @@ export function syncInteractionFromEngagement(
   opts?: { source?: string },
   runner: DbRunner = db,
 ): Interaction | null {
-  if (!engagement.contactId) return null;
+  const contactId = resolveContactIdForEngagement(engagement);
+  if (!contactId) return null;
 
   const existing = runner
     .select()
@@ -48,7 +68,7 @@ export function syncInteractionFromEngagement(
     .where(eq(interactions.engagementId, engagement.id))
     .get();
   if (existing) {
-    touchContactLastInteraction(engagement.contactId, existing.occurredAt, runner);
+    touchContactLastInteraction(contactId, existing.occurredAt, runner);
     return existing;
   }
 
@@ -59,7 +79,7 @@ export function syncInteractionFromEngagement(
     .insert(interactions)
     .values({
       id,
-      contactId: engagement.contactId,
+      contactId,
       orgId: null,
       interactionType: mapEngagementTypeToInteractionType(engagement.engagementType),
       direction: engagement.direction,
@@ -78,6 +98,6 @@ export function syncInteractionFromEngagement(
     .run();
 
   const interaction = runner.select().from(interactions).where(eq(interactions.id, id)).get()!;
-  touchContactLastInteraction(engagement.contactId, occurredAt, runner);
+  touchContactLastInteraction(contactId, occurredAt, runner);
   return interaction;
 }

@@ -7,6 +7,7 @@ import { logInteraction } from "@/lib/db/queries/interactions";
 import * as projection from "@/lib/db/queries/contact-interaction-projection";
 import { recomputeContactLastInteraction } from "@/lib/db/queries/contact-interaction-projection";
 import { syncInteractionFromEngagement } from "@/lib/db/engagement-interaction-sync";
+import { ensurePlatformActorContact } from "@/lib/db/queries/platform-actor-contact";
 import { db } from "@/lib/db/client";
 import { contacts, engagements, interactions } from "@/lib/db/schema";
 import { resetCoreTables } from "@/test/db";
@@ -105,7 +106,7 @@ describe("engagement → interaction dual-write", () => {
     expect(recomputed?.lastInteractionAt).toBe(1_700_000_500);
   });
 
-  it("skips interaction dual-write when engagement has no contact", () => {
+  it("skips interaction dual-write when actor cannot be resolved", () => {
     const engagement = createEngagement({
       contactId: null,
       platformAccountId: null,
@@ -124,6 +125,40 @@ describe("engagement → interaction dual-write", () => {
 
     expect(db.select().from(interactions).all()).toHaveLength(0);
     expect(syncInteractionFromEngagement(engagement)).toBeNull();
+  });
+
+  it("projects contactless engagement when actor platform identity is embedded", () => {
+    ensurePlatformActorContact({
+      platform: "x",
+      platformUserId: "actor-1",
+      displayName: "Me",
+      platformHandle: "me",
+    });
+
+    const engagement = createEngagement({
+      contactId: null,
+      platformAccountId: null,
+      engagementType: "like",
+      direction: "outbound",
+      content: null,
+      templateId: null,
+      workflowRunId: null,
+      contentPostId: null,
+      platform: "x",
+      platformEngagementId: null,
+      threadId: null,
+      source: "manual",
+      platformData: JSON.stringify({ actorPlatformUserId: "actor-1", action: "like" }),
+    });
+
+    const interaction = db
+      .select()
+      .from(interactions)
+      .where(eq(interactions.engagementId, engagement.id))
+      .get();
+
+    expect(interaction).toBeTruthy();
+    expect(interaction?.source).toBe("manual");
   });
 
   it("rolls back logInteraction when projection update fails", () => {

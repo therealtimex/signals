@@ -213,7 +213,7 @@ export function getEngagementVolume(since: number): { date: string; type: string
          interaction_type AS type,
          COUNT(*) AS count
        FROM interactions
-       WHERE occurred_at >= ? AND scope = 'shared'
+       WHERE occurred_at >= ?
        GROUP BY date, interaction_type
        ORDER BY date ASC`
     )
@@ -229,7 +229,7 @@ export function getEngagementDirectionSummary(since: number): { period: string; 
          SUM(CASE WHEN direction = 'inbound' THEN 1 ELSE 0 END) AS inbound,
          SUM(CASE WHEN direction = 'outbound' THEN 1 ELSE 0 END) AS outbound
        FROM interactions
-       WHERE occurred_at >= ? AND scope = 'shared'
+       WHERE occurred_at >= ?
        GROUP BY period
        ORDER BY period ASC`
     )
@@ -242,7 +242,7 @@ export function getEngagementTypeBreakdown(since: number): { type: string; count
     .prepare(
       `SELECT interaction_type AS type, COUNT(*) AS count
        FROM interactions
-       WHERE occurred_at >= ? AND scope = 'shared'
+       WHERE occurred_at >= ?
        GROUP BY interaction_type
        ORDER BY count DESC`
     )
@@ -263,7 +263,7 @@ export function getTopEngagedContacts(since: number, limit = 10): {
          COUNT(*) AS count
        FROM interactions i
        JOIN contacts c ON c.id = i.contact_id
-       WHERE i.occurred_at >= ? AND i.scope = 'shared'
+       WHERE i.occurred_at >= ?
        GROUP BY i.contact_id
        ORDER BY count DESC
        LIMIT ?`
