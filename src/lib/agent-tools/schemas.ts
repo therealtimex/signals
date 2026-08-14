@@ -1,0 +1,111 @@
+import { z } from "zod";
+
+const funnelStage = z.enum([
+  "prospect",
+  "engaged",
+  "qualified",
+  "opportunity",
+  "customer",
+  "advocate",
+]);
+
+const platform = z.enum(["x", "linkedin", "gmail", "substack"]);
+
+export const queryContactsSchema = z.object({
+  search: z.string().optional(),
+  funnelStage: funnelStage.optional(),
+  platform: platform.optional(),
+  page: z.number().int().positive().optional(),
+  pageSize: z.number().int().positive().max(100).optional(),
+});
+
+export const getContactSchema = z.object({
+  contactId: z.string().min(1),
+});
+
+export const createContactSchema = z.object({
+  name: z.string().min(1),
+  email: z.string().email().optional().or(z.literal("")),
+  company: z.string().optional(),
+  title: z.string().optional(),
+  platform: platform.optional(),
+  funnelStage: funnelStage.optional(),
+  firstName: z.string().optional(),
+  lastName: z.string().optional(),
+});
+
+export const updateContactSchema = z.object({
+  contactId: z.string().min(1),
+  email: z.string().email().optional().or(z.literal("")),
+  company: z.string().optional(),
+  title: z.string().optional(),
+  headline: z.string().optional(),
+  bio: z.string().optional(),
+  location: z.string().optional(),
+  website: z.string().optional(),
+  funnelStage: funnelStage.optional(),
+  tags: z.string().optional(),
+});
+
+export const enrichContactSchema = z.object({
+  contactId: z.string().min(1),
+  company: z.string().optional(),
+  title: z.string().optional(),
+  headline: z.string().optional(),
+  email: z.string().optional(),
+  phone: z.string().optional(),
+  location: z.string().optional(),
+  website: z.string().optional(),
+  bio: z.string().optional(),
+  tags: z.array(z.string()).optional(),
+  metadata: z.record(z.unknown()).optional(),
+});
+
+export const archiveContactSchema = z.object({
+  contactId: z.string().min(1),
+  reason: z.string().min(1),
+});
+
+export const queryGoalsSchema = z.object({
+  status: z.enum(["active", "achieved", "missed", "paused"]).optional(),
+  goalType: z
+    .enum(["audience_growth", "lead_generation", "content_engagement", "pipeline_progression"])
+    .optional(),
+  page: z.number().int().positive().optional(),
+  pageSize: z.number().int().positive().max(100).optional(),
+});
+
+export const queryAnalyticsSchema = z.object({});
+
+export const queryWorkflowsSchema = z.object({
+  workflowType: z.enum(["sync", "enrich", "search", "prune", "sequence", "agent"]).optional(),
+  status: z
+    .enum(["pending", "running", "paused", "completed", "failed", "cancelled"])
+    .optional(),
+  page: z.number().int().positive().optional(),
+  pageSize: z.number().int().positive().max(100).optional(),
+});
+
+export const queryContentSchema = z.object({
+  contentType: z.enum(["post", "thread", "article", "newsletter", "dm", "reply"]).optional(),
+  status: z.enum(["draft", "scheduled", "published", "archived"]).optional(),
+  page: z.number().int().positive().optional(),
+  pageSize: z.number().int().positive().max(100).optional(),
+});
+
+export const createTaskSchema = z.object({
+  title: z.string().min(1),
+  description: z.string().optional(),
+  priority: z.enum(["low", "medium", "high", "urgent"]).optional(),
+  dueDate: z.number().int().optional(),
+  relatedContactId: z.string().optional(),
+});
+
+export const listWorkflowTemplatesSchema = z.object({
+  status: z.enum(["active", "paused", "draft", "completed"]).optional(),
+});
+
+export const startWorkflowSchema = z.object({
+  templateId: z.string().min(1),
+  workflowType: z.enum(["search", "enrich", "prune", "agent"]).optional(),
+});

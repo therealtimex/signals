@@ -21,7 +21,7 @@ export interface ArchiveContactResult {
 export async function archiveContactTool(
   contactId: string,
   reason: string,
-  workflowRunId: string
+  workflowRunId?: string
 ): Promise<ArchiveContactResult> {
   const startTime = Date.now();
 
@@ -29,18 +29,20 @@ export async function archiveContactTool(
   if (!contact) {
     const error = `Contact not found: ${contactId}`;
 
-    createWorkflowStep({
-      workflowRunId,
-      stepIndex: nextStepIndex(workflowRunId),
-      stepType: "contact_archive",
-      status: "failed",
-      contactId,
-      tool: "archive_contact",
-      input: JSON.stringify({ contactId, reason }),
-      output: JSON.stringify({ error }),
-      error,
-      durationMs: Date.now() - startTime,
-    });
+    if (workflowRunId) {
+      createWorkflowStep({
+        workflowRunId,
+        stepIndex: nextStepIndex(workflowRunId),
+        stepType: "contact_archive",
+        status: "failed",
+        contactId,
+        tool: "archive_contact",
+        input: JSON.stringify({ contactId, reason }),
+        output: JSON.stringify({ error }),
+        error,
+        durationMs: Date.now() - startTime,
+      });
+    }
 
     return {
       contactId,
@@ -52,22 +54,24 @@ export async function archiveContactTool(
 
   const updated = archiveContactQuery(contactId, reason, workflowRunId);
 
-  createWorkflowStep({
-    workflowRunId,
-    stepIndex: nextStepIndex(workflowRunId),
-    stepType: "contact_archive",
-    status: "completed",
-    contactId,
-    tool: "archive_contact",
-    input: JSON.stringify({ contactId, reason }),
-    output: JSON.stringify({
+  if (workflowRunId) {
+    createWorkflowStep({
+      workflowRunId,
+      stepIndex: nextStepIndex(workflowRunId),
+      stepType: "contact_archive",
+      status: "completed",
       contactId,
-      contactName: contact.name,
-      reason,
-      archived: !!updated,
-    }),
-    durationMs: Date.now() - startTime,
-  });
+      tool: "archive_contact",
+      input: JSON.stringify({ contactId, reason }),
+      output: JSON.stringify({
+        contactId,
+        contactName: contact.name,
+        reason,
+        archived: !!updated,
+      }),
+      durationMs: Date.now() - startTime,
+    });
+  }
 
   return {
     contactId,

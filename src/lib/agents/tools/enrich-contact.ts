@@ -26,7 +26,7 @@ export async function enrichContact(
     tags?: string[];
     metadata?: Record<string, unknown>;
   },
-  workflowRunId: string
+  workflowRunId?: string
 ): Promise<EnrichContactResult> {
   const startTime = Date.now();
 
@@ -34,18 +34,20 @@ export async function enrichContact(
   if (!contact) {
     const error = `Contact not found: ${contactId}`;
 
-    createWorkflowStep({
-      workflowRunId,
-      stepIndex: nextStepIndex(workflowRunId),
-      stepType: "contact_merge",
-      status: "failed",
-      contactId,
-      tool: "enrich_contact",
-      input: JSON.stringify({ contactId }),
-      output: JSON.stringify({ error }),
-      error,
-      durationMs: Date.now() - startTime,
-    });
+    if (workflowRunId) {
+      createWorkflowStep({
+        workflowRunId,
+        stepIndex: nextStepIndex(workflowRunId),
+        stepType: "contact_merge",
+        status: "failed",
+        contactId,
+        tool: "enrich_contact",
+        input: JSON.stringify({ contactId }),
+        output: JSON.stringify({ error }),
+        error,
+        durationMs: Date.now() - startTime,
+      });
+    }
 
     return {
       contactId,
@@ -102,21 +104,23 @@ export async function enrichContact(
     newScore = updated?.enrichmentScore ?? previousScore;
   }
 
-  createWorkflowStep({
-    workflowRunId,
-    stepIndex: nextStepIndex(workflowRunId),
-    stepType: "contact_merge",
-    status: "completed",
-    contactId,
-    tool: "enrich_contact",
-    input: JSON.stringify({ contactId, fieldsProvided: Object.keys(data) }),
-    output: JSON.stringify({
-      fieldsUpdated,
-      previousScore,
-      newScore,
-    }),
-    durationMs: Date.now() - startTime,
-  });
+  if (workflowRunId) {
+    createWorkflowStep({
+      workflowRunId,
+      stepIndex: nextStepIndex(workflowRunId),
+      stepType: "contact_merge",
+      status: "completed",
+      contactId,
+      tool: "enrich_contact",
+      input: JSON.stringify({ contactId, fieldsProvided: Object.keys(data) }),
+      output: JSON.stringify({
+        fieldsUpdated,
+        previousScore,
+        newScore,
+      }),
+      durationMs: Date.now() - startTime,
+    });
+  }
 
   return {
     contactId,
