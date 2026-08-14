@@ -38,3 +38,5 @@ sessions/
 data/
 .ci/
 coverage/
+test-results/
+playwright-report/

@@ -19,6 +19,7 @@ export default defineConfig({
   },
   test: {
     setupFiles: ["./src/test/setup.ts"],
+    exclude: ["**/node_modules/**", "**/e2e/**"],
     coverage: {
       provider: "v8",
       include: COVERAGE_INCLUDE,
