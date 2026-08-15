@@ -352,14 +352,14 @@ describe("simulation results and projection (slice 3.2)", () => {
 
     const completed = await invokeAgentTool("complete_simulation_run", {
       runId: run.id,
-      predictedScore: 78,
+      predictedScore: 100,
       predictionConfidence: 0.85,
       predictedMetrics: { likes: 120 },
     });
 
     expect((completed as { run: { status: string } }).run.status).toBe("completed");
     const updated = getVariantById(variant.id)!;
-    expect(updated.predictedScore).toBe(78);
+    expect(updated.predictedScore).toBe(100);
     expect(updated.predictionConfidence).toBe(0.85);
     expect(updated.status).toBe("simulated");
     expect(updated.predictionModel).toBe("rtx:default");
@@ -377,6 +377,7 @@ describe("simulation results and projection (slice 3.2)", () => {
     completeSimulationRun(run.id, {
       predictedScore: 60,
       predictionConfidence: 0.5,
+      predictedMetrics: { likes: 30 },
     });
 
     vi.setSystemTime(new Date("2026-08-15T10:00:01Z"));
@@ -392,6 +393,7 @@ describe("simulation results and projection (slice 3.2)", () => {
     completeSimulationRun(second.run.id, {
       predictedScore: 90,
       predictionConfidence: 0.9,
+      predictedMetrics: { likes: 45 },
     });
 
     const updated = getVariantById(variant.id)!;
@@ -414,18 +416,20 @@ describe("simulation results and projection (slice 3.2)", () => {
       compareBinaryDesc(a.id, b.id),
     );
     const scores = {
-      [firstRun.id]: { score: 60, confidence: 0.5, model: "rtx:default" },
-      [second.run.id]: { score: 90, confidence: 0.9, model: "rtx:new" },
+      [firstRun.id]: { score: 60, confidence: 0.5, model: "rtx:default", likes: 30 },
+      [second.run.id]: { score: 90, confidence: 0.9, model: "rtx:new", likes: 45 },
     } as const;
     const winnerMeta = scores[winner.id as keyof typeof scores];
 
     completeSimulationRun(loser.id, {
       predictedScore: scores[loser.id as keyof typeof scores].score,
       predictionConfidence: scores[loser.id as keyof typeof scores].confidence,
+      predictedMetrics: { likes: scores[loser.id as keyof typeof scores].likes },
     });
     completeSimulationRun(winner.id, {
       predictedScore: winnerMeta.score,
       predictionConfidence: winnerMeta.confidence,
+      predictedMetrics: { likes: winnerMeta.likes },
     });
 
     const updated = getVariantById(variant.id)!;
@@ -438,7 +442,11 @@ describe("simulation results and projection (slice 3.2)", () => {
     upsertVariant({ id: variant.id, launchId: variant.launchId, status: "selected" });
 
     recordSimulationAgentResults(run.id, [{ agentId: agent.id, outcome: "like" }]);
-    completeSimulationRun(run.id, { predictedScore: 70, predictionConfidence: 0.7 });
+    completeSimulationRun(run.id, {
+      predictedScore: 70,
+      predictionConfidence: 0.7,
+      predictedMetrics: { likes: 35 },
+    });
 
     expect(getVariantById(variant.id)?.status).toBe("selected");
     expect(getVariantById(variant.id)?.predictedScore).toBe(70);
@@ -526,6 +534,14 @@ describe("simulation results and projection (slice 3.2)", () => {
         predictedMetrics: { invalid_metric: 10 },
       }),
     ).toThrow(SimulationValidationError);
+
+    expect(() =>
+      completeSimulationRun(run.id, {
+        predictedScore: 100,
+        predictionConfidence: 0.5,
+        predictedMetrics: { likes: 0 },
+      }),
+    ).toThrow(SimulationValidationError);
   });
 
   it("rejects record on non-running runs and invalid completions", () => {
@@ -544,7 +560,11 @@ describe("simulation results and projection (slice 3.2)", () => {
       SimulationRunStateError,
     );
 
-    completeSimulationRun(run.id, { predictedScore: 50, predictionConfidence: 0.5 });
+    completeSimulationRun(run.id, {
+      predictedScore: 50,
+      predictionConfidence: 0.5,
+      predictedMetrics: { likes: 25 },
+    });
     expect(() =>
       completeSimulationRun(run.id, { status: "failed", error: "retry" }),
     ).toThrow(SimulationRunStateError);
@@ -574,6 +594,7 @@ describe("simulation results and projection (slice 3.2)", () => {
       runId: run.id,
       predictedScore: 55,
       predictionConfidence: 0.6,
+      predictedMetrics: { impressions: 1100 },
     });
     assertNoPrivacySentinels(completed);
   });
@@ -648,7 +669,11 @@ describe("simulation transcripts and retention (slice 3.3)", () => {
         transcript: [{ role: "agent", text: "old dialogue" }],
       },
     ]);
-    completeSimulationRun(oldRun.id, { predictedScore: 40, predictionConfidence: 0.4 });
+    completeSimulationRun(oldRun.id, {
+      predictedScore: 40,
+      predictionConfidence: 0.4,
+      predictedMetrics: { impressions: 800 },
+    });
     const oldTs = Math.floor(new Date("2026-01-01T00:00:00Z").getTime() / 1000);
     db.update(simulationRuns)
       .set({ createdAt: oldTs, completedAt: oldTs, updatedAt: oldTs })
@@ -668,7 +693,11 @@ describe("simulation transcripts and retention (slice 3.3)", () => {
         transcript: [{ role: "agent", text: "new dialogue" }],
       },
     ]);
-    completeSimulationRun(second.run.id, { predictedScore: 80, predictionConfidence: 0.8 });
+    completeSimulationRun(second.run.id, {
+      predictedScore: 80,
+      predictionConfidence: 0.8,
+      predictedMetrics: { impressions: 1600 },
+    });
 
     const report = pruneSimulationTranscripts({
       now: Math.floor(new Date("2026-02-15T00:00:00Z").getTime() / 1000),

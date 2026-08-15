@@ -24,10 +24,10 @@ import { assertSimulationOutcome } from "@/lib/db/simulation-outcomes";
 import {
   assertEngagementScore,
   assertPredictionConfidence,
-  assertPredictionScore,
   normalizePredictedMetrics,
   parsePredictedActions,
 } from "@/lib/db/simulation-validation";
+import { resolvePredictedScoreFromMetrics } from "@/lib/db/simulation-scoring";
 import {
   SimulationAgentOwnershipError,
   SimulationRunStateError,
@@ -743,9 +743,12 @@ export function completeSimulationRun(
       );
     }
 
-    const predictedScore = assertPredictionScore(input.predictedScore);
     const predictionConfidence = assertPredictionConfidence(input.predictionConfidence);
     const predictedMetrics = normalizePredictedMetrics(input.predictedMetrics);
+    const predictedScore = resolvePredictedScoreFromMetrics(
+      predictedMetrics,
+      input.predictedScore,
+    );
 
     db.transaction(() => {
       db.update(simulationRuns)

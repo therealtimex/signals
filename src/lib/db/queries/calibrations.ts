@@ -19,6 +19,7 @@ import {
   SIMULATION_SCORING_RECIPE_VERSION,
   type EngagementMetricsRecord,
   emptyEngagementMetrics,
+  metricsRecordFromPredicted,
   scoreEngagementMetrics,
   sumEngagementMetrics,
 } from "@/lib/db/simulation-scoring";
@@ -38,9 +39,24 @@ const EVENT_TYPE_TO_METRIC: Record<string, keyof EngagementMetricsRecord> = {
 
 export type CalibrateSimulationRunInput = {
   observedUntil?: number;
-  workflowRunId?: string | null;
-  source?: "agent" | "workflow";
+  provenance?:
+    | { source: "agent" }
+    | { source: "workflow"; workflowRunId: string };
 };
+
+function resolveCalibrationProvenance(input: CalibrateSimulationRunInput): {
+  source: "agent" | "workflow";
+  workflowRunId: string | null;
+} {
+  const provenance = input.provenance ?? { source: "agent" as const };
+  if (provenance.source === "agent") {
+    return { source: "agent", workflowRunId: null };
+  }
+  if (!provenance.workflowRunId) {
+    throw new Error("Workflow calibration requires workflowRunId");
+  }
+  return { source: "workflow", workflowRunId: provenance.workflowRunId };
+}
 
 type MetricProvenance = Record<EngagementMetricKey, "snapshot" | "events" | "none">;
 
@@ -100,7 +116,7 @@ function actualMetricsForPost(
     const snapshotMetrics = metricsFromSnapshot(snapshot);
     for (const key of ENGAGEMENT_METRIC_KEYS) {
       metrics[key] = snapshotMetrics[key];
-      provenance[key] = snapshotMetrics[key] > 0 ? "snapshot" : "none";
+      provenance[key] = "snapshot";
     }
     return { metrics, provenance };
   }
@@ -200,13 +216,33 @@ export function calibrateSimulationRun(
   }
 
   const actualScore = scoreEngagementMetrics(actualMetrics);
-  const predictedScore = run.predictedScore ?? 0;
+  const predictedMetrics = metricsRecordFromPredicted(
+    JSON.parse(run.predictedMetrics ?? "{}") as Record<string, number>,
+  );
+  const predictedScore = scoreEngagementMetrics(predictedMetrics);
   const scoreError = actualScore - predictedScore;
   const computedAt = Math.floor(Date.now() / 1000);
   const calibrationId = nanoid();
+  const { source, workflowRunId } = resolveCalibrationProvenance(input);
+
+  const metricComparisons = Object.fromEntries(
+    ENGAGEMENT_METRIC_KEYS.map((key) => [
+      key,
+      {
+        predicted: predictedMetrics[key],
+        actual: actualMetrics[key],
+        error: actualMetrics[key] - predictedMetrics[key],
+      },
+    ]),
+  ) as Record<
+    EngagementMetricKey,
+    { predicted: number; actual: number; error: number }
+  >;
 
   const calibrationPayload = {
     scoringRecipeVersion: SIMULATION_SCORING_RECIPE_VERSION,
+    predictedScore,
+    metricComparisons,
     posts: postBreakdown,
     skippedPosts,
     provenanceSummary: postBreakdown.map((post) => ({
@@ -228,8 +264,8 @@ export function calibrateSimulationRun(
       actualMetrics: JSON.stringify(actualMetrics),
       scoreError,
       calibration: JSON.stringify(calibrationPayload),
-      workflowRunId: input.workflowRunId ?? null,
-      source: input.source ?? "agent",
+      workflowRunId,
+      source,
       computedAt,
     })
     .run();
@@ -251,6 +287,7 @@ export function serializeCalibration(row: SimulationCalibration) {
     scoreError: row.scoreError,
     calibration: JSON.parse(row.calibration ?? "{}") as Record<string, unknown>,
     source: row.source,
+    workflowRunId: row.workflowRunId,
     computedAt: row.computedAt,
   };
 }

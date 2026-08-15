@@ -518,8 +518,7 @@ export async function handleCalibrateSimulationRun(
 ) {
   const calibration = calibrateSimulationRun(input.runId, {
     observedUntil: input.observedUntil,
-    source: input.source,
-    workflowRunId: input.workflowRunId,
+    provenance: { source: "agent" },
   });
   return {
     calibration: serializeCalibration(calibration),

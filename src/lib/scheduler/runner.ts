@@ -10,6 +10,10 @@ import {
   pruneSimulationTranscripts,
   SIMULATION_TRANSCRIPT_RETENTION_JOB_TYPE,
 } from "@/lib/db/simulation-transcript-retention";
+import {
+  runSimulationCalibrationSweep,
+  SIMULATION_CALIBRATION_SWEEP_JOB_TYPE,
+} from "@/lib/db/simulation-calibration-sweep";
 import type { WorkflowType } from "@/lib/workflows/types";
 
 const CHECK_INTERVAL_MS = 60_000; // 1 minute
@@ -32,6 +36,11 @@ const MAINTENANCE_HANDLERS: Record<string, MaintenanceHandler> = {
     pruneSimulationTranscripts({
       retentionDays:
         typeof payload.retentionDays === "number" ? payload.retentionDays : undefined,
+    }),
+  [SIMULATION_CALIBRATION_SWEEP_JOB_TYPE]: (payload) =>
+    runSimulationCalibrationSweep({
+      observedUntil:
+        typeof payload.observedUntil === "number" ? payload.observedUntil : undefined,
     }),
 };
 

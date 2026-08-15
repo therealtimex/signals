@@ -4,11 +4,14 @@ import { nanoid } from "nanoid";
 import { invokeAgentTool } from "@/lib/agent-tools/invoke";
 import { db } from "@/lib/db/client";
 import {
+  contentActivities,
   contentPosts,
   engagementMetrics,
   interactions,
   platformAccounts,
+  scheduledJobs,
   simulationCalibrations,
+  workflowRuns,
 } from "@/lib/db/schema";
 import { createContact } from "@/lib/db/queries/contacts";
 import { createEngagement } from "@/lib/db/queries/engagements";
@@ -26,6 +29,12 @@ import {
   recordSimulationAgentResults,
 } from "@/lib/db/queries/simulations";
 import { publishVariant, upsertVariant } from "@/lib/db/queries/variants";
+import {
+  runSimulationCalibrationSweep,
+  SIMULATION_CALIBRATION_SWEEP_JOB_TYPE,
+} from "@/lib/db/simulation-calibration-sweep";
+import { executeScheduledJob } from "@/lib/scheduler/runner";
+import { getScheduledJob } from "@/lib/db/queries/scheduled-jobs";
 import { scoreEngagementMetrics } from "@/lib/db/simulation-scoring";
 import { assertNoPrivacySentinels } from "@/test/privacy-sentinels";
 import { resetCoreTables } from "@/test/db";
@@ -91,7 +100,7 @@ describe("simulation calibration (slice 3.4)", () => {
       .run();
   }
 
-  function seedCompletedPublishedRun(predictedScore = 40) {
+  function seedCompletedPublishedRun(predictedMetrics: Record<string, number> = { likes: 20 }) {
     const contact = createContact({ name: "Calib Agent", platform: "x", platformUserId: "cal-1" });
     const launch = upsertLaunch({ name: "Calib Launch", primaryPlatform: "x" });
     const variant = upsertVariant({ launchId: launch.id, body: "Wind tunnel copy" });
@@ -99,10 +108,24 @@ describe("simulation calibration (slice 3.4)", () => {
       variantId: variant.id,
       populationSpec: { contactIds: [contact.id] },
     });
+    const predictedScore = scoreEngagementMetrics({
+      likes: predictedMetrics.likes ?? 0,
+      comments: predictedMetrics.comments ?? 0,
+      shares: predictedMetrics.shares ?? 0,
+      impressions: predictedMetrics.impressions ?? 0,
+      clicks: predictedMetrics.clicks ?? 0,
+      bookmarks: predictedMetrics.bookmarks ?? 0,
+      quotes: predictedMetrics.quotes ?? 0,
+      retweets: predictedMetrics.retweets ?? 0,
+    });
     recordSimulationAgentResults(run.id, [
       { agentId: agents[0]!.id, engagementScore: 50, outcome: "like" },
     ]);
-    completeSimulationRun(run.id, { predictedScore, predictionConfidence: 0.5 });
+    completeSimulationRun(run.id, {
+      predictedScore,
+      predictionConfidence: 0.5,
+      predictedMetrics,
+    });
     const published = publishVariant(variant.id, { platform: "x", publishedAt: PUBLISHED_AT });
     return { contact, launch, variant: published, run };
   }
@@ -247,8 +270,103 @@ describe("simulation calibration (slice 3.4)", () => {
     expect(after.actualMetrics.likes).toBe(2);
   });
 
+  it("labels zero-valued snapshot counters as snapshot provenance", () => {
+    const { variant, run } = seedCompletedPublishedRun();
+    const postId = insertContentPost(variant.contentItemId!, PUBLISHED_AT);
+    insertSnapshot(postId, { likes: 0 }, PUBLISHED_AT + 100);
+
+    const calibration = calibrateSimulationRun(run.id, { observedUntil: OBSERVED_UNTIL });
+    const payload = JSON.parse(calibration.calibration ?? "{}") as {
+      provenanceSummary: { provenance: { likes: string } }[];
+    };
+    expect(payload.provenanceSummary[0]?.provenance.likes).toBe("snapshot");
+  });
+
+  it("enforces observed_until on shared events and snapshots", () => {
+    const { variant, run } = seedCompletedPublishedRun();
+    const postId = insertContentPost(variant.contentItemId!, PUBLISHED_AT);
+    seedLikeEvents(postId, 2, OBSERVED_UNTIL + 1, "shared");
+    insertSnapshot(postId, { likes: 99 }, OBSERVED_UNTIL + 1);
+
+    const calibration = calibrateSimulationRun(run.id, { observedUntil: OBSERVED_UNTIL });
+    expect(calibration.actualMetrics).toContain('"likes":0');
+  });
+
+  it("§8.5(3.4): local_only content activities do not change derived calibration values", () => {
+    const { variant, run } = seedCompletedPublishedRun();
+    const postId = insertContentPost(variant.contentItemId!, PUBLISHED_AT);
+    seedLikeEvents(postId, 2, PUBLISHED_AT + 50, "shared");
+
+    const before = computeCalibrationActualsForRun(run, OBSERVED_UNTIL);
+    db.insert(contentActivities)
+      .values({
+        id: nanoid(),
+        activityType: "like",
+        direction: "outbound",
+        occurredAt: PUBLISHED_AT + 60,
+        scope: "local_only",
+        source: "agent",
+        contentPostId: postId,
+        platform: "x",
+      })
+      .run();
+    const after = computeCalibrationActualsForRun(run, OBSERVED_UNTIL);
+
+    expect(after).toEqual(before);
+  });
+
+  it("persists metric comparisons and workflow provenance from the calibration sweep", () => {
+    const { variant, run } = seedCompletedPublishedRun({ likes: 10 });
+    const postId = insertContentPost(variant.contentItemId!, PUBLISHED_AT);
+    insertSnapshot(postId, { likes: 6 }, PUBLISHED_AT + 20);
+
+    const report = runSimulationCalibrationSweep({ observedUntil: OBSERVED_UNTIL });
+    const calibration = getLatestCalibrationForRun(run.id)!;
+
+    expect(report.runsCalibrated).toBe(1);
+    expect(calibration.source).toBe("workflow");
+    expect(calibration.workflowRunId).toBe(report.workflowRunId);
+    expect(
+      db.select().from(workflowRuns).where(eq(workflowRuns.id, report.workflowRunId)).get()
+        ?.workflowType,
+    ).toBe("calibrate");
+
+    const serialized = JSON.parse(calibration.calibration ?? "{}") as {
+      metricComparisons: { likes: { predicted: number; actual: number; error: number } };
+      predictedScore: number;
+    };
+    expect(serialized.metricComparisons.likes).toEqual({
+      predicted: 10,
+      actual: 6,
+      error: -4,
+    });
+    expect(serialized.predictedScore).toBe(20);
+    expect(calibration.scoreError).toBe(12 - 20);
+  });
+
+  it("scheduler dispatches the calibration sweep maintenance job", () => {
+    const { variant, run } = seedCompletedPublishedRun({ likes: 4 });
+    insertContentPost(variant.contentItemId!, PUBLISHED_AT);
+    const jobId = nanoid();
+    db.insert(scheduledJobs)
+      .values({
+        id: jobId,
+        jobType: SIMULATION_CALIBRATION_SWEEP_JOB_TYPE,
+        status: "pending",
+        runAt: OBSERVED_UNTIL - 10,
+        enabled: 1,
+        payload: JSON.stringify({ observedUntil: OBSERVED_UNTIL }),
+      })
+      .run();
+
+    executeScheduledJob(jobId);
+
+    expect(getScheduledJob(jobId)?.status).toBe("completed");
+    expect(getLatestCalibrationForRun(run.id)?.source).toBe("workflow");
+  });
+
   it("calibrate_simulation_run tool persists and query_simulations can surface latest calibration", async () => {
-    const { variant, run } = seedCompletedPublishedRun(55);
+    const { variant, run } = seedCompletedPublishedRun({ likes: 10 });
     const postId = insertContentPost(variant.contentItemId!, PUBLISHED_AT);
     insertSnapshot(postId, { likes: 6 }, PUBLISHED_AT + 20);
 
@@ -257,18 +375,11 @@ describe("simulation calibration (slice 3.4)", () => {
       observedUntil: OBSERVED_UNTIL,
     });
     assertNoPrivacySentinels(calibrated);
-    expect((calibrated as { calibration: { scoreError: number } }).calibration.scoreError).toBe(
-      scoreEngagementMetrics({
-        likes: 6,
-        comments: 0,
-        shares: 0,
-        impressions: 0,
-        clicks: 0,
-        bookmarks: 0,
-        quotes: 0,
-        retweets: 0,
-      }) - 55,
-    );
+    expect((calibrated as { calibration: { scoreError: number; source: string; workflowRunId: null } }).calibration).toMatchObject({
+      scoreError: 12 - 20,
+      source: "agent",
+      workflowRunId: null,
+    });
 
     const queried = await invokeAgentTool("query_simulations", {
       variantId: variant.id,

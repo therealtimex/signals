@@ -1,4 +1,9 @@
-import { ENGAGEMENT_METRIC_KEYS, assertEngagementScore } from "@/lib/db/simulation-validation";
+import {
+  ENGAGEMENT_METRIC_KEYS,
+  SimulationValidationError,
+  assertEngagementScore,
+  assertPredictionScore,
+} from "@/lib/db/simulation-validation";
 
 export const SIMULATION_SCORING_RECIPE_VERSION = "engagement-v1";
 
@@ -26,6 +31,37 @@ export function sumEngagementMetrics(
     result[key] = (left[key] ?? 0) + (right[key] ?? 0);
   }
   return result;
+}
+
+/** Normalize a predicted_metrics JSON object into the engagement_metrics keyspace. */
+export function metricsRecordFromPredicted(
+  metrics: Record<string, number>,
+): EngagementMetricsRecord {
+  const result = emptyEngagementMetrics();
+  for (const key of ENGAGEMENT_METRIC_KEYS) {
+    result[key] = metrics[key] ?? 0;
+  }
+  return result;
+}
+
+/**
+ * Derive the engagement-v1 score from predicted metrics and optionally validate
+ * a caller-supplied predictedScore matches the shared recipe.
+ */
+export function resolvePredictedScoreFromMetrics(
+  predictedMetrics: Record<string, number>,
+  predictedScore?: number,
+): number {
+  const derived = scoreEngagementMetrics(metricsRecordFromPredicted(predictedMetrics));
+  if (predictedScore !== undefined) {
+    const validated = assertPredictionScore(predictedScore);
+    if (validated !== derived) {
+      throw new SimulationValidationError(
+        `predictedScore (${validated}) does not match engagement-v1 recipe score (${derived}) from predictedMetrics`,
+      );
+    }
+  }
+  return derived;
 }
 
 /** Shared recipe for predicted and actual Wind Tunnel scores (§7). */

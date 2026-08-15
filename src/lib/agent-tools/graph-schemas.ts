@@ -182,8 +182,6 @@ export const completeSimulationRunSchema = z.object({
 export const calibrateSimulationRunSchema = z.object({
   runId: z.string().min(1),
   observedUntil: z.number().int().optional(),
-  source: z.enum(["agent", "workflow"]).optional(),
-  workflowRunId: z.string().optional(),
 });
 
 export const queryOrgIdentitiesSchema = z.object({
