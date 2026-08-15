@@ -78,7 +78,9 @@ export function serializeSimulationRun(
           engagementScore: agent.engagementScore,
           outcome: agent.outcome,
           predictedActions: agent.predictedActions,
-          ...(opts?.includeTranscripts && agent.transcript ? { transcript: agent.transcript } : {}),
+          ...(opts?.includeTranscripts
+            ? { transcript: agent.transcript ?? null }
+            : {}),
         }))
       : undefined;
 

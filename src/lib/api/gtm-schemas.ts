@@ -1,26 +1,16 @@
 import { z } from "zod";
 import { PLATFORMS } from "@/lib/db/platforms";
 import { VARIANT_TYPES } from "@/lib/db/variant-types";
+import {
+  LAUNCH_STATUSES,
+  SIMULATION_RUN_STATUSES,
+  VARIANT_STATUSES,
+  VARIANT_WRITE_STATUSES,
+} from "@/lib/db/gtm-status";
 
-const launchStatusEnum = z.enum([
-  "draft",
-  "generating",
-  "simulating",
-  "ready",
-  "live",
-  "completed",
-  "archived",
-]);
-
-const variantWriteStatusEnum = z.enum(["draft", "simulated", "selected", "rejected"]);
-
-const simulationStatusEnum = z.enum([
-  "pending",
-  "running",
-  "completed",
-  "failed",
-  "cancelled",
-]);
+const launchStatusEnum = z.enum(LAUNCH_STATUSES);
+const variantWriteStatusEnum = z.enum(VARIANT_WRITE_STATUSES);
+const simulationStatusEnum = z.enum(SIMULATION_RUN_STATUSES);
 
 export const createLaunchSchema = z.object({
   name: z.string().min(1),
@@ -49,9 +39,7 @@ export const updateVariantSchema = z
     label: z.string().nullable().optional(),
     variantType: z.enum(VARIANT_TYPES).optional(),
     body: z.string().nullable().optional(),
-    status: z
-      .enum(["draft", "simulated", "selected", "rejected", "published"])
-      .optional(),
+    status: z.enum(VARIANT_STATUSES).optional(),
   })
   .superRefine((input, ctx) => {
     if (input.status === "published") {

@@ -8,12 +8,16 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const { id } = await params;
-  const launch = getLaunchWithDetails(id);
-  if (!launch) {
-    return notFoundResponse("Launch not found");
+  try {
+    const { id } = await params;
+    const launch = getLaunchWithDetails(id);
+    if (!launch) {
+      return notFoundResponse("Launch not found");
+    }
+    return NextResponse.json(serializeLaunch(launch));
+  } catch (error) {
+    return toErrorResponse(error);
   }
-  return NextResponse.json(serializeLaunch(launch));
 }
 
 export async function PUT(

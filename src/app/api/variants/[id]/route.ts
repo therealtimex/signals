@@ -8,12 +8,16 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const { id } = await params;
-  const variant = getVariantById(id);
-  if (!variant) {
-    return notFoundResponse("Variant not found");
+  try {
+    const { id } = await params;
+    const variant = getVariantById(id);
+    if (!variant) {
+      return notFoundResponse("Variant not found");
+    }
+    return NextResponse.json(serializeVariant(variant));
+  } catch (error) {
+    return toErrorResponse(error);
   }
-  return NextResponse.json(serializeVariant(variant));
 }
 
 export async function PUT(
