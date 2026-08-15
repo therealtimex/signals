@@ -1,4 +1,4 @@
-import { and, desc, eq, SQL } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db, sqlite } from "@/lib/db/client";
 import {
@@ -54,11 +54,6 @@ function nowUnix(): number {
   return Math.floor(Date.now() / 1000);
 }
 
-function scopeCondition(includeLocalOnly?: boolean): SQL | undefined {
-  if (includeLocalOnly) return undefined;
-  return eq(embeddings.scope, "shared");
-}
-
 function resolveSearchNodeTypes(
   kind: EmbeddingKind,
   nodeTypes?: GraphNodeType[],
@@ -79,24 +74,6 @@ function resolveSearchNodeTypes(
   return resolved;
 }
 
-function embeddingBaseConditions(
-  kind: EmbeddingKind,
-  model: string,
-  queryDims: number,
-  nodeType: GraphNodeType,
-  includeLocalOnly?: boolean,
-): SQL[] {
-  const conditions: SQL[] = [
-    eq(embeddings.kind, kind),
-    eq(embeddings.model, model),
-    eq(embeddings.dims, queryDims),
-    eq(embeddings.nodeType, nodeType),
-  ];
-  const cachedScope = scopeCondition(includeLocalOnly);
-  if (cachedScope) conditions.push(cachedScope);
-  return conditions;
-}
-
 type SearchableEmbeddingRow = {
   nodeType: GraphNodeType;
   nodeId: string;
@@ -105,10 +82,22 @@ type SearchableEmbeddingRow = {
 
 const EMBEDDING_MATCH_WHERE =
   "e.kind = ? AND e.model = ? AND e.dims = ? AND e.node_type = ?";
+const EMBEDDING_MATCH_WHERE_PLAIN =
+  "kind = ? AND model = ? AND dims = ? AND node_type = ?";
 const SHARED_EMBEDDING_SCOPE = " AND e.scope = 'shared'";
-const preparedEmbeddingScanStatements = new Map<string, ReturnType<typeof sqlite.prepare>>();
+const SHARED_EMBEDDING_SCOPE_PLAIN = " AND scope = 'shared'";
+const preparedRawEmbeddingScanStatements = new Map<
+  string,
+  ReturnType<ReturnType<typeof sqlite.prepare>["raw"]>
+>();
+const embeddingNodeTypeExistsStmt = sqlite.prepare(
+  `SELECT 1 AS ok FROM embeddings
+   WHERE kind = ? AND model = ? AND dims = ? AND node_type = ?
+   AND (? = 1 OR scope = 'shared')
+   LIMIT 1`,
+);
 
-function hasEmbeddingCandidates(
+function hasEmbeddingsForNodeType(
   kind: EmbeddingKind,
   model: string,
   queryDims: number,
@@ -116,30 +105,26 @@ function hasEmbeddingCandidates(
   includeLocalOnly?: boolean,
 ): boolean {
   return (
-    db
-      .select({ id: embeddings.id })
-      .from(embeddings)
-      .where(and(...embeddingBaseConditions(kind, model, queryDims, nodeType, includeLocalOnly)))
-      .limit(1)
-      .get() !== undefined
+    embeddingNodeTypeExistsStmt.get(kind, model, queryDims, nodeType, includeLocalOnly ? 1 : 0) !==
+    undefined
   );
 }
 
-function* iterateSqlEmbeddingRows(
+function scanSqlEmbeddingRows(
   nodeType: GraphNodeType,
   sql: string,
   params: Array<string | number>,
-): Generator<SearchableEmbeddingRow> {
-  let stmt = preparedEmbeddingScanStatements.get(sql);
+  onRow: (row: SearchableEmbeddingRow) => void,
+): void {
+  let stmt = preparedRawEmbeddingScanStatements.get(sql);
   if (!stmt) {
-    stmt = sqlite.prepare(sql);
-    preparedEmbeddingScanStatements.set(sql, stmt);
+    stmt = sqlite.prepare(sql).raw();
+    preparedRawEmbeddingScanStatements.set(sql, stmt);
   }
-  for (const row of stmt.iterate(params) as Iterable<{
-    node_id: string;
-    vector: Buffer;
-  }>) {
-    yield { nodeType, nodeId: row.node_id, vector: row.vector };
+  const rows = stmt.all(params) as Array<[string, Buffer]>;
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i]!;
+    onRow({ nodeType, nodeId: row[0], vector: row[1] });
   }
 }
 
@@ -151,36 +136,40 @@ function embeddingScanParams(
   return [input.kind, input.model, queryDims, nodeType];
 }
 
-function* iterateEmbeddingsForNodeType(
+function scanEmbeddingsForNodeType(
   input: SemanticSearchInput,
   queryDims: number,
   nodeType: GraphNodeType,
-): Generator<SearchableEmbeddingRow> {
+  onRow: (row: SearchableEmbeddingRow) => void,
+): void {
   const params = embeddingScanParams(input, queryDims, nodeType);
   const sharedScope = input.includeLocalOnly ? "" : SHARED_EMBEDDING_SCOPE;
+  const sharedScopePlain = input.includeLocalOnly ? "" : SHARED_EMBEDDING_SCOPE_PLAIN;
 
   switch (input.kind) {
     case "profile": {
       if (nodeType === "contact") {
-        yield* iterateSqlEmbeddingRows(
+        // Contacts are always shared-scope; orphan rows are swept by graph integrity.
+        scanSqlEmbeddingRows(
           nodeType,
-          `SELECT e.node_id, e.vector
-           FROM embeddings e
-           INNER JOIN contacts c ON c.id = e.node_id
-           WHERE ${EMBEDDING_MATCH_WHERE}${sharedScope}`,
+          `SELECT node_id, vector
+           FROM embeddings
+           WHERE ${EMBEDDING_MATCH_WHERE_PLAIN}${sharedScopePlain}`,
           params,
+          onRow,
         );
         return;
       }
       if (nodeType === "org") {
         const liveScope = input.includeLocalOnly ? "" : " AND o.scope = 'shared'";
-        yield* iterateSqlEmbeddingRows(
+        scanSqlEmbeddingRows(
           nodeType,
           `SELECT e.node_id, e.vector
            FROM embeddings e
            INNER JOIN orgs o ON o.id = e.node_id${liveScope}
            WHERE ${EMBEDDING_MATCH_WHERE}${sharedScope}`,
           params,
+          onRow,
         );
       }
       return;
@@ -188,44 +177,47 @@ function* iterateEmbeddingsForNodeType(
     case "description": {
       if (nodeType === "niche") {
         const liveScope = input.includeLocalOnly ? "" : " AND n.scope = 'shared'";
-        yield* iterateSqlEmbeddingRows(
+        scanSqlEmbeddingRows(
           nodeType,
           `SELECT e.node_id, e.vector
            FROM embeddings e
            INNER JOIN niches n ON n.id = e.node_id${liveScope}
            WHERE ${EMBEDDING_MATCH_WHERE}${sharedScope}`,
           params,
+          onRow,
         );
         return;
       }
       if (nodeType === "launch") {
         const liveScope = input.includeLocalOnly ? "" : " AND l.scope = 'shared'";
-        yield* iterateSqlEmbeddingRows(
+        scanSqlEmbeddingRows(
           nodeType,
           `SELECT e.node_id, e.vector
            FROM embeddings e
            INNER JOIN launches l ON l.id = e.node_id${liveScope}
            WHERE ${EMBEDDING_MATCH_WHERE}${sharedScope}`,
           params,
+          onRow,
         );
       }
       return;
     }
     case "body": {
       if (nodeType === "content") {
-        yield* iterateSqlEmbeddingRows(
+        scanSqlEmbeddingRows(
           nodeType,
           `SELECT e.node_id, e.vector
            FROM embeddings e
            INNER JOIN content_items ci ON ci.id = e.node_id
            WHERE ${EMBEDDING_MATCH_WHERE}${sharedScope}`,
           params,
+          onRow,
         );
         return;
       }
       if (nodeType === "variant") {
         const liveScope = input.includeLocalOnly ? "" : " AND l.scope = 'shared'";
-        yield* iterateSqlEmbeddingRows(
+        scanSqlEmbeddingRows(
           nodeType,
           `SELECT e.node_id, e.vector
            FROM embeddings e
@@ -233,6 +225,7 @@ function* iterateEmbeddingsForNodeType(
            INNER JOIN launches l ON l.id = v.launch_id${liveScope}
            WHERE ${EMBEDDING_MATCH_WHERE}${sharedScope}`,
           params,
+          onRow,
         );
       }
       return;
@@ -242,15 +235,24 @@ function* iterateEmbeddingsForNodeType(
   }
 }
 
-function* iterateSearchableEmbeddingRows(
+function scanSearchableEmbeddingRows(
   input: SemanticSearchInput,
   queryDims: number,
-): Generator<SearchableEmbeddingRow> {
+  onRow: (row: SearchableEmbeddingRow) => void,
+): void {
   for (const nodeType of resolveSearchNodeTypes(input.kind, input.nodeTypes)) {
-    if (!hasEmbeddingCandidates(input.kind, input.model, queryDims, nodeType, input.includeLocalOnly)) {
+    if (
+      !hasEmbeddingsForNodeType(
+        input.kind,
+        input.model,
+        queryDims,
+        nodeType,
+        input.includeLocalOnly,
+      )
+    ) {
       continue;
     }
-    yield* iterateEmbeddingsForNodeType(input, queryDims, nodeType);
+    scanEmbeddingsForNodeType(input, queryDims, nodeType, onRow);
   }
 }
 
@@ -356,17 +358,19 @@ export function semanticSearch(input: SemanticSearchInput): SemanticSearchHit[] 
   const k = input.k ?? 10;
   const queryDims = input.queryVector.length;
   const queryNorm = vectorL2Norm(input.queryVector);
+  const invQueryNorm = queryNorm === 0 ? 0 : 1 / queryNorm;
   const top: SemanticSearchHit[] = [];
 
-  for (const row of iterateSearchableEmbeddingRows(input, queryDims)) {
+  scanSearchableEmbeddingRows(input, queryDims, (row) => {
     const score = cosineSimilarityWithQueryNormFromBuffer(
       input.queryVector,
       row.vector,
-      queryNorm,
+      invQueryNorm,
     );
-    if (Number.isNaN(score)) continue;
+    if (Number.isNaN(score)) return;
+    if (top.length >= k && score <= top[0]!.score) return;
     pushSemanticTopK(top, { nodeType: row.nodeType, nodeId: row.nodeId, score }, k);
-  }
+  });
 
   return finalizeSemanticTopK(top);
 }

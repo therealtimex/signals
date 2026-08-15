@@ -705,6 +705,13 @@ export const embeddings = sqliteTable("embeddings", {
   ),
   index("idx_embeddings_model_kind").on(table.model, table.kind),
   index("idx_embeddings_node").on(table.nodeType, table.nodeId, table.kind),
+  index("idx_embeddings_semantic_search").on(
+    table.model,
+    table.kind,
+    table.dims,
+    table.nodeType,
+    table.scope,
+  ),
 ]);
 
 // --- Graph Edges (polymorphic typed-edge overlay) ---

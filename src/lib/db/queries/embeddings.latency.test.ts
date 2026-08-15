@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { nanoid } from "nanoid";
 import { semanticSearch } from "@/lib/db/queries/embeddings";
 import { float32ToBuffer } from "@/lib/embeddings/vector-utils";
-import { db } from "@/lib/db/client";
+import { db, sqlite } from "@/lib/db/client";
 import { contacts, embeddings } from "@/lib/db/schema";
 
 function vectorWith(value: number, dims = 4): Float32Array {
@@ -44,6 +44,9 @@ describe("embeddings latency tripwire", () => {
             .run();
         }
       });
+
+      sqlite.exec("ANALYZE embeddings");
+      sqlite.exec("ANALYZE contacts");
 
       semanticSearch({
         kind: "profile",

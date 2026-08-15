@@ -72,27 +72,37 @@ export function cosineSimilarityWithQueryNorm(
 export function cosineSimilarityWithQueryNormFromBuffer(
   query: Float32Array,
   candidate: Buffer,
-  queryNorm: number,
+  invQueryNorm: number,
 ): number {
   const dims = query.length;
   if (candidate.byteLength !== dims * 4) return Number.NaN;
+  if (invQueryNorm === 0) return 0;
 
   const values = new Float32Array(candidate.buffer, candidate.byteOffset, dims);
   let dot = 0;
   let normCandidate = 0;
   let i = 0;
-  const limit = dims - (dims % 4);
-  for (; i < limit; i += 4) {
+  const limit = dims - (dims % 8);
+  for (; i < limit; i += 8) {
     const q0 = query[i]!;
     const q1 = query[i + 1]!;
     const q2 = query[i + 2]!;
     const q3 = query[i + 3]!;
+    const q4 = query[i + 4]!;
+    const q5 = query[i + 5]!;
+    const q6 = query[i + 6]!;
+    const q7 = query[i + 7]!;
     const c0 = values[i]!;
     const c1 = values[i + 1]!;
     const c2 = values[i + 2]!;
     const c3 = values[i + 3]!;
-    dot += q0 * c0 + q1 * c1 + q2 * c2 + q3 * c3;
-    normCandidate += c0 * c0 + c1 * c1 + c2 * c2 + c3 * c3;
+    const c4 = values[i + 4]!;
+    const c5 = values[i + 5]!;
+    const c6 = values[i + 6]!;
+    const c7 = values[i + 7]!;
+    dot += q0 * c0 + q1 * c1 + q2 * c2 + q3 * c3 + q4 * c4 + q5 * c5 + q6 * c6 + q7 * c7;
+    normCandidate +=
+      c0 * c0 + c1 * c1 + c2 * c2 + c3 * c3 + c4 * c4 + c5 * c5 + c6 * c6 + c7 * c7;
   }
   for (; i < dims; i++) {
     const qv = query[i]!;
@@ -101,8 +111,8 @@ export function cosineSimilarityWithQueryNormFromBuffer(
     normCandidate += cv * cv;
   }
 
-  if (queryNorm === 0 || normCandidate === 0) return 0;
-  return dot / (queryNorm * Math.sqrt(normCandidate));
+  if (normCandidate === 0) return 0;
+  return dot * invQueryNorm * (1 / Math.sqrt(normCandidate));
 }
 
 export function pushSemanticTopK<T extends { score: number }>(top: T[], hit: T, k: number): void {
