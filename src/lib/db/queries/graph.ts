@@ -10,6 +10,7 @@ import {
   interactions,
   launches,
   niches,
+  orgIdentities,
   orgs,
   variants,
   workflowRuns,
@@ -87,6 +88,8 @@ function nodeTable(type: GraphNodeType) {
       return workflowRuns;
     case "platform_identity":
       return contactIdentities;
+    case "org_identity":
+      return orgIdentities;
     case "interaction":
       return interactions;
     default:

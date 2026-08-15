@@ -598,6 +598,60 @@ export const orgs = sqliteTable("orgs", {
   uniqueIndex("idx_orgs_domain").on(table.domain),
 ]);
 
+// --- Org Identities (org-level platform accounts; ADR-022-5) ---
+
+export const orgIdentities = sqliteTable("org_identities", {
+  id: text("id").primaryKey(),
+  orgId: text("org_id")
+    .notNull()
+    .references(() => orgs.id, { onDelete: "cascade" }),
+  platform: text("platform").notNull(),
+  platformUserId: text("platform_user_id").notNull(),
+  platformHandle: text("platform_handle"),
+  platformUrl: text("platform_url"),
+  platformData: text("platform_data").default("{}"),
+  displayName: text("display_name"),
+  bio: text("bio"),
+  avatarUrl: text("avatar_url"),
+  location: text("location"),
+  websiteUrl: text("website_url"),
+  isVerified: integer("is_verified", { mode: "boolean" }),
+  followersCount: integer("followers_count"),
+  followingCount: integer("following_count"),
+  postsCount: integer("posts_count"),
+  listedCount: integer("listed_count"),
+  platformCreatedAt: integer("platform_created_at"),
+  statsUpdatedAt: integer("stats_updated_at"),
+  isPrimary: integer("is_primary").notNull().default(0),
+  isActive: integer("is_active").notNull().default(1),
+  lastSyncedAt: integer("last_synced_at"),
+  syncErrors: text("sync_errors"),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex("idx_org_identity_platform_user").on(table.platform, table.platformUserId),
+  index("idx_org_identity_org").on(table.orgId),
+]);
+
+// --- Org Identity Metrics (snapshot pattern, mirrors identity_metrics) ---
+
+export const orgIdentityMetrics = sqliteTable("org_identity_metrics", {
+  id: text("id").primaryKey(),
+  orgIdentityId: text("org_identity_id")
+    .notNull()
+    .references(() => orgIdentities.id, { onDelete: "cascade" }),
+  snapshotAt: integer("snapshot_at")
+    .notNull()
+    .default(sql`(unixepoch())`),
+  followersCount: integer("followers_count"),
+  followingCount: integer("following_count"),
+  postsCount: integer("posts_count"),
+  listedCount: integer("listed_count"),
+  engagementRate: real("engagement_rate"),
+  metadata: text("metadata").default("{}"),
+}, (table) => [
+  index("idx_org_identity_metrics_identity_time").on(table.orgIdentityId, table.snapshotAt),
+]);
+
 // --- Niches (derived interest / firmographic clusters; spec §3 Niche node) ---
 
 export const niches = sqliteTable("niches", {
@@ -730,6 +784,7 @@ export const graphEdges = sqliteTable("graph_edges", {
       "interaction",
       "workflow_run",
       "platform_identity",
+      "org_identity",
     ],
   }).notNull(),
   srcId: text("src_id").notNull(),
@@ -745,6 +800,7 @@ export const graphEdges = sqliteTable("graph_edges", {
       "interaction",
       "workflow_run",
       "platform_identity",
+      "org_identity",
     ],
   }).notNull(),
   dstId: text("dst_id").notNull(),

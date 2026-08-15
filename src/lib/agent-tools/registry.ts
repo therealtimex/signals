@@ -21,9 +21,11 @@ import {
   queryNichesSchema,
   queryOrgsSchema,
   queryLaunchesSchema,
+  queryOrgIdentitiesSchema,
   upsertEdgeSchema,
   upsertLaunchSchema,
   upsertNicheSchema,
+  upsertOrgIdentitySchema,
   upsertVariantSchema,
   semanticSearchSchema,
 } from "@/lib/agent-tools/graph-schemas";
@@ -32,11 +34,13 @@ import {
   handleQueryGraph,
   handleQueryLaunches,
   handleQueryNiches,
+  handleQueryOrgIdentities,
   handleQueryOrgs,
   handleSemanticSearch,
   handleUpsertEdge,
   handleUpsertLaunch,
   handleUpsertNiche,
+  handleUpsertOrgIdentity,
   handleUpsertVariant,
 } from "@/lib/agent-tools/graph-handlers";
 import { zodToParameters } from "@/lib/agent-tools/json-schema";
@@ -196,6 +200,23 @@ export const AGENT_TOOLS: Record<string, AgentToolDefinition> = {
     schema: queryOrgsSchema,
     parameters: zodToParameters(queryOrgsSchema),
     execute: handleQueryOrgs,
+  },
+  query_org_identities: {
+    name: "query_org_identities",
+    description: "List org platform identities with profile and stat fields.",
+    category: "graph",
+    schema: queryOrgIdentitiesSchema,
+    parameters: zodToParameters(queryOrgIdentitiesSchema),
+    execute: handleQueryOrgIdentities,
+  },
+  upsert_org_identity: {
+    name: "upsert_org_identity",
+    description:
+      "Create or update an org platform identity. Cross-claim conflicts return a reassign error.",
+    category: "graph",
+    schema: upsertOrgIdentitySchema,
+    parameters: zodToParameters(upsertOrgIdentitySchema),
+    execute: handleUpsertOrgIdentity,
   },
   query_graph: {
     name: "query_graph",

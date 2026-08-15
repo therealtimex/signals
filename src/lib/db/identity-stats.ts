@@ -16,6 +16,23 @@ type IdentityStatFields = Pick<
   | "statsUpdatedAt"
 >;
 
+export type IdentityStatsLiftInput = {
+  platformData?: string | null;
+  displayName?: string | null;
+  bio?: string | null;
+  avatarUrl?: string | null;
+  location?: string | null;
+  websiteUrl?: string | null;
+  isVerified?: boolean | null;
+  followersCount?: number | null;
+  followingCount?: number | null;
+  postsCount?: number | null;
+  listedCount?: number | null;
+  platformCreatedAt?: number | null;
+  statsUpdatedAt?: number | null;
+  lastSyncedAt?: number | null;
+};
+
 function readNumber(obj: Record<string, unknown>, keys: string[]): number | undefined {
   for (const key of keys) {
     const value = obj[key];

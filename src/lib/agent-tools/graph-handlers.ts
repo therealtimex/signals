@@ -1,4 +1,5 @@
 import { listOrgs } from "@/lib/db/queries/orgs";
+import { listOrgIdentities, upsertOrgIdentity } from "@/lib/db/queries/org-identities";
 import { listLaunches, upsertLaunch } from "@/lib/db/queries/launches";
 import { listNiches, upsertNiche } from "@/lib/db/queries/niches";
 import { semanticSearch } from "@/lib/db/queries/embeddings";
@@ -14,7 +15,9 @@ import type {
   queryLaunchesSchema,
   queryNichesSchema,
   queryOrgsSchema,
+  queryOrgIdentitiesSchema,
   semanticSearchSchema,
+  upsertOrgIdentitySchema,
   upsertEdgeSchema,
   upsertLaunchSchema,
   upsertNicheSchema,
@@ -284,5 +287,78 @@ export async function handleSemanticSearch(input: z.infer<typeof semanticSearchS
       score: hit.score,
       label: getNodeDisplayLabel(hit.nodeType, hit.nodeId),
     })),
+  };
+}
+
+function serializeOrgIdentity(identity: Awaited<ReturnType<typeof upsertOrgIdentity>>) {
+  return {
+    id: identity.id,
+    orgId: identity.orgId,
+    platform: identity.platform,
+    platformUserId: identity.platformUserId,
+    platformHandle: identity.platformHandle,
+    platformUrl: identity.platformUrl,
+    displayName: identity.displayName,
+    bio: identity.bio,
+    avatarUrl: identity.avatarUrl,
+    location: identity.location,
+    websiteUrl: identity.websiteUrl,
+    isVerified: identity.isVerified,
+    followersCount: identity.followersCount,
+    followingCount: identity.followingCount,
+    postsCount: identity.postsCount,
+    listedCount: identity.listedCount,
+    platformCreatedAt: identity.platformCreatedAt,
+    statsUpdatedAt: identity.statsUpdatedAt,
+    isPrimary: Boolean(identity.isPrimary),
+    isActive: Boolean(identity.isActive),
+    lastSyncedAt: identity.lastSyncedAt,
+  };
+}
+
+export async function handleQueryOrgIdentities(
+  input: z.infer<typeof queryOrgIdentitiesSchema>,
+) {
+  const result = listOrgIdentities({
+    orgId: input.orgId,
+    platform: input.platform,
+    page: input.page,
+    pageSize: input.pageSize,
+  });
+
+  return {
+    total: result.total,
+    identities: result.data.map(serializeOrgIdentity),
+  };
+}
+
+export async function handleUpsertOrgIdentity(input: z.infer<typeof upsertOrgIdentitySchema>) {
+  const identity = upsertOrgIdentity({
+    id: input.id,
+    orgId: input.orgId,
+    platform: input.platform,
+    platformUserId: input.platformUserId,
+    platformHandle: input.platformHandle,
+    platformUrl: input.platformUrl,
+    platformData: input.platformData ? JSON.stringify(input.platformData) : undefined,
+    displayName: input.displayName,
+    bio: input.bio,
+    avatarUrl: input.avatarUrl,
+    location: input.location,
+    websiteUrl: input.websiteUrl,
+    isVerified: input.isVerified,
+    followersCount: input.followersCount,
+    followingCount: input.followingCount,
+    postsCount: input.postsCount,
+    listedCount: input.listedCount,
+    platformCreatedAt: input.platformCreatedAt,
+    isPrimary: input.isPrimary === undefined ? undefined : input.isPrimary ? 1 : 0,
+    isActive: input.isActive === undefined ? undefined : input.isActive ? 1 : 0,
+    lastSyncedAt: input.lastSyncedAt,
+  });
+
+  return {
+    ...serializeOrgIdentity(identity),
+    message: "Org identity upserted.",
   };
 }

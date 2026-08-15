@@ -24,6 +24,8 @@ import {
   graphEdges,
   interactions,
   identityMetrics,
+  orgIdentities,
+  orgIdentityMetrics,
   contactPersonas,
   niches,
   contentActivities,
@@ -116,6 +118,12 @@ export interface PaginatedResult<T> {
 // Org types
 export type Org = InferSelectModel<typeof orgs>;
 export type NewOrg = InferInsertModel<typeof orgs>;
+
+// Org identity types
+export type OrgIdentity = InferSelectModel<typeof orgIdentities>;
+export type NewOrgIdentity = InferInsertModel<typeof orgIdentities>;
+export type OrgIdentityMetric = InferSelectModel<typeof orgIdentityMetrics>;
+export type NewOrgIdentityMetric = InferInsertModel<typeof orgIdentityMetrics>;
 
 // Niche types
 export type Niche = InferSelectModel<typeof niches>;
