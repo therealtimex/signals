@@ -3,11 +3,13 @@ import { listOrgIdentities, upsertOrgIdentity } from "@/lib/db/queries/org-ident
 import { listLaunches, upsertLaunch } from "@/lib/db/queries/launches";
 import { listNiches, upsertNiche } from "@/lib/db/queries/niches";
 import { semanticSearch } from "@/lib/db/queries/embeddings";
-import { upsertVariant } from "@/lib/db/queries/variants";
+import { getVariantById, upsertVariant } from "@/lib/db/queries/variants";
 import {
   createAndStartSimulationRun,
+  completeSimulationRun,
   getSimulationRun,
   listSimulationRuns,
+  recordSimulationAgentResults,
 } from "@/lib/db/queries/simulations";
 import { getNeighbors, upsertGraphEdge } from "@/lib/db/queries/graph";
 import { logInteraction } from "@/lib/db/queries/interactions";
@@ -29,6 +31,8 @@ import type {
   upsertVariantSchema,
   createSimulationRunSchema,
   querySimulationsSchema,
+  recordSimulationResultsSchema,
+  completeSimulationRunSchema,
 } from "@/lib/agent-tools/graph-schemas";
 import type { z } from "zod";
 
@@ -444,5 +448,47 @@ export async function handleQuerySimulations(input: z.infer<typeof querySimulati
   return {
     total: result.total,
     runs,
+  };
+}
+
+export async function handleRecordSimulationResults(
+  input: z.infer<typeof recordSimulationResultsSchema>,
+) {
+  recordSimulationAgentResults(input.runId, input.results);
+  const run = getSimulationRun(input.runId, { includeAgents: true });
+  if (!run) {
+    throw new Error(`Simulation run not found: ${input.runId}`);
+  }
+  return {
+    run: serializeSimulationRun(run, { includeAgents: true }),
+    message: "Simulation agent results recorded.",
+  };
+}
+
+export async function handleCompleteSimulationRun(
+  input: z.infer<typeof completeSimulationRunSchema>,
+) {
+  const run = completeSimulationRun(input.runId, {
+    status: input.status,
+    predictedScore: input.predictedScore,
+    predictionConfidence: input.predictionConfidence,
+    predictedMetrics: input.predictedMetrics,
+    error: input.error,
+  });
+  const variant = getVariantById(run.variantId);
+  return {
+    run: serializeSimulationRun(run),
+    variant: variant
+      ? {
+          id: variant.id,
+          predictedScore: variant.predictedScore,
+          predictionConfidence: variant.predictionConfidence,
+          predictedMetrics: JSON.parse(variant.predictedMetrics ?? "{}") as Record<string, unknown>,
+          predictionModel: variant.predictionModel,
+          simulatedAt: variant.simulatedAt,
+          status: variant.status,
+        }
+      : null,
+    message: "Simulation run completed.",
   };
 }

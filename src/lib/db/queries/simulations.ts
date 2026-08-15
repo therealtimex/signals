@@ -15,11 +15,13 @@ import {
 import { getActivePersona } from "@/lib/db/queries/personas";
 import { getLaunchById } from "@/lib/db/queries/launches";
 import { getVariantById } from "@/lib/db/queries/variants";
+import { assertSimulationOutcome } from "@/lib/db/simulation-outcomes";
 import {
+  SimulationAgentOwnershipError,
   SimulationRunStateError,
   SimulationScopeError,
 } from "@/lib/db/queries/simulation-errors";
-import type { PaginatedResult, SimulationAgent, SimulationRun } from "@/lib/db/types";
+import type { PaginatedResult, SimulationAgent, SimulationRun, Variant } from "@/lib/db/types";
 
 export type PopulationSpec = {
   contactIds?: string[];
@@ -47,6 +49,29 @@ export type CreateSimulationRunResult = {
   run: SimulationRun;
   agents: SimulationAgentWithGrounding[];
 };
+
+export type SimulationAgentResultInput = {
+  agentId: string;
+  engagementScore?: number | null;
+  outcome?: string | null;
+  predictedActions?: Record<string, unknown>[] | Record<string, unknown>;
+  /** Transcript writes activate in slice 3.3 — accepted but ignored until then. */
+  transcript?: unknown;
+};
+
+export type CompleteSimulationRunInput = {
+  status?: "completed" | "failed" | "cancelled";
+  predictedScore?: number;
+  predictionConfidence?: number;
+  predictedMetrics?: Record<string, unknown>;
+  error?: string;
+};
+
+const TERMINAL_STATUSES = new Set<SimulationRun["status"]>([
+  "completed",
+  "failed",
+  "cancelled",
+]);
 
 const DEFAULT_SAMPLE_SIZE = 100;
 
@@ -465,4 +490,194 @@ export function getSimulationRun(
     .map(parseAgentGrounding);
 
   return { ...run, agents };
+}
+
+function assertRunIsRunning(run: SimulationRun): void {
+  if (run.status !== "running") {
+    throw new SimulationRunStateError(
+      `Simulation run must be 'running' — current status is '${run.status}'`,
+    );
+  }
+}
+
+function projectVariantFromRunIfLatest(run: SimulationRun, now: number): void {
+  if (run.status !== "completed") return;
+
+  const latest = db
+    .select()
+    .from(simulationRuns)
+    .where(
+      and(eq(simulationRuns.variantId, run.variantId), eq(simulationRuns.status, "completed")),
+    )
+    .orderBy(desc(simulationRuns.completedAt), desc(simulationRuns.id))
+    .get();
+
+  if (!latest || latest.id !== run.id) return;
+
+  const variant = getVariantById(run.variantId);
+  if (!variant) return;
+
+  const variantUpdate: {
+    predictedScore: number | null;
+    predictionConfidence: number | null;
+    predictedMetrics: string;
+    predictionModel: string | null;
+    simulatedAt: number | null;
+    status?: Variant["status"];
+    updatedAt: number;
+  } = {
+    predictedScore: run.predictedScore,
+    predictionConfidence: run.predictionConfidence,
+    predictedMetrics: run.predictedMetrics ?? "{}",
+    predictionModel: run.predictionModel,
+    simulatedAt: run.completedAt,
+    updatedAt: now,
+  };
+
+  if (variant.status === "draft") {
+    variantUpdate.status = "simulated";
+  }
+
+  db.update(variants).set(variantUpdate).where(eq(variants.id, run.variantId)).run();
+}
+
+export function recordSimulationAgentResults(
+  runId: string,
+  results: SimulationAgentResultInput[],
+): void {
+  const run = db.select().from(simulationRuns).where(eq(simulationRuns.id, runId)).get();
+  if (!run) {
+    throw new Error(`Simulation run not found: ${runId}`);
+  }
+  assertRunIsRunning(run);
+
+  if (results.length === 0) return;
+
+  db.transaction(() => {
+    for (const result of results) {
+      const agent = db
+        .select()
+        .from(simulationAgents)
+        .where(eq(simulationAgents.id, result.agentId))
+        .get();
+
+      if (!agent || agent.simulationRunId !== runId) {
+        throw new SimulationAgentOwnershipError(
+          `Agent ${result.agentId} does not belong to simulation run ${runId}`,
+        );
+      }
+
+      const outcome =
+        result.outcome === undefined || result.outcome === null
+          ? agent.outcome
+          : assertSimulationOutcome(result.outcome);
+
+      const predictedActions =
+        result.predictedActions === undefined
+          ? agent.predictedActions
+          : JSON.stringify(result.predictedActions);
+
+      db.update(simulationAgents)
+        .set({
+          engagementScore:
+            result.engagementScore !== undefined
+              ? result.engagementScore
+              : agent.engagementScore,
+          outcome,
+          predictedActions,
+        })
+        .where(eq(simulationAgents.id, result.agentId))
+        .run();
+    }
+  });
+}
+
+export function completeSimulationRun(
+  runId: string,
+  input: CompleteSimulationRunInput = {},
+): SimulationRun {
+  const run = db.select().from(simulationRuns).where(eq(simulationRuns.id, runId)).get();
+  if (!run) {
+    throw new Error(`Simulation run not found: ${runId}`);
+  }
+
+  const targetStatus = input.status ?? "completed";
+  const now = nowUnix();
+
+  if (TERMINAL_STATUSES.has(run.status)) {
+    if (run.status === targetStatus) {
+      return run;
+    }
+    throw new SimulationRunStateError(
+      `Cannot transition simulation run from '${run.status}' to '${targetStatus}'`,
+    );
+  }
+
+  if (targetStatus === "completed") {
+    if (run.status !== "running") {
+      throw new SimulationRunStateError(
+        `Cannot complete simulation run in status '${run.status}' — expected 'running'`,
+      );
+    }
+    if (input.predictedScore === undefined || input.predictionConfidence === undefined) {
+      throw new SimulationRunStateError(
+        "Completing a simulation run requires predictedScore and predictionConfidence",
+      );
+    }
+
+    db.transaction(() => {
+      db.update(simulationRuns)
+        .set({
+          status: "completed",
+          predictedScore: input.predictedScore,
+          predictionConfidence: input.predictionConfidence,
+          predictedMetrics: JSON.stringify(input.predictedMetrics ?? {}),
+          completedAt: now,
+          updatedAt: now,
+          error: null,
+        })
+        .where(eq(simulationRuns.id, runId))
+        .run();
+
+      const completed = db.select().from(simulationRuns).where(eq(simulationRuns.id, runId)).get()!;
+      projectVariantFromRunIfLatest(completed, now);
+    });
+  } else if (targetStatus === "failed") {
+    if (run.status !== "pending" && run.status !== "running") {
+      throw new SimulationRunStateError(
+        `Cannot fail simulation run in status '${run.status}'`,
+      );
+    }
+    if (!input.error) {
+      throw new SimulationRunStateError("Failing a simulation run requires error");
+    }
+    db.update(simulationRuns)
+      .set({
+        status: "failed",
+        error: input.error,
+        completedAt: now,
+        updatedAt: now,
+      })
+      .where(eq(simulationRuns.id, runId))
+      .run();
+  } else if (targetStatus === "cancelled") {
+    if (run.status !== "pending" && run.status !== "running") {
+      throw new SimulationRunStateError(
+        `Cannot cancel simulation run in status '${run.status}'`,
+      );
+    }
+    db.update(simulationRuns)
+      .set({
+        status: "cancelled",
+        error: input.error ?? run.error,
+        completedAt: now,
+        updatedAt: now,
+      })
+      .where(eq(simulationRuns.id, runId))
+      .run();
+  } else {
+    throw new SimulationRunStateError(`Unsupported terminal status: ${targetStatus}`);
+  }
+
+  return db.select().from(simulationRuns).where(eq(simulationRuns.id, runId)).get()!;
 }

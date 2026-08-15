@@ -15,3 +15,12 @@ export class SimulationRunStateError extends Error {
     this.name = "SimulationRunStateError";
   }
 }
+
+export class SimulationAgentOwnershipError extends Error {
+  readonly code = "SIMULATION_AGENT_OWNERSHIP_ERROR" as const;
+
+  constructor(message: string) {
+    super(message);
+    this.name = "SimulationAgentOwnershipError";
+  }
+}

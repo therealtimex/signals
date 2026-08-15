@@ -30,6 +30,8 @@ import {
   semanticSearchSchema,
   createSimulationRunSchema,
   querySimulationsSchema,
+  recordSimulationResultsSchema,
+  completeSimulationRunSchema,
 } from "@/lib/agent-tools/graph-schemas";
 import {
   handleLogInteraction,
@@ -46,6 +48,8 @@ import {
   handleUpsertVariant,
   handleCreateSimulationRun,
   handleQuerySimulations,
+  handleRecordSimulationResults,
+  handleCompleteSimulationRun,
 } from "@/lib/agent-tools/graph-handlers";
 import { zodToParameters } from "@/lib/agent-tools/json-schema";
 import {
@@ -282,7 +286,7 @@ export const AGENT_TOOLS: Record<string, AgentToolDefinition> = {
   upsert_variant: {
     name: "upsert_variant",
     description:
-      "Create or update a creative variant under a launch. status:'published' routes through publishVariant.",
+      "Create or update a creative variant under a launch. status:'published' routes through publishVariant. predicted_* fields are manual overrides; use create_simulation_run / complete_simulation_run for Wind Tunnel projections.",
     category: "graph",
     schema: upsertVariantSchema,
     parameters: zodToParameters(upsertVariantSchema),
@@ -314,6 +318,24 @@ export const AGENT_TOOLS: Record<string, AgentToolDefinition> = {
     schema: querySimulationsSchema,
     parameters: zodToParameters(querySimulationsSchema),
     execute: handleQuerySimulations,
+  },
+  record_simulation_results: {
+    name: "record_simulation_results",
+    description:
+      "Batch per-agent simulation outcomes for a running simulation run. Idempotent per agentId.",
+    category: "graph",
+    schema: recordSimulationResultsSchema,
+    parameters: zodToParameters(recordSimulationResultsSchema),
+    execute: handleRecordSimulationResults,
+  },
+  complete_simulation_run: {
+    name: "complete_simulation_run",
+    description:
+      "Finish a simulation run and project latest predictions onto the parent variant when completed.",
+    category: "graph",
+    schema: completeSimulationRunSchema,
+    parameters: zodToParameters(completeSimulationRunSchema),
+    execute: handleCompleteSimulationRun,
   },
 };
 

@@ -155,6 +155,28 @@ export const querySimulationsSchema = z.object({
   pageSize: z.number().int().positive().max(100).optional(),
 });
 
+const simulationAgentResultSchema = z.object({
+  agentId: z.string().min(1),
+  engagementScore: z.number().optional(),
+  outcome: z.string().optional(),
+  predictedActions: z.union([z.array(z.record(z.unknown())), z.record(z.unknown())]).optional(),
+  transcript: z.unknown().optional(),
+});
+
+export const recordSimulationResultsSchema = z.object({
+  runId: z.string().min(1),
+  results: z.array(simulationAgentResultSchema).min(1),
+});
+
+export const completeSimulationRunSchema = z.object({
+  runId: z.string().min(1),
+  status: z.enum(["completed", "failed", "cancelled"]).optional(),
+  predictedScore: z.number().optional(),
+  predictionConfidence: z.number().optional(),
+  predictedMetrics: z.record(z.unknown()).optional(),
+  error: z.string().optional(),
+});
+
 export const queryOrgIdentitiesSchema = z.object({
   orgId: z.string().optional(),
   platform: z.string().optional(),

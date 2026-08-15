@@ -6,14 +6,21 @@ import { contactIdentities, contacts, simulationRuns } from "@/lib/db/schema";
 import { createContact } from "@/lib/db/queries/contacts";
 import { upsertLaunch } from "@/lib/db/queries/launches";
 import { upsertPersona } from "@/lib/db/queries/personas";
-import { upsertVariant } from "@/lib/db/queries/variants";
+import { upsertVariant, getVariantById } from "@/lib/db/queries/variants";
 import {
   createAndStartSimulationRun,
+  completeSimulationRun,
   createSimulationRun,
   getSimulationRun,
+  listSimulationRuns,
+  recordSimulationAgentResults,
   startSimulationRun,
 } from "@/lib/db/queries/simulations";
-import { SimulationRunStateError, SimulationScopeError } from "@/lib/db/queries/simulation-errors";
+import {
+  SimulationAgentOwnershipError,
+  SimulationRunStateError,
+  SimulationScopeError,
+} from "@/lib/db/queries/simulation-errors";
 import { assertNoPrivacySentinels, PRIVACY_SENTINELS } from "@/test/privacy-sentinels";
 import { resetCoreTables } from "@/test/db";
 
@@ -191,5 +198,150 @@ describe("simulation runs (slice 3.1)", () => {
 
     expect(getSimulationRun(run.id)?.agents).toBeUndefined();
     expect(getSimulationRun(run.id, { includeAgents: true })?.agents).toHaveLength(1);
+  });
+});
+
+describe("simulation results and projection (slice 3.2)", () => {
+  beforeEach(() => {
+    resetCoreTables();
+  });
+
+  function seedRunningRun() {
+    const contact = createContact({ name: "Sim Agent", platform: "x", platformUserId: "sim-3.2" });
+    const launch = upsertLaunch({ name: "Projection Launch", primaryPlatform: "x" });
+    const variant = upsertVariant({ launchId: launch.id, label: "A", body: "copy" });
+    const { run, agents } = createAndStartSimulationRun({
+      variantId: variant.id,
+      populationSpec: { contactIds: [contact.id] },
+      predictionModel: "rtx:default",
+    });
+    return { contact, launch, variant, run, agent: agents[0]! };
+  }
+
+  it("runs the direct-agent happy path through all three tools", async () => {
+    const { variant, run, agent } = seedRunningRun();
+
+    await invokeAgentTool("record_simulation_results", {
+      runId: run.id,
+      results: [{ agentId: agent.id, engagementScore: 72, outcome: "like" }],
+    });
+
+    const completed = await invokeAgentTool("complete_simulation_run", {
+      runId: run.id,
+      predictedScore: 78,
+      predictionConfidence: 0.85,
+      predictedMetrics: { likes: 120 },
+    });
+
+    expect((completed as { run: { status: string } }).run.status).toBe("completed");
+    const updated = getVariantById(variant.id)!;
+    expect(updated.predictedScore).toBe(78);
+    expect(updated.predictionConfidence).toBe(0.85);
+    expect(updated.status).toBe("simulated");
+    expect(updated.predictionModel).toBe("rtx:default");
+  });
+
+  it("projects only the latest completed run", async () => {
+    const { variant, run, agent } = seedRunningRun();
+
+    recordSimulationAgentResults(run.id, [
+      { agentId: agent.id, engagementScore: 50, outcome: "impression" },
+    ]);
+    completeSimulationRun(run.id, {
+      predictedScore: 60,
+      predictionConfidence: 0.5,
+    });
+
+    const second = createAndStartSimulationRun({
+      variantId: variant.id,
+      populationSpec: { contactIds: [agent.contactId!] },
+      predictionModel: "rtx:new",
+    });
+    recordSimulationAgentResults(second.run.id, [
+      { agentId: second.agents[0]!.id, engagementScore: 80, outcome: "reply" },
+    ]);
+    completeSimulationRun(second.run.id, {
+      predictedScore: 90,
+      predictionConfidence: 0.9,
+    });
+
+    const updated = getVariantById(variant.id)!;
+    expect(updated.predictedScore).toBe(90);
+    expect(updated.predictionModel).toBe("rtx:new");
+  });
+
+  it("does not downgrade selected variants on projection", () => {
+    const { variant, run, agent } = seedRunningRun();
+    upsertVariant({ id: variant.id, launchId: variant.launchId, status: "selected" });
+
+    recordSimulationAgentResults(run.id, [{ agentId: agent.id, outcome: "like" }]);
+    completeSimulationRun(run.id, { predictedScore: 70, predictionConfidence: 0.7 });
+
+    expect(getVariantById(variant.id)?.status).toBe("selected");
+    expect(getVariantById(variant.id)?.predictedScore).toBe(70);
+  });
+
+  it("rejects cross-run agent ownership", () => {
+    const first = seedRunningRun();
+    const second = createAndStartSimulationRun({
+      variantId: first.variant.id,
+      populationSpec: { contactIds: [first.contact.id] },
+    });
+
+    expect(() =>
+      recordSimulationAgentResults(second.run.id, [
+        { agentId: first.agent.id, engagementScore: 10, outcome: "like" },
+      ]),
+    ).toThrow(SimulationAgentOwnershipError);
+  });
+
+  it("rejects record on non-running runs and invalid completions", () => {
+    const { variant, run } = seedRunningRun();
+    const pending = createSimulationRun({
+      variantId: variant.id,
+      populationSpec: { contactIds: [] },
+    });
+
+    expect(() =>
+      recordSimulationAgentResults(pending.run.id, [{ agentId: "missing", outcome: "like" }]),
+    ).toThrow(SimulationRunStateError);
+
+    expect(() => completeSimulationRun(run.id)).toThrow(SimulationRunStateError);
+    expect(() => completeSimulationRun(run.id, { status: "failed" })).toThrow(
+      SimulationRunStateError,
+    );
+
+    completeSimulationRun(run.id, { predictedScore: 50, predictionConfidence: 0.5 });
+    expect(() =>
+      completeSimulationRun(run.id, { status: "failed", error: "retry" }),
+    ).toThrow(SimulationRunStateError);
+  });
+
+  it("§8.5(3.2): results and projection responses contain no privacy sentinels", async () => {
+    const contact = createContact({
+      name: "Public",
+      platform: "x",
+      platformUserId: "sim-privacy-3.2",
+      email: PRIVACY_SENTINELS.email,
+    });
+    const launch = upsertLaunch({ name: "Privacy", primaryPlatform: "x" });
+    const variant = upsertVariant({ launchId: launch.id, body: "x" });
+    const { run, agents } = createAndStartSimulationRun({
+      variantId: variant.id,
+      populationSpec: { contactIds: [contact.id] },
+    });
+
+    const recorded = await invokeAgentTool("record_simulation_results", {
+      runId: run.id,
+      results: [{ agentId: agents[0]!.id, engagementScore: 40, outcome: "click" }],
+    });
+    assertNoPrivacySentinels(recorded);
+
+    const completed = await invokeAgentTool("complete_simulation_run", {
+      runId: run.id,
+      predictedScore: 55,
+      predictionConfidence: 0.6,
+    });
+    assertNoPrivacySentinels(completed);
   });
 });
