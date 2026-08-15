@@ -672,6 +672,100 @@ The Phase 1 `PLATFORMS` registry already carries the new networks, but `Platform
 
 No schema change in this slice. Real API/browser sync implementations are separate epics per platform.
 
+#### §7.1 Amendment E — slice 2.6 boundaries (2026-08-15, kickoff for #37)
+
+The sketch above is confirmed: type widen, capabilities contract, three stubs, connect-UI
+gating, tests; no schema change. The rulings below pin down what it left implicit,
+corrected against a code audit of `main` @ `ecf377f`.
+
+**1. Capabilities are static implementation facts in a dependency-free module — not
+adapter state.** The connect UI (`src/app/dashboard/settings/page.tsx`) is a
+`"use client"` component, while `getPlatformAdapter` is a server-only `require()`
+factory whose adapters pull in DB and crypto concerns — capabilities therefore cannot
+be read off adapter instances in the browser. New `src/lib/platforms/capabilities.ts`
+(imports nothing beyond the `Platform` type) exports:
+
+```ts
+export interface PlatformCapabilities {
+  oauth: boolean;          // connect/disconnect via OAuth from settings
+  contactSync: boolean;    // import contacts/connections into the CRM
+  contentSync: boolean;    // import the user's own posts/content items
+  engagementSync: boolean; // import engagement events/metrics (incl. message-metadata interactions)
+  statsSync: boolean;      // import profile/audience stats (incl. browser-scrape enrichment)
+}
+export const PLATFORM_CAPABILITIES: Partial<Record<Platform, PlatformCapabilities>>;
+```
+
+The map is keyed **only for platforms with a registered adapter** (x, linkedin, gmail,
+instagram, facebook, threads). Absence from the map means "no adapter exists" (substack,
+tiktok, youtube, bluesky, telegram, whatsapp) — a different fact from all-false, and
+those platforms stay unmapped until their own slices. `PlatformAdapter` gains
+`readonly capabilities: PlatformCapabilities`, and each adapter's value must be the map
+entry itself — a test asserts referential identity, keeping one source of truth.
+
+Semantic rule: a flag is `true` iff a shipped end-to-end code path exists behind it for
+that platform *today*; when in doubt, `false` — the contract's entire value is honesty.
+Capabilities are static per platform. Per-account/runtime entitlements (X Basic-tier
+`syncCapable`, granted scopes) stay in account state and never leak into capabilities.
+
+Proposed matrix, to be verified against code at implementation time (bias false):
+
+| Platform | oauth | contactSync | contentSync | engagementSync | statsSync |
+|---|---|---|---|---|---|
+| x | ✓ | ✓ | ✓ | ✓ (tweet metrics) | ✓ (browser enrichment) |
+| linkedin | ✓ | ✓ | ✗ | ✗ | ✗ |
+| gmail | ✓ | ✓ | ✗ | ✓ (message metadata) | ✗ |
+| instagram / facebook / threads | ✗ | ✗ | ✗ | ✗ | ✗ |
+
+**2. Type widen + one typed error.** `PlatformAdapter.platform` becomes the registry
+`Platform` type (type-only import from `@/lib/db/platforms`; adds no runtime
+dependency). `NotImplementedError extends Error` lives beside the contract in
+`src/lib/platforms/adapter.ts`, carries `{ platform: Platform; method: string }`, and
+sets `name = "NotImplementedError"`. The factory's `default` case also throws it
+(method `"getPlatformAdapter"`) so "no adapter registered" (substack et al. — the
+current generic `Error`) and "stub method called" share one typed contract for callers,
+with distinct messages.
+
+**3. One stub implementation, three registrations.** A single `StubPlatformAdapter`
+(suggested `src/lib/platforms/stub-adapter.ts`) implements the full contract with every
+method throwing `NotImplementedError(platform, method)` — including
+`getRateLimitState`: throw, don't fake empty state. `instagram/`, `facebook/`,
+`threads/` directories each hold a one-class `adapter.ts` extending it (the directory
+is the landing zone for the future real implementation, per §7's per-capability
+follow-on framing); all three are registered in `getPlatformAdapter`. Do not copy the
+stub body three times.
+
+**4. Connect-UI gating is additive — no page refactor.** The settings page renders
+three additional cards driven by the `PLATFORM_CAPABILITIES` entries with
+`oauth: false` (derived from the map, not hardcoded names, not the whole registry).
+`PlatformConnectionCard`'s `ConnectionStatus` union gains `"coming_soon"`: a secondary
+"Coming soon" badge, an explanatory line noting identities for these platforms can
+already be added manually or by agents, and **no Connect button or any click path** —
+stub platforms must trigger zero network calls (no `/api/platforms/instagram|facebook|threads`
+routes exist; do not add fetches that 404). Do not refactor the page's per-platform
+state hooks into a generic loop in this slice — that cleanup rides with the first real
+adapter implementation.
+
+**5. Corrective, in scope: stale platform enums in dashboard API routes.** §7's premise
+that manual enrichment "can create identities today" is currently false through the web
+API: `api/contacts/route.ts`, `api/contacts/[id]/route.ts`,
+`api/contacts/[id]/identities/route.ts`, `api/workflows/templates/route.ts`, and
+`api/workflows/templates/[id]/route.ts` hard-code
+`z.enum(["x", "linkedin", "gmail", "substack"])` and reject platforms the identity
+tables (and the agent tools, via `PLATFORM_ENUM`) already accept. Replace those
+literals with `z.enum(PLATFORM_ENUM)`. Validation-level only, no schema change; a
+regression test creates an instagram identity through the API.
+
+**6. Tests.** (a) factory returns an adapter for all six mapped platforms and throws
+the typed error otherwise; (b) every mapped platform's adapter `capabilities` is
+referentially the map entry; (c) stub methods throw `NotImplementedError` with correct
+`platform`/`method`; (d) the three stub entries are all-false; (e) settings page shows
+coming-soon cards for exactly the `oauth: false` map entries, with no connect
+affordance; (f) API routes accept registry platforms (ruling 5). `npm run check` green.
+
+No new ADR: nothing here changes schema or ownership; the capability-contract rationale
+is recorded in this amendment.
+
 ---
 
 ## 8. Agent-Tool Impact (additive only)
