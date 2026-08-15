@@ -52,6 +52,9 @@ jobs:
       - name: Install Playwright Chromium
         run: npx playwright install chromium --with-deps
 
+      - name: Verify fresh data dir import safety
+        run: npm run verify:fresh-import
+
       - name: Build production app
         run: npm run build
         env:

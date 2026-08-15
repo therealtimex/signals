@@ -1,0 +1,1 @@
+CREATE INDEX `idx_embeddings_semantic_search` ON `embeddings` (`model`,`kind`,`dims`,`node_type`,`scope`);

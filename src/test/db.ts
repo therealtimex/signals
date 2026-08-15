@@ -16,6 +16,7 @@ import {
   niches,
   launches,
   variants,
+  embeddings,
   orgs,
   workflowRuns,
   workflowSteps,
@@ -35,6 +36,7 @@ export function resetCoreTables(): void {
   db.delete(contactPersonas).run();
   db.delete(identityMetrics).run();
   db.delete(graphEdges).run();
+  db.delete(embeddings).run();
   db.delete(variants).run();
   db.delete(contentPosts).run();
   db.delete(contentItems).run();

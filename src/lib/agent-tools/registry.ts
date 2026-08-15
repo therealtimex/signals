@@ -25,6 +25,7 @@ import {
   upsertLaunchSchema,
   upsertNicheSchema,
   upsertVariantSchema,
+  semanticSearchSchema,
 } from "@/lib/agent-tools/graph-schemas";
 import {
   handleLogInteraction,
@@ -32,6 +33,7 @@ import {
   handleQueryLaunches,
   handleQueryNiches,
   handleQueryOrgs,
+  handleSemanticSearch,
   handleUpsertEdge,
   handleUpsertLaunch,
   handleUpsertNiche,
@@ -260,6 +262,15 @@ export const AGENT_TOOLS: Record<string, AgentToolDefinition> = {
     schema: upsertVariantSchema,
     parameters: zodToParameters(upsertVariantSchema),
     execute: handleUpsertVariant,
+  },
+  semantic_search: {
+    name: "semantic_search",
+    description:
+      "Top-k semantic search over embedded graph nodes. Embeds the query via RealtimeX and searches local vectors.",
+    category: "graph",
+    schema: semanticSearchSchema,
+    parameters: zodToParameters(semanticSearchSchema),
+    execute: handleSemanticSearch,
   },
 };
 

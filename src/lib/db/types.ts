@@ -29,6 +29,7 @@ import {
   contentActivities,
   launches,
   variants,
+  embeddings,
 } from "./schema";
 
 // Contact types
@@ -127,6 +128,10 @@ export type NewLaunch = InferInsertModel<typeof launches>;
 // Variant types
 export type Variant = InferSelectModel<typeof variants>;
 export type NewVariant = InferInsertModel<typeof variants>;
+
+// Embedding types
+export type Embedding = InferSelectModel<typeof embeddings>;
+export type NewEmbedding = InferInsertModel<typeof embeddings>;
 
 // Graph edge types
 export type GraphEdge = InferSelectModel<typeof graphEdges>;

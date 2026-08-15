@@ -57,8 +57,11 @@ Then pass `Authorization: Bearer your-secret-token` on each request.
 | `query_launches` | graph | List GTM launches with variant summaries and goal links |
 | `upsert_launch` | graph | Create or update a GTM launch |
 | `upsert_variant` | graph | Create or update a launch variant (publish via status) |
+| `semantic_search` | graph | Top-k semantic search over embedded nodes (query embed via RealtimeX) |
 
 `create_contact` / `update_contact` with a `company` field also dual-write an `orgs` row and `works_at` edge (contacts projection unchanged).
+
+`semantic_search` requires Signals running as a RealtimeX Local App with the `llm.embed` permission granted. Vectors are stored locally in SQLite; only embedding generation is delegated to RealtimeX.
 
 Tools that require browser/LLM (web search, scrape, publish, etc.) are **not** exposed here — RTX terminal agents should use platform credentials and their own tools for those operations.
 
