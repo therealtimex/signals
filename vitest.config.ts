@@ -39,7 +39,7 @@ export default defineConfig({
         test: {
           name: "unit",
           include: ["src/**/*.test.ts"],
-          exclude: ["**/node_modules/**", "**/e2e/**", "src/**/*.latency.test.ts"],
+          exclude: ["**/node_modules/**", "**/e2e/**", "src/**/*.latency.test.ts", "src/**/*.import-safety.test.ts"],
         },
       },
       {
@@ -47,6 +47,21 @@ export default defineConfig({
         test: {
           name: "latency",
           include: ["src/**/*.latency.test.ts"],
+          exclude: ["**/node_modules/**"],
+          pool: "forks",
+          poolOptions: {
+            forks: {
+              singleFork: true,
+            },
+          },
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: "import-safety",
+          setupFiles: [],
+          include: ["src/**/*.import-safety.test.ts"],
           exclude: ["**/node_modules/**"],
           pool: "forks",
           poolOptions: {

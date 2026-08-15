@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { invokeAgentTool } from "@/lib/agent-tools/invoke";
-import { createContact } from "@/lib/db/queries/contacts";
+import { createContact, deleteContact } from "@/lib/db/queries/contacts";
 import { upsertEmbedding, semanticSearch } from "@/lib/db/queries/embeddings";
 import { upsertNiche } from "@/lib/db/queries/niches";
 import { embedNodeIfStale } from "@/lib/embeddings/embed-node";
@@ -97,6 +97,31 @@ describe("embeddings query layer", () => {
 
     expect(hits).toHaveLength(1);
     expect(hits[0]?.nodeId).toBe(contactA.id);
+  });
+
+  it("semanticSearch excludes orphan contact embeddings before integrity repair", () => {
+    const contact = createContact({ name: "Gone", platform: "x", platformUserId: "gone-1" });
+    upsertEmbedding({
+      nodeType: "contact",
+      nodeId: contact.id,
+      kind: "profile",
+      model: "native:default",
+      vector: float32ToBuffer(vectorWith(1)),
+      contentHash: "gone",
+      dims: 4,
+    });
+
+    deleteContact(contact.id);
+
+    const hits = semanticSearch({
+      kind: "profile",
+      model: "native:default",
+      queryVector: vectorWith(1),
+      k: 5,
+      nodeTypes: ["contact"],
+    });
+
+    expect(hits).toHaveLength(0);
   });
 
   it("semanticSearch deduplicates repeated nodeTypes", () => {

@@ -82,20 +82,24 @@ type SearchableEmbeddingRow = {
 
 const EMBEDDING_MATCH_WHERE =
   "e.kind = ? AND e.model = ? AND e.dims = ? AND e.node_type = ?";
-const EMBEDDING_MATCH_WHERE_PLAIN =
-  "kind = ? AND model = ? AND dims = ? AND node_type = ?";
 const SHARED_EMBEDDING_SCOPE = " AND e.scope = 'shared'";
-const SHARED_EMBEDDING_SCOPE_PLAIN = " AND scope = 'shared'";
 const preparedRawEmbeddingScanStatements = new Map<
   string,
   ReturnType<ReturnType<typeof sqlite.prepare>["raw"]>
 >();
-const embeddingNodeTypeExistsStmt = sqlite.prepare(
-  `SELECT 1 AS ok FROM embeddings
-   WHERE kind = ? AND model = ? AND dims = ? AND node_type = ?
-   AND (? = 1 OR scope = 'shared')
-   LIMIT 1`,
-);
+let embeddingNodeTypeExistsStmt: ReturnType<typeof sqlite.prepare> | null = null;
+
+function getEmbeddingNodeTypeExistsStmt(): ReturnType<typeof sqlite.prepare> {
+  if (!embeddingNodeTypeExistsStmt) {
+    embeddingNodeTypeExistsStmt = sqlite.prepare(
+      `SELECT 1 AS ok FROM embeddings
+       WHERE kind = ? AND model = ? AND dims = ? AND node_type = ?
+       AND (? = 1 OR scope = 'shared')
+       LIMIT 1`,
+    );
+  }
+  return embeddingNodeTypeExistsStmt;
+}
 
 function hasEmbeddingsForNodeType(
   kind: EmbeddingKind,
@@ -105,8 +109,13 @@ function hasEmbeddingsForNodeType(
   includeLocalOnly?: boolean,
 ): boolean {
   return (
-    embeddingNodeTypeExistsStmt.get(kind, model, queryDims, nodeType, includeLocalOnly ? 1 : 0) !==
-    undefined
+    getEmbeddingNodeTypeExistsStmt().get([
+      kind,
+      model,
+      queryDims,
+      nodeType,
+      includeLocalOnly ? 1 : 0,
+    ]) !== undefined
   );
 }
 
@@ -144,17 +153,16 @@ function scanEmbeddingsForNodeType(
 ): void {
   const params = embeddingScanParams(input, queryDims, nodeType);
   const sharedScope = input.includeLocalOnly ? "" : SHARED_EMBEDDING_SCOPE;
-  const sharedScopePlain = input.includeLocalOnly ? "" : SHARED_EMBEDDING_SCOPE_PLAIN;
 
   switch (input.kind) {
     case "profile": {
       if (nodeType === "contact") {
-        // Contacts are always shared-scope; orphan rows are swept by graph integrity.
         scanSqlEmbeddingRows(
           nodeType,
-          `SELECT node_id, vector
-           FROM embeddings
-           WHERE ${EMBEDDING_MATCH_WHERE_PLAIN}${sharedScopePlain}`,
+          `SELECT e.node_id, e.vector
+           FROM embeddings e
+           INNER JOIN contacts c ON c.id = e.node_id
+           WHERE ${EMBEDDING_MATCH_WHERE}${sharedScope}`,
           params,
           onRow,
         );
