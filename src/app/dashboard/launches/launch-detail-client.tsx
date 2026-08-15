@@ -18,8 +18,6 @@ export function LaunchDetailClient({ launch, linkedGoals }: LaunchDetailClientPr
   const [variantDialogOpen, setVariantDialogOpen] = useState(false);
   const [editingVariantId, setEditingVariantId] = useState<string | null>(null);
 
-  const editingVariant = launch.variants.find((variant) => variant.id === editingVariantId);
-
   return (
     <>
       <LaunchDetailView
@@ -47,7 +45,7 @@ export function LaunchDetailClient({ launch, linkedGoals }: LaunchDetailClientPr
         open={variantDialogOpen}
         onOpenChange={setVariantDialogOpen}
         launchId={launch.id}
-        editVariant={editingVariant}
+        editVariantId={editingVariantId}
         onSuccess={() => router.refresh()}
       />
     </>

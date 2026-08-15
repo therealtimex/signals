@@ -23,12 +23,12 @@ export function sortVariantsForBoard(variants: LaunchVariantSummary[]): LaunchVa
     const aScore = a.predictedScore;
     const bScore = b.predictedScore;
     if (aScore == null && bScore == null) {
-      return a.createdAt - b.createdAt;
+      return a.id.localeCompare(b.id);
     }
     if (aScore == null) return 1;
     if (bScore == null) return -1;
     if (bScore !== aScore) return bScore - aScore;
-    return a.createdAt - b.createdAt;
+    return a.id.localeCompare(b.id);
   });
 }
 

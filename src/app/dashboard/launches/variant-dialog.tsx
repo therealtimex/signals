@@ -20,77 +20,108 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { VARIANT_TYPES } from "@/lib/db/variant-types";
-import type { LaunchVariantSummary } from "@/lib/db/queries/launches";
-
-const DIALOG_STATUSES = ["draft", "selected", "rejected"] as const;
+import {
+  VARIANT_DIALOG_STATUSES,
+  buildVariantSavePayload,
+} from "./variant-dialog-utils";
 
 interface VariantDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSuccess: () => void;
   launchId: string;
-  editVariant?: LaunchVariantSummary;
+  editVariantId?: string | null;
 }
+
+type LoadedVariant = {
+  label: string | null;
+  variantType: string;
+  body: string | null;
+  status: string;
+};
 
 export function VariantDialog({
   open,
   onOpenChange,
   onSuccess,
   launchId,
-  editVariant,
+  editVariantId,
 }: VariantDialogProps) {
   const [label, setLabel] = useState("");
   const [variantType, setVariantType] = useState<string>("post");
   const [body, setBody] = useState("");
   const [status, setStatus] = useState<string>("draft");
   const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const isSimulatedCurrent = editVariant?.status === "simulated";
+  const isSimulatedCurrent = status === "simulated";
 
   useEffect(() => {
-    if (editVariant) {
-      setLabel(editVariant.label ?? "");
-      setVariantType(editVariant.variantType);
-      setBody("");
-      setStatus(editVariant.status);
-    } else {
+    if (!open) return;
+
+    if (!editVariantId) {
       setLabel("");
       setVariantType("post");
       setBody("");
       setStatus("draft");
+      setError(null);
+      setLoading(false);
+      return;
     }
-    setError(null);
-  }, [editVariant, open]);
+
+    let cancelled = false;
+    async function loadVariant() {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await fetch(`/api/variants/${editVariantId}`);
+        if (!res.ok) {
+          if (!cancelled) {
+            setError("Failed to load variant");
+          }
+          return;
+        }
+        const variant = (await res.json()) as LoadedVariant;
+        if (cancelled) return;
+        setLabel(variant.label ?? "");
+        setVariantType(variant.variantType);
+        setBody(variant.body ?? "");
+        setStatus(variant.status);
+      } catch {
+        if (!cancelled) {
+          setError("Failed to load variant");
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    void loadVariant();
+    return () => {
+      cancelled = true;
+    };
+  }, [editVariantId, open]);
 
   async function handleSubmit() {
     setSaving(true);
     setError(null);
     try {
-      const payload: Record<string, unknown> = {
-        label: label.trim() ? label.trim() : null,
+      const payload = buildVariantSavePayload({
+        label,
         variantType,
-      };
-      if (body.trim()) {
-        payload.body = body.trim();
-      } else if (!editVariant) {
-        payload.body = null;
-      }
-      if (!editVariant || !isSimulatedCurrent || status !== "simulated") {
-        payload.status = DIALOG_STATUSES.includes(status as (typeof DIALOG_STATUSES)[number])
-          ? status
-          : isSimulatedCurrent
-            ? undefined
-            : status;
-      }
-      if (payload.status === undefined) {
-        delete payload.status;
-      }
+        body,
+        status,
+        isEdit: Boolean(editVariantId),
+        isSimulatedCurrent,
+      });
 
-      const url = editVariant
-        ? `/api/variants/${editVariant.id}`
+      const url = editVariantId
+        ? `/api/variants/${editVariantId}`
         : `/api/launches/${launchId}/variants`;
-      const method = editVariant ? "PUT" : "POST";
+      const method = editVariantId ? "PUT" : "POST";
       const res = await fetch(url, {
         method,
         headers: { "Content-Type": "application/json" },
@@ -114,7 +145,7 @@ export function VariantDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>{editVariant ? "Edit Variant" : "Add Variant"}</DialogTitle>
+          <DialogTitle>{editVariantId ? "Edit Variant" : "Add Variant"}</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4">
@@ -125,13 +156,14 @@ export function VariantDialog({
               value={label}
               onChange={(e) => setLabel(e.target.value)}
               placeholder="A"
+              disabled={loading}
             />
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>Type</Label>
-              <Select value={variantType} onValueChange={setVariantType}>
+              <Select value={variantType} onValueChange={setVariantType} disabled={loading}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -146,7 +178,7 @@ export function VariantDialog({
             </div>
             <div className="space-y-2">
               <Label>Status</Label>
-              <Select value={status} onValueChange={setStatus}>
+              <Select value={status} onValueChange={setStatus} disabled={loading}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -156,7 +188,7 @@ export function VariantDialog({
                       simulated
                     </SelectItem>
                   )}
-                  {DIALOG_STATUSES.map((value) => (
+                  {VARIANT_DIALOG_STATUSES.map((value) => (
                     <SelectItem key={value} value={value}>
                       {value}
                     </SelectItem>
@@ -173,10 +205,12 @@ export function VariantDialog({
               value={body}
               onChange={(e) => setBody(e.target.value)}
               rows={5}
-              placeholder={editVariant ? "Leave blank to keep existing copy" : "Variant copy"}
+              placeholder="Variant copy"
+              disabled={loading}
             />
           </div>
 
+          {loading && <p className="text-sm text-muted-foreground">Loading variant…</p>}
           {error && <p className="text-sm text-destructive">{error}</p>}
         </div>
 
@@ -184,8 +218,8 @@ export function VariantDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button onClick={handleSubmit} disabled={saving}>
-            {saving ? "Saving..." : editVariant ? "Update" : "Add"}
+          <Button onClick={handleSubmit} disabled={saving || loading}>
+            {saving ? "Saving..." : editVariantId ? "Update" : "Add"}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -5,6 +5,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
   Table,
   TableBody,
   TableCell,
@@ -18,6 +24,8 @@ import {
   parseAudienceSpec,
   sortVariantsForBoard,
 } from "@/lib/launches-display";
+
+const PUBLISHED_VARIANT_TOOLTIP = "Published variants are read-only";
 
 const STATUS_VARIANTS: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
   draft: "outline",
@@ -91,7 +99,8 @@ export function LaunchDetailView({
   const sortedVariants = sortVariantsForBoard(launch.variants);
 
   return (
-    <div className="space-y-6 max-w-3xl">
+    <TooltipProvider>
+      <div className="space-y-6 max-w-3xl">
       <div className="space-y-3">
         <Link href="/dashboard/launches" className="text-sm text-muted-foreground hover:text-foreground">
           ← Launches
@@ -243,17 +252,29 @@ export function LaunchDetailView({
                       </TableCell>
                       {onEditVariant && (
                         <TableCell>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            disabled={isPublished}
-                            title={
-                              isPublished ? "Published variants are read-only" : undefined
-                            }
-                            onClick={() => onEditVariant(variant.id)}
-                          >
-                            Edit
-                          </Button>
+                          {isPublished ? (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span
+                                  className="inline-flex"
+                                  aria-label={PUBLISHED_VARIANT_TOOLTIP}
+                                >
+                                  <Button variant="ghost" size="sm" disabled>
+                                    Edit
+                                  </Button>
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent>{PUBLISHED_VARIANT_TOOLTIP}</TooltipContent>
+                            </Tooltip>
+                          ) : (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => onEditVariant(variant.id)}
+                            >
+                              Edit
+                            </Button>
+                          )}
                         </TableCell>
                       )}
                     </TableRow>
@@ -264,6 +285,7 @@ export function LaunchDetailView({
           )}
         </CardContent>
       </Card>
-    </div>
+      </div>
+    </TooltipProvider>
   );
 }

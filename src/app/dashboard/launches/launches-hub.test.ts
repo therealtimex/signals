@@ -87,7 +87,7 @@ describe("UI 4.4 launches hub", () => {
     expect(html).toContain("Summer Launch");
     expect(html).toContain("live");
     expect(html).toContain("2 variants · 1 published");
-    expect(html).toContain(">1<");
+    expect(html).toContain(`/dashboard/launches/${launch.id}`);
   });
 
   it("list view shows Private badge for local_only launches when included", () => {
@@ -110,6 +110,7 @@ describe("UI 4.4 launches hub", () => {
       createElement(LaunchDetailView, {
         launch: details,
         linkedGoals: [{ id: goal.id, name: goal.name }],
+        onEditVariant: () => {},
       }),
     );
 
@@ -122,6 +123,8 @@ describe("UI 4.4 launches hub", () => {
     expect(html).toContain(`/dashboard/content/${published.contentItemId}`);
     expect(html).toContain("Draft A");
     expect(html).toContain(">—<");
+    expect(html).toContain('aria-label="Published variants are read-only"');
+    expect(html).toContain('data-slot="tooltip-trigger"');
   });
 
   it("detail view renders local_only guard callout and Private badge", () => {
