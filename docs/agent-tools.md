@@ -56,7 +56,7 @@ Then pass `Authorization: Bearer your-secret-token` on each request.
 | `log_interaction` | graph | Append interaction event for a contact |
 | `query_niches` | graph | List/search niche clusters with member counts |
 | `upsert_niche` | graph | Create or update a niche cluster |
-| `query_launches` | graph | List GTM launches with variant summaries and goal links |
+| `query_launches` | graph | List GTM launches with variant summaries (`variantType`, `predictionConfidence`, `simulatedAt`, `contentItemId` additive fields) and goal links |
 | `upsert_launch` | graph | Create or update a GTM launch |
 | `upsert_variant` | graph | Create or update a launch variant (publish via status) |
 | `semantic_search` | graph | Top-k semantic search over embedded nodes (query embed via RealtimeX) |

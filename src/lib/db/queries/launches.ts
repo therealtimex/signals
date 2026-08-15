@@ -12,6 +12,11 @@ export type LaunchVariantSummary = {
   label: string | null;
   status: string;
   predictedScore: number | null;
+  variantType: string;
+  predictionConfidence: number | null;
+  simulatedAt: number | null;
+  contentItemId: string | null;
+  createdAt: number;
 };
 
 export type LaunchWithDetails = Launch & {
@@ -84,6 +89,11 @@ function summarizeVariants(launchId: string): LaunchVariantSummary[] {
     label: variant.label,
     status: variant.status,
     predictedScore: variant.predictedScore,
+    variantType: variant.variantType,
+    predictionConfidence: variant.predictionConfidence,
+    simulatedAt: variant.simulatedAt,
+    contentItemId: variant.contentItemId,
+    createdAt: variant.createdAt,
   }));
 }
 

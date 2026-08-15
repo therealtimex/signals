@@ -176,6 +176,13 @@ describe("UI 4.1 REST API", () => {
     const body = await res.json();
     expect(res.status).toBe(200);
     expect(body.variants).toHaveLength(1);
+    expect(body.variants[0]).toMatchObject({
+      label: "Hook",
+      variantType: expect.any(String),
+      predictionConfidence: null,
+      simulatedAt: null,
+      contentItemId: null,
+    });
     expect(body.goalIds).toContain(goal.id);
   });
 
