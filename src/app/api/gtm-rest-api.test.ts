@@ -335,6 +335,33 @@ describe("UI 4.1 REST API", () => {
     const transcriptBody = await withTranscripts.json();
     expect(transcriptBody.agents).toHaveLength(1);
     expect(transcriptBody.agents[0]).toHaveProperty("transcript", null);
+
+    const completedLaunch = upsertLaunch({ name: "No calibration", primaryPlatform: "x" });
+    const completedVariant = upsertVariant({ launchId: completedLaunch.id, body: "copy" });
+    const completedContact = createContact({
+      name: "Done",
+      platform: "x",
+      platformUserId: "done-1",
+    });
+    const { run: completedRun } = createAndStartSimulationRun({
+      variantId: completedVariant.id,
+      populationSpec: { contactIds: [completedContact.id] },
+    });
+    completeSimulationRun(completedRun.id, {
+      predictedScore: 4,
+      predictionConfidence: 0.5,
+      predictedMetrics: { likes: 2 },
+    });
+
+    const noCalibration = await getSimulation(
+      new NextRequest(
+        `http://localhost/api/simulations/${completedRun.id}?includeCalibration=true`,
+      ),
+      { params: Promise.resolve({ id: completedRun.id }) },
+    );
+    const noCalibrationBody = await noCalibration.json();
+    expect(noCalibrationBody.calibrations).toEqual([]);
+    expect(noCalibrationBody.latestCalibration).toBeUndefined();
   });
 
   it("transcript route returns 200 and 404 codes", async () => {
@@ -521,6 +548,11 @@ describe("UI 4.1 REST API", () => {
     expect(body.latestCalibration).toMatchObject({
       simulationRunId: run.id,
       actualScore: expect.any(Number),
+    });
+    expect(body.calibrations).toHaveLength(1);
+    expect(body.calibrations[0]).toMatchObject({
+      simulationRunId: run.id,
+      observedUntil: PUBLISHED_AT + 1000,
     });
 
     const gtm = await getGtmContext(new NextRequest("http://localhost"), {

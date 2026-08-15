@@ -142,6 +142,15 @@ export function getLatestCalibrationForRun(
     .get();
 }
 
+export function listCalibrationsForRun(runId: string): SimulationCalibration[] {
+  return db
+    .select()
+    .from(simulationCalibrations)
+    .where(eq(simulationCalibrations.simulationRunId, runId))
+    .orderBy(desc(simulationCalibrations.observedUntil), desc(simulationCalibrations.computedAt))
+    .all();
+}
+
 export function calibrateSimulationRun(
   runId: string,
   input: CalibrateSimulationRunInput = {},

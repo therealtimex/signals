@@ -108,8 +108,11 @@ export function serializeSimulationRun(
     updatedAt: run.updatedAt,
     transcriptsPrunedAt: run.transcriptsPrunedAt,
     ...(agents ? { agents } : {}),
-    ...(opts?.includeCalibrations && "latestCalibration" in run && run.latestCalibration
-      ? { latestCalibration: run.latestCalibration }
+    ...(opts?.includeCalibrations
+      ? {
+          ...(run.latestCalibration ? { latestCalibration: run.latestCalibration } : {}),
+          calibrations: run.calibrations ?? [],
+        }
       : {}),
   };
 }

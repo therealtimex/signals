@@ -61,7 +61,7 @@ Then pass `Authorization: Bearer your-secret-token` on each request.
 | `upsert_variant` | graph | Create or update a launch variant (publish via status) |
 | `semantic_search` | graph | Top-k semantic search over embedded nodes (query embed via RealtimeX) |
 | `create_simulation_run` | graph | Start a Wind Tunnel simulation run (atomic create + start) |
-| `query_simulations` | graph | List simulation runs with optional agent grounding |
+| `query_simulations` | graph | List simulation runs with optional agent grounding. With `includeCalibrations: true`, detail payloads include `latestCalibration` and the full per-horizon `calibrations[]` history (same shape as `GET /api/simulations/[id]?includeCalibration=true`). |
 | `record_simulation_results` | graph | Batch per-agent simulation outcomes on a running run |
 | `complete_simulation_run` | graph | Complete/fail/cancel a run and project variant predictions. Default `status` is `completed`, which requires `predictedScore`, `predictionConfidence`, and `predictedMetrics` (engagement_metrics keyspace). `failed` requires `error`. |
 

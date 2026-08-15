@@ -129,6 +129,7 @@ describe("UI 4.4 launches hub", () => {
     expect(html).toContain("Grow audience");
     expect(html).toContain(`/dashboard/goals/${goal.id}`);
     expect(html).toContain("Winner");
+    expect(html).toContain(`/dashboard/launches/${launch.id}/variants/${published.id}`);
     expect(html).toContain("42.50");
     expect(html).toContain("80%");
     expect(html).toContain(`/dashboard/content/${published.contentItemId}`);
