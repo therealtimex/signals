@@ -1,6 +1,8 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { getContentItem, getThreadItems } from "@/lib/db/queries/content";
+import { getContentGtmContext } from "@/lib/db/queries/content-gtm-context";
+import { WindTunnelSection } from "@/components/wind-tunnel-section";
 import { listEngagementsByContentPost } from "@/lib/db/queries/engagements";
 import { getPlatformAccountByPlatform } from "@/lib/db/queries/platform-accounts";
 import { Card, CardContent } from "@/components/ui/card";
@@ -61,6 +63,7 @@ export default async function ContentDetailPage({
   // Get thread context if this item belongs to a thread
   const threadItems = item.threadId ? getThreadItems(item.threadId) : [];
   const isThread = threadItems.length > 1;
+  const gtm = getContentGtmContext(id)!;
 
   return (
     <div className="space-y-6 max-w-3xl">
@@ -248,6 +251,8 @@ export default async function ContentDetailPage({
           </CardContent>
         </Card>
       )}
+
+      <WindTunnelSection gtm={gtm} />
     </div>
   );
 }
