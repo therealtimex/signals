@@ -1,3 +1,19 @@
+import type { Platform } from "@/lib/db/platforms";
+import type { PlatformCapabilities } from "@/lib/platforms/capabilities";
+
+/** Thrown when a platform adapter or method is not implemented. */
+export class NotImplementedError extends Error {
+  readonly platform: Platform;
+  readonly method: string;
+
+  constructor(platform: Platform, method: string) {
+    super(`Platform "${platform}" does not implement ${method}`);
+    this.name = "NotImplementedError";
+    this.platform = platform;
+    this.method = method;
+  }
+}
+
 /** Decrypted OAuth credentials for a platform account. */
 export interface PlatformCredentials {
   accessToken: string;
@@ -47,7 +63,8 @@ export type RateLimitState = Record<string, RateLimitInfo>;
 
 /** Generic platform adapter — each social platform implements this contract. */
 export interface PlatformAdapter {
-  readonly platform: "x" | "linkedin" | "gmail" | "substack";
+  readonly platform: Platform;
+  readonly capabilities: PlatformCapabilities;
 
   /** Generate the OAuth authorization URL for initial connection. */
   getAuthorizationUrl(redirectUri: string, extended?: boolean): Promise<{ authUrl: string; state: string }>;

@@ -14,6 +14,7 @@ import {
 } from "@/lib/platforms/x/client";
 import { getRateLimitState } from "@/lib/platforms/rate-limiter";
 import { getPlatformAccountByPlatform } from "@/lib/db/queries/platform-accounts";
+import { PLATFORM_CAPABILITIES } from "@/lib/platforms/capabilities";
 import { randomBytes, createHash } from "crypto";
 import type { XUser } from "@/lib/platforms/x/client";
 
@@ -35,6 +36,7 @@ function toProfile(xUser: XUser): PlatformUserProfile {
 
 export class XPlatformAdapter implements PlatformAdapter {
   readonly platform = "x" as const;
+  readonly capabilities = PLATFORM_CAPABILITIES.x!;
 
   async getAuthorizationUrl(redirectUri: string, extended = false): Promise<{ authUrl: string; state: string }> {
     const { clientId } = getXClientCredentials();

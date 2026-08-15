@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { PLATFORM_ENUM } from "@/lib/db/platforms";
 import { listTemplates, createTemplate } from "@/lib/db/queries/workflow-templates";
 
 const createTemplateSchema = z.object({
   name: z.string().min(1, "Name is required"),
   description: z.string().optional(),
-  platform: z.enum(["x", "linkedin", "gmail", "substack"]).optional(),
+  platform: z.enum(PLATFORM_ENUM).optional(),
   templateType: z.enum([
     "outreach", "engagement", "content", "nurture", "prospecting", "enrichment", "pruning",
   ]),

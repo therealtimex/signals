@@ -10,6 +10,10 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Key, CheckCircle, XCircle, Loader2, Monitor, Globe, Trash2, Search } from "lucide-react";
 import { PlatformConnectionCard } from "@/components/platform-connection-card";
+import {
+  getPlatformsWithoutOAuth,
+  PLATFORM_DISPLAY_NAMES,
+} from "@/lib/platforms/capabilities";
 
 type AuthSource = "env_var" | "config" | "none";
 
@@ -1106,6 +1110,15 @@ function SettingsContent() {
               disconnecting={gmDisconnecting}
             />
           )}
+
+          {getPlatformsWithoutOAuth().map((platform) => (
+            <PlatformConnectionCard
+              key={platform}
+              platform={platform}
+              displayName={PLATFORM_DISPLAY_NAMES[platform] ?? platform}
+              status="coming_soon"
+            />
+          ))}
 
           <Separator />
 

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { PLATFORM_ENUM } from "@/lib/db/platforms";
 import { getContactById, updateContact, deleteContact } from "@/lib/db/queries/contacts";
 
 const updateContactSchema = z.object({
@@ -9,7 +10,7 @@ const updateContactSchema = z.object({
   headline: z.string().optional(),
   company: z.string().optional(),
   title: z.string().optional(),
-  platform: z.enum(["x", "linkedin", "gmail", "substack"]).nullable().optional(),
+  platform: z.enum(PLATFORM_ENUM).nullable().optional(),
   platformUserId: z.string().optional(),
   profileUrl: z.string().optional(),
   avatarUrl: z.string().optional(),

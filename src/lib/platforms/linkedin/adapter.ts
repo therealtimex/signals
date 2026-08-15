@@ -17,6 +17,7 @@ import {
   getConnections,
 } from "@/lib/platforms/linkedin/client";
 import { getRateLimitState } from "@/lib/platforms/rate-limiter";
+import { PLATFORM_CAPABILITIES } from "@/lib/platforms/capabilities";
 import { randomBytes } from "crypto";
 import type { LinkedInProfile, LinkedInConnection } from "@/lib/platforms/linkedin/client";
 
@@ -83,6 +84,7 @@ function connectionToUserProfile(connection: LinkedInConnection): PlatformUserPr
 
 export class LinkedInPlatformAdapter implements PlatformAdapter {
   readonly platform = "linkedin" as const;
+  readonly capabilities = PLATFORM_CAPABILITIES.linkedin!;
 
   async getAuthorizationUrl(redirectUri: string): Promise<{ authUrl: string; state: string }> {
     const { clientId } = getLinkedInClientCredentials();
