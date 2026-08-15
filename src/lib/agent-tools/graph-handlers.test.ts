@@ -257,6 +257,43 @@ describe("graph agent tools", () => {
         }),
       ],
     });
+
+    const updatedIdentity = await invokeAgentTool("upsert_org_identity", {
+      orgId: orgRow!.id,
+      platform: "linkedin",
+      platformUserId: "org-identity-co",
+      followersCount: 950,
+      displayName: "Org Identity Co Updated",
+    });
+    expect(updatedIdentity).toMatchObject({
+      id: (createdIdentity as { id: string }).id,
+      orgId: orgRow!.id,
+      platform: "linkedin",
+      platformUserId: "org-identity-co",
+      followersCount: 950,
+      displayName: "Org Identity Co Updated",
+    });
+
+    const secondOrgId = nanoid();
+    db.insert(orgs)
+      .values({
+        id: secondOrgId,
+        name: "Org Identity Co EU",
+        scope: "shared",
+        source: "test",
+      })
+      .run();
+
+    await expect(
+      invokeAgentTool("upsert_org_identity", {
+        orgId: secondOrgId,
+        platform: "linkedin",
+        platformUserId: "org-identity-co",
+      }),
+    ).rejects.toMatchObject({
+      code: "EXECUTION_ERROR",
+      message: expect.stringContaining("Reassign, don't duplicate"),
+    });
   });
 
   it("upsert_org_identity surfaces PlatformAccountConflictError via invokeAgentTool", async () => {
