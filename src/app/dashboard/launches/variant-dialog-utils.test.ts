@@ -4,7 +4,9 @@ import {
   VARIANT_DIALOG_STATUSES,
   buildVariantSavePayload,
   canSubmitVariantDialog,
+  isVariantDialogFieldsDisabled,
   resolveVariantEditBody,
+  resolveVariantSaveErrorMessage,
 } from "@/app/dashboard/launches/variant-dialog-utils";
 
 describe("variant dialog utils", () => {
@@ -83,5 +85,30 @@ describe("variant dialog utils", () => {
         loading: false,
       }),
     ).toBe(true);
+  });
+
+  it("keeps loaded edit fields enabled and retryable after a save error", () => {
+    const canSubmit = canSubmitVariantDialog({
+      editVariantId: "variant-1",
+      loadedEditVariantId: "variant-1",
+      loadError: null,
+      loading: false,
+    });
+
+    expect(canSubmit).toBe(true);
+    expect(
+      isVariantDialogFieldsDisabled({
+        loading: false,
+        editVariantId: "variant-1",
+        canSubmit,
+      }),
+    ).toBe(false);
+  });
+
+  it("preserves server save error messages and maps rejected saves to a fallback", () => {
+    expect(resolveVariantSaveErrorMessage({ error: "Published variants are read-only" })).toBe(
+      "Published variants are read-only",
+    );
+    expect(resolveVariantSaveErrorMessage(null)).toBe("Failed to save variant");
   });
 });

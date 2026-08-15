@@ -24,6 +24,8 @@ import {
   VARIANT_DIALOG_STATUSES,
   buildVariantSavePayload,
   canSubmitVariantDialog,
+  isVariantDialogFieldsDisabled,
+  resolveVariantSaveErrorMessage,
 } from "./variant-dialog-utils";
 
 interface VariantDialogProps {
@@ -61,17 +63,22 @@ export function VariantDialog({
   const [status, setStatus] = useState<string>(EMPTY_FORM.status);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [loadedEditVariantId, setLoadedEditVariantId] = useState<string | null>(null);
 
   const isSimulatedCurrent = status === "simulated";
   const canSubmit = canSubmitVariantDialog({
     editVariantId,
     loadedEditVariantId,
-    loadError: error,
+    loadError,
     loading,
   });
-  const fieldsDisabled = loading || (Boolean(editVariantId) && !canSubmit);
+  const fieldsDisabled = isVariantDialogFieldsDisabled({
+    loading,
+    editVariantId,
+    canSubmit,
+  });
 
   useEffect(() => {
     if (!open) return;
@@ -81,7 +88,8 @@ export function VariantDialog({
       setVariantType(EMPTY_FORM.variantType);
       setBody(EMPTY_FORM.body);
       setStatus(EMPTY_FORM.status);
-      setError(null);
+      setLoadError(null);
+      setSaveError(null);
       setLoading(false);
       setLoadedEditVariantId(null);
       return;
@@ -91,7 +99,8 @@ export function VariantDialog({
     let cancelled = false;
     async function loadVariant() {
       setLoading(true);
-      setError(null);
+      setLoadError(null);
+      setSaveError(null);
       setLoadedEditVariantId(null);
       setLabel(EMPTY_FORM.label);
       setVariantType(EMPTY_FORM.variantType);
@@ -101,7 +110,7 @@ export function VariantDialog({
         const res = await fetch(`/api/variants/${variantId}`);
         if (!res.ok) {
           if (!cancelled) {
-            setError("Failed to load variant");
+            setLoadError("Failed to load variant");
           }
           return;
         }
@@ -114,7 +123,7 @@ export function VariantDialog({
         setLoadedEditVariantId(variantId);
       } catch {
         if (!cancelled) {
-          setError("Failed to load variant");
+          setLoadError("Failed to load variant");
         }
       } finally {
         if (!cancelled) {
@@ -133,7 +142,7 @@ export function VariantDialog({
     if (!canSubmit) return;
 
     setSaving(true);
-    setError(null);
+    setSaveError(null);
     try {
       const payload = buildVariantSavePayload({
         label,
@@ -161,7 +170,9 @@ export function VariantDialog({
       }
 
       const response = (await res.json().catch(() => null)) as { error?: string } | null;
-      setError(response?.error ?? "Failed to save variant");
+      setSaveError(resolveVariantSaveErrorMessage(response));
+    } catch {
+      setSaveError(resolveVariantSaveErrorMessage(null));
     } finally {
       setSaving(false);
     }
@@ -241,7 +252,8 @@ export function VariantDialog({
           </div>
 
           {loading && <p className="text-sm text-muted-foreground">Loading variant…</p>}
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {loadError && <p className="text-sm text-destructive">{loadError}</p>}
+          {saveError && <p className="text-sm text-destructive">{saveError}</p>}
         </div>
 
         <DialogFooter>

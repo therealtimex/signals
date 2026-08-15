@@ -20,6 +20,21 @@ export function canSubmitVariantDialog(input: {
   return input.loadedEditVariantId === input.editVariantId && input.loadError === null;
 }
 
+export function isVariantDialogFieldsDisabled(input: {
+  loading: boolean;
+  editVariantId?: string | null;
+  canSubmit: boolean;
+}): boolean {
+  return input.loading || (Boolean(input.editVariantId) && !input.canSubmit);
+}
+
+export function resolveVariantSaveErrorMessage(
+  response: { error?: string } | null,
+  fallback = "Failed to save variant",
+): string {
+  return response?.error ?? fallback;
+}
+
 export function buildVariantSavePayload(input: {
   label: string;
   variantType: string;
