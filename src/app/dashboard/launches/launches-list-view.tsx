@@ -1,4 +1,7 @@
-import Link from "next/link";
+"use client";
+
+import { useRouter } from "next/navigation";
+import type { KeyboardEvent } from "react";
 import { Badge } from "@/components/ui/badge";
 import {
   Table,
@@ -10,6 +13,10 @@ import {
 } from "@/components/ui/table";
 import type { LaunchWithDetails } from "@/lib/db/queries/launches";
 import { formatLaunchDate, formatVariantCount } from "@/lib/launches-display";
+import {
+  getLaunchDetailHref,
+  isLaunchRowActivationKey,
+} from "./launches-list-utils";
 
 const STATUS_VARIANTS: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
   draft: "outline",
@@ -26,6 +33,18 @@ interface LaunchesListViewProps {
 }
 
 export function LaunchesListView({ launches }: LaunchesListViewProps) {
+  const router = useRouter();
+
+  function navigateToLaunch(launchId: string) {
+    router.push(getLaunchDetailHref(launchId));
+  }
+
+  function handleRowKeyDown(event: KeyboardEvent<HTMLTableRowElement>, launchId: string) {
+    if (!isLaunchRowActivationKey(event.key)) return;
+    event.preventDefault();
+    navigateToLaunch(launchId);
+  }
+
   return (
     <Table>
       <TableHeader>
@@ -39,29 +58,32 @@ export function LaunchesListView({ launches }: LaunchesListViewProps) {
       </TableHeader>
       <TableBody>
         {launches.map((launch) => (
-          <TableRow key={launch.id} className="hover:bg-muted/50">
-            <TableCell colSpan={5} className="p-0">
-              <Link
-                href={`/dashboard/launches/${launch.id}`}
-                className="grid grid-cols-5 items-center gap-2 px-2 py-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                <div className="flex items-center gap-2">
-                  <span className="font-medium">{launch.name}</span>
-                  {launch.scope === "local_only" && (
-                    <Badge variant="outline">Private</Badge>
-                  )}
-                </div>
-                <div>
-                  <Badge variant={STATUS_VARIANTS[launch.status] ?? "outline"}>
-                    {launch.status}
-                  </Badge>
-                </div>
-                <div>{formatVariantCount(launch.variants)}</div>
-                <div>{launch.goalIds.length}</div>
-                <div className="text-muted-foreground">
-                  {formatLaunchDate(launch.updatedAt)}
-                </div>
-              </Link>
+          <TableRow
+            key={launch.id}
+            className="cursor-pointer hover:bg-muted/50"
+            tabIndex={0}
+            role="link"
+            aria-label={`Open launch ${launch.name}`}
+            onClick={() => navigateToLaunch(launch.id)}
+            onKeyDown={(event) => handleRowKeyDown(event, launch.id)}
+          >
+            <TableCell>
+              <div className="flex items-center gap-2">
+                <span className="font-medium">{launch.name}</span>
+                {launch.scope === "local_only" && (
+                  <Badge variant="outline">Private</Badge>
+                )}
+              </div>
+            </TableCell>
+            <TableCell>
+              <Badge variant={STATUS_VARIANTS[launch.status] ?? "outline"}>
+                {launch.status}
+              </Badge>
+            </TableCell>
+            <TableCell>{formatVariantCount(launch.variants)}</TableCell>
+            <TableCell>{launch.goalIds.length}</TableCell>
+            <TableCell className="text-muted-foreground">
+              {formatLaunchDate(launch.updatedAt)}
             </TableCell>
           </TableRow>
         ))}

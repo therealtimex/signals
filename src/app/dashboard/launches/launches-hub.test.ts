@@ -1,16 +1,21 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { nanoid } from "nanoid";
 import { WindTunnelSection } from "@/components/wind-tunnel-section";
 import type { ContentGtmContext } from "@/lib/db/queries/content-gtm-context";
+import { resetCoreTables } from "@/test/db";
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn() }),
+}));
+
 import { LaunchesListView } from "@/app/dashboard/launches/launches-list-view";
 import { LaunchDetailView } from "@/app/dashboard/launches/launch-detail-view";
 import { createGoal } from "@/lib/db/queries/goals";
 import { getLaunchWithDetails, upsertLaunch } from "@/lib/db/queries/launches";
 import { upsertGraphEdge } from "@/lib/db/queries/graph";
 import { publishVariant, upsertVariant } from "@/lib/db/queries/variants";
-import { resetCoreTables } from "@/test/db";
 
 describe("UI 4.4 launches hub", () => {
   beforeEach(() => {
@@ -76,10 +81,12 @@ describe("UI 4.4 launches hub", () => {
       simulatedAt: 1_700_000_000,
       contentItemId: published.contentItemId,
       predictedScore: 42.5,
+      createdAt: expect.any(Number),
     });
+    expect(Object.keys(publishedSummary ?? {})).not.toContain("updatedAt");
   });
 
-  it("list view renders launch row with variant and goal counts", () => {
+  it("list view renders five table cells per row with variant and goal counts", () => {
     const { launch } = seedSharedLaunchFixture();
     const details = getLaunchWithDetails(launch.id, { includeLocalOnly: true })!;
     const html = renderToStaticMarkup(createElement(LaunchesListView, { launches: [details] }));
@@ -87,7 +94,11 @@ describe("UI 4.4 launches hub", () => {
     expect(html).toContain("Summer Launch");
     expect(html).toContain("live");
     expect(html).toContain("2 variants · 1 published");
-    expect(html).toContain(`/dashboard/launches/${launch.id}`);
+    expect(html).toContain(">1<");
+    expect(html).not.toContain('colSpan="5"');
+    expect(html).toContain('role="link"');
+    expect(html).toContain('aria-label="Open launch Summer Launch"');
+    expect((html.match(/data-slot="table-cell"/g) ?? []).length).toBe(5);
   });
 
   it("list view shows Private badge for local_only launches when included", () => {

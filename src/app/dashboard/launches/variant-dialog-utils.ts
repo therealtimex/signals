@@ -9,6 +9,17 @@ export function resolveVariantEditBody(body: string): string | null {
   return body.trim() ? body.trim() : null;
 }
 
+export function canSubmitVariantDialog(input: {
+  editVariantId?: string | null;
+  loadedEditVariantId: string | null;
+  loadError: string | null;
+  loading: boolean;
+}): boolean {
+  if (input.loading) return false;
+  if (!input.editVariantId) return true;
+  return input.loadedEditVariantId === input.editVariantId && input.loadError === null;
+}
+
 export function buildVariantSavePayload(input: {
   label: string;
   variantType: string;

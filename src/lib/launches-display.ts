@@ -1,4 +1,7 @@
-import type { LaunchVariantSummary } from "@/lib/db/queries/launches";
+import type {
+  LaunchVariantBoardItem,
+  LaunchVariantSummary,
+} from "@/lib/db/queries/launches";
 
 export function formatLaunchDate(unix: number | null | undefined): string {
   if (!unix) return "—";
@@ -18,17 +21,19 @@ export function formatVariantCount(variants: LaunchVariantSummary[]): string {
   return published > 0 ? `${base} · ${published} published` : base;
 }
 
-export function sortVariantsForBoard(variants: LaunchVariantSummary[]): LaunchVariantSummary[] {
+export function sortVariantsForBoard(
+  variants: LaunchVariantBoardItem[],
+): LaunchVariantBoardItem[] {
   return [...variants].sort((a, b) => {
     const aScore = a.predictedScore;
     const bScore = b.predictedScore;
     if (aScore == null && bScore == null) {
-      return a.id.localeCompare(b.id);
+      return a.createdAt - b.createdAt;
     }
     if (aScore == null) return 1;
     if (bScore == null) return -1;
     if (bScore !== aScore) return bScore - aScore;
-    return a.id.localeCompare(b.id);
+    return a.createdAt - b.createdAt;
   });
 }
 

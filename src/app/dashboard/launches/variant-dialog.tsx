@@ -23,6 +23,7 @@ import { VARIANT_TYPES } from "@/lib/db/variant-types";
 import {
   VARIANT_DIALOG_STATUSES,
   buildVariantSavePayload,
+  canSubmitVariantDialog,
 } from "./variant-dialog-utils";
 
 interface VariantDialogProps {
@@ -40,6 +41,13 @@ type LoadedVariant = {
   status: string;
 };
 
+const EMPTY_FORM = {
+  label: "",
+  variantType: "post",
+  body: "",
+  status: "draft",
+};
+
 export function VariantDialog({
   open,
   onOpenChange,
@@ -47,35 +55,50 @@ export function VariantDialog({
   launchId,
   editVariantId,
 }: VariantDialogProps) {
-  const [label, setLabel] = useState("");
-  const [variantType, setVariantType] = useState<string>("post");
-  const [body, setBody] = useState("");
-  const [status, setStatus] = useState<string>("draft");
+  const [label, setLabel] = useState(EMPTY_FORM.label);
+  const [variantType, setVariantType] = useState<string>(EMPTY_FORM.variantType);
+  const [body, setBody] = useState(EMPTY_FORM.body);
+  const [status, setStatus] = useState<string>(EMPTY_FORM.status);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loadedEditVariantId, setLoadedEditVariantId] = useState<string | null>(null);
 
   const isSimulatedCurrent = status === "simulated";
+  const canSubmit = canSubmitVariantDialog({
+    editVariantId,
+    loadedEditVariantId,
+    loadError: error,
+    loading,
+  });
+  const fieldsDisabled = loading || (Boolean(editVariantId) && !canSubmit);
 
   useEffect(() => {
     if (!open) return;
 
     if (!editVariantId) {
-      setLabel("");
-      setVariantType("post");
-      setBody("");
-      setStatus("draft");
+      setLabel(EMPTY_FORM.label);
+      setVariantType(EMPTY_FORM.variantType);
+      setBody(EMPTY_FORM.body);
+      setStatus(EMPTY_FORM.status);
       setError(null);
       setLoading(false);
+      setLoadedEditVariantId(null);
       return;
     }
 
+    const variantId = editVariantId;
     let cancelled = false;
     async function loadVariant() {
       setLoading(true);
       setError(null);
+      setLoadedEditVariantId(null);
+      setLabel(EMPTY_FORM.label);
+      setVariantType(EMPTY_FORM.variantType);
+      setBody(EMPTY_FORM.body);
+      setStatus(EMPTY_FORM.status);
       try {
-        const res = await fetch(`/api/variants/${editVariantId}`);
+        const res = await fetch(`/api/variants/${variantId}`);
         if (!res.ok) {
           if (!cancelled) {
             setError("Failed to load variant");
@@ -88,6 +111,7 @@ export function VariantDialog({
         setVariantType(variant.variantType);
         setBody(variant.body ?? "");
         setStatus(variant.status);
+        setLoadedEditVariantId(variantId);
       } catch {
         if (!cancelled) {
           setError("Failed to load variant");
@@ -106,6 +130,8 @@ export function VariantDialog({
   }, [editVariantId, open]);
 
   async function handleSubmit() {
+    if (!canSubmit) return;
+
     setSaving(true);
     setError(null);
     try {
@@ -156,14 +182,18 @@ export function VariantDialog({
               value={label}
               onChange={(e) => setLabel(e.target.value)}
               placeholder="A"
-              disabled={loading}
+              disabled={fieldsDisabled}
             />
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>Type</Label>
-              <Select value={variantType} onValueChange={setVariantType} disabled={loading}>
+              <Select
+                value={variantType}
+                onValueChange={setVariantType}
+                disabled={fieldsDisabled}
+              >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -178,7 +208,7 @@ export function VariantDialog({
             </div>
             <div className="space-y-2">
               <Label>Status</Label>
-              <Select value={status} onValueChange={setStatus} disabled={loading}>
+              <Select value={status} onValueChange={setStatus} disabled={fieldsDisabled}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -206,7 +236,7 @@ export function VariantDialog({
               onChange={(e) => setBody(e.target.value)}
               rows={5}
               placeholder="Variant copy"
-              disabled={loading}
+              disabled={fieldsDisabled}
             />
           </div>
 
@@ -218,7 +248,7 @@ export function VariantDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button onClick={handleSubmit} disabled={saving || loading}>
+          <Button onClick={handleSubmit} disabled={saving || !canSubmit}>
             {saving ? "Saving..." : editVariantId ? "Update" : "Add"}
           </Button>
         </DialogFooter>

@@ -183,6 +183,7 @@ describe("UI 4.1 REST API", () => {
       simulatedAt: null,
       contentItemId: null,
     });
+    expect(body.variants[0]).not.toHaveProperty("createdAt");
     expect(body.goalIds).toContain(goal.id);
   });
 

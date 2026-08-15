@@ -3,6 +3,7 @@ import { VARIANT_STATUSES } from "@/lib/db/gtm-status";
 import {
   VARIANT_DIALOG_STATUSES,
   buildVariantSavePayload,
+  canSubmitVariantDialog,
   resolveVariantEditBody,
 } from "@/app/dashboard/launches/variant-dialog-utils";
 
@@ -44,5 +45,43 @@ describe("variant dialog utils", () => {
       variantType: "post",
       body: "copy",
     });
+  });
+
+  it("blocks edit submit until the current variant loads successfully", () => {
+    expect(
+      canSubmitVariantDialog({
+        editVariantId: "variant-1",
+        loadedEditVariantId: null,
+        loadError: null,
+        loading: true,
+      }),
+    ).toBe(false);
+
+    expect(
+      canSubmitVariantDialog({
+        editVariantId: "variant-1",
+        loadedEditVariantId: null,
+        loadError: "Failed to load variant",
+        loading: false,
+      }),
+    ).toBe(false);
+
+    expect(
+      canSubmitVariantDialog({
+        editVariantId: "variant-1",
+        loadedEditVariantId: "variant-2",
+        loadError: null,
+        loading: false,
+      }),
+    ).toBe(false);
+
+    expect(
+      canSubmitVariantDialog({
+        editVariantId: "variant-1",
+        loadedEditVariantId: "variant-1",
+        loadError: null,
+        loading: false,
+      }),
+    ).toBe(true);
   });
 });

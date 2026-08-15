@@ -1,4 +1,7 @@
-import type { LaunchWithDetails } from "@/lib/db/queries/launches";
+import {
+  toLaunchVariantSummary,
+  type LaunchWithDetails,
+} from "@/lib/db/queries/launches";
 import type { getSimulationRun } from "@/lib/db/queries/simulations";
 import type { Variant } from "@/lib/db/types";
 
@@ -30,7 +33,7 @@ export function serializeLaunch(launch: LaunchWithDetails) {
     completedAt: launch.completedAt,
     createdAt: launch.createdAt,
     updatedAt: launch.updatedAt,
-    variants: launch.variants,
+    variants: launch.variants.map(toLaunchVariantSummary),
     goalIds: launch.goalIds,
   };
 }
