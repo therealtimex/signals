@@ -21,6 +21,7 @@ import {
   createAndStartSimulationRun,
   completeSimulationRun,
   createSimulationRun,
+  getSimulationAgentTranscript,
   getSimulationRun,
   listSimulationRuns,
   recordSimulationAgentResults,
@@ -782,5 +783,40 @@ describe("simulation transcripts and retention (slice 3.3)", () => {
       includeTranscripts: true,
     });
     assertNoPrivacySentinels(listed);
+  });
+});
+
+describe("getSimulationAgentTranscript (ui-4.1)", () => {
+  beforeEach(() => {
+    resetCoreTables();
+  });
+
+  it("returns undefined, null, or transcript object", () => {
+    const launch = upsertLaunch({ name: "Transcript API", primaryPlatform: "x" });
+    const variant = upsertVariant({ launchId: launch.id, body: "copy" });
+    const contact = createContact({ name: "Agent", platform: "x", platformUserId: "tr-1" });
+    const { run, agents } = createAndStartSimulationRun({
+      variantId: variant.id,
+      populationSpec: { contactIds: [contact.id] },
+    });
+    const agentId = agents[0]!.id;
+
+    expect(getSimulationAgentTranscript(run.id, `missing-${nanoid()}`)).toBeUndefined();
+    expect(getSimulationAgentTranscript(run.id, agentId)).toBeNull();
+
+    recordSimulationAgentResults(run.id, [
+      {
+        agentId,
+        engagementScore: 55,
+        outcome: "like",
+        transcript: [{ role: "agent", text: "Reasoning" }],
+      },
+    ]);
+
+    const transcript = getSimulationAgentTranscript(run.id, agentId);
+    expect(transcript).toMatchObject({
+      byteSize: expect.any(Number),
+      content: expect.anything(),
+    });
   });
 });

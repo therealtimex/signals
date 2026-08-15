@@ -36,6 +36,7 @@ import type {
   calibrateSimulationRunSchema,
 } from "@/lib/agent-tools/graph-schemas";
 import { calibrateSimulationRun, serializeCalibration } from "@/lib/db/queries/calibrations";
+import { serializeSimulationRun } from "@/lib/serializers/gtm";
 import type { z } from "zod";
 
 export async function handleQueryOrgs(input: z.infer<typeof queryOrgsSchema>) {
@@ -373,48 +374,6 @@ export async function handleUpsertOrgIdentity(input: z.infer<typeof upsertOrgIde
   return {
     ...serializeOrgIdentity(identity),
     message: "Org identity upserted.",
-  };
-}
-
-function serializeSimulationRun(
-  run: NonNullable<ReturnType<typeof getSimulationRun>>,
-  opts?: { includeAgents?: boolean; includeTranscripts?: boolean; includeCalibrations?: boolean },
-) {
-  const agents =
-    opts?.includeAgents && run.agents
-      ? run.agents.map((agent) => ({
-          id: agent.id,
-          contactId: agent.contactId,
-          orgId: agent.orgId,
-          contactPersonaId: agent.contactPersonaId,
-          grounding: agent.grounding,
-          engagementScore: agent.engagementScore,
-          outcome: agent.outcome,
-          predictedActions: agent.predictedActions,
-          ...(opts?.includeTranscripts && agent.transcript
-            ? { transcript: agent.transcript }
-            : {}),
-        }))
-      : undefined;
-
-  return {
-    id: run.id,
-    variantId: run.variantId,
-    batchId: run.batchId,
-    status: run.status,
-    agentCount: run.agentCount,
-    predictionModel: run.predictionModel,
-    predictedScore: run.predictedScore,
-    predictionConfidence: run.predictionConfidence,
-    predictedMetrics: JSON.parse(run.predictedMetrics ?? "{}") as Record<string, unknown>,
-    scope: run.scope,
-    source: run.source,
-    startedAt: run.startedAt,
-    completedAt: run.completedAt,
-    ...(agents ? { agents } : {}),
-    ...(opts?.includeCalibrations && "latestCalibration" in run && run.latestCalibration
-      ? { latestCalibration: run.latestCalibration }
-      : {}),
   };
 }
 

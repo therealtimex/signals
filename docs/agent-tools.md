@@ -65,6 +65,8 @@ Then pass `Authorization: Bearer your-secret-token` on each request.
 | `record_simulation_results` | graph | Batch per-agent simulation outcomes on a running run |
 | `complete_simulation_run` | graph | Complete/fail/cancel a run and project variant predictions. Default `status` is `completed`, which requires `predictedScore`, `predictionConfidence`, and `predictedMetrics` (engagement_metrics keyspace). `failed` requires `error`. |
 
+Simulation run tool responses include additive fields (`populationSpec`, `error`, `workflowRunId`, `createdAt`, `updatedAt`, `transcriptsPrunedAt`) shared with the dashboard REST API (`specs/ui-4.1-rest-api.md`).
+
 `create_contact` / `update_contact` with a `company` field also dual-write an `orgs` row and `works_at` edge (contacts projection unchanged).
 
 `semantic_search` requires Signals running as a RealtimeX Local App with the `llm.embed` permission granted. Vectors are stored locally in SQLite; only embedding generation is delegated to RealtimeX.
