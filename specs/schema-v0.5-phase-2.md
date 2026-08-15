@@ -471,6 +471,105 @@ export const orgIdentityMetrics = sqliteTable("org_identity_metrics", {
 
 Cross-table ambiguity guard: the same platform account must not be claimed as both a contact identity and an org identity. The write path checks `contact_identities` for `(platform, platform_user_id)` before creating an org identity (and vice versa) and rejects with a "reassign, don't duplicate" error; `graph-integrity` reports any duplicates that slip through sync races. `graph_edges.src_type`/`dst_type` gain the `org_identity` value via the permitted one-time enum widen.
 
+#### §4.4 Amendment D — slice 2.4 boundaries (2026-08-15, kickoff for #36)
+
+The DDL sketch above is approved verbatim: one additive migration (next in sequence,
+`0012`) containing exactly the two CREATE TABLEs and three indexes. **No backfill in
+this slice** — there is no pre-existing org platform data to lift, so §4 rules 5–6
+are not triggered; N-1 safety is by construction (rule 8: new tables are invisible to
+old binaries) and the standard old-binary test covers it. Everything below pins down
+what the sketch left implicit, corrected against a code audit of `main` @ `c6dcd14`.
+
+**1. The enum widen is code-only — no DDL.** `graph_edges.src_type`/`dst_type` are
+plain `text NOT NULL` in SQLite (verified: migration `0005` emits no CHECK
+constraint; Drizzle text enums are TypeScript-level). The permitted §4-rule-4 widen
+is therefore three code edits and zero migrations: add `org_identity` to both enum
+arrays in `schema.ts` (which widens `GraphNodeType` automatically), to `NODE_TYPES`
+in `agent-tools/graph-schemas.ts`, and a `case "org_identity": return orgIdentities`
+in `graph.ts`'s `nodeTable()`. That single switch case is load-bearing twice over:
+`validateEdgeEndpoints` (write path) and the `graph-integrity` edge/embedding orphan
+sweeps all resolve endpoints through `nodeExists` → `nodeTable()`, so no separate
+integrity-resolution change exists. `drizzle-kit generate` must emit nothing for the
+enum edit — if it proposes a table rebuild, stop and escalate rather than commit it.
+Accepted naming asymmetry: the existing `platform_identity` value continues to mean
+*contact* identities (renaming an enum value in place is a forbidden mutation);
+`org_identity` is its org counterpart. Extending `node-labels.ts` is optional (it has
+a `default` branch), but any exhaustive `GraphNodeType` switch the compiler flags
+must gain the new case.
+
+**2. Dedup guard (ADR-022-5): one shared module, one typed error.** A shared helper
+(suggested `src/lib/db/identity-claims.ts`) exports
+`assertPlatformAccountUnclaimed(platform, platformUserId, { claimant: "contact" | "org", excludeId? })`
+and a typed `PlatformAccountConflictError` carrying
+`{ platform, platformUserId, claimedBy: { kind, id } }` with the
+"reassign, don't duplicate" message. It is wired into all four write paths:
+`createIdentity`/`updateIdentity` in `queries/identities.ts` (checks
+`org_identities`) and `createOrgIdentity`/`updateOrgIdentity` (checks
+`contact_identities`); update calls exclude the row's own claim. Sync callers treat
+the throw like any other per-item sync error — no special casing. The check-then-
+insert on the shared synchronous better-sqlite3 client is race-free within one
+process; residual cross-process races are exactly what the integrity check (below)
+is for.
+
+**3. `graph-integrity` duplicate report is report-only.** New check: join the two
+identity tables on `(platform, platform_user_id)` and report each pair under a new
+issue kind (`duplicate_platform_account`, both row ids included), extending
+`GraphIntegrityReport` additively the same way embedding issues were.
+`repairGraphIntegrity` never touches these — ownership is a human/agent decision.
+
+**4. Query layer mirrors `queries/identities.ts`; the lift helper is shared, and the
+snapshot table must not be born dormant.** `src/lib/db/queries/org-identities.ts`
+mirrors the contact file (`listOrgIdentitiesByOrg`, `getOrgIdentityById`,
+`createOrgIdentity`, `updateOrgIdentity`, `deleteOrgIdentityForOrg`). The "stats
+population hook" is the contact pattern: `liftIdentityStatsFromPlatformData` applied
+on create/update — retype its stat-fields shape structurally so both identity tables
+share the one helper (ADR-022-5's "shared TS helpers"). Platform is validated against
+the `PLATFORMS` registry via `assertPlatform` (new-table rule, §5) — not the legacy
+four-platform zod enum still used by the contact identities API route. Audit fact:
+`identity_metrics` has **no production writer** on `main` — the contact snapshot
+table is dormant pending sync epics. Do not mirror the dormancy:
+`createOrgIdentity`/`updateOrgIdentity` append one `org_identity_metrics` row
+whenever the write changes any of `followers_count` / `following_count` /
+`posts_count` / `listed_count` (from explicit input or the lift), plus a
+`listOrgIdentityMetrics(orgIdentityId, { limit? })` read helper. This write-path
+append is the only population point available before Phase 3 needs history.
+Populating `identity_metrics` the same way on the contact side is a follow-up issue
+(file at PR time), not this slice.
+
+**5. Agent tools: exactly two, and §8 is extended accordingly.** Audit facts: no
+contact-identity agent tools exist (the "contact-identity tool precedent" for tools
+is vacuous — contact identities are written by platform sync and REST routes only),
+and there are no `/api/orgs` routes at all. Without tools, `org_identities` would be
+write-unreachable until Phase 3. Slice 2.4 therefore ships (registry + schemas +
+handlers + `realtimex-signals` skill docs; 25 → 27 tools):
+
+- `query_org_identities({ orgId?, platform?, page?, pageSize? })` → `{ total,
+  identities: [...] }` with the profile/stat columns. No `includeLocalOnly`
+  parameter: identity rows carry no scope column (public platform facts, matching
+  `contact_identities`); org-level scope filtering stays where it lives today
+  (`query_orgs`, central export boundary).
+- `upsert_org_identity({ id?, orgId, platform, platformUserId, ...profile/stat
+  fields, platformData?, isPrimary?, isActive? })` — update by explicit `id`;
+  otherwise, if `(platform, platformUserId)` already exists on the **same** org,
+  update that row; if it exists on a different org or is claimed by a contact,
+  surface `PlatformAccountConflictError` verbatim (reassignment must be deliberate:
+  delete/repoint first, or pass the explicit `id`). Insert otherwise. Platform
+  validated against `PLATFORMS`.
+- These tools write no graph edges: org → org_identity connectivity is the typed FK
+  (intra-aggregate); cross-node edges use the existing `upsert_edge` with the widened
+  node type, per the slice 2.1/2.2 precedent.
+
+**6. Tests.** Query-layer CRUD + lift; dedup guard in all four write paths including
+self-exclusion on update and the typed error shape; snapshot-append on stat change
+and no-append otherwise; integrity `duplicate_platform_account` report;
+`org_identity` edge endpoints (valid upsert succeeds, orphan sweep flags a deleted
+org identity); both tool handlers including conflict surfacing; migration/old-binary
+test per repo convention; `npm run check` green.
+
+**Out of scope confirmed:** polymorphic `platform_identities`, org explore-card UI,
+sync adapter stubs (2.6, #37), contact-side `identity_metrics` population, and any
+`/api/orgs` REST surface.
+
 ---
 
 ## 5. Vocabulary & Validation Rules (recap applied to Phase 2)
@@ -587,6 +686,8 @@ The 19 registered tools are untouched. New tools (registry + schemas + handlers 
 | `upsert_launch` | create/update a launch (brief, status, audience spec) | |
 | `upsert_variant` | add/update a variant under a launch | prediction fields writable by simulation agents |
 | `semantic_search` | top-k nodes by embedding similarity | `includeLocalOnly?: boolean` default `false`, same auditability rationale as `query_graph` |
+| `query_org_identities` | list org platform identities with profile/stat fields | *(Amendment D)* no scope param — identity rows are unscoped public platform facts |
+| `upsert_org_identity` | create/update an org platform identity | *(Amendment D)* natural-key update within same org; cross-claim conflicts surface the reassign error |
 
 `query_graph` / `upsert_edge` need no signature change — new node types and edge types are new *values* through existing open-text parameters, which is additive for callers.
 
@@ -622,7 +723,7 @@ All six slices are mutually independent at the schema level (Phase 1 already res
 
 **ADR-022-4: Embeddings in a plain SQLite table with app-side search; extensions may accelerate, never own.** — Accepted (confirmed unchanged by Amendment C for slice 2.3). Context: spec requires embeddings + semantic search; stack is SQLite + Drizzle, local-first, no vector DB; native extensions (sqlite-vec) complicate the `npx signals` install matrix. Decision: `embeddings` table keyed `(node_type, node_id, kind, model)` with Float32 BLOB vectors and `content_hash` staleness; brute-force cosine in the query layer behind `semanticSearch()`; if scale outgrows it (regression test is the tripwire), adopt sqlite-vec as a derived index behind the same interface. Consequences: zero install risk, trivially correct, easy re-embedding; cost is O(n) scans — acceptable at tens of thousands of nodes, and the revisit path is contained to one module.
 
-**ADR-022-5: Separate typed `org_identities` table, not a generalized polymorphic identity table.** — Proposed. Context: orgs need platform identities; options were (a) new `org_identities` mirroring `contact_identities`, (b) generalized `platform_identities(owner_type, owner_id)`, (c) widening `contact_identities` with a nullable org FK. Decision: (a), consistent with ADR-022-1's typed-node philosophy — real FK with cascade, no polymorphic endpoints to integrity-sweep, `contact_identities` and its heavy read paths untouched; (b) would re-introduce app-enforced integrity for the highest-churn sync surface and force a risky migration of existing identities; (c) muddies NOT NULL semantics (forbidden mutation). Consequences: some column-shape duplication (mitigated by shared TS helpers) and a mirrored `org_identity_metrics` snapshot table; cross-table account-claim ambiguity handled by a write-path guard + integrity check.
+**ADR-022-5: Separate typed `org_identities` table, not a generalized polymorphic identity table.** — Accepted (Amendment D, slice 2.4 kickoff). Context: orgs need platform identities; options were (a) new `org_identities` mirroring `contact_identities`, (b) generalized `platform_identities(owner_type, owner_id)`, (c) widening `contact_identities` with a nullable org FK. Decision: (a), consistent with ADR-022-1's typed-node philosophy — real FK with cascade, no polymorphic endpoints to integrity-sweep, `contact_identities` and its heavy read paths untouched; (b) would re-introduce app-enforced integrity for the highest-churn sync surface and force a risky migration of existing identities; (c) muddies NOT NULL semantics (forbidden mutation). Consequences: some column-shape duplication (mitigated by shared TS helpers) and a mirrored `org_identity_metrics` snapshot table; cross-table account-claim ambiguity handled by a write-path guard + integrity check.
 
 **ADR-022-6: Niche membership as graph edges; clustering computation is workflow-owned.** — Proposed. Context: niches must be queryable across contacts *and* orgs with confidence and provenance; clustering algorithms/models will change frequently. Decision: `niches` stores results with provenance (`source`), membership is `belongs_to_niche` edges (edge overlay is the junction — scope, weight, provenance, indexes for free); the clustering job is a workflow (`workflow_runs`-tracked) outside this schema, and persona `interests` JSON becomes a maintained projection seeded backward via backfill. Consequences: schema survives algorithm churn; bad clustering runs are surgically deletable by `source` tag; cost is that "interests" exist in two places until Phase 3 UI reads edges, governed by the projection rule.
 
