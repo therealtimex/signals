@@ -160,4 +160,30 @@ describe("graph agent tools", () => {
     expect(edges).toHaveLength(1);
     expect(edges[0]?.propertiesPrivate).toEqual({ private_notes: "secret dinner plans" });
   });
+
+  it("upsert_edge accepts launch and variant node endpoints", async () => {
+    const launch = await invokeAgentTool("upsert_launch", { name: "Edge Launch" });
+    const launchId = (launch as { id: string }).id;
+    const variant = await invokeAgentTool("upsert_variant", {
+      launchId,
+      label: "v1",
+      body: "copy",
+    });
+    const variantId = (variant as { id: string }).id;
+
+    const edge = await invokeAgentTool("upsert_edge", {
+      srcType: "variant",
+      srcId: variantId,
+      dstType: "launch",
+      dstId: launchId,
+      edgeType: "targets",
+      scope: "shared",
+    });
+
+    expect(edge).toMatchObject({
+      srcType: "variant",
+      dstType: "launch",
+      edgeType: "targets",
+    });
+  });
 });

@@ -625,6 +625,62 @@ export const niches = sqliteTable("niches", {
   index("idx_niches_status").on(table.status),
 ]);
 
+// --- Launches (GTM campaign node; spec §3 Launch) ---
+
+export const launches = sqliteTable("launches", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  brief: text("brief"),
+  status: text("status", {
+    enum: ["draft", "generating", "simulating", "ready", "live", "completed", "archived"],
+  })
+    .notNull()
+    .default("draft"),
+  primaryPlatform: text("primary_platform"),
+  audienceSpec: text("audience_spec").default("{}"),
+  workflowTemplateId: text("workflow_template_id").references(() => workflowTemplates.id),
+  scope: text("scope", { enum: ["shared", "local_only"] })
+    .notNull()
+    .default("shared"),
+  source: text("source"),
+  metadata: text("metadata").default("{}"),
+  launchedAt: integer("launched_at"),
+  completedAt: integer("completed_at"),
+  ...timestamps,
+}, (table) => [
+  index("idx_launches_status").on(table.status),
+]);
+
+// --- Variants (generated creatives under a launch; spec §3 Variant) ---
+
+export const variants = sqliteTable("variants", {
+  id: text("id").primaryKey(),
+  launchId: text("launch_id")
+    .notNull()
+    .references(() => launches.id, { onDelete: "cascade" }),
+  label: text("label"),
+  variantType: text("variant_type").notNull().default("post"),
+  body: text("body"),
+  contentItemId: text("content_item_id").references(() => contentItems.id),
+  status: text("status", {
+    enum: ["draft", "simulated", "selected", "published", "rejected"],
+  })
+    .notNull()
+    .default("draft"),
+  predictedScore: real("predicted_score"),
+  predictionConfidence: real("prediction_confidence"),
+  predictedMetrics: text("predicted_metrics").default("{}"),
+  predictionModel: text("prediction_model"),
+  simulatedAt: integer("simulated_at"),
+  generationModel: text("generation_model"),
+  generationMetadata: text("generation_metadata").default("{}"),
+  metadata: text("metadata").default("{}"),
+  ...timestamps,
+}, (table) => [
+  index("idx_variants_launch").on(table.launchId),
+  index("idx_variants_content_item").on(table.contentItemId),
+]);
+
 // --- Graph Edges (polymorphic typed-edge overlay) ---
 
 export const graphEdges = sqliteTable("graph_edges", {
