@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { ContentGtmContext } from "@/lib/db/queries/content-gtm-context";
 import { buildCalibrationMetricRows } from "@/lib/wind-tunnel-calibration";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -46,9 +47,9 @@ export function WindTunnelSection({ gtm }: WindTunnelSectionProps) {
         <CardTitle className="text-base">Wind Tunnel</CardTitle>
         {variant && launch && (
           <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-            <a href="#" title="Launch detail coming soon" className="font-medium text-foreground hover:underline">
+            <Link href={`/dashboard/launches/${launch.id}`} className="font-medium text-foreground hover:underline">
               {launch.name}
-            </a>
+            </Link>
             <Badge variant="secondary">{launch.status}</Badge>
             {launch.scope === "local_only" && <Badge variant="outline">Private launch</Badge>}
             {variant.label && <span>· {variant.label}</span>}

@@ -12,10 +12,24 @@ export type LaunchVariantSummary = {
   label: string | null;
   status: string;
   predictedScore: number | null;
+  variantType: string;
+  predictionConfidence: number | null;
+  simulatedAt: number | null;
+  contentItemId: string | null;
 };
 
+/** Dashboard-internal variant row; includes sort tiebreak fields not exposed on REST/agent summaries. */
+export type LaunchVariantBoardItem = LaunchVariantSummary & {
+  createdAt: number;
+};
+
+export function toLaunchVariantSummary(variant: LaunchVariantBoardItem): LaunchVariantSummary {
+  const { createdAt: _createdAt, ...summary } = variant;
+  return summary;
+}
+
 export type LaunchWithDetails = Launch & {
-  variants: LaunchVariantSummary[];
+  variants: LaunchVariantBoardItem[];
   goalIds: string[];
 };
 
@@ -78,12 +92,17 @@ export function getLaunchWithDetails(
   };
 }
 
-function summarizeVariants(launchId: string): LaunchVariantSummary[] {
+function summarizeVariants(launchId: string): LaunchVariantBoardItem[] {
   return listVariantsByLaunchId(launchId).map((variant) => ({
     id: variant.id,
     label: variant.label,
     status: variant.status,
     predictedScore: variant.predictedScore,
+    variantType: variant.variantType,
+    predictionConfidence: variant.predictionConfidence,
+    simulatedAt: variant.simulatedAt,
+    contentItemId: variant.contentItemId,
+    createdAt: variant.createdAt,
   }));
 }
 

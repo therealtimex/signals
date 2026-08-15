@@ -1,6 +1,6 @@
 import { listOrgs } from "@/lib/db/queries/orgs";
 import { listOrgIdentities, upsertOrgIdentity } from "@/lib/db/queries/org-identities";
-import { listLaunches, upsertLaunch } from "@/lib/db/queries/launches";
+import { listLaunches, toLaunchVariantSummary, upsertLaunch } from "@/lib/db/queries/launches";
 import { listNiches, upsertNiche } from "@/lib/db/queries/niches";
 import { semanticSearch } from "@/lib/db/queries/embeddings";
 import { getVariantById, upsertVariant } from "@/lib/db/queries/variants";
@@ -209,7 +209,7 @@ export async function handleQueryLaunches(input: z.infer<typeof queryLaunchesSch
       status: launch.status,
       primaryPlatform: launch.primaryPlatform,
       scope: launch.scope,
-      variants: launch.variants,
+      variants: launch.variants.map(toLaunchVariantSummary),
       goalIds: launch.goalIds,
     })),
   };
