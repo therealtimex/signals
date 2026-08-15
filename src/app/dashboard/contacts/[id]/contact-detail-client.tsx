@@ -27,6 +27,8 @@ import { EnrichButton } from "@/components/enrich-button";
 import { ArrowLeft, Trash2, Save, CheckCircle2, Circle, Archive, RotateCcw } from "lucide-react";
 import Link from "next/link";
 import type { ContactWithIdentities, Task } from "@/lib/db/types";
+import type { ContactExploreCard } from "@/lib/db/queries/contact-explore";
+import { ContactExploreCardView } from "@/components/contact-explore-card";
 
 const platformLabels: Record<string, string> = {
   x: "X / Twitter",
@@ -38,9 +40,10 @@ const platformLabels: Record<string, string> = {
 interface ContactDetailClientProps {
   contact: ContactWithIdentities;
   tasks: Task[];
+  explore: ContactExploreCard;
 }
 
-export function ContactDetailClient({ contact, tasks }: ContactDetailClientProps) {
+export function ContactDetailClient({ contact, tasks, explore }: ContactDetailClientProps) {
   const router = useRouter();
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -193,6 +196,7 @@ export function ContactDetailClient({ contact, tasks }: ContactDetailClientProps
             Identities ({contact.identities.length})
           </TabsTrigger>
           <TabsTrigger value="tasks">Tasks ({tasks.length})</TabsTrigger>
+          <TabsTrigger value="audience">Audience</TabsTrigger>
         </TabsList>
 
         <TabsContent value="details" className="space-y-4">
@@ -382,6 +386,10 @@ export function ContactDetailClient({ contact, tasks }: ContactDetailClientProps
               ))}
             </div>
           )}
+        </TabsContent>
+
+        <TabsContent value="audience" className="space-y-4">
+          <ContactExploreCardView explore={explore} />
         </TabsContent>
       </Tabs>
     </div>
