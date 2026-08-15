@@ -11,7 +11,10 @@ const graphNodeType = z.enum([
   "interaction",
   "workflow_run",
   "platform_identity",
+  "org_identity",
 ]);
+
+export const NODE_TYPES = graphNodeType.options;
 
 export const queryOrgsSchema = z.object({
   search: z.string().optional(),
@@ -124,4 +127,35 @@ export const semanticSearchSchema = z.object({
   kind: z.enum(["profile", "description", "body"]).optional(),
   k: z.number().int().positive().max(100).optional(),
   includeLocalOnly: z.boolean().optional(),
+});
+
+export const queryOrgIdentitiesSchema = z.object({
+  orgId: z.string().optional(),
+  platform: z.string().optional(),
+  page: z.number().int().positive().optional(),
+  pageSize: z.number().int().positive().max(100).optional(),
+});
+
+export const upsertOrgIdentitySchema = z.object({
+  id: z.string().optional(),
+  orgId: z.string().min(1),
+  platform: z.string().min(1),
+  platformUserId: z.string().min(1),
+  platformHandle: z.string().optional(),
+  platformUrl: z.string().optional(),
+  platformData: z.record(z.unknown()).optional(),
+  displayName: z.string().optional(),
+  bio: z.string().optional(),
+  avatarUrl: z.string().optional(),
+  location: z.string().optional(),
+  websiteUrl: z.string().optional(),
+  isVerified: z.boolean().optional(),
+  followersCount: z.number().int().optional(),
+  followingCount: z.number().int().optional(),
+  postsCount: z.number().int().optional(),
+  listedCount: z.number().int().optional(),
+  platformCreatedAt: z.number().int().optional(),
+  isPrimary: z.boolean().optional(),
+  isActive: z.boolean().optional(),
+  lastSyncedAt: z.number().int().optional(),
 });

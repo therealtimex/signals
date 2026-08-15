@@ -48,12 +48,14 @@ describe("embeddings latency tripwire", () => {
       sqlite.exec("ANALYZE embeddings");
       sqlite.exec("ANALYZE contacts");
 
-      semanticSearch({
-        kind: "profile",
-        model,
-        queryVector: query,
-        k: 10,
-      });
+      for (let i = 0; i < 3; i++) {
+        semanticSearch({
+          kind: "profile",
+          model,
+          queryVector: query,
+          k: 10,
+        });
+      }
 
       const start = performance.now();
       const hits = semanticSearch({

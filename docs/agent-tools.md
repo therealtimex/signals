@@ -49,6 +49,8 @@ Then pass `Authorization: Bearer your-secret-token` on each request.
 | `get_persona` | contacts | Get active AI persona for a contact |
 | `upsert_persona` | contacts | Save versioned persona (supersedes prior active) |
 | `query_orgs` | graph | Search organization nodes |
+| `query_org_identities` | graph | List org platform identities with profile/stat fields |
+| `upsert_org_identity` | graph | Create or update an org platform identity |
 | `query_graph` | graph | 1-hop graph traversal from a node |
 | `upsert_edge` | graph | Create/update typed graph edge |
 | `log_interaction` | graph | Append interaction event for a contact |

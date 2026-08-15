@@ -1,6 +1,6 @@
 import { and, eq, or } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { contacts, embeddings, graphEdges, niches } from "@/lib/db/schema";
+import { contactIdentities, contacts, embeddings, graphEdges, niches, orgIdentities } from "@/lib/db/schema";
 import { nodeExists } from "@/lib/db/queries/graph";
 import type { GraphEdge, GraphNodeType } from "@/lib/db/types";
 
@@ -10,6 +10,14 @@ export type GraphIntegrityIssueReason =
   | "stale_niche_membership";
 
 export type EmbeddingIntegrityIssueReason = "missing_endpoint";
+
+export type DuplicatePlatformAccountIssue = {
+  platform: string;
+  platformUserId: string;
+  contactIdentityId: string;
+  orgIdentityId: string;
+  reason: "duplicate_platform_account";
+};
 
 export type GraphIntegrityIssue = {
   edgeId: string;
@@ -36,6 +44,7 @@ export type GraphIntegrityReport = {
   repairedCount: number;
   issues: GraphIntegrityIssue[];
   embeddingIssues: EmbeddingIntegrityIssue[];
+  duplicatePlatformAccounts: DuplicatePlatformAccountIssue[];
 };
 
 function isArchivedContact(contactId: string): boolean {
@@ -103,6 +112,33 @@ function endpointIssue(
   return null;
 }
 
+function auditDuplicatePlatformAccounts(): DuplicatePlatformAccountIssue[] {
+  const rows = db
+    .select({
+      platform: contactIdentities.platform,
+      platformUserId: contactIdentities.platformUserId,
+      contactIdentityId: contactIdentities.id,
+      orgIdentityId: orgIdentities.id,
+    })
+    .from(contactIdentities)
+    .innerJoin(
+      orgIdentities,
+      and(
+        eq(contactIdentities.platform, orgIdentities.platform),
+        eq(contactIdentities.platformUserId, orgIdentities.platformUserId),
+      ),
+    )
+    .all();
+
+  return rows.map((row) => ({
+    platform: row.platform,
+    platformUserId: row.platformUserId,
+    contactIdentityId: row.contactIdentityId,
+    orgIdentityId: row.orgIdentityId,
+    reason: "duplicate_platform_account" as const,
+  }));
+}
+
 /** Scan all graph edges for missing endpoints and archived contact references. */
 export function auditGraphIntegrity(): GraphIntegrityReport {
   const edges = db.select().from(graphEdges).all();
@@ -132,15 +168,17 @@ export function auditGraphIntegrity(): GraphIntegrityReport {
 
   const uniqueEdgeIds = new Set(issues.map((issue) => issue.edgeId));
   const uniqueEmbeddingIds = new Set(embeddingIssues.map((issue) => issue.embeddingId));
+  const duplicatePlatformAccounts = auditDuplicatePlatformAccounts();
 
   return {
     scannedAt: Math.floor(Date.now() / 1000),
     totalEdges: edges.length,
     totalEmbeddings: embeddingRows.length,
-    issueCount: uniqueEdgeIds.size + uniqueEmbeddingIds.size,
+    issueCount: uniqueEdgeIds.size + uniqueEmbeddingIds.size + duplicatePlatformAccounts.length,
     repairedCount: 0,
     issues,
     embeddingIssues,
+    duplicatePlatformAccounts,
   };
 }
 
@@ -201,6 +239,7 @@ export function getGraphIntegritySummary(): {
   lastScannedAt: number;
   sampleIssues: GraphIntegrityIssue[];
   sampleEmbeddingIssues: EmbeddingIntegrityIssue[];
+  sampleDuplicatePlatformAccounts: DuplicatePlatformAccountIssue[];
 } {
   const report = auditGraphIntegrity();
   return {
@@ -210,5 +249,6 @@ export function getGraphIntegritySummary(): {
     lastScannedAt: report.scannedAt,
     sampleIssues: report.issues.slice(0, 10),
     sampleEmbeddingIssues: report.embeddingIssues.slice(0, 10),
+    sampleDuplicatePlatformAccounts: report.duplicatePlatformAccounts.slice(0, 10),
   };
 }

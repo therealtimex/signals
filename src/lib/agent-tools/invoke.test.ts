@@ -15,6 +15,8 @@ describe("agent-tools registry", () => {
     expect(names).toContain("query_contacts");
     expect(names).toContain("create_contact");
     expect(names).toContain("enrich_contact");
+    expect(names).toContain("query_org_identities");
+    expect(names).toContain("upsert_org_identity");
 
     const createContact = manifest.tools.find((tool) => tool.name === "create_contact");
     expect(createContact?.parameters).toMatchObject({

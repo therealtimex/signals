@@ -1,9 +1,17 @@
 import { eq, and } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db/client";
+import { assertPlatformAccountUnclaimed, PlatformAccountConflictError } from "@/lib/db/identity-claims";
 import { contactIdentities } from "@/lib/db/schema";
 import { liftIdentityStatsFromPlatformData } from "@/lib/db/identity-stats";
 import type { ContactIdentity, NewContactIdentity } from "@/lib/db/types";
+
+function guardContactIdentityClaim(
+  platform: string,
+  platformUserId: string,
+): void {
+  assertPlatformAccountUnclaimed(platform, platformUserId, { claimant: "contact" });
+}
 
 export function listIdentitiesByContact(contactId: string): ContactIdentity[] {
   return db
@@ -18,6 +26,7 @@ export function getIdentityById(id: string): ContactIdentity | undefined {
 }
 
 export function createIdentity(data: Omit<NewContactIdentity, "id">): ContactIdentity {
+  guardContactIdentityClaim(data.platform, data.platformUserId);
   const id = nanoid();
   const lifted = liftIdentityStatsFromPlatformData(data.platformData, {
     statsUpdatedAt: data.lastSyncedAt ?? undefined,
@@ -32,6 +41,10 @@ export function updateIdentity(
 ): ContactIdentity | undefined {
   const existing = getIdentityById(id);
   if (!existing) return undefined;
+
+  const nextPlatform = data.platform ?? existing.platform;
+  const nextPlatformUserId = data.platformUserId ?? existing.platformUserId;
+  guardContactIdentityClaim(nextPlatform, nextPlatformUserId);
 
   const lifted =
     data.platformData !== undefined

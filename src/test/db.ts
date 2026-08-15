@@ -12,6 +12,8 @@ import {
   interactions,
   contentActivities,
   identityMetrics,
+  orgIdentityMetrics,
+  orgIdentities,
   contactPersonas,
   niches,
   launches,
@@ -34,6 +36,7 @@ export function resetCoreTables(): void {
   db.delete(goalWorkflows).run();
   db.delete(goals).run();
   db.delete(contactPersonas).run();
+  db.delete(orgIdentityMetrics).run();
   db.delete(identityMetrics).run();
   db.delete(graphEdges).run();
   db.delete(embeddings).run();
@@ -42,6 +45,7 @@ export function resetCoreTables(): void {
   db.delete(contentItems).run();
   db.delete(launches).run();
   db.delete(niches).run();
+  db.delete(orgIdentities).run();
   db.delete(orgs).run();
   db.delete(contactIdentities).run();
   db.delete(contacts).run();

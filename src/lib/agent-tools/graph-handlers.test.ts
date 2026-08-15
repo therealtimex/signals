@@ -213,4 +213,117 @@ describe("graph agent tools", () => {
 
     expect(getVariantById(variantId)?.status).toBe("draft");
   });
+
+  it("query_org_identities and upsert_org_identity round-trip via invokeAgentTool", async () => {
+    const org = await invokeAgentTool("query_orgs", { search: "Org Identity Co" });
+    expect(org).toMatchObject({ total: 0 });
+
+    const createdOrg = await invokeAgentTool("create_contact", {
+      name: "Owner",
+      company: "Org Identity Co",
+    });
+    expect(createdOrg).toMatchObject({ company: "Org Identity Co" });
+
+    const orgRow = db.select().from(orgs).where(eq(orgs.name, "Org Identity Co")).get();
+    expect(orgRow).toBeTruthy();
+
+    const createdIdentity = await invokeAgentTool("upsert_org_identity", {
+      orgId: orgRow!.id,
+      platform: "linkedin",
+      platformUserId: "org-identity-co",
+      displayName: "Org Identity Co",
+      followersCount: 420,
+    });
+    expect(createdIdentity).toMatchObject({
+      orgId: orgRow!.id,
+      platform: "linkedin",
+      platformUserId: "org-identity-co",
+      displayName: "Org Identity Co",
+      followersCount: 420,
+      message: "Org identity upserted.",
+    });
+
+    const listed = await invokeAgentTool("query_org_identities", {
+      orgId: orgRow!.id,
+      platform: "linkedin",
+    });
+    expect(listed).toMatchObject({
+      total: 1,
+      identities: [
+        expect.objectContaining({
+          id: (createdIdentity as { id: string }).id,
+          platformUserId: "org-identity-co",
+          followersCount: 420,
+        }),
+      ],
+    });
+
+    const updatedIdentity = await invokeAgentTool("upsert_org_identity", {
+      orgId: orgRow!.id,
+      platform: "linkedin",
+      platformUserId: "org-identity-co",
+      followersCount: 950,
+      displayName: "Org Identity Co Updated",
+    });
+    expect(updatedIdentity).toMatchObject({
+      id: (createdIdentity as { id: string }).id,
+      orgId: orgRow!.id,
+      platform: "linkedin",
+      platformUserId: "org-identity-co",
+      followersCount: 950,
+      displayName: "Org Identity Co Updated",
+    });
+
+    const secondOrgId = nanoid();
+    db.insert(orgs)
+      .values({
+        id: secondOrgId,
+        name: "Org Identity Co EU",
+        scope: "shared",
+        source: "test",
+      })
+      .run();
+
+    await expect(
+      invokeAgentTool("upsert_org_identity", {
+        orgId: secondOrgId,
+        platform: "linkedin",
+        platformUserId: "org-identity-co",
+      }),
+    ).rejects.toMatchObject({
+      code: "EXECUTION_ERROR",
+      message: expect.stringContaining("Reassign, don't duplicate"),
+    });
+  });
+
+  it("upsert_org_identity surfaces PlatformAccountConflictError via invokeAgentTool", async () => {
+    const contact = createContact({ name: "Claimant", platform: "x", platformUserId: "claimant-1" });
+    const { createIdentity } = await import("@/lib/db/queries/identities");
+    createIdentity({
+      contactId: contact.id,
+      platform: "instagram",
+      platformUserId: "claimed-ig",
+    });
+
+    const orgId = nanoid();
+    db.insert(orgs)
+      .values({
+        id: orgId,
+        name: "Conflict Org",
+        scope: "shared",
+        source: "test",
+      })
+      .run();
+
+    await expect(
+      invokeAgentTool("upsert_org_identity", {
+        orgId,
+        platform: "instagram",
+        platformUserId: "claimed-ig",
+      }),
+    ).rejects.toMatchObject({
+      code: "EXECUTION_ERROR",
+      message: expect.stringContaining("Reassign, don't duplicate"),
+    });
+  });
 });
