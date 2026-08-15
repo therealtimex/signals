@@ -152,6 +152,7 @@ export const querySimulationsSchema = z.object({
   status: z.enum(["pending", "running", "completed", "failed", "cancelled"]).optional(),
   includeAgents: z.boolean().optional(),
   includeTranscripts: z.boolean().optional(),
+  includeCalibrations: z.boolean().optional(),
   page: z.number().int().positive().optional(),
   pageSize: z.number().int().positive().max(100).optional(),
 });
@@ -176,6 +177,13 @@ export const completeSimulationRunSchema = z.object({
   predictionConfidence: z.number().min(0).max(1).optional(),
   predictedMetrics: z.record(z.number().nonnegative()).optional(),
   error: z.string().optional(),
+});
+
+export const calibrateSimulationRunSchema = z.object({
+  runId: z.string().min(1),
+  observedUntil: z.number().int().optional(),
+  source: z.enum(["agent", "workflow"]).optional(),
+  workflowRunId: z.string().optional(),
 });
 
 export const queryOrgIdentitiesSchema = z.object({

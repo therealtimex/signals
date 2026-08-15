@@ -33,7 +33,9 @@ import type {
   querySimulationsSchema,
   recordSimulationResultsSchema,
   completeSimulationRunSchema,
+  calibrateSimulationRunSchema,
 } from "@/lib/agent-tools/graph-schemas";
+import { calibrateSimulationRun, serializeCalibration } from "@/lib/db/queries/calibrations";
 import type { z } from "zod";
 
 export async function handleQueryOrgs(input: z.infer<typeof queryOrgsSchema>) {
@@ -376,7 +378,7 @@ export async function handleUpsertOrgIdentity(input: z.infer<typeof upsertOrgIde
 
 function serializeSimulationRun(
   run: NonNullable<ReturnType<typeof getSimulationRun>>,
-  opts?: { includeAgents?: boolean; includeTranscripts?: boolean },
+  opts?: { includeAgents?: boolean; includeTranscripts?: boolean; includeCalibrations?: boolean },
 ) {
   const agents =
     opts?.includeAgents && run.agents
@@ -410,6 +412,9 @@ function serializeSimulationRun(
     startedAt: run.startedAt,
     completedAt: run.completedAt,
     ...(agents ? { agents } : {}),
+    ...(opts?.includeCalibrations && "latestCalibration" in run && run.latestCalibration
+      ? { latestCalibration: run.latestCalibration }
+      : {}),
   };
 }
 
@@ -442,15 +447,18 @@ export async function handleQuerySimulations(input: z.infer<typeof querySimulati
   });
 
   const runs = result.data.map((run) => {
-    if (input.includeAgents || input.includeTranscripts) {
-      const detailed = getSimulationRun(run.id, {
-        includeAgents: true,
-        includeTranscripts: input.includeTranscripts,
-      });
+    const detailOpts = {
+      includeAgents: Boolean(input.includeAgents || input.includeTranscripts),
+      includeTranscripts: input.includeTranscripts,
+      includeCalibration: input.includeCalibrations,
+    };
+    if (detailOpts.includeAgents || input.includeCalibrations) {
+      const detailed = getSimulationRun(run.id, detailOpts);
       return detailed
         ? serializeSimulationRun(detailed, {
-            includeAgents: true,
+            includeAgents: detailOpts.includeAgents,
             includeTranscripts: input.includeTranscripts,
+            includeCalibrations: input.includeCalibrations,
           })
         : serializeSimulationRun(run);
     }
@@ -502,5 +510,19 @@ export async function handleCompleteSimulationRun(
         }
       : null,
     message: "Simulation run completed.",
+  };
+}
+
+export async function handleCalibrateSimulationRun(
+  input: z.infer<typeof calibrateSimulationRunSchema>,
+) {
+  const calibration = calibrateSimulationRun(input.runId, {
+    observedUntil: input.observedUntil,
+    source: input.source,
+    workflowRunId: input.workflowRunId,
+  });
+  return {
+    calibration: serializeCalibration(calibration),
+    message: "Simulation run calibrated.",
   };
 }

@@ -17,8 +17,15 @@ export type EngagementEventRow = {
 };
 
 /** Union of relationship interactions and contactless content activities for a post. */
-export function listEngagementEventsByContentPost(contentPostId: string): EngagementEventRow[] {
-  const interactions = listInteractionsByContentPost(contentPostId).map((row) => ({
+export function listEngagementEventsByContentPost(
+  contentPostId: string,
+  opts?: { scope?: "shared" | "local_only" | "all" },
+): EngagementEventRow[] {
+  const scope = opts?.scope ?? "all";
+
+  const interactions = listInteractionsByContentPost(contentPostId)
+    .filter((row) => scope === "all" || row.scope === scope)
+    .map((row) => ({
     id: row.id,
     engagementId: row.engagementId,
     eventType: row.interactionType,
@@ -33,7 +40,9 @@ export function listEngagementEventsByContentPost(contentPostId: string): Engage
     contactId: row.contactId,
   }));
 
-  const activities = listContentActivitiesByContentPost(contentPostId).map((row) => ({
+  const activities = listContentActivitiesByContentPost(contentPostId)
+    .filter((row) => scope === "all" || row.scope === scope)
+    .map((row) => ({
     id: row.id,
     engagementId: row.engagementId,
     eventType: row.activityType,
@@ -49,4 +58,11 @@ export function listEngagementEventsByContentPost(contentPostId: string): Engage
   }));
 
   return [...interactions, ...activities].sort((a, b) => b.occurredAt - a.occurredAt);
+}
+
+/** Shared-scope calibration read surface (§7.2a). */
+export function listSharedEngagementEventsByContentPost(
+  contentPostId: string,
+): EngagementEventRow[] {
+  return listEngagementEventsByContentPost(contentPostId, { scope: "shared" });
 }
