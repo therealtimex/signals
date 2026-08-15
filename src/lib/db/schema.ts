@@ -1,5 +1,10 @@
 import { sqliteTable, text, integer, real, index, uniqueIndex, blob } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
+import {
+  LAUNCH_STATUS_ENUM,
+  SIMULATION_RUN_STATUS_ENUM,
+  VARIANT_STATUS_ENUM,
+} from "./gtm-status";
 import { PLATFORM_ENUM } from "./platforms";
 
 // Helper for default timestamps (unix epoch seconds)
@@ -686,7 +691,7 @@ export const launches = sqliteTable("launches", {
   name: text("name").notNull(),
   brief: text("brief"),
   status: text("status", {
-    enum: ["draft", "generating", "simulating", "ready", "live", "completed", "archived"],
+    enum: LAUNCH_STATUS_ENUM,
   })
     .notNull()
     .default("draft"),
@@ -717,7 +722,7 @@ export const variants = sqliteTable("variants", {
   body: text("body"),
   contentItemId: text("content_item_id").references(() => contentItems.id),
   status: text("status", {
-    enum: ["draft", "simulated", "selected", "published", "rejected"],
+    enum: VARIANT_STATUS_ENUM,
   })
     .notNull()
     .default("draft"),
@@ -744,7 +749,7 @@ export const simulationRuns = sqliteTable("simulation_runs", {
     .references(() => variants.id, { onDelete: "cascade" }),
   batchId: text("batch_id"),
   status: text("status", {
-    enum: ["pending", "running", "completed", "failed", "cancelled"],
+    enum: SIMULATION_RUN_STATUS_ENUM,
   })
     .notNull()
     .default("pending"),

@@ -67,9 +67,9 @@ function applyVariantUpdate(
   db.update(variants)
     .set({
       launchId: input.launchId,
-      label: input.label ?? existing.label,
+      label: input.label !== undefined ? input.label : existing.label,
       variantType,
-      body: input.body ?? existing.body,
+      body: input.body !== undefined ? input.body : existing.body,
       contentItemId: input.contentItemId ?? existing.contentItemId,
       status,
       predictedScore: input.predictedScore ?? existing.predictedScore,

@@ -601,6 +601,29 @@ export function getSimulationRun(
   return { ...run, agents, ...(latestCalibration ? { latestCalibration } : {}) };
 }
 
+/** Tri-state transcript lookup for lazy-load REST route (ui-4.1 §4.7). */
+export function getSimulationAgentTranscript(
+  runId: string,
+  agentId: string,
+): SimulationAgentTranscript | null | undefined {
+  const agent = db
+    .select()
+    .from(simulationAgents)
+    .where(
+      and(eq(simulationAgents.simulationRunId, runId), eq(simulationAgents.id, agentId)),
+    )
+    .get();
+  if (!agent) return undefined;
+
+  const transcriptRow = db
+    .select()
+    .from(simulationTranscripts)
+    .where(eq(simulationTranscripts.simulationAgentId, agentId))
+    .get();
+
+  return parseAgentTranscript(transcriptRow);
+}
+
 function assertRunIsRunning(run: SimulationRun): void {
   if (run.status !== "running") {
     throw new SimulationRunStateError(

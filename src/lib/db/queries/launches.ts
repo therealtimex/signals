@@ -129,7 +129,7 @@ export function upsertLaunch(input: UpsertLaunchInput): Launch {
     db.update(launches)
       .set({
         name: input.name.trim(),
-        brief: input.brief ?? existing.brief,
+        brief: input.brief !== undefined ? input.brief : existing.brief,
         status: input.status ?? existing.status,
         primaryPlatform:
           input.primaryPlatform !== undefined
@@ -138,11 +138,15 @@ export function upsertLaunch(input: UpsertLaunchInput): Launch {
         audienceSpec: input.audienceSpec
           ? JSON.stringify(input.audienceSpec)
           : existing.audienceSpec,
-        workflowTemplateId: input.workflowTemplateId ?? existing.workflowTemplateId,
+        workflowTemplateId:
+          input.workflowTemplateId !== undefined
+            ? input.workflowTemplateId
+            : existing.workflowTemplateId,
         scope: input.scope ?? existing.scope,
         metadata: input.metadata ? JSON.stringify(input.metadata) : existing.metadata,
-        launchedAt: input.launchedAt ?? existing.launchedAt,
-        completedAt: input.completedAt ?? existing.completedAt,
+        launchedAt: input.launchedAt !== undefined ? input.launchedAt : existing.launchedAt,
+        completedAt:
+          input.completedAt !== undefined ? input.completedAt : existing.completedAt,
         updatedAt: now,
       })
       .where(eq(launches.id, input.id))
