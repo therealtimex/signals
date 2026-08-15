@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { nanoid } from "nanoid";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import { createContact } from "@/lib/db/queries/contacts";
 import {
@@ -17,6 +18,24 @@ import { db } from "@/lib/db/client";
 import { graphEdges, orgs } from "@/lib/db/schema";
 import { runMigrations } from "@/lib/db/migrate";
 import { resetCoreTables } from "@/test/db";
+
+const migrationsDir = join(dirname(fileURLToPath(import.meta.url)), "../migrations");
+
+function applyMigrationFiles(sqlite: Database.Database, files: string[]) {
+  for (const file of files) {
+    const sql = readFileSync(join(migrationsDir, file), "utf8");
+    for (const statement of sql.split(/--> statement-breakpoint\n?/)) {
+      const trimmed = statement.trim();
+      if (trimmed) sqlite.exec(trimmed);
+    }
+  }
+}
+
+function listMigrationSqlFiles(): string[] {
+  return readdirSync(migrationsDir)
+    .filter((file) => file.endsWith(".sql"))
+    .sort();
+}
 
 describe("graph queries", () => {
   beforeEach(() => {
@@ -161,7 +180,50 @@ describe("schema v0.5 migrations", () => {
     expect(tables).toContain("interactions");
     expect(tables).toContain("identity_metrics");
     expect(tables).toContain("contact_personas");
+    expect(tables).toContain("org_identities");
+    expect(tables).toContain("org_identity_metrics");
     sqlite.close();
+  });
+
+  it("applies 0012 additively for N-1 databases (new tables invisible before upgrade)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "signals-migrate-n-1-org-identities-"));
+    const dbPath = join(dir, "data.db");
+    const sqlite = new Database(dbPath);
+    sqlite.pragma("foreign_keys = ON");
+
+    const migrationFiles = listMigrationSqlFiles();
+    const pre0012 = migrationFiles.filter((file) => !file.startsWith("0012_"));
+    applyMigrationFiles(sqlite, pre0012);
+
+    const tablesBefore = sqlite
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
+      .all()
+      .map((row) => (row as { name: string }).name);
+    expect(tablesBefore).not.toContain("org_identities");
+    expect(tablesBefore).not.toContain("org_identity_metrics");
+
+    const orgId = nanoid();
+    sqlite.prepare("INSERT INTO orgs (id, name) VALUES (?, ?)").run(orgId, "Legacy Org");
+    expect(sqlite.prepare("SELECT name FROM orgs WHERE id = ?").get(orgId)).toEqual({
+      name: "Legacy Org",
+    });
+
+    applyMigrationFiles(
+      sqlite,
+      migrationFiles.filter((file) => file.startsWith("0012_")),
+    );
+
+    const tablesAfter = sqlite
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
+      .all()
+      .map((row) => (row as { name: string }).name);
+    expect(tablesAfter).toContain("org_identities");
+    expect(tablesAfter).toContain("org_identity_metrics");
+    expect(sqlite.prepare("SELECT name FROM orgs WHERE id = ?").get(orgId)).toEqual({
+      name: "Legacy Org",
+    });
+    sqlite.close();
+    expect(dbPath).toBeTruthy();
   });
 
   it("is idempotent when migrations run twice", () => {

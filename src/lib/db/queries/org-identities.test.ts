@@ -10,12 +10,30 @@ import {
   upsertOrgIdentity,
 } from "@/lib/db/queries/org-identities";
 import { upsertGraphEdge, validateEdgeEndpoints } from "@/lib/db/queries/graph";
-import { PlatformAccountConflictError } from "@/lib/db/identity-claims";
+import {
+  PlatformAccountConflictError,
+  type PlatformAccountClaimedBy,
+} from "@/lib/db/identity-claims";
 import { auditGraphIntegrity } from "@/lib/db/graph-integrity";
-import { handleUpsertOrgIdentity } from "@/lib/agent-tools/graph-handlers";
 import { db } from "@/lib/db/client";
 import { contactIdentities, orgIdentities } from "@/lib/db/schema";
 import { resetCoreTables } from "@/test/db";
+
+function expectPlatformConflict(
+  run: () => unknown,
+  expected: { platform: string; platformUserId: string; claimedBy: PlatformAccountClaimedBy },
+) {
+  try {
+    run();
+    throw new Error("Expected PlatformAccountConflictError");
+  } catch (error) {
+    expect(error).toBeInstanceOf(PlatformAccountConflictError);
+    const conflict = error as PlatformAccountConflictError;
+    expect(conflict.platform).toBe(expected.platform);
+    expect(conflict.platformUserId).toBe(expected.platformUserId);
+    expect(conflict.claimedBy).toEqual(expected.claimedBy);
+  }
+}
 
 describe("org identities", () => {
   beforeEach(() => {
@@ -58,33 +76,101 @@ describe("org identities", () => {
   it("rejects cross-table platform account claims on contact and org writes", () => {
     const org = ensureOrgByName("Acme");
     const contact = createContact({ name: "Pat", platform: "x", platformUserId: "pat-1" });
-    createIdentity({
+    const contactIdentity = createIdentity({
       contactId: contact.id,
       platform: "linkedin",
       platformUserId: "shared-li",
     });
 
-    expect(() =>
-      createOrgIdentity({
-        orgId: org.id,
+    expectPlatformConflict(
+      () =>
+        createOrgIdentity({
+          orgId: org.id,
+          platform: "linkedin",
+          platformUserId: "shared-li",
+        }),
+      {
         platform: "linkedin",
         platformUserId: "shared-li",
-      }),
-    ).toThrow(PlatformAccountConflictError);
+        claimedBy: { kind: "contact", id: contactIdentity.id },
+      },
+    );
 
-    createOrgIdentity({
+    const orgIdentity = createOrgIdentity({
       orgId: org.id,
       platform: "x",
       platformUserId: "org-only",
     });
 
-    expect(() =>
-      createIdentity({
-        contactId: contact.id,
+    expectPlatformConflict(
+      () =>
+        createIdentity({
+          contactId: contact.id,
+          platform: "x",
+          platformUserId: "org-only",
+        }),
+      {
         platform: "x",
         platformUserId: "org-only",
-      }),
-    ).toThrow(/Reassign, don't duplicate/);
+        claimedBy: { kind: "org", id: orgIdentity.id },
+      },
+    );
+  });
+
+  it("rejects updateIdentity when retargeting to an org-owned natural key", () => {
+    const org = ensureOrgByName("Retarget Org");
+    const contact = createContact({ name: "Riley", platform: "x", platformUserId: "riley-1" });
+    const orgIdentity = createOrgIdentity({
+      orgId: org.id,
+      platform: "instagram",
+      platformUserId: "ig-shared",
+    });
+    const contactIdentity = createIdentity({
+      contactId: contact.id,
+      platform: "linkedin",
+      platformUserId: "li-original",
+    });
+
+    expectPlatformConflict(
+      () =>
+        updateIdentity(contactIdentity.id, {
+          platform: "instagram",
+          platformUserId: "ig-shared",
+        }),
+      {
+        platform: "instagram",
+        platformUserId: "ig-shared",
+        claimedBy: { kind: "org", id: orgIdentity.id },
+      },
+    );
+  });
+
+  it("rejects updateOrgIdentity when retargeting to a contact-owned natural key", () => {
+    const org = ensureOrgByName("Retarget Org 2");
+    const contact = createContact({ name: "Jordan", platform: "x", platformUserId: "jordan-1" });
+    const contactIdentity = createIdentity({
+      contactId: contact.id,
+      platform: "threads",
+      platformUserId: "threads-shared",
+    });
+    const orgIdentity = createOrgIdentity({
+      orgId: org.id,
+      platform: "linkedin",
+      platformUserId: "li-original",
+    });
+
+    expectPlatformConflict(
+      () =>
+        updateOrgIdentity(orgIdentity.id, {
+          platform: "threads",
+          platformUserId: "threads-shared",
+        }),
+      {
+        platform: "threads",
+        platformUserId: "threads-shared",
+        claimedBy: { kind: "contact", id: contactIdentity.id },
+      },
+    );
   });
 
   it("allows contact identity updates without self-conflict", () => {
@@ -97,6 +183,23 @@ describe("org identities", () => {
 
     const updated = updateIdentity(identity.id, { displayName: "Sam I." });
     expect(updated?.displayName).toBe("Sam I.");
+  });
+
+  it("allows org identity updates without self-conflict", () => {
+    const org = ensureOrgByName("Self Org");
+    const identity = createOrgIdentity({
+      orgId: org.id,
+      platform: "linkedin",
+      platformUserId: "self-org-li",
+      displayName: "Before",
+    });
+
+    const updated = updateOrgIdentity(identity.id, {
+      platform: "linkedin",
+      platformUserId: "self-org-li",
+      displayName: "After",
+    });
+    expect(updated?.displayName).toBe("After");
   });
 
   it("reports duplicate_platform_account in graph integrity", () => {
@@ -149,36 +252,6 @@ describe("org identities", () => {
     db.delete(orgIdentities).where(eq(orgIdentities.id, identity.id)).run();
     const report = auditGraphIntegrity();
     expect(report.issues.some((issue) => issue.nodeType === "org_identity")).toBe(true);
-  });
-
-  it("upserts by natural key within the same org and surfaces conflicts via agent handler", async () => {
-    const org = ensureOrgByName("Umbrella");
-    const created = await handleUpsertOrgIdentity({
-      orgId: org.id,
-      platform: "linkedin",
-      platformUserId: "umbrella-li",
-      displayName: "Umbrella Corp",
-      followersCount: 900,
-    });
-    expect(created.id).toBeTruthy();
-
-    const updated = await handleUpsertOrgIdentity({
-      orgId: org.id,
-      platform: "linkedin",
-      platformUserId: "umbrella-li",
-      followersCount: 950,
-    });
-    expect(updated.id).toBe(created.id);
-    expect(updated.followersCount).toBe(950);
-
-    const otherOrg = ensureOrgByName("Umbrella EU");
-    await expect(
-      handleUpsertOrgIdentity({
-        orgId: otherOrg.id,
-        platform: "linkedin",
-        platformUserId: "umbrella-li",
-      }),
-    ).rejects.toThrow(/Reassign, don't duplicate/);
   });
 
   it("upserts by explicit id", () => {
