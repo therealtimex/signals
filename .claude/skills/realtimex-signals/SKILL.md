@@ -129,6 +129,20 @@ flowchart TD
 3. `enrich_contact` with discovered fields (fill-gaps only)
 4. `create_task` for follow-up if appropriate
 
+### Wind Tunnel (variant simulation)
+
+```bash
+.claude/skills/realtimex-signals/scripts/invoke-tool.sh create_simulation_run \
+  '{"variantId":"<variant-id>","populationSpec":{"contactIds":["<contact-id>"]}}'
+
+# After scoring agents externally:
+.claude/skills/realtimex-signals/scripts/invoke-tool.sh record_simulation_results \
+  '{"runId":"<run-id>","results":[{"agentId":"<agent-id>","engagementScore":72,"outcome":"like"}]}'
+
+.claude/skills/realtimex-signals/scripts/invoke-tool.sh complete_simulation_run \
+  '{"runId":"<run-id>","predictedScore":78,"predictionConfidence":0.85,"predictedMetrics":{"likes":120}}'
+```
+
 ## Install on an RTX workspace
 
 **Package for upload** (preserves `+x` on `scripts/*.sh`):

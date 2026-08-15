@@ -32,6 +32,8 @@ import {
   launches,
   variants,
   embeddings,
+  simulationRuns,
+  simulationAgents,
 } from "./schema";
 
 // Contact types
@@ -136,6 +138,12 @@ export type NewLaunch = InferInsertModel<typeof launches>;
 // Variant types
 export type Variant = InferSelectModel<typeof variants>;
 export type NewVariant = InferInsertModel<typeof variants>;
+
+// Simulation types (Phase 3)
+export type SimulationRun = InferSelectModel<typeof simulationRuns>;
+export type NewSimulationRun = InferInsertModel<typeof simulationRuns>;
+export type SimulationAgent = InferSelectModel<typeof simulationAgents>;
+export type NewSimulationAgent = InferInsertModel<typeof simulationAgents>;
 
 // Embedding types
 export type Embedding = InferSelectModel<typeof embeddings>;

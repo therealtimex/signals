@@ -79,7 +79,9 @@ export const queryGoalsSchema = z.object({
 export const queryAnalyticsSchema = z.object({});
 
 export const queryWorkflowsSchema = z.object({
-  workflowType: z.enum(["sync", "enrich", "search", "prune", "sequence", "agent"]).optional(),
+  workflowType: z
+    .enum(["sync", "enrich", "search", "prune", "sequence", "agent", "simulate", "calibrate"])
+    .optional(),
   status: z
     .enum(["pending", "running", "paused", "completed", "failed", "cancelled"])
     .optional(),
