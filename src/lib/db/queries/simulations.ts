@@ -586,7 +586,7 @@ export function getSimulationRun(
         const latestCalibration = calibrations[0];
         return {
           ...(latestCalibration ? { latestCalibration } : {}),
-          ...(calibrations.length > 0 ? { calibrations } : {}),
+          calibrations,
         };
       })()
     : {};

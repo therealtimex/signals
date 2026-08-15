@@ -68,27 +68,21 @@ describe("findProjectionSourceRunId", () => {
     ).toBeNull();
   });
 
-  it("tiebreaks with createdAt then id", () => {
-    const a = runFixture({
+  it("tiebreaks equal completedAt by id desc, not createdAt", () => {
+    const olderCreated = runFixture({
       id: "aaa",
       status: "completed",
       completedAt: 100,
-      createdAt: 50,
+      createdAt: 60,
     });
-    const b = runFixture({
+    const newerId = runFixture({
       id: "bbb",
       status: "completed",
       completedAt: 100,
-      createdAt: 60,
-    });
-    const c = runFixture({
-      id: "ccc",
-      status: "completed",
-      completedAt: 100,
-      createdAt: 60,
+      createdAt: 10,
     });
 
-    expect(findProjectionSourceRunId([a, b, c])).toBe("ccc");
+    expect(findProjectionSourceRunId([olderCreated, newerId])).toBe("bbb");
   });
 });
 

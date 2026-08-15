@@ -14,14 +14,7 @@ export function findProjectionSourceRunId(runs: SimulationRun[]): string | null 
     }
     if (runCompleted < bestCompleted) continue;
 
-    const bestCreated = best.createdAt;
-    const runCreated = run.createdAt;
-    if (runCreated > bestCreated) {
-      best = run;
-      continue;
-    }
-    if (runCreated < bestCreated) continue;
-
+    // Match projectVariantFromRunIfLatest: completedAt desc, then id desc (Phase 3 §6).
     if (run.id > best.id) {
       best = run;
     }

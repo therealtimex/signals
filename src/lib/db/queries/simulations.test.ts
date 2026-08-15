@@ -883,4 +883,23 @@ describe("getSimulationAgentTranscript (ui-4.1)", () => {
     expect(detail?.calibrations?.[0]?.observedUntil).toBe(1_700_001_500);
     expect(detail?.latestCalibration?.id).toBe(detail?.calibrations?.[0]?.id);
   });
+
+  it("getSimulationRun with includeCalibration returns empty calibrations when none exist", () => {
+    const contact = createContact({ name: "No Cal", platform: "x", platformUserId: "no-cal" });
+    const launch = upsertLaunch({ name: "No Cal Launch", primaryPlatform: "x" });
+    const variant = upsertVariant({ launchId: launch.id, body: "copy" });
+    const { run } = createAndStartSimulationRun({
+      variantId: variant.id,
+      populationSpec: { contactIds: [contact.id] },
+    });
+    completeSimulationRun(run.id, {
+      predictedScore: 4,
+      predictionConfidence: 0.5,
+      predictedMetrics: { likes: 2 },
+    });
+
+    const detail = getSimulationRun(run.id, { includeCalibration: true });
+    expect(detail?.calibrations).toEqual([]);
+    expect(detail?.latestCalibration).toBeUndefined();
+  });
 });

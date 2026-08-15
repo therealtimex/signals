@@ -17,6 +17,11 @@ import {
 import { formatLaunchDate } from "@/lib/launches-display";
 import { summarizeAgentGrounding } from "@/lib/simulation-run-display";
 import { TranscriptSessionCache } from "@/lib/simulation-transcript-client";
+import {
+  bumpTranscriptCacheRevision,
+  toggleTranscriptExpansion,
+  type TranscriptUiState,
+} from "./run-agents-table-state";
 
 export type RunAgentRow = {
   id: string;
@@ -34,31 +39,36 @@ interface RunAgentsTableProps {
 
 export function RunAgentsTable({ runId, agents, transcriptsPrunedAt }: RunAgentsTableProps) {
   const transcriptCache = useMemo(() => new TranscriptSessionCache(), []);
-  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const [uiState, setUiState] = useState<TranscriptUiState>(() => ({
+    expandedAgentIds: new Set(),
+    cacheRevision: 0,
+  }));
 
   if (agents.length === 0) {
     return <p className="text-sm text-muted-foreground">No agent results yet.</p>;
   }
 
-  async function toggleTranscript(agentId: string) {
+  function toggleTranscript(agentId: string) {
     if (transcriptsPrunedAt) return;
 
-    const next = new Set(expanded);
-    if (next.has(agentId)) {
-      next.delete(agentId);
-      setExpanded(next);
-      return;
-    }
-
-    next.add(agentId);
-    setExpanded(next);
+    setUiState((prev) => toggleTranscriptExpansion(prev, agentId));
 
     const cached = transcriptCache.get(agentId);
     if (!cached) {
-      await transcriptCache.load(runId, agentId);
-      setExpanded(new Set(next));
+      transcriptCache.load(runId, agentId).then(() => {
+        setUiState((prev) => bumpTranscriptCacheRevision(prev));
+      });
     }
   }
+
+  function retryTranscript(agentId: string) {
+    transcriptCache.load(runId, agentId).then(() => {
+      setUiState((prev) => bumpTranscriptCacheRevision(prev));
+    });
+  }
+
+  // cacheRevision forces re-read of transcriptCache after async loads.
+  void uiState.cacheRevision;
 
   return (
     <Table>
@@ -74,7 +84,7 @@ export function RunAgentsTable({ runId, agents, transcriptsPrunedAt }: RunAgents
       <TableBody>
         {agents.map((agent) => {
           const summary = summarizeAgentGrounding(agent.grounding);
-          const isExpanded = expanded.has(agent.id);
+          const isExpanded = uiState.expandedAgentIds.has(agent.id);
           const transcriptState = transcriptCache.get(agent.id);
 
           return (
@@ -123,11 +133,7 @@ export function RunAgentsTable({ runId, agents, transcriptsPrunedAt }: RunAgents
                     {isExpanded && (
                       <TranscriptPanel
                         state={transcriptState}
-                        onRetry={() => {
-                          transcriptCache.load(runId, agent.id).then(() => {
-                            setExpanded(new Set(expanded));
-                          });
-                        }}
+                        onRetry={() => retryTranscript(agent.id)}
                       />
                     )}
                   </div>
