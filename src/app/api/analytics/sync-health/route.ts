@@ -6,6 +6,7 @@ import {
   getRecentSyncErrors,
 } from "@/lib/db/queries/analytics";
 import { getGraphIntegritySummary } from "@/lib/db/graph-integrity";
+import { getSimulationTranscriptRetentionSummary } from "@/lib/db/simulation-transcript-retention";
 
 /**
  * GET /api/analytics/sync-health?range=30d
@@ -20,5 +21,6 @@ export async function GET(req: NextRequest) {
     syncActivity: getSyncActivityOverTime(since),
     recentErrors: getRecentSyncErrors(),
     graphIntegrity: getGraphIntegritySummary(),
+    simulationTranscriptRetention: getSimulationTranscriptRetentionSummary(),
   });
 }

@@ -797,6 +797,23 @@ export const simulationAgents = sqliteTable("simulation_agents", {
   index("idx_sim_agents_persona").on(table.contactPersonaId),
 ]);
 
+// --- Simulation Transcripts (per-agent dialogue; schema Phase 3 §4.2 / ADR-022-11) ---
+
+export const simulationTranscripts = sqliteTable("simulation_transcripts", {
+  id: text("id").primaryKey(),
+  simulationAgentId: text("simulation_agent_id")
+    .notNull()
+    .references(() => simulationAgents.id, { onDelete: "cascade" }),
+  content: text("content").notNull(),
+  byteSize: integer("byte_size").notNull(),
+  tokenCount: integer("token_count"),
+  createdAt: integer("created_at")
+    .notNull()
+    .default(sql`(unixepoch())`),
+}, (table) => [
+  uniqueIndex("idx_sim_transcripts_agent").on(table.simulationAgentId),
+]);
+
 // --- Embeddings (per-node derived vectors; ADR-022-4 / Amendment C) ---
 
 export const embeddings = sqliteTable("embeddings", {

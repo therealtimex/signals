@@ -376,7 +376,7 @@ export async function handleUpsertOrgIdentity(input: z.infer<typeof upsertOrgIde
 
 function serializeSimulationRun(
   run: NonNullable<ReturnType<typeof getSimulationRun>>,
-  opts?: { includeAgents?: boolean },
+  opts?: { includeAgents?: boolean; includeTranscripts?: boolean },
 ) {
   const agents =
     opts?.includeAgents && run.agents
@@ -389,6 +389,9 @@ function serializeSimulationRun(
           engagementScore: agent.engagementScore,
           outcome: agent.outcome,
           predictedActions: agent.predictedActions,
+          ...(opts?.includeTranscripts && agent.transcript
+            ? { transcript: agent.transcript }
+            : {}),
         }))
       : undefined;
 
@@ -439,9 +442,17 @@ export async function handleQuerySimulations(input: z.infer<typeof querySimulati
   });
 
   const runs = result.data.map((run) => {
-    if (input.includeAgents) {
-      const detailed = getSimulationRun(run.id, { includeAgents: true });
-      return detailed ? serializeSimulationRun(detailed, { includeAgents: true }) : serializeSimulationRun(run);
+    if (input.includeAgents || input.includeTranscripts) {
+      const detailed = getSimulationRun(run.id, {
+        includeAgents: true,
+        includeTranscripts: input.includeTranscripts,
+      });
+      return detailed
+        ? serializeSimulationRun(detailed, {
+            includeAgents: true,
+            includeTranscripts: input.includeTranscripts,
+          })
+        : serializeSimulationRun(run);
     }
     return serializeSimulationRun(run);
   });

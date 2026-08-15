@@ -34,6 +34,7 @@ import {
   embeddings,
   simulationRuns,
   simulationAgents,
+  simulationTranscripts,
 } from "./schema";
 
 // Contact types
@@ -144,6 +145,8 @@ export type SimulationRun = InferSelectModel<typeof simulationRuns>;
 export type NewSimulationRun = InferInsertModel<typeof simulationRuns>;
 export type SimulationAgent = InferSelectModel<typeof simulationAgents>;
 export type NewSimulationAgent = InferInsertModel<typeof simulationAgents>;
+export type SimulationTranscript = InferSelectModel<typeof simulationTranscripts>;
+export type NewSimulationTranscript = InferInsertModel<typeof simulationTranscripts>;
 
 // Embedding types
 export type Embedding = InferSelectModel<typeof embeddings>;

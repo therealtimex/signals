@@ -32,6 +32,7 @@ import {
   SimulationScopeError,
 } from "@/lib/db/queries/simulation-errors";
 import { SimulationValidationError } from "@/lib/db/simulation-validation";
+import { pruneSimulationTranscripts } from "@/lib/db/simulation-transcript-retention";
 import { assertNoPrivacySentinels, PRIVACY_SENTINELS } from "@/test/privacy-sentinels";
 import { resetCoreTables } from "@/test/db";
 
@@ -575,5 +576,152 @@ describe("simulation results and projection (slice 3.2)", () => {
       predictionConfidence: 0.6,
     });
     assertNoPrivacySentinels(completed);
+  });
+});
+
+describe("simulation transcripts and retention (slice 3.3)", () => {
+  beforeEach(() => {
+    resetCoreTables();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function seedRunningRun() {
+    const contact = createContact({ name: "Transcript Agent", platform: "x", platformUserId: "sim-3.3" });
+    const launch = upsertLaunch({ name: "Transcript Launch", primaryPlatform: "x" });
+    const variant = upsertVariant({ launchId: launch.id, label: "A", body: "copy" });
+    const { run, agents } = createAndStartSimulationRun({
+      variantId: variant.id,
+      populationSpec: { contactIds: [contact.id] },
+    });
+    return { contact, launch, variant, run, agent: agents[0]! };
+  }
+
+  it("writes and round-trips transcripts through record and query tools", async () => {
+    const { variant, run, agent } = seedRunningRun();
+    const transcript = [{ role: "agent", text: "I would reply to this post." }];
+
+    await invokeAgentTool("record_simulation_results", {
+      runId: run.id,
+      results: [{ agentId: agent.id, engagementScore: 70, outcome: "reply", transcript }],
+    });
+
+    const listed = await invokeAgentTool("query_simulations", {
+      variantId: variant.id,
+      includeAgents: true,
+      includeTranscripts: true,
+    });
+    const listedAgent = (listed as { runs: { agents: { transcript: { content: unknown } }[] }[] })
+      .runs[0]?.agents[0];
+    expect(listedAgent?.transcript.content).toEqual(transcript);
+  });
+
+  it("re-records transcripts idempotently per agent", async () => {
+    const { run, agent } = seedRunningRun();
+    const first = [{ role: "agent", text: "first" }];
+    const second = [{ role: "agent", text: "second" }];
+
+    recordSimulationAgentResults(run.id, [
+      { agentId: agent.id, engagementScore: 50, outcome: "like", transcript: first },
+    ]);
+    recordSimulationAgentResults(run.id, [
+      { agentId: agent.id, engagementScore: 55, outcome: "like", transcript: second },
+    ]);
+
+    const detailed = getSimulationRun(run.id, { includeAgents: true, includeTranscripts: true });
+    expect(detailed?.agents?.[0]?.transcript?.content).toEqual(second);
+    expect(detailed?.agents?.[0]?.engagementScore).toBe(55);
+  });
+
+  it("prunes old transcripts while preserving agent results", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+
+    const { variant, run: oldRun, agent } = seedRunningRun();
+    recordSimulationAgentResults(oldRun.id, [
+      {
+        agentId: agent.id,
+        engagementScore: 40,
+        outcome: "impression",
+        transcript: [{ role: "agent", text: "old dialogue" }],
+      },
+    ]);
+    completeSimulationRun(oldRun.id, { predictedScore: 40, predictionConfidence: 0.4 });
+    const oldTs = Math.floor(new Date("2026-01-01T00:00:00Z").getTime() / 1000);
+    db.update(simulationRuns)
+      .set({ createdAt: oldTs, completedAt: oldTs, updatedAt: oldTs })
+      .where(eq(simulationRuns.id, oldRun.id))
+      .run();
+
+    vi.setSystemTime(new Date("2026-02-15T00:00:00Z"));
+    const second = createAndStartSimulationRun({
+      variantId: variant.id,
+      populationSpec: { contactIds: [agent.contactId!] },
+    });
+    recordSimulationAgentResults(second.run.id, [
+      {
+        agentId: second.agents[0]!.id,
+        engagementScore: 80,
+        outcome: "reply",
+        transcript: [{ role: "agent", text: "new dialogue" }],
+      },
+    ]);
+    completeSimulationRun(second.run.id, { predictedScore: 80, predictionConfidence: 0.8 });
+
+    const report = pruneSimulationTranscripts({
+      now: Math.floor(new Date("2026-02-15T00:00:00Z").getTime() / 1000),
+    });
+    expect(report.transcriptsDeleted).toBe(1);
+
+    const oldDetailed = getSimulationRun(oldRun.id, {
+      includeAgents: true,
+      includeTranscripts: true,
+    });
+    expect(oldDetailed?.agents?.[0]?.transcript).toBeNull();
+    expect(oldDetailed?.agents?.[0]?.engagementScore).toBe(40);
+
+    const newDetailed = getSimulationRun(second.run.id, {
+      includeAgents: true,
+      includeTranscripts: true,
+    });
+    expect(newDetailed?.agents?.[0]?.transcript?.content).toEqual([
+      { role: "agent", text: "new dialogue" },
+    ]);
+  });
+
+  it("§8.5(3.3): transcript query surfaces contain no privacy sentinels", async () => {
+    const contact = createContact({
+      name: "Public",
+      platform: "x",
+      platformUserId: "sim-privacy-3.3",
+      email: PRIVACY_SENTINELS.email,
+    });
+    const launch = upsertLaunch({ name: "Privacy", primaryPlatform: "x" });
+    const variant = upsertVariant({ launchId: launch.id, body: "x" });
+    const { run, agents } = createAndStartSimulationRun({
+      variantId: variant.id,
+      populationSpec: { contactIds: [contact.id] },
+    });
+
+    await invokeAgentTool("record_simulation_results", {
+      runId: run.id,
+      results: [
+        {
+          agentId: agents[0]!.id,
+          engagementScore: 40,
+          outcome: "click",
+          transcript: [{ role: "agent", text: "Public reasoning only." }],
+        },
+      ],
+    });
+
+    const listed = await invokeAgentTool("query_simulations", {
+      variantId: variant.id,
+      includeAgents: true,
+      includeTranscripts: true,
+    });
+    assertNoPrivacySentinels(listed);
   });
 });

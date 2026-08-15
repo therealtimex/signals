@@ -99,6 +99,13 @@
       "when": 1786786000000,
       "tag": "0013_simulation_runs_agents",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1786793661289,
+      "tag": "0014_simulation_transcripts",
+      "breakpoints": true
     }
   ]
 }
