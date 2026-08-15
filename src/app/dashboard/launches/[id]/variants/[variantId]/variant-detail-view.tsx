@@ -3,13 +3,12 @@ import { Wind } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/empty-state";
-import { PaginationControls } from "@/components/pagination-controls";
 import type { Launch } from "@/lib/db/types";
 import type { Variant } from "@/lib/db/types";
 import type { SimulationRun } from "@/lib/db/types";
 import { formatLaunchDate } from "@/lib/launches-display";
-import { createVariantRunsPageUrl } from "./variant-run-timeline-utils";
 import { VariantRunTimeline } from "./variant-run-timeline";
+import { VariantRunsPagination } from "./variant-runs-pagination";
 
 const VARIANT_STATUS_VARIANTS: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
   draft: "outline",
@@ -167,13 +166,12 @@ export function VariantDetailView({
                 runs={runs}
                 projectionSourceRunId={projectionSourceRunId}
               />
-              <PaginationControls
+              <VariantRunsPagination
+                launchId={launch.id}
+                variantId={variant.id}
                 page={runsPage}
                 pageSize={runsPageSize}
                 total={runsTotal}
-                createPageUrl={(page) =>
-                  createVariantRunsPageUrl(launch.id, variant.id, page)
-                }
               />
             </>
           )}

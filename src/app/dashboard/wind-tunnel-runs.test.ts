@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { VariantDetailView } from "@/app/dashboard/launches/[id]/variants/[variantId]/variant-detail-view";
+import VariantDetailPage from "@/app/dashboard/launches/[id]/variants/[variantId]/page";
 import { RunDetailView } from "@/app/dashboard/simulations/[id]/run-detail-view";
 import { RunAgentsTable } from "@/app/dashboard/simulations/[id]/run-agents-table";
 import { db } from "@/lib/db/client";
@@ -192,6 +193,19 @@ describe("UI 4.5 wind tunnel runs", () => {
     expect(emptyHtml).toContain(
       "Runs live in your terminal agent — ask it to run the Wind Tunnel on this variant. The dashboard is read-only.",
     );
+  });
+
+  it("variant detail page server render accepts multi-run fixture without function props", async () => {
+    const { launch, variant } = seedMultiRunVariant();
+    const page = await VariantDetailPage({
+      params: Promise.resolve({ id: launch.id, variantId: variant.id }),
+      searchParams: Promise.resolve({}),
+    });
+    const html = renderToStaticMarkup(page);
+    expect(html).toContain("Hero");
+    expect(html).toContain("Simulation runs");
+    expect(html).toContain("failed");
+    expect(html).toContain("Projection source");
   });
 
   it("run detail smoke renders agents, calibration horizons, error callout, and pruned transcripts", () => {
