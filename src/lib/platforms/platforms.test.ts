@@ -1,22 +1,76 @@
-import { describe, it, expect } from "vitest";
+import { beforeEach, afterEach, describe, it, expect } from "vitest";
 import { getPlatformAdapter } from "@/lib/platforms";
-import { NotImplementedError } from "@/lib/platforms/adapter";
+import { NotImplementedError, type PlatformAdapter } from "@/lib/platforms/adapter";
 import { PLATFORM_CAPABILITIES, getPlatformsWithoutOAuth } from "@/lib/platforms/capabilities";
-import { XPlatformAdapter } from "@/lib/platforms/x/adapter";
-import { LinkedInPlatformAdapter } from "@/lib/platforms/linkedin/adapter";
-import { GmailPlatformAdapter } from "@/lib/platforms/gmail/adapter";
-import { InstagramPlatformAdapter } from "@/lib/platforms/instagram/adapter";
-import { FacebookPlatformAdapter } from "@/lib/platforms/facebook/adapter";
-import { ThreadsPlatformAdapter } from "@/lib/platforms/threads/adapter";
+import {
+  resetRealAdapterLoader,
+  setRealAdapterLoader,
+  type RealAdapterPlatform,
+} from "@/lib/platforms/real-adapter-loader";
 
+const MAPPED_PLATFORMS = ["x", "linkedin", "gmail", "instagram", "facebook", "threads"] as const;
 const STUB_PLATFORMS = ["instagram", "facebook", "threads"] as const;
+const REAL_PLATFORMS = ["x", "linkedin", "gmail"] as const;
+
+function mockRealAdapter(platform: RealAdapterPlatform): PlatformAdapter {
+  return {
+    platform,
+    capabilities: PLATFORM_CAPABILITIES[platform]!,
+    getAuthorizationUrl: async () => {
+      throw new NotImplementedError(platform, "getAuthorizationUrl");
+    },
+    exchangeCode: async () => {
+      throw new NotImplementedError(platform, "exchangeCode");
+    },
+    refreshToken: async () => {
+      throw new NotImplementedError(platform, "refreshToken");
+    },
+    revokeToken: async () => {
+      throw new NotImplementedError(platform, "revokeToken");
+    },
+    getProfile: async () => {
+      throw new NotImplementedError(platform, "getProfile");
+    },
+    getContacts: async () => {
+      throw new NotImplementedError(platform, "getContacts");
+    },
+    getUserById: async () => {
+      throw new NotImplementedError(platform, "getUserById");
+    },
+    getRateLimitState: () => {
+      throw new NotImplementedError(platform, "getRateLimitState");
+    },
+  };
+}
 
 describe("getPlatformAdapter", () => {
-  it("returns stub adapters from the factory", () => {
-    for (const platform of STUB_PLATFORMS) {
+  beforeEach(() => {
+    setRealAdapterLoader(mockRealAdapter);
+  });
+
+  afterEach(() => {
+    resetRealAdapterLoader();
+  });
+
+  it("returns an adapter for all six mapped platforms", () => {
+    for (const platform of MAPPED_PLATFORMS) {
       const adapter = getPlatformAdapter(platform);
       expect(adapter.platform).toBe(platform);
     }
+  });
+
+  it("routes real platforms through the loader seam", () => {
+    const loaded: RealAdapterPlatform[] = [];
+    setRealAdapterLoader((platform) => {
+      loaded.push(platform);
+      return mockRealAdapter(platform);
+    });
+
+    for (const platform of REAL_PLATFORMS) {
+      getPlatformAdapter(platform);
+    }
+
+    expect(loaded).toEqual([...REAL_PLATFORMS]);
   });
 
   it("throws NotImplementedError when no adapter is registered", () => {
@@ -36,23 +90,31 @@ describe("getPlatformAdapter", () => {
 });
 
 describe("adapter capabilities", () => {
-  it("uses the PLATFORM_CAPABILITIES map entry by reference", () => {
-    const adapters = [
-      new XPlatformAdapter(),
-      new LinkedInPlatformAdapter(),
-      new GmailPlatformAdapter(),
-      new InstagramPlatformAdapter(),
-      new FacebookPlatformAdapter(),
-      new ThreadsPlatformAdapter(),
-    ];
+  beforeEach(() => {
+    setRealAdapterLoader(mockRealAdapter);
+  });
 
-    for (const adapter of adapters) {
-      expect(adapter.capabilities).toBe(PLATFORM_CAPABILITIES[adapter.platform]);
+  afterEach(() => {
+    resetRealAdapterLoader();
+  });
+
+  it("uses the PLATFORM_CAPABILITIES map entry by reference", () => {
+    for (const platform of MAPPED_PLATFORMS) {
+      const adapter = getPlatformAdapter(platform);
+      expect(adapter.capabilities).toBe(PLATFORM_CAPABILITIES[platform]);
     }
   });
 });
 
 describe("stub platform adapters", () => {
+  beforeEach(() => {
+    setRealAdapterLoader(mockRealAdapter);
+  });
+
+  afterEach(() => {
+    resetRealAdapterLoader();
+  });
+
   it("has all capabilities false", () => {
     for (const platform of STUB_PLATFORMS) {
       const caps = PLATFORM_CAPABILITIES[platform]!;
