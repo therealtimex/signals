@@ -332,6 +332,83 @@ Query layer (`src/lib/db/queries/embeddings.ts`):
 
 Embedding *generation* (which model, batching, cost, refresh cadence) is a pipeline concern configured where personas are generated; this doc only fixes storage and the read interface. Slice 2.3 ships the table, the search, and an on-demand embed helper — not a bulk backfill of every node.
 
+#### §4.3 Amendment C — slice 2.3 RTX-first embedding boundaries (2026-08-15, kickoff for #35)
+
+The §4.3 DDL sketch and query-layer contract above are approved verbatim (additive
+migration `0010`). This amendment fixes the embedding-*generation* boundary that §4.3
+deliberately left open, per the product decision that Signals is a RealtimeX Local
+App: **all LLM compute is delegated to the RealtimeX SDK proxy — no provider API keys
+in Signals** (ADR-022-9). Vector storage and search stay Signals-owned per ADR-022-4
+(now Accepted); RTX `/sdk/llm/vectors/*` is explicitly not used — vectors never leave
+`~/.signals/`.
+
+**RTX embed client (`src/lib/rtx/llm.ts`).**
+
+- `rtx-manifest.json` `permissions` gains `llm.embed`; `RTX_SDK_PERMISSIONS` derives
+  from the manifest, so `/sdk/register` picks it up with no register-path change.
+- `rtxEmbed(inputs: string[])` follows the `sdk.ts` conventions (injectable
+  `fetchImpl`/`env`, `x-app-id` header, result-object errors). It calls
+  `POST /sdk/llm/embed` with `input` only — **no `provider`/`model` override in v1**:
+  the proxy currently always uses the system default engine and treats overrides as
+  planned, so sending them only invites `VALIDATION_ERROR`/`INVALID_MODEL`.
+- Proxy payload limits are the client's contract: ≤100 inputs, ≤8,000 chars each.
+  `assembleEmbedText` truncates to the limit, and `content_hash` is the sha256 of the
+  exact (post-truncation) text sent.
+- Failure is explicit, never silent: missing RTX env (`RTX_APP_ID`/API base),
+  `PERMISSION_REQUIRED`, `PROVIDER_UNAVAILABLE`, and `EMBED_ERROR` each surface a
+  typed result whose message says what to do (run inside RealtimeX / approve
+  `llm.embed` in the Admin UI). There is no fallback provider path.
+- Chat/content/workflow migration onto this module is a follow-up issue (#TBD, filed
+  at PR time); this slice establishes the pattern with embed only.
+
+**Model identity rule.** The stored `model` column is provider-qualified from the
+response: `${provider}:${model}` (e.g. `native:default`,
+`openai:text-embedding-3-large`). Rationale: the proxy may report the bare model as
+literally `"default"`, and bare model names can collide across providers — the unique
+key `(node_type, node_id, kind, model)` needs an unambiguous engine identity. `dims`
+is stored from the response `dimensions`.
+
+**Search follows the query's engine.** The `semantic_search` handler derives its model
+filter from its own query-embed response, never from a constant: embed the query via
+`rtxEmbed`, then search rows carrying that model key. After a system-default engine
+swap, searches see only rows re-embedded under the new key — results shrink
+gracefully instead of mixing incompatible vector spaces. As defense in depth (the
+`"default"` alias can hide an engine change), `semanticSearch()` skips candidate rows
+whose `dims` ≠ the query vector's length.
+
+**Staleness semantics — `embedNodeIfStale(nodeType, nodeId, kind, { force? })`.**
+
+- Assemble via `assembleEmbedText` → sha256 → compare against the *latest* row for
+  `(node_type, node_id, kind)`; on match, skip with no RTX call; otherwise
+  `rtxEmbed` → `upsertEmbedding`.
+- Accepted gap: an engine swap the proxy reports under an unchanged
+  `provider:model` string is invisible to the hash check; `force: true` exists for
+  maintenance re-embeds. Revisit together with ADR-022-4's latency tripwire.
+- v1 kind coverage (write-path validated per §5): `description` (niche, launch),
+  `body` (content, variant), `profile` (contact, org). `persona` stays reserved for
+  the persona epic.
+- v1 assembles from `shared`-scope fields only, so every row lands
+  `scope = 'shared'`; the `local_only` embedding path in §4.3's privacy rule stays
+  dormant until a caller needs it. The §6 zero-private-bytes invariant test still
+  extends to `semantic_search`.
+
+**Integrity & latency tripwire.** `graph-integrity` gains an embeddings orphan sweep
+(resolve `(node_type, node_id)` the same way edge endpoints are resolved; report
+orphaned rows). The §4.3 latency regression test is pinned: synthetic corpus of
+20,000 × 1536-dim vectors, `semanticSearch` top-10 under 250 ms — generous against
+the interactive budget, but it trips on accidental quadratic work or per-row
+deserialization mistakes, which is what fires ADR-022-4's revisit trigger.
+
+**Agent tool.** `semantic_search({ query, nodeTypes?, kind?, k = 10, includeLocalOnly = false })`
+per §8: embed query → `semanticSearch` → top-k `(nodeType, nodeId, score)` hydrated
+with a display label via existing node lookups. `includeLocalOnly` is future-proofing
+in v1 (no `local_only` rows are written yet) and stays for parity with `query_graph`.
+When embeddings are unavailable (outside the RTX runtime, permission not granted),
+the tool returns the client's actionable error verbatim rather than empty results.
+
+**Out of scope confirmed:** bulk backfill, persona/clustering workflows, sqlite-vec,
+UI, and migrating chat/content/workflows off `ANTHROPIC_API_KEY` (follow-up issue).
+
 ### 4.4 Org Identities
 
 ```ts
@@ -532,7 +609,7 @@ Each slice = one Dev child issue = DDL (if any) + query layer + tests + agent to
 |---|---|---|---|
 | **2.1 Niches** | `niches` DDL; `belongs_to_niche` write/read in graph query layer; `backfill-niches-from-interests`; `query_niches` / `upsert_niche` tools; integrity-job niche checks | — | A |
 | **2.2 Launches & variants** | `launches` + `variants` DDL; `targets` / `published_as` edge support; publish flow creates content link + edge; `query_launches` / `upsert_launch` / `upsert_variant` tools | — | A |
-| **2.3 Embeddings** | `embeddings` DDL; vector query layer + cosine search + latency regression test; embed-on-demand helper; `semantic_search` tool; §6 privacy invariant extension | — (embeds niches too if 2.1 landed) | B |
+| **2.3 Embeddings** | `embeddings` DDL; RTX embed client (`src/lib/rtx/llm.ts` + `llm.embed` permission, Amendment C); vector query layer + cosine search + latency regression test; embed-on-demand helper; `semantic_search` tool; §6 privacy invariant extension | — (embeds niches too if 2.1 landed) | B |
 | **2.4 Org identities** | `org_identities` + `org_identity_metrics` DDL; `org_identity` enum widen on `graph_edges`; dedup-vs-contact guard; query layer; stats population hook in sync/enrichment | — | B |
 | **2.5 Engagements read retirement** | `interactions` parity columns DDL; `content_activities` DDL for contactless events (§6.3, Amendment A); routed dual-write + `backfill-interaction-read-parity`; port analytics/goals/content readers (union reads per §6.3) with parity tests; no-direct-reads lint test | — | A |
 | **2.6 Adapter stubs** | adapter `platform` type widen + `capabilities` contract; instagram/facebook/threads stubs; connect-UI gating | — | B |
@@ -543,7 +620,7 @@ All six slices are mutually independent at the schema level (Phase 1 already res
 
 ## ADR Summary (Phase 2)
 
-**ADR-022-4: Embeddings in a plain SQLite table with app-side search; extensions may accelerate, never own.** — Proposed. Context: spec requires embeddings + semantic search; stack is SQLite + Drizzle, local-first, no vector DB; native extensions (sqlite-vec) complicate the `npx signals` install matrix. Decision: `embeddings` table keyed `(node_type, node_id, kind, model)` with Float32 BLOB vectors and `content_hash` staleness; brute-force cosine in the query layer behind `semanticSearch()`; if scale outgrows it (regression test is the tripwire), adopt sqlite-vec as a derived index behind the same interface. Consequences: zero install risk, trivially correct, easy re-embedding; cost is O(n) scans — acceptable at tens of thousands of nodes, and the revisit path is contained to one module.
+**ADR-022-4: Embeddings in a plain SQLite table with app-side search; extensions may accelerate, never own.** — Accepted (confirmed unchanged by Amendment C for slice 2.3). Context: spec requires embeddings + semantic search; stack is SQLite + Drizzle, local-first, no vector DB; native extensions (sqlite-vec) complicate the `npx signals` install matrix. Decision: `embeddings` table keyed `(node_type, node_id, kind, model)` with Float32 BLOB vectors and `content_hash` staleness; brute-force cosine in the query layer behind `semanticSearch()`; if scale outgrows it (regression test is the tripwire), adopt sqlite-vec as a derived index behind the same interface. Consequences: zero install risk, trivially correct, easy re-embedding; cost is O(n) scans — acceptable at tens of thousands of nodes, and the revisit path is contained to one module.
 
 **ADR-022-5: Separate typed `org_identities` table, not a generalized polymorphic identity table.** — Proposed. Context: orgs need platform identities; options were (a) new `org_identities` mirroring `contact_identities`, (b) generalized `platform_identities(owner_type, owner_id)`, (c) widening `contact_identities` with a nullable org FK. Decision: (a), consistent with ADR-022-1's typed-node philosophy — real FK with cascade, no polymorphic endpoints to integrity-sweep, `contact_identities` and its heavy read paths untouched; (b) would re-introduce app-enforced integrity for the highest-churn sync surface and force a risky migration of existing identities; (c) muddies NOT NULL semantics (forbidden mutation). Consequences: some column-shape duplication (mitigated by shared TS helpers) and a mirrored `org_identity_metrics` snapshot table; cross-table account-claim ambiguity handled by a write-path guard + integrity check.
 
@@ -552,3 +629,5 @@ All six slices are mutually independent at the schema level (Phase 1 already res
 **ADR-022-7: Launches/variants as typed nodes joined to the existing content pipeline; simulation storage deferred.** — Proposed. Context: GTM flow needs brief → variants → publish → outcomes with goal linkage; `workflow_templates` conflates automation config with campaign identity; full Wind Tunnel storage is not in scope. Decision: `launches` (with optional `workflow_template_id` provenance) and `variants` (FK to launch — intra-aggregate, so a real FK, not an edge); publishing materializes a variant into `content_items` + `published_as` edge so real outcomes flow through existing interactions/metrics/goal machinery; latest prediction values live on the variant row as a projection-in-waiting for Phase 3 simulation runs. Consequences: variant comparison is one indexed read and no metrics duplication; cost is prediction history absent until simulation-run storage lands, and the launch/template split must be explained in docs.
 
 **ADR-022-8: Contactless platform events in a separate `content_activities` table; `interactions.contact_id` stays NOT NULL.** — Accepted (Amendment A, resolves Review pass-3 escalation on PR #38). Context: owner outbound actions and anonymous engagements have no counterparty contact; `engagements.contact_id` is nullable but `interactions.contact_id` is not, and slice 2.5 needs these events in the product read model. Options: (a) relax `interactions.contact_id` to nullable — rejected: the table rebuild violates rule 1's spirit and rule 8's letter, with a demonstrated N-1 rollback crash (`backfillEngagedWithEdges` → `upsertGraphEdge('contact:null')` aborts the shipped binary's startup backfill chain, unpatchable retroactively); (b) synthetic self-contact — rejected in review pass 2: pollutes CRM lists and top-engaged analytics; (c) permanent read carve-out on `engagements` — rejected: makes the enum-locked sync ledger load-bearing forever and forecloses its Phase 4+ drop. Decision: (d) additive `content_activities` table; write path routes each engagement by counterparty resolution; contact-centric readers stay `interactions`-only (structural exclusion), content/volume readers union both tables. Consequences: N-1 safe by construction (new tables are invisible to old binaries); legacy parity is exact (`interactions ∪ content_activities` = legacy `engagements` reads); the domain distinction relationship-event vs content-activity is now in the schema, not in WHERE clauses; cost is a second event table and a routed write path with two-table idempotency checks.
+
+**ADR-022-9: All LLM compute via the RealtimeX SDK proxy; no provider API keys in Signals; vectors stay local.** — Accepted (Amendment C, product decision 2026-08-15). Context: Signals ships as a RealtimeX Local App; direct provider keys (`ANTHROPIC_API_KEY` today, OpenAI/Serper/Tavily prospectively) mean per-user key management, duplicate spend controls, and a second trust surface, while the RTX SDK proxy already exposes permission-gated `llm.chat` / `llm.embed` / `llm.providers`. Options: (a) keep direct provider SDKs per feature — rejected: key sprawl and non-uniform failure modes across features; (b) RTX proxy for all LLM compute, Signals SQLite for vector storage — chosen; (c) RTX proxy plus RTX-managed vector storage (`/sdk/llm/vectors/*`) — rejected: embeddings are derived from scoped CRM data, and ADR-022-4's ownership model plus the §6 scope filter only hold if vectors stay in `~/.signals/`. Decision: (b), starting with embeddings in slice 2.3 (`src/lib/rtx/llm.ts`, `llm.embed` permission); chat/content/workflow migration is a follow-up issue reusing the same module. Consequences: zero key management and user-visible permission grants; embedding features fail clearly outside the RTX runtime instead of degrading silently; model selection is deferred to the system default engine until the proxy implements overrides — which forces Amendment C's provider-qualified model identity rule and search-follows-query semantics.
