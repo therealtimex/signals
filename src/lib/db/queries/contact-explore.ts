@@ -2,12 +2,12 @@ import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import {
   contactIdentities,
-  contactPersonas,
   contacts,
   graphEdges,
   identityMetrics,
   niches,
 } from "@/lib/db/schema";
+import { getActivePersona } from "@/lib/db/queries/personas";
 
 export type ContactExplorePersona = {
   visibility: "shared" | "local_only" | "absent";
@@ -91,13 +91,7 @@ function sharedNichesForContact(contactId: string): ContactExploreNiche[] {
 }
 
 function buildPersonaProjection(contactId: string): ContactExplorePersona {
-  const persona = db
-    .select()
-    .from(contactPersonas)
-    .where(
-      and(eq(contactPersonas.contactId, contactId), eq(contactPersonas.status, "active")),
-    )
-    .get();
+  const persona = getActivePersona(contactId, { includeLocalOnly: true });
 
   if (!persona) {
     return {

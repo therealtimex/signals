@@ -18,6 +18,9 @@ export default async function ContactDetailPage({
 
   const tasks = getTasksByContact(id);
   const explore = getContactExploreCard(id);
+  if (!explore) {
+    notFound();
+  }
 
-  return <ContactDetailClient contact={contact} tasks={tasks} explore={explore!} />;
+  return <ContactDetailClient contact={contact} tasks={tasks} explore={explore} />;
 }
