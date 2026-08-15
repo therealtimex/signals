@@ -28,6 +28,19 @@ Invoke body: `{ "tool": "<name>", "input": { ... } }`
 | `query_content` | List content items |
 | `query_goals` | List goals |
 | `create_task` | Follow-up task |
+| `create_simulation_run` | Wind Tunnel: create + start a simulation run for a variant |
+| `query_simulations` | List runs; `includeAgents: true` returns public grounding |
+| `record_simulation_results` | Per-agent scores/outcomes on a running simulation |
+| `complete_simulation_run` | Finish run and project `variants.predicted_*` |
+
+## Wind Tunnel simulation flow
+
+1. `upsert_launch` + `upsert_variant` on a **shared** launch
+2. `create_simulation_run` with `variantId` and optional `populationSpec`
+3. `record_simulation_results` while status is `running`
+4. `complete_simulation_run` with `predictedScore` (0–100), `predictionConfidence` (0–1), optional `predictedMetrics`
+
+Scores and metrics are validated at the query layer. Grounding uses shared-scope CRM data only — no `local_only` rows or `properties_private`.
 
 ## Common input shapes
 

@@ -157,7 +157,7 @@ export const querySimulationsSchema = z.object({
 
 const simulationAgentResultSchema = z.object({
   agentId: z.string().min(1),
-  engagementScore: z.number().optional(),
+  engagementScore: z.number().min(0).max(100).optional(),
   outcome: z.string().optional(),
   predictedActions: z.union([z.array(z.record(z.unknown())), z.record(z.unknown())]).optional(),
   transcript: z.unknown().optional(),
@@ -171,9 +171,9 @@ export const recordSimulationResultsSchema = z.object({
 export const completeSimulationRunSchema = z.object({
   runId: z.string().min(1),
   status: z.enum(["completed", "failed", "cancelled"]).optional(),
-  predictedScore: z.number().optional(),
-  predictionConfidence: z.number().optional(),
-  predictedMetrics: z.record(z.unknown()).optional(),
+  predictedScore: z.number().min(0).max(100).optional(),
+  predictionConfidence: z.number().min(0).max(1).optional(),
+  predictedMetrics: z.record(z.number().nonnegative()).optional(),
   error: z.string().optional(),
 });
 

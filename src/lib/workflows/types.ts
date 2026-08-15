@@ -1,5 +1,13 @@
 /** Workflow type identifiers. */
-export type WorkflowType = "sync" | "enrich" | "search" | "prune" | "sequence" | "agent";
+export type WorkflowType =
+  | "sync"
+  | "enrich"
+  | "search"
+  | "prune"
+  | "sequence"
+  | "agent"
+  | "simulate"
+  | "calibrate";
 
 /** Step types for workflow observability. */
 export type WorkflowStepType =
@@ -31,6 +39,8 @@ export const WORKFLOW_TYPE_LABELS: Record<WorkflowType, string> = {
   prune: "Contact Pruning",
   sequence: "Sequence",
   agent: "AI Agent",
+  simulate: "Wind Tunnel Simulation",
+  calibrate: "Simulation Calibration",
 };
 
 /** Sub-type qualifiers for sync workflows. */

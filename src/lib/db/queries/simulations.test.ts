@@ -1,10 +1,20 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
+import { nanoid } from "nanoid";
 import { invokeAgentTool } from "@/lib/agent-tools/invoke";
 import { db } from "@/lib/db/client";
-import { contactIdentities, contacts, simulationRuns } from "@/lib/db/schema";
+import {
+  contactIdentities,
+  contacts,
+  orgs,
+  simulationAgents,
+  simulationRuns,
+} from "@/lib/db/schema";
 import { createContact } from "@/lib/db/queries/contacts";
+import { upsertGraphEdge } from "@/lib/db/queries/graph";
+import { logInteraction } from "@/lib/db/queries/interactions";
 import { upsertLaunch } from "@/lib/db/queries/launches";
+import { upsertNiche } from "@/lib/db/queries/niches";
 import { upsertPersona } from "@/lib/db/queries/personas";
 import { upsertVariant, getVariantById } from "@/lib/db/queries/variants";
 import {
@@ -21,6 +31,7 @@ import {
   SimulationRunStateError,
   SimulationScopeError,
 } from "@/lib/db/queries/simulation-errors";
+import { SimulationValidationError } from "@/lib/db/simulation-validation";
 import { assertNoPrivacySentinels, PRIVACY_SENTINELS } from "@/test/privacy-sentinels";
 import { resetCoreTables } from "@/test/db";
 
@@ -107,6 +118,7 @@ describe("simulation runs (slice 3.1)", () => {
       phone: PRIVACY_SENTINELS.phone,
       tags: JSON.stringify([PRIVACY_SENTINELS.tags]),
     });
+    const peer = createContact({ name: "Peer", platform: "x", platformUserId: "sim-3-peer" });
     db.update(contacts)
       .set({ title: "Engineer", company: "Acme" })
       .where(eq(contacts.id, contact.id))
@@ -118,6 +130,91 @@ describe("simulation runs (slice 3.1)", () => {
       })
       .where(eq(contactIdentities.contactId, contact.id))
       .run();
+
+    const localOrgId = nanoid();
+    db.insert(orgs)
+      .values({
+        id: localOrgId,
+        name: "Hidden Org",
+        description: PRIVACY_SENTINELS.propertiesPrivate,
+        scope: "local_only",
+        source: "test",
+      })
+      .run();
+
+    const sharedOrgId = nanoid();
+    db.insert(orgs)
+      .values({
+        id: sharedOrgId,
+        name: "Visible Org",
+        scope: "shared",
+        source: "test",
+      })
+      .run();
+
+    upsertGraphEdge({
+      srcType: "contact",
+      srcId: contact.id,
+      dstType: "org",
+      dstId: localOrgId,
+      edgeType: "works_at",
+      scope: "local_only",
+      propertiesPrivate: JSON.stringify({ notes: PRIVACY_SENTINELS.propertiesPrivate }),
+    });
+    upsertGraphEdge({
+      srcType: "contact",
+      srcId: contact.id,
+      dstType: "org",
+      dstId: sharedOrgId,
+      edgeType: "works_at",
+      scope: "shared",
+      propertiesPrivate: JSON.stringify({ notes: PRIVACY_SENTINELS.propertiesPrivate }),
+    });
+    upsertGraphEdge({
+      srcType: "contact",
+      srcId: contact.id,
+      dstType: "contact",
+      dstId: peer.id,
+      edgeType: "relationship",
+      scope: "local_only",
+      propertiesPrivate: JSON.stringify({ notes: PRIVACY_SENTINELS.propertiesPrivate }),
+    });
+
+    const sharedNiche = upsertNiche({ name: "devtools", nicheType: "interest", scope: "shared" });
+    const privateNiche = upsertNiche({
+      name: PRIVACY_SENTINELS.propertiesPrivate,
+      nicheType: "interest",
+      scope: "local_only",
+    });
+    upsertGraphEdge({
+      srcType: "contact",
+      srcId: contact.id,
+      dstType: "niche",
+      dstId: sharedNiche.id,
+      edgeType: "belongs_to_niche",
+      scope: "shared",
+    });
+    upsertGraphEdge({
+      srcType: "contact",
+      srcId: contact.id,
+      dstType: "niche",
+      dstId: privateNiche.id,
+      edgeType: "belongs_to_niche",
+      scope: "local_only",
+    });
+
+    logInteraction({
+      contactId: contact.id,
+      interactionType: "dm",
+      summary: PRIVACY_SENTINELS.propertiesPrivate,
+      scope: "local_only",
+    });
+    logInteraction({
+      contactId: contact.id,
+      interactionType: "like",
+      summary: "public like",
+      scope: "shared",
+    });
 
     const { variant } = seedSharedLaunchWithVariant();
     const created = await invokeAgentTool("create_simulation_run", {
@@ -131,6 +228,22 @@ describe("simulation runs (slice 3.1)", () => {
       includeAgents: true,
     });
     assertNoPrivacySentinels(listed);
+  });
+
+  it("rolls back workflow-path run creation when agent materialization fails", () => {
+    const contact = createContact({ name: "Good", platform: "x", platformUserId: "sim-atomic-1" });
+    const { variant } = seedSharedLaunchWithVariant();
+
+    expect(() =>
+      createSimulationRun({
+        variantId: variant.id,
+        populationSpec: { contactIds: [contact.id, "missing-contact-id"] },
+        source: "workflow",
+      }),
+    ).toThrow(/Contact not found/);
+
+    expect(listSimulationRuns({ variantId: variant.id }).total).toBe(0);
+    expect(db.select().from(simulationAgents).all()).toHaveLength(0);
   });
 
   it("enforces startSimulationRun state transitions", () => {
@@ -293,6 +406,76 @@ describe("simulation results and projection (slice 3.2)", () => {
         { agentId: first.agent.id, engagementScore: 10, outcome: "like" },
       ]),
     ).toThrow(SimulationAgentOwnershipError);
+  });
+
+  it("rolls back earlier agent updates when a later result violates ownership", () => {
+    const first = seedRunningRun();
+    const second = createAndStartSimulationRun({
+      variantId: first.variant.id,
+      populationSpec: { contactIds: [first.contact.id] },
+    });
+
+    expect(() =>
+      recordSimulationAgentResults(second.run.id, [
+        { agentId: second.agents[0]!.id, engagementScore: 55, outcome: "like" },
+        { agentId: first.agent.id, engagementScore: 10, outcome: "like" },
+      ]),
+    ).toThrow(SimulationAgentOwnershipError);
+
+    const secondAgent = db
+      .select()
+      .from(simulationAgents)
+      .where(eq(simulationAgents.id, second.agents[0]!.id))
+      .get()!;
+    expect(secondAgent.engagementScore).toBeNull();
+    expect(secondAgent.outcome).toBeNull();
+  });
+
+  it("round-trips predictedActions through record and query tools", async () => {
+    const { variant, run, agent } = seedRunningRun();
+    const predictedActions = [{ action: "reply", confidence: 0.8 }];
+
+    const recorded = await invokeAgentTool("record_simulation_results", {
+      runId: run.id,
+      results: [{ agentId: agent.id, engagementScore: 60, outcome: "reply", predictedActions }],
+    });
+    const recordedAgent = (recorded as { run: { agents: { predictedActions: unknown }[] } }).run
+      .agents[0];
+    expect(recordedAgent?.predictedActions).toEqual(predictedActions);
+
+    const listed = await invokeAgentTool("query_simulations", {
+      variantId: variant.id,
+      includeAgents: true,
+    });
+    const listedAgent = (listed as { runs: { agents: { predictedActions: unknown }[] }[] }).runs[0]
+      ?.agents[0];
+    expect(listedAgent?.predictedActions).toEqual(predictedActions);
+  });
+
+  it("rejects invalid numeric simulation contracts", () => {
+    const { run, agent } = seedRunningRun();
+
+    expect(() =>
+      recordSimulationAgentResults(run.id, [
+        { agentId: agent.id, engagementScore: 150, outcome: "like" },
+      ]),
+    ).toThrow(SimulationValidationError);
+
+    expect(() =>
+      completeSimulationRun(run.id, { predictedScore: 101, predictionConfidence: 0.5 }),
+    ).toThrow(SimulationValidationError);
+
+    expect(() =>
+      completeSimulationRun(run.id, { predictedScore: 50, predictionConfidence: 1.5 }),
+    ).toThrow(SimulationValidationError);
+
+    expect(() =>
+      completeSimulationRun(run.id, {
+        predictedScore: 50,
+        predictionConfidence: 0.5,
+        predictedMetrics: { invalid_metric: 10 },
+      }),
+    ).toThrow(SimulationValidationError);
   });
 
   it("rejects record on non-running runs and invalid completions", () => {

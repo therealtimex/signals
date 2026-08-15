@@ -116,10 +116,10 @@ export const chatTools = {
 
   query_workflows: tool({
     description:
-      "List automation runs. Filter by type (sync, enrich, search, prune, sequence, agent) or status.",
+      "List automation runs. Filter by type (sync, enrich, search, prune, sequence, agent, simulate, calibrate) or status.",
     inputSchema: z.object({
       workflowType: z
-        .enum(["sync", "enrich", "search", "prune", "sequence", "agent"])
+        .enum(["sync", "enrich", "search", "prune", "sequence", "agent", "simulate", "calibrate"])
         .optional()
         .describe("Filter by workflow type"),
       status: z

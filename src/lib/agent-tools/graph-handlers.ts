@@ -388,6 +388,7 @@ function serializeSimulationRun(
           grounding: agent.grounding,
           engagementScore: agent.engagementScore,
           outcome: agent.outcome,
+          predictedActions: agent.predictedActions,
         }))
       : undefined;
 

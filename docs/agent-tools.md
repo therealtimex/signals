@@ -60,6 +60,10 @@ Then pass `Authorization: Bearer your-secret-token` on each request.
 | `upsert_launch` | graph | Create or update a GTM launch |
 | `upsert_variant` | graph | Create or update a launch variant (publish via status) |
 | `semantic_search` | graph | Top-k semantic search over embedded nodes (query embed via RealtimeX) |
+| `create_simulation_run` | graph | Start a Wind Tunnel simulation run (atomic create + start) |
+| `query_simulations` | graph | List simulation runs with optional agent grounding |
+| `record_simulation_results` | graph | Batch per-agent simulation outcomes on a running run |
+| `complete_simulation_run` | graph | Complete/fail/cancel a run and project variant predictions |
 
 `create_contact` / `update_contact` with a `company` field also dual-write an `orgs` row and `works_at` edge (contacts projection unchanged).
 

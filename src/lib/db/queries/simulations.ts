@@ -17,6 +17,13 @@ import { getLaunchById } from "@/lib/db/queries/launches";
 import { getVariantById } from "@/lib/db/queries/variants";
 import { assertSimulationOutcome } from "@/lib/db/simulation-outcomes";
 import {
+  assertEngagementScore,
+  assertPredictionConfidence,
+  assertPredictionScore,
+  normalizePredictedMetrics,
+  parsePredictedActions,
+} from "@/lib/db/simulation-validation";
+import {
   SimulationAgentOwnershipError,
   SimulationRunStateError,
   SimulationScopeError,
@@ -41,8 +48,12 @@ export type CreateSimulationRunInput = {
   source?: "agent" | "workflow";
 };
 
-export type SimulationAgentWithGrounding = Omit<SimulationAgent, "grounding"> & {
+export type SimulationAgentWithGrounding = Omit<
+  SimulationAgent,
+  "grounding" | "predictedActions"
+> & {
   grounding: Record<string, unknown>;
+  predictedActions: Record<string, unknown>[] | Record<string, unknown>;
 };
 
 export type CreateSimulationRunResult = {
@@ -337,41 +348,44 @@ function materializeAgents(
       .run();
 
     const agent = db.select().from(simulationAgents).where(eq(simulationAgents.id, agentId)).get()!;
-    const { grounding: groundingRaw, ...rest } = agent;
+    const { grounding: groundingRaw, predictedActions: predictedActionsRaw, ...rest } = agent;
     return {
       ...rest,
       grounding,
+      predictedActions: parsePredictedActions(predictedActionsRaw),
     };
   });
 }
 
 export function createSimulationRun(input: CreateSimulationRunInput): CreateSimulationRunResult {
-  assertSharedLaunchForVariant(input.variantId);
-  const variant = getVariantById(input.variantId)!;
-  const launch = getLaunchById(variant.launchId)!;
-  const populationSpec = mergePopulationSpec(input.populationSpec, launch.audienceSpec);
-  const contactIds = resolvePopulationContactIds(populationSpec, launch.audienceSpec);
-  const runId = nanoid();
+  return db.transaction(() => {
+    assertSharedLaunchForVariant(input.variantId);
+    const variant = getVariantById(input.variantId)!;
+    const launch = getLaunchById(variant.launchId)!;
+    const populationSpec = mergePopulationSpec(input.populationSpec, launch.audienceSpec);
+    const contactIds = resolvePopulationContactIds(populationSpec, launch.audienceSpec);
+    const runId = nanoid();
 
-  db.insert(simulationRuns)
-    .values({
-      id: runId,
-      variantId: input.variantId,
-      batchId: input.batchId ?? null,
-      status: "pending",
-      populationSpec: JSON.stringify(populationSpec),
-      agentCount: contactIds.length,
-      predictionModel: input.predictionModel ?? null,
-      config: JSON.stringify(input.config ?? {}),
-      scope: "shared",
-      source: input.source ?? "agent",
-      workflowRunId: input.workflowRunId ?? null,
-    })
-    .run();
+    db.insert(simulationRuns)
+      .values({
+        id: runId,
+        variantId: input.variantId,
+        batchId: input.batchId ?? null,
+        status: "pending",
+        populationSpec: JSON.stringify(populationSpec),
+        agentCount: contactIds.length,
+        predictionModel: input.predictionModel ?? null,
+        config: JSON.stringify(input.config ?? {}),
+        scope: "shared",
+        source: input.source ?? "agent",
+        workflowRunId: input.workflowRunId ?? null,
+      })
+      .run();
 
-  const agents = materializeAgents(runId, contactIds);
-  const run = db.select().from(simulationRuns).where(eq(simulationRuns.id, runId)).get()!;
-  return { run, agents };
+    const agents = materializeAgents(runId, contactIds);
+    const run = db.select().from(simulationRuns).where(eq(simulationRuns.id, runId)).get()!;
+    return { run, agents };
+  });
 }
 
 export function startSimulationRun(runId: string): SimulationRun {
@@ -407,10 +421,11 @@ export function createAndStartSimulationRun(
 }
 
 function parseAgentGrounding(agent: SimulationAgent): SimulationAgentWithGrounding {
-  const { grounding: groundingRaw, ...rest } = agent;
+  const { grounding: groundingRaw, predictedActions: predictedActionsRaw, ...rest } = agent;
   return {
     ...rest,
     grounding: parseJsonRecord(groundingRaw),
+    predictedActions: parsePredictedActions(predictedActionsRaw),
   };
 }
 
@@ -577,12 +592,17 @@ export function recordSimulationAgentResults(
           ? agent.predictedActions
           : JSON.stringify(result.predictedActions);
 
+      let engagementScore = agent.engagementScore;
+      if (result.engagementScore !== undefined) {
+        engagementScore =
+          result.engagementScore === null
+            ? null
+            : assertEngagementScore(result.engagementScore);
+      }
+
       db.update(simulationAgents)
         .set({
-          engagementScore:
-            result.engagementScore !== undefined
-              ? result.engagementScore
-              : agent.engagementScore,
+          engagementScore,
           outcome,
           predictedActions,
         })
@@ -625,13 +645,17 @@ export function completeSimulationRun(
       );
     }
 
+    const predictedScore = assertPredictionScore(input.predictedScore);
+    const predictionConfidence = assertPredictionConfidence(input.predictionConfidence);
+    const predictedMetrics = normalizePredictedMetrics(input.predictedMetrics);
+
     db.transaction(() => {
       db.update(simulationRuns)
         .set({
           status: "completed",
-          predictedScore: input.predictedScore,
-          predictionConfidence: input.predictionConfidence,
-          predictedMetrics: JSON.stringify(input.predictedMetrics ?? {}),
+          predictedScore,
+          predictionConfidence,
+          predictedMetrics: JSON.stringify(predictedMetrics),
           completedAt: now,
           updatedAt: now,
           error: null,
