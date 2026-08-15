@@ -16,7 +16,9 @@ describe("GET /api/contacts/[id]/explore", () => {
     const res = await GET(new NextRequest("http://localhost"), {
       params: Promise.resolve({ id: "missing" }),
     });
+    const body = await res.json();
     expect(res.status).toBe(404);
+    expect(body).toEqual({ error: "Contact not found", code: "NOT_FOUND" });
   });
 
   it("returns explore payload for seeded contact", async () => {

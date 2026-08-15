@@ -16,6 +16,11 @@ function formatCount(value: number | null | undefined): string {
   return value.toLocaleString();
 }
 
+/** Platform handles are stored platform-formatted (@user, /in/name); render verbatim. */
+export function formatPlatformHandle(handle: string): string {
+  return handle;
+}
+
 interface ContactExploreCardProps {
   explore: ContactExploreCard;
 }
@@ -84,7 +89,9 @@ export function ContactExploreCardView({ explore }: ContactExploreCardProps) {
                     {platformLabels[identity.platform] ?? identity.platform}
                   </span>
                   {identity.platformHandle && (
-                    <span className="text-xs text-muted-foreground">@{identity.platformHandle}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {formatPlatformHandle(identity.platformHandle)}
+                    </span>
                   )}
                 </div>
                 <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground sm:grid-cols-4">
@@ -114,9 +121,9 @@ export function ContactExploreCardView({ explore }: ContactExploreCardProps) {
           ) : (
             <div className="flex flex-wrap gap-2">
               {niches.map((niche) => (
-                <button
+                <a
                   key={niche.id}
-                  type="button"
+                  href="#"
                   title="Niche detail coming soon"
                   className="inline-flex items-center gap-1 rounded-full border px-3 py-1 text-sm hover:bg-muted"
                 >
@@ -126,7 +133,7 @@ export function ContactExploreCardView({ explore }: ContactExploreCardProps) {
                       {(niche.weight * 100).toFixed(0)}%
                     </span>
                   )}
-                </button>
+                </a>
               ))}
             </div>
           )}

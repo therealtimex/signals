@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import {
   contactIdentities,
@@ -8,6 +8,7 @@ import {
   niches,
 } from "@/lib/db/schema";
 import { getActivePersona } from "@/lib/db/queries/personas";
+import type { IdentityMetric } from "@/lib/db/types";
 
 export type ContactExplorePersona = {
   visibility: "shared" | "local_only" | "absent";
@@ -47,23 +48,48 @@ export type ContactExploreCard = {
   niches: ContactExploreNiche[];
 };
 
-function latestMetricForIdentity(identityId: string) {
-  return db
+/** Parse persona interests JSON; never throws. */
+export function parsePersonaInterests(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is string => typeof item === "string");
+  } catch {
+    return [];
+  }
+}
+
+function latestMetricsForIdentities(identityIds: string[]): Map<string, IdentityMetric> {
+  if (identityIds.length === 0) return new Map();
+
+  const rows = db
     .select()
     .from(identityMetrics)
-    .where(eq(identityMetrics.contactIdentityId, identityId))
+    .where(inArray(identityMetrics.contactIdentityId, identityIds))
     .orderBy(desc(identityMetrics.snapshotAt))
-    .limit(1)
-    .get();
+    .all();
+
+  const latest = new Map<string, IdentityMetric>();
+  for (const row of rows) {
+    if (!latest.has(row.contactIdentityId)) {
+      latest.set(row.contactIdentityId, row);
+    }
+  }
+  return latest;
 }
 
 function sharedNichesForContact(contactId: string): ContactExploreNiche[] {
-  const edges = db
+  return db
     .select({
-      nicheId: graphEdges.dstId,
+      id: niches.id,
+      name: niches.name,
+      slug: niches.slug,
+      nicheType: niches.nicheType,
       weight: graphEdges.weight,
     })
     .from(graphEdges)
+    .innerJoin(niches, eq(graphEdges.dstId, niches.id))
     .where(
       and(
         eq(graphEdges.edgeType, "belongs_to_niche"),
@@ -71,23 +97,17 @@ function sharedNichesForContact(contactId: string): ContactExploreNiche[] {
         eq(graphEdges.srcId, contactId),
         eq(graphEdges.dstType, "niche"),
         eq(graphEdges.scope, "shared"),
+        eq(niches.scope, "shared"),
       ),
     )
-    .all();
-
-  const results: ContactExploreNiche[] = [];
-  for (const edge of edges) {
-    const niche = db.select().from(niches).where(eq(niches.id, edge.nicheId)).get();
-    if (!niche || niche.scope !== "shared") continue;
-    results.push({
-      id: niche.id,
-      name: niche.name,
-      slug: niche.slug,
-      nicheType: niche.nicheType,
-      weight: edge.weight ?? null,
-    });
-  }
-  return results;
+    .all()
+    .map((row) => ({
+      id: row.id,
+      name: row.name,
+      slug: row.slug,
+      nicheType: row.nicheType,
+      weight: row.weight ?? null,
+    }));
 }
 
 function buildPersonaProjection(contactId: string): ContactExplorePersona {
@@ -122,7 +142,7 @@ function buildPersonaProjection(contactId: string): ContactExplorePersona {
     archetype: persona.archetype,
     tone: persona.tone,
     summary: persona.summary,
-    interests: JSON.parse(persona.interests ?? "[]") as string[],
+    interests: parsePersonaInterests(persona.interests),
     confidence: persona.confidence,
     generatedAt: persona.generatedAt,
   };
@@ -138,8 +158,10 @@ export function getContactExploreCard(contactId: string): ContactExploreCard | u
     .where(eq(contactIdentities.contactId, contactId))
     .all();
 
+  const metricByIdentity = latestMetricsForIdentities(identityRows.map((identity) => identity.id));
+
   const identities: ContactExploreIdentity[] = identityRows.map((identity) => {
-    const latest = latestMetricForIdentity(identity.id);
+    const latest = metricByIdentity.get(identity.id);
     return {
       id: identity.id,
       platform: identity.platform,

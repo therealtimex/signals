@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { notFoundResponse } from "@/lib/api/errors";
 import { getContactExploreCard } from "@/lib/db/queries/contact-explore";
 
 export async function GET(
@@ -8,7 +9,7 @@ export async function GET(
   const { id } = await params;
   const explore = getContactExploreCard(id);
   if (!explore) {
-    return NextResponse.json({ error: "Contact not found" }, { status: 404 });
+    return notFoundResponse("Contact not found");
   }
   return NextResponse.json(explore);
 }
