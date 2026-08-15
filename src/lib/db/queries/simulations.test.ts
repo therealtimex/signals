@@ -35,6 +35,12 @@ import { SimulationValidationError } from "@/lib/db/simulation-validation";
 import { assertNoPrivacySentinels, PRIVACY_SENTINELS } from "@/test/privacy-sentinels";
 import { resetCoreTables } from "@/test/db";
 
+/** Matches SQLite `TEXT` default BINARY collation for ASCII nanoid IDs. */
+function compareBinaryDesc(a: string, b: string): number {
+  if (a === b) return 0;
+  return a < b ? 1 : -1;
+}
+
 describe("simulation runs (slice 3.1)", () => {
   beforeEach(() => {
     resetCoreTables();
@@ -403,7 +409,9 @@ describe("simulation results and projection (slice 3.2)", () => {
       predictionModel: "rtx:new",
     });
 
-    const [winner, loser] = [firstRun, second.run].sort((a, b) => b.id.localeCompare(a.id));
+    const [winner, loser] = [firstRun, second.run].sort((a, b) =>
+      compareBinaryDesc(a.id, b.id),
+    );
     const scores = {
       [firstRun.id]: { score: 60, confidence: 0.5, model: "rtx:default" },
       [second.run.id]: { score: 90, confidence: 0.9, model: "rtx:new" },
