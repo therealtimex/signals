@@ -6,6 +6,10 @@ import {
 } from "@/lib/db/queries/scheduled-jobs";
 import { getTemplate } from "@/lib/db/queries/workflow-templates";
 import { startAgentWorkflow } from "@/lib/agents/run-agent-workflow";
+import {
+  pruneSimulationTranscripts,
+  SIMULATION_TRANSCRIPT_RETENTION_JOB_TYPE,
+} from "@/lib/db/simulation-transcript-retention";
 import type { WorkflowType } from "@/lib/workflows/types";
 
 const CHECK_INTERVAL_MS = 60_000; // 1 minute
@@ -19,6 +23,16 @@ const TEMPLATE_TO_WORKFLOW_TYPE: Record<string, WorkflowType> = {
   engagement: "agent",
   content: "agent",
   nurture: "agent",
+};
+
+type MaintenanceHandler = (payload: Record<string, unknown>) => unknown;
+
+const MAINTENANCE_HANDLERS: Record<string, MaintenanceHandler> = {
+  [SIMULATION_TRANSCRIPT_RETENTION_JOB_TYPE]: (payload) =>
+    pruneSimulationTranscripts({
+      retentionDays:
+        typeof payload.retentionDays === "number" ? payload.retentionDays : undefined,
+    }),
 };
 
 let initialized = false;
@@ -64,15 +78,15 @@ function checkDueJobs(): void {
       console.log(`[scheduler] Found ${dueJobs.length} due job(s)`);
     }
     for (const job of dueJobs) {
-      executeJob(job.id);
+      executeScheduledJob(job.id);
     }
   } catch (err) {
     console.error("[scheduler] Error checking due jobs:", err);
   }
 }
 
-/** Execute a single scheduled job. */
-function executeJob(jobId: string): void {
+/** Execute a single scheduled job (exported for tests). */
+export function executeScheduledJob(jobId: string): void {
   const job = getScheduledJob(jobId);
   if (!job) return;
 
@@ -83,9 +97,26 @@ function executeJob(jobId: string): void {
   });
 
   try {
-    // Load the template
+    const maintenanceHandler = MAINTENANCE_HANDLERS[job.jobType];
+    if (maintenanceHandler) {
+      const payload = JSON.parse(job.payload ?? "{}") as Record<string, unknown>;
+      maintenanceHandler(payload);
+      console.log(`[scheduler] Ran maintenance job ${jobId} (${job.jobType})`);
+
+      updateScheduledJob(jobId, {
+        status: "completed",
+        completedAt: Math.floor(Date.now() / 1000),
+      });
+
+      if (job.cronExpression) {
+        rescheduleJob(jobId);
+        console.log(`[scheduler] Rescheduled maintenance job ${jobId} for next cron interval`);
+      }
+      return;
+    }
+
     if (!job.templateId) {
-      throw new Error("Scheduled job has no templateId");
+      throw new Error(`Unknown job_type without templateId: ${job.jobType}`);
     }
 
     const template = getTemplate(job.templateId);

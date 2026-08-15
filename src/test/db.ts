@@ -25,11 +25,15 @@ import {
   workflowTemplates,
   simulationAgents,
   simulationRuns,
+  simulationTranscripts,
+  scheduledJobs,
 } from "@/lib/db/schema";
 
 /** Clear core tables used by unit tests (child rows first). */
 export function resetCoreTables(): void {
   db.delete(workflowSteps).run();
+  db.delete(scheduledJobs).run();
+  db.delete(simulationTranscripts).run();
   db.delete(simulationAgents).run();
   db.delete(simulationRuns).run();
   db.delete(interactions).run();

@@ -10,6 +10,7 @@ import {
   orgs,
   simulationAgents,
   simulationRuns,
+  simulationTranscripts,
   variants,
 } from "@/lib/db/schema";
 import { getActivePersona } from "@/lib/db/queries/personas";
@@ -54,6 +55,13 @@ export type SimulationAgentWithGrounding = Omit<
 > & {
   grounding: Record<string, unknown>;
   predictedActions: Record<string, unknown>[] | Record<string, unknown>;
+  transcript?: SimulationAgentTranscript | null;
+};
+
+export type SimulationAgentTranscript = {
+  content: unknown;
+  byteSize: number;
+  tokenCount: number | null;
 };
 
 export type CreateSimulationRunResult = {
@@ -66,7 +74,6 @@ export type SimulationAgentResultInput = {
   engagementScore?: number | null;
   outcome?: string | null;
   predictedActions?: Record<string, unknown>[] | Record<string, unknown>;
-  /** Transcript writes activate in slice 3.3 — accepted but ignored until then. */
   transcript?: unknown;
 };
 
@@ -420,12 +427,81 @@ export function createAndStartSimulationRun(
   });
 }
 
-function parseAgentGrounding(agent: SimulationAgent): SimulationAgentWithGrounding {
+function parseAgentTranscript(
+  row: typeof simulationTranscripts.$inferSelect | undefined,
+): SimulationAgentTranscript | null {
+  if (!row) return null;
+  try {
+    return {
+      content: JSON.parse(row.content) as unknown,
+      byteSize: row.byteSize,
+      tokenCount: row.tokenCount,
+    };
+  } catch {
+    return {
+      content: [],
+      byteSize: row.byteSize,
+      tokenCount: row.tokenCount,
+    };
+  }
+}
+
+function upsertAgentTranscript(agentId: string, transcript: unknown): void {
+  const content = JSON.stringify(transcript);
+  const byteSize = Buffer.byteLength(content, "utf8");
+  const tokenCount =
+    typeof transcript === "object" &&
+    transcript !== null &&
+    "tokenCount" in transcript &&
+    typeof (transcript as { tokenCount?: unknown }).tokenCount === "number"
+      ? (transcript as { tokenCount: number }).tokenCount
+      : null;
+
+  const existing = db
+    .select()
+    .from(simulationTranscripts)
+    .where(eq(simulationTranscripts.simulationAgentId, agentId))
+    .get();
+
+  if (existing) {
+    db.update(simulationTranscripts)
+      .set({ content, byteSize, tokenCount })
+      .where(eq(simulationTranscripts.id, existing.id))
+      .run();
+    return;
+  }
+
+  db.insert(simulationTranscripts)
+    .values({
+      id: nanoid(),
+      simulationAgentId: agentId,
+      content,
+      byteSize,
+      tokenCount,
+    })
+    .run();
+}
+
+function parseAgentGrounding(
+  agent: SimulationAgent,
+  opts?: { includeTranscript?: boolean },
+): SimulationAgentWithGrounding {
   const { grounding: groundingRaw, predictedActions: predictedActionsRaw, ...rest } = agent;
+  const transcriptRow = opts?.includeTranscript
+    ? db
+        .select()
+        .from(simulationTranscripts)
+        .where(eq(simulationTranscripts.simulationAgentId, agent.id))
+        .get()
+    : undefined;
+
   return {
     ...rest,
     grounding: parseJsonRecord(groundingRaw),
     predictedActions: parsePredictedActions(predictedActionsRaw),
+    ...(opts?.includeTranscript
+      ? { transcript: parseAgentTranscript(transcriptRow) }
+      : {}),
   };
 }
 
@@ -490,7 +566,7 @@ export function listSimulationRuns(opts?: {
 
 export function getSimulationRun(
   id: string,
-  opts?: { includeAgents?: boolean },
+  opts?: { includeAgents?: boolean; includeTranscripts?: boolean },
 ): (SimulationRun & { agents?: SimulationAgentWithGrounding[] }) | undefined {
   const run = db.select().from(simulationRuns).where(eq(simulationRuns.id, id)).get();
   if (!run) return undefined;
@@ -502,7 +578,9 @@ export function getSimulationRun(
     .from(simulationAgents)
     .where(eq(simulationAgents.simulationRunId, id))
     .all()
-    .map(parseAgentGrounding);
+    .map((agent) =>
+      parseAgentGrounding(agent, { includeTranscript: opts?.includeTranscripts }),
+    );
 
   return { ...run, agents };
 }
@@ -608,6 +686,10 @@ export function recordSimulationAgentResults(
         })
         .where(eq(simulationAgents.id, result.agentId))
         .run();
+
+      if (result.transcript !== undefined) {
+        upsertAgentTranscript(result.agentId, result.transcript);
+      }
     }
   });
 }

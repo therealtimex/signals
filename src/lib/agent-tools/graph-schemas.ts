@@ -151,6 +151,7 @@ export const querySimulationsSchema = z.object({
   batchId: z.string().optional(),
   status: z.enum(["pending", "running", "completed", "failed", "cancelled"]).optional(),
   includeAgents: z.boolean().optional(),
+  includeTranscripts: z.boolean().optional(),
   page: z.number().int().positive().optional(),
   pageSize: z.number().int().positive().max(100).optional(),
 });
