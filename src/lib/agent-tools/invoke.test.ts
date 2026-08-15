@@ -26,6 +26,25 @@ describe("agent-tools registry", () => {
       }),
     });
   });
+
+  it("advertises completed-path requirements for complete_simulation_run", () => {
+    const manifest = listAgentToolsManifest();
+    const completeRun = manifest.tools.find((tool) => tool.name === "complete_simulation_run");
+    expect(completeRun?.description).toContain("predictedMetrics");
+    expect(completeRun?.parameters).toMatchObject({
+      type: "object",
+      properties: expect.objectContaining({
+        predictedMetrics: expect.objectContaining({ type: "object" }),
+      }),
+      allOf: expect.arrayContaining([
+        expect.objectContaining({
+          then: {
+            required: ["predictedScore", "predictionConfidence", "predictedMetrics"],
+          },
+        }),
+      ]),
+    });
+  });
 });
 
 describe("invokeAgentTool", () => {
