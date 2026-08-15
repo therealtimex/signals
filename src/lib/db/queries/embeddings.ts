@@ -1,10 +1,12 @@
-import { and, desc, eq, inArray, SQL } from "drizzle-orm";
+import { and, desc, eq, SQL } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db/client";
 import {
   assertEmbeddingKind,
   assertEmbeddingNodeType,
+  EMBEDDING_KIND_NODE_TYPES,
   type EmbeddingKind,
+  V1_EMBEDDING_KINDS,
 } from "@/lib/db/embedding-kinds";
 import { contacts, contentItems, embeddings, launches, niches, orgs, variants } from "@/lib/db/schema";
 import { nodeExists } from "@/lib/db/queries/graph";
@@ -16,7 +18,7 @@ import {
   topKSemanticHits,
   vectorL2Norm,
 } from "@/lib/embeddings/vector-utils";
-import { assertSharedEmbeddingSource, buildEmbeddingSourceVisibilityLookup } from "@/lib/embeddings/source-scope";
+import { assertSharedEmbeddingSource } from "@/lib/embeddings/source-scope";
 
 export type EmbeddingRow = typeof embeddings.$inferSelect;
 
@@ -54,6 +56,178 @@ function nowUnix(): number {
 function scopeCondition(includeLocalOnly?: boolean): SQL | undefined {
   if (includeLocalOnly) return undefined;
   return eq(embeddings.scope, "shared");
+}
+
+function resolveSearchNodeTypes(
+  kind: EmbeddingKind,
+  nodeTypes?: GraphNodeType[],
+): GraphNodeType[] {
+  if (!V1_EMBEDDING_KINDS.includes(kind as (typeof V1_EMBEDDING_KINDS)[number])) {
+    return [];
+  }
+  const allowed = [...EMBEDDING_KIND_NODE_TYPES[kind]];
+  if (!nodeTypes?.length) return allowed;
+  return nodeTypes.filter((nodeType) => allowed.includes(nodeType));
+}
+
+function embeddingBaseConditions(
+  kind: EmbeddingKind,
+  model: string,
+  queryDims: number,
+  nodeType: GraphNodeType,
+  includeLocalOnly?: boolean,
+): SQL[] {
+  const conditions: SQL[] = [
+    eq(embeddings.kind, kind),
+    eq(embeddings.model, model),
+    eq(embeddings.dims, queryDims),
+    eq(embeddings.nodeType, nodeType),
+  ];
+  const cachedScope = scopeCondition(includeLocalOnly);
+  if (cachedScope) conditions.push(cachedScope);
+  return conditions;
+}
+
+type SearchableEmbeddingRow = {
+  nodeType: GraphNodeType;
+  nodeId: string;
+  vector: Buffer;
+};
+
+/** Load embedding rows joined to live source nodes so scope transitions stay enforced in SQL. */
+function selectSearchableEmbeddingRows(
+  input: SemanticSearchInput,
+  queryDims: number,
+): SearchableEmbeddingRow[] {
+  const rows: SearchableEmbeddingRow[] = [];
+
+  for (const nodeType of resolveSearchNodeTypes(input.kind, input.nodeTypes)) {
+    switch (input.kind) {
+      case "profile": {
+        if (nodeType === "contact") {
+          const contactRows = db
+            .select({ nodeId: embeddings.nodeId, vector: embeddings.vector })
+            .from(embeddings)
+            .innerJoin(contacts, eq(embeddings.nodeId, contacts.id))
+            .where(and(...embeddingBaseConditions(input.kind, input.model, queryDims, nodeType, input.includeLocalOnly)))
+            .all();
+          rows.push(
+            ...contactRows.map((row) => ({
+              nodeType: "contact" as const,
+              nodeId: row.nodeId,
+              vector: row.vector,
+            })),
+          );
+          break;
+        }
+        if (nodeType === "org") {
+          const orgConditions = [
+            ...embeddingBaseConditions(input.kind, input.model, queryDims, nodeType, input.includeLocalOnly),
+          ];
+          if (!input.includeLocalOnly) orgConditions.push(eq(orgs.scope, "shared"));
+          const orgRows = db
+            .select({ nodeId: embeddings.nodeId, vector: embeddings.vector })
+            .from(embeddings)
+            .innerJoin(orgs, eq(embeddings.nodeId, orgs.id))
+            .where(and(...orgConditions))
+            .all();
+          rows.push(
+            ...orgRows.map((row) => ({
+              nodeType: "org" as const,
+              nodeId: row.nodeId,
+              vector: row.vector,
+            })),
+          );
+        }
+        break;
+      }
+      case "description": {
+        if (nodeType === "niche") {
+          const nicheConditions = [
+            ...embeddingBaseConditions(input.kind, input.model, queryDims, nodeType, input.includeLocalOnly),
+          ];
+          if (!input.includeLocalOnly) nicheConditions.push(eq(niches.scope, "shared"));
+          const nicheRows = db
+            .select({ nodeId: embeddings.nodeId, vector: embeddings.vector })
+            .from(embeddings)
+            .innerJoin(niches, eq(embeddings.nodeId, niches.id))
+            .where(and(...nicheConditions))
+            .all();
+          rows.push(
+            ...nicheRows.map((row) => ({
+              nodeType: "niche" as const,
+              nodeId: row.nodeId,
+              vector: row.vector,
+            })),
+          );
+          break;
+        }
+        if (nodeType === "launch") {
+          const launchConditions = [
+            ...embeddingBaseConditions(input.kind, input.model, queryDims, nodeType, input.includeLocalOnly),
+          ];
+          if (!input.includeLocalOnly) launchConditions.push(eq(launches.scope, "shared"));
+          const launchRows = db
+            .select({ nodeId: embeddings.nodeId, vector: embeddings.vector })
+            .from(embeddings)
+            .innerJoin(launches, eq(embeddings.nodeId, launches.id))
+            .where(and(...launchConditions))
+            .all();
+          rows.push(
+            ...launchRows.map((row) => ({
+              nodeType: "launch" as const,
+              nodeId: row.nodeId,
+              vector: row.vector,
+            })),
+          );
+        }
+        break;
+      }
+      case "body": {
+        if (nodeType === "content") {
+          const contentRows = db
+            .select({ nodeId: embeddings.nodeId, vector: embeddings.vector })
+            .from(embeddings)
+            .innerJoin(contentItems, eq(embeddings.nodeId, contentItems.id))
+            .where(and(...embeddingBaseConditions(input.kind, input.model, queryDims, nodeType, input.includeLocalOnly)))
+            .all();
+          rows.push(
+            ...contentRows.map((row) => ({
+              nodeType: "content" as const,
+              nodeId: row.nodeId,
+              vector: row.vector,
+            })),
+          );
+          break;
+        }
+        if (nodeType === "variant") {
+          const variantConditions = [
+            ...embeddingBaseConditions(input.kind, input.model, queryDims, nodeType, input.includeLocalOnly),
+          ];
+          if (!input.includeLocalOnly) variantConditions.push(eq(launches.scope, "shared"));
+          const variantRows = db
+            .select({ nodeId: embeddings.nodeId, vector: embeddings.vector })
+            .from(embeddings)
+            .innerJoin(variants, eq(embeddings.nodeId, variants.id))
+            .innerJoin(launches, eq(variants.launchId, launches.id))
+            .where(and(...variantConditions))
+            .all();
+          rows.push(
+            ...variantRows.map((row) => ({
+              nodeType: "variant" as const,
+              nodeId: row.nodeId,
+              vector: row.vector,
+            })),
+          );
+        }
+        break;
+      }
+      default:
+        break;
+    }
+  }
+
+  return rows;
 }
 
 function normalizeVector(vector: Float32Array | Buffer): Buffer {
@@ -157,47 +331,15 @@ export function semanticSearch(input: SemanticSearchInput): SemanticSearchHit[] 
 
   const k = input.k ?? 10;
   const queryDims = input.queryVector.length;
-  const conditions: SQL[] = [
-    eq(embeddings.kind, input.kind),
-    eq(embeddings.model, input.model),
-    eq(embeddings.dims, queryDims),
-  ];
-
-  const scope = scopeCondition(input.includeLocalOnly);
-  if (scope) conditions.push(scope);
-
-  if (input.nodeTypes?.length) {
-    conditions.push(inArray(embeddings.nodeType, input.nodeTypes));
-  }
-
-  const rows = db
-    .select({
-      nodeType: embeddings.nodeType,
-      nodeId: embeddings.nodeId,
-      vector: embeddings.vector,
-    })
-    .from(embeddings)
-    .where(and(...conditions))
-    .all();
-
-  const visibility = buildEmbeddingSourceVisibilityLookup(
-    input.kind,
-    rows.map((row) => ({ nodeType: row.nodeType as GraphNodeType, nodeId: row.nodeId })),
-    input.includeLocalOnly,
-  );
+  const rows = selectSearchableEmbeddingRows(input, queryDims);
 
   const queryNorm = vectorL2Norm(input.queryVector);
   const hits: SemanticSearchHit[] = [];
   for (const row of rows) {
-    const nodeType = row.nodeType as GraphNodeType;
-    if (!visibility.get(`${nodeType}:${row.nodeId}`)) {
-      continue;
-    }
-
     const vector = bufferToFloat32(row.vector);
     if (vector.length !== queryDims) continue;
     hits.push({
-      nodeType,
+      nodeType: row.nodeType,
       nodeId: row.nodeId,
       score: cosineSimilarityWithQueryNorm(input.queryVector, vector, queryNorm),
     });
