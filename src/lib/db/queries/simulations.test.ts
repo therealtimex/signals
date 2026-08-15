@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { invokeAgentTool } from "@/lib/agent-tools/invoke";
@@ -319,6 +319,10 @@ describe("simulation results and projection (slice 3.2)", () => {
     resetCoreTables();
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   function seedRunningRun() {
     const contact = createContact({ name: "Sim Agent", platform: "x", platformUserId: "sim-3.2" });
     const launch = upsertLaunch({ name: "Projection Launch", primaryPlatform: "x" });
@@ -354,7 +358,10 @@ describe("simulation results and projection (slice 3.2)", () => {
     expect(updated.predictionModel).toBe("rtx:default");
   });
 
-  it("projects only the latest completed run", async () => {
+  it("projects the run with the latest completed_at", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-15T10:00:00Z"));
+
     const { variant, run, agent } = seedRunningRun();
 
     recordSimulationAgentResults(run.id, [
@@ -364,6 +371,8 @@ describe("simulation results and projection (slice 3.2)", () => {
       predictedScore: 60,
       predictionConfidence: 0.5,
     });
+
+    vi.setSystemTime(new Date("2026-08-15T10:00:01Z"));
 
     const second = createAndStartSimulationRun({
       variantId: variant.id,
@@ -381,6 +390,38 @@ describe("simulation results and projection (slice 3.2)", () => {
     const updated = getVariantById(variant.id)!;
     expect(updated.predictedScore).toBe(90);
     expect(updated.predictionModel).toBe("rtx:new");
+  });
+
+  it("breaks completed_at ties by descending run id (§6)", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-15T10:00:00Z"));
+
+    const { variant, run: firstRun, agent } = seedRunningRun();
+    const second = createAndStartSimulationRun({
+      variantId: variant.id,
+      populationSpec: { contactIds: [agent.contactId!] },
+      predictionModel: "rtx:new",
+    });
+
+    const [winner, loser] = [firstRun, second.run].sort((a, b) => b.id.localeCompare(a.id));
+    const scores = {
+      [firstRun.id]: { score: 60, confidence: 0.5, model: "rtx:default" },
+      [second.run.id]: { score: 90, confidence: 0.9, model: "rtx:new" },
+    } as const;
+    const winnerMeta = scores[winner.id as keyof typeof scores];
+
+    completeSimulationRun(loser.id, {
+      predictedScore: scores[loser.id as keyof typeof scores].score,
+      predictionConfidence: scores[loser.id as keyof typeof scores].confidence,
+    });
+    completeSimulationRun(winner.id, {
+      predictedScore: winnerMeta.score,
+      predictionConfidence: winnerMeta.confidence,
+    });
+
+    const updated = getVariantById(variant.id)!;
+    expect(updated.predictedScore).toBe(winnerMeta.score);
+    expect(updated.predictionModel).toBe(winnerMeta.model);
   });
 
   it("does not downgrade selected variants on projection", () => {
