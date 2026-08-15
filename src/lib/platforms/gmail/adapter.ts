@@ -20,6 +20,7 @@ import {
   mapGooglePersonToUserProfile,
 } from "@/lib/platforms/gmail/mappers";
 import { getRateLimitState } from "@/lib/platforms/rate-limiter";
+import { PLATFORM_CAPABILITIES } from "@/lib/platforms/capabilities";
 import { randomBytes } from "crypto";
 
 // Google OAuth scopes — OpenID Connect (for userinfo) + read-only contacts + Gmail read
@@ -35,6 +36,7 @@ const SCOPES = [
 
 export class GmailPlatformAdapter implements PlatformAdapter {
   readonly platform = "gmail" as const;
+  readonly capabilities = PLATFORM_CAPABILITIES.gmail!;
 
   async getAuthorizationUrl(redirectUri: string): Promise<{ authUrl: string; state: string }> {
     const { clientId } = getGoogleClientCredentials();

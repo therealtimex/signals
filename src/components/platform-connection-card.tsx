@@ -16,7 +16,13 @@ import {
   Shield,
 } from "lucide-react";
 
-type ConnectionStatus = "disconnected" | "connected" | "needs_reauth";
+export type ConnectionStatus = "disconnected" | "connected" | "needs_reauth" | "coming_soon";
+
+/** Statuses that render a Connect or Reconnect button. */
+export const CONNECTION_STATUSES_WITH_CONNECT_ACTION: ConnectionStatus[] = [
+  "disconnected",
+  "needs_reauth",
+];
 
 interface PlatformConnectionCardProps {
   platform: string;
@@ -27,9 +33,9 @@ interface PlatformConnectionCardProps {
   syncCapable?: boolean;
   grantedScopes?: string;
   showSync?: boolean;
-  onConnect: () => void;
-  onDisconnect: () => void;
-  onSync: () => void;
+  onConnect?: () => void;
+  onDisconnect?: () => void;
+  onSync?: () => void;
   onEnableSync?: () => void;
   connecting?: boolean;
   syncing?: boolean;
@@ -153,6 +159,11 @@ export function PlatformConnectionCard({
                 Not connected
               </Badge>
             )}
+            {status === "coming_soon" && (
+              <Badge variant="secondary">
+                Coming soon
+              </Badge>
+            )}
           </div>
 
           {status === "connected" && accountHandle && (
@@ -180,26 +191,35 @@ export function PlatformConnectionCard({
               Your session expired. Reconnect to continue syncing.
             </p>
           )}
+          {status === "coming_soon" && (
+            <p className="text-sm text-muted-foreground">
+              OAuth connection is not available yet. You can add identities for this platform manually or via agents.
+            </p>
+          )}
         </div>
 
         <div className="flex items-center gap-2">
-          {status === "disconnected" && (
+          {CONNECTION_STATUSES_WITH_CONNECT_ACTION.includes(status) &&
+            status === "disconnected" &&
+            onConnect && (
             <Button onClick={onConnect} disabled={connecting}>
               {connecting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Connect
             </Button>
           )}
 
-          {status === "needs_reauth" && (
+          {CONNECTION_STATUSES_WITH_CONNECT_ACTION.includes(status) &&
+            status === "needs_reauth" &&
+            onConnect && (
             <Button onClick={onConnect} variant="outline" disabled={connecting}>
               {connecting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Reconnect
             </Button>
           )}
 
-          {status === "connected" && (
+          {status === "connected" && onDisconnect && (
             <>
-              {showSync && syncCapable ? (
+              {showSync && syncCapable && onSync ? (
                 <Button
                   onClick={onSync}
                   variant="outline"

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { PLATFORM_ENUM } from "@/lib/db/platforms";
 import {
   getTemplate,
   updateTemplate,
@@ -9,7 +10,7 @@ import {
 const updateTemplateSchema = z.object({
   name: z.string().min(1).optional(),
   description: z.string().nullable().optional(),
-  platform: z.enum(["x", "linkedin", "gmail", "substack"]).nullable().optional(),
+  platform: z.enum(PLATFORM_ENUM).nullable().optional(),
   templateType: z.enum([
     "outreach", "engagement", "content", "nurture", "prospecting", "enrichment", "pruning",
   ]).optional(),

@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { PLATFORM_ENUM } from "@/lib/db/platforms";
 import { getContactById, recalcEnrichment } from "@/lib/db/queries/contacts";
 import { createIdentity, listIdentitiesByContact } from "@/lib/db/queries/identities";
 
 const createIdentitySchema = z.object({
-  platform: z.enum(["x", "linkedin", "gmail", "substack"]),
+  platform: z.enum(PLATFORM_ENUM),
   platformUserId: z.string().min(1),
   platformHandle: z.string().optional(),
   platformUrl: z.string().optional(),

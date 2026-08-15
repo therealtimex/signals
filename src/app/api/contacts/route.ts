@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { PLATFORM_ENUM } from "@/lib/db/platforms";
 import { listContacts, createContact } from "@/lib/db/queries/contacts";
 import { createIdentity } from "@/lib/db/queries/identities";
 import { recalcEnrichment } from "@/lib/db/queries/contacts";
 
 const identitySchema = z.object({
-  platform: z.enum(["x", "linkedin", "gmail", "substack"]),
+  platform: z.enum(PLATFORM_ENUM),
   platformUserId: z.string().min(1),
   platformHandle: z.string().optional(),
   platformUrl: z.string().optional(),
@@ -19,7 +20,7 @@ const createContactSchema = z.object({
   headline: z.string().optional(),
   company: z.string().optional(),
   title: z.string().optional(),
-  platform: z.enum(["x", "linkedin", "gmail", "substack"]).optional(),
+  platform: z.enum(PLATFORM_ENUM).optional(),
   platformUserId: z.string().optional(),
   profileUrl: z.string().optional(),
   avatarUrl: z.string().optional(),
