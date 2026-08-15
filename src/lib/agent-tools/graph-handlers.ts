@@ -1,15 +1,20 @@
 import { listOrgs } from "@/lib/db/queries/orgs";
 import { listLaunches, upsertLaunch } from "@/lib/db/queries/launches";
 import { listNiches, upsertNiche } from "@/lib/db/queries/niches";
+import { semanticSearch } from "@/lib/db/queries/embeddings";
 import { upsertVariant } from "@/lib/db/queries/variants";
 import { getNeighbors, upsertGraphEdge } from "@/lib/db/queries/graph";
 import { logInteraction } from "@/lib/db/queries/interactions";
+import { getNodeDisplayLabel } from "@/lib/embeddings/node-labels";
+import { EmbeddingUnavailableError } from "@/lib/embeddings/embed-node";
+import { rtxEmbed } from "@/lib/rtx/llm";
 import type {
   logInteractionSchema,
   queryGraphSchema,
   queryLaunchesSchema,
   queryNichesSchema,
   queryOrgsSchema,
+  semanticSearchSchema,
   upsertEdgeSchema,
   upsertLaunchSchema,
   upsertNicheSchema,
@@ -244,5 +249,40 @@ export async function handleUpsertVariant(input: z.infer<typeof upsertVariantSch
     status: variant.status,
     contentItemId: variant.contentItemId,
     message: "Variant upserted.",
+  };
+}
+
+export async function handleSemanticSearch(input: z.infer<typeof semanticSearchSchema>) {
+  const embedResult = await rtxEmbed([input.query]);
+  if (!embedResult.success) {
+    throw new EmbeddingUnavailableError(embedResult.code, embedResult.error);
+  }
+
+  const queryVector = embedResult.embeddings[0];
+  if (!queryVector) {
+    throw new EmbeddingUnavailableError("EMBED_ERROR", "RealtimeX returned no embedding vector.");
+  }
+
+  const kind = input.kind ?? "description";
+  const hits = semanticSearch({
+    nodeTypes: input.nodeTypes,
+    kind,
+    model: embedResult.qualifiedModel,
+    queryVector,
+    k: input.k,
+    includeLocalOnly: input.includeLocalOnly ?? false,
+  });
+
+  return {
+    model: embedResult.qualifiedModel,
+    dimensions: embedResult.dimensions,
+    kind,
+    resultCount: hits.length,
+    results: hits.map((hit) => ({
+      nodeType: hit.nodeType,
+      nodeId: hit.nodeId,
+      score: hit.score,
+      label: getNodeDisplayLabel(hit.nodeType, hit.nodeId),
+    })),
   };
 }

@@ -1,6 +1,6 @@
 import { and, eq, or } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { contacts, graphEdges, niches } from "@/lib/db/schema";
+import { contacts, embeddings, graphEdges, niches } from "@/lib/db/schema";
 import { nodeExists } from "@/lib/db/queries/graph";
 import type { GraphEdge, GraphNodeType } from "@/lib/db/types";
 
@@ -8,6 +8,8 @@ export type GraphIntegrityIssueReason =
   | "missing_endpoint"
   | "archived_contact"
   | "stale_niche_membership";
+
+export type EmbeddingIntegrityIssueReason = "missing_endpoint";
 
 export type GraphIntegrityIssue = {
   edgeId: string;
@@ -18,12 +20,22 @@ export type GraphIntegrityIssue = {
   reason: GraphIntegrityIssueReason;
 };
 
+export type EmbeddingIntegrityIssue = {
+  embeddingId: string;
+  nodeType: GraphNodeType;
+  nodeId: string;
+  kind: string;
+  reason: EmbeddingIntegrityIssueReason;
+};
+
 export type GraphIntegrityReport = {
   scannedAt: number;
   totalEdges: number;
+  totalEmbeddings: number;
   issueCount: number;
   repairedCount: number;
   issues: GraphIntegrityIssue[];
+  embeddingIssues: EmbeddingIntegrityIssue[];
 };
 
 function isArchivedContact(contactId: string): boolean {
@@ -103,14 +115,32 @@ export function auditGraphIntegrity(): GraphIntegrityReport {
     if (dstIssue) issues.push(dstIssue);
   }
 
+  const embeddingRows = db.select().from(embeddings).all();
+  const embeddingIssues: EmbeddingIntegrityIssue[] = [];
+  for (const row of embeddingRows) {
+    const nodeType = row.nodeType as GraphNodeType;
+    if (!nodeExists(nodeType, row.nodeId)) {
+      embeddingIssues.push({
+        embeddingId: row.id,
+        nodeType,
+        nodeId: row.nodeId,
+        kind: row.kind,
+        reason: "missing_endpoint",
+      });
+    }
+  }
+
   const uniqueEdgeIds = new Set(issues.map((issue) => issue.edgeId));
+  const uniqueEmbeddingIds = new Set(embeddingIssues.map((issue) => issue.embeddingId));
 
   return {
     scannedAt: Math.floor(Date.now() / 1000),
     totalEdges: edges.length,
-    issueCount: uniqueEdgeIds.size,
+    totalEmbeddings: embeddingRows.length,
+    issueCount: uniqueEdgeIds.size + uniqueEmbeddingIds.size,
     repairedCount: 0,
     issues,
+    embeddingIssues,
   };
 }
 
@@ -134,18 +164,23 @@ export function deleteEdgesTouchingContact(contactId: string): number {
   return edges.length;
 }
 
-/** Remove invalid edges identified by the audit (idempotent). */
+/** Remove invalid edges and orphaned embeddings identified by the audit (idempotent). */
 export function repairGraphIntegrity(report?: GraphIntegrityReport): GraphIntegrityReport {
   const audit = report ?? auditGraphIntegrity();
   const edgeIds = [...new Set(audit.issues.map((issue) => issue.edgeId))];
+  const embeddingIds = [...new Set(audit.embeddingIssues.map((issue) => issue.embeddingId))];
 
   for (const edgeId of edgeIds) {
     db.delete(graphEdges).where(eq(graphEdges.id, edgeId)).run();
   }
 
+  for (const embeddingId of embeddingIds) {
+    db.delete(embeddings).where(eq(embeddings.id, embeddingId)).run();
+  }
+
   return {
     ...audit,
-    repairedCount: edgeIds.length,
+    repairedCount: edgeIds.length + embeddingIds.length,
   };
 }
 
@@ -161,15 +196,19 @@ export function runGraphIntegrityJob(opts?: { repair?: boolean }): GraphIntegrit
 /** Summary for analytics / Sync Health dashboard. */
 export function getGraphIntegritySummary(): {
   totalEdges: number;
+  totalEmbeddings: number;
   issueCount: number;
   lastScannedAt: number;
   sampleIssues: GraphIntegrityIssue[];
+  sampleEmbeddingIssues: EmbeddingIntegrityIssue[];
 } {
   const report = auditGraphIntegrity();
   return {
     totalEdges: report.totalEdges,
+    totalEmbeddings: report.totalEmbeddings,
     issueCount: report.issueCount,
     lastScannedAt: report.scannedAt,
     sampleIssues: report.issues.slice(0, 10),
+    sampleEmbeddingIssues: report.embeddingIssues.slice(0, 10),
   };
 }

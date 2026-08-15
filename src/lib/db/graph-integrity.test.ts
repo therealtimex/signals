@@ -10,7 +10,7 @@ import {
   runGraphIntegrityJob,
 } from "@/lib/db/graph-integrity";
 import { db } from "@/lib/db/client";
-import { graphEdges, niches } from "@/lib/db/schema";
+import { contacts, embeddings, graphEdges, niches } from "@/lib/db/schema";
 import { resetCoreTables } from "@/test/db";
 
 describe("graph integrity", () => {
@@ -148,5 +148,26 @@ describe("graph integrity", () => {
 
     const report = auditGraphIntegrity();
     expect(report.issues.some((issue) => issue.reason === "stale_niche_membership")).toBe(true);
+  });
+
+  it("detects orphaned embeddings when the target node is missing", () => {
+    db.insert(embeddings)
+      .values({
+        id: "orphan-embedding",
+        nodeType: "contact",
+        nodeId: "missing-contact",
+        kind: "profile",
+        model: "native:default",
+        dims: 4,
+        vector: Buffer.alloc(16),
+        contentHash: "orphan",
+        scope: "shared",
+      })
+      .run();
+
+    const report = auditGraphIntegrity();
+    expect(report.embeddingIssues).toHaveLength(1);
+    expect(report.embeddingIssues[0]?.reason).toBe("missing_endpoint");
+    expect(report.issueCount).toBe(1);
   });
 });

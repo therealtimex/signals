@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, real, index, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, real, index, uniqueIndex, blob } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 import { PLATFORM_ENUM } from "./platforms";
 
@@ -679,6 +679,32 @@ export const variants = sqliteTable("variants", {
 }, (table) => [
   index("idx_variants_launch").on(table.launchId),
   index("idx_variants_content_item").on(table.contentItemId),
+]);
+
+// --- Embeddings (per-node derived vectors; ADR-022-4 / Amendment C) ---
+
+export const embeddings = sqliteTable("embeddings", {
+  id: text("id").primaryKey(),
+  nodeType: text("node_type").notNull(),
+  nodeId: text("node_id").notNull(),
+  kind: text("kind").notNull().default("profile"),
+  model: text("model").notNull(),
+  dims: integer("dims").notNull(),
+  vector: blob("vector", { mode: "buffer" }).notNull(),
+  contentHash: text("content_hash").notNull(),
+  scope: text("scope", { enum: ["shared", "local_only"] })
+    .notNull()
+    .default("shared"),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex("idx_embeddings_node_kind_model").on(
+    table.nodeType,
+    table.nodeId,
+    table.kind,
+    table.model,
+  ),
+  index("idx_embeddings_model_kind").on(table.model, table.kind),
+  index("idx_embeddings_node").on(table.nodeType, table.nodeId, table.kind),
 ]);
 
 // --- Graph Edges (polymorphic typed-edge overlay) ---

@@ -8,6 +8,7 @@
   "permissions": [
     "credentials.list",
     "credentials.use",
-    "webhook.trigger"
+    "webhook.trigger",
+    "llm.embed"
   ]
 }

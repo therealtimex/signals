@@ -36,6 +36,7 @@ describe("rtx sdk", () => {
       (fetchMock.mock.calls[0][1] as RequestInit).body as string
     );
     expect(body.permissions).toContain("credentials.list");
+    expect(body.permissions).toContain("llm.embed");
     expect(body.permissions).not.toContain("llm.chat");
   });
 

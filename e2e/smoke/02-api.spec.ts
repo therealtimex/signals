@@ -24,6 +24,7 @@ test.describe("smoke:core API", () => {
     const body = await response.json();
     expect(body.manifest.id).toBe("signals");
     expect(body.permissions).toContain("credentials.use");
+    expect(body.permissions).toContain("llm.embed");
     expect(body.permissions).not.toContain("llm.chat");
   });
 

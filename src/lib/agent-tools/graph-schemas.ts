@@ -117,3 +117,11 @@ export const upsertVariantSchema = z.object({
   platform: z.string().optional(),
   publishedAt: z.number().int().optional(),
 });
+
+export const semanticSearchSchema = z.object({
+  query: z.string().min(1),
+  nodeTypes: z.array(graphNodeType).optional(),
+  kind: z.enum(["profile", "description", "body"]).optional(),
+  k: z.number().int().positive().max(100).optional(),
+  includeLocalOnly: z.boolean().optional(),
+});
