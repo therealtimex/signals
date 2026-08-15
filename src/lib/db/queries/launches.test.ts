@@ -3,7 +3,13 @@ import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { invokeAgentTool } from "@/lib/agent-tools/invoke";
 import { upsertLaunch } from "@/lib/db/queries/launches";
-import { getVariantById, publishVariant, upsertVariant } from "@/lib/db/queries/variants";
+import {
+  getVariantById,
+  publishVariant,
+  publishVariantForContentItem,
+  upsertVariant,
+} from "@/lib/db/queries/variants";
+import { createContentItem } from "@/lib/db/queries/content";
 import { db } from "@/lib/db/client";
 import { contentItems, graphEdges, goals, launches, variants } from "@/lib/db/schema";
 import { resetCoreTables } from "@/test/db";
@@ -149,5 +155,108 @@ describe("launches and variants", () => {
         body: "nope",
       }),
     ).toThrow(/Invalid variant_type/);
+  });
+
+  it("applies update fields before publishing an existing variant", async () => {
+    const launch = await invokeAgentTool("upsert_launch", {
+      name: "Finalize Launch",
+      primaryPlatform: "x",
+    });
+    const launchId = (launch as { id: string }).id;
+
+    const created = await invokeAgentTool("upsert_variant", {
+      launchId,
+      label: "Draft",
+      body: "old copy",
+      variantType: "post",
+    });
+    const variantId = (created as { id: string }).id;
+
+    const published = await invokeAgentTool("upsert_variant", {
+      id: variantId,
+      launchId,
+      label: "Final",
+      body: "fresh copy",
+      predictedScore: 88,
+      status: "published",
+      platform: "x",
+    });
+
+    expect(published).toMatchObject({ status: "published" });
+
+    const stored = getVariantById(variantId);
+    expect(stored).toMatchObject({
+      label: "Final",
+      predictedScore: 88,
+    });
+
+    const content = db
+      .select()
+      .from(contentItems)
+      .where(eq(contentItems.id, (published as { contentItemId: string }).contentItemId))
+      .get();
+    expect(content?.body).toBe("fresh copy");
+  });
+
+  it("preserves variantType on partial updates", () => {
+    const launch = upsertLaunch({ name: "Partial Update", primaryPlatform: "x" });
+    const variant = upsertVariant({
+      launchId: launch.id,
+      variantType: "thread",
+      body: "thread body",
+    });
+
+    const updated = upsertVariant({
+      id: variant.id,
+      launchId: launch.id,
+      label: "renamed",
+    });
+
+    expect(updated.variantType).toBe("thread");
+  });
+
+  it("requires a resolvable platform when publishing", () => {
+    const launch = upsertLaunch({ name: "No Platform" });
+    const variant = upsertVariant({
+      launchId: launch.id,
+      body: "copy",
+    });
+
+    expect(() => publishVariant(variant.id)).toThrow(/requires platform/i);
+  });
+
+  it("rejects invalid launch primaryPlatform values", () => {
+    expect(() => upsertLaunch({ name: "Bad Platform", primaryPlatform: "myspace" })).toThrow(
+      /Invalid platform/i,
+    );
+  });
+
+  it("publishVariantForContentItem links an existing content item to published_as", () => {
+    const launch = upsertLaunch({ name: "Hook Launch", primaryPlatform: "linkedin" });
+    const content = createContentItem({
+      body: "Already published copy",
+      contentType: "post",
+      platformTarget: "linkedin",
+      status: "published",
+      aiGenerated: true,
+      origin: "authored",
+      direction: "outbound",
+    });
+    const variant = upsertVariant({
+      launchId: launch.id,
+      body: "Already published copy",
+      contentItemId: content.id,
+    });
+
+    const result = publishVariantForContentItem(content.id, {
+      platform: "linkedin",
+      publishedAt: 1_700_000_500,
+    });
+
+    expect(result?.status).toBe("published");
+    expect(getVariantById(variant.id)?.status).toBe("published");
+    expect(
+      db.select().from(graphEdges).where(eq(graphEdges.edgeType, "published_as")).all(),
+    ).toHaveLength(1);
   });
 });

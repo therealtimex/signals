@@ -46,12 +46,55 @@ export type UpsertVariantInput = {
   publishedAt?: number;
 };
 
+function resolvePublishPlatform(
+  callPlatform: string | undefined,
+  launchPrimaryPlatform: string | null,
+): string {
+  const resolved = callPlatform ?? launchPrimaryPlatform ?? undefined;
+  if (!resolved) {
+    throw new Error("Publish requires platform on the variant call or launch.primaryPlatform");
+  }
+  return assertPlatform(resolved);
+}
+
+function applyVariantUpdate(
+  existing: Variant,
+  input: UpsertVariantInput,
+  variantType: string,
+  now: number,
+  status: Variant["status"],
+): void {
+  db.update(variants)
+    .set({
+      launchId: input.launchId,
+      label: input.label ?? existing.label,
+      variantType,
+      body: input.body ?? existing.body,
+      contentItemId: input.contentItemId ?? existing.contentItemId,
+      status,
+      predictedScore: input.predictedScore ?? existing.predictedScore,
+      predictionConfidence: input.predictionConfidence ?? existing.predictionConfidence,
+      predictedMetrics: input.predictedMetrics
+        ? JSON.stringify(input.predictedMetrics)
+        : existing.predictedMetrics,
+      predictionModel: input.predictionModel ?? existing.predictionModel,
+      simulatedAt: input.simulatedAt ?? existing.simulatedAt,
+      generationModel: input.generationModel ?? existing.generationModel,
+      generationMetadata: input.generationMetadata
+        ? JSON.stringify(input.generationMetadata)
+        : existing.generationMetadata,
+      metadata: input.metadata ? JSON.stringify(input.metadata) : existing.metadata,
+      updatedAt: now,
+    })
+    .where(eq(variants.id, existing.id))
+    .run();
+}
+
 export function upsertVariant(input: UpsertVariantInput): Variant {
   if (!getLaunchById(input.launchId)) {
     throw new Error(`Launch not found: ${input.launchId}`);
   }
 
-  const variantType = input.variantType ? assertVariantType(input.variantType) : "post";
   const now = Math.floor(Date.now() / 1000);
   const wantsPublish = input.status === "published";
 
@@ -61,6 +104,18 @@ export function upsertVariant(input: UpsertVariantInput): Variant {
       throw new Error(`Variant not found: ${input.id}`);
     }
 
+    const variantType = input.variantType
+      ? assertVariantType(input.variantType)
+      : existing.variantType;
+
+    applyVariantUpdate(
+      existing,
+      input,
+      variantType,
+      now,
+      wantsPublish ? existing.status : (input.status ?? existing.status),
+    );
+
     if (wantsPublish) {
       return publishVariant(input.id, {
         platform: input.platform,
@@ -69,34 +124,10 @@ export function upsertVariant(input: UpsertVariantInput): Variant {
       });
     }
 
-    db.update(variants)
-      .set({
-        launchId: input.launchId,
-        label: input.label ?? existing.label,
-        variantType,
-        body: input.body ?? existing.body,
-        contentItemId: input.contentItemId ?? existing.contentItemId,
-        status: input.status ?? existing.status,
-        predictedScore: input.predictedScore ?? existing.predictedScore,
-        predictionConfidence: input.predictionConfidence ?? existing.predictionConfidence,
-        predictedMetrics: input.predictedMetrics
-          ? JSON.stringify(input.predictedMetrics)
-          : existing.predictedMetrics,
-        predictionModel: input.predictionModel ?? existing.predictionModel,
-        simulatedAt: input.simulatedAt ?? existing.simulatedAt,
-        generationModel: input.generationModel ?? existing.generationModel,
-        generationMetadata: input.generationMetadata
-          ? JSON.stringify(input.generationMetadata)
-          : existing.generationMetadata,
-        metadata: input.metadata ? JSON.stringify(input.metadata) : existing.metadata,
-        updatedAt: now,
-      })
-      .where(eq(variants.id, input.id))
-      .run();
-
     return getVariantById(input.id)!;
   }
 
+  const variantType = input.variantType ? assertVariantType(input.variantType) : "post";
   const id = nanoid();
   db.insert(variants)
     .values({
@@ -148,7 +179,7 @@ export function publishVariant(
     throw new Error(`Launch not found: ${variant.launchId}`);
   }
 
-  const platform = assertPlatform(opts?.platform ?? launch.primaryPlatform ?? "x");
+  const platform = resolvePublishPlatform(opts?.platform, launch.primaryPlatform);
   const publishedAt = opts?.publishedAt ?? Math.floor(Date.now() / 1000);
   const now = Math.floor(Date.now() / 1000);
   let contentItemId = variant.contentItemId;

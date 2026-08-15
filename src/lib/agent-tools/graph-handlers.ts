@@ -67,6 +67,12 @@ export async function handleQueryGraph(input: z.infer<typeof queryGraphSchema>) 
 }
 
 export async function handleUpsertEdge(input: z.infer<typeof upsertEdgeSchema>) {
+  if (input.edgeType === "published_as") {
+    throw new Error(
+      "published_as edges are created only via upsert_variant publish flow; use upsert_variant with status published",
+    );
+  }
+
   const edge = upsertGraphEdge({
     srcType: input.srcType,
     srcId: input.srcId,

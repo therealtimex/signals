@@ -1,6 +1,7 @@
 import { and, count, desc, eq, like, SQL } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db/client";
+import { assertPlatform } from "@/lib/db/platforms";
 import { launches, variants } from "@/lib/db/schema";
 import { getNeighbors } from "@/lib/db/queries/graph";
 import { listVariantsByLaunchId } from "@/lib/db/queries/variants";
@@ -110,6 +111,12 @@ export type UpsertLaunchInput = {
   completedAt?: number | null;
 };
 
+function normalizePrimaryPlatform(value: string | null | undefined): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  return assertPlatform(value);
+}
+
 export function upsertLaunch(input: UpsertLaunchInput): Launch {
   const now = Math.floor(Date.now() / 1000);
 
@@ -124,7 +131,10 @@ export function upsertLaunch(input: UpsertLaunchInput): Launch {
         name: input.name.trim(),
         brief: input.brief ?? existing.brief,
         status: input.status ?? existing.status,
-        primaryPlatform: input.primaryPlatform ?? existing.primaryPlatform,
+        primaryPlatform:
+          input.primaryPlatform !== undefined
+            ? normalizePrimaryPlatform(input.primaryPlatform)
+            : existing.primaryPlatform,
         audienceSpec: input.audienceSpec
           ? JSON.stringify(input.audienceSpec)
           : existing.audienceSpec,
@@ -148,7 +158,7 @@ export function upsertLaunch(input: UpsertLaunchInput): Launch {
       name: input.name.trim(),
       brief: input.brief ?? null,
       status: input.status ?? "draft",
-      primaryPlatform: input.primaryPlatform ?? null,
+      primaryPlatform: normalizePrimaryPlatform(input.primaryPlatform) ?? null,
       audienceSpec: JSON.stringify(input.audienceSpec ?? {}),
       workflowTemplateId: input.workflowTemplateId ?? null,
       scope: input.scope ?? "shared",
