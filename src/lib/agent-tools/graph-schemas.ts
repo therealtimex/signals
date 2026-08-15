@@ -152,6 +152,7 @@ export const querySimulationsSchema = z.object({
   status: z.enum(["pending", "running", "completed", "failed", "cancelled"]).optional(),
   includeAgents: z.boolean().optional(),
   includeTranscripts: z.boolean().optional(),
+  includeCalibrations: z.boolean().optional(),
   page: z.number().int().positive().optional(),
   pageSize: z.number().int().positive().max(100).optional(),
 });
@@ -169,13 +170,33 @@ export const recordSimulationResultsSchema = z.object({
   results: z.array(simulationAgentResultSchema).min(1),
 });
 
-export const completeSimulationRunSchema = z.object({
+export const completeSimulationRunObjectSchema = z.object({
   runId: z.string().min(1),
   status: z.enum(["completed", "failed", "cancelled"]).optional(),
   predictedScore: z.number().min(0).max(100).optional(),
   predictionConfidence: z.number().min(0).max(1).optional(),
   predictedMetrics: z.record(z.number().nonnegative()).optional(),
   error: z.string().optional(),
+});
+
+export const completeSimulationRunSchema = completeSimulationRunObjectSchema.superRefine(
+  (input, ctx) => {
+    const status = input.status ?? "completed";
+    if (status !== "completed") return;
+    if (input.predictedMetrics === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["predictedMetrics"],
+        message:
+          "predictedMetrics is required when completing a simulation run (engagement_metrics keyspace)",
+      });
+    }
+  },
+);
+
+export const calibrateSimulationRunSchema = z.object({
+  runId: z.string().min(1),
+  observedUntil: z.number().int().optional(),
 });
 
 export const queryOrgIdentitiesSchema = z.object({

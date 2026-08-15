@@ -16,14 +16,18 @@ import {
 import { getActivePersona } from "@/lib/db/queries/personas";
 import { getLaunchById } from "@/lib/db/queries/launches";
 import { getVariantById } from "@/lib/db/queries/variants";
+import {
+  getLatestCalibrationForRun,
+  serializeCalibration,
+} from "@/lib/db/queries/calibrations";
 import { assertSimulationOutcome } from "@/lib/db/simulation-outcomes";
 import {
   assertEngagementScore,
   assertPredictionConfidence,
-  assertPredictionScore,
   normalizePredictedMetrics,
   parsePredictedActions,
 } from "@/lib/db/simulation-validation";
+import { resolvePredictedScoreFromMetrics } from "@/lib/db/simulation-scoring";
 import {
   SimulationAgentOwnershipError,
   SimulationRunStateError,
@@ -566,12 +570,24 @@ export function listSimulationRuns(opts?: {
 
 export function getSimulationRun(
   id: string,
-  opts?: { includeAgents?: boolean; includeTranscripts?: boolean },
-): (SimulationRun & { agents?: SimulationAgentWithGrounding[] }) | undefined {
+  opts?: { includeAgents?: boolean; includeTranscripts?: boolean; includeCalibration?: boolean },
+): (SimulationRun & {
+  agents?: SimulationAgentWithGrounding[];
+  latestCalibration?: ReturnType<typeof serializeCalibration>;
+}) | undefined {
   const run = db.select().from(simulationRuns).where(eq(simulationRuns.id, id)).get();
   if (!run) return undefined;
 
-  if (!opts?.includeAgents) return run;
+  const latestCalibration = opts?.includeCalibration
+    ? (() => {
+        const row = getLatestCalibrationForRun(run.id);
+        return row ? serializeCalibration(row) : undefined;
+      })()
+    : undefined;
+
+  if (!opts?.includeAgents) {
+    return latestCalibration ? { ...run, latestCalibration } : run;
+  }
 
   const agents = db
     .select()
@@ -582,7 +598,7 @@ export function getSimulationRun(
       parseAgentGrounding(agent, { includeTranscript: opts?.includeTranscripts }),
     );
 
-  return { ...run, agents };
+  return { ...run, agents, ...(latestCalibration ? { latestCalibration } : {}) };
 }
 
 function assertRunIsRunning(run: SimulationRun): void {
@@ -726,10 +742,18 @@ export function completeSimulationRun(
         "Completing a simulation run requires predictedScore and predictionConfidence",
       );
     }
+    if (input.predictedMetrics === undefined) {
+      throw new SimulationRunStateError(
+        "Completing a simulation run requires predictedMetrics (engagement_metrics keyspace) for engagement-v1 score alignment",
+      );
+    }
 
-    const predictedScore = assertPredictionScore(input.predictedScore);
     const predictionConfidence = assertPredictionConfidence(input.predictionConfidence);
     const predictedMetrics = normalizePredictedMetrics(input.predictedMetrics);
+    const predictedScore = resolvePredictedScoreFromMetrics(
+      predictedMetrics,
+      input.predictedScore,
+    );
 
     db.transaction(() => {
       db.update(simulationRuns)

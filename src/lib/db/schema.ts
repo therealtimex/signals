@@ -814,6 +814,36 @@ export const simulationTranscripts = sqliteTable("simulation_transcripts", {
   uniqueIndex("idx_sim_transcripts_agent").on(table.simulationAgentId),
 ]);
 
+// --- Simulation Calibrations (predicted vs actual; schema Phase 3 §4.3 / ADR-022-12) ---
+
+export const simulationCalibrations = sqliteTable("simulation_calibrations", {
+  id: text("id").primaryKey(),
+  simulationRunId: text("simulation_run_id")
+    .notNull()
+    .references(() => simulationRuns.id, { onDelete: "cascade" }),
+  variantId: text("variant_id")
+    .notNull()
+    .references(() => variants.id, { onDelete: "cascade" }),
+  contentItemId: text("content_item_id").references(() => contentItems.id, {
+    onDelete: "set null",
+  }),
+  contentPostId: text("content_post_id").references(() => contentPosts.id),
+  observedFrom: integer("observed_from").notNull(),
+  observedUntil: integer("observed_until").notNull(),
+  actualScore: real("actual_score"),
+  actualMetrics: text("actual_metrics").default("{}"),
+  scoreError: real("score_error"),
+  calibration: text("calibration").default("{}"),
+  workflowRunId: text("workflow_run_id").references(() => workflowRuns.id),
+  source: text("source").notNull().default("workflow"),
+  computedAt: integer("computed_at")
+    .notNull()
+    .default(sql`(unixepoch())`),
+}, (table) => [
+  index("idx_sim_calibrations_run_window").on(table.simulationRunId, table.observedUntil),
+  index("idx_sim_calibrations_variant").on(table.variantId),
+]);
+
 // --- Embeddings (per-node derived vectors; ADR-022-4 / Amendment C) ---
 
 export const embeddings = sqliteTable("embeddings", {

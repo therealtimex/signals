@@ -24,3 +24,12 @@ export class SimulationAgentOwnershipError extends Error {
     this.name = "SimulationAgentOwnershipError";
   }
 }
+
+export class CalibrationSourceError extends Error {
+  readonly code = "CALIBRATION_SOURCE_ERROR" as const;
+
+  constructor(message: string) {
+    super(message);
+    this.name = "CalibrationSourceError";
+  }
+}

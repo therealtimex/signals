@@ -38,7 +38,7 @@ Invoke body: `{ "tool": "<name>", "input": { ... } }`
 1. `upsert_launch` + `upsert_variant` on a **shared** launch
 2. `create_simulation_run` with `variantId` and optional `populationSpec`
 3. `record_simulation_results` while status is `running`
-4. `complete_simulation_run` with `predictedScore` (0–100), `predictionConfidence` (0–1), optional `predictedMetrics`
+4. `complete_simulation_run` with `predictedScore` (0–100), `predictionConfidence` (0–1), and `predictedMetrics` (engagement_metrics keyspace, e.g. `{ "likes": 120 }`). All three are required when completing (default `status`).
 
 Scores and metrics are validated at the query layer. Grounding uses shared-scope CRM data only — no `local_only` rows or `properties_private`.
 

@@ -1,8 +1,42 @@
 import type { z } from "zod";
+import { completeSimulationRunObjectSchema } from "@/lib/agent-tools/graph-schemas";
 
 /** Minimal Zod 3 → JSON Schema for agent tool manifests. */
 export function zodToParameters(schema: z.ZodTypeAny): Record<string, unknown> {
   return convert(schema);
+}
+
+/** Manifest parameters for complete_simulation_run with status-conditional required fields. */
+export function completeSimulationRunParameters(): Record<string, unknown> {
+  const base = convert(completeSimulationRunObjectSchema);
+  return {
+    ...base,
+    allOf: [
+      {
+        if: {
+          anyOf: [
+            { not: { required: ["status"] } },
+            {
+              properties: { status: { const: "completed" } },
+              required: ["status"],
+            },
+          ],
+        },
+        then: {
+          required: ["predictedScore", "predictionConfidence", "predictedMetrics"],
+        },
+      },
+      {
+        if: {
+          properties: { status: { const: "failed" } },
+          required: ["status"],
+        },
+        then: {
+          required: ["error"],
+        },
+      },
+    ],
+  };
 }
 
 function convert(schema: z.ZodTypeAny): Record<string, unknown> {

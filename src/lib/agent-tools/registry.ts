@@ -32,6 +32,7 @@ import {
   querySimulationsSchema,
   recordSimulationResultsSchema,
   completeSimulationRunSchema,
+  calibrateSimulationRunSchema,
 } from "@/lib/agent-tools/graph-schemas";
 import {
   handleLogInteraction,
@@ -50,8 +51,12 @@ import {
   handleQuerySimulations,
   handleRecordSimulationResults,
   handleCompleteSimulationRun,
+  handleCalibrateSimulationRun,
 } from "@/lib/agent-tools/graph-handlers";
-import { zodToParameters } from "@/lib/agent-tools/json-schema";
+import {
+  completeSimulationRunParameters,
+  zodToParameters,
+} from "@/lib/agent-tools/json-schema";
 import {
   handleArchiveContact,
   handleCreateContact,
@@ -331,11 +336,20 @@ export const AGENT_TOOLS: Record<string, AgentToolDefinition> = {
   complete_simulation_run: {
     name: "complete_simulation_run",
     description:
-      "Finish a simulation run and project latest predictions onto the parent variant when completed.",
+      "Finish a simulation run and project latest predictions onto the parent variant when completed. status defaults to 'completed', which requires predictedScore (0–100), predictionConfidence (0–1), and predictedMetrics (engagement_metrics keyspace, e.g. { likes: 120 }). failed requires error; cancelled accepts optional error. Neither failed nor cancelled projects scores.",
     category: "graph",
     schema: completeSimulationRunSchema,
-    parameters: zodToParameters(completeSimulationRunSchema),
+    parameters: completeSimulationRunParameters(),
     execute: handleCompleteSimulationRun,
+  },
+  calibrate_simulation_run: {
+    name: "calibrate_simulation_run",
+    description:
+      "Compute predicted-vs-actual calibration for a completed simulation run on a published variant.",
+    category: "graph",
+    schema: calibrateSimulationRunSchema,
+    parameters: zodToParameters(calibrateSimulationRunSchema),
+    execute: handleCalibrateSimulationRun,
   },
 };
 
