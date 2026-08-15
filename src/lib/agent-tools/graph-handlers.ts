@@ -4,6 +4,11 @@ import { listLaunches, upsertLaunch } from "@/lib/db/queries/launches";
 import { listNiches, upsertNiche } from "@/lib/db/queries/niches";
 import { semanticSearch } from "@/lib/db/queries/embeddings";
 import { upsertVariant } from "@/lib/db/queries/variants";
+import {
+  createAndStartSimulationRun,
+  getSimulationRun,
+  listSimulationRuns,
+} from "@/lib/db/queries/simulations";
 import { getNeighbors, upsertGraphEdge } from "@/lib/db/queries/graph";
 import { logInteraction } from "@/lib/db/queries/interactions";
 import { getNodeDisplayLabel } from "@/lib/embeddings/node-labels";
@@ -22,6 +27,8 @@ import type {
   upsertLaunchSchema,
   upsertNicheSchema,
   upsertVariantSchema,
+  createSimulationRunSchema,
+  querySimulationsSchema,
 } from "@/lib/agent-tools/graph-schemas";
 import type { z } from "zod";
 
@@ -360,5 +367,82 @@ export async function handleUpsertOrgIdentity(input: z.infer<typeof upsertOrgIde
   return {
     ...serializeOrgIdentity(identity),
     message: "Org identity upserted.",
+  };
+}
+
+function serializeSimulationRun(
+  run: NonNullable<ReturnType<typeof getSimulationRun>>,
+  opts?: { includeAgents?: boolean },
+) {
+  const agents =
+    opts?.includeAgents && run.agents
+      ? run.agents.map((agent) => ({
+          id: agent.id,
+          contactId: agent.contactId,
+          orgId: agent.orgId,
+          contactPersonaId: agent.contactPersonaId,
+          grounding: agent.grounding,
+          engagementScore: agent.engagementScore,
+          outcome: agent.outcome,
+        }))
+      : undefined;
+
+  return {
+    id: run.id,
+    variantId: run.variantId,
+    batchId: run.batchId,
+    status: run.status,
+    agentCount: run.agentCount,
+    predictionModel: run.predictionModel,
+    predictedScore: run.predictedScore,
+    predictionConfidence: run.predictionConfidence,
+    predictedMetrics: JSON.parse(run.predictedMetrics ?? "{}") as Record<string, unknown>,
+    scope: run.scope,
+    source: run.source,
+    startedAt: run.startedAt,
+    completedAt: run.completedAt,
+    ...(agents ? { agents } : {}),
+  };
+}
+
+export async function handleCreateSimulationRun(
+  input: z.infer<typeof createSimulationRunSchema>,
+) {
+  const { run, agents } = createAndStartSimulationRun({
+    variantId: input.variantId,
+    populationSpec: input.populationSpec,
+    batchId: input.batchId,
+    predictionModel: input.predictionModel,
+    config: input.config,
+    source: "agent",
+  });
+
+  return {
+    run: serializeSimulationRun({ ...run, agents }, { includeAgents: true }),
+    message: "Simulation run created and started.",
+  };
+}
+
+export async function handleQuerySimulations(input: z.infer<typeof querySimulationsSchema>) {
+  const result = listSimulationRuns({
+    variantId: input.variantId,
+    launchId: input.launchId,
+    batchId: input.batchId,
+    status: input.status,
+    page: input.page,
+    pageSize: input.pageSize,
+  });
+
+  const runs = result.data.map((run) => {
+    if (input.includeAgents) {
+      const detailed = getSimulationRun(run.id, { includeAgents: true });
+      return detailed ? serializeSimulationRun(detailed, { includeAgents: true }) : serializeSimulationRun(run);
+    }
+    return serializeSimulationRun(run);
+  });
+
+  return {
+    total: result.total,
+    runs,
   };
 }

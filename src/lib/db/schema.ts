@@ -402,7 +402,7 @@ export const workflowRuns = sqliteTable("workflow_runs", {
   id: text("id").primaryKey(),
   templateId: text("template_id").references(() => workflowTemplates.id),
   workflowType: text("workflow_type", {
-    enum: ["sync", "enrich", "search", "prune", "sequence", "agent"],
+    enum: ["sync", "enrich", "search", "prune", "sequence", "agent", "simulate", "calibrate"],
   }).notNull(),
   platformAccountId: text("platform_account_id").references(() => platformAccounts.id),
   status: text("status", {
@@ -733,6 +733,68 @@ export const variants = sqliteTable("variants", {
 }, (table) => [
   index("idx_variants_launch").on(table.launchId),
   index("idx_variants_content_item").on(table.contentItemId),
+]);
+
+// --- Simulation Runs (Wind Tunnel executions; schema Phase 3 §4.1) ---
+
+export const simulationRuns = sqliteTable("simulation_runs", {
+  id: text("id").primaryKey(),
+  variantId: text("variant_id")
+    .notNull()
+    .references(() => variants.id, { onDelete: "cascade" }),
+  batchId: text("batch_id"),
+  status: text("status", {
+    enum: ["pending", "running", "completed", "failed", "cancelled"],
+  })
+    .notNull()
+    .default("pending"),
+  populationSpec: text("population_spec").default("{}"),
+  agentCount: integer("agent_count").notNull().default(0),
+  predictionModel: text("prediction_model"),
+  config: text("config").default("{}"),
+  predictedScore: real("predicted_score"),
+  predictionConfidence: real("prediction_confidence"),
+  predictedMetrics: text("predicted_metrics").default("{}"),
+  error: text("error"),
+  scope: text("scope", { enum: ["shared", "local_only"] })
+    .notNull()
+    .default("shared"),
+  source: text("source").notNull().default("agent"),
+  workflowRunId: text("workflow_run_id").references(() => workflowRuns.id),
+  transcriptsPrunedAt: integer("transcripts_pruned_at"),
+  startedAt: integer("started_at"),
+  completedAt: integer("completed_at"),
+  ...timestamps,
+}, (table) => [
+  index("idx_sim_runs_variant_completed").on(table.variantId, table.completedAt),
+  index("idx_sim_runs_batch").on(table.batchId),
+  index("idx_sim_runs_status").on(table.status),
+]);
+
+// --- Simulation Agents (per-run synthetic population; schema Phase 3 §4.1) ---
+
+export const simulationAgents = sqliteTable("simulation_agents", {
+  id: text("id").primaryKey(),
+  simulationRunId: text("simulation_run_id")
+    .notNull()
+    .references(() => simulationRuns.id, { onDelete: "cascade" }),
+  contactId: text("contact_id").references(() => contacts.id, { onDelete: "set null" }),
+  orgId: text("org_id").references(() => orgs.id, { onDelete: "set null" }),
+  contactPersonaId: text("contact_persona_id").references(() => contactPersonas.id, {
+    onDelete: "set null",
+  }),
+  grounding: text("grounding").default("{}"),
+  engagementScore: real("engagement_score"),
+  outcome: text("outcome"),
+  predictedActions: text("predicted_actions").default("[]"),
+  metadata: text("metadata").default("{}"),
+  createdAt: integer("created_at")
+    .notNull()
+    .default(sql`(unixepoch())`),
+}, (table) => [
+  index("idx_sim_agents_run").on(table.simulationRunId),
+  index("idx_sim_agents_contact").on(table.contactId),
+  index("idx_sim_agents_persona").on(table.contactPersonaId),
 ]);
 
 // --- Embeddings (per-node derived vectors; ADR-022-4 / Amendment C) ---

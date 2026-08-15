@@ -129,6 +129,32 @@ export const semanticSearchSchema = z.object({
   includeLocalOnly: z.boolean().optional(),
 });
 
+const populationSpecSchema = z.object({
+  contactIds: z.array(z.string()).optional(),
+  nicheIds: z.array(z.string()).optional(),
+  orgIds: z.array(z.string()).optional(),
+  sampleSize: z.number().int().positive().optional(),
+  seed: z.number().int().optional(),
+});
+
+export const createSimulationRunSchema = z.object({
+  variantId: z.string().min(1),
+  populationSpec: populationSpecSchema.optional(),
+  batchId: z.string().optional(),
+  predictionModel: z.string().optional(),
+  config: z.record(z.unknown()).optional(),
+});
+
+export const querySimulationsSchema = z.object({
+  variantId: z.string().optional(),
+  launchId: z.string().optional(),
+  batchId: z.string().optional(),
+  status: z.enum(["pending", "running", "completed", "failed", "cancelled"]).optional(),
+  includeAgents: z.boolean().optional(),
+  page: z.number().int().positive().optional(),
+  pageSize: z.number().int().positive().max(100).optional(),
+});
+
 export const queryOrgIdentitiesSchema = z.object({
   orgId: z.string().optional(),
   platform: z.string().optional(),

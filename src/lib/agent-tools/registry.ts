@@ -28,6 +28,8 @@ import {
   upsertOrgIdentitySchema,
   upsertVariantSchema,
   semanticSearchSchema,
+  createSimulationRunSchema,
+  querySimulationsSchema,
 } from "@/lib/agent-tools/graph-schemas";
 import {
   handleLogInteraction,
@@ -42,6 +44,8 @@ import {
   handleUpsertNiche,
   handleUpsertOrgIdentity,
   handleUpsertVariant,
+  handleCreateSimulationRun,
+  handleQuerySimulations,
 } from "@/lib/agent-tools/graph-handlers";
 import { zodToParameters } from "@/lib/agent-tools/json-schema";
 import {
@@ -292,6 +296,24 @@ export const AGENT_TOOLS: Record<string, AgentToolDefinition> = {
     schema: semanticSearchSchema,
     parameters: zodToParameters(semanticSearchSchema),
     execute: handleSemanticSearch,
+  },
+  create_simulation_run: {
+    name: "create_simulation_run",
+    description:
+      "Create a Wind Tunnel simulation run for a variant, materialize a grounded agent population, and start the run atomically.",
+    category: "graph",
+    schema: createSimulationRunSchema,
+    parameters: zodToParameters(createSimulationRunSchema),
+    execute: handleCreateSimulationRun,
+  },
+  query_simulations: {
+    name: "query_simulations",
+    description:
+      "List simulation run history and results by variant, launch, or batch. Transcripts are not included.",
+    category: "graph",
+    schema: querySimulationsSchema,
+    parameters: zodToParameters(querySimulationsSchema),
+    execute: handleQuerySimulations,
   },
 };
 
