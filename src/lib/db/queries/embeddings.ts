@@ -1,6 +1,6 @@
 import { and, desc, eq, SQL } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import { db } from "@/lib/db/client";
+import { db, sqlite } from "@/lib/db/client";
 import {
   assertEmbeddingKind,
   assertEmbeddingNodeType,
@@ -13,9 +13,10 @@ import { nodeExists } from "@/lib/db/queries/graph";
 import type { GraphNodeType } from "@/lib/db/types";
 import {
   bufferToFloat32,
-  cosineSimilarityWithQueryNorm,
+  cosineSimilarityWithQueryNormFromBuffer,
+  finalizeSemanticTopK,
   float32ToBuffer,
-  topKSemanticHits,
+  pushSemanticTopK,
   vectorL2Norm,
 } from "@/lib/embeddings/vector-utils";
 import { assertSharedEmbeddingSource } from "@/lib/embeddings/source-scope";
@@ -67,7 +68,15 @@ function resolveSearchNodeTypes(
   }
   const allowed = [...EMBEDDING_KIND_NODE_TYPES[kind]];
   if (!nodeTypes?.length) return allowed;
-  return nodeTypes.filter((nodeType) => allowed.includes(nodeType));
+
+  const seen = new Set<GraphNodeType>();
+  const resolved: GraphNodeType[] = [];
+  for (const nodeType of nodeTypes) {
+    if (!allowed.includes(nodeType) || seen.has(nodeType)) continue;
+    seen.add(nodeType);
+    resolved.push(nodeType);
+  }
+  return resolved;
 }
 
 function embeddingBaseConditions(
@@ -94,140 +103,155 @@ type SearchableEmbeddingRow = {
   vector: Buffer;
 };
 
-/** Load embedding rows joined to live source nodes so scope transitions stay enforced in SQL. */
-function selectSearchableEmbeddingRows(
+const EMBEDDING_MATCH_WHERE =
+  "e.kind = ? AND e.model = ? AND e.dims = ? AND e.node_type = ?";
+const SHARED_EMBEDDING_SCOPE = " AND e.scope = 'shared'";
+const preparedEmbeddingScanStatements = new Map<string, ReturnType<typeof sqlite.prepare>>();
+
+function hasEmbeddingCandidates(
+  kind: EmbeddingKind,
+  model: string,
+  queryDims: number,
+  nodeType: GraphNodeType,
+  includeLocalOnly?: boolean,
+): boolean {
+  return (
+    db
+      .select({ id: embeddings.id })
+      .from(embeddings)
+      .where(and(...embeddingBaseConditions(kind, model, queryDims, nodeType, includeLocalOnly)))
+      .limit(1)
+      .get() !== undefined
+  );
+}
+
+function* iterateSqlEmbeddingRows(
+  nodeType: GraphNodeType,
+  sql: string,
+  params: Array<string | number>,
+): Generator<SearchableEmbeddingRow> {
+  let stmt = preparedEmbeddingScanStatements.get(sql);
+  if (!stmt) {
+    stmt = sqlite.prepare(sql);
+    preparedEmbeddingScanStatements.set(sql, stmt);
+  }
+  for (const row of stmt.iterate(params) as Iterable<{
+    node_id: string;
+    vector: Buffer;
+  }>) {
+    yield { nodeType, nodeId: row.node_id, vector: row.vector };
+  }
+}
+
+function embeddingScanParams(
   input: SemanticSearchInput,
   queryDims: number,
-): SearchableEmbeddingRow[] {
-  const rows: SearchableEmbeddingRow[] = [];
+  nodeType: GraphNodeType,
+): Array<string | number> {
+  return [input.kind, input.model, queryDims, nodeType];
+}
 
-  for (const nodeType of resolveSearchNodeTypes(input.kind, input.nodeTypes)) {
-    switch (input.kind) {
-      case "profile": {
-        if (nodeType === "contact") {
-          const contactRows = db
-            .select({ nodeId: embeddings.nodeId, vector: embeddings.vector })
-            .from(embeddings)
-            .innerJoin(contacts, eq(embeddings.nodeId, contacts.id))
-            .where(and(...embeddingBaseConditions(input.kind, input.model, queryDims, nodeType, input.includeLocalOnly)))
-            .all();
-          rows.push(
-            ...contactRows.map((row) => ({
-              nodeType: "contact" as const,
-              nodeId: row.nodeId,
-              vector: row.vector,
-            })),
-          );
-          break;
-        }
-        if (nodeType === "org") {
-          const orgConditions = [
-            ...embeddingBaseConditions(input.kind, input.model, queryDims, nodeType, input.includeLocalOnly),
-          ];
-          if (!input.includeLocalOnly) orgConditions.push(eq(orgs.scope, "shared"));
-          const orgRows = db
-            .select({ nodeId: embeddings.nodeId, vector: embeddings.vector })
-            .from(embeddings)
-            .innerJoin(orgs, eq(embeddings.nodeId, orgs.id))
-            .where(and(...orgConditions))
-            .all();
-          rows.push(
-            ...orgRows.map((row) => ({
-              nodeType: "org" as const,
-              nodeId: row.nodeId,
-              vector: row.vector,
-            })),
-          );
-        }
-        break;
+function* iterateEmbeddingsForNodeType(
+  input: SemanticSearchInput,
+  queryDims: number,
+  nodeType: GraphNodeType,
+): Generator<SearchableEmbeddingRow> {
+  const params = embeddingScanParams(input, queryDims, nodeType);
+  const sharedScope = input.includeLocalOnly ? "" : SHARED_EMBEDDING_SCOPE;
+
+  switch (input.kind) {
+    case "profile": {
+      if (nodeType === "contact") {
+        yield* iterateSqlEmbeddingRows(
+          nodeType,
+          `SELECT e.node_id, e.vector
+           FROM embeddings e
+           INNER JOIN contacts c ON c.id = e.node_id
+           WHERE ${EMBEDDING_MATCH_WHERE}${sharedScope}`,
+          params,
+        );
+        return;
       }
-      case "description": {
-        if (nodeType === "niche") {
-          const nicheConditions = [
-            ...embeddingBaseConditions(input.kind, input.model, queryDims, nodeType, input.includeLocalOnly),
-          ];
-          if (!input.includeLocalOnly) nicheConditions.push(eq(niches.scope, "shared"));
-          const nicheRows = db
-            .select({ nodeId: embeddings.nodeId, vector: embeddings.vector })
-            .from(embeddings)
-            .innerJoin(niches, eq(embeddings.nodeId, niches.id))
-            .where(and(...nicheConditions))
-            .all();
-          rows.push(
-            ...nicheRows.map((row) => ({
-              nodeType: "niche" as const,
-              nodeId: row.nodeId,
-              vector: row.vector,
-            })),
-          );
-          break;
-        }
-        if (nodeType === "launch") {
-          const launchConditions = [
-            ...embeddingBaseConditions(input.kind, input.model, queryDims, nodeType, input.includeLocalOnly),
-          ];
-          if (!input.includeLocalOnly) launchConditions.push(eq(launches.scope, "shared"));
-          const launchRows = db
-            .select({ nodeId: embeddings.nodeId, vector: embeddings.vector })
-            .from(embeddings)
-            .innerJoin(launches, eq(embeddings.nodeId, launches.id))
-            .where(and(...launchConditions))
-            .all();
-          rows.push(
-            ...launchRows.map((row) => ({
-              nodeType: "launch" as const,
-              nodeId: row.nodeId,
-              vector: row.vector,
-            })),
-          );
-        }
-        break;
+      if (nodeType === "org") {
+        const liveScope = input.includeLocalOnly ? "" : " AND o.scope = 'shared'";
+        yield* iterateSqlEmbeddingRows(
+          nodeType,
+          `SELECT e.node_id, e.vector
+           FROM embeddings e
+           INNER JOIN orgs o ON o.id = e.node_id${liveScope}
+           WHERE ${EMBEDDING_MATCH_WHERE}${sharedScope}`,
+          params,
+        );
       }
-      case "body": {
-        if (nodeType === "content") {
-          const contentRows = db
-            .select({ nodeId: embeddings.nodeId, vector: embeddings.vector })
-            .from(embeddings)
-            .innerJoin(contentItems, eq(embeddings.nodeId, contentItems.id))
-            .where(and(...embeddingBaseConditions(input.kind, input.model, queryDims, nodeType, input.includeLocalOnly)))
-            .all();
-          rows.push(
-            ...contentRows.map((row) => ({
-              nodeType: "content" as const,
-              nodeId: row.nodeId,
-              vector: row.vector,
-            })),
-          );
-          break;
-        }
-        if (nodeType === "variant") {
-          const variantConditions = [
-            ...embeddingBaseConditions(input.kind, input.model, queryDims, nodeType, input.includeLocalOnly),
-          ];
-          if (!input.includeLocalOnly) variantConditions.push(eq(launches.scope, "shared"));
-          const variantRows = db
-            .select({ nodeId: embeddings.nodeId, vector: embeddings.vector })
-            .from(embeddings)
-            .innerJoin(variants, eq(embeddings.nodeId, variants.id))
-            .innerJoin(launches, eq(variants.launchId, launches.id))
-            .where(and(...variantConditions))
-            .all();
-          rows.push(
-            ...variantRows.map((row) => ({
-              nodeType: "variant" as const,
-              nodeId: row.nodeId,
-              vector: row.vector,
-            })),
-          );
-        }
-        break;
-      }
-      default:
-        break;
+      return;
     }
+    case "description": {
+      if (nodeType === "niche") {
+        const liveScope = input.includeLocalOnly ? "" : " AND n.scope = 'shared'";
+        yield* iterateSqlEmbeddingRows(
+          nodeType,
+          `SELECT e.node_id, e.vector
+           FROM embeddings e
+           INNER JOIN niches n ON n.id = e.node_id${liveScope}
+           WHERE ${EMBEDDING_MATCH_WHERE}${sharedScope}`,
+          params,
+        );
+        return;
+      }
+      if (nodeType === "launch") {
+        const liveScope = input.includeLocalOnly ? "" : " AND l.scope = 'shared'";
+        yield* iterateSqlEmbeddingRows(
+          nodeType,
+          `SELECT e.node_id, e.vector
+           FROM embeddings e
+           INNER JOIN launches l ON l.id = e.node_id${liveScope}
+           WHERE ${EMBEDDING_MATCH_WHERE}${sharedScope}`,
+          params,
+        );
+      }
+      return;
+    }
+    case "body": {
+      if (nodeType === "content") {
+        yield* iterateSqlEmbeddingRows(
+          nodeType,
+          `SELECT e.node_id, e.vector
+           FROM embeddings e
+           INNER JOIN content_items ci ON ci.id = e.node_id
+           WHERE ${EMBEDDING_MATCH_WHERE}${sharedScope}`,
+          params,
+        );
+        return;
+      }
+      if (nodeType === "variant") {
+        const liveScope = input.includeLocalOnly ? "" : " AND l.scope = 'shared'";
+        yield* iterateSqlEmbeddingRows(
+          nodeType,
+          `SELECT e.node_id, e.vector
+           FROM embeddings e
+           INNER JOIN variants v ON v.id = e.node_id
+           INNER JOIN launches l ON l.id = v.launch_id${liveScope}
+           WHERE ${EMBEDDING_MATCH_WHERE}${sharedScope}`,
+          params,
+        );
+      }
+      return;
+    }
+    default:
+      return;
   }
+}
 
-  return rows;
+function* iterateSearchableEmbeddingRows(
+  input: SemanticSearchInput,
+  queryDims: number,
+): Generator<SearchableEmbeddingRow> {
+  for (const nodeType of resolveSearchNodeTypes(input.kind, input.nodeTypes)) {
+    if (!hasEmbeddingCandidates(input.kind, input.model, queryDims, nodeType, input.includeLocalOnly)) {
+      continue;
+    }
+    yield* iterateEmbeddingsForNodeType(input, queryDims, nodeType);
+  }
 }
 
 function normalizeVector(vector: Float32Array | Buffer): Buffer {
@@ -331,21 +355,20 @@ export function semanticSearch(input: SemanticSearchInput): SemanticSearchHit[] 
 
   const k = input.k ?? 10;
   const queryDims = input.queryVector.length;
-  const rows = selectSearchableEmbeddingRows(input, queryDims);
-
   const queryNorm = vectorL2Norm(input.queryVector);
-  const hits: SemanticSearchHit[] = [];
-  for (const row of rows) {
-    const vector = bufferToFloat32(row.vector);
-    if (vector.length !== queryDims) continue;
-    hits.push({
-      nodeType: row.nodeType,
-      nodeId: row.nodeId,
-      score: cosineSimilarityWithQueryNorm(input.queryVector, vector, queryNorm),
-    });
+  const top: SemanticSearchHit[] = [];
+
+  for (const row of iterateSearchableEmbeddingRows(input, queryDims)) {
+    const score = cosineSimilarityWithQueryNormFromBuffer(
+      input.queryVector,
+      row.vector,
+      queryNorm,
+    );
+    if (Number.isNaN(score)) continue;
+    pushSemanticTopK(top, { nodeType: row.nodeType, nodeId: row.nodeId, score }, k);
   }
 
-  return topKSemanticHits(hits, k);
+  return finalizeSemanticTopK(top);
 }
 
 function joinText(parts: Array<string | null | undefined>): string {

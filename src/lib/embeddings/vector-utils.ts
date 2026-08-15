@@ -68,6 +68,61 @@ export function cosineSimilarityWithQueryNorm(
   return dot / (queryNorm * Math.sqrt(normCandidate));
 }
 
+/** Cosine similarity against a stored vector buffer without allocating a full hits array first. */
+export function cosineSimilarityWithQueryNormFromBuffer(
+  query: Float32Array,
+  candidate: Buffer,
+  queryNorm: number,
+): number {
+  const dims = query.length;
+  if (candidate.byteLength !== dims * 4) return Number.NaN;
+
+  const values = new Float32Array(candidate.buffer, candidate.byteOffset, dims);
+  let dot = 0;
+  let normCandidate = 0;
+  let i = 0;
+  const limit = dims - (dims % 4);
+  for (; i < limit; i += 4) {
+    const q0 = query[i]!;
+    const q1 = query[i + 1]!;
+    const q2 = query[i + 2]!;
+    const q3 = query[i + 3]!;
+    const c0 = values[i]!;
+    const c1 = values[i + 1]!;
+    const c2 = values[i + 2]!;
+    const c3 = values[i + 3]!;
+    dot += q0 * c0 + q1 * c1 + q2 * c2 + q3 * c3;
+    normCandidate += c0 * c0 + c1 * c1 + c2 * c2 + c3 * c3;
+  }
+  for (; i < dims; i++) {
+    const qv = query[i]!;
+    const cv = values[i]!;
+    dot += qv * cv;
+    normCandidate += cv * cv;
+  }
+
+  if (queryNorm === 0 || normCandidate === 0) return 0;
+  return dot / (queryNorm * Math.sqrt(normCandidate));
+}
+
+export function pushSemanticTopK<T extends { score: number }>(top: T[], hit: T, k: number): void {
+  if (top.length < k) {
+    top.push(hit);
+    if (top.length === k) {
+      top.sort((a, b) => a.score - b.score);
+    }
+    return;
+  }
+
+  if (hit.score <= top[0]!.score) return;
+  top[0] = hit;
+  top.sort((a, b) => a.score - b.score);
+}
+
+export function finalizeSemanticTopK<T extends { score: number }>(top: T[]): T[] {
+  return top.sort((a, b) => b.score - a.score);
+}
+
 export function topKSemanticHits<T extends { score: number }>(hits: T[], k: number): T[] {
   if (hits.length <= k) {
     return [...hits].sort((a, b) => b.score - a.score);

@@ -99,6 +99,30 @@ describe("embeddings query layer", () => {
     expect(hits[0]?.nodeId).toBe(contactA.id);
   });
 
+  it("semanticSearch deduplicates repeated nodeTypes", () => {
+    const contact = createContact({ name: "Once", platform: "x", platformUserId: "once" });
+    upsertEmbedding({
+      nodeType: "contact",
+      nodeId: contact.id,
+      kind: "profile",
+      model: "native:default",
+      vector: float32ToBuffer(vectorWith(1)),
+      contentHash: "once",
+      dims: 4,
+    });
+
+    const hits = semanticSearch({
+      kind: "profile",
+      model: "native:default",
+      queryVector: vectorWith(1),
+      k: 5,
+      nodeTypes: ["contact", "contact"],
+    });
+
+    expect(hits).toHaveLength(1);
+    expect(hits[0]?.nodeId).toBe(contact.id);
+  });
+
   it("semanticSearch excludes local_only embedding rows by default", () => {
     const shared = createContact({ name: "Shared", platform: "x", platformUserId: "shared" });
     const hidden = createContact({ name: "Hidden", platform: "x", platformUserId: "hidden" });
