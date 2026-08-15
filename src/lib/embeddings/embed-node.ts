@@ -6,6 +6,7 @@ import {
 } from "@/lib/db/queries/embeddings";
 import type { GraphNodeType } from "@/lib/db/types";
 import { truncateEmbedText } from "@/lib/embeddings/vector-utils";
+import { resolveEmbeddingSourceScope } from "@/lib/embeddings/source-scope";
 import { rtxEmbed, sha256EmbedText, type RtxEmbedFailure } from "@/lib/rtx/llm";
 
 export type EmbedNodeResult =
@@ -65,6 +66,8 @@ export async function embedNodeIfStale(
     throw new EmbeddingUnavailableError("EMBED_ERROR", "RealtimeX returned no embedding vector.");
   }
 
+  const sourceScope = resolveEmbeddingSourceScope(nodeType, nodeId, kind);
+
   upsertEmbedding({
     nodeType,
     nodeId,
@@ -73,7 +76,8 @@ export async function embedNodeIfStale(
     vector,
     contentHash,
     dims: embedResult.dimensions,
-    scope: "shared",
+    scope: sourceScope,
+    force: opts?.force,
   });
 
   return {

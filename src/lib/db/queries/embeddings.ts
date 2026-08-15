@@ -16,6 +16,7 @@ import {
   topKSemanticHits,
   vectorL2Norm,
 } from "@/lib/embeddings/vector-utils";
+import { assertSharedEmbeddingSource, buildEmbeddingSourceVisibilityLookup } from "@/lib/embeddings/source-scope";
 
 export type EmbeddingRow = typeof embeddings.$inferSelect;
 
@@ -28,6 +29,7 @@ export type UpsertEmbeddingInput = {
   contentHash: string;
   dims: number;
   scope?: "shared" | "local_only";
+  force?: boolean;
 };
 
 export type SemanticSearchInput = {
@@ -108,7 +110,7 @@ export function upsertEmbedding(input: UpsertEmbeddingInput): EmbeddingRow | nul
     )
     .get();
 
-  if (existing?.contentHash === input.contentHash) {
+  if (existing?.contentHash === input.contentHash && !input.force) {
     return existing;
   }
 
@@ -178,13 +180,24 @@ export function semanticSearch(input: SemanticSearchInput): SemanticSearchHit[] 
     .where(and(...conditions))
     .all();
 
+  const visibility = buildEmbeddingSourceVisibilityLookup(
+    input.kind,
+    rows.map((row) => ({ nodeType: row.nodeType as GraphNodeType, nodeId: row.nodeId })),
+    input.includeLocalOnly,
+  );
+
   const queryNorm = vectorL2Norm(input.queryVector);
   const hits: SemanticSearchHit[] = [];
   for (const row of rows) {
+    const nodeType = row.nodeType as GraphNodeType;
+    if (!visibility.get(`${nodeType}:${row.nodeId}`)) {
+      continue;
+    }
+
     const vector = bufferToFloat32(row.vector);
     if (vector.length !== queryDims) continue;
     hits.push({
-      nodeType: row.nodeType as GraphNodeType,
+      nodeType,
       nodeId: row.nodeId,
       score: cosineSimilarityWithQueryNorm(input.queryVector, vector, queryNorm),
     });
@@ -200,14 +213,6 @@ function joinText(parts: Array<string | null | undefined>): string {
     .join("\n");
 }
 
-function assertSharedScopedNode(scope: string | undefined, nodeType: GraphNodeType, nodeId: string): void {
-  if (scope === "local_only") {
-    throw new Error(
-      `Cannot assemble shared-scope embedding text for local_only ${nodeType}:${nodeId} in v1`,
-    );
-  }
-}
-
 /** Assemble embeddable text from shared-scope node fields (v1). */
 export function assembleEmbedText(
   nodeType: GraphNodeType,
@@ -216,6 +221,7 @@ export function assembleEmbedText(
 ): string {
   assertEmbeddingKind(kind);
   assertEmbeddingNodeType(kind, nodeType);
+  assertSharedEmbeddingSource(nodeType, nodeId, kind);
 
   if (kind === "persona") {
     throw new Error('Embedding kind "persona" is reserved for a follow-on epic.');
@@ -226,12 +232,10 @@ export function assembleEmbedText(
       if (nodeType === "niche") {
         const niche = db.select().from(niches).where(eq(niches.id, nodeId)).get();
         if (!niche) throw new Error(`Niche not found: ${nodeId}`);
-        assertSharedScopedNode(niche.scope, nodeType, nodeId);
         return joinText([niche.name, niche.description]);
       }
       const launch = db.select().from(launches).where(eq(launches.id, nodeId)).get();
       if (!launch) throw new Error(`Launch not found: ${nodeId}`);
-      assertSharedScopedNode(launch.scope, nodeType, nodeId);
       return joinText([launch.name, launch.brief]);
     }
     case "body": {
@@ -259,7 +263,6 @@ export function assembleEmbedText(
       }
       const org = db.select().from(orgs).where(eq(orgs.id, nodeId)).get();
       if (!org) throw new Error(`Org not found: ${nodeId}`);
-      assertSharedScopedNode(org.scope, nodeType, nodeId);
       return joinText([org.name, org.description, org.domain, org.location]);
     }
     default:

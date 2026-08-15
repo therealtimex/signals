@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { nanoid } from "nanoid";
+import { eq } from "drizzle-orm";
 import { invokeAgentTool } from "@/lib/agent-tools/invoke";
 import { createContact } from "@/lib/db/queries/contacts";
 import { upsertEmbedding, semanticSearch } from "@/lib/db/queries/embeddings";
 import { upsertNiche } from "@/lib/db/queries/niches";
 import { embedNodeIfStale } from "@/lib/embeddings/embed-node";
-import { float32ToBuffer } from "@/lib/embeddings/vector-utils";
+import { bufferToFloat32, float32ToBuffer } from "@/lib/embeddings/vector-utils";
 import { db } from "@/lib/db/client";
 import { embeddings } from "@/lib/db/schema";
 import { resetCoreTables } from "@/test/db";
@@ -23,6 +23,12 @@ vi.mock("@/lib/rtx/llm", async (importOriginal) => {
 function vectorWith(value: number, dims = 4): Float32Array {
   const vector = new Float32Array(dims);
   vector[0] = value;
+  return vector;
+}
+
+function axisVector(axis: number, dims = 4): Float32Array {
+  const vector = new Float32Array(dims);
+  vector[axis] = 1;
   return vector;
 }
 
@@ -93,7 +99,7 @@ describe("embeddings query layer", () => {
     expect(hits[0]?.nodeId).toBe(contactA.id);
   });
 
-  it("semanticSearch excludes local_only rows by default", () => {
+  it("semanticSearch excludes local_only embedding rows by default", () => {
     const shared = createContact({ name: "Shared", platform: "x", platformUserId: "shared" });
     const hidden = createContact({ name: "Hidden", platform: "x", platformUserId: "hidden" });
 
@@ -135,6 +141,75 @@ describe("embeddings query layer", () => {
       includeLocalOnly: true,
     });
     expect(privateHits).toHaveLength(2);
+  });
+
+  it("semanticSearch hides stale shared embeddings when source scope becomes local_only", () => {
+    const niche = upsertNiche({ name: "Public Niche", description: "Visible cluster" });
+    upsertEmbedding({
+      nodeType: "niche",
+      nodeId: niche.id,
+      kind: "description",
+      model: "native:default",
+      vector: float32ToBuffer(vectorWith(1)),
+      contentHash: "niche",
+      dims: 4,
+      scope: "shared",
+    });
+
+    upsertNiche({ id: niche.id, name: "Public Niche", scope: "local_only" });
+
+    const hits = semanticSearch({
+      kind: "description",
+      model: "native:default",
+      queryVector: vectorWith(1),
+      k: 10,
+    });
+    expect(hits).toHaveLength(0);
+  });
+
+  it("embedNodeIfStale force replaces vector when content hash is unchanged", async () => {
+    const contact = createContact({ name: "Force", platform: "x", platformUserId: "force-1" });
+    mockRtxEmbed
+      .mockResolvedValueOnce({
+        success: true,
+        embeddings: [axisVector(0)],
+        provider: "native",
+        model: "default",
+        qualifiedModel: "native:default",
+        dimensions: 4,
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        embeddings: [axisVector(1)],
+        provider: "native",
+        model: "default",
+        qualifiedModel: "native:default",
+        dimensions: 4,
+      });
+
+    await embedNodeIfStale("contact", contact.id, "profile");
+    await embedNodeIfStale("contact", contact.id, "profile", { force: true });
+
+    const stored = bufferToFloat32(
+      db.select().from(embeddings).where(eq(embeddings.nodeId, contact.id)).get()!.vector,
+    );
+    expect(stored[1]).toBe(1);
+    expect(stored[0]).toBe(0);
+  });
+
+  it("rejects embedding variant body when parent launch is local_only", async () => {
+    const launch = await invokeAgentTool("upsert_launch", {
+      name: "Private Launch",
+      scope: "local_only",
+    });
+    const variant = await invokeAgentTool("upsert_variant", {
+      launchId: (launch as { id: string }).id,
+      body: "secret copy",
+    });
+
+    await expect(
+      embedNodeIfStale("variant", (variant as { id: string }).id, "body"),
+    ).rejects.toThrow("local_only");
   });
 
   it("embedNodeIfStale skips unchanged text and embeds via RTX when stale", async () => {
@@ -194,6 +269,38 @@ describe("embeddings query layer", () => {
     expect(row?.label).toBe("Founders");
   });
 
+  it("semantic_search omits nodes that became local_only even with stale shared embeddings", async () => {
+    const niche = upsertNiche({ name: "Stealth Cluster", description: "Was public" });
+    upsertEmbedding({
+      nodeType: "niche",
+      nodeId: niche.id,
+      kind: "description",
+      model: "native:default",
+      vector: float32ToBuffer(vectorWith(1)),
+      contentHash: "stealth",
+      dims: 4,
+      scope: "shared",
+    });
+    upsertNiche({ id: niche.id, name: "Stealth Cluster", scope: "local_only" });
+
+    mockRtxEmbed.mockResolvedValue({
+      success: true,
+      embeddings: [vectorWith(1)],
+      provider: "native",
+      model: "default",
+      qualifiedModel: "native:default",
+      dimensions: 4,
+    });
+
+    const result = await invokeAgentTool("semantic_search", {
+      query: "stealth cluster",
+      kind: "description",
+      k: 5,
+    });
+
+    expect(result).toMatchObject({ resultCount: 0, results: [] });
+  });
+
   it("semantic_search surfaces RTX embed errors verbatim", async () => {
     mockRtxEmbed.mockResolvedValue({
       success: false,
@@ -205,50 +312,4 @@ describe("embeddings query layer", () => {
       invokeAgentTool("semantic_search", { query: "test query" }),
     ).rejects.toThrow("Approve llm.embed");
   });
-
-  it(
-    "semanticSearch scans 20k x 1536 vectors within ADR-022-4 latency budget",
-    () => {
-      const model = "bench:latency";
-      const dims = 1536;
-      const query = vectorWith(1, dims);
-      const base = vectorWith(0.5, dims);
-
-      db.transaction(() => {
-        for (let i = 0; i < 20_000; i++) {
-          db.insert(embeddings)
-            .values({
-              id: nanoid(),
-              nodeType: "contact",
-              nodeId: `bench-${i}`,
-              kind: "profile",
-              model,
-              dims,
-              vector: float32ToBuffer(base),
-              contentHash: `bench-${i}`,
-              scope: "shared",
-            })
-            .run();
-        }
-      });
-
-      const durations: number[] = [];
-      for (let run = 0; run < 5; run++) {
-        const start = performance.now();
-        const hits = semanticSearch({
-          kind: "profile",
-          model,
-          queryVector: query,
-          k: 10,
-        });
-        durations.push(performance.now() - start);
-        expect(hits.length).toBeGreaterThan(0);
-      }
-
-      const elapsed = Math.min(...durations);
-      // Design target is 250 ms (Amendment C); 500 ms min-of-5 leaves headroom for parallel CI.
-      expect(elapsed).toBeLessThan(500);
-    },
-    30_000,
-  );
 });

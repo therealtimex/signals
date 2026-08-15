@@ -22,11 +22,10 @@ export default defineConfig({
   },
   test: {
     setupFiles: ["./src/test/setup.ts"],
-    exclude: ["**/node_modules/**", "**/e2e/**"],
     coverage: {
       provider: "v8",
       include: COVERAGE_INCLUDE,
-      exclude: ["**/*.test.ts"],
+      exclude: ["**/*.test.ts", "**/*.latency.test.ts"],
       thresholds: {
         lines: 80,
         functions: 75,
@@ -34,5 +33,29 @@ export default defineConfig({
         statements: 80,
       },
     },
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: "unit",
+          include: ["src/**/*.test.ts"],
+          exclude: ["**/node_modules/**", "**/e2e/**", "src/**/*.latency.test.ts"],
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: "latency",
+          include: ["src/**/*.latency.test.ts"],
+          exclude: ["**/node_modules/**"],
+          pool: "forks",
+          poolOptions: {
+            forks: {
+              singleFork: true,
+            },
+          },
+        },
+      },
+    ],
   },
 });
