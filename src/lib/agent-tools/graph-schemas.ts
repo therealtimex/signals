@@ -53,3 +53,21 @@ export const logInteractionSchema = z.object({
   contentItemId: z.string().optional(),
   metadata: z.record(z.unknown()).optional(),
 });
+
+export const queryNichesSchema = z.object({
+  search: z.string().optional(),
+  status: z.enum(["candidate", "active", "merged", "archived"]).optional(),
+  page: z.number().int().positive().optional(),
+  pageSize: z.number().int().positive().max(100).optional(),
+  includeLocalOnly: z.boolean().optional(),
+});
+
+export const upsertNicheSchema = z.object({
+  id: z.string().optional(),
+  name: z.string().min(1),
+  description: z.string().optional(),
+  nicheType: z.enum(["interest", "firmographic", "behavioral", "custom"]).optional(),
+  status: z.enum(["candidate", "active", "merged", "archived"]).optional(),
+  scope: z.enum(["shared", "local_only"]).optional(),
+  metadata: z.record(z.unknown()).optional(),
+});

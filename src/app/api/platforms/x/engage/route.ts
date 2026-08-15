@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { getPlatformAccountByPlatform } from "@/lib/db/queries/platform-accounts";
 import { createEngagement } from "@/lib/db/queries/engagements";
+import { resolveEngagementTargetContact } from "@/lib/db/queries/engagement-target-contact";
 import {
   getAuthenticatedUser,
   likeTweet,
@@ -74,8 +75,12 @@ export async function POST(req: NextRequest) {
       reply: "reply",
     } as const;
 
+    const targetContactId = contentPostId
+      ? resolveEngagementTargetContact(contentPostId)
+      : null;
+
     createEngagement({
-      contactId: null,
+      contactId: targetContactId,
       platformAccountId: account.id,
       engagementType: engagementTypeMap[action],
       direction: "outbound",

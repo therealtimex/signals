@@ -52,6 +52,8 @@ Then pass `Authorization: Bearer your-secret-token` on each request.
 | `query_graph` | graph | 1-hop graph traversal from a node |
 | `upsert_edge` | graph | Create/update typed graph edge |
 | `log_interaction` | graph | Append interaction event for a contact |
+| `query_niches` | graph | List/search niche clusters with member counts |
+| `upsert_niche` | graph | Create or update a niche cluster |
 
 `create_contact` / `update_contact` with a `company` field also dual-write an `orgs` row and `works_at` edge (contacts projection unchanged).
 

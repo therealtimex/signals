@@ -10,7 +10,7 @@ import {
   runGraphIntegrityJob,
 } from "@/lib/db/graph-integrity";
 import { db } from "@/lib/db/client";
-import { graphEdges } from "@/lib/db/schema";
+import { graphEdges, niches } from "@/lib/db/schema";
 import { resetCoreTables } from "@/test/db";
 
 describe("graph integrity", () => {
@@ -123,5 +123,30 @@ describe("graph integrity", () => {
 
     const report = auditGraphIntegrity();
     expect(report.issueCount).toBe(0);
+  });
+
+  it("flags belongs_to_niche edges pointing at merged niches", () => {
+    const contact = createContact({ name: "Niche Member", platform: "x", platformUserId: "nm1" });
+    const nicheId = "merged-niche";
+    db.insert(niches)
+      .values({
+        id: nicheId,
+        name: "Old Cluster",
+        slug: "old-cluster",
+        status: "merged",
+        scope: "shared",
+      })
+      .run();
+
+    upsertGraphEdge({
+      srcType: "contact",
+      srcId: contact.id,
+      dstType: "niche",
+      dstId: nicheId,
+      edgeType: "belongs_to_niche",
+    });
+
+    const report = auditGraphIntegrity();
+    expect(report.issues.some((issue) => issue.reason === "stale_niche_membership")).toBe(true);
   });
 });

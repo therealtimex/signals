@@ -7,8 +7,9 @@ import { logInteraction } from "@/lib/db/queries/interactions";
 import * as projection from "@/lib/db/queries/contact-interaction-projection";
 import { recomputeContactLastInteraction } from "@/lib/db/queries/contact-interaction-projection";
 import { syncInteractionFromEngagement } from "@/lib/db/engagement-interaction-sync";
+import { backfillInteractions } from "@/lib/db/backfills/interactions";
 import { db } from "@/lib/db/client";
-import { contacts, engagements, interactions } from "@/lib/db/schema";
+import { contacts, contentActivities, contentItems, contentPosts, engagements, interactions, platformAccounts } from "@/lib/db/schema";
 import { resetCoreTables } from "@/test/db";
 
 describe("engagement → interaction dual-write", () => {
@@ -70,9 +71,10 @@ describe("engagement → interaction dual-write", () => {
     const first = syncInteractionFromEngagement(engagement);
     const second = syncInteractionFromEngagement(engagement);
 
-    expect(first?.id).toBe(second?.id);
+    expect(first?.kind).toBe("interaction");
+    expect(first?.row.id).toBe(second?.row.id);
     expect(db.select().from(interactions).all()).toHaveLength(1);
-    expect(second?.source).toBe("sync:linkedin");
+    expect(second?.row.source).toBe("sync:linkedin");
   });
 
   it("logInteraction maintains lastInteractionAt projection", () => {
@@ -105,7 +107,7 @@ describe("engagement → interaction dual-write", () => {
     expect(recomputed?.lastInteractionAt).toBe(1_700_000_500);
   });
 
-  it("skips interaction dual-write when engagement has no contact", () => {
+  it("routes actor-only engagement into content_activities", () => {
     const engagement = createEngagement({
       contactId: null,
       platformAccountId: null,
@@ -119,11 +121,71 @@ describe("engagement → interaction dual-write", () => {
       platformEngagementId: null,
       threadId: null,
       source: "manual",
-      platformData: "{}",
+      platformData: JSON.stringify({ action: "like", tweetId: "1" }),
     });
 
+    const activity = db
+      .select()
+      .from(contentActivities)
+      .where(eq(contentActivities.engagementId, engagement.id))
+      .get();
+
+    expect(activity).toBeTruthy();
+    expect(activity?.activityType).toBe("like");
+    expect(activity?.source).toBe("manual");
     expect(db.select().from(interactions).all()).toHaveLength(0);
-    expect(syncInteractionFromEngagement(engagement)).toBeNull();
+    expect(db.select().from(contacts).all()).toHaveLength(0);
+  });
+
+  it("backfills legacy contactless X engagements into content_activities", () => {
+    const platformAccountId = nanoid();
+    const contentItemId = nanoid();
+    const contentPostId = nanoid();
+    db.insert(platformAccounts)
+      .values({
+        id: platformAccountId,
+        platform: "x",
+        displayName: "@me",
+        authType: "oauth",
+      })
+      .run();
+    db.insert(contentItems)
+      .values({ id: contentItemId, contentType: "post", status: "imported" })
+      .run();
+    db.insert(contentPosts)
+      .values({
+        id: contentPostId,
+        contentItemId,
+        platformAccountId,
+        status: "imported",
+      })
+      .run();
+
+    const engagementId = nanoid();
+    db.insert(engagements)
+      .values({
+        id: engagementId,
+        contactId: null,
+        engagementType: "like",
+        direction: "outbound",
+        contentPostId,
+        platform: "x",
+        source: "manual",
+        platformData: JSON.stringify({ action: "like", tweetId: "legacy-1" }),
+        createdAt: 1_700_000_000,
+      })
+      .run();
+
+    const result = backfillInteractions();
+    expect(result.inserted).toBe(1);
+
+    const activity = db
+      .select()
+      .from(contentActivities)
+      .where(eq(contentActivities.engagementId, engagementId))
+      .get();
+    expect(activity?.contentPostId).toBe(contentPostId);
+    expect(db.select().from(interactions).all()).toHaveLength(0);
   });
 
   it("rolls back logInteraction when projection update fails", () => {

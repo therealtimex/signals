@@ -13,13 +13,18 @@ export function backfillEngagedWithEdges(): { upserted: number } {
       contentItemId: interactions.contentItemId,
     })
     .from(interactions)
-    .where(and(isNotNull(interactions.contentItemId), eq(interactions.scope, "shared")))
+    .where(
+      and(
+        isNotNull(interactions.contentItemId),
+        eq(interactions.scope, "shared"),
+      ),
+    )
     .all();
 
   const counts = new Map<string, { contactId: string; contentItemId: string; count: number }>();
 
   for (const row of rows) {
-    if (!row.contentItemId) continue;
+    if (!row.contentItemId || !row.contactId) continue;
     const key = `${row.contactId}:${row.contentItemId}`;
     const existing = counts.get(key);
     if (existing) {

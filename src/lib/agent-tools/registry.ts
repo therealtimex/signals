@@ -18,14 +18,18 @@ import {
 import {
   logInteractionSchema,
   queryGraphSchema,
+  queryNichesSchema,
   queryOrgsSchema,
   upsertEdgeSchema,
+  upsertNicheSchema,
 } from "@/lib/agent-tools/graph-schemas";
 import {
   handleLogInteraction,
   handleQueryGraph,
+  handleQueryNiches,
   handleQueryOrgs,
   handleUpsertEdge,
+  handleUpsertNiche,
 } from "@/lib/agent-tools/graph-handlers";
 import { zodToParameters } from "@/lib/agent-tools/json-schema";
 import {
@@ -208,6 +212,22 @@ export const AGENT_TOOLS: Record<string, AgentToolDefinition> = {
     schema: logInteractionSchema,
     parameters: zodToParameters(logInteractionSchema),
     execute: handleLogInteraction,
+  },
+  query_niches: {
+    name: "query_niches",
+    description: "List or search niche clusters with member counts. Private niches excluded unless includeLocalOnly is true.",
+    category: "graph",
+    schema: queryNichesSchema,
+    parameters: zodToParameters(queryNichesSchema),
+    execute: handleQueryNiches,
+  },
+  upsert_niche: {
+    name: "upsert_niche",
+    description: "Create or update a niche cluster. Use upsert_edge with belongs_to_niche for membership.",
+    category: "graph",
+    schema: upsertNicheSchema,
+    parameters: zodToParameters(upsertNicheSchema),
+    execute: handleUpsertNiche,
   },
 };
 

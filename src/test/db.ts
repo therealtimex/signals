@@ -8,8 +8,10 @@ import {
   goals,
   graphEdges,
   interactions,
+  contentActivities,
   identityMetrics,
   contactPersonas,
+  niches,
   orgs,
   workflowRuns,
   workflowSteps,
@@ -19,15 +21,17 @@ import {
 /** Clear core tables used by unit tests (child rows first). */
 export function resetCoreTables(): void {
   db.delete(workflowSteps).run();
+  db.delete(interactions).run();
+  db.delete(contentActivities).run();
+  db.delete(engagements).run();
   db.delete(workflowRuns).run();
   db.delete(goalProgress).run();
   db.delete(goalWorkflows).run();
   db.delete(goals).run();
   db.delete(contactPersonas).run();
   db.delete(identityMetrics).run();
-  db.delete(interactions).run();
-  db.delete(engagements).run();
   db.delete(graphEdges).run();
+  db.delete(niches).run();
   db.delete(orgs).run();
   db.delete(contactIdentities).run();
   db.delete(contacts).run();
