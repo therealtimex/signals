@@ -15,6 +15,7 @@ import { createGoal } from "@/lib/db/queries/goals";
 import { upsertGraphEdge } from "@/lib/db/queries/graph";
 import { calibrateSimulationRun } from "@/lib/db/queries/calibrations";
 import { upsertLaunch } from "@/lib/db/queries/launches";
+import * as launchesQueries from "@/lib/db/queries/launches";
 import {
   completeSimulationRun,
   createAndStartSimulationRun,
@@ -109,6 +110,7 @@ describe("UI 4.1 REST API", () => {
       brief: "keep until cleared",
       workflowTemplateId,
       launchedAt: 1_700_000_000,
+      completedAt: 1_700_000_100,
     });
     const variant = upsertVariant({
       launchId: launch.id,
@@ -134,6 +136,7 @@ describe("UI 4.1 REST API", () => {
     expect(launchBody.brief).toBeNull();
     expect(launchBody.workflowTemplateId).toBeNull();
     expect(launchBody.launchedAt).toBeNull();
+    expect(launchBody.completedAt).toBeNull();
 
     const clearedVariant = await updateVariant(
       new NextRequest("http://localhost", {
@@ -241,7 +244,7 @@ describe("UI 4.1 REST API", () => {
       new NextRequest("http://localhost", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ label: "Moved?" }),
+        body: JSON.stringify({ label: "Moved?", launchId: otherLaunch.id }),
       }),
       { params: Promise.resolve({ id: variant.id }) },
     );
@@ -548,6 +551,27 @@ describe("UI 4.1 REST API", () => {
     const res = await getLaunch(new NextRequest("http://localhost"), {
       params: Promise.resolve({ id: launch.id }),
     });
+    const body = await res.json();
+    expect(res.status).toBe(500);
+    expect(body).toEqual({ error: "Internal server error", code: "INTERNAL_ERROR" });
+
+    spy.mockRestore();
+  });
+
+  it("write-route prechecks return INTERNAL_ERROR envelope on unexpected failures", async () => {
+    const launch = upsertLaunch({ name: "Write error path", primaryPlatform: "x" });
+    const spy = vi.spyOn(launchesQueries, "getLaunchById").mockImplementation(() => {
+      throw new Error("db blew up");
+    });
+
+    const res = await updateLaunch(
+      new NextRequest("http://localhost", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Updated" }),
+      }),
+      { params: Promise.resolve({ id: launch.id }) },
+    );
     const body = await res.json();
     expect(res.status).toBe(500);
     expect(body).toEqual({ error: "Internal server error", code: "INTERNAL_ERROR" });

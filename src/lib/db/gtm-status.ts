@@ -1,6 +1,5 @@
-import type { Launch, SimulationRun, Variant } from "@/lib/db/types";
+/** Canonical GTM status registries — widen enums here; schema and REST import from this module. */
 
-/** Mirrors `launches.status` in schema.ts. */
 export const LAUNCH_STATUSES = [
   "draft",
   "generating",
@@ -9,7 +8,29 @@ export const LAUNCH_STATUSES = [
   "live",
   "completed",
   "archived",
-] as const satisfies readonly Launch["status"][];
+] as const;
+
+export type LaunchStatus = (typeof LAUNCH_STATUSES)[number];
+
+export const LAUNCH_STATUS_ENUM = LAUNCH_STATUSES as unknown as [
+  LaunchStatus,
+  ...LaunchStatus[],
+];
+
+export const VARIANT_STATUSES = [
+  "draft",
+  "simulated",
+  "selected",
+  "published",
+  "rejected",
+] as const;
+
+export type VariantStatus = (typeof VARIANT_STATUSES)[number];
+
+export const VARIANT_STATUS_ENUM = VARIANT_STATUSES as unknown as [
+  VariantStatus,
+  ...VariantStatus[],
+];
 
 /** Variant statuses writable via REST (excludes published). */
 export const VARIANT_WRITE_STATUSES = [
@@ -17,19 +38,29 @@ export const VARIANT_WRITE_STATUSES = [
   "simulated",
   "selected",
   "rejected",
-] as const satisfies readonly Variant["status"][];
+] as const;
 
-/** All variant statuses including published (for PUT rejection). */
-export const VARIANT_STATUSES = [
-  ...VARIANT_WRITE_STATUSES,
-  "published",
-] as const satisfies readonly Variant["status"][];
+type AssertVariantWriteSubset =
+  Exclude<VariantStatus, (typeof VARIANT_WRITE_STATUSES)[number]> extends "published"
+    ? "published" extends Exclude<VariantStatus, (typeof VARIANT_WRITE_STATUSES)[number]>
+      ? true
+      : never
+    : never;
 
-/** Mirrors `simulation_runs.status` in schema.ts. */
+const _assertVariantWriteSubset: AssertVariantWriteSubset = true;
+void _assertVariantWriteSubset;
+
 export const SIMULATION_RUN_STATUSES = [
   "pending",
   "running",
   "completed",
   "failed",
   "cancelled",
-] as const satisfies readonly SimulationRun["status"][];
+] as const;
+
+export type SimulationRunStatus = (typeof SIMULATION_RUN_STATUSES)[number];
+
+export const SIMULATION_RUN_STATUS_ENUM = SIMULATION_RUN_STATUSES as unknown as [
+  SimulationRunStatus,
+  ...SimulationRunStatus[],
+];

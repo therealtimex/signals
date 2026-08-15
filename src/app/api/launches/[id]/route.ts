@@ -24,12 +24,12 @@ export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const { id } = await params;
-  if (!getLaunchById(id)) {
-    return notFoundResponse("Launch not found");
-  }
-
   try {
+    const { id } = await params;
+    if (!getLaunchById(id)) {
+      return notFoundResponse("Launch not found");
+    }
+
     const body = await req.json();
     const data = updateLaunchSchema.parse(body);
     upsertLaunch({

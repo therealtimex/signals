@@ -24,13 +24,13 @@ export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const { id } = await params;
-  const existing = getVariantById(id);
-  if (!existing) {
-    return notFoundResponse("Variant not found");
-  }
-
   try {
+    const { id } = await params;
+    const existing = getVariantById(id);
+    if (!existing) {
+      return notFoundResponse("Variant not found");
+    }
+
     const body = await req.json();
     const data = updateVariantSchema.parse(body);
     const variant = upsertVariant({

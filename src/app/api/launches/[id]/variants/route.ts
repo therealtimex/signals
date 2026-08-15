@@ -9,12 +9,12 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const { id: launchId } = await params;
-  if (!getLaunchById(launchId)) {
-    return notFoundResponse("Launch not found");
-  }
-
   try {
+    const { id: launchId } = await params;
+    if (!getLaunchById(launchId)) {
+      return notFoundResponse("Launch not found");
+    }
+
     const body = await req.json();
     const data = createVariantSchema.parse(body);
     const variant = upsertVariant({
