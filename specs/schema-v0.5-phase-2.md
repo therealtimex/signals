@@ -239,6 +239,61 @@ Design notes:
 - **`workflow_templates` is not retired.** It remains the automation-config store; a launch may reference the template that executes it. The two concepts stop being conflated.
 - **Prediction fields live on the variant** as *latest-value* columns so "compare variants" is one indexed read. Full simulation-run history (per-agent transcripts, populations) is deliberately deferred (§9) — when it lands, runs will reference `variant_id` and these columns become a projection of the latest run, consistent with the `contacts` projection rule.
 
+#### §4.2 Amendment B — slice 2.2 publish-flow boundaries (2026-08-15, kickoff for #34)
+
+The DDL sketch above is approved verbatim. This amendment pins down the publish-flow
+integration and edge-endpoint wiring that the sketch left implicit, so Dev has one
+unambiguous boundary per deliverable.
+
+**Publish flow — one choke point, two triggers.**
+
+- `publishVariant(variantId, { platform?, publishedAt? })` in the launches/variants
+  query layer is the *only* writer of `published_as` edges and the only path that sets
+  `variants.status = 'published'`. Steps (single synchronous flow on the shared
+  better-sqlite3 client):
+  1. Load variant + parent launch; resolve `platform ?? launch.primaryPlatform`
+     (validated against `PLATFORMS`).
+  2. **Materialize if needed:** when `contentItemId` is null, `createContentItem()`
+     with `origin: 'authored'`, `aiGenerated: true`, body from `variants.body`,
+     `platformTarget` = resolved platform, status `'published'` when the variant was
+     published externally via the agent-tool path, `'approved'` when materializing
+     ahead of an in-app platform publish; set `variants.contentItemId`.
+  3. Upsert `published_as` edge (variant → content) with properties
+     `{ platform, published_at }` via `upsertGraphEdge` — edge multiplicity rule makes
+     re-publish idempotent (same edge, refreshed properties).
+  4. Set `variants.status = 'published'`.
+- **Trigger 1 (agent tools, this slice's primary surface):** `upsert_variant` with
+  `status: 'published'` must delegate to `publishVariant()` rather than writing the
+  status column directly; direct status writes to `'published'` outside the choke
+  point are an architectural smell.
+- **Trigger 2 (existing in-app publisher):** `/api/content/publish` success path gains
+  a small hook — after `updateContentItem(status: 'published')`, look up a variant by
+  `contentItemId` (`idx_variants_content_item`) and, if found, call `publishVariant()`
+  to write the edge and flip variant status. The browser publishers themselves are
+  untouched.
+- A standalone `materializeVariant(variantId)` (steps 1–2 only, content item
+  `'draft'`) is optional in this slice; add it only if a test or tool needs
+  pre-publish materialization.
+
+**Edge-endpoint wiring (load-bearing, easy to miss).** `graph.ts`'s private
+`nodeTable()` switch and the `graph-integrity` node resolution currently have no
+`launch`/`variant` cases, so `upsertGraphEdge` would reject the new endpoints and the
+integrity job would sweep their edges as orphans. Slice 2.2 must add both cases (the
+enum values were reserved in Phase 1; no DDL change). `targets` and `published_as`
+default to `shared` scope — no `LOCAL_ONLY_EDGE_TYPES` change.
+
+**No dedicated edge tools.** `targets` (launch|variant → niche|org|contact) and
+`contributes_to` (launch → goal) edges are written through the existing `upsert_edge`
+tool, mirroring slice 2.1's `belongs_to_niche` precedent. The three new tools are
+`query_launches` / `upsert_launch` / `upsert_variant` only; `query_launches` returns
+variant summaries (id, label, status, predicted_score) and goal links from
+`contributes_to` edges, scope-filtered by default (`includeLocalOnly` default false).
+`upsert_launch` updates by explicit `id`, otherwise inserts (launch names are not
+unique — no natural-key dedup, unlike niche slugs); handlers hardcode
+`source: 'agent'`. `variant_type` is open text validated in the write path against a
+small code-level registry (§5 rule); prediction fields are writable via
+`upsert_variant` for future simulation agents.
+
 ### 4.3 Embeddings
 
 ```ts
