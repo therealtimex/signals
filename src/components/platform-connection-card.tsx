@@ -199,14 +199,18 @@ export function PlatformConnectionCard({
         </div>
 
         <div className="flex items-center gap-2">
-          {status === "disconnected" && onConnect && (
+          {CONNECTION_STATUSES_WITH_CONNECT_ACTION.includes(status) &&
+            status === "disconnected" &&
+            onConnect && (
             <Button onClick={onConnect} disabled={connecting}>
               {connecting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Connect
             </Button>
           )}
 
-          {status === "needs_reauth" && onConnect && (
+          {CONNECTION_STATUSES_WITH_CONNECT_ACTION.includes(status) &&
+            status === "needs_reauth" &&
+            onConnect && (
             <Button onClick={onConnect} variant="outline" disabled={connecting}>
               {connecting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Reconnect

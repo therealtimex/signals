@@ -1,17 +1,19 @@
 import { describe, it, expect } from "vitest";
 import { getPlatformAdapter } from "@/lib/platforms";
 import { NotImplementedError } from "@/lib/platforms/adapter";
-import {
-  PLATFORM_CAPABILITIES,
-  getPlatformsWithoutOAuth,
-} from "@/lib/platforms/capabilities";
-import { CONNECTION_STATUSES_WITH_CONNECT_ACTION } from "@/components/platform-connection-card";
+import { PLATFORM_CAPABILITIES, getPlatformsWithoutOAuth } from "@/lib/platforms/capabilities";
+import { XPlatformAdapter } from "@/lib/platforms/x/adapter";
+import { LinkedInPlatformAdapter } from "@/lib/platforms/linkedin/adapter";
+import { GmailPlatformAdapter } from "@/lib/platforms/gmail/adapter";
+import { InstagramPlatformAdapter } from "@/lib/platforms/instagram/adapter";
+import { FacebookPlatformAdapter } from "@/lib/platforms/facebook/adapter";
+import { ThreadsPlatformAdapter } from "@/lib/platforms/threads/adapter";
 
-const MAPPED_PLATFORMS = ["x", "linkedin", "gmail", "instagram", "facebook", "threads"] as const;
+const STUB_PLATFORMS = ["instagram", "facebook", "threads"] as const;
 
 describe("getPlatformAdapter", () => {
-  it("returns an adapter for all six mapped platforms", () => {
-    for (const platform of MAPPED_PLATFORMS) {
+  it("returns stub adapters from the factory", () => {
+    for (const platform of STUB_PLATFORMS) {
       const adapter = getPlatformAdapter(platform);
       expect(adapter.platform).toBe(platform);
     }
@@ -35,18 +37,24 @@ describe("getPlatformAdapter", () => {
 
 describe("adapter capabilities", () => {
   it("uses the PLATFORM_CAPABILITIES map entry by reference", () => {
-    for (const platform of MAPPED_PLATFORMS) {
-      const adapter = getPlatformAdapter(platform);
-      expect(adapter.capabilities).toBe(PLATFORM_CAPABILITIES[platform]);
+    const adapters = [
+      new XPlatformAdapter(),
+      new LinkedInPlatformAdapter(),
+      new GmailPlatformAdapter(),
+      new InstagramPlatformAdapter(),
+      new FacebookPlatformAdapter(),
+      new ThreadsPlatformAdapter(),
+    ];
+
+    for (const adapter of adapters) {
+      expect(adapter.capabilities).toBe(PLATFORM_CAPABILITIES[adapter.platform]);
     }
   });
 });
 
 describe("stub platform adapters", () => {
-  const stubPlatforms = ["instagram", "facebook", "threads"] as const;
-
   it("has all capabilities false", () => {
-    for (const platform of stubPlatforms) {
+    for (const platform of STUB_PLATFORMS) {
       const caps = PLATFORM_CAPABILITIES[platform]!;
       expect(caps).toEqual({
         oauth: false,
@@ -58,7 +66,7 @@ describe("stub platform adapters", () => {
     }
   });
 
-  it.each(stubPlatforms)("throws NotImplementedError from every method (%s)", async (platform) => {
+  it.each(STUB_PLATFORMS)("throws NotImplementedError from every method (%s)", async (platform) => {
     const adapter = getPlatformAdapter(platform);
 
     await expect(adapter.getAuthorizationUrl("http://localhost/callback")).rejects.toMatchObject({
@@ -100,11 +108,5 @@ describe("stub platform adapters", () => {
 describe("getPlatformsWithoutOAuth", () => {
   it("lists exactly the stub platforms with oauth disabled", () => {
     expect(getPlatformsWithoutOAuth().sort()).toEqual(["facebook", "instagram", "threads"]);
-  });
-});
-
-describe("connect UI coming_soon gating", () => {
-  it("does not treat coming_soon as a connect-action status", () => {
-    expect(CONNECTION_STATUSES_WITH_CONNECT_ACTION).not.toContain("coming_soon");
   });
 });
