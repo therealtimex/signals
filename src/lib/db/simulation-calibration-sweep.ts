@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { simulationRuns, variants } from "@/lib/db/schema";
 import {
@@ -26,29 +26,27 @@ export type CalibrationSweepReport = {
   errors: { runId: string; message: string }[];
 };
 
-function listLatestCompletedRunsForPublishedVariants(): SimulationRun[] {
-  const publishedVariants = db
-    .select()
+function listCompletedRunsForPublishedVariants(): SimulationRun[] {
+  const publishedVariantIds = db
+    .select({ id: variants.id })
     .from(variants)
     .where(eq(variants.status, "published"))
-    .all();
+    .all()
+    .map((row) => row.id);
 
-  const runs: SimulationRun[] = [];
-  for (const variant of publishedVariants) {
-    const run = db
-      .select()
-      .from(simulationRuns)
-      .where(
-        and(
-          eq(simulationRuns.variantId, variant.id),
-          eq(simulationRuns.status, "completed"),
-        ),
-      )
-      .orderBy(desc(simulationRuns.completedAt), desc(simulationRuns.id))
-      .get();
-    if (run) runs.push(run);
-  }
-  return runs;
+  if (publishedVariantIds.length === 0) return [];
+
+  return db
+    .select()
+    .from(simulationRuns)
+    .where(
+      and(
+        inArray(simulationRuns.variantId, publishedVariantIds),
+        eq(simulationRuns.status, "completed"),
+      ),
+    )
+    .orderBy(desc(simulationRuns.completedAt), desc(simulationRuns.id))
+    .all();
 }
 
 export function runNeedsCalibrationAtHorizon(runId: string, observedUntil: number): boolean {
@@ -83,7 +81,7 @@ export function runSimulationCalibrationSweep(opts?: {
   };
 
   try {
-    for (const run of listLatestCompletedRunsForPublishedVariants()) {
+    for (const run of listCompletedRunsForPublishedVariants()) {
       report.runsConsidered += 1;
 
       if (!runNeedsCalibrationAtHorizon(run.id, observedUntil)) {

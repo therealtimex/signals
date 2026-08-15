@@ -267,7 +267,7 @@ describe("simulation runs (slice 3.1)", () => {
     expect(started.status).toBe("running");
     expect(startSimulationRun(run.id).status).toBe("running");
 
-    expect(() => startSimulationRun(run.id.replace(/.$/, "x"))).toThrow(/not found/);
+    expect(() => startSimulationRun(`missing-${nanoid()}`)).toThrow(/not found/);
   });
 
   it("rejects starting a non-pending run", () => {
@@ -520,11 +520,26 @@ describe("simulation results and projection (slice 3.2)", () => {
     ).toThrow(SimulationValidationError);
 
     expect(() =>
-      completeSimulationRun(run.id, { predictedScore: 101, predictionConfidence: 0.5 }),
+      completeSimulationRun(run.id, {
+        predictedScore: 101,
+        predictionConfidence: 0.5,
+        predictedMetrics: { likes: 1 },
+      }),
     ).toThrow(SimulationValidationError);
 
     expect(() =>
-      completeSimulationRun(run.id, { predictedScore: 50, predictionConfidence: 1.5 }),
+      completeSimulationRun(run.id, {
+        predictedScore: 50,
+        predictionConfidence: 0.5,
+      }),
+    ).toThrow(SimulationRunStateError);
+
+    expect(() =>
+      completeSimulationRun(run.id, {
+        predictedScore: 50,
+        predictionConfidence: 1.5,
+        predictedMetrics: { likes: 25 },
+      }),
     ).toThrow(SimulationValidationError);
 
     expect(() =>
@@ -542,6 +557,21 @@ describe("simulation results and projection (slice 3.2)", () => {
         predictedMetrics: { likes: 0 },
       }),
     ).toThrow(SimulationValidationError);
+  });
+
+  it("accepts zero-score completion when predictedMetrics is explicitly provided", () => {
+    const { run, agent } = seedRunningRun();
+    recordSimulationAgentResults(run.id, [
+      { agentId: agent.id, engagementScore: 5, outcome: "impression" },
+    ]);
+
+    completeSimulationRun(run.id, {
+      predictedScore: 0,
+      predictionConfidence: 0.4,
+      predictedMetrics: {},
+    });
+
+    expect(getSimulationRun(run.id)?.predictedScore).toBe(0);
   });
 
   it("rejects record on non-running runs and invalid completions", () => {

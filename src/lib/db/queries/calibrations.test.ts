@@ -344,6 +344,83 @@ describe("simulation calibration (slice 3.4)", () => {
     expect(calibration.scoreError).toBe(12 - 20);
   });
 
+  it("calibrates every completed run on a published variant, not only the latest", () => {
+    const contact = createContact({ name: "Sweep Agent", platform: "x", platformUserId: "cal-sweep" });
+    const launch = upsertLaunch({ name: "Sweep Launch", primaryPlatform: "x" });
+    const variant = upsertVariant({ launchId: launch.id, body: "copy" });
+
+    const first = createAndStartSimulationRun({
+      variantId: variant.id,
+      populationSpec: { contactIds: [contact.id] },
+    });
+    recordSimulationAgentResults(first.run.id, [
+      { agentId: first.agents[0]!.id, engagementScore: 40, outcome: "like" },
+    ]);
+    completeSimulationRun(first.run.id, {
+      predictedScore: 20,
+      predictionConfidence: 0.5,
+      predictedMetrics: { likes: 10 },
+    });
+
+    const second = createAndStartSimulationRun({
+      variantId: variant.id,
+      populationSpec: { contactIds: [contact.id] },
+    });
+    recordSimulationAgentResults(second.run.id, [
+      { agentId: second.agents[0]!.id, engagementScore: 60, outcome: "like" },
+    ]);
+    completeSimulationRun(second.run.id, {
+      predictedScore: 30,
+      predictionConfidence: 0.6,
+      predictedMetrics: { likes: 15 },
+    });
+
+    const published = publishVariant(variant.id, { platform: "x", publishedAt: PUBLISHED_AT });
+    insertContentPost(published.contentItemId!, PUBLISHED_AT);
+
+    const report = runSimulationCalibrationSweep({ observedUntil: OBSERVED_UNTIL });
+
+    expect(report.runsCalibrated).toBe(2);
+    expect(getLatestCalibrationForRun(first.run.id)).toBeTruthy();
+    expect(getLatestCalibrationForRun(second.run.id)).toBeTruthy();
+  });
+
+  it("§8.5(3.4): persisted calibration values are invariant to local_only evidence", () => {
+    const { variant, run } = seedCompletedPublishedRun({ likes: 2 });
+    const postId = insertContentPost(variant.contentItemId!, PUBLISHED_AT);
+    seedLikeEvents(postId, 2, PUBLISHED_AT + 50, "shared");
+
+    const first = calibrateSimulationRun(run.id, { observedUntil: OBSERVED_UNTIL });
+    const persisted = {
+      actualScore: first.actualScore,
+      actualMetrics: first.actualMetrics,
+      scoreError: first.scoreError,
+    };
+
+    seedLikeEvents(postId, 100, PUBLISHED_AT + 60, "local_only");
+    db.insert(contentActivities)
+      .values({
+        id: nanoid(),
+        activityType: "like",
+        direction: "outbound",
+        occurredAt: PUBLISHED_AT + 70,
+        scope: "local_only",
+        source: "agent",
+        contentPostId: postId,
+        platform: "x",
+      })
+      .run();
+
+    const second = calibrateSimulationRun(run.id, {
+      observedUntil: OBSERVED_UNTIL + 500,
+      provenance: { source: "agent" },
+    });
+
+    expect(second.actualScore).toBe(persisted.actualScore);
+    expect(second.actualMetrics).toBe(persisted.actualMetrics);
+    expect(second.scoreError).toBe(persisted.scoreError);
+  });
+
   it("scheduler dispatches the calibration sweep maintenance job", () => {
     const { variant, run } = seedCompletedPublishedRun({ likes: 4 });
     insertContentPost(variant.contentItemId!, PUBLISHED_AT);

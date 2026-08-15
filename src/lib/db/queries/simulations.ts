@@ -742,6 +742,11 @@ export function completeSimulationRun(
         "Completing a simulation run requires predictedScore and predictionConfidence",
       );
     }
+    if (input.predictedMetrics === undefined) {
+      throw new SimulationRunStateError(
+        "Completing a simulation run requires predictedMetrics (engagement_metrics keyspace) for engagement-v1 score alignment",
+      );
+    }
 
     const predictionConfidence = assertPredictionConfidence(input.predictionConfidence);
     const predictedMetrics = normalizePredictedMetrics(input.predictedMetrics);
