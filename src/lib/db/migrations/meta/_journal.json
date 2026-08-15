@@ -64,6 +64,13 @@
       "when": 1786745682921,
       "tag": "0008_old_landau",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1786757851792,
+      "tag": "0009_launches_variants",
+      "breakpoints": true
     }
   ]
 }

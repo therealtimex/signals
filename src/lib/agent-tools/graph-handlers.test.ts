@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { invokeAgentTool } from "@/lib/agent-tools/invoke";
 import { createContact } from "@/lib/db/queries/contacts";
+import { getVariantById } from "@/lib/db/queries/variants";
 import { db } from "@/lib/db/client";
 import { graphEdges, orgs } from "@/lib/db/schema";
 import { resetCoreTables } from "@/test/db";
@@ -159,5 +160,57 @@ describe("graph agent tools", () => {
     const edges = (privateView as { edges: { propertiesPrivate?: Record<string, string> }[] }).edges;
     expect(edges).toHaveLength(1);
     expect(edges[0]?.propertiesPrivate).toEqual({ private_notes: "secret dinner plans" });
+  });
+
+  it("upsert_edge accepts launch and variant node endpoints", async () => {
+    const launch = await invokeAgentTool("upsert_launch", { name: "Edge Launch" });
+    const launchId = (launch as { id: string }).id;
+    const variant = await invokeAgentTool("upsert_variant", {
+      launchId,
+      label: "v1",
+      body: "copy",
+    });
+    const variantId = (variant as { id: string }).id;
+
+    const edge = await invokeAgentTool("upsert_edge", {
+      srcType: "variant",
+      srcId: variantId,
+      dstType: "launch",
+      dstId: launchId,
+      edgeType: "targets",
+      scope: "shared",
+    });
+
+    expect(edge).toMatchObject({
+      srcType: "variant",
+      dstType: "launch",
+      edgeType: "targets",
+    });
+  });
+
+  it("rejects published_as edges via upsert_edge", async () => {
+    const launch = await invokeAgentTool("upsert_launch", {
+      name: "Edge Guard",
+      primaryPlatform: "x",
+    });
+    const launchId = (launch as { id: string }).id;
+    const variant = await invokeAgentTool("upsert_variant", {
+      launchId,
+      body: "copy",
+    });
+    const variantId = (variant as { id: string }).id;
+
+    await expect(
+      invokeAgentTool("upsert_edge", {
+        srcType: "variant",
+        srcId: variantId,
+        dstType: "content",
+        dstId: "content-does-not-matter",
+        edgeType: "published_as",
+        scope: "shared",
+      }),
+    ).rejects.toThrow(/published_as edges are created only via upsert_variant/i);
+
+    expect(getVariantById(variantId)?.status).toBe("draft");
   });
 });

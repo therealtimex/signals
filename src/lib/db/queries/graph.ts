@@ -8,8 +8,10 @@ import {
   goals,
   graphEdges,
   interactions,
+  launches,
   niches,
   orgs,
+  variants,
   workflowRuns,
 } from "@/lib/db/schema";
 import type { GraphEdge, GraphNodeType } from "@/lib/db/types";
@@ -73,6 +75,10 @@ function nodeTable(type: GraphNodeType) {
       return orgs;
     case "niche":
       return niches;
+    case "launch":
+      return launches;
+    case "variant":
+      return variants;
     case "content":
       return contentItems;
     case "goal":

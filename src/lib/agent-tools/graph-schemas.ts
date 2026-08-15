@@ -71,3 +71,49 @@ export const upsertNicheSchema = z.object({
   scope: z.enum(["shared", "local_only"]).optional(),
   metadata: z.record(z.unknown()).optional(),
 });
+
+export const queryLaunchesSchema = z.object({
+  search: z.string().optional(),
+  status: z
+    .enum(["draft", "generating", "simulating", "ready", "live", "completed", "archived"])
+    .optional(),
+  page: z.number().int().positive().optional(),
+  pageSize: z.number().int().positive().max(100).optional(),
+  includeLocalOnly: z.boolean().optional(),
+});
+
+export const upsertLaunchSchema = z.object({
+  id: z.string().optional(),
+  name: z.string().min(1),
+  brief: z.string().optional(),
+  status: z
+    .enum(["draft", "generating", "simulating", "ready", "live", "completed", "archived"])
+    .optional(),
+  primaryPlatform: z.string().optional(),
+  audienceSpec: z.record(z.unknown()).optional(),
+  workflowTemplateId: z.string().optional(),
+  scope: z.enum(["shared", "local_only"]).optional(),
+  metadata: z.record(z.unknown()).optional(),
+  launchedAt: z.number().int().optional(),
+  completedAt: z.number().int().optional(),
+});
+
+export const upsertVariantSchema = z.object({
+  id: z.string().optional(),
+  launchId: z.string().min(1),
+  label: z.string().optional(),
+  variantType: z.string().optional(),
+  body: z.string().optional(),
+  contentItemId: z.string().optional(),
+  status: z.enum(["draft", "simulated", "selected", "published", "rejected"]).optional(),
+  predictedScore: z.number().optional(),
+  predictionConfidence: z.number().optional(),
+  predictedMetrics: z.record(z.unknown()).optional(),
+  predictionModel: z.string().optional(),
+  simulatedAt: z.number().int().optional(),
+  generationModel: z.string().optional(),
+  generationMetadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.unknown()).optional(),
+  platform: z.string().optional(),
+  publishedAt: z.number().int().optional(),
+});

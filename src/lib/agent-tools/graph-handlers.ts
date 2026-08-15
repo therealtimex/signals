@@ -1,14 +1,19 @@
 import { listOrgs } from "@/lib/db/queries/orgs";
+import { listLaunches, upsertLaunch } from "@/lib/db/queries/launches";
 import { listNiches, upsertNiche } from "@/lib/db/queries/niches";
+import { upsertVariant } from "@/lib/db/queries/variants";
 import { getNeighbors, upsertGraphEdge } from "@/lib/db/queries/graph";
 import { logInteraction } from "@/lib/db/queries/interactions";
 import type {
   logInteractionSchema,
   queryGraphSchema,
+  queryLaunchesSchema,
   queryNichesSchema,
   queryOrgsSchema,
   upsertEdgeSchema,
+  upsertLaunchSchema,
   upsertNicheSchema,
+  upsertVariantSchema,
 } from "@/lib/agent-tools/graph-schemas";
 import type { z } from "zod";
 
@@ -62,6 +67,12 @@ export async function handleQueryGraph(input: z.infer<typeof queryGraphSchema>) 
 }
 
 export async function handleUpsertEdge(input: z.infer<typeof upsertEdgeSchema>) {
+  if (input.edgeType === "published_as") {
+    throw new Error(
+      "published_as edges are created only via upsert_variant publish flow; use upsert_variant with status published",
+    );
+  }
+
   const edge = upsertGraphEdge({
     srcType: input.srcType,
     srcId: input.srcId,
@@ -156,5 +167,82 @@ export async function handleUpsertNiche(input: z.infer<typeof upsertNicheSchema>
     status: niche.status,
     scope: niche.scope,
     message: "Niche upserted.",
+  };
+}
+
+export async function handleQueryLaunches(input: z.infer<typeof queryLaunchesSchema>) {
+  const result = listLaunches({
+    search: input.search,
+    status: input.status,
+    page: input.page,
+    pageSize: input.pageSize,
+    includeLocalOnly: input.includeLocalOnly ?? false,
+  });
+
+  return {
+    total: result.total,
+    launches: result.data.map((launch) => ({
+      id: launch.id,
+      name: launch.name,
+      status: launch.status,
+      primaryPlatform: launch.primaryPlatform,
+      scope: launch.scope,
+      variants: launch.variants,
+      goalIds: launch.goalIds,
+    })),
+  };
+}
+
+export async function handleUpsertLaunch(input: z.infer<typeof upsertLaunchSchema>) {
+  const launch = upsertLaunch({
+    id: input.id,
+    name: input.name,
+    brief: input.brief,
+    status: input.status,
+    primaryPlatform: input.primaryPlatform,
+    audienceSpec: input.audienceSpec,
+    workflowTemplateId: input.workflowTemplateId,
+    scope: input.scope,
+    metadata: input.metadata,
+    launchedAt: input.launchedAt,
+    completedAt: input.completedAt,
+  });
+
+  return {
+    id: launch.id,
+    name: launch.name,
+    status: launch.status,
+    scope: launch.scope,
+    message: "Launch upserted.",
+  };
+}
+
+export async function handleUpsertVariant(input: z.infer<typeof upsertVariantSchema>) {
+  const variant = upsertVariant({
+    id: input.id,
+    launchId: input.launchId,
+    label: input.label,
+    variantType: input.variantType,
+    body: input.body,
+    contentItemId: input.contentItemId,
+    status: input.status,
+    predictedScore: input.predictedScore,
+    predictionConfidence: input.predictionConfidence,
+    predictedMetrics: input.predictedMetrics,
+    predictionModel: input.predictionModel,
+    simulatedAt: input.simulatedAt,
+    generationModel: input.generationModel,
+    generationMetadata: input.generationMetadata,
+    metadata: input.metadata,
+    platform: input.platform,
+    publishedAt: input.publishedAt,
+  });
+
+  return {
+    id: variant.id,
+    launchId: variant.launchId,
+    status: variant.status,
+    contentItemId: variant.contentItemId,
+    message: "Variant upserted.",
   };
 }

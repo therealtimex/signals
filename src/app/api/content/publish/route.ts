@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getContentItem, updateContentItem, createContentPost } from "@/lib/db/queries/content";
+import { publishVariantForContentItem } from "@/lib/db/queries/variants";
 import { getPlatformAccountByPlatform } from "@/lib/db/queries/platform-accounts";
 import { publishToX } from "@/lib/browser/publishers/x-publisher";
 import { publishToLinkedIn } from "@/lib/browser/publishers/linkedin-publisher";
@@ -85,6 +86,11 @@ export async function POST(req: Request) {
         platformUrl: result.platformUrl ?? null,
         publishedAt: Math.floor(Date.now() / 1000),
         status: "published",
+      });
+
+      publishVariantForContentItem(contentItemId, {
+        platform,
+        publishedAt: Math.floor(Date.now() / 1000),
       });
 
       return NextResponse.json({

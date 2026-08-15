@@ -27,6 +27,8 @@ import {
   contactPersonas,
   niches,
   contentActivities,
+  launches,
+  variants,
 } from "./schema";
 
 // Contact types
@@ -117,6 +119,14 @@ export type NewOrg = InferInsertModel<typeof orgs>;
 // Niche types
 export type Niche = InferSelectModel<typeof niches>;
 export type NewNiche = InferInsertModel<typeof niches>;
+
+// Launch types
+export type Launch = InferSelectModel<typeof launches>;
+export type NewLaunch = InferInsertModel<typeof launches>;
+
+// Variant types
+export type Variant = InferSelectModel<typeof variants>;
+export type NewVariant = InferInsertModel<typeof variants>;
 
 // Graph edge types
 export type GraphEdge = InferSelectModel<typeof graphEdges>;

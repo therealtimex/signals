@@ -20,16 +20,22 @@ import {
   queryGraphSchema,
   queryNichesSchema,
   queryOrgsSchema,
+  queryLaunchesSchema,
   upsertEdgeSchema,
+  upsertLaunchSchema,
   upsertNicheSchema,
+  upsertVariantSchema,
 } from "@/lib/agent-tools/graph-schemas";
 import {
   handleLogInteraction,
   handleQueryGraph,
+  handleQueryLaunches,
   handleQueryNiches,
   handleQueryOrgs,
   handleUpsertEdge,
+  handleUpsertLaunch,
   handleUpsertNiche,
+  handleUpsertVariant,
 } from "@/lib/agent-tools/graph-handlers";
 import { zodToParameters } from "@/lib/agent-tools/json-schema";
 import {
@@ -228,6 +234,32 @@ export const AGENT_TOOLS: Record<string, AgentToolDefinition> = {
     schema: upsertNicheSchema,
     parameters: zodToParameters(upsertNicheSchema),
     execute: handleUpsertNiche,
+  },
+  query_launches: {
+    name: "query_launches",
+    description:
+      "List GTM launches with variant summaries and linked goal IDs. Private launches excluded unless includeLocalOnly is true.",
+    category: "graph",
+    schema: queryLaunchesSchema,
+    parameters: zodToParameters(queryLaunchesSchema),
+    execute: handleQueryLaunches,
+  },
+  upsert_launch: {
+    name: "upsert_launch",
+    description: "Create or update a GTM launch by explicit id (insert when id omitted).",
+    category: "graph",
+    schema: upsertLaunchSchema,
+    parameters: zodToParameters(upsertLaunchSchema),
+    execute: handleUpsertLaunch,
+  },
+  upsert_variant: {
+    name: "upsert_variant",
+    description:
+      "Create or update a creative variant under a launch. status:'published' routes through publishVariant.",
+    category: "graph",
+    schema: upsertVariantSchema,
+    parameters: zodToParameters(upsertVariantSchema),
+    execute: handleUpsertVariant,
   },
 };
 
