@@ -6,17 +6,21 @@ import { db } from "@/lib/db/client";
 import {
   contactIdentities,
   contacts,
+  contentPosts,
+  engagementMetrics,
   orgs,
+  platformAccounts,
   simulationAgents,
   simulationRuns,
 } from "@/lib/db/schema";
 import { createContact } from "@/lib/db/queries/contacts";
+import { calibrateSimulationRun } from "@/lib/db/queries/calibrations";
 import { upsertGraphEdge } from "@/lib/db/queries/graph";
 import { logInteraction } from "@/lib/db/queries/interactions";
 import { upsertLaunch } from "@/lib/db/queries/launches";
 import { upsertNiche } from "@/lib/db/queries/niches";
 import { upsertPersona } from "@/lib/db/queries/personas";
-import { upsertVariant, getVariantById } from "@/lib/db/queries/variants";
+import { upsertVariant, getVariantById, publishVariant } from "@/lib/db/queries/variants";
 import {
   createAndStartSimulationRun,
   completeSimulationRun,
@@ -818,5 +822,65 @@ describe("getSimulationAgentTranscript (ui-4.1)", () => {
       byteSize: expect.any(Number),
       content: expect.anything(),
     });
+  });
+
+  it("getSimulationRun with includeCalibration returns latestCalibration and calibrations[]", () => {
+    const contact = createContact({ name: "Calib", platform: "x", platformUserId: "cal-x" });
+    const launch = upsertLaunch({ name: "Calib Launch", primaryPlatform: "x" });
+    const variant = upsertVariant({ launchId: launch.id, body: "copy" });
+    const { run } = createAndStartSimulationRun({
+      variantId: variant.id,
+      populationSpec: { contactIds: [contact.id] },
+    });
+    completeSimulationRun(run.id, {
+      predictedScore: 10,
+      predictionConfidence: 0.5,
+      predictedMetrics: { likes: 5 },
+    });
+    const published = publishVariant(variant.id, { platform: "x", publishedAt: 1_700_000_000 });
+
+    const platformAccountId = nanoid();
+    db.insert(platformAccounts)
+      .values({
+        id: platformAccountId,
+        platform: "x",
+        displayName: "@brand",
+        authType: "oauth",
+      })
+      .run();
+    const postId = nanoid();
+    db.insert(contentPosts)
+      .values({
+        id: postId,
+        contentItemId: published.contentItemId!,
+        platformAccountId,
+        publishedAt: 1_700_000_000,
+        status: "published",
+      })
+      .run();
+    db.insert(engagementMetrics)
+      .values({
+        id: nanoid(),
+        contentPostId: postId,
+        snapshotAt: 1_700_000_100,
+        likes: 8,
+        comments: 0,
+        shares: 0,
+        impressions: 0,
+        clicks: 0,
+        bookmarks: 0,
+        quotes: 0,
+        retweets: 0,
+      })
+      .run();
+
+    calibrateSimulationRun(run.id, { observedUntil: 1_700_001_000 });
+    calibrateSimulationRun(run.id, { observedUntil: 1_700_001_500 });
+
+    const detail = getSimulationRun(run.id, { includeCalibration: true });
+    expect(detail?.latestCalibration).toBeTruthy();
+    expect(detail?.calibrations?.length).toBe(2);
+    expect(detail?.calibrations?.[0]?.observedUntil).toBe(1_700_001_500);
+    expect(detail?.latestCalibration?.id).toBe(detail?.calibrations?.[0]?.id);
   });
 });

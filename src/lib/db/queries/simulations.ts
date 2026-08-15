@@ -17,7 +17,7 @@ import { getActivePersona } from "@/lib/db/queries/personas";
 import { getLaunchById } from "@/lib/db/queries/launches";
 import { getVariantById } from "@/lib/db/queries/variants";
 import {
-  getLatestCalibrationForRun,
+  listCalibrationsForRun,
   serializeCalibration,
 } from "@/lib/db/queries/calibrations";
 import { assertSimulationOutcome } from "@/lib/db/simulation-outcomes";
@@ -574,19 +574,25 @@ export function getSimulationRun(
 ): (SimulationRun & {
   agents?: SimulationAgentWithGrounding[];
   latestCalibration?: ReturnType<typeof serializeCalibration>;
+  calibrations?: ReturnType<typeof serializeCalibration>[];
 }) | undefined {
   const run = db.select().from(simulationRuns).where(eq(simulationRuns.id, id)).get();
   if (!run) return undefined;
 
-  const latestCalibration = opts?.includeCalibration
+  const calibrationFields = opts?.includeCalibration
     ? (() => {
-        const row = getLatestCalibrationForRun(run.id);
-        return row ? serializeCalibration(row) : undefined;
+        const rows = listCalibrationsForRun(run.id);
+        const calibrations = rows.map((row) => serializeCalibration(row));
+        const latestCalibration = calibrations[0];
+        return {
+          ...(latestCalibration ? { latestCalibration } : {}),
+          ...(calibrations.length > 0 ? { calibrations } : {}),
+        };
       })()
-    : undefined;
+    : {};
 
   if (!opts?.includeAgents) {
-    return latestCalibration ? { ...run, latestCalibration } : run;
+    return { ...run, ...calibrationFields };
   }
 
   const agents = db
@@ -598,7 +604,7 @@ export function getSimulationRun(
       parseAgentGrounding(agent, { includeTranscript: opts?.includeTranscripts }),
     );
 
-  return { ...run, agents, ...(latestCalibration ? { latestCalibration } : {}) };
+  return { ...run, agents, ...calibrationFields };
 }
 
 /** Tri-state transcript lookup for lazy-load REST route (ui-4.1 §4.7). */

@@ -218,7 +218,12 @@ export function LaunchDetailView({
                     <TableRow key={variant.id}>
                       <TableCell>
                         <div className="flex items-center gap-2">
-                          <span>{variant.label ?? "Untitled"}</span>
+                          <Link
+                            href={`/dashboard/launches/${launch.id}/variants/${variant.id}`}
+                            className="text-sm hover:underline"
+                          >
+                            {variant.label ?? "Untitled"}
+                          </Link>
                           <Badge variant="outline" className="text-xs">
                             {variant.variantType}
                           </Badge>

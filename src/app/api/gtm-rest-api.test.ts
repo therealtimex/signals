@@ -522,6 +522,11 @@ describe("UI 4.1 REST API", () => {
       simulationRunId: run.id,
       actualScore: expect.any(Number),
     });
+    expect(body.calibrations).toHaveLength(1);
+    expect(body.calibrations[0]).toMatchObject({
+      simulationRunId: run.id,
+      observedUntil: PUBLISHED_AT + 1000,
+    });
 
     const gtm = await getGtmContext(new NextRequest("http://localhost"), {
       params: Promise.resolve({ id: published.contentItemId! }),

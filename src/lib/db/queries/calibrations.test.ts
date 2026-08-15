@@ -20,6 +20,7 @@ import {
   calibrateSimulationRun,
   computeCalibrationActualsForRun,
   getLatestCalibrationForRun,
+  listCalibrationsForRun,
 } from "@/lib/db/queries/calibrations";
 import { CalibrationSourceError } from "@/lib/db/queries/simulation-errors";
 import {
@@ -179,6 +180,20 @@ describe("simulation calibration (slice 3.4)", () => {
       }
     }
   }
+
+  it("listCalibrationsForRun orders by observedUntil desc and matches latest helper", () => {
+    const { variant, run } = seedCompletedPublishedRun();
+    const postId = insertContentPost(variant.contentItemId!, PUBLISHED_AT);
+    insertSnapshot(postId, { likes: 4 }, PUBLISHED_AT + 100);
+
+    calibrateSimulationRun(run.id, { observedUntil: OBSERVED_UNTIL });
+    calibrateSimulationRun(run.id, { observedUntil: OBSERVED_UNTIL + 500 });
+
+    const rows = listCalibrationsForRun(run.id);
+    expect(rows.length).toBe(2);
+    expect(rows[0]!.observedUntil).toBeGreaterThan(rows[1]!.observedUntil);
+    expect(rows[0]).toEqual(getLatestCalibrationForRun(run.id));
+  });
 
   it("prefers snapshot metrics over shared events (no double-count)", () => {
     const { variant, run } = seedCompletedPublishedRun();

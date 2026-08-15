@@ -147,6 +147,9 @@ describe("WindTunnelSection", () => {
     expect(html).toContain("score");
     expect(html).toContain("likes");
     expect(html).toContain('href="/dashboard/launches/launch-1"');
+    expect(html).toContain('href="/dashboard/launches/launch-1/variants/var-1"');
+    expect(html).toContain('href="/dashboard/simulations/run-1"');
+    expect(html).toContain("View run →");
   });
 
   it("renders empty-state copy for each progressive-null level", () => {

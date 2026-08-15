@@ -52,7 +52,14 @@ export function WindTunnelSection({ gtm }: WindTunnelSectionProps) {
             </Link>
             <Badge variant="secondary">{launch.status}</Badge>
             {launch.scope === "local_only" && <Badge variant="outline">Private launch</Badge>}
-            {variant.label && <span>· {variant.label}</span>}
+            {variant.label && (
+              <Link
+                href={`/dashboard/launches/${launch.id}/variants/${variant.id}`}
+                className="hover:underline"
+              >
+                · {variant.label}
+              </Link>
+            )}
             <Badge variant="outline">{variant.status}</Badge>
           </div>
         )}
@@ -72,6 +79,16 @@ export function WindTunnelSection({ gtm }: WindTunnelSectionProps) {
                 </p>
                 {variant.predictionModel && <p>Model: {variant.predictionModel}</p>}
                 {variant.simulatedAt && <p>Simulated: {formatDate(variant.simulatedAt)}</p>}
+                {latestRun && (
+                  <p>
+                    <Link
+                      href={`/dashboard/simulations/${latestRun.id}`}
+                      className="hover:underline text-foreground"
+                    >
+                      View run →
+                    </Link>
+                  </p>
+                )}
               </div>
             ) : (
               <p className="text-muted-foreground">Not simulated yet.</p>

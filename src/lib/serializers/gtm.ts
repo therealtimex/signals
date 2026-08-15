@@ -111,5 +111,8 @@ export function serializeSimulationRun(
     ...(opts?.includeCalibrations && "latestCalibration" in run && run.latestCalibration
       ? { latestCalibration: run.latestCalibration }
       : {}),
+    ...(opts?.includeCalibrations && "calibrations" in run && run.calibrations
+      ? { calibrations: run.calibrations }
+      : {}),
   };
 }
