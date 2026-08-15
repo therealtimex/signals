@@ -2,6 +2,12 @@ import { beforeEach, afterEach, describe, it, expect } from "vitest";
 import { getPlatformAdapter } from "@/lib/platforms";
 import { NotImplementedError, type PlatformAdapter } from "@/lib/platforms/adapter";
 import { PLATFORM_CAPABILITIES, getPlatformsWithoutOAuth } from "@/lib/platforms/capabilities";
+import { XPlatformAdapter } from "@/lib/platforms/x/adapter";
+import { LinkedInPlatformAdapter } from "@/lib/platforms/linkedin/adapter";
+import { GmailPlatformAdapter } from "@/lib/platforms/gmail/adapter";
+import { InstagramPlatformAdapter } from "@/lib/platforms/instagram/adapter";
+import { FacebookPlatformAdapter } from "@/lib/platforms/facebook/adapter";
+import { ThreadsPlatformAdapter } from "@/lib/platforms/threads/adapter";
 import {
   resetRealAdapterLoader,
   setRealAdapterLoader,
@@ -89,19 +95,19 @@ describe("getPlatformAdapter", () => {
   });
 });
 
-describe("adapter capabilities", () => {
-  beforeEach(() => {
-    setRealAdapterLoader(mockRealAdapter);
-  });
+describe("production adapter capabilities", () => {
+  it("uses the PLATFORM_CAPABILITIES map entry by reference on every adapter class", () => {
+    const adapters = [
+      new XPlatformAdapter(),
+      new LinkedInPlatformAdapter(),
+      new GmailPlatformAdapter(),
+      new InstagramPlatformAdapter(),
+      new FacebookPlatformAdapter(),
+      new ThreadsPlatformAdapter(),
+    ];
 
-  afterEach(() => {
-    resetRealAdapterLoader();
-  });
-
-  it("uses the PLATFORM_CAPABILITIES map entry by reference", () => {
-    for (const platform of MAPPED_PLATFORMS) {
-      const adapter = getPlatformAdapter(platform);
-      expect(adapter.capabilities).toBe(PLATFORM_CAPABILITIES[platform]);
+    for (const adapter of adapters) {
+      expect(adapter.capabilities).toBe(PLATFORM_CAPABILITIES[adapter.platform]);
     }
   });
 });
