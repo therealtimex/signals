@@ -5,7 +5,7 @@
 <p align="center">
   Unified multi-source knowledge graph across X/Twitter, LinkedIn, and Gmail — powered by RealTimeX agents and audience simulation.
   <br />
-  All data stays on your machine. One command to start.
+  All CRM data stays on your machine. Optional RTX-backed features may send bounded inputs to your configured model providers.
 </p>
 
 <p align="center">
@@ -19,7 +19,7 @@
 
 **One-command boot** — `npx @realtimex/signals` starts everything
 &nbsp;&bull;&nbsp;
-**Local-first** — SQLite database, data never leaves your machine
+**Local-first** — SQLite database under `~/.signals/`; graph and credentials stay local. Semantic search and persona workflows may send inputs through RealTimeX `llm.embed` / `llm.chat` (provider-dependent).
 &nbsp;&bull;&nbsp;
 **Multi-platform** — X + LinkedIn + Gmail in one living graph
 &nbsp;&bull;&nbsp;
@@ -69,7 +69,7 @@ Local REST API (`/api/agent-tools`) for RealTimeX terminal agents — query cont
 In-process Playwright profile scraping was removed. Terminal agents enrich contacts via RealTimeX Browser + `agent-browser`, writing results through `enrich_contact`. See `docs/rtx-agent-browser-enrichment.md`. Signals browser sessions remain for **publish/engage** only.
 
 ### Privacy & Security
-AES-256 encrypted credential storage. All data stored locally in SQLite — no cloud dependency, no data leaves your machine.
+AES-256 encrypted credential storage. CRM graph, credentials, and embeddings are stored locally in SQLite. Semantic search and persona generation send bounded inputs to RealTimeX `/sdk/llm/embed` and `/sdk/llm/chat`; whether those leave your machine depends on your configured RTX/model provider.
 
 ## Quick Start
 

@@ -1,5 +1,9 @@
 # Unified Workflow System
 
+> **Partially superseded (2026-08)** — Schema/UI unification sections remain valid; execution steps that reference in-process LLM extraction, Claude Agent SDK loops, or Playwright `browser_scrape` were removed in #4/#5.
+> **Current path:** [`docs/rtx-agent-orchestration.md`](../docs/rtx-agent-orchestration.md), [`docs/rtx-agent-browser-enrichment.md`](../docs/rtx-agent-browser-enrichment.md), [`docs/realtimex-local-app.md`](../docs/realtimex-local-app.md).
+> Retained for historical context; do not implement new execution behavior from §4 step types without checking current docs.
+
 > Documents the completed unification of Campaigns, Agents, and Workflows into
 > a single Workflow system. Covers schema consolidation, type system, API routes,
 > visualization views, and the `runSyncWorkflow` wrapper pattern.

@@ -32,13 +32,13 @@ Terminal agent
 
 ## RealTimeX upstream docs
 
-Read these in the **realtimex-ai-app** repository (paths relative to that repo root):
+Canonical docs in the [realtimex-ai-app](https://github.com/therealtimex/realtimex-ai-app) repository:
 
-| Topic | Path |
+| Topic | Link |
 |-------|------|
-| Local Apps architecture | `docs/local-apps/architecture.md` |
-| SDK LLM proxy (`llm.embed`, `llm.chat`) | `docs/local-apps/sdk-llm-proxy.md` |
-| Local Apps admin / registration | Settings → Local Apps in the RTX desktop app |
+| Local Apps architecture | [architecture.md](https://github.com/therealtimex/realtimex-ai-app/blob/main/docs/local-apps/architecture.md) |
+| SDK LLM proxy (`llm.embed`, `llm.chat`) | [sdk-llm-proxy.md](https://github.com/therealtimex/realtimex-ai-app/blob/main/docs/local-apps/sdk-llm-proxy.md) |
+| Local Apps admin / registration | [user-guide.md](https://github.com/therealtimex/realtimex-ai-app/blob/main/docs/local-apps/user-guide.md) |
 
 Signals [`local-app.md`](./local-app.md) documents the concrete startup command, health probe, and permission manifest (`rtx-manifest.json`) for this app.
 
@@ -67,7 +67,7 @@ Signals [`local-app.md`](./local-app.md) documents the concrete startup command,
 
 ## Legacy specs
 
-Pre-migration implementation specs under `specs/` (e.g. `05-browser-enrichment.md`, `07-agentic-workflows.md`) are **historical**. They carry a superseded banner — implement from the docs above, not from those files.
+Pre-migration implementation specs under `specs/` (e.g. `05-browser-enrichment.md`, `06-unified-workflows.md`, `07-agentic-workflows.md`) are **historical**. They carry a superseded banner — implement from the docs above, not from those files.
 
 ## Quick start (embedded)
 
