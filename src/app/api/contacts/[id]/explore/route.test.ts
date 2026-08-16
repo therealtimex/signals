@@ -40,6 +40,7 @@ describe("GET /api/contacts/[id]/explore", () => {
     expect(res.status).toBe(200);
     expect(body.persona.visibility).toBe("shared");
     expect(body.persona.summary).toBe("API persona");
+    expect(body.persona.stale).toBe(false);
     expect(body.identities).toEqual([]);
   });
 });
