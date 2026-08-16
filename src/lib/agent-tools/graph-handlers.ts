@@ -12,7 +12,7 @@ import {
   recordSimulationAgentResults,
 } from "@/lib/db/queries/simulations";
 import { getNeighbors, upsertGraphEdge } from "@/lib/db/queries/graph";
-import { logInteraction } from "@/lib/db/queries/interactions";
+import { logInteraction, countInteractionAttachments } from "@/lib/db/queries/interactions";
 import { getNodeDisplayLabel } from "@/lib/embeddings/node-labels";
 import { EmbeddingUnavailableError } from "@/lib/embeddings/embed-node";
 import { rtxEmbed } from "@/lib/rtx/llm";
@@ -133,6 +133,7 @@ export async function handleLogInteraction(input: z.infer<typeof logInteractionS
     isMeaningful: input.isMeaningful,
     scope: input.scope,
     contentItemId: input.contentItemId,
+    attachmentIds: input.attachmentIds,
     metadata: input.metadata,
     source: "agent",
   });
@@ -143,6 +144,7 @@ export async function handleLogInteraction(input: z.infer<typeof logInteractionS
     interactionType: interaction.interactionType,
     occurredAt: interaction.occurredAt,
     scope: interaction.scope,
+    attachmentCount: countInteractionAttachments(interaction.id),
     message: "Interaction logged.",
   };
 }
