@@ -24,7 +24,6 @@ describe("contact org linking API", () => {
         name: "Jane Doe",
         orgId: org.id,
         title: "CEO",
-        platform: "x",
       }),
     });
 
@@ -70,7 +69,6 @@ describe("contact org linking API", () => {
       body: JSON.stringify({
         name: "Duplicate Name",
         orgId: "same-name-selected",
-        platform: "x",
       }),
     });
 
@@ -90,7 +88,6 @@ describe("contact org linking API", () => {
         name: "John Smith",
         company: "Beta LLC",
         title: "Engineer",
-        platform: "x",
       }),
     });
 
@@ -210,7 +207,6 @@ describe("contact org linking API", () => {
         name: "Duplicate Name",
         orgId: "same-name-selected",
         title: "CEO",
-        platform: "x",
       }),
     });
     const createRes = await POST(createReq);

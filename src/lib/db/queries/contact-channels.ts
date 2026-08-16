@@ -3,6 +3,7 @@ import { nanoid } from "nanoid";
 import { db, type DbRunner } from "@/lib/db/client";
 import { assertChannelType, normalizeChannelValue, type ChannelType } from "@/lib/db/channel-types";
 import { recalcContactEnrichment } from "@/lib/db/contact-enrichment-recalc";
+import { syncContactScalarProjections } from "@/lib/db/contact-scalar-projection";
 import { getContactDtoById } from "@/lib/db/queries/contact-read-model";
 import { contactChannels, contacts } from "@/lib/db/schema";
 import type { ContactChannel, ContactWithIdentities, NewContactChannel } from "@/lib/db/types";
@@ -32,6 +33,11 @@ export type UpdateContactChannelInput = {
 
 function nowUnix(): number {
   return Math.floor(Date.now() / 1000);
+}
+
+function afterChannelMutation(contactId: string): void {
+  recalcContactEnrichment(contactId);
+  syncContactScalarProjections(contactId);
 }
 
 function demoteOtherPrimaries(
@@ -132,7 +138,7 @@ export function createContactChannel(input: CreateContactChannelInput): ContactC
       .run();
   });
 
-  recalcContactEnrichment(input.contactId);
+  afterChannelMutation(input.contactId);
   return getContactChannelById(id)!;
 }
 
@@ -169,7 +175,7 @@ export function updateContactChannel(
     tx.update(contactChannels).set(updates).where(eq(contactChannels.id, id)).run();
   });
 
-  recalcContactEnrichment(existing.contactId);
+  afterChannelMutation(existing.contactId);
   return getContactChannelById(id);
 }
 
@@ -177,7 +183,7 @@ export function deleteContactChannel(id: string): boolean {
   const existing = getContactChannelById(id);
   if (!existing) return false;
   db.delete(contactChannels).where(eq(contactChannels.id, id)).run();
-  recalcContactEnrichment(existing.contactId);
+  afterChannelMutation(existing.contactId);
   return true;
 }
 

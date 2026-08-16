@@ -4,6 +4,7 @@ import { assertChannelType, normalizeChannelValue } from "@/lib/db/channel-types
 import {
   createContactChannel,
   deleteContactChannel,
+  getContactChannelById,
   listContactChannels,
   resolvePrimaryChannel,
   updateContactChannel,
@@ -11,6 +12,13 @@ import {
 } from "@/lib/db/queries/contact-channels";
 import { contactChannels } from "@/lib/db/schema";
 import type { ContactChannel } from "@/lib/db/types";
+
+export class ChannelWriteError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ChannelWriteError";
+  }
+}
 
 export type ChannelInput = {
   id?: string;
@@ -59,6 +67,30 @@ export function ensureContactChannel(input: CreateContactChannelInput): ContactC
   return updateContactChannel(existing.id, updates) ?? existing;
 }
 
+function updateChannelInPlace(contactId: string, channel: ChannelInput): void {
+  if (!channel.id) {
+    throw new ChannelWriteError("Channel id is required for in-place update");
+  }
+
+  const existing = getContactChannelById(channel.id);
+  if (!existing) {
+    throw new ChannelWriteError(`Channel not found: ${channel.id}`);
+  }
+  if (existing.contactId !== contactId) {
+    throw new ChannelWriteError(`Channel ${channel.id} does not belong to contact ${contactId}`);
+  }
+  if (existing.channelType !== channel.channelType) {
+    throw new ChannelWriteError("Channel type cannot change");
+  }
+
+  updateContactChannel(channel.id, {
+    value: channel.value,
+    label: channel.label,
+    isPrimary: channel.isPrimary,
+    isVerified: channel.isVerified,
+  });
+}
+
 export function applyChannelInputs(
   contactId: string,
   channels: ChannelInput[],
@@ -68,14 +100,7 @@ export function applyChannelInputs(
     if (!channel.value?.trim()) continue;
 
     if (channel.id) {
-      updateContactChannel(channel.id, {
-        value: channel.value,
-        label: channel.label,
-        isPrimary: channel.isPrimary,
-        isVerified: channel.isVerified,
-        contactIdentityId: channel.contactIdentityId,
-        scope: channel.scope,
-      });
+      updateChannelInPlace(contactId, channel);
       continue;
     }
 
@@ -106,6 +131,16 @@ export function syncChannelInputs(
     channels.map((channel) => channel.id).filter((id): id is string => Boolean(id)),
   );
   const existing = listContactChannels(contactId);
+
+  for (const id of incomingIds) {
+    const row = getContactChannelById(id);
+    if (!row) {
+      throw new ChannelWriteError(`Channel not found: ${id}`);
+    }
+    if (row.contactId !== contactId) {
+      throw new ChannelWriteError(`Channel ${id} does not belong to contact ${contactId}`);
+    }
+  }
 
   for (const row of existing) {
     if (!incomingIds.has(row.id)) {

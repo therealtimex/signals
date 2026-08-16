@@ -18,7 +18,6 @@ describe("POST /api/contacts identities[]", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         name: "Multi Identity",
-        platform: "x",
         identities: [
           {
             platform: "x",
@@ -55,7 +54,7 @@ describe("POST /api/contacts identities[]", () => {
     expect(linkedinIdentity?.isPrimary).toBe(0);
   });
 
-  it("creates zero identities when identities[] is omitted", async () => {
+  it("rejects bare platform fields when identities[] is omitted", async () => {
     const req = new NextRequest("http://localhost/api/contacts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -66,14 +65,7 @@ describe("POST /api/contacts identities[]", () => {
     });
 
     const res = await POST(req);
-    expect(res.status).toBe(201);
-
-    const contact = await res.json();
-    expect("platform" in contact).toBe(false);
-    expect(contact.identities).toEqual([]);
-
-    const rows = db.select().from(contactIdentities).all();
-    expect(rows).toHaveLength(0);
+    expect(res.status).toBe(400);
   });
 
   it("still supports legacy single identity field", async () => {

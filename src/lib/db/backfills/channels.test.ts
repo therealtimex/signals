@@ -33,8 +33,8 @@ describe("backfillChannels", () => {
 
     expect(first.emails).toBe(1);
     expect(first.phones).toBe(1);
-    expect(second.emails).toBe(1);
-    expect(second.phones).toBe(1);
+    expect(second.emails).toBe(0);
+    expect(second.phones).toBe(0);
     expect(countEmailChannels()).toBe(1);
     expect(countScalarEmailsMissingChannel()).toBe(0);
     expect(countScalarPhonesMissingChannel()).toBe(0);

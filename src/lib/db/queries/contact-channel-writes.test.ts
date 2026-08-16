@@ -4,6 +4,8 @@ import { createContact, updateContact, getContactById } from "@/lib/db/queries/c
 import {
   applyLegacyEmailPhone,
   ensureContactChannel,
+  syncChannelInputs,
+  ChannelWriteError,
 } from "@/lib/db/queries/contact-channel-writes";
 import {
   createContactChannel,
@@ -37,6 +39,9 @@ describe("contact-channel-writes", () => {
 
     expect(resolvePrimaryChannel(contact.id, "email")).toBeUndefined();
     expect(getContactById(contact.id)?.email).toBeNull();
+
+    const row = db.select().from(contacts).where(eq(contacts.id, contact.id)).get();
+    expect(row?.email).toBeNull();
   });
 
   it("recalculates enrichment when a verified email channel is added directly", () => {
@@ -79,5 +84,63 @@ describe("contact-channel-writes", () => {
     applyLegacyEmailPhone(contact.id, { verifiedEmail: 1 }, "test");
 
     expect(resolvePrimaryChannel(contact.id, "email")?.isVerified).toBe(true);
+  });
+
+  it("updates channels in place and preserves server-owned fields", () => {
+    const contact = createContact({ name: "Ada" });
+    const channel = createContactChannel({
+      contactId: contact.id,
+      channelType: "email",
+      value: "work@example.com",
+      isPrimary: true,
+      isVerified: true,
+      scope: "local_only",
+      source: "sync:private",
+      metadata: { provenance: "kept" },
+    });
+
+    syncChannelInputs(
+      contact.id,
+      [
+        {
+          id: channel.id,
+          channelType: "email",
+          value: "work@example.com",
+          label: "Work inbox",
+          isPrimary: true,
+        },
+      ],
+      "api:update_contact",
+    );
+
+    const refreshed = db
+      .select()
+      .from(contactChannels)
+      .where(eq(contactChannels.id, channel.id))
+      .get();
+    expect(refreshed?.id).toBe(channel.id);
+    expect(refreshed?.label).toBe("Work inbox");
+    expect(refreshed?.scope).toBe("local_only");
+    expect(refreshed?.source).toBe("sync:private");
+    expect(refreshed?.metadata).toBe(JSON.stringify({ provenance: "kept" }));
+  });
+
+  it("rejects a foreign contact channel id during sync", () => {
+    const owner = createContact({ name: "Owner" });
+    const other = createContact({ name: "Other" });
+    const foreign = createContactChannel({
+      contactId: other.id,
+      channelType: "email",
+      value: "foreign@example.com",
+      source: "test",
+    });
+
+    expect(() =>
+      syncChannelInputs(
+        owner.id,
+        [{ id: foreign.id, channelType: "email", value: "foreign@example.com" }],
+        "test",
+      ),
+    ).toThrow(ChannelWriteError);
   });
 });

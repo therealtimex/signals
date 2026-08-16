@@ -35,26 +35,54 @@ export function backfillChannels(): { emails: number; phones: number } {
 
   for (const row of rows) {
     if (row.email?.trim()) {
-      ensureContactChannel({
-        contactId: row.id,
-        channelType: "email",
-        value: row.email,
-        isPrimary: true,
-        isVerified: row.verifiedEmail === 1,
-        source: SOURCE,
-      });
-      emails++;
+      const normalized = normalizeChannelValue("email", row.email);
+      const exists = db
+        .select()
+        .from(contactChannels)
+        .where(
+          and(
+            eq(contactChannels.contactId, row.id),
+            eq(contactChannels.channelType, "email"),
+            eq(contactChannels.valueNormalized, normalized),
+          ),
+        )
+        .get();
+      if (!exists) {
+        ensureContactChannel({
+          contactId: row.id,
+          channelType: "email",
+          value: row.email,
+          isPrimary: true,
+          isVerified: row.verifiedEmail === 1,
+          source: SOURCE,
+        });
+        emails++;
+      }
     }
 
     if (row.phone?.trim()) {
-      ensureContactChannel({
-        contactId: row.id,
-        channelType: "phone",
-        value: row.phone,
-        isPrimary: true,
-        source: SOURCE,
-      });
-      phones++;
+      const normalized = normalizeChannelValue("phone", row.phone);
+      const exists = db
+        .select()
+        .from(contactChannels)
+        .where(
+          and(
+            eq(contactChannels.contactId, row.id),
+            eq(contactChannels.channelType, "phone"),
+            eq(contactChannels.valueNormalized, normalized),
+          ),
+        )
+        .get();
+      if (!exists) {
+        ensureContactChannel({
+          contactId: row.id,
+          channelType: "phone",
+          value: row.phone,
+          isPrimary: true,
+          source: SOURCE,
+        });
+        phones++;
+      }
     }
   }
 

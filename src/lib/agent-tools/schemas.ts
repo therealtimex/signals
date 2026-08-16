@@ -13,6 +13,7 @@ const funnelStage = z.enum([
 const platform = z.enum(PLATFORMS as unknown as [string, ...string[]]);
 
 export const channelInputSchema = z.object({
+  id: z.string().min(1).optional(),
   channelType: z.string().min(1),
   value: z.string().min(1),
   label: z.string().optional().nullable(),

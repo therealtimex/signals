@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { PLATFORM_ENUM } from "@/lib/db/platforms";
 import { listContacts, createContact } from "@/lib/db/queries/contacts";
 import { db } from "@/lib/db/client";
 import { PlatformAccountConflictError } from "@/lib/db/identity-claims";
@@ -10,6 +9,8 @@ import {
   createContactIdentities,
 } from "@/lib/contact-identities-api";
 import { channelInputSchema } from "@/lib/agent-tools/schemas";
+import { getDeprecatedPlatformFieldsError } from "@/lib/api/contact-route-validation";
+import { ChannelWriteError } from "@/lib/db/queries/contact-channel-writes";
 
 function isUniqueConstraintError(error: unknown): boolean {
   return (
@@ -28,8 +29,6 @@ const createContactSchema = z.object({
   orgId: z.string().optional().nullable(),
   company: z.string().optional().nullable(),
   title: z.string().optional(),
-  platform: z.enum(PLATFORM_ENUM).optional(),
-  platformUserId: z.string().optional(),
   profileUrl: z.string().optional(),
   avatarUrl: z.string().optional(),
   email: z.string().email().optional().or(z.literal("")),
@@ -69,8 +68,12 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { identity, identities, orgId, company, platform: _platform, platformUserId: _platformUserId, ...data } =
-      createContactSchema.parse(body);
+    const deprecatedError = getDeprecatedPlatformFieldsError(body);
+    if (deprecatedError) {
+      return NextResponse.json({ error: deprecatedError }, { status: 400 });
+    }
+
+    const { identity, identities, orgId, company, ...data } = createContactSchema.parse(body);
 
     const resolvedCompany = resolveContactCompanyFields({ orgId, company });
     if ("error" in resolvedCompany) {
@@ -116,6 +119,9 @@ export async function POST(req: NextRequest) {
     const result = getContactById(contact.id);
     return NextResponse.json(result, { status: 201 });
   } catch (error) {
+    if (error instanceof ChannelWriteError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: error.errors }, { status: 400 });
     }

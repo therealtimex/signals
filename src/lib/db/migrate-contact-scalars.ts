@@ -1,7 +1,8 @@
 import { sqlite } from "@/lib/db/client";
+import { reconstructAllContactScalarProjections } from "@/lib/db/contact-scalar-projection";
 
 /** Re-add legacy contact scalar columns when an earlier drop migration was applied locally. */
-export function ensureContactScalarColumns(): { restored: string[] } {
+export function ensureContactScalarColumns(): { restored: string[]; projections: number } {
   const rows = sqlite.prepare("PRAGMA table_info(contacts)").all() as { name: string }[];
   const existing = new Set(rows.map((row) => row.name));
   const restored: string[] = [];
@@ -33,5 +34,7 @@ export function ensureContactScalarColumns(): { restored: string[] } {
     "CREATE INDEX IF NOT EXISTS `idx_contacts_email` ON `contacts` (`email`)",
   );
 
-  return { restored };
+  const projections = reconstructAllContactScalarProjections();
+
+  return { restored, projections };
 }
