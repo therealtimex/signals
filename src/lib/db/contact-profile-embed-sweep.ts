@@ -1,7 +1,7 @@
 import { db, sqlite } from "@/lib/db/client";
 import { assembleEmbedText, getLatestEmbedding } from "@/lib/db/queries/embeddings";
 import { getScheduledJob } from "@/lib/db/queries/scheduled-jobs";
-import { contacts, scheduledJobs } from "@/lib/db/schema";
+import { embeddings, scheduledJobs } from "@/lib/db/schema";
 import { embedNodeIfStale, EmbeddingUnavailableError } from "@/lib/embeddings/embed-node";
 import { truncateEmbedText } from "@/lib/embeddings/vector-utils";
 import { sha256EmbedText } from "@/lib/rtx/llm";
@@ -46,20 +46,36 @@ export function resetContactProfileEmbedSweepStateForTests(): void {
 }
 
 export function contactNeedsProfileReembed(contactId: string): boolean {
+  const latest = getLatestEmbedding("contact", contactId, "profile");
+  if (!latest) return false;
+
   try {
     const text = truncateEmbedText(assembleEmbedText("contact", contactId, "profile"));
     const contentHash = sha256EmbedText(text);
-    const latest = getLatestEmbedding("contact", contactId, "profile");
-    return !latest || latest.contentHash !== contentHash;
+    return latest.contentHash !== contentHash;
   } catch {
     return false;
   }
 }
 
 export function listContactsNeedingProfileReembed(limit?: number): string[] {
-  const ids = db.select({ id: contacts.id }).from(contacts).all().map((row) => row.id);
-  const pending = ids.filter(contactNeedsProfileReembed);
-  return limit == null ? pending : pending.slice(0, limit);
+  const rows = db
+    .select({ nodeId: embeddings.nodeId })
+    .from(embeddings)
+    .where(and(eq(embeddings.nodeType, "contact"), eq(embeddings.kind, "profile")))
+    .all();
+
+  const seen = new Set<string>();
+  const pending: string[] = [];
+  for (const row of rows) {
+    if (seen.has(row.nodeId)) continue;
+    seen.add(row.nodeId);
+    if (!contactNeedsProfileReembed(row.nodeId)) continue;
+    pending.push(row.nodeId);
+    if (limit != null && pending.length >= limit) break;
+  }
+
+  return pending;
 }
 
 export type ContactProfileEmbedSweepReport = {
@@ -106,6 +122,18 @@ export async function runContactProfileEmbedSweep(opts?: {
     errors: [],
   };
 
+  if (pending.length === 0) {
+    markBackfillApplied(CONTACT_PROFILE_EMBED_SWEEP_KEY);
+    return {
+      complete: true,
+      processed: 0,
+      embedded: 0,
+      skipped: 0,
+      remaining: 0,
+      errors: [],
+    };
+  }
+
   for (const contactId of pending) {
     report.processed++;
     try {
@@ -135,6 +163,7 @@ export async function runContactProfileEmbedSweep(opts?: {
 /** Enqueue a one-shot maintenance job when profile embeddings still need regeneration. */
 export function ensureContactProfileEmbedSweepJob(now = nowUnix()): boolean {
   if (isContactProfileEmbedSweepComplete()) return false;
+  if (listContactsNeedingProfileReembed().length === 0) return false;
 
   const existing = db
     .select({ id: scheduledJobs.id })

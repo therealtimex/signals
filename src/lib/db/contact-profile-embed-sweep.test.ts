@@ -110,6 +110,48 @@ describe("contact profile embed sweep", () => {
     expect(row?.contentHash).not.toBe("old-hash");
   });
 
+  it("does not embed never-embedded contacts while still re-embedding stale vectors", async () => {
+    const neverEmbedded = createContact({
+      name: "New",
+      platform: "x",
+      platformUserId: "never-embedded",
+    });
+    const stale = createContact({ name: "Stale", platform: "x", platformUserId: "stale-2" });
+    upsertEmbedding({
+      nodeType: "contact",
+      nodeId: stale.id,
+      kind: "profile",
+      model: "native:default",
+      vector: float32ToBuffer(vectorWith(0.2)),
+      contentHash: "old-hash",
+      dims: 4,
+    });
+
+    expect(contactNeedsProfileReembed(neverEmbedded.id)).toBe(false);
+    expect(listContactsNeedingProfileReembed()).toEqual([stale.id]);
+
+    mockRtxEmbed.mockResolvedValue({
+      success: true,
+      embeddings: [vectorWith(0.9)],
+      provider: "native",
+      model: "default",
+      qualifiedModel: "native:default",
+      dimensions: 4,
+    });
+
+    const report = await runContactProfileEmbedSweep({ batchSize: 10 });
+    expect(report.processed).toBe(1);
+    expect(report.embedded).toBe(1);
+    expect(report.complete).toBe(true);
+
+    expect(
+      db.select().from(embeddings).where(eq(embeddings.nodeId, neverEmbedded.id)).get(),
+    ).toBeUndefined();
+    expect(
+      db.select().from(embeddings).where(eq(embeddings.nodeId, stale.id)).get()?.contentHash,
+    ).not.toBe("old-hash");
+  });
+
   it("schedules continuation when a single batch cannot finish", async () => {
     mockRtxEmbed.mockResolvedValue({
       success: true,
@@ -158,10 +200,17 @@ describe("contact profile embed sweep", () => {
     expect(hits).toHaveLength(26);
   });
 
-  it("enqueues only one pending continuation job", () => {
-    for (let i = 0; i < 3; i++) {
-      createContact({ name: `Pending ${i}`, platform: "x", platformUserId: `pending-${i}` });
-    }
+  it("enqueues only one pending continuation job when stale vectors remain", () => {
+    const contact = createContact({ name: "Pending", platform: "x", platformUserId: "pending-0" });
+    upsertEmbedding({
+      nodeType: "contact",
+      nodeId: contact.id,
+      kind: "profile",
+      model: "native:default",
+      vector: float32ToBuffer(vectorWith(0.1)),
+      contentHash: "old-hash",
+      dims: 4,
+    });
 
     expect(ensureContactProfileEmbedSweepJob()).toBe(true);
     expect(ensureContactProfileEmbedSweepJob()).toBe(false);
