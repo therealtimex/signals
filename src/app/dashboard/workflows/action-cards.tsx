@@ -15,6 +15,11 @@ import {
   Lock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  ENRICH_ACTION_IDS,
+  actionNeedsPlatformConnection,
+  getActionRunButtonLabel,
+} from "@/app/dashboard/workflows/action-cards-utils";
 
 type ActionDef = {
   id: string;
@@ -32,8 +37,28 @@ const ACTIONS: ActionDef[] = [
   { id: "x-sync-posts", label: "Sync Posts", description: "Import your recent tweets from X.", platform: "x", endpoint: "/api/platforms/x/sync", body: { type: "tweets" }, type: "api", icon: RefreshCw },
   { id: "x-sync-mentions", label: "Sync Mentions", description: "Import recent mentions of your account.", platform: "x", endpoint: "/api/platforms/x/sync", body: { type: "mentions" }, type: "api", icon: RefreshCw },
   { id: "x-sync-contacts", label: "Sync Contacts", description: "Import followers and following from X.", platform: "x", endpoint: "/api/platforms/x/sync", body: { type: "contacts" }, type: "api", icon: RefreshCw },
-  { id: "x-enrich", label: "Enrich Profiles", description: "Enrich contacts with X profile data.", platform: "x", endpoint: "/api/platforms/x/enrich", body: {}, type: "api", icon: Sparkles },
-  { id: "x-enrich-low", label: "Enrich Low-Score", description: "Enrich contacts with low enrichment scores.", platform: "x", endpoint: "/api/platforms/x/enrich", body: { lowScore: true }, type: "api", icon: Sparkles },
+  {
+    id: "x-enrich",
+    label: "Enrich Profiles (RTX)",
+    description:
+      "In-app scraping removed. Use RealTimeX agent-browser + agent-tools (docs/rtx-agent-browser-enrichment.md).",
+    platform: "x",
+    endpoint: "/api/platforms/x/enrich",
+    body: {},
+    type: "api",
+    icon: Sparkles,
+  },
+  {
+    id: "x-enrich-low",
+    label: "Enrich Low-Score (RTX)",
+    description:
+      "Shows RTX migration steps. Query lowest enrichmentScore contacts via agent-tools, then enrich in RealTimeX Browser.",
+    platform: "x",
+    endpoint: "/api/platforms/x/enrich",
+    body: { lowScore: true },
+    type: "api",
+    icon: Sparkles,
+  },
   // LinkedIn
   { id: "li-sync-connections", label: "Sync Connections", description: "Import connections from LinkedIn.", platform: "linkedin", endpoint: "/api/platforms/linkedin/sync", body: { type: "contacts" }, type: "api", icon: RefreshCw },
   { id: "li-import-csv", label: "Import Connections CSV", description: "Upload a LinkedIn connections CSV export.", platform: "linkedin", endpoint: "/api/platforms/linkedin/import", body: {}, type: "upload", icon: Upload },
@@ -92,12 +117,6 @@ function getActionRestriction(
       break;
     case "x-enrich":
     case "x-enrich-low":
-      if (!status.hasBrowserSession) {
-        return {
-          reason: "Set up Browser Session in Settings",
-          navigateTo: "/dashboard/settings",
-        };
-      }
       break;
     case "li-sync-connections":
       if (!status.syncCapable) {
@@ -161,6 +180,7 @@ export function ActionCards() {
   const router = useRouter();
   const [running, setRunning] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [migrationNotice, setMigrationNotice] = useState<string | null>(null);
   const [result, setResult] = useState<{ id: string; message: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadActionId, setUploadActionId] = useState<string | null>(null);
@@ -238,7 +258,10 @@ export function ActionCards() {
 
     setRunning(action.id);
     setError(null);
+    setMigrationNotice(null);
     setResult(null);
+
+    const isEnrichAction = ENRICH_ACTION_IDS.has(action.id);
 
     try {
       const res = await fetch(action.endpoint, {
@@ -248,13 +271,21 @@ export function ActionCards() {
       });
 
       const data = await res.json();
-      if (!res.ok) {
+      if (!res.ok && !data.delegated) {
         setError(data.error || "Action failed");
         return;
       }
 
-      if (data.workflowRunId) {
+      if (data.delegated && data.message) {
+        setMigrationNotice(data.message);
+      }
+
+      if (data.workflowRunId && !isEnrichAction) {
         router.push(`/dashboard/workflows/${data.workflowRunId}`);
+        return;
+      }
+
+      if (isEnrichAction) {
         return;
       }
 
@@ -326,10 +357,15 @@ export function ActionCards() {
         }}
       />
 
-      {/* Error / Result banners */}
+      {/* Error / migration / result banners */}
       {error && (
         <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200">
           {error}
+        </div>
+      )}
+      {migrationNotice && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100">
+          {migrationNotice}
         </div>
       )}
       {result && (
@@ -368,8 +404,12 @@ export function ActionCards() {
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {actions.map((action) => {
                 const isRunning = running === action.id;
-                // CSV import doesn't need platform connection
-                const needsConnection = action.type !== "upload" && !isConnected && !isLoading;
+                const needsConnection = actionNeedsPlatformConnection(
+                  action.id,
+                  action.type,
+                  !!isConnected,
+                  isLoading
+                );
                 // Check per-action restrictions (only when connected)
                 const restriction = isConnected && !isLoading
                   ? getActionRestriction(action.id, status)
@@ -454,15 +494,12 @@ export function ActionCards() {
                         ) : (
                           <Play className="mr-1.5 h-3 w-3" />
                         )}
-                        {needsConnection
-                          ? "Connect first"
-                          : restriction?.navigateTo
-                            ? "Go to Settings"
-                            : restriction
-                              ? "Restricted"
-                              : isRunning
-                                ? "Running..."
-                                : "Run"}
+                        {getActionRunButtonLabel(action.id, {
+                          needsConnection,
+                          restrictionNavigateTo: restriction?.navigateTo,
+                          hasRestriction: !!restriction,
+                          isRunning,
+                        })}
                       </Button>
                     </CardContent>
                   </Card>

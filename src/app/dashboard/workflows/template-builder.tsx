@@ -20,7 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Loader2, Sparkles } from "lucide-react";
+import { Loader2 } from "lucide-react";
 
 interface Template {
   id: string;
@@ -69,7 +69,6 @@ function parseConfig(config: string): Record<string, unknown> {
 export function TemplateBuilder({ open, onClose, onSaved, editTemplate }: TemplateBuilderProps) {
   const isEdit = !!editTemplate;
   const [saving, setSaving] = useState(false);
-  const [generating, setGenerating] = useState(false);
 
   // Form state
   const [name, setName] = useState(editTemplate?.name ?? "");
@@ -82,28 +81,6 @@ export function TemplateBuilder({ open, onClose, onSaved, editTemplate }: Templa
   const [configJson, setConfigJson] = useState(
     editTemplate?.config ? JSON.stringify(parseConfig(editTemplate.config), null, 2) : "{}"
   );
-
-  const handleGeneratePrompt = async () => {
-    setGenerating(true);
-    try {
-      const res = await fetch("/api/workflows/templates/generate-prompt", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          templateType,
-          description: description || undefined,
-          targetPersona: targetPersona || undefined,
-          platform: platform !== "none" ? platform : undefined,
-        }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setSystemPrompt(data.prompt);
-      }
-    } finally {
-      setGenerating(false);
-    }
-  };
 
   const handleSave = async () => {
     if (!name.trim()) return;
@@ -223,24 +200,7 @@ export function TemplateBuilder({ open, onClose, onSaved, editTemplate }: Templa
 
           {/* System Prompt */}
           <div className="space-y-1.5">
-            <div className="flex items-center justify-between">
-              <Label htmlFor="systemPrompt">System Prompt</Label>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-7 text-xs"
-                onClick={handleGeneratePrompt}
-                disabled={generating}
-              >
-                {generating ? (
-                  <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
-                ) : (
-                  <Sparkles className="mr-1.5 h-3 w-3" />
-                )}
-                AI Generate
-              </Button>
-            </div>
+            <Label htmlFor="systemPrompt">System Prompt</Label>
             <Textarea
               id="systemPrompt"
               placeholder="Instructions for the AI agent..."

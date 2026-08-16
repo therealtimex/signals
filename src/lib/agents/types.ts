@@ -23,16 +23,6 @@ export interface UrlFetchResult {
   needsBrowser: boolean;
 }
 
-/** Result of a browser scrape operation. */
-export interface BrowserScrapeResult {
-  url: string;
-  title: string;
-  content: string;
-  contentLength: number;
-  success: boolean;
-  error?: string;
-}
-
 /** A single web search result. */
 export interface SearchResult {
   title: string;

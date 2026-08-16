@@ -1,33 +1,30 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getPlatformAccountByPlatform } from "@/lib/db/queries/platform-accounts";
 import { listSyncCursors } from "@/lib/db/queries/sync";
-import { hasSession } from "@/lib/browser/session";
-import { syncXProfiles } from "@/lib/platforms/sync-x-profiles";
+import {
+  BROWSER_ENRICHMENT_MESSAGE,
+  syncXProfiles,
+} from "@/lib/platforms/sync-x-profiles";
 import { runSyncWorkflow } from "@/lib/workflows/run-sync-workflow";
 
 /**
  * POST /api/platforms/x/enrich
- * Trigger browser-based profile enrichment for X contacts.
- * Body: { contactIds?: string[], maxProfiles?: number }
+ * Records an enrich workflow run. In-process browser enrichment was removed —
+ * use RTX agent-browser + agent-tools instead (docs/rtx-agent-browser-enrichment.md).
  */
 export async function POST(req: NextRequest) {
   try {
+    const body = await req.json().catch(() => ({}));
     const account = getPlatformAccountByPlatform("x");
     if (!account) {
-      return NextResponse.json(
-        { error: "No X platform account found" },
-        { status: 400 }
-      );
+      return NextResponse.json({
+        success: false,
+        delegated: true,
+        message: BROWSER_ENRICHMENT_MESSAGE,
+        migrationDoc: "docs/rtx-agent-browser-enrichment.md",
+      });
     }
 
-    if (!hasSession("x")) {
-      return NextResponse.json(
-        { error: "No browser session configured. Set up in Settings." },
-        { status: 400 }
-      );
-    }
-
-    const body = await req.json().catch(() => ({}));
     const maxProfiles = body.maxProfiles ?? 15;
 
     const { workflowRun, syncResult } = await runSyncWorkflow({
@@ -41,7 +38,15 @@ export async function POST(req: NextRequest) {
         }),
     });
 
-    return NextResponse.json({ success: true, result: syncResult, workflowRunId: workflowRun.id });
+    const delegated = syncResult.errors.length > 0 && syncResult.updated === 0;
+
+    return NextResponse.json({
+      success: !delegated,
+      delegated,
+      message: delegated ? BROWSER_ENRICHMENT_MESSAGE : undefined,
+      result: syncResult,
+      workflowRunId: workflowRun.id,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Enrichment failed";
     return NextResponse.json({ error: message }, { status: 500 });
@@ -50,23 +55,26 @@ export async function POST(req: NextRequest) {
 
 /**
  * GET /api/platforms/x/enrich
- * Get enrichment sync status.
+ * Enrichment status and migration guidance.
  */
 export async function GET() {
   const account = getPlatformAccountByPlatform("x");
   if (!account) {
-    return NextResponse.json({ configured: false });
+    return NextResponse.json({
+      configured: false,
+      delegatedToRtx: true,
+      message: BROWSER_ENRICHMENT_MESSAGE,
+      migrationDoc: "docs/rtx-agent-browser-enrichment.md",
+    });
   }
 
-  const hasBrowserSession = hasSession("x");
-
-  // Find the x_profiles sync cursor if it exists
   const cursors = listSyncCursors(account.id);
   const enrichCursor = cursors.find((c) => c.dataType === "x_profiles");
 
   return NextResponse.json({
     configured: true,
-    hasBrowserSession,
+    delegatedToRtx: true,
+    migrationDoc: "docs/rtx-agent-browser-enrichment.md",
     enrichment: enrichCursor
       ? {
           status: enrichCursor.syncStatus,

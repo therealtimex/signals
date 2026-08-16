@@ -1,8 +1,11 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
 import { createContact } from "@/lib/db/queries/contacts";
 import { invokeAgentTool } from "@/lib/agent-tools/invoke";
 import { listAgentToolsManifest } from "@/lib/agent-tools/registry";
 import { AgentToolError } from "@/lib/agent-tools/types";
+import { db } from "@/lib/db/client";
+import { contacts } from "@/lib/db/schema";
 import { resetCoreTables } from "@/test/db";
 
 describe("agent-tools registry", () => {
@@ -88,5 +91,24 @@ describe("invokeAgentTool", () => {
     await expect(invokeAgentTool("create_contact", {})).rejects.toMatchObject({
       code: "VALIDATION_ERROR",
     } satisfies Partial<AgentToolError>);
+  });
+
+  it("sorts query_contacts by enrichment score ascending", async () => {
+    const low = createContact({ name: "Low", platform: "x", platformUserId: "low" });
+    const high = createContact({ name: "High", platform: "x", platformUserId: "high" });
+
+    db.update(contacts).set({ enrichmentScore: 5 }).where(eq(contacts.id, low.id)).run();
+    db.update(contacts).set({ enrichmentScore: 95 }).where(eq(contacts.id, high.id)).run();
+
+    const result = await invokeAgentTool("query_contacts", {
+      pageSize: 10,
+      sort: "enrichmentScore",
+      order: "asc",
+    });
+
+    const rows = (result as { contacts: Array<{ id: string; score: number }> }).contacts;
+    expect(rows[0]?.id).toBe(low.id);
+    expect(rows[0]?.score).toBe(5);
+    expect(rows[1]?.id).toBe(high.id);
   });
 });

@@ -1,4 +1,5 @@
 import { beforeEach, describe, it, expect } from "vitest";
+import { eq } from "drizzle-orm";
 import {
   createContact,
   findContactByNameOrEmail,
@@ -10,6 +11,8 @@ import {
   countContacts,
   countArchivedContacts,
 } from "@/lib/db/queries/contacts";
+import { db } from "@/lib/db/client";
+import { contacts } from "@/lib/db/schema";
 import { resetCoreTables } from "@/test/db";
 
 describe("contacts queries", () => {
@@ -60,6 +63,23 @@ describe("contacts queries", () => {
     const result = listContacts({ search: "alp" });
     expect(result.total).toBe(1);
     expect(result.data[0]?.name).toBe("Alpha");
+  });
+
+  it("sorts contacts by enrichment score ascending", () => {
+    const low = createContact({ name: "Low Score", platform: "x", platformUserId: "low" });
+    const high = createContact({ name: "High Score", platform: "x", platformUserId: "high" });
+
+    db.update(contacts).set({ enrichmentScore: 10 }).where(eq(contacts.id, low.id)).run();
+    db.update(contacts).set({ enrichmentScore: 90 }).where(eq(contacts.id, high.id)).run();
+
+    const result = listContacts({
+      sort: "enrichmentScore",
+      order: "asc",
+      pageSize: 10,
+    });
+
+    expect(result.data[0]?.id).toBe(low.id);
+    expect(result.data[1]?.id).toBe(high.id);
   });
 
   it("updates contact and recomputes display name from name parts", () => {

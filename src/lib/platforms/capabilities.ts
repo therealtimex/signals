@@ -9,7 +9,7 @@ export interface PlatformCapabilities {
   contentSync: boolean;
   /** Import engagement events/metrics (incl. message-metadata interactions). */
   engagementSync: boolean;
-  /** Import profile/audience stats (incl. browser-scrape enrichment). */
+  /** Import profile/audience stats via RTX agent-browser (not in-process Playwright). */
   statsSync: boolean;
 }
 

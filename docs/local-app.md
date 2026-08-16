@@ -55,6 +55,25 @@ Persona generation records `${provider}:${model}` provenance on every `workflow_
 
 Deploy Signals persona generation only with a RealTimeX Main App build that includes the SDK chat response contract (`response.provider` + `response.model` in the sync chat payload). See RTX `docs/local-apps/sdk-llm-proxy.md` §3.2 and `server/endpoints/sdk/llm.js` (tracked regression: `server/__tests__/endpoints/sdk/llm.test.js`).
 
+## Removed embedded features (#4)
+
+The following no longer run inside Signals:
+
+- Cmd+K chat panel and `/api/chat` — use RealTimeX workspace threads
+- In-process agent tool loops — use RTX agents + `/api/agent-tools/invoke`
+- Content AI routes (`/api/content/ai-generate`) — use RTX creative flows
+
+See `docs/rtx-agent-orchestration.md` for migration guidance.
+
+## Removed Playwright enrichment (#5)
+
+Profile scraping for contact enrichment no longer runs inside Signals:
+
+- `sync-x-profiles` / `/api/platforms/x/enrich` — delegate to RTX agent-browser
+- In-process scrapers (`x-scraper`, `browser-scrape` tool) — removed
+
+Publish and engage browser flows still use Signals-managed sessions. See `docs/rtx-agent-browser-enrichment.md`.
+
 ## Modes
 
 | Mode | Detection | Browser |

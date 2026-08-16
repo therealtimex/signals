@@ -129,16 +129,6 @@ async function startApp(port: number) {
     console.log(`\n  Port ${requestedPort} in use, using ${actualPort}`);
   }
 
-  // Check if Playwright Chromium browser is installed (needed for browser enrichment)
-  try {
-    const pwBrowsersPath = join(homedir(), ".cache", "ms-playwright");
-    if (!existsSync(pwBrowsersPath)) {
-      console.log("\n  Playwright browsers not found. Run `npx playwright install chromium` for browser enrichment.");
-    }
-  } catch {
-    // Non-critical — skip silently
-  }
-
   console.log(`\n  Starting server on http://localhost:${actualPort}...\n`);
 
   // Start Next.js dev server
@@ -229,19 +219,16 @@ Features:
                   image, video, email, dm, newsletter
   Automation      10 seed templates, 6 workflow types
                   (sync, enrich, search, prune, sequence, agent)
-  AI Agents       8 tools: url-fetch, browser-scrape,
-                  search-web, enrich-contact, archive-contact,
-                  engage-post, save-draft, update-progress
-  AI Chat         8 CRM tools, streaming, conversation history
+  AI Agents       Agent tools API + RTX terminal agents
   Analytics       5 tabs: Overview, Agents, Engagement,
                   Content, Sync Health
   Scheduling      Cron-based workflow scheduling
 
 Getting started:
-  1. Set ANTHROPIC_API_KEY in your environment
-  2. Run npx @realtimex/signals (or npx signals)
-  3. Connect X, LinkedIn, or Gmail in Settings > Platforms
-  4. Sync contacts and run your first workflow
+  1. Run npx @realtimex/signals (or npx signals)
+  2. Connect X, LinkedIn, or Gmail in Settings > Platforms
+  3. Sync contacts; enrich via RTX agent-browser (docs/rtx-agent-browser-enrichment.md)
+  4. Run platform sync actions from Automation > Actions
 
 Data:
   Database        ~/.signals/data.db
@@ -250,7 +237,6 @@ Data:
   Media           ~/.signals/media/
 
 Environment variables:
-  ANTHROPIC_API_KEY    Claude AI (required for agents + chat)
   SERPER_API_KEY       Serper Search (broad discovery)
   TAVILY_API_KEY       Tavily Search (deep research)
   SIGNALS_DATA_DIR     Data directory override (default: ~/.signals)

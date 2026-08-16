@@ -1119,7 +1119,8 @@ function SettingsContent() {
               Browser Sessions
             </h3>
             <p className="text-xs text-muted-foreground">
-              Browser sessions enable enrichment (scraping profiles) and publishing (posting content).
+              Browser sessions enable publishing and engagement (posting, liking, replying).
+              Profile enrichment runs via RealTimeX agent-browser — see docs/rtx-agent-browser-enrichment.md.
               Each platform requires a separate session via manual login.
             </p>
 

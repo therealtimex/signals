@@ -36,6 +36,26 @@ type PatternMatcher = {
 const PATTERNS: PatternMatcher[] = [
   // ── Prefix-anchored patterns (composite messages) ─────────────────
 
+  {
+    pattern: /^BROWSER_ENRICHMENT_UNAVAILABLE:/,
+    category: "browser_enrichment",
+    format: () => ({
+      title: "Profile enrichment moved to RealTimeX Browser",
+      detail: "Use agent-browser + /api/agent-tools (see docs/rtx-agent-browser-enrichment.md).",
+      category: "browser_enrichment",
+    }),
+  },
+
+  {
+    pattern: /^AGENT_ORCHESTRATION_UNAVAILABLE:/,
+    category: "agent_orchestration",
+    format: () => ({
+      title: "Agent orchestration moved to RealTimeX",
+      detail: "Run agents via terminal agents and /api/agent-tools (see docs/rtx-agent-orchestration.md).",
+      category: "agent_orchestration",
+    }),
+  },
+
   // 1. Batch limit (enrichment) — "Batch limit reached after 15 profiles..."
   {
     pattern: /^Batch limit reached after (\d+)/,
