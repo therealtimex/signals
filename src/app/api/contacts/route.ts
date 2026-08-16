@@ -2,18 +2,22 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { PLATFORM_ENUM } from "@/lib/db/platforms";
 import { listContacts, createContact } from "@/lib/db/queries/contacts";
-import { createIdentity } from "@/lib/db/queries/identities";
-import { recalcEnrichment } from "@/lib/db/queries/contacts";
 import { db } from "@/lib/db/client";
+import { PlatformAccountConflictError } from "@/lib/db/identity-claims";
 import { applyContactOrgLink, resolveContactCompanyFields } from "@/lib/contact-org-api";
+import {
+  contactIdentityInputSchema,
+  createContactIdentities,
+} from "@/lib/contact-identities-api";
 
-const identitySchema = z.object({
-  platform: z.enum(PLATFORM_ENUM),
-  platformUserId: z.string().min(1),
-  platformHandle: z.string().optional(),
-  platformUrl: z.string().optional(),
-  isPrimary: z.boolean().optional(),
-});
+function isUniqueConstraintError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: string }).code === "SQLITE_CONSTRAINT_UNIQUE"
+  );
+}
 
 const createContactSchema = z.object({
   name: z.string().min(1, "Name is required").optional(),
@@ -38,7 +42,8 @@ const createContactSchema = z.object({
     .enum(["prospect", "engaged", "qualified", "opportunity", "customer", "advocate"])
     .optional(),
   score: z.number().int().min(0).optional(),
-  identity: identitySchema.optional(),
+  identity: contactIdentityInputSchema.optional(),
+  identities: z.array(contactIdentityInputSchema).optional(),
 }).refine(
   (data) => data.name || data.firstName || data.lastName,
   { message: "At least name, firstName, or lastName is required" }
@@ -61,7 +66,8 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { identity, orgId, company, ...data } = createContactSchema.parse(body);
+    const { identity, identities, orgId, company, platform: _platform, platformUserId: _platformUserId, ...data } =
+      createContactSchema.parse(body);
 
     const resolvedCompany = resolveContactCompanyFields({ orgId, company });
     if ("error" in resolvedCompany) {
@@ -80,6 +86,9 @@ export async function POST(req: NextRequest) {
       ...(resolvedCompany.touched ? { company: resolvedCompany.company } : {}),
     };
 
+    const identityPayload =
+      identities && identities.length > 0 ? identities : identity ? [identity] : [];
+
     const contact = db.transaction(() => {
       const created = createContact(contactPayload);
       if (resolvedCompany.touched) {
@@ -93,21 +102,11 @@ export async function POST(req: NextRequest) {
           contactPayload.title,
         );
       }
+      if (identityPayload.length > 0) {
+        createContactIdentities(created.id, identityPayload);
+      }
       return created;
     });
-
-    // If an inline identity was provided, create it
-    if (identity) {
-      createIdentity({
-        contactId: contact.id,
-        platform: identity.platform,
-        platformUserId: identity.platformUserId,
-        platformHandle: identity.platformHandle,
-        platformUrl: identity.platformUrl,
-        isPrimary: identity.isPrimary ? 1 : 0,
-      });
-      recalcEnrichment(contact.id);
-    }
 
     // Re-fetch to include the newly created identity
     const { getContactById } = await import("@/lib/db/queries/contacts");
@@ -116,6 +115,15 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: error.errors }, { status: 400 });
+    }
+    if (error instanceof PlatformAccountConflictError) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
+    }
+    if (isUniqueConstraintError(error)) {
+      return NextResponse.json(
+        { error: "A platform identity with this platform and user ID already exists" },
+        { status: 409 },
+      );
     }
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }

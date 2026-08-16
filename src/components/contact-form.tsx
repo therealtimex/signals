@@ -11,23 +11,25 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { Contact } from "@/lib/db/types";
+import type { DraftContactIdentity } from "@/lib/contact-identity-draft";
 import { OrgPicker } from "@/components/org-picker";
+import { ContactIdentitiesInput } from "@/components/contact-identities-input";
 
 const funnelStages = ["prospect", "engaged", "qualified", "opportunity", "customer", "advocate"];
-const platforms = ["x", "linkedin", "gmail", "substack"];
-const platformLabels: Record<string, string> = {
-  x: "X / Twitter",
-  linkedin: "LinkedIn",
-  gmail: "Gmail",
-  substack: "Substack",
-};
 
 interface ContactFormProps {
   defaultValues?: Partial<Contact> & { orgId?: string };
   onChange: (data: Record<string, string>) => void;
+  showIdentities?: boolean;
+  onIdentitiesChange?: (identities: DraftContactIdentity[]) => void;
 }
 
-export function ContactForm({ defaultValues, onChange }: ContactFormProps) {
+export function ContactForm({
+  defaultValues,
+  onChange,
+  showIdentities = false,
+  onIdentitiesChange,
+}: ContactFormProps) {
   function handleChange(field: string, value: string) {
     onChange({ [field]: value });
   }
@@ -140,44 +142,28 @@ export function ContactForm({ defaultValues, onChange }: ContactFormProps) {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
-        <div className="grid gap-2">
-          <Label htmlFor="funnelStage">Funnel Stage</Label>
-          <Select
-            defaultValue={defaultValues?.funnelStage ?? "prospect"}
-            onValueChange={(v) => handleChange("funnelStage", v)}
-          >
-            <SelectTrigger id="funnelStage">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {funnelStages.map((s) => (
-                <SelectItem key={s} value={s}>
-                  {s.charAt(0).toUpperCase() + s.slice(1)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="grid gap-2">
-          <Label htmlFor="platform">Platform</Label>
-          <Select
-            defaultValue={defaultValues?.platform ?? ""}
-            onValueChange={(v) => handleChange("platform", v)}
-          >
-            <SelectTrigger id="platform">
-              <SelectValue placeholder="Select platform" />
-            </SelectTrigger>
-            <SelectContent>
-              {platforms.map((p) => (
-                <SelectItem key={p} value={p}>
-                  {platformLabels[p] ?? p}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+      <div className="grid gap-2">
+        <Label htmlFor="funnelStage">Funnel Stage</Label>
+        <Select
+          defaultValue={defaultValues?.funnelStage ?? "prospect"}
+          onValueChange={(v) => handleChange("funnelStage", v)}
+        >
+          <SelectTrigger id="funnelStage">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {funnelStages.map((s) => (
+              <SelectItem key={s} value={s}>
+                {s.charAt(0).toUpperCase() + s.slice(1)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
+
+      {showIdentities && onIdentitiesChange ? (
+        <ContactIdentitiesInput onChange={onIdentitiesChange} />
+      ) : null}
 
       <div className="grid gap-2">
         <Label htmlFor="bio">Bio</Label>
