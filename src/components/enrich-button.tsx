@@ -54,8 +54,13 @@ export function EnrichButton({
 
       const data = await res.json();
 
-      if (!res.ok || data.delegated) {
-        setError(data.message || data.error || "Enrichment runs via RealTimeX agent-browser (see docs/rtx-agent-browser-enrichment.md)");
+      if (!res.ok && !data.delegated) {
+        setError(data.error || "Enrichment runs via RealTimeX agent-browser (see docs/rtx-agent-browser-enrichment.md)");
+        return;
+      }
+
+      if (data.delegated) {
+        setError(data.message || "Enrichment runs via RealTimeX agent-browser (see docs/rtx-agent-browser-enrichment.md)");
         return;
       }
 
@@ -84,10 +89,10 @@ export function EnrichButton({
           <Sparkles className="mr-1.5 h-3.5 w-3.5" />
         )}
         {enriching
-          ? "Enriching..."
+          ? "Loading..."
           : isBulk
-            ? "Enrich Low-Score"
-            : "Enrich from X"}
+            ? "Low-score (RTX)"
+            : "RTX enrich"}
       </Button>
 
       {error && (

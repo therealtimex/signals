@@ -18,6 +18,8 @@ export const queryContactsSchema = z.object({
   platform: platform.optional(),
   page: z.number().int().positive().optional(),
   pageSize: z.number().int().positive().max(100).optional(),
+  sort: z.enum(["createdAt", "enrichmentScore"]).optional(),
+  order: z.enum(["asc", "desc"]).optional(),
 });
 
 export const getContactSchema = z.object({

@@ -1,4 +1,4 @@
-import { eq, like, and, or, desc, count, inArray, isNotNull, sql, SQL } from "drizzle-orm";
+import { eq, like, and, or, desc, asc, count, inArray, isNotNull, sql, SQL } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db/client";
 import { contacts, contactIdentities, contentItems, tasks, workflowSteps } from "@/lib/db/schema";
@@ -59,6 +59,8 @@ export function listContacts(opts?: {
   page?: number;
   pageSize?: number;
   includeArchived?: boolean;
+  sort?: "createdAt" | "enrichmentScore";
+  order?: "asc" | "desc";
 }): PaginatedResult<ContactWithIdentities> {
   const conditions: SQL[] = [];
 
@@ -100,11 +102,17 @@ export function listContacts(opts?: {
   const page = opts?.page ?? 1;
   const pageSize = opts?.pageSize ?? 25;
 
+  const sortField =
+    opts?.sort === "enrichmentScore" ? contacts.enrichmentScore : contacts.createdAt;
+  const orderDirection = opts?.order ?? (opts?.sort === "enrichmentScore" ? "asc" : "desc");
+  const orderByClause =
+    orderDirection === "asc" ? asc(sortField) : desc(sortField);
+
   const rows = db
     .select()
     .from(contacts)
     .where(whereClause)
-    .orderBy(desc(contacts.createdAt))
+    .orderBy(orderByClause)
     .limit(pageSize)
     .offset((page - 1) * pageSize)
     .all();

@@ -27,13 +27,35 @@ type ActionDef = {
   icon: typeof RefreshCw;
 };
 
+const ENRICH_ACTION_IDS = new Set(["x-enrich", "x-enrich-low"]);
+
 const ACTIONS: ActionDef[] = [
   // X
   { id: "x-sync-posts", label: "Sync Posts", description: "Import your recent tweets from X.", platform: "x", endpoint: "/api/platforms/x/sync", body: { type: "tweets" }, type: "api", icon: RefreshCw },
   { id: "x-sync-mentions", label: "Sync Mentions", description: "Import recent mentions of your account.", platform: "x", endpoint: "/api/platforms/x/sync", body: { type: "mentions" }, type: "api", icon: RefreshCw },
   { id: "x-sync-contacts", label: "Sync Contacts", description: "Import followers and following from X.", platform: "x", endpoint: "/api/platforms/x/sync", body: { type: "contacts" }, type: "api", icon: RefreshCw },
-  { id: "x-enrich", label: "Enrich Profiles", description: "Delegate profile enrichment to RTX agent-browser (see docs).", platform: "x", endpoint: "/api/platforms/x/enrich", body: {}, type: "api", icon: Sparkles },
-  { id: "x-enrich-low", label: "Enrich Low-Score", description: "Queue low-score contacts for RTX agent-browser enrichment.", platform: "x", endpoint: "/api/platforms/x/enrich", body: { lowScore: true }, type: "api", icon: Sparkles },
+  {
+    id: "x-enrich",
+    label: "Enrich Profiles (RTX)",
+    description:
+      "In-app scraping removed. Use RealTimeX agent-browser + agent-tools (docs/rtx-agent-browser-enrichment.md).",
+    platform: "x",
+    endpoint: "/api/platforms/x/enrich",
+    body: {},
+    type: "api",
+    icon: Sparkles,
+  },
+  {
+    id: "x-enrich-low",
+    label: "Enrich Low-Score (RTX)",
+    description:
+      "Shows RTX migration steps. Query lowest enrichmentScore contacts via agent-tools, then enrich in RealTimeX Browser.",
+    platform: "x",
+    endpoint: "/api/platforms/x/enrich",
+    body: { lowScore: true },
+    type: "api",
+    icon: Sparkles,
+  },
   // LinkedIn
   { id: "li-sync-connections", label: "Sync Connections", description: "Import connections from LinkedIn.", platform: "linkedin", endpoint: "/api/platforms/linkedin/sync", body: { type: "contacts" }, type: "api", icon: RefreshCw },
   { id: "li-import-csv", label: "Import Connections CSV", description: "Upload a LinkedIn connections CSV export.", platform: "linkedin", endpoint: "/api/platforms/linkedin/import", body: {}, type: "upload", icon: Upload },
@@ -155,6 +177,7 @@ export function ActionCards() {
   const router = useRouter();
   const [running, setRunning] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [migrationNotice, setMigrationNotice] = useState<string | null>(null);
   const [result, setResult] = useState<{ id: string; message: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadActionId, setUploadActionId] = useState<string | null>(null);
@@ -232,7 +255,10 @@ export function ActionCards() {
 
     setRunning(action.id);
     setError(null);
+    setMigrationNotice(null);
     setResult(null);
+
+    const isEnrichAction = ENRICH_ACTION_IDS.has(action.id);
 
     try {
       const res = await fetch(action.endpoint, {
@@ -242,17 +268,21 @@ export function ActionCards() {
       });
 
       const data = await res.json();
-      if (!res.ok) {
+      if (!res.ok && !data.delegated) {
         setError(data.error || "Action failed");
         return;
       }
 
       if (data.delegated && data.message) {
-        setError(data.message);
+        setMigrationNotice(data.message);
       }
 
-      if (data.workflowRunId) {
+      if (data.workflowRunId && !isEnrichAction) {
         router.push(`/dashboard/workflows/${data.workflowRunId}`);
+        return;
+      }
+
+      if (isEnrichAction) {
         return;
       }
 
@@ -324,10 +354,15 @@ export function ActionCards() {
         }}
       />
 
-      {/* Error / Result banners */}
+      {/* Error / migration / result banners */}
       {error && (
         <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200">
           {error}
+        </div>
+      )}
+      {migrationNotice && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100">
+          {migrationNotice}
         </div>
       )}
       {result && (
@@ -460,7 +495,9 @@ export function ActionCards() {
                               ? "Restricted"
                               : isRunning
                                 ? "Running..."
-                                : "Run"}
+                                : ENRICH_ACTION_IDS.has(action.id)
+                                  ? "Show RTX steps"
+                                  : "Run"}
                       </Button>
                     </CardContent>
                   </Card>

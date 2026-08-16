@@ -14,15 +14,17 @@ import { runSyncWorkflow } from "@/lib/workflows/run-sync-workflow";
  */
 export async function POST(req: NextRequest) {
   try {
+    const body = await req.json().catch(() => ({}));
     const account = getPlatformAccountByPlatform("x");
     if (!account) {
-      return NextResponse.json(
-        { error: "No X platform account found" },
-        { status: 400 }
-      );
+      return NextResponse.json({
+        success: false,
+        delegated: true,
+        message: BROWSER_ENRICHMENT_MESSAGE,
+        migrationDoc: "docs/rtx-agent-browser-enrichment.md",
+      });
     }
 
-    const body = await req.json().catch(() => ({}));
     const maxProfiles = body.maxProfiles ?? 15;
 
     const { workflowRun, syncResult } = await runSyncWorkflow({
@@ -58,7 +60,12 @@ export async function POST(req: NextRequest) {
 export async function GET() {
   const account = getPlatformAccountByPlatform("x");
   if (!account) {
-    return NextResponse.json({ configured: false });
+    return NextResponse.json({
+      configured: false,
+      delegatedToRtx: true,
+      message: BROWSER_ENRICHMENT_MESSAGE,
+      migrationDoc: "docs/rtx-agent-browser-enrichment.md",
+    });
   }
 
   const cursors = listSyncCursors(account.id);

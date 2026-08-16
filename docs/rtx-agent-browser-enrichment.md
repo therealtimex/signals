@@ -97,8 +97,8 @@ curl -s http://127.0.0.1:3000/api/agent-tools/invoke \
 
 ## Signals UI behavior
 
-- **Automation → Actions → Enrich Profiles** still creates an `enrich` workflow run for observability, but the run fails with `BROWSER_ENRICHMENT_UNAVAILABLE` until migrated to RTX orchestration.
-- **Contact detail → Enrich from X** shows the same migration message.
+- **Automation → Actions → Enrich Profiles (RTX)** shows migration guidance on the Actions page. It does not queue or run in-app enrichment.
+- **Contact detail → RTX enrich** shows the same migration message, including when X is not connected in Signals.
 - **Settings → Browser Session** remains for **publish/engage**, not in-app enrichment.
 
 ## Related docs

@@ -48,6 +48,8 @@ export async function handleQueryContacts(input: z.infer<typeof queryContactsSch
     platform: input.platform,
     page: input.page,
     pageSize: input.pageSize ?? DEFAULT_PAGE_SIZE,
+    sort: input.sort,
+    order: input.order,
   });
 
   return {
