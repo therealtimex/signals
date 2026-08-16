@@ -72,6 +72,7 @@ describe("graph agent tools", () => {
     expect(result).toMatchObject({
       interactionType: "meeting",
       scope: "shared",
+      attachmentCount: 0,
     });
   });
 

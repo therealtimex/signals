@@ -39,6 +39,7 @@ import type { ContactExploreCard } from "@/lib/db/queries/contact-explore";
 import type { DraftContactChannel } from "@/lib/contact-channel-draft";
 import type { DraftContactEmployment } from "@/lib/contact-employment-draft";
 import { ContactExploreCardView } from "@/components/contact-explore-card";
+import { ContactTimelineTab } from "@/components/contact-timeline-tab";
 
 const platformLabels: Record<string, string> = {
   x: "X / Twitter",
@@ -255,6 +256,7 @@ export function ContactDetailClient({ contact, tasks, explore }: ContactDetailCl
             Identities ({contact.identities.length})
           </TabsTrigger>
           <TabsTrigger value="tasks">Tasks ({tasks.length})</TabsTrigger>
+          <TabsTrigger value="activity">Activity</TabsTrigger>
           <TabsTrigger value="audience">Audience</TabsTrigger>
         </TabsList>
 
@@ -456,6 +458,10 @@ export function ContactDetailClient({ contact, tasks, explore }: ContactDetailCl
               ))}
             </div>
           )}
+        </TabsContent>
+
+        <TabsContent value="activity" className="space-y-4">
+          <ContactTimelineTab contactId={contact.id} />
         </TabsContent>
 
         <TabsContent value="audience" className="space-y-4">

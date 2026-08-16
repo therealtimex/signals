@@ -54,6 +54,7 @@ export const logInteractionSchema = z.object({
   isMeaningful: z.boolean().optional(),
   scope: z.enum(["shared", "local_only"]).optional(),
   contentItemId: z.string().optional(),
+  attachmentIds: z.array(z.string().min(1)).optional(),
   metadata: z.record(z.unknown()).optional(),
 });
 
