@@ -10,6 +10,7 @@ import {
 } from "@/lib/db/embedding-kinds";
 import { contacts, contentItems, embeddings, launches, niches, orgs, variants } from "@/lib/db/schema";
 import { nodeExists } from "@/lib/db/queries/graph";
+import { resolveContactCareerSummary } from "@/lib/db/queries/contact-employments";
 import { getActivePersona } from "@/lib/db/queries/personas";
 import type { GraphNodeType } from "@/lib/db/types";
 import {
@@ -442,11 +443,12 @@ export function assembleEmbedText(
       if (nodeType === "contact") {
         const contact = db.select().from(contacts).where(eq(contacts.id, nodeId)).get();
         if (!contact) throw new Error(`Contact not found: ${nodeId}`);
+        const career = resolveContactCareerSummary(nodeId);
         return joinText([
           contact.name,
           contact.headline,
-          contact.company,
-          contact.title,
+          career.company,
+          career.title,
           contact.bio,
           contact.location,
         ]);
@@ -458,4 +460,42 @@ export function assembleEmbedText(
     default:
       throw new Error(`Unsupported embedding kind: ${kind satisfies never}`);
   }
+}
+
+const CONTACT_PROFILE_EMBED_SWEEP_KEY = "contact-profile-employment-text-v1";
+
+function ensureBackfillMarkersTable(): void {
+  sqlite.exec(
+    `CREATE TABLE IF NOT EXISTS _backfill_markers (key TEXT PRIMARY KEY, applied_at INTEGER NOT NULL)`,
+  );
+}
+
+function backfillMarkerApplied(key: string): boolean {
+  ensureBackfillMarkersTable();
+  return sqlite.prepare("SELECT 1 FROM _backfill_markers WHERE key = ?").get(key) !== undefined;
+}
+
+function markBackfillApplied(key: string): void {
+  ensureBackfillMarkersTable();
+  sqlite
+    .prepare("INSERT OR IGNORE INTO _backfill_markers (key, applied_at) VALUES (?, ?)")
+    .run(key, nowUnix());
+}
+
+/** One-time invalidation so contact profile embeddings use employment-backed text. */
+export function sweepContactProfileEmbeddingsAfterEmploymentMigration(): {
+  deleted: number;
+  skipped: boolean;
+} {
+  if (backfillMarkerApplied(CONTACT_PROFILE_EMBED_SWEEP_KEY)) {
+    return { deleted: 0, skipped: true };
+  }
+
+  const result = db
+    .delete(embeddings)
+    .where(and(eq(embeddings.nodeType, "contact"), eq(embeddings.kind, "profile")))
+    .run();
+
+  markBackfillApplied(CONTACT_PROFILE_EMBED_SWEEP_KEY);
+  return { deleted: result.changes ?? 0, skipped: false };
 }

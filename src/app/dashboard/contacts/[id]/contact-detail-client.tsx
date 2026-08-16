@@ -37,6 +37,7 @@ import {
 import type { ContactWithIdentities, Task } from "@/lib/db/types";
 import type { ContactExploreCard } from "@/lib/db/queries/contact-explore";
 import type { DraftContactChannel } from "@/lib/contact-channel-draft";
+import type { DraftContactEmployment } from "@/lib/contact-employment-draft";
 import { ContactExploreCardView } from "@/components/contact-explore-card";
 
 const platformLabels: Record<string, string> = {
@@ -60,6 +61,7 @@ export function ContactDetailClient({ contact, tasks, explore }: ContactDetailCl
   const [selfSaving, setSelfSaving] = useState(false);
   const formChanges = useRef<Record<string, string>>({});
   const channelsData = useRef<DraftContactChannel[] | null>(null);
+  const employmentsData = useRef<DraftContactEmployment[] | null>(null);
 
   async function handleToggleSelf(nextValue: boolean) {
     setSelfSaving(true);
@@ -80,7 +82,8 @@ export function ContactDetailClient({ contact, tasks, explore }: ContactDetailCl
   async function handleSave() {
     const data = formChanges.current;
     const hasChannelChanges = channelsData.current !== null;
-    if (Object.keys(data).length === 0 && !hasChannelChanges) return;
+    const hasEmploymentChanges = employmentsData.current !== null;
+    if (Object.keys(data).length === 0 && !hasChannelChanges && !hasEmploymentChanges) return;
 
     setSaving(true);
     try {
@@ -90,11 +93,13 @@ export function ContactDetailClient({ contact, tasks, explore }: ContactDetailCl
         body: JSON.stringify({
           ...data,
           ...(hasChannelChanges ? { channels: channelsData.current } : {}),
+          ...(hasEmploymentChanges ? { employments: employmentsData.current } : {}),
         }),
       });
       if (res.ok) {
         formChanges.current = {};
         channelsData.current = null;
+        employmentsData.current = null;
         router.refresh();
       }
     } finally {
@@ -346,6 +351,9 @@ export function ContactDetailClient({ contact, tasks, explore }: ContactDetailCl
                 }}
                 onChannelsChange={(channels) => {
                   channelsData.current = channels;
+                }}
+                onEmploymentsChange={(employments) => {
+                  employmentsData.current = employments;
                 }}
               />
               <div className="flex justify-between">

@@ -121,18 +121,25 @@ export async function handleGetContact(input: z.infer<typeof getContactSchema>) 
 }
 
 export async function handleCreateContact(input: z.infer<typeof createContactSchema>) {
-  const contact = createContact({
+  const payload: Parameters<typeof createContact>[0] = {
     name: input.name,
     firstName: input.firstName,
     lastName: input.lastName,
-    email: input.email || null,
-    phone: input.phone ?? null,
-    channels: input.channels,
-    employments: input.employments,
-    company: input.company ?? null,
-    title: input.title ?? null,
     funnelStage: input.funnelStage ?? "prospect",
-  }, "agent:create_contact");
+  };
+
+  if (input.email !== undefined) payload.email = input.email || null;
+  if (input.phone !== undefined) payload.phone = input.phone ?? null;
+  if (input.channels !== undefined) payload.channels = input.channels;
+
+  if (input.employments !== undefined) {
+    payload.employments = input.employments;
+  } else {
+    if (input.company !== undefined) payload.company = input.company ?? null;
+    if (input.title !== undefined) payload.title = input.title ?? null;
+  }
+
+  const contact = createContact(payload, "agent:create_contact");
 
   return {
     id: contact.id,

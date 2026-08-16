@@ -14,6 +14,7 @@ import {
   variants,
 } from "@/lib/db/schema";
 import { getActivePersona } from "@/lib/db/queries/personas";
+import { resolveContactCareerSummary } from "@/lib/db/queries/contact-employments";
 import { getLaunchById } from "@/lib/db/queries/launches";
 import { getVariantById } from "@/lib/db/queries/variants";
 import {
@@ -305,11 +306,13 @@ export function assembleAgentGrounding(contactId: string): Record<string, unknow
     }
   }
 
+  const career = resolveContactCareerSummary(contactId);
+
   return {
     contact: {
       name: contact.name,
-      title: contact.title,
-      company: contact.company,
+      title: career.title,
+      company: career.company,
       location: contact.location,
       bio: contact.bio,
     },

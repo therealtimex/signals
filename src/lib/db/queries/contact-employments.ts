@@ -62,6 +62,18 @@ export function getContactEmploymentById(id: string): ContactEmployment | undefi
   return db.select().from(contactEmployments).where(eq(contactEmployments.id, id)).get();
 }
 
+/** Career summary from structured employments (not scalar projection columns). */
+export function resolveContactCareerSummary(contactId: string): {
+  company: string | null;
+  title: string | null;
+} {
+  const current = resolveCurrentEmployment(contactId);
+  return {
+    company: current?.orgName?.trim() || null,
+    title: current?.title ?? null,
+  };
+}
+
 /** Resolve current employment — latest started_at, then latest created_at (ADR-092-2). */
 export function resolveCurrentEmployment(contactId: string): ContactEmploymentWithOrg | undefined {
   const rows = listContactEmployments(contactId).filter((row) => row.isCurrent);

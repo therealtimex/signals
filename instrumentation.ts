@@ -38,6 +38,18 @@ export async function register() {
       console.warn("[instrumentation] Employment backfill skipped:", (e as Error).message);
     }
 
+    try {
+      const { sweepContactProfileEmbeddingsAfterEmploymentMigration } = await import(
+        "@/lib/db/queries/embeddings"
+      );
+      const embedSweep = sweepContactProfileEmbeddingsAfterEmploymentMigration();
+      if (!embedSweep.skipped && embedSweep.deleted > 0) {
+        console.log("[instrumentation] Contact profile embedding sweep:", embedSweep);
+      }
+    } catch (e) {
+      console.warn("[instrumentation] Contact profile embedding sweep skipped:", (e as Error).message);
+    }
+
     // Run identity migration
     try {
       const { migrateContactIdentities } = await import("@/lib/db/migrate-identities");

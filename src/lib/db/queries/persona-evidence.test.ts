@@ -1,7 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { createContact } from "@/lib/db/queries/contacts";
 import { createIdentity } from "@/lib/db/queries/identities";
+import { createOrg } from "@/lib/db/queries/orgs";
+import { createContactEmployment } from "@/lib/db/queries/contact-employments";
 import { logInteraction } from "@/lib/db/queries/interactions";
 import { projectPersonaInterestsToNiches } from "@/lib/db/queries/persona-niches";
 import { ensureNicheByName } from "@/lib/db/queries/niches";
@@ -20,6 +23,7 @@ import { db } from "@/lib/db/client";
 import {
   contentItems,
   contentPosts,
+  contacts,
   platformAccounts,
   workflowRuns,
 } from "@/lib/db/schema";
@@ -119,6 +123,33 @@ describe("assemblePersonaEvidence", () => {
     const bundle = assemblePersonaEvidence(contact.id);
     assertNoPrivacySentinels(bundle);
     assertNoPrivacySentinels(renderPersonaEvidencePrompt(bundle.evidence));
+  });
+
+  it("uses employment-backed career fields instead of stale scalar columns", () => {
+    const contact = createContact({ name: "Career", platform: "x", platformUserId: "career-1" });
+    const org = createOrg({ name: "Structured Corp", source: "test" });
+    createContactEmployment({
+      contactId: contact.id,
+      orgId: org.id,
+      title: "VP Sales",
+      isCurrent: true,
+      source: "test",
+    });
+    db.update(contacts)
+      .set({ company: "Stale Scalar Co", title: "Stale Title" })
+      .where(eq(contacts.id, contact.id))
+      .run();
+
+    createIdentity({
+      contactId: contact.id,
+      platform: "x",
+      platformUserId: nanoid(),
+      platformHandle: "@career",
+    });
+
+    const bundle = assemblePersonaEvidence(contact.id);
+    expect(bundle.evidence.contact.company).toBe("Structured Corp");
+    expect(bundle.evidence.contact.title).toBe("VP Sales");
   });
 
   it("excludes persona-generation niche side effects from the evidence digest", () => {

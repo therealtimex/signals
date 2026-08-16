@@ -2,12 +2,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { invokeAgentTool } from "@/lib/agent-tools/invoke";
 import { createContact, deleteContact } from "@/lib/db/queries/contacts";
-import { upsertEmbedding, semanticSearch } from "@/lib/db/queries/embeddings";
+import { upsertEmbedding, semanticSearch, assembleEmbedText, sweepContactProfileEmbeddingsAfterEmploymentMigration } from "@/lib/db/queries/embeddings";
 import { upsertNiche } from "@/lib/db/queries/niches";
+import { createContactEmployment } from "@/lib/db/queries/contact-employments";
+import { createOrg } from "@/lib/db/queries/orgs";
 import { embedNodeIfStale } from "@/lib/embeddings/embed-node";
 import { bufferToFloat32, float32ToBuffer } from "@/lib/embeddings/vector-utils";
 import { db } from "@/lib/db/client";
-import { embeddings } from "@/lib/db/schema";
+import { contacts, embeddings } from "@/lib/db/schema";
 import { resetCoreTables } from "@/test/db";
 
 const mockRtxEmbed = vi.fn();
@@ -348,6 +350,49 @@ describe("embeddings query layer", () => {
     });
 
     expect(result).toMatchObject({ resultCount: 0, results: [] });
+  });
+
+  it("builds contact profile embed text from employments instead of scalar columns", () => {
+    const contact = createContact({ name: "Ada", platform: "x", platformUserId: "embed-career" });
+    const org = createOrg({ name: "Structured Corp", source: "test" });
+    createContactEmployment({
+      contactId: contact.id,
+      orgId: org.id,
+      title: "VP Sales",
+      isCurrent: true,
+      source: "test",
+    });
+    db.update(contacts)
+      .set({ company: "Stale Scalar Co", title: "Stale Title" })
+      .where(eq(contacts.id, contact.id))
+      .run();
+
+    const text = assembleEmbedText("contact", contact.id, "profile");
+    expect(text).toContain("Structured Corp");
+    expect(text).toContain("VP Sales");
+    expect(text).not.toContain("Stale Scalar Co");
+    expect(text).not.toContain("Stale Title");
+  });
+
+  it("sweeps contact profile embeddings once after employment migration", () => {
+    const contact = createContact({ name: "Sweep", platform: "x", platformUserId: "embed-sweep" });
+    upsertEmbedding({
+      nodeType: "contact",
+      nodeId: contact.id,
+      kind: "profile",
+      model: "native:default",
+      vector: float32ToBuffer(vectorWith(1)),
+      contentHash: "old-hash",
+      dims: 4,
+    });
+
+    const first = sweepContactProfileEmbeddingsAfterEmploymentMigration();
+    expect(first.skipped).toBe(false);
+    expect(first.deleted).toBe(1);
+
+    const second = sweepContactProfileEmbeddingsAfterEmploymentMigration();
+    expect(second.skipped).toBe(true);
+    expect(second.deleted).toBe(0);
   });
 
   it("semantic_search surfaces RTX embed errors verbatim", async () => {

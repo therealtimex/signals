@@ -1,11 +1,13 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
-import { createContact } from "@/lib/db/queries/contacts";
+import { createContact, getContactById } from "@/lib/db/queries/contacts";
 import { invokeAgentTool } from "@/lib/agent-tools/invoke";
 import { listAgentToolsManifest } from "@/lib/agent-tools/registry";
 import { AgentToolError } from "@/lib/agent-tools/types";
 import { db } from "@/lib/db/client";
 import { contacts } from "@/lib/db/schema";
+import { createOrg } from "@/lib/db/queries/orgs";
+import { listContactEmployments } from "@/lib/db/queries/contact-employments";
 import { resetCoreTables } from "@/test/db";
 
 describe("agent-tools registry", () => {
@@ -53,6 +55,32 @@ describe("agent-tools registry", () => {
 describe("invokeAgentTool", () => {
   beforeEach(() => {
     resetCoreTables();
+  });
+
+  it("creates a contact with structured employments when legacy company/title omitted", async () => {
+    const org = createOrg({ name: "Structured Corp", source: "test" });
+
+    const created = await invokeAgentTool("create_contact", {
+      name: "Jane Doe",
+      employments: [{ orgId: org.id, title: "CEO", isCurrent: true }],
+    });
+
+    const contactId = (created as { id: string }).id;
+    const contact = getContactById(contactId);
+
+    expect(listContactEmployments(contactId)).toHaveLength(1);
+    expect(contact?.currentEmployment).toMatchObject({
+      orgId: org.id,
+      orgName: "Structured Corp",
+      title: "CEO",
+    });
+    expect(created).toMatchObject({
+      currentEmployment: {
+        orgId: org.id,
+        orgName: "Structured Corp",
+        title: "CEO",
+      },
+    });
   });
 
   it("creates and enriches a contact", async () => {
