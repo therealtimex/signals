@@ -10,6 +10,7 @@ import {
 } from "@/lib/db/embedding-kinds";
 import { contacts, contentItems, embeddings, launches, niches, orgs, variants } from "@/lib/db/schema";
 import { nodeExists } from "@/lib/db/queries/graph";
+import { resolveContactCareerSummary } from "@/lib/db/queries/contact-employments";
 import { getActivePersona } from "@/lib/db/queries/personas";
 import type { GraphNodeType } from "@/lib/db/types";
 import {
@@ -442,11 +443,12 @@ export function assembleEmbedText(
       if (nodeType === "contact") {
         const contact = db.select().from(contacts).where(eq(contacts.id, nodeId)).get();
         if (!contact) throw new Error(`Contact not found: ${nodeId}`);
+        const career = resolveContactCareerSummary(nodeId);
         return joinText([
           contact.name,
           contact.headline,
-          contact.company,
-          contact.title,
+          career.company,
+          career.title,
           contact.bio,
           contact.location,
         ]);

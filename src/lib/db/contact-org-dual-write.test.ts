@@ -1,14 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { invokeAgentTool } from "@/lib/agent-tools/invoke";
-import { createContact } from "@/lib/db/queries/contacts";
-import { syncContactCompanyGraph } from "@/lib/db/contact-org-dual-write";
+import { createContact, updateContact } from "@/lib/db/queries/contacts";
+import { listContactEmployments } from "@/lib/db/queries/contact-employments";
 import * as graphQueries from "@/lib/db/queries/graph";
 import { db } from "@/lib/db/client";
 import { contacts, graphEdges, orgs } from "@/lib/db/schema";
 import { resetCoreTables } from "@/test/db";
 
-describe("contact company graph sync", () => {
+describe("contact company employment sync", () => {
   beforeEach(() => {
     resetCoreTables();
   });
@@ -17,12 +17,12 @@ describe("contact company graph sync", () => {
     const contact = createContact({
       name: "Mover",
       company: "Acme Corp",
+      title: "CEO",
       platform: "x",
       platformUserId: "m1",
     });
-    syncContactCompanyGraph(contact.id, "Acme Corp", "CEO");
 
-    syncContactCompanyGraph(contact.id, "Beta LLC", "CTO", "agent:update_contact");
+    updateContact(contact.id, { company: "Beta LLC", title: "CTO" }, "agent:update_contact");
 
     const orgRows = db.select().from(orgs).all();
     expect(orgRows.map((o) => o.name).sort()).toEqual(["Acme Corp", "Beta LLC"]);
@@ -38,6 +38,7 @@ describe("contact company graph sync", () => {
       title: "CTO",
       is_current: true,
     });
+    expect(listContactEmployments(contact.id)).toHaveLength(1);
   });
 
   it("removes works_at edges when company is cleared", () => {
@@ -47,11 +48,11 @@ describe("contact company graph sync", () => {
       platform: "x",
       platformUserId: "l1",
     });
-    syncContactCompanyGraph(contact.id, "Acme Corp");
 
-    const retired = syncContactCompanyGraph(contact.id, "", undefined, "agent:update_contact");
-    expect(retired.retiredEdges).toBe(1);
+    updateContact(contact.id, { company: "", orgId: "" }, "agent:update_contact");
+
     expect(db.select().from(graphEdges).all()).toHaveLength(0);
+    expect(listContactEmployments(contact.id)).toHaveLength(0);
   });
 
   it("update_contact keeps a single current employer via agent tool", async () => {
@@ -76,6 +77,7 @@ describe("contact company graph sync", () => {
     expect(worksAt).toHaveLength(1);
     const beta = db.select().from(orgs).where(eq(orgs.name, "Beta LLC")).get();
     expect(worksAt[0]?.dstId).toBe(beta?.id);
+    expect(listContactEmployments(contactId)).toHaveLength(1);
   });
 
   it("update_contact refreshes works_at title when only title changes", async () => {
@@ -102,7 +104,7 @@ describe("contact company graph sync", () => {
     });
   });
 
-  it("rolls back create_contact when graph dual-write fails", async () => {
+  it("rolls back create_contact when works_at projection fails", async () => {
     vi.spyOn(graphQueries, "upsertGraphEdge").mockImplementation(() => {
       throw new Error("graph write failed");
     });

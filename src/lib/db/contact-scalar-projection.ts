@@ -1,10 +1,11 @@
 import { eq, desc } from "drizzle-orm";
 import { db, sqlite } from "@/lib/db/client";
 import { resolvePrimaryChannel } from "@/lib/db/queries/contact-channels";
+import { resolveCurrentEmployment } from "@/lib/db/queries/contact-employments";
 import { contacts, contactIdentities } from "@/lib/db/schema";
 import type { NewContact } from "@/lib/db/types";
 
-export type ScalarProjectionDomain = "channels" | "identities";
+export type ScalarProjectionDomain = "channels" | "identities" | "employments";
 
 function contactsHasColumn(name: string): boolean {
   const rows = sqlite.prepare("PRAGMA table_info(contacts)").all() as { name: string }[];
@@ -70,16 +71,40 @@ export function syncIdentityScalarProjections(contactId: string): void {
     .run();
 }
 
+/** Project retiring company/title scalars from the resolved current employment. */
+export function syncEmploymentScalarProjections(contactId: string): void {
+  const updates: Partial<NewContact> = {};
+  const current = resolveCurrentEmployment(contactId);
+
+  if (contactsHasColumn("company")) {
+    updates.company = current?.orgName?.trim() || null;
+  }
+
+  if (contactsHasColumn("title")) {
+    updates.title = current?.title ?? null;
+  }
+
+  if (Object.keys(updates).length === 0) return;
+
+  db.update(contacts)
+    .set(updates as Partial<NewContact>)
+    .where(eq(contacts.id, contactId))
+    .run();
+}
+
 /** Write-through projection of all retiring scalar columns. */
 export function syncContactScalarProjections(
   contactId: string,
-  domains: ScalarProjectionDomain[] = ["channels", "identities"],
+  domains: ScalarProjectionDomain[] = ["channels", "identities", "employments"],
 ): void {
   if (domains.includes("channels")) {
     syncChannelScalarProjections(contactId);
   }
   if (domains.includes("identities")) {
     syncIdentityScalarProjections(contactId);
+  }
+  if (domains.includes("employments")) {
+    syncEmploymentScalarProjections(contactId);
   }
 }
 

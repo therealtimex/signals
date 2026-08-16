@@ -17,6 +17,12 @@ import {
   validateChannelSync,
   type ChannelInput,
 } from "@/lib/db/queries/contact-channel-writes";
+import {
+  applyLegacyCompanyTitle,
+  syncEmploymentInputs,
+  validateEmploymentSync,
+  type EmploymentInput,
+} from "@/lib/db/queries/contact-employment-writes";
 import { attachContactDtos, getContactDtoById } from "@/lib/db/queries/contact-read-model";
 import { recalcContactEnrichment } from "@/lib/db/contact-enrichment-recalc";
 import type { ContactDTO } from "@/lib/db/queries/contact-dto";
@@ -27,9 +33,18 @@ export type ContactWriteExtras = {
   phone?: string | null;
   verifiedEmail?: boolean | number | null;
   channels?: ChannelInput[];
+  employments?: EmploymentInput[];
+  orgId?: string | null;
   /** Stripped on write — use contact_identities */
   platform?: string | null;
   platformUserId?: string | null;
+};
+
+export type EmploymentWriteExtras = {
+  employments?: EmploymentInput[];
+  orgId?: string | null;
+  company?: string | null;
+  title?: string | null;
 };
 
 /** Contact create/update payload with optional channel shim fields. */
@@ -49,8 +64,23 @@ function stripChannelShim<T extends ContactWriteExtras>(data: T): Omit<T, keyof 
     phone: _p,
     verifiedEmail: _v,
     channels: _c,
+    employments: _emp,
+    orgId: _orgId,
     platform: _plat,
     platformUserId: _puid,
+    ...rest
+  } = data;
+  return rest;
+}
+
+function stripEmploymentShim<T extends EmploymentWriteExtras>(
+  data: T,
+): Omit<T, "employments" | "orgId" | "company" | "title"> {
+  const {
+    employments: _emp,
+    orgId: _orgId,
+    company: _company,
+    title: _title,
     ...rest
   } = data;
   return rest;
@@ -84,6 +114,39 @@ function applyChannelWrites(
   }
 }
 
+function applyEmploymentWrites(
+  contactId: string,
+  extras: EmploymentWriteExtras | undefined,
+  source: string,
+): void {
+  if (!extras) return;
+
+  if (extras.employments !== undefined) {
+    syncEmploymentInputs(contactId, extras.employments, source);
+  }
+
+  const legacy: {
+    company?: string | null;
+    orgId?: string | null;
+    title?: string | null;
+  } = {};
+  if (extras.orgId !== undefined) legacy.orgId = extras.orgId;
+  if (extras.company !== undefined) legacy.company = extras.company;
+  if (extras.title !== undefined) legacy.title = extras.title;
+  if (Object.keys(legacy).length > 0) {
+    applyLegacyCompanyTitle(contactId, legacy, source);
+  }
+}
+
+function validateEmploymentWrites(
+  contactId: string,
+  extras: EmploymentWriteExtras | undefined,
+): void {
+  if (extras?.employments !== undefined) {
+    validateEmploymentSync(contactId, extras.employments);
+  }
+}
+
 function validateChannelWrites(
   contactId: string,
   extras: ContactWriteExtras | undefined,
@@ -91,6 +154,23 @@ function validateChannelWrites(
   if (extras?.channels !== undefined) {
     validateChannelSync(contactId, extras.channels);
   }
+}
+
+function applyContactWrites(
+  contactId: string,
+  extras: ContactWriteExtras | undefined,
+  source: string,
+): void {
+  applyChannelWrites(contactId, extras, source);
+  applyEmploymentWrites(contactId, extras, source);
+}
+
+function validateContactWrites(
+  contactId: string,
+  extras: ContactWriteExtras | undefined,
+): void {
+  validateChannelWrites(contactId, extras);
+  validateEmploymentWrites(contactId, extras);
 }
 
 /** Recalculate and persist enrichment score for a contact. */
@@ -200,7 +280,7 @@ export function createContact(
   channelSource = "api:create_contact",
 ): ContactDTO {
   const id = nanoid();
-  const rowData = stripChannelShim(data);
+  const rowData = stripEmploymentShim(stripChannelShim(data));
 
   const nameFields =
     !rowData.firstName && !rowData.lastName && rowData.name ? parseName(rowData.name) : {};
@@ -222,13 +302,15 @@ export function createContact(
         .values({ ...rowData, ...nameFields, name, id, isSelf: true })
         .run();
     });
-    applyChannelWrites(id, data, channelSource);
+    applyContactWrites(id, data, channelSource);
     recalcEnrichment(id);
     return getContactById(id)!;
   }
 
-  db.insert(contacts).values({ ...rowData, ...nameFields, name, id }).run();
-  applyChannelWrites(id, data, channelSource);
+  db.transaction(() => {
+    db.insert(contacts).values({ ...rowData, ...nameFields, name, id }).run();
+    applyContactWrites(id, data, channelSource);
+  });
   recalcEnrichment(id);
   return getContactById(id)!;
 }
@@ -241,9 +323,9 @@ export function updateContact(
   const existing = getContactById(id);
   if (!existing) return undefined;
 
-  validateChannelWrites(id, data);
+  validateContactWrites(id, data);
 
-  const rowUpdates = stripChannelShim(data);
+  const rowUpdates = stripEmploymentShim(stripChannelShim(data));
   const updates = { ...rowUpdates };
 
   if (data.firstName !== undefined || data.lastName !== undefined) {
@@ -264,7 +346,7 @@ export function updateContact(
         .set({ ...updates, isSelf: true, updatedAt: now })
         .where(eq(contacts.id, id))
         .run();
-      applyChannelWrites(id, data, channelSource);
+      applyContactWrites(id, data, channelSource);
     });
     recalcEnrichment(id);
     return getContactById(id);
@@ -275,7 +357,7 @@ export function updateContact(
       .set({ ...updates, updatedAt: now })
       .where(eq(contacts.id, id))
       .run();
-    applyChannelWrites(id, data, channelSource);
+    applyContactWrites(id, data, channelSource);
   });
   recalcEnrichment(id);
   return getContactById(id);

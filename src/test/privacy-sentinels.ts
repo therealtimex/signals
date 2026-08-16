@@ -8,6 +8,8 @@ export const PRIVACY_SENTINELS = {
   personaArchetype: "SENTINEL_LOCAL_PERSONA",
   propertiesPrivate: "SENTINEL_PROPERTIES_PRIVATE",
   interactionSummary: "SENTINEL_LOCAL_INTERACTION",
+  privateEmployer: "SENTINEL_PRIVATE_EMPLOYER",
+  privateEmploymentTitle: "SENTINEL_PRIVATE_EMPLOYMENT_TITLE",
 } as const;
 
 export function assertNoPrivacySentinels(payload: unknown): void {

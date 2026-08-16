@@ -30,7 +30,10 @@ import {
   listSimulationRuns,
   recordSimulationAgentResults,
   startSimulationRun,
+  assembleAgentGrounding,
 } from "@/lib/db/queries/simulations";
+import { createContactEmployment } from "@/lib/db/queries/contact-employments";
+import { createOrg } from "@/lib/db/queries/orgs";
 import {
   SimulationAgentOwnershipError,
   SimulationRunStateError,
@@ -119,6 +122,33 @@ describe("simulation runs (slice 3.1)", () => {
     expect(agents[0]?.contactPersonaId).toBeNull();
     expect(agents[0]?.grounding.persona).toBeNull();
     assertNoPrivacySentinels(agents[0]?.grounding);
+  });
+
+  it("grounds simulation agents from employment-backed career fields", () => {
+    const contact = createContact({
+      name: "Public Name",
+      platform: "x",
+      platformUserId: "sim-career",
+    });
+    const org = createOrg({ name: "Structured Corp", source: "test" });
+    createContactEmployment({
+      contactId: contact.id,
+      orgId: org.id,
+      title: "VP Sales",
+      isCurrent: true,
+      source: "test",
+    });
+    db.update(contacts)
+      .set({ company: "Stale Scalar Co", title: "Stale Title" })
+      .where(eq(contacts.id, contact.id))
+      .run();
+
+    const grounding = assembleAgentGrounding(contact.id) as {
+      contact: { company: string | null; title: string | null };
+    };
+
+    expect(grounding.contact.company).toBe("Structured Corp");
+    expect(grounding.contact.title).toBe("VP Sales");
   });
 
   it("never leaks private CRM fields through grounding or query_simulations", async () => {

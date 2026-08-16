@@ -1,19 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { getContactById, updateContact, deleteContact } from "@/lib/db/queries/contacts";
-import { channelInputSchema } from "@/lib/agent-tools/schemas";
+import { channelInputSchema, employmentInputSchema } from "@/lib/agent-tools/schemas";
 import { ChannelWriteError } from "@/lib/db/queries/contact-channel-writes";
+import { EmploymentWriteError } from "@/lib/db/queries/contact-employment-writes";
 import {
   getDeprecatedPlatformFieldsError,
   getUnsupportedIdentityFieldsError,
 } from "@/lib/api/contact-route-validation";
-import { db } from "@/lib/db/client";
-import {
-  applyContactOrgLink,
-  resolveContactCompanyFields,
-  shouldSyncCompanyGraphOnUpdate,
-  syncContactCompanyFromContact,
-} from "@/lib/contact-org-api";
+import { resolveContactCompanyFields } from "@/lib/contact-org-api";
 
 const updateContactSchema = z.object({
   name: z.string().min(1).optional(),
@@ -38,6 +33,7 @@ const updateContactSchema = z.object({
   score: z.number().int().min(0).optional(),
   isSelf: z.boolean().optional(),
   channels: z.array(channelInputSchema).optional(),
+  employments: z.array(employmentInputSchema).optional(),
 });
 
 export async function GET(
@@ -68,7 +64,7 @@ async function updateContactHandler(
       return NextResponse.json({ error: identityError }, { status: 400 });
     }
 
-    const { orgId, company, ...data } = updateContactSchema.parse(body);
+    const { orgId, company, employments, ...data } = updateContactSchema.parse(body);
 
     const resolvedCompany = resolveContactCompanyFields({ orgId, company });
     if ("error" in resolvedCompany) {
@@ -76,39 +72,15 @@ async function updateContactHandler(
     }
 
     const updates: Record<string, unknown> = { ...data };
+    if (employments !== undefined) {
+      updates.employments = employments;
+    }
     if (resolvedCompany.touched) {
       updates.company = resolvedCompany.company;
+      updates.orgId = resolvedCompany.orgId;
     }
 
-    const syncGraph = shouldSyncCompanyGraphOnUpdate({ orgId, company, title: data.title });
-
-    const contact = syncGraph
-      ? db.transaction(() => {
-          const updated = updateContact(id, updates);
-          if (!updated) return undefined;
-
-          if (resolvedCompany.touched) {
-            applyContactOrgLink(
-              updated.id,
-              {
-                company: resolvedCompany.company,
-                orgId: resolvedCompany.orgId,
-              },
-              "api:update_contact",
-              updated.title,
-            );
-          } else {
-            syncContactCompanyFromContact(
-              updated.id,
-              updated.company,
-              updated.title,
-              "api:update_contact",
-            );
-          }
-
-          return updated;
-        })
-      : updateContact(id, updates);
+    const contact = updateContact(id, updates, "api:update_contact");
 
     if (!contact) {
       return NextResponse.json({ error: "Contact not found" }, { status: 404 });
@@ -116,6 +88,9 @@ async function updateContactHandler(
     return NextResponse.json(contact);
   } catch (error) {
     if (error instanceof ChannelWriteError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+    if (error instanceof EmploymentWriteError) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
     if (error instanceof z.ZodError) {

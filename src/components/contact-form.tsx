@@ -13,9 +13,11 @@ import {
 import type { ContactDTO } from "@/lib/db/queries/contact-dto";
 import type { DraftContactIdentity } from "@/lib/contact-identity-draft";
 import type { DraftContactChannel } from "@/lib/contact-channel-draft";
+import type { DraftContactEmployment } from "@/lib/contact-employment-draft";
 import { OrgPicker } from "@/components/org-picker";
 import { ContactIdentitiesInput } from "@/components/contact-identities-input";
 import { ContactChannelsInput } from "@/components/contact-channels-input";
+import { ContactEmploymentsInput } from "@/components/contact-employments-input";
 
 const funnelStages = ["prospect", "engaged", "qualified", "opportunity", "customer", "advocate"];
 
@@ -25,6 +27,7 @@ interface ContactFormProps {
   showIdentities?: boolean;
   onIdentitiesChange?: (identities: DraftContactIdentity[]) => void;
   onChannelsChange?: (channels: DraftContactChannel[]) => void;
+  onEmploymentsChange?: (employments: DraftContactEmployment[]) => void;
 }
 
 export function ContactForm({
@@ -33,6 +36,7 @@ export function ContactForm({
   showIdentities = false,
   onIdentitiesChange,
   onChannelsChange,
+  onEmploymentsChange,
 }: ContactFormProps) {
   function handleChange(field: string, value: string) {
     onChange({ [field]: value });
@@ -74,23 +78,37 @@ export function ContactForm({
       </div>
 
       <div className="grid grid-cols-2 gap-4">
-        <OrgPicker
-          id="organization"
-          defaultOrgId={defaultValues?.orgId}
-          defaultOrgName={defaultValues?.company ?? ""}
-          onChange={(value) => {
-            onChange({ orgId: value.orgId, company: value.company });
-          }}
-        />
-        <div className="grid gap-2">
-          <Label htmlFor="title">Title</Label>
-          <Input
-            id="title"
-            defaultValue={defaultValues?.title ?? ""}
-            onChange={(e) => handleChange("title", e.target.value)}
-            placeholder="Job title"
-          />
-        </div>
+        {onEmploymentsChange ? (
+          <div className="col-span-2">
+            <ContactEmploymentsInput
+              defaultEmployments={defaultValues?.employments}
+              defaultCompany={defaultValues?.company}
+              defaultTitle={defaultValues?.title}
+              defaultOrgId={defaultValues?.orgId}
+              onChange={onEmploymentsChange}
+            />
+          </div>
+        ) : (
+          <>
+            <OrgPicker
+              id="organization"
+              defaultOrgId={defaultValues?.orgId}
+              defaultOrgName={defaultValues?.company ?? ""}
+              onChange={(value) => {
+                onChange({ orgId: value.orgId, company: value.company });
+              }}
+            />
+            <div className="grid gap-2">
+              <Label htmlFor="title">Title</Label>
+              <Input
+                id="title"
+                defaultValue={defaultValues?.title ?? ""}
+                onChange={(e) => handleChange("title", e.target.value)}
+                placeholder="Job title"
+              />
+            </div>
+          </>
+        )}
       </div>
 
       <div className="grid gap-2">

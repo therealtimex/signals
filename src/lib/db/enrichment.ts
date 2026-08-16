@@ -1,4 +1,5 @@
 import type { Contact, ContactChannel, ContactIdentity } from "./types";
+import type { ContactEmploymentWithOrg } from "@/lib/db/queries/contact-employments";
 
 /**
  * Calculates an enrichment score (0-100) based on how complete
@@ -8,6 +9,7 @@ export function calculateEnrichmentScore(
   contact: Contact,
   identities: ContactIdentity[],
   channels: ContactChannel[] = [],
+  currentEmployment?: ContactEmploymentWithOrg | null,
 ): number {
   let score = 0;
 
@@ -34,12 +36,14 @@ export function calculateEnrichmentScore(
   }
 
   // Company: 5 points
-  if (contact.company) {
+  const company = currentEmployment?.orgName ?? contact.company;
+  if (company) {
     score += 5;
   }
 
   // Title: 5 points
-  if (contact.title) {
+  const title = currentEmployment?.title ?? contact.title;
+  if (title) {
     score += 5;
   }
 

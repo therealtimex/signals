@@ -1,7 +1,9 @@
-import type { Contact, ContactChannel, ContactIdentity } from "@/lib/db/types";
 import { eq, and, desc } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { contactChannels } from "@/lib/db/schema";
+import type { Contact, ContactChannel, ContactEmployment, ContactIdentity } from "@/lib/db/types";
+
+export type ContactEmploymentDTO = ContactEmployment & { orgName: string };
 
 export type ContactDTO = {
   id: string;
@@ -28,42 +30,14 @@ export type ContactDTO = {
   updatedAt: number;
   identities: ContactIdentity[];
   channels: ContactChannel[];
+  employments: ContactEmploymentDTO[];
+  currentEmployment: { orgId: string; orgName: string; title: string | null } | null;
   primaryEmail: string | null;
   primaryPhone: string | null;
   channelCount: number;
   email: string | null;
   phone: string | null;
 };
-
-export function assembleContactDto(
-  contact: Contact,
-  identities: ContactIdentity[],
-  channels: ContactChannel[],
-): ContactDTO {
-  const {
-    platform: _platform,
-    platformUserId: _platformUserId,
-    verifiedEmail: _verifiedEmail,
-    email: _legacyEmail,
-    phone: _legacyPhone,
-    ...contactRest
-  } = contact;
-  const primaryEmailChannel = pickPrimaryChannel(channels, "email");
-  const primaryPhoneChannel = pickPrimaryChannel(channels, "phone");
-  const primaryEmail = primaryEmailChannel?.value ?? null;
-  const primaryPhone = primaryPhoneChannel?.value ?? null;
-
-  return {
-    ...contactRest,
-    identities,
-    channels,
-    primaryEmail,
-    primaryPhone,
-    channelCount: channels.length,
-    email: primaryEmail,
-    phone: primaryPhone,
-  };
-}
 
 function pickPrimaryChannel(
   channels: ContactChannel[],
@@ -77,6 +51,67 @@ function pickPrimaryChannel(
   if (verified) return verified;
   return typed.sort((a, b) => b.createdAt - a.createdAt)[0];
 }
+
+function resolveCurrentFromEmployments(
+  employments: ContactEmploymentDTO[],
+): ContactEmploymentDTO | undefined {
+  const current = employments.filter((employment) => employment.isCurrent);
+  if (current.length === 0) return undefined;
+
+  return [...current].sort((a, b) => {
+    const aStart = a.startedAt ?? -1;
+    const bStart = b.startedAt ?? -1;
+    if (bStart !== aStart) return bStart - aStart;
+    return b.createdAt - a.createdAt;
+  })[0];
+}
+
+export function assembleContactDto(
+  contact: Contact,
+  identities: ContactIdentity[],
+  channels: ContactChannel[],
+  employments: ContactEmploymentDTO[],
+): ContactDTO {
+  const {
+    platform: _platform,
+    platformUserId: _platformUserId,
+    verifiedEmail: _verifiedEmail,
+    email: _legacyEmail,
+    phone: _legacyPhone,
+    company: _legacyCompany,
+    title: _legacyTitle,
+    ...contactRest
+  } = contact;
+  const primaryEmailChannel = pickPrimaryChannel(channels, "email");
+  const primaryPhoneChannel = pickPrimaryChannel(channels, "phone");
+  const primaryEmail = primaryEmailChannel?.value ?? null;
+  const primaryPhone = primaryPhoneChannel?.value ?? null;
+  const currentEmploymentRow = resolveCurrentFromEmployments(employments);
+  const currentEmployment = currentEmploymentRow
+    ? {
+        orgId: currentEmploymentRow.orgId,
+        orgName: currentEmploymentRow.orgName,
+        title: currentEmploymentRow.title,
+      }
+    : null;
+
+  return {
+    ...contactRest,
+    identities,
+    channels,
+    employments,
+    currentEmployment,
+    primaryEmail,
+    primaryPhone,
+    channelCount: channels.length,
+    email: primaryEmail,
+    phone: primaryPhone,
+    company: currentEmployment?.orgName ?? null,
+    title: currentEmployment?.title ?? null,
+  };
+}
+
+export { pickPrimaryChannel as pickPrimaryChannelForDto };
 
 export function resolveContactPrimaryEmail(contactId: string): string | null {
   return resolvePrimaryChannelValue(contactId, "email");

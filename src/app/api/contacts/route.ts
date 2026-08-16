@@ -3,14 +3,15 @@ import { z } from "zod";
 import { listContacts, createContact } from "@/lib/db/queries/contacts";
 import { db } from "@/lib/db/client";
 import { PlatformAccountConflictError } from "@/lib/db/identity-claims";
-import { applyContactOrgLink, resolveContactCompanyFields } from "@/lib/contact-org-api";
+import { resolveContactCompanyFields } from "@/lib/contact-org-api";
 import {
   contactIdentityInputSchema,
   createContactIdentities,
 } from "@/lib/contact-identities-api";
-import { channelInputSchema } from "@/lib/agent-tools/schemas";
+import { channelInputSchema, employmentInputSchema } from "@/lib/agent-tools/schemas";
 import { getDeprecatedPlatformFieldsError } from "@/lib/api/contact-route-validation";
 import { ChannelWriteError } from "@/lib/db/queries/contact-channel-writes";
+import { EmploymentWriteError } from "@/lib/db/queries/contact-employment-writes";
 
 function isUniqueConstraintError(error: unknown): boolean {
   return (
@@ -44,6 +45,7 @@ const createContactSchema = z.object({
   score: z.number().int().min(0).optional(),
   isSelf: z.boolean().optional(),
   channels: z.array(channelInputSchema).optional(),
+  employments: z.array(employmentInputSchema).optional(),
   identity: contactIdentityInputSchema.optional(),
   identities: z.array(contactIdentityInputSchema).optional(),
 }).refine(
@@ -73,7 +75,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: deprecatedError }, { status: 400 });
     }
 
-    const { identity, identities, orgId, company, ...data } = createContactSchema.parse(body);
+    const { identity, identities, orgId, company, employments, ...data } = createContactSchema.parse(body);
 
     const resolvedCompany = resolveContactCompanyFields({ orgId, company });
     if ("error" in resolvedCompany) {
@@ -89,25 +91,17 @@ export async function POST(req: NextRequest) {
     const contactPayload = {
       ...data,
       name,
-      ...(resolvedCompany.touched ? { company: resolvedCompany.company } : {}),
+      ...(employments !== undefined ? { employments } : {}),
+      ...(resolvedCompany.touched
+        ? { company: resolvedCompany.company, orgId: resolvedCompany.orgId }
+        : {}),
     };
 
     const identityPayload =
       identities && identities.length > 0 ? identities : identity ? [identity] : [];
 
     const contact = db.transaction(() => {
-      const created = createContact(contactPayload);
-      if (resolvedCompany.touched) {
-        applyContactOrgLink(
-          created.id,
-          {
-            company: resolvedCompany.company,
-            orgId: resolvedCompany.orgId,
-          },
-          "api:create_contact",
-          contactPayload.title,
-        );
-      }
+      const created = createContact(contactPayload, "api:create_contact");
       if (identityPayload.length > 0) {
         createContactIdentities(created.id, identityPayload);
       }
@@ -120,6 +114,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(result, { status: 201 });
   } catch (error) {
     if (error instanceof ChannelWriteError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+    if (error instanceof EmploymentWriteError) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
     if (error instanceof z.ZodError) {

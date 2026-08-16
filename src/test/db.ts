@@ -1,6 +1,7 @@
 import { db } from "@/lib/db/client";
 import {
   contactChannels,
+  contactEmployments,
   contactIdentities,
   contacts,
   contentItems,
@@ -57,6 +58,7 @@ export function resetCoreTables(): void {
   db.delete(launches).run();
   db.delete(niches).run();
   db.delete(orgIdentities).run();
+  db.delete(contactEmployments).run();
   db.delete(orgs).run();
   db.delete(contactChannels).run();
   db.delete(contactIdentities).run();

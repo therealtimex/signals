@@ -21,6 +21,16 @@ export const channelInputSchema = z.object({
   isVerified: z.boolean().optional(),
 });
 
+export const employmentInputSchema = z.object({
+  id: z.string().min(1).optional(),
+  orgId: z.string().min(1).optional(),
+  orgName: z.string().optional(),
+  title: z.string().optional().nullable(),
+  startedAt: z.number().int().optional().nullable(),
+  endedAt: z.number().int().optional().nullable(),
+  isCurrent: z.boolean().optional(),
+});
+
 export const queryContactsSchema = z.object({
   search: z.string().optional(),
   funnelStage: funnelStage.optional(),
@@ -40,6 +50,7 @@ export const createContactSchema = z.object({
   email: z.string().email().optional().or(z.literal("")),
   phone: z.string().optional(),
   channels: z.array(channelInputSchema).optional(),
+  employments: z.array(employmentInputSchema).optional(),
   company: z.string().optional(),
   title: z.string().optional(),
   funnelStage: funnelStage.optional(),
@@ -52,6 +63,7 @@ export const updateContactSchema = z.object({
   email: z.string().email().optional().or(z.literal("")),
   phone: z.string().optional(),
   channels: z.array(channelInputSchema).optional(),
+  employments: z.array(employmentInputSchema).optional(),
   company: z.string().optional(),
   title: z.string().optional(),
   headline: z.string().optional(),

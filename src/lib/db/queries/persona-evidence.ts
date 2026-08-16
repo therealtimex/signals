@@ -13,6 +13,7 @@ import {
   orgs,
 } from "@/lib/db/schema";
 import type { IdentityMetric } from "@/lib/db/types";
+import { resolveContactCareerSummary } from "@/lib/db/queries/contact-employments";
 import { PersonaEvidenceError } from "@/lib/db/queries/persona-errors";
 
 export const MAX_EVIDENCE_CHARS = 24_000;
@@ -299,12 +300,13 @@ export function assemblePersonaEvidence(contactId: string): PersonaEvidenceBundl
 
   const orgRecord = primarySharedOrg(contactId);
   const nicheRows = sharedNichesForContact(contactId);
+  const career = resolveContactCareerSummary(contactId);
 
   const evidenceDraft: PersonaEvidence = {
     contact: {
       name: contact.name,
-      title: contact.title,
-      company: contact.company,
+      title: career.title,
+      company: career.company,
       location: contact.location,
       bio: contact.bio,
     },

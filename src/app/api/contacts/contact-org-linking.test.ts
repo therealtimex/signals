@@ -5,6 +5,10 @@ import { POST } from "@/app/api/contacts/route";
 import { PATCH, PUT } from "@/app/api/contacts/[id]/route";
 import { createContact } from "@/lib/db/queries/contacts";
 import { createOrg } from "@/lib/db/queries/orgs";
+import {
+  createContactEmployment,
+  listContactEmployments,
+} from "@/lib/db/queries/contact-employments";
 import { db } from "@/lib/db/client";
 import { graphEdges, orgs } from "@/lib/db/schema";
 import { resetCoreTables } from "@/test/db";
@@ -33,6 +37,12 @@ describe("contact org linking API", () => {
     const contact = await res.json();
     expect(contact.company).toBe("Acme Corp");
     expect(contact.title).toBe("CEO");
+    expect(contact.currentEmployment).toMatchObject({
+      orgId: org.id,
+      orgName: "Acme Corp",
+      title: "CEO",
+    });
+    expect(listContactEmployments(contact.id)).toHaveLength(1);
 
     const worksAt = db.select().from(graphEdges).where(eq(graphEdges.edgeType, "works_at")).all();
     expect(worksAt).toHaveLength(1);
@@ -109,23 +119,11 @@ describe("contact org linking API", () => {
     const contact = createContact({
       name: "Leaver",
       company: "Acme Corp",
+      title: "CEO",
       platform: "x",
       platformUserId: "leaver-1",
     });
-    const org = createOrg({ name: "Acme Corp", source: "test" });
-    db.insert(graphEdges)
-      .values({
-        id: "edge-1",
-        srcType: "contact",
-        srcId: contact.id,
-        dstType: "org",
-        dstId: org.id,
-        edgeType: "works_at",
-        properties: JSON.stringify({ title: "CEO", is_current: true }),
-        scope: "shared",
-        source: "test",
-      })
-      .run();
+    expect(listContactEmployments(contact.id)).toHaveLength(1);
 
     const req = new NextRequest(`http://localhost/api/contacts/${contact.id}`, {
       method: "PUT",
@@ -149,20 +147,6 @@ describe("contact org linking API", () => {
       platform: "x",
       platformUserId: "titled-1",
     });
-    const org = createOrg({ name: "Acme Corp", source: "test" });
-    db.insert(graphEdges)
-      .values({
-        id: "edge-2",
-        srcType: "contact",
-        srcId: contact.id,
-        dstType: "org",
-        dstId: org.id,
-        edgeType: "works_at",
-        properties: JSON.stringify({ title: "CEO", is_current: true }),
-        scope: "shared",
-        source: "test",
-      })
-      .run();
 
     const req = new NextRequest(`http://localhost/api/contacts/${contact.id}`, {
       method: "PATCH",
@@ -231,5 +215,45 @@ describe("contact org linking API", () => {
       title: "CTO",
       is_current: true,
     });
+  });
+
+  it("PUT /api/contacts preserves multiple employments when syncing structured history", async () => {
+    const contact = createContact({ name: "Multi Role" });
+    const acme = createOrg({ name: "Acme Corp", source: "test" });
+    const beta = createOrg({ name: "Beta LLC", source: "test" });
+    const first = createContactEmployment({
+      contactId: contact.id,
+      orgId: acme.id,
+      title: "CEO",
+      isCurrent: true,
+      source: "test",
+    });
+    const second = createContactEmployment({
+      contactId: contact.id,
+      orgId: beta.id,
+      title: "Advisor",
+      startedAt: 100,
+      isCurrent: false,
+      source: "test",
+    });
+
+    const req = new NextRequest(`http://localhost/api/contacts/${contact.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        employments: [
+          { id: first.id, orgId: acme.id, title: "Chair", isCurrent: true },
+          { id: second.id, orgId: beta.id, title: "Advisor", startedAt: 100, isCurrent: false },
+        ],
+      }),
+    });
+
+    const res = await PUT(req, { params: Promise.resolve({ id: contact.id }) });
+    expect(res.status).toBe(200);
+
+    const employments = listContactEmployments(contact.id);
+    expect(employments).toHaveLength(2);
+    expect(employments.find((row) => row.orgId === acme.id)?.title).toBe("Chair");
+    expect(employments.find((row) => row.orgId === beta.id)?.title).toBe("Advisor");
   });
 });

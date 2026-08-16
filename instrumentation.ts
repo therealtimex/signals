@@ -28,6 +28,26 @@ export async function register() {
       console.warn("[instrumentation] Channel backfill skipped:", (e as Error).message);
     }
 
+    try {
+      const { backfillEmployments } = await import("@/lib/db/backfills/employments");
+      const employmentBackfill = backfillEmployments();
+      if (employmentBackfill.inserted > 0) {
+        console.log("[instrumentation] Employment backfill applied:", employmentBackfill);
+      }
+    } catch (e) {
+      console.warn("[instrumentation] Employment backfill skipped:", (e as Error).message);
+    }
+
+    try {
+      const { runContactProfileEmbedSweep } = await import("@/lib/db/contact-profile-embed-sweep");
+      const embedSweep = await runContactProfileEmbedSweep({ batchSize: 25 });
+      if (embedSweep.processed > 0 || (!embedSweep.complete && embedSweep.remaining > 0)) {
+        console.log("[instrumentation] Contact profile embedding sweep:", embedSweep);
+      }
+    } catch (e) {
+      console.warn("[instrumentation] Contact profile embedding sweep skipped:", (e as Error).message);
+    }
+
     // Run identity migration
     try {
       const { migrateContactIdentities } = await import("@/lib/db/migrate-identities");
