@@ -12,6 +12,15 @@ const funnelStage = z.enum([
 
 const platform = z.enum(PLATFORMS as unknown as [string, ...string[]]);
 
+export const channelInputSchema = z.object({
+  id: z.string().min(1).optional(),
+  channelType: z.string().min(1),
+  value: z.string().min(1),
+  label: z.string().optional().nullable(),
+  isPrimary: z.boolean().optional(),
+  isVerified: z.boolean().optional(),
+});
+
 export const queryContactsSchema = z.object({
   search: z.string().optional(),
   funnelStage: funnelStage.optional(),
@@ -29,9 +38,10 @@ export const getContactSchema = z.object({
 export const createContactSchema = z.object({
   name: z.string().min(1),
   email: z.string().email().optional().or(z.literal("")),
+  phone: z.string().optional(),
+  channels: z.array(channelInputSchema).optional(),
   company: z.string().optional(),
   title: z.string().optional(),
-  platform: platform.optional(),
   funnelStage: funnelStage.optional(),
   firstName: z.string().optional(),
   lastName: z.string().optional(),
@@ -40,6 +50,8 @@ export const createContactSchema = z.object({
 export const updateContactSchema = z.object({
   contactId: z.string().min(1),
   email: z.string().email().optional().or(z.literal("")),
+  phone: z.string().optional(),
+  channels: z.array(channelInputSchema).optional(),
   company: z.string().optional(),
   title: z.string().optional(),
   headline: z.string().optional(),

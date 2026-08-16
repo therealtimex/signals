@@ -1,7 +1,9 @@
-import { eq, and, isNotNull } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { contacts, contactIdentities } from "@/lib/db/schema";
-import { updateContact } from "@/lib/db/queries/contacts";
+import { contacts, contactIdentities, contactChannels } from "@/lib/db/schema";
+import { createContact, updateContact, recalcEnrichment } from "@/lib/db/queries/contacts";
+import { findContactByChannel } from "@/lib/db/queries/contact-channels";
+import { resolveContactPrimaryEmail } from "@/lib/db/queries/contact-dto";
 import { logInteraction } from "@/lib/db/queries/interactions";
 import { updatePlatformAccount } from "@/lib/db/queries/platform-accounts";
 import { getSyncCursor, updateSyncCursor } from "@/lib/db/queries/sync";
@@ -33,9 +35,15 @@ export async function syncGmailMetadata(
   try {
     // Find contacts with email addresses
     const contactsWithEmail = db
-      .select()
+      .selectDistinct({ contact: contacts })
       .from(contacts)
-      .where(isNotNull(contacts.email))
+      .innerJoin(
+        contactChannels,
+        and(
+          eq(contactChannels.contactId, contacts.id),
+          eq(contactChannels.channelType, "email"),
+        ),
+      )
       .limit(maxContacts)
       .all();
 
@@ -55,14 +63,15 @@ export async function syncGmailMetadata(
 
     let processed = 0;
 
-    for (const contact of contactsWithEmail) {
-      if (!contact.email) continue;
+    for (const { contact } of contactsWithEmail) {
+      const email = resolveContactPrimaryEmail(contact.id);
+      if (!email) continue;
 
       try {
         // Get most recent messages for last interaction date
         const recentMessages = await getGmailMessagesByContact(
           accountId,
-          contact.email,
+          email,
           { maxResults: 1 }
         );
 
@@ -82,10 +91,10 @@ export async function syncGmailMetadata(
         // Get sent messages in the last 30 days
         const sentMessages = await getGmailMessagesByContact(
           accountId,
-          contact.email,
+          email,
           {
             maxResults: 100,
-            query: `to:${contact.email} after:${afterDate}`,
+            query: `to:${email} after:${afterDate}`,
           }
         );
         const sent30d = sentMessages.messages?.length ?? 0;
@@ -93,10 +102,10 @@ export async function syncGmailMetadata(
         // Get received messages in the last 30 days
         const receivedMessages = await getGmailMessagesByContact(
           accountId,
-          contact.email,
+          email,
           {
             maxResults: 100,
-            query: `from:${contact.email} after:${afterDate}`,
+            query: `from:${email} after:${afterDate}`,
           }
         );
         const received30d = receivedMessages.messages?.length ?? 0;
@@ -133,7 +142,7 @@ export async function syncGmailMetadata(
         processed++;
       } catch (err) {
         result.errors.push(
-          `Failed to sync metadata for ${contact.name} (${contact.email}): ${err instanceof Error ? err.message : String(err)}`
+          `Failed to sync metadata for ${contact.name} (${email}): ${err instanceof Error ? err.message : String(err)}`
         );
       }
     }

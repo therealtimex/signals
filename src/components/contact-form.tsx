@@ -10,18 +10,21 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import type { Contact } from "@/lib/db/types";
+import type { ContactDTO } from "@/lib/db/queries/contact-dto";
 import type { DraftContactIdentity } from "@/lib/contact-identity-draft";
+import type { DraftContactChannel } from "@/lib/contact-channel-draft";
 import { OrgPicker } from "@/components/org-picker";
 import { ContactIdentitiesInput } from "@/components/contact-identities-input";
+import { ContactChannelsInput } from "@/components/contact-channels-input";
 
 const funnelStages = ["prospect", "engaged", "qualified", "opportunity", "customer", "advocate"];
 
 interface ContactFormProps {
-  defaultValues?: Partial<Contact> & { orgId?: string };
+  defaultValues?: Partial<ContactDTO> & { orgId?: string };
   onChange: (data: Record<string, string>) => void;
   showIdentities?: boolean;
   onIdentitiesChange?: (identities: DraftContactIdentity[]) => void;
+  onChannelsChange?: (channels: DraftContactChannel[]) => void;
 }
 
 export function ContactForm({
@@ -29,6 +32,7 @@ export function ContactForm({
   onChange,
   showIdentities = false,
   onIdentitiesChange,
+  onChannelsChange,
 }: ContactFormProps) {
   function handleChange(field: string, value: string) {
     onChange({ [field]: value });
@@ -99,27 +103,34 @@ export function ContactForm({
         />
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
-        <div className="grid gap-2">
-          <Label htmlFor="email">Email</Label>
-          <Input
-            id="email"
-            type="email"
-            defaultValue={defaultValues?.email ?? ""}
-            onChange={(e) => handleChange("email", e.target.value)}
-            placeholder="email@example.com"
-          />
+      {onChannelsChange ? (
+        <ContactChannelsInput
+          defaultChannels={defaultValues?.channels}
+          onChange={onChannelsChange}
+        />
+      ) : (
+        <div className="grid grid-cols-2 gap-4">
+          <div className="grid gap-2">
+            <Label htmlFor="email">Email</Label>
+            <Input
+              id="email"
+              type="email"
+              defaultValue={defaultValues?.email ?? ""}
+              onChange={(e) => handleChange("email", e.target.value)}
+              placeholder="email@example.com"
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="phone">Phone</Label>
+            <Input
+              id="phone"
+              defaultValue={defaultValues?.phone ?? ""}
+              onChange={(e) => handleChange("phone", e.target.value)}
+              placeholder="+1 (555) 000-0000"
+            />
+          </div>
         </div>
-        <div className="grid gap-2">
-          <Label htmlFor="phone">Phone</Label>
-          <Input
-            id="phone"
-            defaultValue={defaultValues?.phone ?? ""}
-            onChange={(e) => handleChange("phone", e.target.value)}
-            placeholder="+1 (555) 000-0000"
-          />
-        </div>
-      </div>
+      )}
 
       <div className="grid grid-cols-2 gap-4">
         <div className="grid gap-2">

@@ -7,6 +7,7 @@ import {
   workflowEnrollments,
   contacts,
 } from "@/lib/db/schema";
+import { resolveContactPrimaryEmail } from "@/lib/db/queries/contact-dto";
 import type {
   WorkflowTemplate,
   NewWorkflowTemplate,
@@ -241,7 +242,6 @@ export function listEnrollments(
     .select({
       enrollment: workflowEnrollments,
       contactName: contacts.name,
-      contactEmail: contacts.email,
     })
     .from(workflowEnrollments)
     .innerJoin(contacts, eq(workflowEnrollments.contactId, contacts.id))
@@ -252,6 +252,6 @@ export function listEnrollments(
   return rows.map((r) => ({
     ...r.enrollment,
     contactName: r.contactName,
-    contactEmail: r.contactEmail,
+    contactEmail: resolveContactPrimaryEmail(r.enrollment.contactId),
   }));
 }

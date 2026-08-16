@@ -1,4 +1,4 @@
-import type { Contact, ContactIdentity } from "./types";
+import type { Contact, ContactChannel, ContactIdentity } from "./types";
 
 /**
  * Calculates an enrichment score (0-100) based on how complete
@@ -6,7 +6,8 @@ import type { Contact, ContactIdentity } from "./types";
  */
 export function calculateEnrichmentScore(
   contact: Contact,
-  identities: ContactIdentity[]
+  identities: ContactIdentity[],
+  channels: ContactChannel[] = [],
 ): number {
   let score = 0;
 
@@ -15,13 +16,15 @@ export function calculateEnrichmentScore(
     score += 10;
   }
 
-  // Email: 15 if verified, 10 if unverified
-  if (contact.email) {
-    score += contact.verifiedEmail ? 15 : 10;
+  const emailChannels = channels.filter((c) => c.channelType === "email");
+  const hasVerifiedEmail = emailChannels.some((c) => c.isVerified);
+  const hasEmail = emailChannels.length > 0;
+  if (hasEmail) {
+    score += hasVerifiedEmail ? 15 : 10;
   }
 
-  // Phone: 10 points
-  if (contact.phone) {
+  const hasPhone = channels.some((c) => c.channelType === "phone");
+  if (hasPhone) {
     score += 10;
   }
 

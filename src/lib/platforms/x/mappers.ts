@@ -1,4 +1,5 @@
 import type { NewContact, NewContactIdentity, NewContentItem, NewContentPost } from "@/lib/db/types";
+import type { ContactWriteExtras } from "@/lib/db/queries/contacts";
 import { liftIdentityStatsFromPlatformData } from "@/lib/db/identity-stats";
 import type { XUser, XTweet } from "@/lib/platforms/x/client";
 
@@ -18,7 +19,7 @@ function extractWebsite(xUser: XUser): string | null {
 }
 
 /** Map an X user profile to Signals contact fields. */
-export function mapXUserToContact(xUser: XUser): Omit<NewContact, "id"> {
+export function mapXUserToContact(xUser: XUser): Omit<NewContact, "id"> & ContactWriteExtras {
   const { firstName, lastName } = splitName(xUser.name);
 
   return {

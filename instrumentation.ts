@@ -8,6 +8,26 @@ export async function register() {
       console.warn("[instrumentation] Base schema migrations skipped:", (e as Error).message);
     }
 
+    try {
+      const { ensureContactScalarColumns } = await import("@/lib/db/migrate-contact-scalars");
+      const scalarRestore = ensureContactScalarColumns();
+      if (scalarRestore.restored.length > 0) {
+        console.log("[instrumentation] Restored contact scalar columns:", scalarRestore.restored);
+      }
+    } catch (e) {
+      console.warn("[instrumentation] Contact scalar restore skipped:", (e as Error).message);
+    }
+
+    try {
+      const { backfillChannels } = await import("@/lib/db/backfills/channels");
+      const channelBackfill = backfillChannels();
+      if (channelBackfill.emails > 0 || channelBackfill.phones > 0) {
+        console.log("[instrumentation] Channel backfill applied:", channelBackfill);
+      }
+    } catch (e) {
+      console.warn("[instrumentation] Channel backfill skipped:", (e as Error).message);
+    }
+
     // Run identity migration
     try {
       const { migrateContactIdentities } = await import("@/lib/db/migrate-identities");

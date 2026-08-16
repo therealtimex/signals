@@ -108,6 +108,38 @@ export const contactIdentities = sqliteTable("contact_identities", {
   index("idx_identity_followers").on(table.followersCount),
 ]);
 
+// --- Contact Channels (reachability — email, phone, messengers) ---
+
+export const contactChannels = sqliteTable("contact_channels", {
+  id: text("id").primaryKey(),
+  contactId: text("contact_id")
+    .notNull()
+    .references(() => contacts.id, { onDelete: "cascade" }),
+  channelType: text("channel_type").notNull(),
+  value: text("value").notNull(),
+  valueNormalized: text("value_normalized").notNull(),
+  label: text("label"),
+  isPrimary: integer("is_primary", { mode: "boolean" }).notNull().default(false),
+  isVerified: integer("is_verified", { mode: "boolean" }).notNull().default(false),
+  contactIdentityId: text("contact_identity_id").references(() => contactIdentities.id, {
+    onDelete: "set null",
+  }),
+  scope: text("scope", { enum: ["shared", "local_only"] })
+    .notNull()
+    .default("shared"),
+  source: text("source").notNull(),
+  metadata: text("metadata").default("{}"),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex("idx_channel_contact_value").on(
+    table.contactId,
+    table.channelType,
+    table.valueNormalized,
+  ),
+  index("idx_channel_lookup").on(table.channelType, table.valueNormalized),
+  index("idx_channel_contact").on(table.contactId),
+]);
+
 // --- Identity Metrics (time-series stat snapshots per platform identity) ---
 
 export const identityMetrics = sqliteTable("identity_metrics", {

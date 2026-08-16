@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { PLATFORM_ENUM } from "@/lib/db/platforms";
 import { getContactById, updateContact, deleteContact } from "@/lib/db/queries/contacts";
+import { channelInputSchema } from "@/lib/agent-tools/schemas";
+import { ChannelWriteError } from "@/lib/db/queries/contact-channel-writes";
+import {
+  getDeprecatedPlatformFieldsError,
+  getUnsupportedIdentityFieldsError,
+} from "@/lib/api/contact-route-validation";
 import { db } from "@/lib/db/client";
 import {
   applyContactOrgLink,
@@ -18,8 +23,6 @@ const updateContactSchema = z.object({
   orgId: z.string().optional().nullable(),
   company: z.string().optional().nullable(),
   title: z.string().optional(),
-  platform: z.enum(PLATFORM_ENUM).nullable().optional(),
-  platformUserId: z.string().optional(),
   profileUrl: z.string().optional(),
   avatarUrl: z.string().optional(),
   email: z.string().email().optional().or(z.literal("")),
@@ -34,6 +37,7 @@ const updateContactSchema = z.object({
     .optional(),
   score: z.number().int().min(0).optional(),
   isSelf: z.boolean().optional(),
+  channels: z.array(channelInputSchema).optional(),
 });
 
 export async function GET(
@@ -54,6 +58,16 @@ async function updateContactHandler(
 ): Promise<NextResponse> {
   try {
     const body = await req.json();
+    const deprecatedError = getDeprecatedPlatformFieldsError(body);
+    if (deprecatedError) {
+      return NextResponse.json({ error: deprecatedError }, { status: 400 });
+    }
+
+    const identityError = getUnsupportedIdentityFieldsError(body);
+    if (identityError) {
+      return NextResponse.json({ error: identityError }, { status: 400 });
+    }
+
     const { orgId, company, ...data } = updateContactSchema.parse(body);
 
     const resolvedCompany = resolveContactCompanyFields({ orgId, company });
@@ -101,6 +115,9 @@ async function updateContactHandler(
     }
     return NextResponse.json(contact);
   } catch (error) {
+    if (error instanceof ChannelWriteError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: error.errors }, { status: 400 });
     }

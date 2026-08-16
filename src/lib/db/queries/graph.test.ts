@@ -210,7 +210,7 @@ describe("schema v0.5 migrations", () => {
     const contactId = nanoid();
     sqlite
       .prepare(
-        "INSERT INTO contacts (id, name, funnel_stage, score, enrichment_score, verified_email, created_at, updated_at) VALUES (?, ?, 'prospect', 0, 0, 0, 1, 1)",
+        "INSERT INTO contacts (id, name, funnel_stage, score, enrichment_score, created_at, updated_at) VALUES (?, ?, 'prospect', 0, 0, 1, 1)",
       )
       .run(contactId, "Legacy Contact");
 
