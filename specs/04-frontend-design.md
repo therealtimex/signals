@@ -148,7 +148,7 @@ className="animate-fade-slide-in"
 - **Glass**: `bg-background/80 backdrop-blur-sm` + `border-b border-border/50`
 - **Left**: Sidebar trigger + vertical separator
 - **Center**: Auto-generated breadcrumb from `usePathname()` — last segment bold, earlier segments are links
-- **Right**: Search button (disabled placeholder) + theme toggle (Sun/Moon icons)
+- **Right**: Theme toggle (Sun/Moon icons)
 
 ## 7. Page Structure
 
@@ -172,12 +172,12 @@ className="animate-fade-slide-in"
 
 ### Contact Detail (`/dashboard/contacts/[id]`)
 
-- **Header**: Back button + name/company + EnrichButton (X contacts only) + FunnelStageBadge + EnrichmentScoreBadge
+- **Header**: Back button + name/company + EnrichButton (RTX enrichment guidance for X contacts) + FunnelStageBadge + EnrichmentScoreBadge
 - **Tabs**: Details | Identities (count) | Tasks (count) | Audience
 - **Details tab**: Contact info card (headline, bio, email, phone, location, website, platform, profile link, tags) + Edit form card (with save/delete)
 - **Identities tab**: `IdentitiesSection` — table with add/delete, platform badges, external links
 - **Tasks tab**: Task list with toggle (done/todo), priority badges, add/delete
-- **Audience tab**: Persona summary, per-platform identity stats, niche membership chips (`ContactExploreCard` from `GET /api/contacts/[id]/explore`)
+- **Audience tab**: Persona summary, per-platform identity stats, niche membership chips — server-loaded via `getContactExploreCard()` in the page component and rendered by `ContactExploreCardView` (props; no client fetch on initial paint). `GET /api/contacts/[id]/explore` exposes the same shape for external/agent callers.
 
 ### Content (`/dashboard/content`)
 
@@ -223,9 +223,10 @@ className="animate-fade-slide-in"
 
 ### Automation (`/dashboard/workflows`)
 
-- Server-rendered hub with `AutomationTabs`: **Agents**, **Actions**, **Runs** (plus scheduled jobs list)
-- `WorkflowQuickActions` for triggering sync/enrich delegations
-- `WorkflowViewSwitcher` — list / kanban / swimlane views with URL param `?view=list|kanban|swimlane`
+- Server-rendered hub with `AutomationTabs`: **Agents**, **Actions**, **Runs**
+- **Agents tab**: RTX migration banner, `TemplateGallery`, `ScheduledJobsList`
+- **Actions tab**: `ActionCards` — platform sync/enrich/upload cards (RTX-labeled enrich actions with migration guidance; connection gate bypass for enrich cards)
+- **Runs tab**: `WorkflowViewSwitcher` — list / kanban / swimlane views with URL param `?view=list|kanban|swimlane`
 - Empty state when no runs exist; populated by platform sync, RTX-reported agent runs, and maintenance jobs
 - View components: `WorkflowListView` (table), `WorkflowKanbanView` (4-column status board), `WorkflowSwimlaneView` (horizontal type lanes)
 
@@ -243,7 +244,7 @@ className="animate-fade-slide-in"
 
 ## 8. Component Inventory
 
-### Custom Domain Components (26)
+### Custom Domain Components (28)
 
 | Component | File | Purpose |
 |-----------|------|---------|
@@ -259,9 +260,11 @@ className="animate-fade-slide-in"
 | `ContactForm` | `contact-form.tsx` | Contact CRUD form (auto-syncs full name) |
 | `AddTaskDialog` | `add-task-dialog.tsx` | Task creation dialog |
 | `IdentitiesSection` | `identities-section.tsx` | Platform identities table with add/delete |
-| `EnrichButton` | `enrich-button.tsx` | Single/bulk browser enrichment trigger |
-| `ComposeDialog` | `compose-dialog.tsx` | Tweet/thread compose modal (draft + publish) |
-| `TweetInput` | `tweet-input.tsx` | Auto-resize textarea with char counter |
+| `EnrichButton` | `enrich-button.tsx` | RTX enrichment delegation trigger (migration message; no in-process browser scrape) |
+| `ContactExploreCardView` | `contact-explore-card.tsx` | Audience tab — persona, platform stats, niche chips (server-provided `explore` prop) |
+| `ComposeDialog` | `compose-dialog.tsx` | Multi-platform compose modal (X + LinkedIn, draft + publish) |
+| `PostInput` | `post-input.tsx` | Auto-resize textarea with platform-aware char counter and media attachments |
+| `ActionCards` | `dashboard/workflows/action-cards.tsx` | Automation Actions tab — sync/enrich/upload cards per platform |
 | `PaginationControls` | `pagination-controls.tsx` | Page navigation with windowed numbers |
 | `EmptyState` | `empty-state.tsx` | Centered icon + title + CTA |
 | `WorkflowProgressCard` | `workflow-progress-card.tsx` | Card with type icon (6 types), progress bar, stats |
@@ -320,14 +323,16 @@ The `PlatformConnectionCard` is the most complex reusable component. Key feature
 
 ## 10. Compose Dialog Pattern
 
-The `ComposeDialog` supports single tweets and threads:
+The `ComposeDialog` supports X and LinkedIn posts (threads on X only):
 
-- **Single mode**: One `TweetInput` with 280 char limit
-- **Thread mode**: Multiple `TweetInput` components with reordering (up/down arrows) + add/remove
-- **Character counter**: Normal (gray), warning (>=260, yellow), over (>280, red)
+- **Platform toggle**: X (280 chars, thread support) or LinkedIn (3,000 chars, single post)
+- **Publish mode**: **Auto** (headless browser publishes) or **Review** (headed browser; user confirms Post)
+- **Single vs thread** (X only): One or multiple `PostInput` rows with reordering (up/down) + add/remove
+- **Media**: Attach images per post via `PostInput` + `media-thumbnail-grid` validation
+- **Character counter**: Platform-specific limits with warning/over-threshold styling
 - **Actions**: Save as Draft, Publish
-- **Thread limits**: Max 25 tweets per thread
-- **Partial failure**: If some tweets in a thread post but later ones fail, shows posted count + error
+- **Thread limits**: Max 25 posts per X thread
+- **Partial failure**: If some posts in a thread publish but later ones fail, shows posted count + error
 
 ## 11. Dark Mode
 
