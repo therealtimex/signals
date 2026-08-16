@@ -1,10 +1,11 @@
-import { eq, and, desc, count, SQL } from "drizzle-orm";
+import { eq, and, desc, count, SQL, inArray } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { join } from "path";
 import { homedir } from "os";
 import { existsSync, unlinkSync } from "fs";
 import { db } from "@/lib/db/client";
-import { mediaAssets, contentItems } from "@/lib/db/schema";
+import { createMediaAttachment, listAssetsForParent } from "@/lib/db/queries/media-attachments";
+import { mediaAssets, contentItems, mediaAttachments } from "@/lib/db/schema";
 import type { MediaAsset, NewMediaAsset, PaginatedResult } from "@/lib/db/types";
 
 const dataDir = process.env.SIGNALS_DATA_DIR?.replace("~", homedir()) ?? join(homedir(), ".signals");
@@ -31,7 +32,23 @@ export function listMediaAssets(opts?: {
   const conditions: SQL[] = [];
 
   if (opts?.contentItemId) {
-    conditions.push(eq(mediaAssets.contentItemId, opts.contentItemId));
+    const attachmentAssetIds = db
+      .select({ mediaAssetId: mediaAttachments.mediaAssetId })
+      .from(mediaAttachments)
+      .where(
+        and(
+          eq(mediaAttachments.parentType, "content_item"),
+          eq(mediaAttachments.parentId, opts.contentItemId),
+        ),
+      )
+      .all()
+      .map((row) => row.mediaAssetId);
+
+    if (attachmentAssetIds.length > 0) {
+      conditions.push(inArray(mediaAssets.id, attachmentAssetIds));
+    } else {
+      conditions.push(eq(mediaAssets.contentItemId, opts.contentItemId));
+    }
   }
   if (opts?.platformTarget) {
     conditions.push(
@@ -63,17 +80,28 @@ export function listMediaAssets(opts?: {
   return { data: rows, total };
 }
 
-/** Delete a media asset: removes file from disk, cleans mediaPaths, deletes DB row. */
+/** Delete a media asset: removes file from disk, attachments, legacy mediaPaths, DB row. */
 export function deleteMediaAsset(id: string): boolean {
   const asset = getMediaAsset(id);
   if (!asset) return false;
 
-  // Remove from contentItem.mediaPaths if linked
+  const attachments = db
+    .select()
+    .from(mediaAttachments)
+    .where(eq(mediaAttachments.mediaAssetId, id))
+    .all();
+
+  for (const attachment of attachments) {
+    if (attachment.parentType === "content_item") {
+      removeFromMediaPaths(attachment.parentId, id);
+    }
+    db.delete(mediaAttachments).where(eq(mediaAttachments.id, attachment.id)).run();
+  }
+
   if (asset.contentItemId) {
     removeFromMediaPaths(asset.contentItemId, id);
   }
 
-  // Delete file from disk
   const filePath = join(MEDIA_DIR, asset.storagePath);
   if (existsSync(filePath)) {
     unlinkSync(filePath);
@@ -83,20 +111,33 @@ export function deleteMediaAsset(id: string): boolean {
   return true;
 }
 
-/** Link a media asset to a content item (sets FK + appends to mediaPaths). */
+/** Link a media asset to a content item via junction (+ legacy shim). */
 export function linkMediaToContent(
   assetId: string,
   contentItemId: string,
+  source = "api:link_media",
 ): void {
+  const paths = getMediaPaths(contentItemId);
+  const sortOrder = paths.includes(assetId) ? paths.indexOf(assetId) : paths.length;
+
   db.update(mediaAssets)
     .set({ contentItemId, updatedAt: Math.floor(Date.now() / 1000) })
     .where(eq(mediaAssets.id, assetId))
     .run();
 
+  createMediaAttachment({
+    mediaAssetId: assetId,
+    parentType: "content_item",
+    parentId: contentItemId,
+    role: "attachment",
+    sortOrder,
+    source,
+  });
+
   appendToMediaPaths(contentItemId, assetId);
 }
 
-/** Unlink a media asset from a content item (clears FK + removes from mediaPaths). */
+/** Unlink a media asset from a content item (junction + legacy shim). */
 export function unlinkMediaFromContent(
   assetId: string,
   contentItemId: string,
@@ -106,11 +147,24 @@ export function unlinkMediaFromContent(
     .where(eq(mediaAssets.id, assetId))
     .run();
 
+  db.delete(mediaAttachments)
+    .where(
+      and(
+        eq(mediaAttachments.mediaAssetId, assetId),
+        eq(mediaAttachments.parentType, "content_item"),
+        eq(mediaAttachments.parentId, contentItemId),
+      ),
+    )
+    .run();
+
   removeFromMediaPaths(contentItemId, assetId);
 }
 
-/** Get all media assets linked to a content item. */
+/** Get all media assets linked to a content item (junction first, legacy FK fallback). */
 export function getMediaForContentItem(contentItemId: string): MediaAsset[] {
+  const fromJunction = listAssetsForParent("content_item", contentItemId);
+  if (fromJunction.length > 0) return fromJunction;
+
   return db
     .select()
     .from(mediaAssets)
@@ -118,8 +172,6 @@ export function getMediaForContentItem(contentItemId: string): MediaAsset[] {
     .orderBy(mediaAssets.createdAt)
     .all();
 }
-
-// --- Internal helpers for mediaPaths JSON array ---
 
 function getMediaPaths(contentItemId: string): string[] {
   const item = db

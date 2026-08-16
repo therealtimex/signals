@@ -6,6 +6,7 @@ import { nanoid } from "nanoid";
 import imageSize from "image-size";
 import { createMediaAsset, listMediaAssets, MEDIA_DIR } from "@/lib/db/queries/media";
 import { validateMediaFile } from "@/lib/media/constraints";
+import { validateAttachmentFile } from "@/lib/media/attachment-constraints";
 import { isImageType } from "@/lib/media/constraints";
 
 // Allow up to 20MB uploads (covers all image types in Phase 6A)
@@ -17,21 +18,34 @@ export async function POST(req: NextRequest) {
     const formData = await req.formData();
     const file = formData.get("file") as File | null;
     const platformTarget = formData.get("platformTarget") as string | null;
+    const context = (formData.get("context") as string | null) ?? "compose";
 
     if (!file) {
       return NextResponse.json({ error: "No file provided" }, { status: 400 });
+    }
+
+    if (context !== "compose" && context !== "attachment") {
+      return NextResponse.json({ error: "Invalid upload context" }, { status: 400 });
     }
 
     if (platformTarget && platformTarget !== "x" && platformTarget !== "linkedin") {
       return NextResponse.json({ error: "Invalid platformTarget" }, { status: 400 });
     }
 
-    // Validate file against platform constraints
-    const platform = (platformTarget as "x" | "linkedin") || "x";
-    const validationError = validateMediaFile(
-      { name: file.name, type: file.type, size: file.size },
-      platform,
-    );
+    let validationError: string | null = null;
+    if (context === "attachment") {
+      validationError = validateAttachmentFile({
+        name: file.name,
+        type: file.type,
+        size: file.size,
+      });
+    } else {
+      const platform = (platformTarget as "x" | "linkedin") || "x";
+      validationError = validateMediaFile(
+        { name: file.name, type: file.type, size: file.size },
+        platform,
+      );
+    }
     if (validationError) {
       return NextResponse.json({ error: validationError }, { status: 400 });
     }
@@ -67,8 +81,10 @@ export async function POST(req: NextRequest) {
       fileSize: file.size,
       width: width ?? null,
       height: height ?? null,
+      origin: "upload",
+      scope: context === "attachment" ? "local_only" : "shared",
       contentItemId: null,
-      platformTarget: platformTarget as "x" | "linkedin" | null,
+      platformTarget: context === "compose" ? (platformTarget as "x" | "linkedin" | null) : null,
     });
 
     return NextResponse.json(asset, { status: 201 });

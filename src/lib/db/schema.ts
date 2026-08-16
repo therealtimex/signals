@@ -269,11 +269,43 @@ export const mediaAssets = sqliteTable("media_assets", {
   fileSize: integer("file_size").notNull(), // bytes
   width: integer("width"), // images only
   height: integer("height"), // images only
+  origin: text("origin", { enum: ["upload", "import", "platform_cache"] })
+    .notNull()
+    .default("upload"),
+  sourceUrl: text("source_url"),
+  sha256: text("sha256"),
+  durationMs: integer("duration_ms"),
+  scope: text("scope", { enum: ["shared", "local_only"] })
+    .notNull()
+    .default("shared"),
   contentItemId: text("content_item_id").references(() => contentItems.id, { onDelete: "set null" }),
   platformTarget: text("platform_target", { enum: PLATFORM_ENUM }),
   ...timestamps,
 }, (table) => [
   index("idx_media_assets_content_item").on(table.contentItemId),
+]);
+
+export const mediaAttachments = sqliteTable("media_attachments", {
+  id: text("id").primaryKey(),
+  mediaAssetId: text("media_asset_id")
+    .notNull()
+    .references(() => mediaAssets.id, { onDelete: "cascade" }),
+  parentType: text("parent_type").notNull(),
+  parentId: text("parent_id").notNull(),
+  role: text("role").notNull().default("attachment"),
+  sortOrder: integer("sort_order").notNull().default(0),
+  caption: text("caption"),
+  source: text("source"),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex("idx_attachment_identity").on(
+    table.mediaAssetId,
+    table.parentType,
+    table.parentId,
+    table.role,
+  ),
+  index("idx_attachment_parent").on(table.parentType, table.parentId),
+  index("idx_attachment_asset").on(table.mediaAssetId),
 ]);
 
 // --- Content Posts (published instances) ---
