@@ -173,14 +173,12 @@ src/
       gmail/                          # Gmail/Google client, mappers, adapter
     workflows/                        # Workflow types, sync wrapper
     agents/                           # Agent tools, runner, routing engine
-    chat/                             # Chat types, system prompt, 8 CRM tools, smart prompts
     browser/                          # Publish/engage sessions (Playwright)
     analytics/                        # Analytics utilities (time range, formatting)
     scheduler/                        # Background scheduler runner (60s interval)
     auth/                             # AES-256 crypto + API key management
   components/                         # Shared UI components (shadcn/ui based)
     charts/                           #   Reusable chart components (area, bar, donut, ...)
-    chat/                             #   Chat panel, message, input, toolbar, history
 ```
 
 ## Development
