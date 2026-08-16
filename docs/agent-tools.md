@@ -153,7 +153,7 @@ export SIGNALS_BASE_URL="$(.claude/skills/realtimex-signals/scripts/resolve-base
 2. `POST` to `http://localhost:{port}/api/agent-tools/invoke` with structured JSON.
 3. Use `GET /api/agent-tools` at session start to discover tool names and parameter schemas.
 
-The in-app agent runner (`/api/chat`) remains available; this API is the stable integration surface for external agents (#3).
+The in-app chat panel and embedded agent runner were removed; **`/api/agent-tools` is the stable integration surface** for RealTimeX terminal agents (#3/#4). See `docs/rtx-agent-orchestration.md`.
 
 ## RTX Agent Flows
 

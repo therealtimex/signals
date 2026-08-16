@@ -15,9 +15,9 @@ Signals takes a page from the indie hacker playbook. Pieter Levels runs [multipl
 - **Node.js 20+** — Check with `node --version`
 - **A terminal** — Any terminal works: iTerm, Warp, the VS Code integrated terminal
 - **API keys** (configured after install):
-  - **Anthropic API Key** — Required for AI agents and chat. Get one at [console.anthropic.com](https://console.anthropic.com)
-  - **Serper API Key** — Optional, for broad web search (2,500 free queries). Get one at [serper.dev](https://serper.dev)
-  - **Tavily API Key** — Optional, for deep research queries (1,000 free/month). Get one at [tavily.com](https://tavily.com)
+  - **RealTimeX workspace** — Terminal agents run enrichment, search, and workflow orchestration via `/api/agent-tools` (see `docs/rtx-agent-orchestration.md`)
+  - **Serper API Key** — Optional, for RTX agent web search (2,500 free queries). Get one at [serper.dev](https://serper.dev)
+  - **Tavily API Key** — Optional, for RTX agent deep research (1,000 free/month). Get one at [tavily.com](https://tavily.com)
 
 ## Installation
 
@@ -54,23 +54,14 @@ Navigate to **Settings** in the sidebar. This is where you connect Signals to th
 ![Settings page — API keys and platform connections](assets/settings-page.png)
 *The Settings page: configure API keys, connect platforms, and manage browser sessions.*
 
-### Anthropic API Key
-
-This powers everything AI in Signals — agents, chat, content generation. You can configure it two ways:
-
-- **Environment variable**: Set `ANTHROPIC_API_KEY` in your shell or in a `.env.local` file
-- **Settings page**: Enter it directly in the UI (stored encrypted in `config.json`)
-
-The Settings page shows detection status — green badges for keys found via environment variables, input fields for manual entry.
-
 ### Search API Keys (Optional)
 
-Signals uses a smart dual-search system:
+RTX terminal agents can use web search when you configure:
 
 - **Serper** — Google-based broad discovery. Great for prospecting and finding new contacts. 2,500 free queries (one-time).
 - **Tavily** — Deep research engine. Better for enrichment and detailed person lookup. 1,000 free searches per month.
 
-The agent routing engine automatically picks the right search provider based on the task. You can configure one or both — the system fails over gracefully if a provider is unavailable.
+Configure keys in **Settings** or environment variables. Agents choose providers in the RealTimeX workspace — Signals stores CRM results via agent-tools, not in-process LLM loops.
 
 ## Connecting Platforms
 
@@ -82,9 +73,9 @@ Below the API key section, you'll find **Platform Connections**. Signals support
 
 Each connection shows its status (Connected/Disconnected), the signed-in account, granted permissions, and last sync time.
 
-### Browser Enrichment Sessions
+### Browser Sessions (Publish / Engage)
 
-At the bottom of Settings, you'll see **Browser Enrichment**. This is a Playwright-powered browser session that logs into X to scrape profile data that APIs can't access. It requires a one-time manual login, after which the session persists for agent use.
+At the bottom of Settings, **Browser Session** supports **publish and engage** flows on X and LinkedIn. Profile enrichment no longer runs inside Signals — use RealTimeX Browser + agent-browser (see `docs/rtx-agent-browser-enrichment.md`).
 
 ## The Help Page
 
@@ -100,7 +91,7 @@ The Help page includes:
 
 ## Your Dashboard
 
-Once you've configured at least your Anthropic API key, head to the **Dashboard**.
+Once you've connected at least one platform (or imported contacts), head to the **Dashboard**.
 
 ![Dashboard overview — your CRM at a glance](assets/dashboard-overview.png)
 *The Dashboard: stat cards for contacts, workflows, tasks, and content. Contact pipeline below.*
@@ -118,4 +109,4 @@ The sidebar navigation mirrors the workflow you'll follow through these guides: 
 
 Your CRM is running. Your keys are configured. Time to get people into the system.
 
-**Next: [Contacts and Enrichment](02-contacts-and-enrichment.md)** — Import contacts from X and LinkedIn, understand enrichment scores, and let AI fill in the gaps.
+**Next: [Contacts and Enrichment](02-contacts-and-enrichment.md)** — Import contacts from X and LinkedIn, understand enrichment scores, and enrich via RTX agents.

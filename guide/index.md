@@ -45,4 +45,4 @@ That's it. Open `http://localhost:3000` and you're in. Head to [Getting Started]
 
 ---
 
-*Signals is open source. Built with Next.js, SQLite, and the Vercel AI SDK.*
+*Signals is open source. Built with Next.js, SQLite, and RealTimeX agent integration.*
