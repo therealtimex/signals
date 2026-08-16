@@ -109,4 +109,54 @@ describe("AddContactDialog", () => {
     expect(body.name).toBe("Partial");
     expect(body.identities).toBeUndefined();
   });
+
+  it("clears draft after a successful save so the next contact starts fresh", async () => {
+    await act(async () => {
+      root.render(createElement(AddContactDialog));
+    });
+
+    await clickButton("Add Contact");
+    await clickButton("Add Identity");
+
+    const identityInput = document.querySelector("#identity-user-id-0") as HTMLInputElement;
+    expect(identityInput).toBeTruthy();
+    await act(async () => {
+      setInputValue(identityInput, "first-user-id");
+    });
+
+    const firstNameInput = document.querySelector("#firstName") as HTMLInputElement;
+    expect(firstNameInput).toBeTruthy();
+    await act(async () => {
+      setInputValue(firstNameInput, "First Contact");
+    });
+
+    await clickButton("Save Contact");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [, firstRequest] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const firstBody = JSON.parse(String(firstRequest.body));
+    expect(firstBody.name).toBe("First Contact");
+    expect(firstBody.identities).toEqual([
+      expect.objectContaining({ platformUserId: "first-user-id" }),
+    ]);
+
+    await clickButton("Add Contact");
+
+    const secondFirstNameInput = document.querySelector("#firstName") as HTMLInputElement;
+    expect(secondFirstNameInput).toBeTruthy();
+    expect(secondFirstNameInput.value).toBe("");
+    await act(async () => {
+      setInputValue(secondFirstNameInput, "Second Contact");
+    });
+
+    await clickButton("Save Contact");
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const [, secondRequest] = fetchMock.mock.calls[1] as [string, RequestInit];
+    const secondBody = JSON.parse(String(secondRequest.body));
+    expect(secondBody.name).toBe("Second Contact");
+    expect(secondBody.identities).toBeUndefined();
+    expect(secondBody.firstName).toBe("Second Contact");
+    expect(secondBody.firstName).not.toBe("First Contact");
+  });
 });

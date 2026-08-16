@@ -58,7 +58,7 @@ export function AddContactDialog() {
         }),
       });
       if (res.ok) {
-        setOpen(false);
+        handleOpenChange(false);
         router.refresh();
       }
     } finally {
