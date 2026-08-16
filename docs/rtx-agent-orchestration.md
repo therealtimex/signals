@@ -19,7 +19,7 @@ Starting an agent from the Automation UI or `start_workflow` still creates a **w
 
 ## Running agents
 
-1. Open Signals as a RealTimeX Local App (see `docs/local-app.md`).
+1. Open Signals as a RealTimeX Local App (see `docs/local-app.md` and `docs/realtimex-local-app.md`).
 2. Use a terminal agent with access to Signals agent tools.
 3. Invoke tools via `POST /api/agent-tools/invoke` — see `docs/agent-tools.md`.
 

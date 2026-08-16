@@ -1,5 +1,9 @@
 # Agentic Workflows — Implementation Spec
 
+> **Superseded (2026-08)** — Describes in-app Claude Agent SDK / Vercel AI SDK tool loops.
+> **Current path:** RTX terminal agents + [`docs/rtx-agent-orchestration.md`](../docs/rtx-agent-orchestration.md) + [`docs/agent-tools.md`](../docs/agent-tools.md).
+> Retained for historical context; do not implement new work from this spec.
+
 > Full implementation spec for autonomous Claude Agent SDK workflows: agent tools,
 > routing strategy, pre-defined campaign templates, pruning, multi-source search/scrape,
 > scheduling, and progress tracking. Covers Phases 3B-3D.

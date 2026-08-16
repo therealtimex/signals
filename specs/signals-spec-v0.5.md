@@ -97,17 +97,32 @@ Types include: Audience Growth, Niche Coverage, Content Publishing, Engagement L
 Auto-progress via contribution edges. Manual override available. Goals organize the system.
 
 ### 5. Recommended Tech Stack
+
+**Application shell**
 - Next.js (App Router) + React 19 + TypeScript
-- SQLite + Drizzle ORM + vector support
-- Local data under `~/.signals/`
-- Vercel AI SDK + Claude / Grok / other models
-- Local or API embeddings
-- react-force-graph
-- Playwright
-- Tailwind + shadcn/ui
-- CLI bootstrap: `npx signals`
+- SQLite + Drizzle ORM + local vector support
+- Local data under `~/.signals/` (override with `SIGNALS_DATA_DIR`)
+- Tailwind CSS + shadcn/ui
+- CLI bootstrap: `npx @realtimex/signals`
 - AES-256 encrypted credentials
 - Strong isolation of private relationship data
+
+**RealTimeX Local App integration**
+- RealTimeX SDK — `POST /sdk/register`, permission grants, embedded lifecycle (`RTX_APP_ID`)
+- Terminal agents + Agent Flows — open-ended CRM work via Signals [`/api/agent-tools`](../docs/agent-tools.md)
+- RealTimeX Browser + **agent-browser** — profile enrichment and delegated scraping (replaces in-process Playwright enrichment)
+- RTX `llm.embed` — on-demand embeddings for semantic search (vectors stay in Signals)
+- RTX `llm.chat` — schema-validated workflows Signals orchestrates itself (e.g. persona generation), provenance on `workflow_runs`
+
+See [`docs/realtimex-local-app.md`](../docs/realtimex-local-app.md) for the integration map and upstream RTX references.
+
+**Still in Signals (migration in progress)**
+- Playwright — publish/engage browser sessions only (`#6` migrates remaining paths to agent-browser)
+- react-force-graph — audience map visualization (planned)
+
+**Removed (#4–#5, shipped)**
+- Vercel AI SDK — in-app chat (`/api/chat`), in-process agent tool loops, content AI routes
+- In-process Playwright profile scraping / LLM profile parsing — delegate to RTX agent-browser + `enrich_contact`
 
 ### 6. Data Model (Conceptual)
 Unified contacts with platform_identities, first-class orgs, flexible property-graph edges, embeddings, goals as nodes with contribution edges, interactions linked to relationships, launches/variants/simulations fully connected to the graph and Goals. Private notes clearly isolated.
