@@ -15,6 +15,11 @@ import {
   Lock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  ENRICH_ACTION_IDS,
+  actionNeedsPlatformConnection,
+  getActionRunButtonLabel,
+} from "@/app/dashboard/workflows/action-cards-utils";
 
 type ActionDef = {
   id: string;
@@ -26,8 +31,6 @@ type ActionDef = {
   type: "api" | "upload";
   icon: typeof RefreshCw;
 };
-
-const ENRICH_ACTION_IDS = new Set(["x-enrich", "x-enrich-low"]);
 
 const ACTIONS: ActionDef[] = [
   // X
@@ -401,8 +404,12 @@ export function ActionCards() {
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {actions.map((action) => {
                 const isRunning = running === action.id;
-                // CSV import doesn't need platform connection
-                const needsConnection = action.type !== "upload" && !isConnected && !isLoading;
+                const needsConnection = actionNeedsPlatformConnection(
+                  action.id,
+                  action.type,
+                  !!isConnected,
+                  isLoading
+                );
                 // Check per-action restrictions (only when connected)
                 const restriction = isConnected && !isLoading
                   ? getActionRestriction(action.id, status)
@@ -487,17 +494,12 @@ export function ActionCards() {
                         ) : (
                           <Play className="mr-1.5 h-3 w-3" />
                         )}
-                        {needsConnection
-                          ? "Connect first"
-                          : restriction?.navigateTo
-                            ? "Go to Settings"
-                            : restriction
-                              ? "Restricted"
-                              : isRunning
-                                ? "Running..."
-                                : ENRICH_ACTION_IDS.has(action.id)
-                                  ? "Show RTX steps"
-                                  : "Run"}
+                        {getActionRunButtonLabel(action.id, {
+                          needsConnection,
+                          restrictionNavigateTo: restriction?.navigateTo,
+                          hasRestriction: !!restriction,
+                          isRunning,
+                        })}
                       </Button>
                     </CardContent>
                   </Card>
