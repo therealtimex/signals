@@ -143,16 +143,16 @@ The detail page toolbar includes:
 Here's how a founder would use goals and analytics together:
 
 1. **Set a goal** — "Generate 100 new leads by end of month" (Lead Generation type)
-2. **Link workflows** — Attach the Top AI Influencers, Fintech Leaders, and Developer Advocates search agents
-3. **Schedule the agents** — Weekly runs for each search agent
-4. **Monitor analytics** — Check the Overview tab for contact growth, Agents tab for run costs
-5. **Check goal progress** — The progress chart shows daily increments as agents create new contacts
-6. **Adjust** — If you're behind pace, increase agent frequency or add more search agents. If you're ahead, redirect effort to enrichment or content.
+2. **Link workflows** — Attach RTX Agent Flows or migrated search templates
+3. **Run agents in RTX** — Weekly prospecting via terminal agents + agent-tools
+4. **Monitor analytics** — Check the Overview tab for contact growth, Agents tab for run history
+5. **Check goal progress** — The progress chart shows daily increments as contacts are created
+6. **Adjust** — If you're behind pace, increase RTX agent frequency or add more flows. If you're ahead, redirect effort to enrichment or content.
 
 The goal becomes the organizing principle. Instead of randomly running agents, every run serves a measurable target.
 
 ## What's Next
 
-You've set up analytics to understand your CRM and goals to direct it. The final piece is the conversational interface that ties everything together.
+You've set up analytics to understand your CRM and goals to direct it. Use RealTimeX terminal agents with `/api/agent-tools` for conversational CRM queries and workflow triggers.
 
-**Next: [Analytics and Goals](05-analytics-and-goals.md)** — Track agent performance, contact growth, and set demand generation targets. Use RealTimeX terminal agents with `/api/agent-tools` for conversational CRM queries.
+**See also:** [AI Agents and Automation](04-ai-agents-and-automation.md) — RTX orchestration and agent-tools integration.

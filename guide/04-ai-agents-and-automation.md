@@ -70,24 +70,13 @@ Click **Run** on any agent card to open the activation dialog and configure para
 When RTX orchestration is wired up, a typical run looks like:
 
 1. **Plan** — Terminal agent reads the template instructions and your CRM context
-2. **Tool use** — Agent calls Signals tools (`query_contacts`, `enrich_contact`, `search_web`, etc.)
+2. **Tool use** — Agent calls Signals agent-tools (`query_contacts`, `enrich_contact`, `start_workflow`, etc.)
 3. **Iteration** — Agent continues until the goal is met or you stop it
 4. **Completion** — Results are visible on the workflow run and in the CRM
 
 Until a template is migrated to RTX, runs started from the gallery or scheduler will fail with `AGENT_ORCHESTRATION_UNAVAILABLE`.
 
-### Smart Search Routing
-
-When an agent needs to search the web, Signals's routing engine automatically picks the best provider:
-
-| Agent Type | Primary Provider | Why |
-|-----------|-----------------|-----|
-| Search agents | Serper | Broad Google results for discovery |
-| Enrich agents | Tavily (advanced) | Deep research for person lookup |
-| Prune agents | Tavily (basic) | Quick validation of activity |
-| Content/Engage | Serper | General web context |
-
-If the primary provider fails or isn't configured, the system automatically fails over to the alternative. You get the best available search without configuring anything.
+Web search and browser scraping are **not** exposed through agent-tools. RTX terminal agents perform search and browser work in the workspace, then write structured results back via `enrich_contact` / `update_contact`. See `docs/agent-tools.md` § “Not exposed via agent-tools”.
 
 ## Step-Level Observability
 
@@ -128,7 +117,7 @@ Agent templates can be scheduled on a recurring cron from the Automation page. T
 - **Next run preview** — Shows the next planned execution
 - **Config overrides** — Per-template payload overrides
 
-**Migration note:** scheduled template jobs no longer execute in-process LLM loops. When orchestration is unavailable, the scheduled job is marked **failed** (not completed) with `AGENT_ORCHESTRATION_UNAVAILABLE`, and recurring jobs are **not** silently rescheduled. Migrate the schedule to an RTX Agent Flow or disable it until migration is complete.
+**Migration note:** scheduled template jobs no longer execute in-process LLM loops. When orchestration is unavailable, the scheduled job is marked **failed**, **disabled**, and shows the error in **Scheduled Workflows**. Recurring jobs are **not** silently rescheduled. Re-enable a schedule after migrating it to an RTX Agent Flow to restore a pending next run.
 
 ## Triggering Agents from RealTimeX
 

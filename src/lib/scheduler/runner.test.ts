@@ -111,6 +111,7 @@ describe("scheduler runner", () => {
 
     const job = getScheduledJob(jobId)!;
     expect(job.status).toBe("failed");
+    expect(job.enabled).toBe(0);
     expect(job.error).toContain(AGENT_ORCHESTRATION_UNAVAILABLE_CODE);
     expect(job.completedAt).toBeTruthy();
     expect(job.runAt).toBe(now - 10);

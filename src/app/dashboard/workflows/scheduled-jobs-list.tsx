@@ -47,7 +47,6 @@ interface TemplateMap {
 
 function formatCron(cron: string | null): string {
   if (!cron) return "—";
-  // Common cron expression descriptions
   const presets: Record<string, string> = {
     "0 9 * * *": "Daily at 9:00 AM",
     "0 9 * * 1-5": "Weekdays at 9:00 AM",
@@ -60,6 +59,48 @@ function formatCron(cron: string | null): string {
 function formatTimestamp(ts: number | null): string {
   if (!ts) return "—";
   return new Date(ts * 1000).toLocaleString();
+}
+
+function statusBadge(job: ScheduledJob) {
+  if (job.status === "failed") {
+    return (
+      <Badge variant="destructive" className="text-[10px]">
+        Failed
+      </Badge>
+    );
+  }
+  if (job.enabled !== 1) {
+    return (
+      <Badge variant="secondary" className="text-[10px]">
+        Disabled
+      </Badge>
+    );
+  }
+  if (job.status === "pending") {
+    return (
+      <Badge variant="default" className="bg-green-600 text-[10px]">
+        Active
+      </Badge>
+    );
+  }
+  return (
+    <Badge variant="outline" className="text-[10px] capitalize">
+      {job.status}
+    </Badge>
+  );
+}
+
+function formatNextRun(job: ScheduledJob): string {
+  if (job.status === "failed" || job.enabled !== 1) {
+    return "Re-enable to schedule";
+  }
+  return formatTimestamp(job.runAt);
+}
+
+function truncateError(error: string | null, max = 80): string | null {
+  if (!error) return null;
+  if (error.length <= max) return error;
+  return `${error.slice(0, max - 1)}…`;
 }
 
 export function ScheduledJobsList() {
@@ -94,17 +135,15 @@ export function ScheduledJobsList() {
   }, []);
 
   async function handleToggle(jobId: string, currentEnabled: number) {
-    const newEnabled = currentEnabled === 1 ? false : true;
-    await fetch(`/api/workflows/schedule/${jobId}`, {
+    const newEnabled = currentEnabled !== 1;
+    const res = await fetch(`/api/workflows/schedule/${jobId}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ enabled: newEnabled }),
     });
-    setJobs((prev) =>
-      prev.map((j) =>
-        j.id === jobId ? { ...j, enabled: newEnabled ? 1 : 0 } : j
-      )
-    );
+    if (!res.ok) return;
+    const job = (await res.json()) as ScheduledJob;
+    setJobs((prev) => prev.map((j) => (j.id === jobId ? job : j)));
   }
 
   async function handleDelete(jobId: string) {
@@ -136,6 +175,7 @@ export function ScheduledJobsList() {
               <TableRow>
                 <TableHead>Template</TableHead>
                 <TableHead>Schedule</TableHead>
+                <TableHead>Status</TableHead>
                 <TableHead>Next Run</TableHead>
                 <TableHead>Last Run</TableHead>
                 <TableHead className="w-20">Enabled</TableHead>
@@ -146,17 +186,27 @@ export function ScheduledJobsList() {
               {jobs.map((job) => (
                 <TableRow key={job.id}>
                   <TableCell className="font-medium">
-                    {job.templateId
-                      ? templateNames[job.templateId] ?? "Unknown"
-                      : "—"}
+                    <div className="space-y-1">
+                      <div>
+                        {job.templateId
+                          ? templateNames[job.templateId] ?? "Unknown"
+                          : "—"}
+                      </div>
+                      {job.error && (
+                        <p className="text-xs text-destructive font-normal">
+                          {truncateError(job.error)}
+                        </p>
+                      )}
+                    </div>
                   </TableCell>
                   <TableCell>
                     <Badge variant="outline" className="font-mono text-xs">
                       {formatCron(job.cronExpression)}
                     </Badge>
                   </TableCell>
+                  <TableCell>{statusBadge(job)}</TableCell>
                   <TableCell className="text-sm text-muted-foreground">
-                    {formatTimestamp(job.runAt)}
+                    {formatNextRun(job)}
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground">
                     {formatTimestamp(job.lastTriggeredAt)}

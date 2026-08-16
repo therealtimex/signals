@@ -122,3 +122,27 @@ export function rescheduleJob(id: string): ScheduledJob | undefined {
 }
 
 export { nextRunFromCron };
+
+/** Re-enable a schedule after failure or completion and restore a runnable pending state. */
+export function reactivateScheduledJob(id: string): ScheduledJob | undefined {
+  const job = getScheduledJob(id);
+  if (!job) return undefined;
+
+  const now = Math.floor(Date.now() / 1000);
+  const updates: Partial<Omit<NewScheduledJob, "id">> = {
+    enabled: 1,
+    status: "pending",
+    error: null,
+    completedAt: null,
+    startedAt: null,
+    retryCount: 0,
+    runAt: job.cronExpression ? nextRunFromCron(job.cronExpression) : now,
+  };
+
+  db.update(scheduledJobs)
+    .set(updates)
+    .where(eq(scheduledJobs.id, id))
+    .run();
+
+  return getScheduledJob(id);
+}

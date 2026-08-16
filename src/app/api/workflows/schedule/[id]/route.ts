@@ -5,6 +5,7 @@ import {
   getScheduledJob,
   updateScheduledJob,
   deleteScheduledJob,
+  reactivateScheduledJob,
 } from "@/lib/db/queries/scheduled-jobs";
 
 const updateScheduleSchema = z.object({
@@ -58,11 +59,22 @@ export async function PUT(
     const updates: Record<string, unknown> = {};
     if (data.cronExpression !== undefined) updates.cronExpression = data.cronExpression;
     if (data.payload !== undefined) updates.payload = JSON.stringify(data.payload);
-    if (data.enabled !== undefined) updates.enabled = data.enabled ? 1 : 0;
 
-    const job = updateScheduledJob(id, updates);
-    if (!job) {
-      return NextResponse.json({ error: "Schedule not found" }, { status: 404 });
+    let job;
+    if (data.enabled === true) {
+      job = reactivateScheduledJob(id);
+      if (!job) {
+        return NextResponse.json({ error: "Schedule not found" }, { status: 404 });
+      }
+      if (data.cronExpression !== undefined || data.payload !== undefined) {
+        job = updateScheduledJob(id, updates) ?? job;
+      }
+    } else {
+      if (data.enabled === false) updates.enabled = 0;
+      job = updateScheduledJob(id, updates);
+      if (!job) {
+        return NextResponse.json({ error: "Schedule not found" }, { status: 404 });
+      }
     }
 
     return NextResponse.json(job);

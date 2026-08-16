@@ -68,27 +68,17 @@ Action items associated with this contact — follow-up reminders, outreach task
 
 ## AI-Powered Enrichment
 
-Here's where Signals diverges from every traditional CRM. Instead of paying for a data provider or manually researching each contact, you deploy AI agents.
+## AI-Powered Enrichment (RTX)
 
-Navigate to **Automation** and look at the **Enrich** category.
+Signals no longer runs in-process enrichment agents. Use **RealTimeX terminal agents** with the Agent Tools API:
 
-![Automation dashboard — agent gallery with Enrich category](assets/automation-dashboard.png)
-*The Automation dashboard: 10 pre-built agents across Search, Enrich, Prune, Content, Engage, and Outreach categories.*
+1. `query_contacts` with `sort: "enrichmentScore"` and `order: "asc"` to find sparse profiles
+2. RealTimeX Browser + **agent-browser** to read public profile evidence
+3. `enrich_contact` to fill gaps in the CRM
 
-Two enrichment agents ship out of the box:
+See `docs/rtx-agent-browser-enrichment.md` and `docs/rtx-agent-orchestration.md`.
 
-### Enrich Low-Score Contacts
-Finds contacts with sparse enrichment data and fills in missing fields. The agent:
-1. Queries your CRM for contacts below a score threshold
-2. Searches the web (via Serper or Tavily) for each person
-3. Optionally scrapes their X profile via browser automation
-4. Updates contact records with discovered information
-5. Recalculates enrichment scores
-
-### Fill Email Gaps
-Specifically targets contacts missing email addresses. Uses web search to find professional email patterns and company domains.
-
-Both agents show estimated cost (~$0.50 per run), run count, and last execution time on their cards. Click **Run** to activate, or schedule them to run on a recurring basis (see [AI Agents and Automation](04-ai-agents-and-automation.md)).
+The **Automation → Agents** gallery still documents enrichment *templates* (instructions and target personas). **Run** and **Schedule** record workflow runs for observability, but execution must happen through RTX Agent Flows calling `POST /api/agent-tools/invoke`. Failed schedules are disabled automatically — re-enable them from **Scheduled Workflows** after migrating the template to RTX.
 
 ## Smart Pruning
 
@@ -115,4 +105,4 @@ You've got contacts in the system and agents enriching them. Now it's time to tu
 
 **Next: [Content and Publishing](03-content-and-publishing.md)** — Write posts, generate AI drafts, and publish to X and LinkedIn directly from your CRM.
 
-**Also see: [AI Agents and Automation](04-ai-agents-and-automation.md)** — Deep dive into how enrichment agents work under the hood.
+**Also see: [AI Agents and Automation](04-ai-agents-and-automation.md)** — RTX orchestration, agent-tools, and scheduling migration.

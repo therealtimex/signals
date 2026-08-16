@@ -171,9 +171,8 @@ src/
       x/                              # X/Twitter client, mappers, adapter
       linkedin/                       # LinkedIn client, mappers, adapter
       gmail/                          # Gmail/Google client, mappers, adapter
-    workflows/                        # Workflow types, sync wrapper
-    agents/                           # Agent tools, runner, routing engine
-    browser/                          # Publish/engage sessions (Playwright)
+    agents/                           # Agent-tools handlers, workflow stubs, routing metadata
+    browser/                          # Publish/engage browser sessions (Playwright)
     analytics/                        # Analytics utilities (time range, formatting)
     scheduler/                        # Background scheduler runner (60s interval)
     auth/                             # AES-256 crypto + API key management
@@ -203,9 +202,9 @@ See [docs/qa/README.md](./docs/qa/README.md) for CI and quality gate details.
 - [x] **Phase 0** — Project setup, CLI, schema, auth, UI shell
 - [x] **Phase 1** — Contact CRUD, Task CRUD, Dashboard, Identities, Enrichment, X/Twitter
 - [x] **Phase 2** — Content Library, LinkedIn + Gmail Integration, Browser Enrichment
-- [x] **Phase 3** — Unified Workflows, Agent Runner, Smart Search Routing, Prune Execution, Workflow Scheduling
+- [x] **Phase 3** — Unified Workflows, workflow observability, prune execution, workflow scheduling (execution via RTX agent-tools)
 - [x] **Phase 4** — Analytics Dashboard (5-tab with charts)
-- [x] **Phase 5** — AI Chat Assistant (8 CRM tools, streaming, smart prompts, conversation history)
+- [x] **Phase 5** — Agent Tools API + RTX orchestration migration (in-app chat and embedded runner removed)
 - [x] **Phase 5.5** — Multi-Channel Content & Automation (platform-agnostic content, multi-platform compose, Automation hub with Agents/Actions/Runs tabs)
 - [ ] **Phase 6** — Content & Demand Gen (media system, browser publishing, AI content creation, goals, user templates — 6E complete)
 

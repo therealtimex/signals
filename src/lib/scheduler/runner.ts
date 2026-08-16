@@ -180,6 +180,7 @@ export function executeScheduledJob(jobId: string): void {
 
       updateScheduledJob(jobId, {
         status: "failed",
+        enabled: 0,
         error: errorMessage,
         completedAt: Math.floor(Date.now() / 1000),
         lastTriggeredAt: Math.floor(Date.now() / 1000),
@@ -208,6 +209,7 @@ export function executeScheduledJob(jobId: string): void {
 
     updateScheduledJob(jobId, {
       status: "failed",
+      enabled: 0,
       error: errorMessage,
       completedAt: Math.floor(Date.now() / 1000),
     });
