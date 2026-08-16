@@ -44,12 +44,17 @@ export const contacts = sqliteTable("contacts", {
   company: text("company"),
   title: text("title"),
   // Deprecated: use contactIdentities table instead
+  platform: text("platform", { enum: PLATFORM_ENUM }),
+  platformUserId: text("platform_user_id"),
   profileUrl: text("profile_url"),
   avatarUrl: text("avatar_url"),
+  email: text("email"),
+  phone: text("phone"),
   bio: text("bio"),
   location: text("location"),
   website: text("website"),
   photoUrl: text("photo_url"),
+  verifiedEmail: integer("verified_email").notNull().default(0),
   enrichmentScore: integer("enrichment_score").notNull().default(0),
   tags: text("tags").default("[]"), // JSON array
   funnelStage: text("funnel_stage", {
@@ -63,6 +68,7 @@ export const contacts = sqliteTable("contacts", {
   isSelf: integer("is_self", { mode: "boolean" }).notNull().default(false),
   ...timestamps,
 }, (table) => [
+  index("idx_contacts_email").on(table.email),
   index("idx_contacts_name").on(table.name),
   index("idx_contacts_company").on(table.company),
 ]);

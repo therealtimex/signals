@@ -1,7 +1,8 @@
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { db, sqlite } from "@/lib/db/client";
-import { contactChannels } from "@/lib/db/schema";
+import { normalizeChannelValue } from "@/lib/db/channel-types";
 import { ensureContactChannel } from "@/lib/db/queries/contact-channel-writes";
+import { contactChannels } from "@/lib/db/schema";
 
 const SOURCE = "backfill:contacts-scalars";
 
@@ -60,6 +61,10 @@ export function backfillChannels(): { emails: number; phones: number } {
   return { emails, phones };
 }
 
+export function countContactsWithScalarEmail(): number {
+  return readScalarRows().filter((row) => row.email?.trim()).length;
+}
+
 export function countEmailChannels(): number {
   return db
     .select()
@@ -68,10 +73,60 @@ export function countEmailChannels(): number {
     .all().length;
 }
 
+export function countContactsWithScalarPhone(): number {
+  return readScalarRows().filter((row) => row.phone?.trim()).length;
+}
+
 export function countPhoneChannels(): number {
   return db
     .select()
     .from(contactChannels)
     .where(eq(contactChannels.channelType, "phone"))
     .all().length;
+}
+
+/** Parity helper: scalar emails missing a matching normalized channel row. */
+export function countScalarEmailsMissingChannel(): number {
+  let missing = 0;
+  for (const row of readScalarRows()) {
+    const email = row.email?.trim();
+    if (!email) continue;
+    const normalized = normalizeChannelValue("email", email);
+    const channel = db
+      .select()
+      .from(contactChannels)
+      .where(
+        and(
+          eq(contactChannels.contactId, row.id),
+          eq(contactChannels.channelType, "email"),
+          eq(contactChannels.valueNormalized, normalized),
+        ),
+      )
+      .get();
+    if (!channel) missing++;
+  }
+  return missing;
+}
+
+/** Parity helper: scalar phones missing a matching normalized channel row. */
+export function countScalarPhonesMissingChannel(): number {
+  let missing = 0;
+  for (const row of readScalarRows()) {
+    const phone = row.phone?.trim();
+    if (!phone) continue;
+    const normalized = normalizeChannelValue("phone", phone);
+    const channel = db
+      .select()
+      .from(contactChannels)
+      .where(
+        and(
+          eq(contactChannels.contactId, row.id),
+          eq(contactChannels.channelType, "phone"),
+          eq(contactChannels.valueNormalized, normalized),
+        ),
+      )
+      .get();
+    if (!channel) missing++;
+  }
+  return missing;
 }

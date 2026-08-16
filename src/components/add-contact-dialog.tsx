@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { ContactForm } from "@/components/contact-form";
 import type { DraftContactIdentity } from "@/lib/contact-identity-draft";
+import type { DraftContactChannel } from "@/lib/contact-channel-draft";
 import { Plus } from "lucide-react";
 
 const defaultFormData = { funnelStage: "prospect" } as const;
@@ -37,10 +38,12 @@ export function AddContactDialog({
   const [formKey, setFormKey] = useState(0);
   const formData = useRef<Record<string, string>>({ ...defaultFormData });
   const identitiesData = useRef<DraftContactIdentity[]>([]);
+  const channelsData = useRef<DraftContactChannel[]>([]);
 
   function resetDraft() {
     formData.current = { ...defaultFormData };
     identitiesData.current = [];
+    channelsData.current = [];
     setFormKey((key) => key + 1);
   }
 
@@ -60,6 +63,7 @@ export function AddContactDialog({
       const identities = identitiesData.current.filter(
         (identity) => identity.platformUserId.trim().length > 0,
       );
+      const channels = channelsData.current.filter((channel) => channel.value.trim().length > 0);
 
       const res = await fetch("/api/contacts", {
         method: "POST",
@@ -68,6 +72,7 @@ export function AddContactDialog({
           ...data,
           ...payloadExtras,
           ...(identities.length > 0 ? { identities } : {}),
+          ...(channels.length > 0 ? { channels } : {}),
         }),
       });
       if (res.ok) {
@@ -108,6 +113,9 @@ export function AddContactDialog({
           }}
           onIdentitiesChange={(identities) => {
             identitiesData.current = identities;
+          }}
+          onChannelsChange={(channels) => {
+            channelsData.current = channels;
           }}
         />
         <DialogFooter>

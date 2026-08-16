@@ -36,6 +36,7 @@ import {
 } from "@/components/ui/tooltip";
 import type { ContactWithIdentities, Task } from "@/lib/db/types";
 import type { ContactExploreCard } from "@/lib/db/queries/contact-explore";
+import type { DraftContactChannel } from "@/lib/contact-channel-draft";
 import { ContactExploreCardView } from "@/components/contact-explore-card";
 
 const platformLabels: Record<string, string> = {
@@ -58,6 +59,7 @@ export function ContactDetailClient({ contact, tasks, explore }: ContactDetailCl
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [selfSaving, setSelfSaving] = useState(false);
   const formChanges = useRef<Record<string, string>>({});
+  const channelsData = useRef<DraftContactChannel[] | null>(null);
 
   async function handleToggleSelf(nextValue: boolean) {
     setSelfSaving(true);
@@ -77,17 +79,22 @@ export function ContactDetailClient({ contact, tasks, explore }: ContactDetailCl
 
   async function handleSave() {
     const data = formChanges.current;
-    if (Object.keys(data).length === 0) return;
+    const hasChannelChanges = channelsData.current !== null;
+    if (Object.keys(data).length === 0 && !hasChannelChanges) return;
 
     setSaving(true);
     try {
       const res = await fetch(`/api/contacts/${contact.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
+        body: JSON.stringify({
+          ...data,
+          ...(hasChannelChanges ? { channels: channelsData.current } : {}),
+        }),
       });
       if (res.ok) {
         formChanges.current = {};
+        channelsData.current = null;
         router.refresh();
       }
     } finally {
@@ -336,6 +343,9 @@ export function ContactDetailClient({ contact, tasks, explore }: ContactDetailCl
                 defaultValues={contact}
                 onChange={(partial) => {
                   formChanges.current = { ...formChanges.current, ...partial };
+                }}
+                onChannelsChange={(channels) => {
+                  channelsData.current = channels;
                 }}
               />
               <div className="flex justify-between">

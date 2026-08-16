@@ -10,13 +10,15 @@ import {
   workflowSteps,
 } from "@/lib/db/schema";
 import { deleteEdgesTouchingContact } from "@/lib/db/graph-integrity";
-import { calculateEnrichmentScore } from "@/lib/db/enrichment";
 import {
   applyChannelInputs,
   applyLegacyEmailPhone,
+  syncChannelInputs,
   type ChannelInput,
 } from "@/lib/db/queries/contact-channel-writes";
-import { assembleContactDto, type ContactDTO } from "@/lib/db/queries/contact-dto";
+import { attachContactDtos, getContactDtoById } from "@/lib/db/queries/contact-read-model";
+import { recalcContactEnrichment } from "@/lib/db/contact-enrichment-recalc";
+import type { ContactDTO } from "@/lib/db/queries/contact-dto";
 import type { Contact, NewContact, PaginatedResult, ContactIdentity } from "@/lib/db/types";
 
 export type ContactWriteExtras = {
@@ -54,38 +56,7 @@ function stripChannelShim<T extends ContactWriteExtras>(data: T): Omit<T, keyof 
 }
 
 function attachChannels(rows: Contact[]): ContactDTO[] {
-  if (rows.length === 0) return [];
-  const ids = rows.map((r) => r.id);
-
-  const allIdentities = db
-    .select()
-    .from(contactIdentities)
-    .where(inArray(contactIdentities.contactId, ids))
-    .all();
-
-  const allChannels = db
-    .select()
-    .from(contactChannels)
-    .where(inArray(contactChannels.contactId, ids))
-    .all();
-
-  const identityMap = new Map<string, typeof allIdentities>();
-  for (const identity of allIdentities) {
-    const list = identityMap.get(identity.contactId) ?? [];
-    list.push(identity);
-    identityMap.set(identity.contactId, list);
-  }
-
-  const channelMap = new Map<string, typeof allChannels>();
-  for (const channel of allChannels) {
-    const list = channelMap.get(channel.contactId) ?? [];
-    list.push(channel);
-    channelMap.set(channel.contactId, list);
-  }
-
-  return rows.map((row) =>
-    assembleContactDto(row, identityMap.get(row.id) ?? [], channelMap.get(row.id) ?? []),
-  );
+  return attachContactDtos(rows);
 }
 
 function applyChannelWrites(
@@ -94,35 +65,27 @@ function applyChannelWrites(
   source: string,
 ): void {
   if (!extras) return;
-  if (extras.channels?.length) {
-    applyChannelInputs(contactId, extras.channels, source);
+
+  if (extras.channels !== undefined) {
+    syncChannelInputs(contactId, extras.channels, source);
   }
-  applyLegacyEmailPhone(contactId, {
-    email: extras.email,
-    phone: extras.phone,
-    verifiedEmail: extras.verifiedEmail,
-  }, source);
+
+  const legacy: {
+    email?: string | null;
+    phone?: string | null;
+    verifiedEmail?: boolean | number | null;
+  } = {};
+  if (extras.email !== undefined) legacy.email = extras.email;
+  if (extras.phone !== undefined) legacy.phone = extras.phone;
+  if (extras.verifiedEmail !== undefined) legacy.verifiedEmail = extras.verifiedEmail;
+  if (Object.keys(legacy).length > 0) {
+    applyLegacyEmailPhone(contactId, legacy, source);
+  }
 }
 
 /** Recalculate and persist enrichment score for a contact. */
 function recalcEnrichment(contactId: string): void {
-  const contact = db.select().from(contacts).where(eq(contacts.id, contactId)).get();
-  if (!contact) return;
-  const identities = db
-    .select()
-    .from(contactIdentities)
-    .where(eq(contactIdentities.contactId, contactId))
-    .all();
-  const channels = db
-    .select()
-    .from(contactChannels)
-    .where(eq(contactChannels.contactId, contactId))
-    .all();
-  const score = calculateEnrichmentScore(contact, identities, channels);
-  db.update(contacts)
-    .set({ enrichmentScore: score, updatedAt: Math.floor(Date.now() / 1000) })
-    .where(eq(contacts.id, contactId))
-    .run();
+  recalcContactEnrichment(contactId);
 }
 
 export function listContacts(opts?: {
@@ -213,9 +176,7 @@ export function listContacts(opts?: {
 }
 
 export function getContactById(id: string): ContactDTO | undefined {
-  const row = db.select().from(contacts).where(eq(contacts.id, id)).get();
-  if (!row) return undefined;
-  return attachChannels([row])[0];
+  return getContactDtoById(id);
 }
 
 export function getContactsByIds(ids: string[]): ContactDTO[] {

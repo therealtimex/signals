@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
-import { createContact, archiveContact } from "@/lib/db/queries/contacts";
+import { createContact, archiveContact, getContactById } from "@/lib/db/queries/contacts";
 import {
   createContactChannel,
   deleteContactChannel,
@@ -82,6 +82,24 @@ describe("contact-channels", () => {
     archiveContact(contact.id, "test");
 
     expect(findContactByChannel("email", "archived@example.com")).toBeUndefined();
+  });
+
+  it("prefers an active contact when an archived contact shares the same email", () => {
+    const archived = createContact({ name: "Archived Owner", email: "shared@example.com" });
+    archiveContact(archived.id, "test");
+
+    const active = createContact({ name: "Active Owner" });
+    createContactChannel({
+      contactId: active.id,
+      channelType: "email",
+      value: "shared@example.com",
+      isVerified: true,
+      source: "manual",
+    });
+
+    const match = findContactByChannel("email", "shared@example.com");
+    expect(match?.id).toBe(active.id);
+    expect(getContactById(active.id)?.email).toBe("shared@example.com");
   });
 
   it("updates value and recomputes normalized key", () => {

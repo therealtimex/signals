@@ -1,9 +1,10 @@
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db, type DbRunner } from "@/lib/db/client";
 import { assertChannelType, normalizeChannelValue, type ChannelType } from "@/lib/db/channel-types";
+import { recalcContactEnrichment } from "@/lib/db/contact-enrichment-recalc";
+import { getContactDtoById } from "@/lib/db/queries/contact-read-model";
 import { contactChannels, contacts } from "@/lib/db/schema";
-import { getContactById } from "@/lib/db/queries/contacts";
 import type { ContactChannel, ContactWithIdentities, NewContactChannel } from "@/lib/db/types";
 
 export type CreateContactChannelInput = {
@@ -31,16 +32,6 @@ export type UpdateContactChannelInput = {
 
 function nowUnix(): number {
   return Math.floor(Date.now() / 1000);
-}
-
-function isArchivedContact(contact: { metadata: string | null }): boolean {
-  if (!contact.metadata) return false;
-  try {
-    const parsed = JSON.parse(contact.metadata) as { archived?: number };
-    return parsed.archived === 1;
-  } catch {
-    return false;
-  }
 }
 
 function demoteOtherPrimaries(
@@ -141,6 +132,7 @@ export function createContactChannel(input: CreateContactChannelInput): ContactC
       .run();
   });
 
+  recalcContactEnrichment(input.contactId);
   return getContactChannelById(id)!;
 }
 
@@ -177,6 +169,7 @@ export function updateContactChannel(
     tx.update(contactChannels).set(updates).where(eq(contactChannels.id, id)).run();
   });
 
+  recalcContactEnrichment(existing.contactId);
   return getContactChannelById(id);
 }
 
@@ -184,6 +177,7 @@ export function deleteContactChannel(id: string): boolean {
   const existing = getContactChannelById(id);
   if (!existing) return false;
   db.delete(contactChannels).where(eq(contactChannels.id, id)).run();
+  recalcContactEnrichment(existing.contactId);
   return true;
 }
 
@@ -198,17 +192,19 @@ export function findContactByChannel(
   const row = db
     .select({ contactId: contactChannels.contactId })
     .from(contactChannels)
+    .innerJoin(contacts, eq(contactChannels.contactId, contacts.id))
     .where(
-      and(eq(contactChannels.channelType, type), eq(contactChannels.valueNormalized, valueNormalized)),
+      and(
+        eq(contactChannels.channelType, type),
+        eq(contactChannels.valueNormalized, valueNormalized),
+        sql`json_extract(${contacts.metadata}, '$.archived') IS NOT 1`,
+      ),
     )
     .orderBy(desc(contactChannels.isVerified), desc(contactChannels.createdAt))
     .get();
 
   if (!row) return undefined;
-
-  const contact = getContactById(row.contactId);
-  if (!contact || isArchivedContact(contact)) return undefined;
-  return contact;
+  return getContactDtoById(row.contactId);
 }
 
 /** List channels matching a normalized value (diagnostics / importer use). */
