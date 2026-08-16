@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
 import { getMediaAsset, deleteMediaAsset, MEDIA_DIR } from "@/lib/db/queries/media";
+import { contentDispositionForMime } from "@/lib/media/serving-policy";
 
 export async function GET(
   _req: NextRequest,
@@ -24,6 +25,8 @@ export async function GET(
     headers: {
       "Content-Type": asset.mimeType,
       "Content-Length": String(buffer.length),
+      "Content-Disposition": contentDispositionForMime(asset.mimeType, asset.filename),
+      "X-Content-Type-Options": "nosniff",
       "Cache-Control": "public, max-age=31536000, immutable",
     },
   });

@@ -39,6 +39,16 @@ export async function register() {
     }
 
     try {
+      const { backfillMediaAttachments } = await import("@/lib/db/backfills/media-attachments");
+      const mediaBackfill = backfillMediaAttachments();
+      if (mediaBackfill.inserted > 0) {
+        console.log("[instrumentation] Media attachment backfill applied:", mediaBackfill);
+      }
+    } catch (e) {
+      console.warn("[instrumentation] Media attachment backfill skipped:", (e as Error).message);
+    }
+
+    try {
       const { runContactProfileEmbedSweep } = await import("@/lib/db/contact-profile-embed-sweep");
       const embedSweep = await runContactProfileEmbedSweep({ batchSize: 25 });
       if (embedSweep.processed > 0 || (!embedSweep.complete && embedSweep.remaining > 0)) {
@@ -94,6 +104,19 @@ export async function register() {
       }
     } catch (e) {
       console.warn("[instrumentation] Graph integrity job skipped:", (e as Error).message);
+    }
+
+    try {
+      const { runMediaIntegrityJob } = await import("@/lib/db/media-integrity");
+      const mediaIntegrity = runMediaIntegrityJob({ repair: true });
+      if (
+        mediaIntegrity.orphanedAttachmentsRemoved > 0 ||
+        mediaIntegrity.orphanedAssetsRemoved > 0
+      ) {
+        console.log("[instrumentation] Media integrity job:", mediaIntegrity);
+      }
+    } catch (e) {
+      console.warn("[instrumentation] Media integrity job skipped:", (e as Error).message);
     }
 
     // Run idempotent migrations before anything else

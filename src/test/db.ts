@@ -21,6 +21,8 @@ import {
   launches,
   variants,
   embeddings,
+  mediaAttachments,
+  mediaAssets,
   orgs,
   workflowRuns,
   workflowSteps,
@@ -52,6 +54,8 @@ export function resetCoreTables(): void {
   db.delete(identityMetrics).run();
   db.delete(graphEdges).run();
   db.delete(embeddings).run();
+  db.delete(mediaAttachments).run();
+  db.delete(mediaAssets).run();
   db.delete(variants).run();
   db.delete(contentPosts).run();
   db.delete(contentItems).run();

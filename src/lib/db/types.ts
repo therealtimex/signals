@@ -19,6 +19,7 @@ import {
   workflowSteps,
   scheduledJobs,
   mediaAssets,
+  mediaAttachments,
   goals,
   goalWorkflows,
   goalProgress,
@@ -117,6 +118,8 @@ export type NewScheduledJob = InferInsertModel<typeof scheduledJobs>;
 // Media asset types
 export type MediaAsset = InferSelectModel<typeof mediaAssets>;
 export type NewMediaAsset = InferInsertModel<typeof mediaAssets>;
+export type MediaAttachment = InferSelectModel<typeof mediaAttachments>;
+export type NewMediaAttachment = InferInsertModel<typeof mediaAttachments>;
 
 // Goal types
 export type Goal = InferSelectModel<typeof goals>;
