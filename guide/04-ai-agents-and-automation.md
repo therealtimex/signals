@@ -117,7 +117,7 @@ Agent templates can be scheduled on a recurring cron from the Automation page. T
 - **Next run preview** — Shows the next planned execution
 - **Config overrides** — Per-template payload overrides
 
-**Migration note:** scheduled template jobs no longer execute in-process LLM loops. When orchestration is unavailable, the scheduled job is marked **failed**, **disabled**, and shows the error in **Scheduled Workflows**. Recurring jobs are **not** silently rescheduled. Re-enable a schedule after migrating it to an RTX Agent Flow to restore a pending next run.
+**Migration note:** scheduled template jobs no longer execute in-process LLM loops. When orchestration is unavailable, the scheduled job is marked **failed** and **disabled**, and shows the error in **Scheduled Workflows**. Recurring jobs are **not** silently rescheduled. Local re-enable is blocked for agent templates — configure the schedule in a **RealTimeX Agent Flow** instead.
 
 ## Triggering Agents from RealTimeX
 

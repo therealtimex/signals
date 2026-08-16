@@ -4,6 +4,7 @@ import { CronExpressionParser } from "cron-parser";
 import { db } from "@/lib/db/client";
 import { scheduledJobs } from "@/lib/db/schema";
 import type { ScheduledJob, NewScheduledJob } from "@/lib/db/types";
+import { canReactivateScheduleLocally } from "@/lib/scheduler/schedule-policy";
 
 /** Compute the next run timestamp from a cron expression. Returns unix seconds. */
 function nextRunFromCron(cronExpression: string): number {
@@ -127,6 +128,7 @@ export { nextRunFromCron };
 export function reactivateScheduledJob(id: string): ScheduledJob | undefined {
   const job = getScheduledJob(id);
   if (!job) return undefined;
+  if (!canReactivateScheduleLocally(job)) return undefined;
 
   const now = Math.floor(Date.now() / 1000);
   const updates: Partial<Omit<NewScheduledJob, "id">> = {

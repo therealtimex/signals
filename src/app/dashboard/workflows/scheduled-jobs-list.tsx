@@ -26,6 +26,10 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { CalendarClock, Trash2, Loader2 } from "lucide-react";
+import {
+  canToggleScheduleEnabled,
+  scheduledJobNextRunLabel,
+} from "@/lib/scheduler/schedule-policy";
 
 interface ScheduledJob {
   id: string;
@@ -91,10 +95,7 @@ function statusBadge(job: ScheduledJob) {
 }
 
 function formatNextRun(job: ScheduledJob): string {
-  if (job.status === "failed" || job.enabled !== 1) {
-    return "Re-enable to schedule";
-  }
-  return formatTimestamp(job.runAt);
+  return scheduledJobNextRunLabel(job, (runAt) => formatTimestamp(runAt));
 }
 
 function truncateError(error: string | null, max = 80): string | null {
@@ -135,15 +136,19 @@ export function ScheduledJobsList() {
   }, []);
 
   async function handleToggle(jobId: string, currentEnabled: number) {
+    const existing = jobs.find((j) => j.id === jobId);
     const newEnabled = currentEnabled !== 1;
+    if (existing && !canToggleScheduleEnabled(existing, newEnabled)) {
+      return;
+    }
     const res = await fetch(`/api/workflows/schedule/${jobId}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ enabled: newEnabled }),
     });
     if (!res.ok) return;
-    const job = (await res.json()) as ScheduledJob;
-    setJobs((prev) => prev.map((j) => (j.id === jobId ? job : j)));
+    const updated = (await res.json()) as ScheduledJob;
+    setJobs((prev) => prev.map((j) => (j.id === jobId ? updated : j)));
   }
 
   async function handleDelete(jobId: string) {
@@ -214,6 +219,9 @@ export function ScheduledJobsList() {
                   <TableCell>
                     <Switch
                       checked={job.enabled === 1}
+                      disabled={
+                        job.enabled !== 1 && !canToggleScheduleEnabled(job, true)
+                      }
                       onCheckedChange={() =>
                         handleToggle(job.id, job.enabled)
                       }

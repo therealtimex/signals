@@ -7,6 +7,11 @@ import {
   deleteScheduledJob,
   reactivateScheduledJob,
 } from "@/lib/db/queries/scheduled-jobs";
+import {
+  RTX_SCHEDULING_REQUIRED_CODE,
+  RTX_SCHEDULING_REQUIRED_MESSAGE,
+  canReactivateScheduleLocally,
+} from "@/lib/scheduler/schedule-policy";
 
 const updateScheduleSchema = z.object({
   cronExpression: z.string().optional(),
@@ -62,6 +67,16 @@ export async function PUT(
 
     let job;
     if (data.enabled === true) {
+      const existing = getScheduledJob(id);
+      if (!existing) {
+        return NextResponse.json({ error: "Schedule not found" }, { status: 404 });
+      }
+      if (!canReactivateScheduleLocally(existing)) {
+        return NextResponse.json(
+          { error: RTX_SCHEDULING_REQUIRED_MESSAGE, code: RTX_SCHEDULING_REQUIRED_CODE },
+          { status: 409 },
+        );
+      }
       job = reactivateScheduledJob(id);
       if (!job) {
         return NextResponse.json({ error: "Schedule not found" }, { status: 404 });

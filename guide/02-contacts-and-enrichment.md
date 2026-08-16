@@ -66,8 +66,6 @@ Identities are how Signals maintains the golden record. When an agent discovers 
 ### Tasks Tab
 Action items associated with this contact — follow-up reminders, outreach tasks, demo scheduling. Tasks have priority levels (high, medium, low) and due dates.
 
-## AI-Powered Enrichment
-
 ## AI-Powered Enrichment (RTX)
 
 Signals no longer runs in-process enrichment agents. Use **RealTimeX terminal agents** with the Agent Tools API:
@@ -78,7 +76,7 @@ Signals no longer runs in-process enrichment agents. Use **RealTimeX terminal ag
 
 See `docs/rtx-agent-browser-enrichment.md` and `docs/rtx-agent-orchestration.md`.
 
-The **Automation → Agents** gallery still documents enrichment *templates* (instructions and target personas). **Run** and **Schedule** record workflow runs for observability, but execution must happen through RTX Agent Flows calling `POST /api/agent-tools/invoke`. Failed schedules are disabled automatically — re-enable them from **Scheduled Workflows** after migrating the template to RTX.
+The **Automation → Agents** gallery still documents enrichment *templates* (instructions and target personas). **Run** and **Schedule** record workflow runs for observability, but execution must happen through RTX Agent Flows calling `POST /api/agent-tools/invoke`. When orchestration is unavailable, template schedules fail once, stay **disabled**, and cannot be re-enabled from Signals — configure recurring runs in **RealTimeX Agent Flows** instead.
 
 ## Smart Pruning
 
@@ -103,6 +101,6 @@ This matters because relationships don't live on one platform. The person who en
 
 You've got contacts in the system and agents enriching them. Now it's time to turn those relationships into content.
 
-**Next: [Content and Publishing](03-content-and-publishing.md)** — Write posts, generate AI drafts, and publish to X and LinkedIn directly from your CRM.
+**Next: [Content and Publishing](03-content-and-publishing.md)** — Draft posts in Signals and publish to X and LinkedIn; use RealTimeX agents for AI-assisted drafting via agent-tools and RTX flows.
 
 **Also see: [AI Agents and Automation](04-ai-agents-and-automation.md)** — RTX orchestration, agent-tools, and scheduling migration.
