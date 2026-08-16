@@ -35,6 +35,7 @@ export function AddOrganizationDialog({ onCreated }: AddOrganizationDialogProps)
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [orgType, setOrgType] = useState<(typeof orgTypes)[number]>("company");
   const [domain, setDomain] = useState("");
@@ -49,12 +50,14 @@ export function AddOrganizationDialog({ onCreated }: AddOrganizationDialogProps)
     setWebsite("");
     setLocation("");
     setDescription("");
+    setError(null);
   }
 
   async function handleSave() {
     if (!name.trim()) return;
 
     setSaving(true);
+    setError(null);
     try {
       const res = await fetch("/api/orgs", {
         method: "POST",
@@ -69,7 +72,11 @@ export function AddOrganizationDialog({ onCreated }: AddOrganizationDialogProps)
         }),
       });
 
-      if (!res.ok) return;
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setError(typeof body.error === "string" ? body.error : "Failed to save organization");
+        return;
+      }
 
       const org = (await res.json()) as Org;
       setOpen(false);
@@ -167,6 +174,7 @@ export function AddOrganizationDialog({ onCreated }: AddOrganizationDialogProps)
             />
           </div>
         </div>
+        {error ? <p className="text-sm text-destructive">{error}</p> : null}
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)}>
             Cancel

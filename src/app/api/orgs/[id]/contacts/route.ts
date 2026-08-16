@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getOrgById, listOrgLinkedContacts } from "@/lib/db/queries/orgs";
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
@@ -11,6 +11,8 @@ export async function GET(
     return NextResponse.json({ error: "Organization not found" }, { status: 404 });
   }
 
-  const contacts = listOrgLinkedContacts(id);
+  const includeLocalOnly =
+    new URL(req.url).searchParams.get("includeLocalOnly") === "true";
+  const contacts = listOrgLinkedContacts(id, { includeLocalOnly });
   return NextResponse.json({ data: contacts, total: contacts.length });
 }

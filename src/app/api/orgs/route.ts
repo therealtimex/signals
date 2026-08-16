@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { createOrg, listOrgsWithContactCounts } from "@/lib/db/queries/orgs";
+import { normalizeOrgWebsiteUrl } from "@/lib/org-website";
 
 const createOrgSchema = z.object({
   name: z.string().min(1, "Name is required"),
@@ -10,6 +11,14 @@ const createOrgSchema = z.object({
   description: z.string().optional().nullable(),
   location: z.string().optional().nullable(),
 });
+
+function parseWebsite(website: string | null | undefined): string | null {
+  try {
+    return normalizeOrgWebsiteUrl(website);
+  } catch {
+    throw new Error("Invalid website URL");
+  }
+}
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -29,7 +38,7 @@ export async function POST(req: NextRequest) {
       name: body.name,
       orgType: body.orgType,
       domain: body.domain,
-      website: body.website,
+      website: parseWebsite(body.website),
       description: body.description,
       location: body.location,
       source: "ui",
@@ -39,7 +48,11 @@ export async function POST(req: NextRequest) {
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: error.errors }, { status: 400 });
     }
-    if (error instanceof Error && error.message === "Organization name is required") {
+    if (
+      error instanceof Error &&
+      (error.message === "Organization name is required" ||
+        error.message === "Invalid website URL")
+    ) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

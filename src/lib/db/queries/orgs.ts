@@ -6,6 +6,10 @@ import { normalizeOrgName, orgDedupeKey } from "@/lib/db/backfills/org-names";
 import { getContactsByIds } from "@/lib/db/queries/contacts";
 import type { ContactWithIdentities, Org, PaginatedResult } from "@/lib/db/types";
 
+export type OrgRelationshipQueryOptions = {
+  includeLocalOnly?: boolean;
+};
+
 export type OrgListRow = Org & { contactCount: number };
 
 export type OrgLinkedContact = ContactWithIdentities & {
@@ -63,44 +67,57 @@ export function listOrgsWithContactCounts(
   opts?: Parameters<typeof listOrgs>[0],
 ): PaginatedResult<OrgListRow> {
   const result = listOrgs(opts);
+  const relationshipOpts: OrgRelationshipQueryOptions = {
+    includeLocalOnly: opts?.includeLocalOnly,
+  };
   return {
     total: result.total,
     data: result.data.map((org) => ({
       ...org,
-      contactCount: countOrgLinkedContacts(org.id),
+      contactCount: countOrgLinkedContacts(org.id, relationshipOpts),
     })),
   };
 }
 
-export function countOrgLinkedContacts(orgId: string): number {
+function worksAtEdgeConditions(
+  orgId: string,
+  opts?: OrgRelationshipQueryOptions,
+): SQL[] {
+  const conditions: SQL[] = [
+    eq(graphEdges.dstType, "org"),
+    eq(graphEdges.dstId, orgId),
+    eq(graphEdges.srcType, "contact"),
+    eq(graphEdges.edgeType, "works_at"),
+  ];
+
+  if (!opts?.includeLocalOnly) {
+    conditions.push(eq(graphEdges.scope, "shared"));
+  }
+
+  return conditions;
+}
+
+export function countOrgLinkedContacts(
+  orgId: string,
+  opts?: OrgRelationshipQueryOptions,
+): number {
   return (
     db
       .select({ value: count() })
       .from(graphEdges)
-      .where(
-        and(
-          eq(graphEdges.dstType, "org"),
-          eq(graphEdges.dstId, orgId),
-          eq(graphEdges.srcType, "contact"),
-          eq(graphEdges.edgeType, "works_at"),
-        ),
-      )
+      .where(and(...worksAtEdgeConditions(orgId, opts)))
       .get()?.value ?? 0
   );
 }
 
-export function listOrgLinkedContacts(orgId: string): OrgLinkedContact[] {
+export function listOrgLinkedContacts(
+  orgId: string,
+  opts?: OrgRelationshipQueryOptions,
+): OrgLinkedContact[] {
   const edges = db
     .select()
     .from(graphEdges)
-    .where(
-      and(
-        eq(graphEdges.dstType, "org"),
-        eq(graphEdges.dstId, orgId),
-        eq(graphEdges.srcType, "contact"),
-        eq(graphEdges.edgeType, "works_at"),
-      ),
-    )
+    .where(and(...worksAtEdgeConditions(orgId, opts)))
     .all();
 
   if (edges.length === 0) return [];
