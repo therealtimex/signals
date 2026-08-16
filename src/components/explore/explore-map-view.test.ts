@@ -12,6 +12,7 @@ import type { ContactExploreCard } from "@/lib/db/queries/contact-explore";
 
 vi.mock("next/navigation", () => ({
   usePathname: () => "/dashboard/explore",
+  useRouter: () => ({ refresh: vi.fn() }),
 }));
 
 vi.mock("next/image", () => ({
@@ -111,6 +112,24 @@ vi.mock("@/components/explore/explore-map-force-graph", () => ({
   ExploreMapCanvas: () => createElement("div", { "data-testid": "explore-map-canvas" }),
 }));
 
+function mockFetchPair(
+  mapBody: Record<string, unknown>,
+  contactTotal = 1,
+) {
+  return vi.fn().mockImplementation((url: string) => {
+    if (url.includes("/api/contacts")) {
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({ total: contactTotal, data: [] }),
+      });
+    }
+    return Promise.resolve({
+      ok: true,
+      json: async () => mapBody,
+    });
+  });
+}
+
 describe("ExploreMapView", () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -119,6 +138,21 @@ describe("ExploreMapView", () => {
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
+
+    class ResizeObserverMock {
+      private readonly callback: ResizeObserverCallback;
+      constructor(callback: ResizeObserverCallback) {
+        this.callback = callback;
+      }
+      observe() {
+        this.callback(
+          [{ contentRect: { width: 800, height: 600 } } as ResizeObserverEntry],
+          this as unknown as ResizeObserver,
+        );
+      }
+      disconnect() {}
+    }
+    vi.stubGlobal("ResizeObserver", ResizeObserverMock);
   });
 
   afterEach(() => {
@@ -127,22 +161,90 @@ describe("ExploreMapView", () => {
     vi.unstubAllGlobals();
   });
 
-  it("renders no-owner empty state", async () => {
+  it("renders no-owner empty state with choose and create CTAs when candidates exist", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({
+      mockFetchPair(
+        {
           nodes: [],
           edges: [],
           meta: {
             ownerContactId: null,
+            owner: null,
             totalContacts: 0,
             shownContacts: 0,
             truncated: false,
             limit: 200,
           },
-        }),
+        },
+        2,
+      ),
+    );
+
+    await act(async () => {
+      root.render(createElement(ExploreMapView));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain("Set yourself to see your audience");
+    expect(container.textContent).toContain("Choose my contact");
+    expect(container.textContent).toContain("Create my profile");
+    expect(container.textContent).not.toContain("update_contact");
+  });
+
+  it("renders create-only CTA when no contact candidates exist", async () => {
+    vi.stubGlobal(
+      "fetch",
+      mockFetchPair(
+        {
+          nodes: [],
+          edges: [],
+          meta: {
+            ownerContactId: null,
+            owner: null,
+            totalContacts: 0,
+            shownContacts: 0,
+            truncated: false,
+            limit: 200,
+          },
+        },
+        0,
+      ),
+    );
+
+    await act(async () => {
+      root.render(createElement(ExploreMapView));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain("Create my profile");
+    expect(container.textContent).not.toContain("Choose my contact");
+  });
+
+  it("falls back to both CTAs when the candidate-count fetch fails but the map succeeds", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((url: string) => {
+        if (url.includes("/api/contacts")) {
+          return Promise.reject(new Error("contacts unavailable"));
+        }
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            nodes: [],
+            edges: [],
+            meta: {
+              ownerContactId: null,
+              owner: null,
+              totalContacts: 0,
+              shownContacts: 0,
+              truncated: false,
+              limit: 200,
+            },
+          }),
+        });
       }),
     );
 
@@ -152,44 +254,45 @@ describe("ExploreMapView", () => {
       await Promise.resolve();
     });
 
-    expect(container.textContent).toContain("Mark your own contact to see your audience");
+    expect(container.textContent).toContain("Set yourself to see your audience");
+    expect(container.textContent).toContain("Choose my contact");
+    expect(container.textContent).toContain("Create my profile");
+    expect(container.textContent).not.toContain("Could not load audience map");
   });
 
-  it("renders no-audience empty state even when owner has niches in the payload", async () => {
+  it("renders no-audience empty state with owner chip even when owner has niches in the payload", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({
-          nodes: [
-            {
-              id: "contact:owner",
-              kind: "contact",
-              entityId: "owner",
-              label: "Owner",
-              avatarUrl: null,
-              isOwner: true,
-              followersCount: null,
-              nicheIds: ["niche-1"],
-            },
-            {
-              id: "niche:niche-1",
-              kind: "niche",
-              entityId: "niche-1",
-              label: "Builders",
-              nicheType: "interest",
-              memberCount: 1,
-            },
-          ],
-          edges: [],
-          meta: {
-            ownerContactId: "owner",
-            totalContacts: 0,
-            shownContacts: 0,
-            truncated: false,
-            limit: 200,
+      mockFetchPair({
+        nodes: [
+          {
+            id: "contact:owner",
+            kind: "contact",
+            entityId: "owner",
+            label: "Owner",
+            avatarUrl: null,
+            isOwner: true,
+            followersCount: null,
+            nicheIds: ["niche-1"],
           },
-        }),
+          {
+            id: "niche:niche-1",
+            kind: "niche",
+            entityId: "niche-1",
+            label: "Builders",
+            nicheType: "interest",
+            memberCount: 1,
+          },
+        ],
+        edges: [],
+        meta: {
+          ownerContactId: "owner",
+          owner: { id: "owner", name: "Owner", avatarUrl: null },
+          totalContacts: 0,
+          shownContacts: 0,
+          truncated: false,
+          limit: 200,
+        },
       }),
     );
 
@@ -200,7 +303,47 @@ describe("ExploreMapView", () => {
     });
 
     expect(container.textContent).toContain("No audience connections synced yet");
+    expect(container.textContent).toContain("You: Owner");
+    expect(container.textContent).toContain("Change");
     expect(container.querySelector('[data-testid="explore-map-canvas"]')).toBeNull();
+  });
+
+  it("renders owner chip on loaded graph state", async () => {
+    vi.stubGlobal(
+      "fetch",
+      mockFetchPair({
+        nodes: [
+          {
+            id: "contact:owner",
+            kind: "contact",
+            entityId: "owner",
+            label: "Owner",
+            avatarUrl: null,
+            isOwner: true,
+            followersCount: 10,
+            nicheIds: [],
+          },
+        ],
+        edges: [],
+        meta: {
+          ownerContactId: "owner",
+          owner: { id: "owner", name: "Owner", avatarUrl: null },
+          totalContacts: 1,
+          shownContacts: 1,
+          truncated: false,
+          limit: 200,
+        },
+      }),
+    );
+
+    await act(async () => {
+      root.render(createElement(ExploreMapView));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain("You: Owner");
+    expect(container.textContent).toContain("Change");
   });
 });
 

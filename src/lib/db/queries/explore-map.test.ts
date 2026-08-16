@@ -34,6 +34,7 @@ describe("getExploreMap", () => {
     expect(map.nodes).toEqual([]);
     expect(map.edges).toEqual([]);
     expect(map.meta.ownerContactId).toBeNull();
+    expect(map.meta.owner).toBeNull();
     expect(map.meta.totalContacts).toBe(0);
   });
 
@@ -313,6 +314,11 @@ describe("getExploreMap", () => {
 
     const map = getExploreMap();
     expect(map.meta.totalContacts).toBe(0);
+    expect(map.meta.owner).toEqual({
+      id: owner.id,
+      name: owner.name,
+      avatarUrl: owner.avatarUrl,
+    });
     expect(map.nodes.some((node) => node.kind === "niche" && node.entityId === niche.id)).toBe(true);
 
     const ownerNode = map.nodes.find(

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import {
@@ -18,7 +18,19 @@ import { Plus } from "lucide-react";
 
 const defaultFormData = { funnelStage: "prospect" } as const;
 
-export function AddContactDialog() {
+type AddContactDialogProps = {
+  trigger?: ReactNode;
+  title?: string;
+  payloadExtras?: Record<string, unknown>;
+  onCreated?: () => void;
+};
+
+export function AddContactDialog({
+  trigger,
+  title = "Add Contact",
+  payloadExtras = {},
+  onCreated,
+}: AddContactDialogProps = {}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -54,11 +66,13 @@ export function AddContactDialog() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...data,
+          ...payloadExtras,
           ...(identities.length > 0 ? { identities } : {}),
         }),
       });
       if (res.ok) {
         handleOpenChange(false);
+        onCreated?.();
         router.refresh();
       }
     } finally {
@@ -66,18 +80,25 @@ export function AddContactDialog() {
     }
   }
 
+  const description =
+    title === "Add Contact"
+      ? "Create a new contact in your CRM."
+      : "Create your profile to anchor the audience map.";
+
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
-        <Button>
-          <Plus className="mr-2 h-4 w-4" />
-          Add Contact
-        </Button>
+        {trigger ?? (
+          <Button>
+            <Plus className="mr-2 h-4 w-4" />
+            Add Contact
+          </Button>
+        )}
       </DialogTrigger>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Add Contact</DialogTitle>
-          <DialogDescription>Create a new contact in your CRM.</DialogDescription>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
         <ContactForm
           key={formKey}

@@ -170,6 +170,22 @@ export function createContact(data: Omit<NewContact, "id">): ContactWithIdentiti
     [data.firstName, data.lastName].filter(Boolean).join(" ") ||
     "Unknown";
 
+  const now = Math.floor(Date.now() / 1000);
+
+  if (data.isSelf === true) {
+    db.transaction((tx) => {
+      tx.update(contacts)
+        .set({ isSelf: false, updatedAt: now })
+        .where(eq(contacts.isSelf, true))
+        .run();
+      tx.insert(contacts)
+        .values({ ...data, ...nameFields, name, id, isSelf: true })
+        .run();
+    });
+    recalcEnrichment(id);
+    return getContactById(id)!;
+  }
+
   db.insert(contacts).values({ ...data, ...nameFields, name, id }).run();
   recalcEnrichment(id);
   return getContactById(id)!;
@@ -291,7 +307,12 @@ export function archiveContact(
     ...(workflowRunId ? { archiveWorkflowRunId: workflowRunId } : {}),
   });
 
-  const updated = updateContact(id, { metadata });
+  const updates: Partial<NewContact> = { metadata };
+  if (contact.isSelf) {
+    updates.isSelf = false;
+  }
+
+  const updated = updateContact(id, updates);
   if (updated) {
     deleteEdgesTouchingContact(id);
   }

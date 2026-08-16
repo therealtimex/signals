@@ -28,11 +28,19 @@ describe("GET /api/explore/map", () => {
 
     expect(res.status).toBe(200);
     expect(body.meta.ownerContactId).toBe(owner.id);
+    expect(body.meta.owner).toEqual({
+      id: owner.id,
+      name: owner.name,
+      avatarUrl: owner.avatarUrl,
+    });
     expect(body.nodes.some((node: { id: string }) => node.id === `contact:${owner.id}`)).toBe(true);
     expect(body.nodes.some((node: { id: string }) => node.id === `contact:${follower.id}`)).toBe(
       true,
     );
     expect(Array.isArray(body.edges)).toBe(true);
+    const serialized = JSON.stringify(body);
+    expect(serialized).not.toContain('"is_self"');
+    expect(serialized).not.toContain('"isSelf"');
   });
 
   it("returns 400 VALIDATION_ERROR for invalid limit", async () => {
@@ -53,6 +61,7 @@ describe("GET /api/explore/map", () => {
     const body = await res.json();
     expect(res.status).toBe(200);
     expect(body.meta.ownerContactId).toBeNull();
+    expect(body.meta.owner).toBeNull();
     expect(body.nodes).toEqual([]);
     expect(body.edges).toEqual([]);
   });

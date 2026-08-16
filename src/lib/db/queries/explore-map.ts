@@ -41,6 +41,7 @@ export type ExploreMapResponse = {
   edges: ExploreMapEdge[];
   meta: {
     ownerContactId: string | null;
+    owner: { id: string; name: string; avatarUrl: string | null } | null;
     totalContacts: number;
     shownContacts: number;
     truncated: boolean;
@@ -70,11 +71,24 @@ function emptyExploreMap(limit: number, ownerContactId: string | null = null): E
     edges: [],
     meta: {
       ownerContactId,
+      owner: null,
       totalContacts: 0,
       shownContacts: 0,
       truncated: false,
       limit,
     },
+  };
+}
+
+function ownerMetaFromRow(
+  ownerContactId: string,
+  rows: { id: string; name: string; avatarUrl: string | null }[],
+): { id: string; name: string; avatarUrl: string | null } {
+  const row = rows.find((entry) => entry.id === ownerContactId);
+  return {
+    id: ownerContactId,
+    name: row?.name ?? "You",
+    avatarUrl: row?.avatarUrl ?? null,
   };
 }
 
@@ -332,6 +346,7 @@ export function getExploreMap(opts?: { limit?: number }): ExploreMapResponse {
     edges,
     meta: {
       ownerContactId,
+      owner: ownerMetaFromRow(ownerContactId, contactRows),
       totalContacts,
       shownContacts: shownAudienceIds.length,
       truncated: totalContacts > limit,

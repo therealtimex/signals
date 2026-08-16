@@ -33,6 +33,7 @@ const updateContactSchema = z.object({
     .enum(["prospect", "engaged", "qualified", "opportunity", "customer", "advocate"])
     .optional(),
   score: z.number().int().min(0).optional(),
+  isSelf: z.boolean().optional(),
 });
 
 export async function GET(
