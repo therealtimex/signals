@@ -4,7 +4,7 @@ import { db } from "@/lib/db/client";
 import { assertPlatformAccountUnclaimed, PlatformAccountConflictError } from "@/lib/db/identity-claims";
 import { contactIdentities } from "@/lib/db/schema";
 import { liftIdentityStatsFromPlatformData } from "@/lib/db/identity-stats";
-import { syncContactScalarProjections } from "@/lib/db/contact-scalar-projection";
+import { syncIdentityScalarProjections } from "@/lib/db/contact-scalar-projection";
 import type { ContactIdentity, NewContactIdentity } from "@/lib/db/types";
 
 function guardContactIdentityClaim(
@@ -33,7 +33,7 @@ export function createIdentity(data: Omit<NewContactIdentity, "id">): ContactIde
     statsUpdatedAt: data.lastSyncedAt ?? undefined,
   });
   db.insert(contactIdentities).values({ ...data, ...lifted, id }).run();
-  syncContactScalarProjections(data.contactId);
+  syncIdentityScalarProjections(data.contactId);
   return getIdentityById(id)!;
 }
 
@@ -64,7 +64,7 @@ export function updateIdentity(
     .where(eq(contactIdentities.id, id))
     .run();
 
-  syncContactScalarProjections(existing.contactId);
+  syncIdentityScalarProjections(existing.contactId);
   return getIdentityById(id);
 }
 
@@ -78,6 +78,6 @@ export function deleteIdentityForContact(contactId: string, identityId: string):
   if (!existing) return false;
 
   db.delete(contactIdentities).where(eq(contactIdentities.id, identityId)).run();
-  syncContactScalarProjections(contactId);
+  syncIdentityScalarProjections(contactId);
   return true;
 }

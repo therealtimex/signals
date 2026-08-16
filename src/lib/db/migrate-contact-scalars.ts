@@ -34,7 +34,8 @@ export function ensureContactScalarColumns(): { restored: string[]; projections:
     "CREATE INDEX IF NOT EXISTS `idx_contacts_email` ON `contacts` (`email`)",
   );
 
-  const projections = reconstructAllContactScalarProjections();
+  const projections =
+    restored.length > 0 ? reconstructAllContactScalarProjections() : 0;
 
   return { restored, projections };
 }

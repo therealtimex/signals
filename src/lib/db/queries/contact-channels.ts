@@ -3,7 +3,7 @@ import { nanoid } from "nanoid";
 import { db, type DbRunner } from "@/lib/db/client";
 import { assertChannelType, normalizeChannelValue, type ChannelType } from "@/lib/db/channel-types";
 import { recalcContactEnrichment } from "@/lib/db/contact-enrichment-recalc";
-import { syncContactScalarProjections } from "@/lib/db/contact-scalar-projection";
+import { syncChannelScalarProjections } from "@/lib/db/contact-scalar-projection";
 import { getContactDtoById } from "@/lib/db/queries/contact-read-model";
 import { contactChannels, contacts } from "@/lib/db/schema";
 import type { ContactChannel, ContactWithIdentities, NewContactChannel } from "@/lib/db/types";
@@ -37,7 +37,7 @@ function nowUnix(): number {
 
 function afterChannelMutation(contactId: string): void {
   recalcContactEnrichment(contactId);
-  syncContactScalarProjections(contactId);
+  syncChannelScalarProjections(contactId);
 }
 
 function demoteOtherPrimaries(

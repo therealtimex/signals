@@ -2,7 +2,7 @@ import { z } from "zod";
 import { PLATFORM_ENUM } from "@/lib/db/platforms";
 import { createIdentity } from "@/lib/db/queries/identities";
 import { recalcEnrichment } from "@/lib/db/queries/contacts";
-import { syncContactScalarProjections } from "@/lib/db/contact-scalar-projection";
+import { syncIdentityScalarProjections } from "@/lib/db/contact-scalar-projection";
 
 export const contactIdentityInputSchema = z.object({
   platform: z.enum(PLATFORM_ENUM),
@@ -37,5 +37,5 @@ export function createContactIdentities(
   }
 
   recalcEnrichment(contactId);
-  syncContactScalarProjections(contactId);
+  syncIdentityScalarProjections(contactId);
 }

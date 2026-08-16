@@ -41,8 +41,10 @@ test.describe("smoke:core API", () => {
         name: "Smoke Test Contact",
         firstName: "Smoke",
         lastName: "Test",
-        platform: "x",
-        platformUserId: "smoke-e2e-user",
+        identity: {
+          platform: "x",
+          platformUserId: "smoke-e2e-user",
+        },
       },
     });
     expect(create.status()).toBe(201);
@@ -52,6 +54,11 @@ test.describe("smoke:core API", () => {
       name: "Smoke Test Contact",
       firstName: "Smoke",
       lastName: "Test",
+    });
+    expect(created.identities).toHaveLength(1);
+    expect(created.identities[0]).toMatchObject({
+      platform: "x",
+      platformUserId: "smoke-e2e-user",
     });
 
     const afterCreate = await request.get("/api/contacts");

@@ -31,6 +31,44 @@ export type ChannelInput = {
   scope?: "shared" | "local_only";
 };
 
+function activeChannelInputs(channels: ChannelInput[]): ChannelInput[] {
+  return channels.filter((channel) => channel.value?.trim());
+}
+
+/** Validate a full channel sync before any mutation. */
+export function validateChannelSync(contactId: string, channels: ChannelInput[]): void {
+  const active = activeChannelInputs(channels);
+  const incomingIds = new Set(
+    active.map((channel) => channel.id).filter((id): id is string => Boolean(id)),
+  );
+
+  for (const id of incomingIds) {
+    const row = getContactChannelById(id);
+    if (!row) {
+      throw new ChannelWriteError(`Channel not found: ${id}`);
+    }
+    if (row.contactId !== contactId) {
+      throw new ChannelWriteError(`Channel ${id} does not belong to contact ${contactId}`);
+    }
+  }
+
+  for (const channel of active) {
+    if (channel.id) {
+      const existing = getContactChannelById(channel.id);
+      if (!existing) {
+        throw new ChannelWriteError(`Channel not found: ${channel.id}`);
+      }
+      if (existing.channelType !== channel.channelType) {
+        throw new ChannelWriteError("Channel type cannot change");
+      }
+      continue;
+    }
+
+    assertChannelType(channel.channelType);
+    normalizeChannelValue(assertChannelType(channel.channelType), channel.value);
+  }
+}
+
 export function ensureContactChannel(input: CreateContactChannelInput): ContactChannel {
   const channelType = assertChannelType(input.channelType);
   const valueNormalized = normalizeChannelValue(channelType, input.value);
@@ -127,28 +165,23 @@ export function syncChannelInputs(
   channels: ChannelInput[],
   source: string,
 ): void {
+  validateChannelSync(contactId, channels);
+
+  const active = activeChannelInputs(channels);
   const incomingIds = new Set(
-    channels.map((channel) => channel.id).filter((id): id is string => Boolean(id)),
+    active.map((channel) => channel.id).filter((id): id is string => Boolean(id)),
   );
   const existing = listContactChannels(contactId);
 
-  for (const id of incomingIds) {
-    const row = getContactChannelById(id);
-    if (!row) {
-      throw new ChannelWriteError(`Channel not found: ${id}`);
+  db.transaction(() => {
+    for (const row of existing) {
+      if (!incomingIds.has(row.id)) {
+        deleteContactChannel(row.id);
+      }
     }
-    if (row.contactId !== contactId) {
-      throw new ChannelWriteError(`Channel ${id} does not belong to contact ${contactId}`);
-    }
-  }
 
-  for (const row of existing) {
-    if (!incomingIds.has(row.id)) {
-      deleteContactChannel(row.id);
-    }
-  }
-
-  applyChannelInputs(contactId, channels.filter((channel) => channel.value?.trim()), source);
+    applyChannelInputs(contactId, active, source);
+  });
 }
 
 function removePrimaryChannel(contactId: string, channelType: string): void {

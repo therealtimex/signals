@@ -143,4 +143,37 @@ describe("contact-channel-writes", () => {
       ),
     ).toThrow(ChannelWriteError);
   });
+
+  it("does not delete channels when sync validation fails", () => {
+    const contact = createContact({ name: "Ada" });
+    const work = createContactChannel({
+      contactId: contact.id,
+      channelType: "email",
+      value: "work@example.com",
+      source: "test",
+    });
+    const personal = createContactChannel({
+      contactId: contact.id,
+      channelType: "email",
+      value: "personal@example.com",
+      source: "test",
+    });
+
+    expect(() =>
+      syncChannelInputs(
+        contact.id,
+        [{ id: work.id, channelType: "phone", value: "work@example.com" }],
+        "test",
+      ),
+    ).toThrow(ChannelWriteError);
+
+    const ids = db
+      .select({ id: contactChannels.id })
+      .from(contactChannels)
+      .where(eq(contactChannels.contactId, contact.id))
+      .all()
+      .map((row) => row.id)
+      .sort();
+    expect(ids).toEqual([personal.id, work.id].sort());
+  });
 });

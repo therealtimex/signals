@@ -4,6 +4,8 @@ import { resolvePrimaryChannel } from "@/lib/db/queries/contact-channels";
 import { contacts, contactIdentities } from "@/lib/db/schema";
 import type { NewContact } from "@/lib/db/types";
 
+export type ScalarProjectionDomain = "channels" | "identities";
+
 function contactsHasColumn(name: string): boolean {
   const rows = sqlite.prepare("PRAGMA table_info(contacts)").all() as { name: string }[];
   return rows.some((row) => row.name === name);
@@ -19,11 +21,9 @@ function resolvePrimaryIdentity(contactId: string) {
   return rows.find((row) => row.isPrimary) ?? rows[0];
 }
 
-/** Write-through projection of retiring scalar columns from channels/identities. */
-export function syncContactScalarProjections(contactId: string): void {
-  const updates: Partial<NewContact> & { updatedAt: number } = {
-    updatedAt: Math.floor(Date.now() / 1000),
-  };
+/** Project retiring email/phone scalars from primary channels only. */
+export function syncChannelScalarProjections(contactId: string): void {
+  const updates: Partial<NewContact> = {};
 
   if (contactsHasColumn("email")) {
     const emailChannel = resolvePrimaryChannel(contactId, "email");
@@ -40,6 +40,18 @@ export function syncContactScalarProjections(contactId: string): void {
     updates.verifiedEmail = emailChannel?.isVerified ? 1 : 0;
   }
 
+  if (Object.keys(updates).length === 0) return;
+
+  db.update(contacts)
+    .set(updates as Partial<NewContact>)
+    .where(eq(contacts.id, contactId))
+    .run();
+}
+
+/** Project retiring platform scalars from primary identity only. */
+export function syncIdentityScalarProjections(contactId: string): void {
+  const updates: Partial<NewContact> = {};
+
   if (contactsHasColumn("platform") || contactsHasColumn("platform_user_id")) {
     const primary = resolvePrimaryIdentity(contactId);
     if (contactsHasColumn("platform")) {
@@ -50,10 +62,25 @@ export function syncContactScalarProjections(contactId: string): void {
     }
   }
 
+  if (Object.keys(updates).length === 0) return;
+
   db.update(contacts)
     .set(updates as Partial<NewContact>)
     .where(eq(contacts.id, contactId))
     .run();
+}
+
+/** Write-through projection of all retiring scalar columns. */
+export function syncContactScalarProjections(
+  contactId: string,
+  domains: ScalarProjectionDomain[] = ["channels", "identities"],
+): void {
+  if (domains.includes("channels")) {
+    syncChannelScalarProjections(contactId);
+  }
+  if (domains.includes("identities")) {
+    syncIdentityScalarProjections(contactId);
+  }
 }
 
 /** Rebuild scalar projections for every contact (recovery after column restore). */

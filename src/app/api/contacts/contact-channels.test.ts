@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { NextRequest } from "next/server";
-import { POST, GET } from "@/app/api/contacts/route";
-import { PUT } from "@/app/api/contacts/[id]/route";
+import { POST, GET as listContactsRoute } from "@/app/api/contacts/route";
+import { PUT, GET as getContactRoute } from "@/app/api/contacts/[id]/route";
 import { createContact } from "@/lib/db/queries/contacts";
 import { createContactChannel } from "@/lib/db/queries/contact-channels";
-import { DEPRECATED_PLATFORM_FIELDS_MESSAGE } from "@/lib/api/contact-route-validation";
+import { DEPRECATED_PLATFORM_FIELDS_MESSAGE, INVALID_JSON_BODY_MESSAGE, UNSUPPORTED_IDENTITY_UPDATE_MESSAGE } from "@/lib/api/contact-route-validation";
 import { resetCoreTables } from "@/test/db";
 
 describe("contact channels API", () => {
@@ -70,7 +70,7 @@ describe("contact channels API", () => {
     expect(updated.channels.find((c: { id: string }) => c.id === personal.id)).toBeTruthy();
     expect(updated.channels.find((c: { id: string }) => c.id === phone.id)).toBeTruthy();
 
-    const listRes = await GET(new NextRequest("http://localhost/api/contacts?search=Channel"));
+    const listRes = await listContactsRoute(new NextRequest("http://localhost/api/contacts?search=Channel"));
     const listed = await listRes.json();
     expect(listed.data[0]?.channelCount).toBe(2);
   });
@@ -194,5 +194,73 @@ describe("contact channels API", () => {
     expect(res.status).toBe(400);
     const body = await res.json();
     expect(body.error).toBe(DEPRECATED_PLATFORM_FIELDS_MESSAGE);
+  });
+
+  it("rejects identity fields on update", async () => {
+    const contact = createContact({ name: "Existing" });
+    const req = new NextRequest(`http://localhost/api/contacts/${contact.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        identity: { platform: "x", platformUserId: "user-1" },
+      }),
+    });
+
+    const res = await PUT(req, { params: Promise.resolve({ id: contact.id }) });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe(UNSUPPORTED_IDENTITY_UPDATE_MESSAGE);
+  });
+
+  it("returns 400 for non-object JSON bodies", async () => {
+    const req = new NextRequest("http://localhost/api/contacts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "null",
+    });
+
+    const res = await POST(req);
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe(INVALID_JSON_BODY_MESSAGE);
+  });
+
+  it("leaves contact and channels unchanged when channel sync is rejected", async () => {
+    const contact = createContact({ name: "Stable Owner" });
+    const work = createContactChannel({
+      contactId: contact.id,
+      channelType: "email",
+      value: "work@example.com",
+      source: "test",
+    });
+    const personal = createContactChannel({
+      contactId: contact.id,
+      channelType: "email",
+      value: "personal@example.com",
+      source: "test",
+    });
+
+    const updateReq = new NextRequest(`http://localhost/api/contacts/${contact.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "Should Not Persist",
+        channels: [{ id: work.id, channelType: "phone", value: "work@example.com" }],
+      }),
+    });
+
+    const updateRes = await PUT(updateReq, { params: Promise.resolve({ id: contact.id }) });
+    expect(updateRes.status).toBe(400);
+
+    const getRes = await getContactRoute(
+      new NextRequest(`http://localhost/api/contacts/${contact.id}`),
+      { params: Promise.resolve({ id: contact.id }) },
+    );
+    const refreshed = await getRes.json();
+    expect(refreshed.name).toBe("Stable Owner");
+    expect(refreshed.channels).toHaveLength(2);
+    expect(refreshed.channels.map((c: { id: string }) => c.id).sort()).toEqual(
+      [work.id, personal.id].sort(),
+    );
   });
 });

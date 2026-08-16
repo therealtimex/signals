@@ -14,6 +14,7 @@ import {
   applyChannelInputs,
   applyLegacyEmailPhone,
   syncChannelInputs,
+  validateChannelSync,
   type ChannelInput,
 } from "@/lib/db/queries/contact-channel-writes";
 import { attachContactDtos, getContactDtoById } from "@/lib/db/queries/contact-read-model";
@@ -80,6 +81,15 @@ function applyChannelWrites(
   if (extras.verifiedEmail !== undefined) legacy.verifiedEmail = extras.verifiedEmail;
   if (Object.keys(legacy).length > 0) {
     applyLegacyEmailPhone(contactId, legacy, source);
+  }
+}
+
+function validateChannelWrites(
+  contactId: string,
+  extras: ContactWriteExtras | undefined,
+): void {
+  if (extras?.channels !== undefined) {
+    validateChannelSync(contactId, extras.channels);
   }
 }
 
@@ -231,6 +241,8 @@ export function updateContact(
   const existing = getContactById(id);
   if (!existing) return undefined;
 
+  validateChannelWrites(id, data);
+
   const rowUpdates = stripChannelShim(data);
   const updates = { ...rowUpdates };
 
@@ -243,27 +255,28 @@ export function updateContact(
   const now = Math.floor(Date.now() / 1000);
 
   if (data.isSelf === true) {
-    db.transaction((tx) => {
-      tx.update(contacts)
+    db.transaction(() => {
+      db.update(contacts)
         .set({ isSelf: false, updatedAt: now })
         .where(eq(contacts.isSelf, true))
         .run();
-      tx.update(contacts)
+      db.update(contacts)
         .set({ ...updates, isSelf: true, updatedAt: now })
         .where(eq(contacts.id, id))
         .run();
+      applyChannelWrites(id, data, channelSource);
     });
-    applyChannelWrites(id, data, channelSource);
     recalcEnrichment(id);
     return getContactById(id);
   }
 
-  db.update(contacts)
-    .set({ ...updates, updatedAt: now })
-    .where(eq(contacts.id, id))
-    .run();
-
-  applyChannelWrites(id, data, channelSource);
+  db.transaction(() => {
+    db.update(contacts)
+      .set({ ...updates, updatedAt: now })
+      .where(eq(contacts.id, id))
+      .run();
+    applyChannelWrites(id, data, channelSource);
+  });
   recalcEnrichment(id);
   return getContactById(id);
 }

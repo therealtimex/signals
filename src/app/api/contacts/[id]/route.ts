@@ -3,7 +3,10 @@ import { z } from "zod";
 import { getContactById, updateContact, deleteContact } from "@/lib/db/queries/contacts";
 import { channelInputSchema } from "@/lib/agent-tools/schemas";
 import { ChannelWriteError } from "@/lib/db/queries/contact-channel-writes";
-import { getDeprecatedPlatformFieldsError } from "@/lib/api/contact-route-validation";
+import {
+  getDeprecatedPlatformFieldsError,
+  getUnsupportedIdentityFieldsError,
+} from "@/lib/api/contact-route-validation";
 import { db } from "@/lib/db/client";
 import {
   applyContactOrgLink,
@@ -58,6 +61,11 @@ async function updateContactHandler(
     const deprecatedError = getDeprecatedPlatformFieldsError(body);
     if (deprecatedError) {
       return NextResponse.json({ error: deprecatedError }, { status: 400 });
+    }
+
+    const identityError = getUnsupportedIdentityFieldsError(body);
+    if (identityError) {
+      return NextResponse.json({ error: identityError }, { status: 400 });
     }
 
     const { orgId, company, ...data } = updateContactSchema.parse(body);
