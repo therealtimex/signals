@@ -28,6 +28,16 @@ export async function register() {
       console.warn("[instrumentation] Channel backfill skipped:", (e as Error).message);
     }
 
+    try {
+      const { backfillEmployments } = await import("@/lib/db/backfills/employments");
+      const employmentBackfill = backfillEmployments();
+      if (employmentBackfill.inserted > 0) {
+        console.log("[instrumentation] Employment backfill applied:", employmentBackfill);
+      }
+    } catch (e) {
+      console.warn("[instrumentation] Employment backfill skipped:", (e as Error).message);
+    }
+
     // Run identity migration
     try {
       const { migrateContactIdentities } = await import("@/lib/db/migrate-identities");

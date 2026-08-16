@@ -41,14 +41,14 @@ describe("graph backfills", () => {
     });
 
     const orgResult = backfillOrgs();
-    expect(orgResult.inserted).toBe(1);
+    expect(orgResult.inserted).toBe(0);
 
     const result = runGraphBackfills();
-    expect(result.worksAt.upserted).toBe(2);
+    expect(result.worksAt.upserted).toBe(0);
+    expect(result.worksAt.skipped).toBeGreaterThan(0);
 
     const orgRows = db.select().from(orgs).all();
     expect(orgRows).toHaveLength(1);
-    expect(orgRows[0]?.source).toBe("backfill:contacts-company");
 
     const edges = db.select().from(graphEdges).all();
     expect(edges).toHaveLength(2);
@@ -125,7 +125,7 @@ describe("graph backfills", () => {
     const first = runGraphBackfills();
     const second = runGraphBackfills();
 
-    expect(first.orgs.inserted).toBe(1);
+    expect(first.orgs.inserted).toBe(0);
     expect(second.orgs.inserted).toBe(0);
     expect(db.select().from(orgs).all()).toHaveLength(1);
     expect(db.select().from(graphEdges).all()).toHaveLength(1);

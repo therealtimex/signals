@@ -2,6 +2,7 @@ import type { InferSelectModel, InferInsertModel } from "drizzle-orm";
 import {
   contacts,
   contactChannels,
+  contactEmployments,
   contactIdentities,
   tasks,
   chatConversations,
@@ -50,6 +51,10 @@ export type NewContactIdentity = InferInsertModel<typeof contactIdentities>;
 // Contact channel types
 export type ContactChannel = InferSelectModel<typeof contactChannels>;
 export type NewContactChannel = InferInsertModel<typeof contactChannels>;
+
+// Contact employment types
+export type ContactEmployment = InferSelectModel<typeof contactEmployments>;
+export type NewContactEmployment = InferInsertModel<typeof contactEmployments>;
 
 /** Resolved contact read model — use ContactDTO from contact-dto for the full shape. */
 export type ContactWithIdentities = import("@/lib/db/queries/contact-dto").ContactDTO;

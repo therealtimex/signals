@@ -5,6 +5,7 @@ import { POST } from "@/app/api/contacts/route";
 import { PATCH, PUT } from "@/app/api/contacts/[id]/route";
 import { createContact } from "@/lib/db/queries/contacts";
 import { createOrg } from "@/lib/db/queries/orgs";
+import { listContactEmployments } from "@/lib/db/queries/contact-employments";
 import { db } from "@/lib/db/client";
 import { graphEdges, orgs } from "@/lib/db/schema";
 import { resetCoreTables } from "@/test/db";
@@ -33,6 +34,12 @@ describe("contact org linking API", () => {
     const contact = await res.json();
     expect(contact.company).toBe("Acme Corp");
     expect(contact.title).toBe("CEO");
+    expect(contact.currentEmployment).toMatchObject({
+      orgId: org.id,
+      orgName: "Acme Corp",
+      title: "CEO",
+    });
+    expect(listContactEmployments(contact.id)).toHaveLength(1);
 
     const worksAt = db.select().from(graphEdges).where(eq(graphEdges.edgeType, "works_at")).all();
     expect(worksAt).toHaveLength(1);
@@ -109,23 +116,11 @@ describe("contact org linking API", () => {
     const contact = createContact({
       name: "Leaver",
       company: "Acme Corp",
+      title: "CEO",
       platform: "x",
       platformUserId: "leaver-1",
     });
-    const org = createOrg({ name: "Acme Corp", source: "test" });
-    db.insert(graphEdges)
-      .values({
-        id: "edge-1",
-        srcType: "contact",
-        srcId: contact.id,
-        dstType: "org",
-        dstId: org.id,
-        edgeType: "works_at",
-        properties: JSON.stringify({ title: "CEO", is_current: true }),
-        scope: "shared",
-        source: "test",
-      })
-      .run();
+    expect(listContactEmployments(contact.id)).toHaveLength(1);
 
     const req = new NextRequest(`http://localhost/api/contacts/${contact.id}`, {
       method: "PUT",
@@ -149,20 +144,6 @@ describe("contact org linking API", () => {
       platform: "x",
       platformUserId: "titled-1",
     });
-    const org = createOrg({ name: "Acme Corp", source: "test" });
-    db.insert(graphEdges)
-      .values({
-        id: "edge-2",
-        srcType: "contact",
-        srcId: contact.id,
-        dstType: "org",
-        dstId: org.id,
-        edgeType: "works_at",
-        properties: JSON.stringify({ title: "CEO", is_current: true }),
-        scope: "shared",
-        source: "test",
-      })
-      .run();
 
     const req = new NextRequest(`http://localhost/api/contacts/${contact.id}`, {
       method: "PATCH",

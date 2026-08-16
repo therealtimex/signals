@@ -1,8 +1,4 @@
-import {
-  syncContactCompanyGraph,
-  syncContactOrgGraph,
-  syncContactWorksAtFromContact,
-} from "@/lib/db/contact-org-dual-write";
+import { applyLegacyCompanyTitle } from "@/lib/db/queries/contact-employment-writes";
 import { getOrgById } from "@/lib/db/queries/orgs";
 
 export type ContactOrgInput = {
@@ -56,24 +52,22 @@ export function applyContactOrgLink(
   source: "api:create_contact" | "api:update_contact",
   title?: string | null,
 ): void {
-  if (resolved.company === null) {
-    syncContactCompanyGraph(contactId, null, title, source);
-    return;
-  }
-
-  if (resolved.orgId) {
-    syncContactOrgGraph(contactId, resolved.orgId, title, source);
-    return;
-  }
-
-  syncContactCompanyGraph(contactId, resolved.company, title, source);
+  applyLegacyCompanyTitle(
+    contactId,
+    {
+      company: resolved.company,
+      orgId: resolved.orgId,
+      title,
+    },
+    source,
+  );
 }
 
 export function syncContactCompanyFromContact(
   contactId: string,
-  company: string | null | undefined,
+  _company: string | null | undefined,
   title: string | null | undefined,
   source: "api:create_contact" | "api:update_contact",
 ): void {
-  syncContactWorksAtFromContact(contactId, company, title, source);
+  applyLegacyCompanyTitle(contactId, { title }, source);
 }

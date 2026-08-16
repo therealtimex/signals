@@ -8,8 +8,6 @@ import { createTask } from "@/lib/db/queries/tasks";
 import { getActivePersona, upsertPersona } from "@/lib/db/queries/personas";
 import { assemblePersonaEvidence } from "@/lib/db/queries/persona-evidence";
 import { generatePersona } from "@/lib/workflows/generate-persona";
-import { db } from "@/lib/db/client";
-import { dualWriteContactCompany, syncContactCompanyGraph } from "@/lib/db/contact-org-dual-write";
 import {
   AGENT_ORCHESTRATION_MESSAGE,
   startAgentWorkflow,
@@ -97,6 +95,13 @@ export async function handleGetContact(input: z.infer<typeof getContactSchema>) 
       isPrimary: ch.isPrimary,
       isVerified: ch.isVerified,
     })),
+    employments: contact.employments.map((employment) => ({
+      orgId: employment.orgId,
+      orgName: employment.orgName,
+      title: employment.title,
+      isCurrent: employment.isCurrent,
+    })),
+    currentEmployment: contact.currentEmployment,
     company: contact.company,
     title: contact.title,
     headline: contact.headline,
@@ -116,31 +121,25 @@ export async function handleGetContact(input: z.infer<typeof getContactSchema>) 
 }
 
 export async function handleCreateContact(input: z.infer<typeof createContactSchema>) {
-  const contact = db.transaction(() => {
-    const created = createContact({
-      name: input.name,
-      firstName: input.firstName,
-      lastName: input.lastName,
-      email: input.email || null,
-      phone: input.phone ?? null,
-      channels: input.channels,
-      company: input.company ?? null,
-      title: input.title ?? null,
-      funnelStage: input.funnelStage ?? "prospect",
-    }, "agent:create_contact");
-
-    if (input.company) {
-      dualWriteContactCompany(created.id, input.company, input.title);
-    }
-
-    return created;
-  });
+  const contact = createContact({
+    name: input.name,
+    firstName: input.firstName,
+    lastName: input.lastName,
+    email: input.email || null,
+    phone: input.phone ?? null,
+    channels: input.channels,
+    employments: input.employments,
+    company: input.company ?? null,
+    title: input.title ?? null,
+    funnelStage: input.funnelStage ?? "prospect",
+  }, "agent:create_contact");
 
   return {
     id: contact.id,
     name: contact.name,
     email: contact.email,
     company: contact.company,
+    currentEmployment: contact.currentEmployment,
     enrichmentScore: contact.enrichmentScore,
     message: `Contact "${contact.name}" created successfully.`,
   };
@@ -163,22 +162,7 @@ export async function handleUpdateContact(input: z.infer<typeof updateContactSch
     updates[key] = value;
   }
 
-  const shouldSyncCompanyGraph =
-    fields.company !== undefined || fields.title !== undefined;
-
-  const updated = shouldSyncCompanyGraph
-    ? db.transaction(() => {
-        const contact = updateContact(contactId, updates, "agent:update_contact");
-        if (!contact) return undefined;
-        syncContactCompanyGraph(
-          contactId,
-          contact.company,
-          contact.title,
-          "agent:update_contact",
-        );
-        return contact;
-      })
-    : updateContact(contactId, updates, "agent:update_contact");
+  const updated = updateContact(contactId, updates, "agent:update_contact");
   if (!updated) {
     return { error: `Failed to update contact: ${contactId}` };
   }
@@ -189,6 +173,7 @@ export async function handleUpdateContact(input: z.infer<typeof updateContactSch
     email: updated.email,
     company: updated.company,
     title: updated.title,
+    currentEmployment: updated.currentEmployment,
     funnelStage: updated.funnelStage,
     enrichmentScore: updated.enrichmentScore,
     message: `Contact "${updated.name}" updated successfully.`,

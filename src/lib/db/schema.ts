@@ -636,6 +636,31 @@ export const orgs = sqliteTable("orgs", {
   uniqueIndex("idx_orgs_domain").on(table.domain),
 ]);
 
+// --- Contact Employments (career history — Phase 2) ---
+
+export const contactEmployments = sqliteTable("contact_employments", {
+  id: text("id").primaryKey(),
+  contactId: text("contact_id")
+    .notNull()
+    .references(() => contacts.id, { onDelete: "cascade" }),
+  orgId: text("org_id")
+    .notNull()
+    .references(() => orgs.id, { onDelete: "cascade" }),
+  title: text("title"),
+  startedAt: integer("started_at"),
+  endedAt: integer("ended_at"),
+  isCurrent: integer("is_current", { mode: "boolean" }).notNull().default(true),
+  scope: text("scope", { enum: ["shared", "local_only"] })
+    .notNull()
+    .default("shared"),
+  source: text("source").notNull(),
+  metadata: text("metadata").default("{}"),
+  ...timestamps,
+}, (table) => [
+  index("idx_employment_contact_current").on(table.contactId, table.isCurrent),
+  index("idx_employment_org").on(table.orgId),
+]);
+
 // --- Org Identities (org-level platform accounts; ADR-022-5) ---
 
 export const orgIdentities = sqliteTable("org_identities", {
