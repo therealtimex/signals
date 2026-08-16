@@ -27,10 +27,6 @@ export type MediaIntegrityReport = {
   orphanedAssetsRemoved: number;
 };
 
-function assetHasLegacyComposeLink(asset: { contentItemId: string | null }): boolean {
-  return asset.contentItemId !== null && asset.contentItemId !== undefined;
-}
-
 export function runMediaIntegrityJob(opts?: { repair?: boolean }): MediaIntegrityReport {
   const repair = opts?.repair ?? false;
   const attachmentIssues: MediaIntegrityIssue[] = [];
@@ -59,8 +55,7 @@ export function runMediaIntegrityJob(opts?: { repair?: boolean }): MediaIntegrit
     const assets = db.select().from(mediaAssets).all();
     for (const asset of assets) {
       const attachmentCount = countAttachmentsForAsset(asset.id);
-      const hasComposeLink = assetHasLegacyComposeLink(asset);
-      if (attachmentCount > 0 || hasComposeLink) continue;
+      if (attachmentCount > 0) continue;
 
       const age = now - asset.createdAt;
       if (age < ORPHAN_ASSET_AGE_SECONDS) continue;

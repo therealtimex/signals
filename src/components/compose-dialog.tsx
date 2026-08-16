@@ -88,7 +88,7 @@ export function ComposeDialog({
 
   const config = PLATFORM_CONFIG[platform];
 
-  // Hydrate media attachments from mediaPaths JSON array
+  // Hydrate media attachments via junction-backed API
   const hydrateMedia = useCallback(
     async (contentItemId: string): Promise<MediaAttachment[]> => {
       try {

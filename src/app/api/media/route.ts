@@ -83,8 +83,6 @@ export async function POST(req: NextRequest) {
       height: height ?? null,
       origin: "upload",
       scope: context === "attachment" ? "local_only" : "shared",
-      contentItemId: null,
-      platformTarget: context === "compose" ? (platformTarget as "x" | "linkedin" | null) : null,
     });
 
     return NextResponse.json(asset, { status: 201 });
@@ -96,10 +94,9 @@ export async function POST(req: NextRequest) {
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const contentItemId = searchParams.get("contentItemId") ?? undefined;
-  const platformTarget = searchParams.get("platformTarget") ?? undefined;
   const page = parseInt(searchParams.get("page") ?? "1", 10) || 1;
   const pageSize = parseInt(searchParams.get("pageSize") ?? "50", 10) || 50;
 
-  const result = listMediaAssets({ contentItemId, platformTarget, page, pageSize });
+  const result = listMediaAssets({ contentItemId, page, pageSize });
   return NextResponse.json({ assets: result.data, total: result.total });
 }
