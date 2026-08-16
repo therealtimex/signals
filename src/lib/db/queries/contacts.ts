@@ -1,10 +1,37 @@
-import { eq, like, and, or, desc, asc, count, inArray, isNotNull, sql, SQL } from "drizzle-orm";
+import { eq, like, and, or, desc, asc, count, inArray, exists, sql, SQL } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db/client";
-import { contacts, contactIdentities, contentItems, tasks, workflowSteps } from "@/lib/db/schema";
+import {
+  contacts,
+  contactChannels,
+  contactIdentities,
+  contentItems,
+  tasks,
+  workflowSteps,
+} from "@/lib/db/schema";
 import { deleteEdgesTouchingContact } from "@/lib/db/graph-integrity";
 import { calculateEnrichmentScore } from "@/lib/db/enrichment";
-import type { Contact, NewContact, ContactWithIdentities, PaginatedResult } from "@/lib/db/types";
+import {
+  applyChannelInputs,
+  applyLegacyEmailPhone,
+  type ChannelInput,
+} from "@/lib/db/queries/contact-channel-writes";
+import { assembleContactDto, type ContactDTO } from "@/lib/db/queries/contact-dto";
+import type { Contact, NewContact, PaginatedResult, ContactIdentity } from "@/lib/db/types";
+
+export type ContactWriteExtras = {
+  email?: string | null;
+  phone?: string | null;
+  verifiedEmail?: boolean | number | null;
+  channels?: ChannelInput[];
+  /** Stripped on write — use contact_identities */
+  platform?: string | null;
+  platformUserId?: string | null;
+};
+
+/** Contact create/update payload with optional channel shim fields. */
+export type ContactWriteInput = Omit<NewContact, "id"> & ContactWriteExtras;
+export type ContactUpdateInput = Partial<NewContact> & ContactWriteExtras;
 
 /** Split a full name into firstName/lastName on the first space. */
 function parseName(fullName: string): { firstName: string; lastName: string } {
@@ -13,27 +40,68 @@ function parseName(fullName: string): { firstName: string; lastName: string } {
   return { firstName: fullName.slice(0, idx), lastName: fullName.slice(idx + 1) };
 }
 
-/** Batch-fetch identities for a set of contacts, returning ContactWithIdentities[]. */
-function attachIdentities(rows: Contact[]): ContactWithIdentities[] {
+function stripChannelShim<T extends ContactWriteExtras>(data: T): Omit<T, keyof ContactWriteExtras> {
+  const {
+    email: _e,
+    phone: _p,
+    verifiedEmail: _v,
+    channels: _c,
+    platform: _plat,
+    platformUserId: _puid,
+    ...rest
+  } = data;
+  return rest;
+}
+
+function attachChannels(rows: Contact[]): ContactDTO[] {
   if (rows.length === 0) return [];
   const ids = rows.map((r) => r.id);
+
   const allIdentities = db
     .select()
     .from(contactIdentities)
     .where(inArray(contactIdentities.contactId, ids))
     .all();
 
-  const map = new Map<string, typeof allIdentities>();
+  const allChannels = db
+    .select()
+    .from(contactChannels)
+    .where(inArray(contactChannels.contactId, ids))
+    .all();
+
+  const identityMap = new Map<string, typeof allIdentities>();
   for (const identity of allIdentities) {
-    const list = map.get(identity.contactId) ?? [];
+    const list = identityMap.get(identity.contactId) ?? [];
     list.push(identity);
-    map.set(identity.contactId, list);
+    identityMap.set(identity.contactId, list);
   }
 
-  return rows.map((row) => ({
-    ...row,
-    identities: map.get(row.id) ?? [],
-  }));
+  const channelMap = new Map<string, typeof allChannels>();
+  for (const channel of allChannels) {
+    const list = channelMap.get(channel.contactId) ?? [];
+    list.push(channel);
+    channelMap.set(channel.contactId, list);
+  }
+
+  return rows.map((row) =>
+    assembleContactDto(row, identityMap.get(row.id) ?? [], channelMap.get(row.id) ?? []),
+  );
+}
+
+function applyChannelWrites(
+  contactId: string,
+  extras: ContactWriteExtras | undefined,
+  source: string,
+): void {
+  if (!extras) return;
+  if (extras.channels?.length) {
+    applyChannelInputs(contactId, extras.channels, source);
+  }
+  applyLegacyEmailPhone(contactId, {
+    email: extras.email,
+    phone: extras.phone,
+    verifiedEmail: extras.verifiedEmail,
+  }, source);
 }
 
 /** Recalculate and persist enrichment score for a contact. */
@@ -45,7 +113,12 @@ function recalcEnrichment(contactId: string): void {
     .from(contactIdentities)
     .where(eq(contactIdentities.contactId, contactId))
     .all();
-  const score = calculateEnrichmentScore(contact, identities);
+  const channels = db
+    .select()
+    .from(contactChannels)
+    .where(eq(contactChannels.contactId, contactId))
+    .all();
+  const score = calculateEnrichmentScore(contact, identities, channels);
   db.update(contacts)
     .set({ enrichmentScore: score, updatedAt: Math.floor(Date.now() / 1000) })
     .where(eq(contacts.id, contactId))
@@ -61,14 +134,12 @@ export function listContacts(opts?: {
   includeArchived?: boolean;
   sort?: "createdAt" | "enrichmentScore";
   order?: "asc" | "desc";
-}): PaginatedResult<ContactWithIdentities> {
+}): PaginatedResult<ContactDTO> {
   const conditions: SQL[] = [];
 
-  // Exclude archived contacts by default
   if (!opts?.includeArchived) {
     conditions.push(sql`json_extract(${contacts.metadata}, '$.archived') IS NOT 1`);
   }
-  // Exclude platform-actor shadow contacts (legacy workaround cleanup)
   conditions.push(sql`json_extract(${contacts.metadata}, '$.platformActor') IS NOT 1`);
 
   if (opts?.search) {
@@ -78,8 +149,19 @@ export function listContacts(opts?: {
         like(contacts.name, pattern),
         like(contacts.firstName, pattern),
         like(contacts.lastName, pattern),
-        like(contacts.email, pattern),
-      )!
+        exists(
+          db
+            .select({ id: contactChannels.id })
+            .from(contactChannels)
+            .where(
+              and(
+                eq(contactChannels.contactId, contacts.id),
+                eq(contactChannels.channelType, "email"),
+                like(contactChannels.value, pattern),
+              ),
+            ),
+        ),
+      )!,
     );
   }
   if (opts?.funnelStage) {
@@ -87,17 +169,28 @@ export function listContacts(opts?: {
   }
   if (opts?.platform) {
     conditions.push(
-      eq(contacts.platform, opts.platform as "x" | "linkedin" | "gmail" | "substack")
+      exists(
+        db
+          .select({ id: contactIdentities.id })
+          .from(contactIdentities)
+          .where(
+            and(
+              eq(contactIdentities.contactId, contacts.id),
+              eq(contactIdentities.platform, opts.platform as ContactIdentity["platform"]),
+            ),
+          ),
+      ),
     );
   }
 
   const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
-  const total = db
-    .select({ value: count() })
-    .from(contacts)
-    .where(whereClause)
-    .get()?.value ?? 0;
+  const total =
+    db
+      .select({ value: count() })
+      .from(contacts)
+      .where(whereClause)
+      .get()?.value ?? 0;
 
   const page = opts?.page ?? 1;
   const pageSize = opts?.pageSize ?? 25;
@@ -105,8 +198,7 @@ export function listContacts(opts?: {
   const sortField =
     opts?.sort === "enrichmentScore" ? contacts.enrichmentScore : contacts.createdAt;
   const orderDirection = opts?.order ?? (opts?.sort === "enrichmentScore" ? "asc" : "desc");
-  const orderByClause =
-    orderDirection === "asc" ? asc(sortField) : desc(sortField);
+  const orderByClause = orderDirection === "asc" ? asc(sortField) : desc(sortField);
 
   const rows = db
     .select()
@@ -117,89 +209,70 @@ export function listContacts(opts?: {
     .offset((page - 1) * pageSize)
     .all();
 
-  return { data: attachIdentities(rows), total };
+  return { data: attachChannels(rows), total };
 }
 
-export function getContactById(id: string): ContactWithIdentities | undefined {
+export function getContactById(id: string): ContactDTO | undefined {
   const row = db.select().from(contacts).where(eq(contacts.id, id)).get();
   if (!row) return undefined;
-  return attachIdentities([row])[0];
+  return attachChannels([row])[0];
 }
 
-export function getContactsByIds(ids: string[]): ContactWithIdentities[] {
+export function getContactsByIds(ids: string[]): ContactDTO[] {
   if (ids.length === 0) return [];
   const rows = db.select().from(contacts).where(inArray(contacts.id, ids)).all();
-  return attachIdentities(rows);
+  return attachChannels(rows);
 }
 
-/**
- * Find an existing contact by exact email match or case-insensitive name match.
- * Email takes priority (more reliable). Returns undefined if no match.
- */
-export function findContactByNameOrEmail(
-  name: string,
-  email?: string | null
-): ContactWithIdentities | undefined {
-  // Try exact email match first (most reliable identifier)
-  if (email) {
-    const byEmail = db.select().from(contacts).where(eq(contacts.email, email)).get();
-    if (byEmail) return attachIdentities([byEmail])[0];
-  }
-  // Fall back to case-insensitive exact name match
-  const byName = db
-    .select()
-    .from(contacts)
-    .where(sql`lower(${contacts.name}) = lower(${name})`)
-    .get();
-  if (byName) return attachIdentities([byName])[0];
-  return undefined;
-}
-
-export function createContact(data: Omit<NewContact, "id">): ContactWithIdentities {
+export function createContact(
+  data: ContactWriteInput,
+  channelSource = "api:create_contact",
+): ContactDTO {
   const id = nanoid();
+  const rowData = stripChannelShim(data);
 
-  // Auto-parse name into firstName/lastName if not provided
   const nameFields =
-    !data.firstName && !data.lastName && data.name
-      ? parseName(data.name)
-      : {};
+    !rowData.firstName && !rowData.lastName && rowData.name ? parseName(rowData.name) : {};
 
-  // Compute full name from firstName + lastName if name is not explicitly set
   const name =
-    data.name ||
-    [data.firstName, data.lastName].filter(Boolean).join(" ") ||
+    rowData.name ||
+    [rowData.firstName, rowData.lastName].filter(Boolean).join(" ") ||
     "Unknown";
 
   const now = Math.floor(Date.now() / 1000);
 
-  if (data.isSelf === true) {
+  if (rowData.isSelf === true) {
     db.transaction((tx) => {
       tx.update(contacts)
         .set({ isSelf: false, updatedAt: now })
         .where(eq(contacts.isSelf, true))
         .run();
       tx.insert(contacts)
-        .values({ ...data, ...nameFields, name, id, isSelf: true })
+        .values({ ...rowData, ...nameFields, name, id, isSelf: true })
         .run();
     });
+    applyChannelWrites(id, data, channelSource);
     recalcEnrichment(id);
     return getContactById(id)!;
   }
 
-  db.insert(contacts).values({ ...data, ...nameFields, name, id }).run();
+  db.insert(contacts).values({ ...rowData, ...nameFields, name, id }).run();
+  applyChannelWrites(id, data, channelSource);
   recalcEnrichment(id);
   return getContactById(id)!;
 }
 
 export function updateContact(
   id: string,
-  data: Partial<NewContact>
-): ContactWithIdentities | undefined {
+  data: ContactUpdateInput,
+  channelSource = "api:update_contact",
+): ContactDTO | undefined {
   const existing = getContactById(id);
   if (!existing) return undefined;
 
-  // If firstName or lastName changed, recompute name
-  const updates = { ...data };
+  const rowUpdates = stripChannelShim(data);
+  const updates = { ...rowUpdates };
+
   if (data.firstName !== undefined || data.lastName !== undefined) {
     const fn = data.firstName ?? existing.firstName ?? "";
     const ln = data.lastName ?? existing.lastName ?? "";
@@ -219,6 +292,7 @@ export function updateContact(
         .where(eq(contacts.id, id))
         .run();
     });
+    applyChannelWrites(id, data, channelSource);
     recalcEnrichment(id);
     return getContactById(id);
   }
@@ -228,11 +302,11 @@ export function updateContact(
     .where(eq(contacts.id, id))
     .run();
 
+  applyChannelWrites(id, data, channelSource);
   recalcEnrichment(id);
   return getContactById(id);
 }
 
-/** Owner contact for relationship chips; lowest created_at wins if invariant violated. */
 export function getOwnerContactId(): string | null {
   const rows = db
     .select({ id: contacts.id })
@@ -248,21 +322,15 @@ export function deleteContact(id: string): boolean {
   if (!existing) return false;
 
   db.transaction((tx) => {
-    // Unlink content items (nullable FK — preserve content, just remove contact reference)
     tx.update(contentItems)
       .set({ contactId: null })
       .where(eq(contentItems.contactId, id))
       .run();
-    // Delete tasks tied to this contact
-    tx.delete(tasks)
-      .where(eq(tasks.relatedContactId, id))
-      .run();
-    // Unlink workflow steps (nullable FK — preserve step history)
+    tx.delete(tasks).where(eq(tasks.relatedContactId, id)).run();
     tx.update(workflowSteps)
       .set({ contactId: null })
       .where(eq(workflowSteps.contactId, id))
       .run();
-    // Now safe to delete the contact (cascades handle identities, enrollments, engagements)
     tx.delete(contacts).where(eq(contacts.id, id)).run();
   });
 
@@ -274,27 +342,29 @@ export function countContacts(): number {
   return result?.value ?? 0;
 }
 
-/** Count non-archived contacts that have an email address. */
 export function countContactsWithEmail(): number {
   const result = db
     .select({ value: count() })
-    .from(contacts)
+    .from(contactChannels)
     .where(
       and(
-        isNotNull(contacts.email),
-        sql`json_extract(${contacts.metadata}, '$.archived') IS NOT 1`
-      )
+        eq(contactChannels.channelType, "email"),
+        sql`EXISTS (
+          SELECT 1 FROM contacts c
+          WHERE c.id = ${contactChannels.contactId}
+          AND json_extract(c.metadata, '$.archived') IS NOT 1
+        )`,
+      ),
     )
     .get();
   return result?.value ?? 0;
 }
 
-/** Archive a contact with a reason, optionally linking to the workflow run that triggered it. */
 export function archiveContact(
   id: string,
   reason: string,
-  workflowRunId?: string
-): ContactWithIdentities | undefined {
+  workflowRunId?: string,
+): ContactDTO | undefined {
   const contact = getContactById(id);
   if (!contact) return undefined;
 
@@ -320,8 +390,7 @@ export function archiveContact(
   return updated;
 }
 
-/** Restore a previously archived contact by clearing archive keys from metadata. */
-export function restoreContact(id: string): ContactWithIdentities | undefined {
+export function restoreContact(id: string): ContactDTO | undefined {
   const contact = getContactById(id);
   if (!contact) return undefined;
 
@@ -335,7 +404,6 @@ export function restoreContact(id: string): ContactWithIdentities | undefined {
   return updateContact(id, { metadata });
 }
 
-/** Restore all contacts archived by a specific workflow run. Returns count restored. */
 export function restoreContactsByWorkflowRun(workflowRunId: string): number {
   const rows = db
     .select()
@@ -343,15 +411,14 @@ export function restoreContactsByWorkflowRun(workflowRunId: string): number {
     .where(sql`json_extract(${contacts.metadata}, '$.archiveWorkflowRunId') = ${workflowRunId}`)
     .all();
 
-  let count = 0;
+  let restored = 0;
   for (const row of rows) {
     restoreContact(row.id);
-    count++;
+    restored++;
   }
-  return count;
+  return restored;
 }
 
-/** Count archived contacts. */
 export function countArchivedContacts(): number {
   const result = db
     .select({ value: count() })
@@ -361,5 +428,4 @@ export function countArchivedContacts(): number {
   return result?.value ?? 0;
 }
 
-/** Exposed for data migration use. */
 export { recalcEnrichment, parseName };

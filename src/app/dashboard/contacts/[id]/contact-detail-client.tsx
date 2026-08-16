@@ -289,12 +289,17 @@ export function ContactDetailClient({ contact, tasks, explore }: ContactDetailCl
                     </a>
                   </div>
                 )}
-                {contact.platform && (
-                  <div>
-                    <span className="text-muted-foreground">Platform: </span>
-                    {platformLabels[contact.platform] ?? contact.platform}
-                  </div>
-                )}
+                {(() => {
+                  const primaryIdentity =
+                    contact.identities.find((id) => id.isPrimary) ?? contact.identities[0];
+                  if (!primaryIdentity) return null;
+                  return (
+                    <div>
+                      <span className="text-muted-foreground">Platform: </span>
+                      {platformLabels[primaryIdentity.platform] ?? primaryIdentity.platform}
+                    </div>
+                  );
+                })()}
                 {contact.profileUrl && (
                   <div>
                     <span className="text-muted-foreground">Profile: </span>

@@ -10,7 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import type { Contact } from "@/lib/db/types";
+import type { ContactDTO } from "@/lib/db/queries/contact-dto";
 import type { DraftContactIdentity } from "@/lib/contact-identity-draft";
 import { OrgPicker } from "@/components/org-picker";
 import { ContactIdentitiesInput } from "@/components/contact-identities-input";
@@ -18,7 +18,7 @@ import { ContactIdentitiesInput } from "@/components/contact-identities-input";
 const funnelStages = ["prospect", "engaged", "qualified", "opportunity", "customer", "advocate"];
 
 interface ContactFormProps {
-  defaultValues?: Partial<Contact> & { orgId?: string };
+  defaultValues?: Partial<ContactDTO> & { orgId?: string };
   onChange: (data: Record<string, string>) => void;
   showIdentities?: boolean;
   onIdentitiesChange?: (identities: DraftContactIdentity[]) => void;

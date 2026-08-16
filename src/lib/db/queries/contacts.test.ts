@@ -2,7 +2,6 @@ import { beforeEach, describe, it, expect } from "vitest";
 import { eq } from "drizzle-orm";
 import {
   createContact,
-  findContactByNameOrEmail,
   listContacts,
   updateContact,
   deleteContact,
@@ -31,29 +30,6 @@ describe("contacts queries", () => {
     expect(contact.firstName).toBe("Ada");
     expect(contact.lastName).toBe("Lovelace");
     expect(contact.enrichmentScore).toBeGreaterThan(0);
-  });
-
-  it("dedupes by email before name", () => {
-    createContact({
-      name: "First Person",
-      email: "same@example.com",
-      platform: "gmail",
-      platformUserId: "g1",
-    });
-
-    const match = findContactByNameOrEmail("Different Name", "same@example.com");
-    expect(match?.name).toBe("First Person");
-  });
-
-  it("finds contacts by case-insensitive name", () => {
-    createContact({
-      name: "Grace Hopper",
-      platform: "x",
-      platformUserId: "gh",
-    });
-
-    const match = findContactByNameOrEmail("grace hopper");
-    expect(match?.name).toBe("Grace Hopper");
   });
 
   it("lists contacts with search filter", () => {

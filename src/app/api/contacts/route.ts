@@ -9,6 +9,7 @@ import {
   contactIdentityInputSchema,
   createContactIdentities,
 } from "@/lib/contact-identities-api";
+import { channelInputSchema } from "@/lib/agent-tools/schemas";
 
 function isUniqueConstraintError(error: unknown): boolean {
   return (
@@ -43,6 +44,7 @@ const createContactSchema = z.object({
     .optional(),
   score: z.number().int().min(0).optional(),
   isSelf: z.boolean().optional(),
+  channels: z.array(channelInputSchema).optional(),
   identity: contactIdentityInputSchema.optional(),
   identities: z.array(contactIdentityInputSchema).optional(),
 }).refine(

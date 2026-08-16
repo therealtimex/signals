@@ -2,6 +2,7 @@ import { eq, and } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { contacts, contactIdentities } from "@/lib/db/schema";
 import { createContact, updateContact, recalcEnrichment } from "@/lib/db/queries/contacts";
+import { findContactByChannel } from "@/lib/db/queries/contact-channels";
 import { createIdentity } from "@/lib/db/queries/identities";
 import { updatePlatformAccount } from "@/lib/db/queries/platform-accounts";
 import { getSyncCursor, updateSyncCursor } from "@/lib/db/queries/sync";
@@ -141,21 +142,16 @@ function processGooglePerson(person: GooglePerson, result: SyncResult): void {
     return;
   }
 
-  // 2. Cross-platform dedup: check contacts.email matching any of the person's emails
+  // 2. Cross-platform dedup: match any person email via contact_channels
   const contactData = mapGooglePersonToContact(person);
   const personEmails = (person.emailAddresses ?? [])
     .map((e) => e.value)
     .filter((v): v is string => !!v);
 
   for (const email of personEmails) {
-    const emailMatch = db
-      .select()
-      .from(contacts)
-      .where(eq(contacts.email, email))
-      .get();
+    const emailMatch = findContactByChannel("email", email);
 
     if (emailMatch) {
-      // Found existing contact by email — add Gmail identity to it
       updateContact(emailMatch.id, {
         firstName: contactData.firstName ?? emailMatch.firstName,
         lastName: contactData.lastName ?? emailMatch.lastName,
@@ -167,7 +163,8 @@ function processGooglePerson(person: GooglePerson, result: SyncResult): void {
         photoUrl: contactData.photoUrl ?? emailMatch.photoUrl,
         avatarUrl: contactData.avatarUrl ?? emailMatch.avatarUrl,
         website: contactData.website ?? emailMatch.website,
-      });
+        email: contactData.email,
+      }, "sync:gmail_contacts");
 
       const identityData = mapGooglePersonToIdentity(person, emailMatch.id);
       createIdentity(identityData);
@@ -178,7 +175,7 @@ function processGooglePerson(person: GooglePerson, result: SyncResult): void {
   }
 
   // 3. Create new contact
-  const contact = createContact(contactData);
+  const contact = createContact(contactData, "sync:gmail_contacts");
   const identityData = mapGooglePersonToIdentity(person, contact.id);
   createIdentity(identityData);
   recalcEnrichment(contact.id);

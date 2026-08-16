@@ -1,4 +1,5 @@
 import type { NewContact, NewContactIdentity } from "@/lib/db/types";
+import type { ContactWriteExtras } from "@/lib/db/queries/contacts";
 import type { LinkedInProfile, LinkedInConnection } from "@/lib/platforms/linkedin/client";
 
 /** Extract profile photo URL from LinkedIn's nested profilePicture structure. */
@@ -19,7 +20,7 @@ function extractPhotoUrl(
 export function mapLinkedInProfileToContact(
   profile: LinkedInProfile,
   email?: string | null
-): Omit<NewContact, "id"> {
+): Omit<NewContact, "id"> & ContactWriteExtras {
   // Support both OpenID Connect userinfo and legacy /me response shapes
   const firstName = profile.given_name ?? profile.localizedFirstName ?? "";
   const lastName = profile.family_name ?? profile.localizedLastName ?? "";
@@ -76,7 +77,7 @@ export function mapLinkedInProfileToIdentity(
 /** Map a LinkedIn connection to Signals contact fields. */
 export function mapLinkedInConnectionToContact(
   connection: LinkedInConnection
-): Omit<NewContact, "id"> {
+): Omit<NewContact, "id"> & ContactWriteExtras {
   const firstName = connection.localizedFirstName ?? "";
   const lastName = connection.localizedLastName ?? "";
   const name = `${firstName} ${lastName}`.trim();

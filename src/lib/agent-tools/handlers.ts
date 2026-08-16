@@ -8,7 +8,6 @@ import { createTask } from "@/lib/db/queries/tasks";
 import { getActivePersona, upsertPersona } from "@/lib/db/queries/personas";
 import { assemblePersonaEvidence } from "@/lib/db/queries/persona-evidence";
 import { generatePersona } from "@/lib/workflows/generate-persona";
-import { assertPlatform } from "@/lib/db/platforms";
 import { db } from "@/lib/db/client";
 import { dualWriteContactCompany, syncContactCompanyGraph } from "@/lib/db/contact-org-dual-write";
 import {
@@ -41,6 +40,13 @@ import type { z } from "zod";
 
 const DEFAULT_PAGE_SIZE = 20;
 
+function primaryPlatform(
+  identities: { platform: string; isPrimary: number | boolean }[],
+): string | null {
+  const primary = identities.find((id) => id.isPrimary);
+  return primary?.platform ?? identities[0]?.platform ?? null;
+}
+
 export async function handleQueryContacts(input: z.infer<typeof queryContactsSchema>) {
   const result = listContacts({
     search: input.search,
@@ -60,9 +66,11 @@ export async function handleQueryContacts(input: z.infer<typeof queryContactsSch
       company: c.company,
       title: c.title,
       email: c.email,
+      primaryEmail: c.primaryEmail,
+      channelCount: c.channelCount,
       score: c.enrichmentScore,
       stage: c.funnelStage,
-      platform: c.platform,
+      platform: primaryPlatform(c.identities),
       identityCount: c.identities.length,
     })),
   };
@@ -80,13 +88,22 @@ export async function handleGetContact(input: z.infer<typeof getContactSchema>) 
     firstName: contact.firstName,
     lastName: contact.lastName,
     email: contact.email,
+    primaryEmail: contact.primaryEmail,
+    primaryPhone: contact.primaryPhone,
+    channelCount: contact.channelCount,
+    channels: contact.channels.map((ch) => ({
+      channelType: ch.channelType,
+      value: ch.value,
+      isPrimary: ch.isPrimary,
+      isVerified: ch.isVerified,
+    })),
     company: contact.company,
     title: contact.title,
     headline: contact.headline,
     bio: contact.bio,
     location: contact.location,
     website: contact.website,
-    platform: contact.platform,
+    platform: primaryPlatform(contact.identities),
     funnelStage: contact.funnelStage,
     enrichmentScore: contact.enrichmentScore,
     tags: contact.tags,
@@ -105,11 +122,12 @@ export async function handleCreateContact(input: z.infer<typeof createContactSch
       firstName: input.firstName,
       lastName: input.lastName,
       email: input.email || null,
+      phone: input.phone ?? null,
+      channels: input.channels,
       company: input.company ?? null,
       title: input.title ?? null,
-      platform: assertPlatform(input.platform ?? "x"),
       funnelStage: input.funnelStage ?? "prospect",
-    });
+    }, "agent:create_contact");
 
     if (input.company) {
       dualWriteContactCompany(created.id, input.company, input.title);
@@ -150,7 +168,7 @@ export async function handleUpdateContact(input: z.infer<typeof updateContactSch
 
   const updated = shouldSyncCompanyGraph
     ? db.transaction(() => {
-        const contact = updateContact(contactId, updates);
+        const contact = updateContact(contactId, updates, "agent:update_contact");
         if (!contact) return undefined;
         syncContactCompanyGraph(
           contactId,
@@ -160,7 +178,7 @@ export async function handleUpdateContact(input: z.infer<typeof updateContactSch
         );
         return contact;
       })
-    : updateContact(contactId, updates);
+    : updateContact(contactId, updates, "agent:update_contact");
   if (!updated) {
     return { error: `Failed to update contact: ${contactId}` };
   }

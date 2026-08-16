@@ -1,4 +1,5 @@
 import type { NewContact, NewContactIdentity } from "@/lib/db/types";
+import type { ContactWriteExtras } from "@/lib/db/queries/contacts";
 import type { GooglePerson, GoogleUserInfo } from "@/lib/platforms/gmail/client";
 import type { PlatformUserProfile } from "@/lib/platforms/adapter";
 
@@ -14,7 +15,9 @@ function extractResourceId(resourceName: string): string {
 }
 
 /** Map a Google People API person to Signals contact fields. */
-export function mapGooglePersonToContact(person: GooglePerson): Omit<NewContact, "id"> {
+export function mapGooglePersonToContact(
+  person: GooglePerson,
+): Omit<NewContact, "id"> & ContactWriteExtras {
   const primaryName = findPrimary(person.names);
   const primaryEmail = findPrimary(person.emailAddresses);
   const primaryPhone = findPrimary(person.phoneNumbers);
@@ -43,8 +46,6 @@ export function mapGooglePersonToContact(person: GooglePerson): Omit<NewContact,
     photoUrl: photo?.url ?? null,
     avatarUrl: photo?.url ?? null,
     website: firstUrl?.value ?? null,
-    platform: "gmail" as const,
-    platformUserId: extractResourceId(person.resourceName),
   };
 }
 

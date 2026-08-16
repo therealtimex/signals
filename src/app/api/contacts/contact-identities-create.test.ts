@@ -39,7 +39,7 @@ describe("POST /api/contacts identities[]", () => {
     expect(res.status).toBe(201);
 
     const contact = await res.json();
-    expect(contact.platform).toBeNull();
+    expect("platform" in contact).toBe(false);
     expect(contact.identities).toHaveLength(2);
 
     const xIdentity = contact.identities.find(
@@ -69,7 +69,7 @@ describe("POST /api/contacts identities[]", () => {
     expect(res.status).toBe(201);
 
     const contact = await res.json();
-    expect(contact.platform).toBeNull();
+    expect("platform" in contact).toBe(false);
     expect(contact.identities).toEqual([]);
 
     const rows = db.select().from(contactIdentities).all();

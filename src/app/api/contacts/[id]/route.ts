@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { PLATFORM_ENUM } from "@/lib/db/platforms";
 import { getContactById, updateContact, deleteContact } from "@/lib/db/queries/contacts";
+import { channelInputSchema } from "@/lib/agent-tools/schemas";
 import { db } from "@/lib/db/client";
 import {
   applyContactOrgLink,
@@ -34,6 +35,7 @@ const updateContactSchema = z.object({
     .optional(),
   score: z.number().int().min(0).optional(),
   isSelf: z.boolean().optional(),
+  channels: z.array(channelInputSchema).optional(),
 });
 
 export async function GET(

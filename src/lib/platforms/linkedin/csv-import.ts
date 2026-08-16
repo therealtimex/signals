@@ -2,6 +2,7 @@ import { eq, and } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { contacts, contactIdentities } from "@/lib/db/schema";
 import { createContact, updateContact, recalcEnrichment } from "@/lib/db/queries/contacts";
+import { findContactByChannel } from "@/lib/db/queries/contact-channels";
 import { createIdentity } from "@/lib/db/queries/identities";
 import type { SyncResult } from "@/lib/platforms/adapter";
 
@@ -142,7 +143,7 @@ function extractVanityName(url: string): string | null {
  *
  * Dedup strategy:
  *   1. Check contactIdentities for platform="linkedin" + matching vanityName
- *   2. If no identity match but email exists, check contacts.email
+ *   2. If no identity match but email exists, check contact_channels (email)
  *   3. Otherwise create new contact + identity
  *
  * CSV provides company + position fields that API sync doesn't,
@@ -212,13 +213,9 @@ function processRow(row: LinkedInCsvRow, result: SyncResult): void {
     }
   }
 
-  // --- Tier 2: match by email ---
+  // --- Tier 2: match by email channel ---
   if (row.email) {
-    const existingContact = db
-      .select()
-      .from(contacts)
-      .where(eq(contacts.email, row.email))
-      .get();
+    const existingContact = findContactByChannel("email", row.email);
 
     if (existingContact) {
       // Update contact fields from CSV
@@ -259,9 +256,8 @@ function processRow(row: LinkedInCsvRow, result: SyncResult): void {
     email: row.email || undefined,
     company: row.company || undefined,
     title: row.position || undefined,
-    platform: "linkedin" as const,
     profileUrl: row.url || undefined,
-  });
+  }, "import:linkedin_csv");
 
   if (vanityName) {
     createIdentity({

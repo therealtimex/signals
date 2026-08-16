@@ -66,8 +66,8 @@ export async function enrichContact(
   if (!contact.company && data.company) { updates.company = data.company; fieldsUpdated.push("company"); }
   if (!contact.title && data.title) { updates.title = data.title; fieldsUpdated.push("title"); }
   if (!contact.headline && data.headline) { updates.headline = data.headline; fieldsUpdated.push("headline"); }
-  if (!contact.email && data.email) { updates.email = data.email; fieldsUpdated.push("email"); }
-  if (!contact.phone && data.phone) { updates.phone = data.phone; fieldsUpdated.push("phone"); }
+  if (!contact.primaryEmail && data.email) { updates.email = data.email; fieldsUpdated.push("email"); }
+  if (!contact.primaryPhone && data.phone) { updates.phone = data.phone; fieldsUpdated.push("phone"); }
   if (!contact.location && data.location) { updates.location = data.location; fieldsUpdated.push("location"); }
   if (!contact.website && data.website) { updates.website = data.website; fieldsUpdated.push("website"); }
   if (!contact.bio && data.bio) { updates.bio = data.bio; fieldsUpdated.push("bio"); }

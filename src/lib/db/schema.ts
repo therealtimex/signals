@@ -44,17 +44,12 @@ export const contacts = sqliteTable("contacts", {
   company: text("company"),
   title: text("title"),
   // Deprecated: use contactIdentities table instead
-  platform: text("platform", { enum: PLATFORM_ENUM }),
-  platformUserId: text("platform_user_id"),
   profileUrl: text("profile_url"),
   avatarUrl: text("avatar_url"),
-  email: text("email"),
-  phone: text("phone"),
   bio: text("bio"),
   location: text("location"),
   website: text("website"),
   photoUrl: text("photo_url"),
-  verifiedEmail: integer("verified_email").notNull().default(0),
   enrichmentScore: integer("enrichment_score").notNull().default(0),
   tags: text("tags").default("[]"), // JSON array
   funnelStage: text("funnel_stage", {
@@ -68,7 +63,6 @@ export const contacts = sqliteTable("contacts", {
   isSelf: integer("is_self", { mode: "boolean" }).notNull().default(false),
   ...timestamps,
 }, (table) => [
-  index("idx_contacts_email").on(table.email),
   index("idx_contacts_name").on(table.name),
   index("idx_contacts_company").on(table.company),
 ]);
@@ -106,6 +100,38 @@ export const contactIdentities = sqliteTable("contact_identities", {
   uniqueIndex("idx_identity_platform_user").on(table.platform, table.platformUserId),
   index("idx_identity_contact").on(table.contactId),
   index("idx_identity_followers").on(table.followersCount),
+]);
+
+// --- Contact Channels (reachability — email, phone, messengers) ---
+
+export const contactChannels = sqliteTable("contact_channels", {
+  id: text("id").primaryKey(),
+  contactId: text("contact_id")
+    .notNull()
+    .references(() => contacts.id, { onDelete: "cascade" }),
+  channelType: text("channel_type").notNull(),
+  value: text("value").notNull(),
+  valueNormalized: text("value_normalized").notNull(),
+  label: text("label"),
+  isPrimary: integer("is_primary", { mode: "boolean" }).notNull().default(false),
+  isVerified: integer("is_verified", { mode: "boolean" }).notNull().default(false),
+  contactIdentityId: text("contact_identity_id").references(() => contactIdentities.id, {
+    onDelete: "set null",
+  }),
+  scope: text("scope", { enum: ["shared", "local_only"] })
+    .notNull()
+    .default("shared"),
+  source: text("source").notNull(),
+  metadata: text("metadata").default("{}"),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex("idx_channel_contact_value").on(
+    table.contactId,
+    table.channelType,
+    table.valueNormalized,
+  ),
+  index("idx_channel_lookup").on(table.channelType, table.valueNormalized),
+  index("idx_channel_contact").on(table.contactId),
 ]);
 
 // --- Identity Metrics (time-series stat snapshots per platform identity) ---
