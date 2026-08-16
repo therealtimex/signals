@@ -5,7 +5,7 @@ import {
   rescheduleJob,
 } from "@/lib/db/queries/scheduled-jobs";
 import { getTemplate } from "@/lib/db/queries/workflow-templates";
-import { startAgentWorkflow } from "@/lib/agents/run-agent-workflow";
+import { startAgentWorkflow, AGENT_ORCHESTRATION_MESSAGE } from "@/lib/agents/run-agent-workflow";
 import {
   pruneSimulationTranscripts,
   SIMULATION_TRANSCRIPT_RETENTION_JOB_TYPE,
@@ -163,12 +163,29 @@ export function executeScheduledJob(jobId: string): void {
     const jobPayload = JSON.parse(job.payload ?? "{}");
     const mergedConfig = { ...templateConfig, ...jobPayload };
 
-    // Start the workflow (fire-and-forget)
-    startAgentWorkflow({
+    // Start the workflow (records run; in-process orchestration removed — see RTX migration)
+    const run = startAgentWorkflow({
       templateId: job.templateId,
       workflowType,
       config: mergedConfig,
     });
+
+    if (run.status === "failed") {
+      const errors = JSON.parse(run.errors ?? "[]") as string[];
+      const errorMessage = errors[0] ?? AGENT_ORCHESTRATION_MESSAGE;
+
+      console.error(
+        `[scheduler] Agent orchestration unavailable for job ${jobId} (template: ${template.name}): ${errorMessage}`
+      );
+
+      updateScheduledJob(jobId, {
+        status: "failed",
+        error: errorMessage,
+        completedAt: Math.floor(Date.now() / 1000),
+        lastTriggeredAt: Math.floor(Date.now() / 1000),
+      });
+      return;
+    }
 
     console.log(
       `[scheduler] Started workflow for job ${jobId} (template: ${template.name})`

@@ -36,7 +36,7 @@ Click the **Compose** button to open the compose dialog — the central place fo
 The compose dialog packs a lot into a clean interface:
 
 ### Platform Selector
-Toggle between **X** and **LinkedIn** at the top. The character counter adjusts automatically — 280 for X, 3,000 for LinkedIn. Platform constraints shape the AI's behavior too, so switching platforms changes how AI Assist generates content.
+Toggle between **X** and **LinkedIn** at the top. The character counter adjusts automatically — 280 for X, 3,000 for LinkedIn.
 
 ### Publish Mode
 Two modes, inspired by what Andrej Karpathy calls the [autonomy slider](https://karpathy.ai/) — the idea that AI should range from full human control to full autonomy, and you pick the level:
@@ -58,39 +58,9 @@ Drag and drop images (JPEG, PNG, GIF, WebP up to 5 MB) into the upload zone. The
 - **API Publish** — Publish via platform APIs (requires X API Basic tier at $200/month)
 - **Publish** — Browser-based publishing (free, works with any account)
 
-## AI-Assisted Content Creation
+## Creative assistance (RealTimeX)
 
-Click the **AI Assist** button (sparkles icon) to open the AI content panel alongside the compose area.
-
-![AI Assist panel — generate drafts, get suggestions, refine your writing](assets/ai-assist-panel.png)
-*AI Assist: three modes (Draft, Suggest, Refine), topic input, tone selection, and optional audience targeting from your contacts.*
-
-AI Assist has three modes, each solving a different part of the content creation problem:
-
-### Draft Mode
-Give AI a topic and it generates **three variations** of a complete post. For example, enter "why local-first software matters for startups" and you'll get three distinct takes — different angles, different hooks, different structures. Each variation respects the active platform's constraints (280 chars for X, long-form for LinkedIn).
-
-Controls:
-- **Topic** — What should the post be about?
-- **Tone** — Professional, Casual, Thought Leader, or Promotional
-- **Target audience** — Optionally select contacts from your CRM. The AI tailors the content to resonate with those specific people based on their profile data.
-
-Click **Generate Drafts** and the AI returns three options. Each comes with an **Insert** button that drops the text directly into the compose area.
-
-### Suggest Mode
-When you don't have a topic yet, Suggest mode generates **five content ideas** based on a broad theme. Enter "AI and startups" and you'll get specific, actionable post concepts. Each suggestion has a **Use as Topic** button that feeds it back into Draft mode — a two-step ideation-to-draft pipeline.
-
-### Refine Mode
-Paste existing text and the AI improves it — tightening language, strengthening hooks, adjusting for the target platform. Useful when you've written a rough draft and want a polish pass before publishing.
-
-## Cross-Platform Adaptation
-
-One of Signals's most practical features: the **Adapt** button (swap icon) in the compose area. Write a post for X, click Adapt, and the AI reformats it for LinkedIn — or vice versa. This isn't just word count adjustment. The AI restructures the content:
-
-- **X → LinkedIn**: Expands the tight X format into LinkedIn's hook-story-insight structure, adds paragraph breaks, extends the narrative
-- **LinkedIn → X**: Distills the key insight into 280 characters, sharpens the hook, drops the filler
-
-One click. No copy-paste between tabs. No manual rewriting.
+In-app AI Assist, draft generation, and one-click cross-platform adaptation were removed from Signals. Use a **RealTimeX terminal agent** for ideation, drafting, and rewriting, then paste into Compose or save via the agent-tools `create_task` / content workflows. See `docs/rtx-agent-orchestration.md`.
 
 ## Browser-Based Publishing
 
@@ -128,15 +98,14 @@ The detail view shows:
 
 Here's how a typical content session looks for a solo founder:
 
-1. **Ideate** — Open Compose, click AI Assist, use Suggest mode with a broad theme
-2. **Draft** — Pick the best suggestion, Use as Topic, generate three Draft variations
-3. **Insert** — Choose the strongest draft, Insert it into the compose area
-4. **Edit** — Tweak the AI-generated text with your personal voice and specific details
-5. **Adapt** — Click Adapt to create a version for the other platform
-6. **Publish** — Hit Publish in Review mode for the first few times, switch to Auto once you trust the flow
-7. **Track** — Check your content library to see engagement data flowing in
+1. **Ideate** — Use a RealTimeX terminal agent or your own notes to brainstorm themes
+2. **Draft** — Write in Compose (or paste agent output) and refine in the editor
+3. **Edit** — Add your personal voice and specific details
+4. **Adapt** — Manually tailor tone/length per platform, or ask an RTX agent to rewrite for the second platform
+5. **Publish** — Hit Publish in Review mode for the first few times, switch to Auto once you trust the flow
+6. **Track** — Check your content library to see engagement data flowing in
 
-The entire loop — from blank page to published on both platforms — takes minutes instead of the hour it used to.
+The loop — from idea to published on both platforms — stays fast when creative work runs in RTX and publishing stays in Signals.
 
 ## What's Next
 

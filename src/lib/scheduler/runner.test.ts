@@ -3,7 +3,9 @@ import { nanoid } from "nanoid";
 import { db } from "@/lib/db/client";
 import { scheduledJobs, workflowTemplates } from "@/lib/db/schema";
 import { getScheduledJob } from "@/lib/db/queries/scheduled-jobs";
+import { listWorkflowRuns } from "@/lib/db/queries/workflows";
 import { executeScheduledJob } from "@/lib/scheduler/runner";
+import { AGENT_ORCHESTRATION_UNAVAILABLE_CODE } from "@/lib/agents/run-agent-workflow";
 import { SIMULATION_TRANSCRIPT_RETENTION_JOB_TYPE } from "@/lib/db/simulation-transcript-retention";
 import { resetCoreTables } from "@/test/db";
 
@@ -78,7 +80,7 @@ describe("scheduler runner", () => {
     expect(getScheduledJob(id)?.error).toMatch(/Unknown job_type/);
   });
 
-  it("still runs template-backed jobs", () => {
+  it("marks template-backed jobs failed when agent orchestration is unavailable", () => {
     const templateId = nanoid();
     db.insert(workflowTemplates)
       .values({
@@ -101,11 +103,19 @@ describe("scheduler runner", () => {
         runAt: now - 10,
         enabled: 1,
         payload: "{}",
+        cronExpression: "0 0 * * *",
       })
       .run();
 
     executeScheduledJob(jobId);
 
-    expect(getScheduledJob(jobId)?.status).toBe("completed");
+    const job = getScheduledJob(jobId)!;
+    expect(job.status).toBe("failed");
+    expect(job.error).toContain(AGENT_ORCHESTRATION_UNAVAILABLE_CODE);
+    expect(job.completedAt).toBeTruthy();
+    expect(job.runAt).toBe(now - 10);
+
+    const runs = listWorkflowRuns({ pageSize: 1 });
+    expect(runs.data[0]?.status).toBe("failed");
   });
 });

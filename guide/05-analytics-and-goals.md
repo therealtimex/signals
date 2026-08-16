@@ -155,4 +155,4 @@ The goal becomes the organizing principle. Instead of randomly running agents, e
 
 You've set up analytics to understand your CRM and goals to direct it. The final piece is the conversational interface that ties everything together.
 
-**Next: [AI Chat Assistant](06-ai-chat-assistant.md)** — Query analytics, check goal progress, and manage your entire CRM through natural language.
+**Next: [Analytics and Goals](05-analytics-and-goals.md)** — Track agent performance, contact growth, and set demand generation targets. Use RealTimeX terminal agents with `/api/agent-tools` for conversational CRM queries.

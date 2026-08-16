@@ -65,14 +65,16 @@ The gallery has two tabs: **System Agents** (the 10 pre-built ones) and **My Age
 
 ## Running an Agent
 
-Click **Run** on any agent card to activate it. The agent goes through a predictable lifecycle:
+Click **Run** on any agent card to open the activation dialog and configure parameters. **Important:** in-process agent execution was removed from Signals. The UI still records a workflow run for observability, but execution must happen through **RealTimeX terminal agents** and Agent Flows calling `POST /api/agent-tools/invoke`. See `docs/rtx-agent-orchestration.md`.
 
-1. **Thinking** — The LLM reads its instructions and plans its approach
-2. **Tool use** — The agent calls tools: web search, browser scrape, contact update, etc.
-3. **Iteration** — Based on tool results, the agent decides whether to continue or stop
-4. **Completion** — The agent summarizes what it accomplished
+When RTX orchestration is wired up, a typical run looks like:
 
-Under the hood, agents use Claude via the Vercel AI SDK's `generateText()` with a bounded step count (`stopWhen: stepCountIs(n)`) to prevent runaway loops. Each step is a complete LLM call with tool results fed back in.
+1. **Plan** — Terminal agent reads the template instructions and your CRM context
+2. **Tool use** — Agent calls Signals tools (`query_contacts`, `enrich_contact`, `search_web`, etc.)
+3. **Iteration** — Agent continues until the goal is met or you stop it
+4. **Completion** — Results are visible on the workflow run and in the CRM
+
+Until a template is migrated to RTX, runs started from the gallery or scheduler will fail with `AGENT_ORCHESTRATION_UNAVAILABLE`.
 
 ### Smart Search Routing
 
@@ -119,57 +121,31 @@ Toggle between **Timeline** (chronological list) and **Graph** (visual dependenc
 
 ## Workflow Scheduling
 
-Agents don't have to be manually triggered. Signals includes a cron-based scheduler that runs agents on a recurring basis.
+Agent templates can be scheduled on a recurring cron from the Automation page. The scheduler polls every 60 seconds.
 
-From the Automation page, click the schedule icon on any agent to configure:
+- **Cron presets** — Hourly, daily, weekly, monthly
+- **Custom cron** — Full cron expression support
+- **Next run preview** — Shows the next planned execution
+- **Config overrides** — Per-template payload overrides
 
-- **Cron presets** — Common schedules: every hour, daily, weekly, monthly
-- **Custom cron** — Full cron expression support for precise scheduling
-- **Next run preview** — Shows when the agent will next execute
-- **Config overrides** — Customize parameters per template type (different search queries, contact filters, etc.)
+**Migration note:** scheduled template jobs no longer execute in-process LLM loops. When orchestration is unavailable, the scheduled job is marked **failed** (not completed) with `AGENT_ORCHESTRATION_UNAVAILABLE`, and recurring jobs are **not** silently rescheduled. Migrate the schedule to an RTX Agent Flow or disable it until migration is complete.
 
-The scheduler runs on a 60-second interval. When a job is due, it fires the agent workflow and updates the next run time. You can enable/disable individual schedules and see last-triggered timestamps.
+## Triggering Agents from RealTimeX
 
-This is how you put your CRM on autopilot: schedule the Search agents to discover new contacts weekly, Enrich agents to fill data gaps daily, and Prune agents to clean up monthly.
+Use a RealTimeX workspace thread or terminal agent instead of the removed Cmd+K chat panel:
 
-## Triggering Agents from Chat
+> "Query my low-score contacts and enrich the top five."
 
-Every agent can also be started from the AI Chat Assistant. Open the chat panel (Cmd+K) and say something like:
+> "Start the Top AI Influencers template workflow via agent-tools."
 
-> "Run the Top AI Influencers search agent"
+Agents should call `GET /api/agent-tools` for the manifest, then `POST /api/agent-tools/invoke` with tools such as `query_contacts`, `start_workflow`, and `enrich_contact`. See `docs/agent-tools.md`.
 
-> "Enrich my low-score contacts"
+## Agent Tools API (integration surface)
 
-> "Start a prune workflow"
-
-The chat assistant has a `start_workflow` tool that activates any agent template. This is often the fastest way to run an ad-hoc agent — no clicking through the gallery, just describe what you want.
-
-![Chat panel — triggering workflows conversationally](assets/chat-panel.png)
-*The Chat panel: smart prompts suggest common actions, and you can start any workflow with natural language.*
-
-## Under the Hood: The Agent Toolset
-
-Every agent has access to 10 tools, each doing one thing well:
-
-| Tool | What It Does |
-|------|-------------|
-| `search_web` | Searches via Serper or Tavily with smart routing |
-| `url_fetch` | Fetches and parses web pages (Cheerio-based) |
-| `browser_scrape` | Full browser automation for JS-rendered pages |
-| `enrich_contact` | Updates contact fields in the CRM |
-| `archive_contact` | Archives contacts (soft delete with metadata) |
-| `update_progress` | Reports progress during execution |
-| `publish_content` | Publishes posts via browser automation |
-| `query_contacts` | Reads contact data from the CRM |
-| `query_content` | Reads content library data |
-| `query_goals` | Reads goal progress data |
-
-The routing engine decides which tools to use based on the target. X profiles get `browser_scrape` (the API is limited). Wikipedia pages get `url_fetch` (no JS needed). The agent doesn't need to know the routing rules — it just asks to "get information about this person" and the system handles the rest.
+Signals exposes CRM and workflow tools over `POST /api/agent-tools/invoke`. Common tools include `query_contacts`, `enrich_contact`, `start_workflow`, `query_content`, `query_goals`, and graph/persona tools. Run `GET /api/agent-tools` at session start for the full manifest and JSON schemas.
 
 ## What's Next
 
 Agents generate data. Analytics help you understand it. Goals give it direction.
 
 **Next: [Analytics and Goals](05-analytics-and-goals.md)** — Track agent performance, contact growth, and set demand generation targets.
-
-**Also see: [AI Chat Assistant](06-ai-chat-assistant.md)** — Trigger and monitor agents through natural language.
