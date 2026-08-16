@@ -4,6 +4,8 @@ import { PLATFORM_ENUM } from "@/lib/db/platforms";
 import { listContacts, createContact } from "@/lib/db/queries/contacts";
 import { createIdentity } from "@/lib/db/queries/identities";
 import { recalcEnrichment } from "@/lib/db/queries/contacts";
+import { db } from "@/lib/db/client";
+import { applyContactOrgLink, resolveContactCompanyFields } from "@/lib/contact-org-api";
 
 const identitySchema = z.object({
   platform: z.enum(PLATFORM_ENUM),
@@ -18,7 +20,8 @@ const createContactSchema = z.object({
   firstName: z.string().optional(),
   lastName: z.string().optional(),
   headline: z.string().optional(),
-  company: z.string().optional(),
+  orgId: z.string().optional().nullable(),
+  company: z.string().optional().nullable(),
   title: z.string().optional(),
   platform: z.enum(PLATFORM_ENUM).optional(),
   platformUserId: z.string().optional(),
@@ -58,7 +61,12 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { identity, ...data } = createContactSchema.parse(body);
+    const { identity, orgId, company, ...data } = createContactSchema.parse(body);
+
+    const resolvedCompany = resolveContactCompanyFields({ orgId, company });
+    if ("error" in resolvedCompany) {
+      return NextResponse.json({ error: resolvedCompany.error }, { status: 400 });
+    }
 
     // Ensure name is always provided (required by DB schema)
     const name =
@@ -66,7 +74,27 @@ export async function POST(req: NextRequest) {
       [data.firstName, data.lastName].filter(Boolean).join(" ") ||
       "Unknown";
 
-    const contact = createContact({ ...data, name });
+    const contactPayload = {
+      ...data,
+      name,
+      ...(resolvedCompany.touched ? { company: resolvedCompany.company } : {}),
+    };
+
+    const contact = db.transaction(() => {
+      const created = createContact(contactPayload);
+      if (resolvedCompany.touched) {
+        applyContactOrgLink(
+          created.id,
+          {
+            company: resolvedCompany.company,
+            orgId: resolvedCompany.orgId,
+          },
+          "api:create_contact",
+          contactPayload.title,
+        );
+      }
+      return created;
+    });
 
     // If an inline identity was provided, create it
     if (identity) {
