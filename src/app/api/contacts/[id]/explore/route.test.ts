@@ -38,6 +38,7 @@ describe("GET /api/contacts/[id]/explore", () => {
     });
     const body = await res.json();
     expect(res.status).toBe(200);
+    expect(body.contact.name).toBe("API");
     expect(body.persona.visibility).toBe("shared");
     expect(body.persona.summary).toBe("API persona");
     expect(body.persona.stale).toBe(false);

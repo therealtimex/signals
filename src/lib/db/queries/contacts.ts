@@ -190,13 +190,41 @@ export function updateContact(
     updates.name = [fn, ln].filter(Boolean).join(" ") || existing.name;
   }
 
+  const now = Math.floor(Date.now() / 1000);
+
+  if (data.isSelf === true) {
+    db.transaction((tx) => {
+      tx.update(contacts)
+        .set({ isSelf: false, updatedAt: now })
+        .where(eq(contacts.isSelf, true))
+        .run();
+      tx.update(contacts)
+        .set({ ...updates, isSelf: true, updatedAt: now })
+        .where(eq(contacts.id, id))
+        .run();
+    });
+    recalcEnrichment(id);
+    return getContactById(id);
+  }
+
   db.update(contacts)
-    .set({ ...updates, updatedAt: Math.floor(Date.now() / 1000) })
+    .set({ ...updates, updatedAt: now })
     .where(eq(contacts.id, id))
     .run();
 
   recalcEnrichment(id);
   return getContactById(id);
+}
+
+/** Owner contact for relationship chips; lowest created_at wins if invariant violated. */
+export function getOwnerContactId(): string | null {
+  const rows = db
+    .select({ id: contacts.id })
+    .from(contacts)
+    .where(eq(contacts.isSelf, true))
+    .orderBy(contacts.createdAt)
+    .all();
+  return rows[0]?.id ?? null;
 }
 
 export function deleteContact(id: string): boolean {

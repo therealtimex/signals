@@ -48,6 +48,7 @@ export const updateContactSchema = z.object({
   website: z.string().optional(),
   funnelStage: funnelStage.optional(),
   tags: z.string().optional(),
+  is_self: z.boolean().optional(),
 });
 
 export const enrichContactSchema = z.object({

@@ -137,9 +137,12 @@ export async function handleUpdateContact(input: z.infer<typeof updateContactSch
 
   const updates: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(fields)) {
-    if (value !== undefined) {
-      updates[key] = value;
+    if (value === undefined) continue;
+    if (key === "is_self") {
+      updates.isSelf = value;
+      continue;
     }
+    updates[key] = value;
   }
 
   const shouldSyncCompanyGraph =

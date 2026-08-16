@@ -182,6 +182,51 @@ describe("schema v0.5 migrations", () => {
     expect(tables).toContain("contact_personas");
     expect(tables).toContain("org_identities");
     expect(tables).toContain("org_identity_metrics");
+
+    const columns = sqlite
+      .prepare("PRAGMA table_info(contacts)")
+      .all()
+      .map((row) => (row as { name: string }).name);
+    expect(columns).toContain("is_self");
+    sqlite.close();
+  });
+
+  it("applies 0016 additively for N-1 databases (is_self column absent before upgrade)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "signals-migrate-n-1-is-self-"));
+    const dbPath = join(dir, "data.db");
+    const sqlite = new Database(dbPath);
+    sqlite.pragma("foreign_keys = ON");
+
+    const migrationFiles = listMigrationSqlFiles();
+    const pre0016 = migrationFiles.filter((file) => !file.startsWith("0016_"));
+    applyMigrationFiles(sqlite, pre0016);
+
+    const columnsBefore = sqlite
+      .prepare("PRAGMA table_info(contacts)")
+      .all()
+      .map((row) => (row as { name: string }).name);
+    expect(columnsBefore).not.toContain("is_self");
+
+    const contactId = nanoid();
+    sqlite
+      .prepare(
+        "INSERT INTO contacts (id, name, funnel_stage, score, enrichment_score, verified_email, created_at, updated_at) VALUES (?, ?, 'prospect', 0, 0, 0, 1, 1)",
+      )
+      .run(contactId, "Legacy Contact");
+
+    applyMigrationFiles(
+      sqlite,
+      migrationFiles.filter((file) => file.startsWith("0016_")),
+    );
+
+    const columnsAfter = sqlite
+      .prepare("PRAGMA table_info(contacts)")
+      .all()
+      .map((row) => (row as { name: string }).name);
+    expect(columnsAfter).toContain("is_self");
+    expect(sqlite.prepare("SELECT name FROM contacts WHERE id = ?").get(contactId)).toEqual({
+      name: "Legacy Contact",
+    });
     sqlite.close();
   });
 
