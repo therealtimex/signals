@@ -51,7 +51,7 @@ function compareCurrentEmployments(a: ContactEmployment, b: ContactEmployment): 
 
 export type EmploymentVisibility = "shared" | "all";
 
-function isSharedEmployment(employment: ContactEmployment): boolean {
+export function isSharedEmployment(employment: ContactEmployment): boolean {
   if (employment.scope !== "shared") return false;
   const org = getOrgById(employment.orgId);
   return org?.scope === "shared";

@@ -47,6 +47,22 @@ describe("employment works_at projection", () => {
     });
   });
 
+  it("projects shared employments at local_only orgs as local_only works_at edges", () => {
+    const contact = createContact({ name: "Scoped Org" });
+    const orgId = createLocalOrg("Private Employer");
+
+    createContactEmployment({
+      contactId: contact.id,
+      orgId,
+      title: "Secret Role",
+      scope: "shared",
+      source: "test",
+    });
+
+    const edge = db.select().from(graphEdges).where(eq(graphEdges.edgeType, "works_at")).get();
+    expect(edge?.scope).toBe("local_only");
+  });
+
   it("keeps shared edge properties derived from shared stints only", () => {
     const contact = createContact({ name: "Mixed" });
     const org = createOrg({ name: "Acme Corp", source: "test" });

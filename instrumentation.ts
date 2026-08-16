@@ -39,8 +39,10 @@ export async function register() {
     }
 
     try {
-      const { runContactProfileEmbedSweep } = await import("@/lib/db/contact-profile-embed-sweep");
-      const embedSweep = await runContactProfileEmbedSweep({ batchSize: 25 });
+      const { runContactProfileEmbedSweepUntilCaughtUp } = await import(
+        "@/lib/db/contact-profile-embed-sweep"
+      );
+      const embedSweep = await runContactProfileEmbedSweepUntilCaughtUp({ batchSize: 25 });
       if (embedSweep.processed > 0 || (!embedSweep.complete && embedSweep.remaining > 0)) {
         console.log("[instrumentation] Contact profile embedding sweep:", embedSweep);
       }

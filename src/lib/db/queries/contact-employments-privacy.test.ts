@@ -13,6 +13,7 @@ import { assembleEmbedText } from "@/lib/db/queries/embeddings";
 import { getContactExploreCard } from "@/lib/db/queries/contact-explore";
 import { assemblePersonaEvidence } from "@/lib/db/queries/persona-evidence";
 import { assembleAgentGrounding } from "@/lib/db/queries/simulations";
+import { queryGraphEdges } from "@/lib/db/queries/graph";
 import { db } from "@/lib/db/client";
 import { contacts, orgs } from "@/lib/db/schema";
 import { assertNoPrivacySentinels, PRIVACY_SENTINELS } from "@/test/privacy-sentinels";
@@ -133,5 +134,36 @@ describe("employment privacy on shared surfaces", () => {
       title: null,
     });
     expect(getContactExploreCard(contact.id)?.org).toBeNull();
+  });
+
+  it("hides works_at edges for shared employments at local_only orgs from default query_graph", () => {
+    const contact = createContact({ name: "Graph", platform: "x", platformUserId: "graph-1" });
+    const privateOrgId = createLocalOrg(PRIVACY_SENTINELS.privateEmployer);
+
+    createContactEmployment({
+      contactId: contact.id,
+      orgId: privateOrgId,
+      title: PRIVACY_SENTINELS.privateEmploymentTitle,
+      scope: "shared",
+      isCurrent: true,
+      source: "test",
+    });
+
+    const publicEdges = queryGraphEdges({
+      srcType: "contact",
+      srcId: contact.id,
+      edgeTypes: ["works_at"],
+    });
+    expect(publicEdges).toHaveLength(0);
+
+    const privateEdges = queryGraphEdges({
+      srcType: "contact",
+      srcId: contact.id,
+      edgeTypes: ["works_at"],
+      includeLocalOnly: true,
+    });
+    expect(privateEdges).toHaveLength(1);
+    expect(privateEdges[0]?.dstId).toBe(privateOrgId);
+    assertNoPrivacySentinels(publicEdges);
   });
 });

@@ -3,6 +3,7 @@ import { db } from "@/lib/db/client";
 import { graphEdges } from "@/lib/db/schema";
 import { upsertGraphEdge } from "@/lib/db/queries/graph";
 import {
+  isSharedEmployment,
   listContactEmployments,
   type ContactEmploymentWithOrg,
 } from "@/lib/db/queries/contact-employments";
@@ -36,14 +37,17 @@ function aggregateOrgEdgeProperties(stints: ContactEmployment[]) {
 }
 
 function resolveEdgeScope(stints: ContactEmployment[]): "shared" | "local_only" {
-  return stints.some((stint) => stint.scope === "shared") ? "shared" : "local_only";
+  return stints.some((stint) => isSharedEmployment(stint)) ? "shared" : "local_only";
 }
 
 function stintsForEdgeScope(
   stints: ContactEmployment[],
   scope: "shared" | "local_only",
 ): ContactEmployment[] {
-  return stints.filter((stint) => stint.scope === scope);
+  if (scope === "shared") {
+    return stints.filter((stint) => isSharedEmployment(stint));
+  }
+  return stints.filter((stint) => !isSharedEmployment(stint));
 }
 
 /** Project `works_at` edges from employment rows — employments are the source of truth (ADR-092-2). */

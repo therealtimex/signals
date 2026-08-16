@@ -20,6 +20,7 @@ import {
 } from "@/lib/db/persona-refresh-sweep";
 import {
   runContactProfileEmbedSweep,
+  ensureContactProfileEmbedSweepJob,
   CONTACT_PROFILE_EMBED_SWEEP_JOB_TYPE,
 } from "@/lib/db/contact-profile-embed-sweep";
 import type { WorkflowType } from "@/lib/workflows/types";
@@ -51,7 +52,13 @@ const MAINTENANCE_HANDLERS: Record<string, MaintenanceHandler> = {
         typeof payload.observedUntil === "number" ? payload.observedUntil : undefined,
     }),
   [PERSONA_REFRESH_JOB_TYPE]: () => runPersonaRefreshSweep(),
-  [CONTACT_PROFILE_EMBED_SWEEP_JOB_TYPE]: () => runContactProfileEmbedSweep(),
+  [CONTACT_PROFILE_EMBED_SWEEP_JOB_TYPE]: async () => {
+    const report = await runContactProfileEmbedSweep();
+    if (!report.complete && report.remaining > 0 && report.errors.length === 0) {
+      ensureContactProfileEmbedSweepJob();
+    }
+    return report;
+  },
 };
 
 let initialized = false;

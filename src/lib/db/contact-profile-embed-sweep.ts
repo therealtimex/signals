@@ -1,10 +1,13 @@
 import { db, sqlite } from "@/lib/db/client";
 import { assembleEmbedText, getLatestEmbedding } from "@/lib/db/queries/embeddings";
-import { contacts } from "@/lib/db/schema";
+import { getScheduledJob } from "@/lib/db/queries/scheduled-jobs";
+import { contacts, scheduledJobs } from "@/lib/db/schema";
 import { embedNodeIfStale, EmbeddingUnavailableError } from "@/lib/embeddings/embed-node";
 import { truncateEmbedText } from "@/lib/embeddings/vector-utils";
 import { sha256EmbedText } from "@/lib/rtx/llm";
 import type { EnvLike } from "@/lib/rtx/env";
+import { and, eq } from "drizzle-orm";
+import { nanoid } from "nanoid";
 
 export const CONTACT_PROFILE_EMBED_SWEEP_KEY = "contact-profile-employment-text-v1";
 export const CONTACT_PROFILE_EMBED_SWEEP_JOB_TYPE = "maintenance:contact-profile-embed-sweep";
@@ -34,6 +37,12 @@ function markBackfillApplied(key: string): void {
 
 export function isContactProfileEmbedSweepComplete(): boolean {
   return backfillMarkerApplied(CONTACT_PROFILE_EMBED_SWEEP_KEY);
+}
+
+/** Test helper — clears the one-time completion marker between isolated sweep cases. */
+export function resetContactProfileEmbedSweepStateForTests(): void {
+  ensureBackfillMarkersTable();
+  sqlite.prepare("DELETE FROM _backfill_markers WHERE key = ?").run(CONTACT_PROFILE_EMBED_SWEEP_KEY);
 }
 
 export function contactNeedsProfileReembed(contactId: string): boolean {
@@ -116,7 +125,93 @@ export async function runContactProfileEmbedSweep(opts?: {
   if (report.remaining === 0 && report.errors.length === 0) {
     markBackfillApplied(CONTACT_PROFILE_EMBED_SWEEP_KEY);
     report.complete = true;
+  } else if (report.remaining > 0 && report.errors.length === 0) {
+    ensureContactProfileEmbedSweepJob();
   }
 
   return report;
+}
+
+/** Enqueue a one-shot maintenance job when profile embeddings still need regeneration. */
+export function ensureContactProfileEmbedSweepJob(now = nowUnix()): boolean {
+  if (isContactProfileEmbedSweepComplete()) return false;
+
+  const existing = db
+    .select({ id: scheduledJobs.id })
+    .from(scheduledJobs)
+    .where(
+      and(
+        eq(scheduledJobs.jobType, CONTACT_PROFILE_EMBED_SWEEP_JOB_TYPE),
+        eq(scheduledJobs.status, "pending"),
+        eq(scheduledJobs.enabled, 1),
+      ),
+    )
+    .get();
+  if (existing) return false;
+
+  const id = nanoid();
+  db.insert(scheduledJobs)
+    .values({
+      id,
+      jobType: CONTACT_PROFILE_EMBED_SWEEP_JOB_TYPE,
+      status: "pending",
+      runAt: now,
+      enabled: 1,
+      payload: JSON.stringify({}),
+    })
+    .run();
+  return true;
+}
+
+/** Process batches until caught up or the embed provider is unavailable. */
+export async function runContactProfileEmbedSweepUntilCaughtUp(opts?: {
+  batchSize?: number;
+  maxBatches?: number;
+  fetchImpl?: typeof fetch;
+  env?: EnvLike;
+}): Promise<ContactProfileEmbedSweepReport> {
+  const maxBatches = opts?.maxBatches ?? 100;
+  let report: ContactProfileEmbedSweepReport = {
+    complete: isContactProfileEmbedSweepComplete(),
+    processed: 0,
+    embedded: 0,
+    skipped: 0,
+    remaining: listContactsNeedingProfileReembed().length,
+    errors: [],
+  };
+
+  if (report.complete) return report;
+
+  for (let batch = 0; batch < maxBatches; batch++) {
+    report = await runContactProfileEmbedSweep(opts);
+    if (report.complete || report.errors.length > 0 || report.processed === 0) {
+      return report;
+    }
+  }
+
+  if (!report.complete && report.remaining > 0 && report.errors.length === 0) {
+    ensureContactProfileEmbedSweepJob();
+  }
+
+  return report;
+}
+
+export function getPendingContactProfileEmbedSweepJobId(): string | null {
+  const row = db
+    .select({ id: scheduledJobs.id })
+    .from(scheduledJobs)
+    .where(
+      and(
+        eq(scheduledJobs.jobType, CONTACT_PROFILE_EMBED_SWEEP_JOB_TYPE),
+        eq(scheduledJobs.status, "pending"),
+        eq(scheduledJobs.enabled, 1),
+      ),
+    )
+    .get();
+  return row?.id ?? null;
+}
+
+export function isContactProfileEmbedSweepJob(id: string): boolean {
+  const job = getScheduledJob(id);
+  return job?.jobType === CONTACT_PROFILE_EMBED_SWEEP_JOB_TYPE;
 }
