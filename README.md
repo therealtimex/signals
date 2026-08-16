@@ -197,6 +197,10 @@ npm run lint             # ESLint
 
 See [docs/qa/README.md](./docs/qa/README.md) for CI and quality gate details.
 
+## Design
+
+Frontend tokens, layout patterns, navigation, and component inventory: [`specs/04-frontend-design.md`](./specs/04-frontend-design.md).
+
 ## Roadmap
 
 - [x] **Phase 0** — Project setup, CLI, schema, auth, UI shell
