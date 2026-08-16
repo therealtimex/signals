@@ -32,13 +32,13 @@ Terminal agent
 
 ## RealTimeX upstream docs
 
-Canonical docs in the [realtimex-ai-app](https://github.com/therealtimex/realtimex-ai-app) repository:
+Canonical docs in the [realtimex-ai-app](https://rtgit.rta.vn/rtlab/rtwebteam/realtimex-ai-app) repository (`realtimex-dev` branch):
 
 | Topic | Link |
 |-------|------|
-| Local Apps architecture | [architecture.md](https://github.com/therealtimex/realtimex-ai-app/blob/main/docs/local-apps/architecture.md) |
-| SDK LLM proxy (`llm.embed`, `llm.chat`) | [sdk-llm-proxy.md](https://github.com/therealtimex/realtimex-ai-app/blob/main/docs/local-apps/sdk-llm-proxy.md) |
-| Local Apps admin / registration | [user-guide.md](https://github.com/therealtimex/realtimex-ai-app/blob/main/docs/local-apps/user-guide.md) |
+| Local Apps architecture | [architecture.md](https://rtgit.rta.vn/rtlab/rtwebteam/realtimex-ai-app/-/blob/realtimex-dev/docs/local-apps/architecture.md) |
+| SDK LLM proxy (`llm.embed`, `llm.chat`) | [sdk-llm-proxy.md](https://rtgit.rta.vn/rtlab/rtwebteam/realtimex-ai-app/-/blob/realtimex-dev/docs/local-apps/sdk-llm-proxy.md) |
+| Local Apps admin / registration | [user-guide.md](https://rtgit.rta.vn/rtlab/rtwebteam/realtimex-ai-app/-/blob/realtimex-dev/docs/local-apps/user-guide.md) |
 
 Signals [`local-app.md`](./local-app.md) documents the concrete startup command, health probe, and permission manifest (`rtx-manifest.json`) for this app.
 
