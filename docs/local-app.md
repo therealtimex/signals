@@ -82,6 +82,30 @@ npm run dev
 
 Register the app in **Settings → Local Apps** first so `/sdk/register` resolves the app id.
 
+### Embedded-host QA (`generate_persona`)
+
+Unit tests mock RTX chat. To verify persisted `provider:model` provenance against a real owned RTX dev host:
+
+1. **RTX co-requisite worktree** (not the main checkout — `rtxtest` refuses main):
+   ```bash
+   RTX_REPO="$PWD/../../worktrees/realtimex-ai-app-issue-64-sdk-llm-chat-provenance"
+   RTXTEST="$PWD/../../.claude/skills/rtx-test-runner/scripts/bin/rtxtest"
+   RTXTEST_TARGET=local node "$RTXTEST" dev up --repo "$RTX_REPO" --electron-no-sandbox
+   ```
+   Branch: `issue-64-sdk-llm-chat-provenance` @ MR !1684 (`response.provider` + `response.model` on `POST /sdk/llm/chat`).
+
+2. **Signals Local App permissions** — grant `llm.chat` (and keep `llm.embed`) for the Signals app in **Settings → Local Apps**. Default dev app id: `47e45f71-3279-42f5-8e95-731de01b6eae`.
+
+3. **Chat provider** — the RTX host must return a successful chat with `response.provider` and `response.model` (probe: `POST /sdk/llm/chat` with `x-app-id`).
+
+4. **Run embedded QA** from the Signals worktree:
+   ```bash
+   ./scripts/qa/run-embedded-generate-persona.sh
+   ```
+   Or explicitly: `SIGNALS_EMBEDDED_QA=1 RTX_APP_ID=... SERVER_URL=http://127.0.0.1:<port> npx vitest run src/lib/workflows/generate-persona.embedded.test.ts`
+
+`SERVER_URL` defaults to `RTX_REPO/tmp/dev-runtime/endpoints.json` → `serverUrl` when the owned dev session is running.
+
 ## References
 
 - Epic #1 / issue #2
