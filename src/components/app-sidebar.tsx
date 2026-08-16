@@ -2,6 +2,7 @@
 
 import {
   LayoutDashboard,
+  Telescope,
   Users,
   Building2,
   FileText,
@@ -32,6 +33,7 @@ import { cn } from "@/lib/utils";
 
 const navItems = [
   { title: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+  { title: "Explore", href: "/dashboard/explore", icon: Telescope },
   { title: "Contacts", href: "/dashboard/contacts", icon: Users },
   { title: "Organizations", href: "/dashboard/organizations", icon: Building2 },
   { title: "Content", href: "/dashboard/content", icon: FileText },

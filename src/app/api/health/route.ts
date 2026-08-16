@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
-import { getRtxBootstrapState } from "@/lib/rtx/bootstrap";
+import { ensureRtxBootstrap } from "@/lib/rtx/bootstrap";
 import { isRtxEmbedded } from "@/lib/rtx/env";
 import { RTX_MANIFEST } from "@/lib/rtx/manifest";
 
 /** Lightweight boot probe for smoke tests and Local App health checks. */
 export async function GET() {
-  const rtx = getRtxBootstrapState();
+  const rtx = await ensureRtxBootstrap();
 
   return NextResponse.json({
     status: "ok",

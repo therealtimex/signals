@@ -31,7 +31,7 @@ Inherited from the desktop runtime when available: `SERVER_PORT`, `REALTIMEX_USE
 
 ## SDK bootstrap
 
-On server start (`src/instrumentation.ts`), when `RTX_APP_ID` is set Signals:
+On server start (`instrumentation.ts`), when `RTX_APP_ID` is set Signals:
 
 1. Resolves the RTX API base from `SERVER_URL` / `REALTIMEX_BASE_URL` / `RTX_API_BASE_URL`
 2. Calls `POST /sdk/register` with permissions from [`rtx-manifest.json`](../rtx-manifest.json)
@@ -102,6 +102,15 @@ npm run dev
 ```
 
 Register the app in **Settings → Local Apps** first so `/sdk/register` resolves the app id.
+
+For headless QA against the canonical dev app id (`47e45f71-3279-42f5-8e95-731de01b6eae`), upsert it into the RTX SQLite database when missing:
+
+```bash
+node scripts/qa/provision-signals-local-app.mjs
+# or: node scripts/qa/provision-signals-local-app.mjs --db /path/to/realtimex.db
+```
+
+This pre-grants manifest permissions so `/sdk/register` and `/sdk/ping` succeed without an Electron permission prompt.
 
 ### Embedded-host QA (`generate_persona`)
 

@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { getRtxBootstrapState } from "@/lib/rtx/bootstrap";
+import { ensureRtxBootstrap } from "@/lib/rtx/bootstrap";
 import { RTX_MANIFEST, RTX_SDK_PERMISSIONS } from "@/lib/rtx/manifest";
 
 export async function GET() {
-  const bootstrap = getRtxBootstrapState();
+  const bootstrap = await ensureRtxBootstrap();
 
   return NextResponse.json({
     manifest: RTX_MANIFEST,

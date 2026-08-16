@@ -83,6 +83,13 @@ export async function register() {
       console.warn("[instrumentation] Seeding skipped:", (e as Error).message);
     }
 
+    try {
+      const { bootstrapRtxIfEmbedded } = await import("@/lib/rtx/bootstrap");
+      await bootstrapRtxIfEmbedded();
+    } catch (e) {
+      console.warn("[instrumentation] RTX bootstrap skipped:", (e as Error).message);
+    }
+
     const { initScheduler } = await import("@/lib/scheduler/runner");
     initScheduler();
   }
