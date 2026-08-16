@@ -49,6 +49,22 @@ function compareCurrentEmployments(a: ContactEmployment, b: ContactEmployment): 
   return b.createdAt - a.createdAt;
 }
 
+export type EmploymentVisibility = "shared" | "all";
+
+function isSharedEmployment(employment: ContactEmployment): boolean {
+  if (employment.scope !== "shared") return false;
+  const org = getOrgById(employment.orgId);
+  return org?.scope === "shared";
+}
+
+function filterEmploymentsByVisibility(
+  rows: ContactEmployment[],
+  visibility: EmploymentVisibility,
+): ContactEmployment[] {
+  if (visibility === "all") return rows;
+  return rows.filter(isSharedEmployment);
+}
+
 export function listContactEmployments(contactId: string): ContactEmployment[] {
   return db
     .select()
@@ -63,11 +79,16 @@ export function getContactEmploymentById(id: string): ContactEmployment | undefi
 }
 
 /** Career summary from structured employments (not scalar projection columns). */
-export function resolveContactCareerSummary(contactId: string): {
+export function resolveContactCareerSummary(
+  contactId: string,
+  opts?: { visibility?: EmploymentVisibility },
+): {
   company: string | null;
   title: string | null;
 } {
-  const current = resolveCurrentEmployment(contactId);
+  const current = resolveCurrentEmployment(contactId, {
+    visibility: opts?.visibility ?? "shared",
+  });
   return {
     company: current?.orgName?.trim() || null,
     title: current?.title ?? null,
@@ -75,8 +96,15 @@ export function resolveContactCareerSummary(contactId: string): {
 }
 
 /** Resolve current employment — latest started_at, then latest created_at (ADR-092-2). */
-export function resolveCurrentEmployment(contactId: string): ContactEmploymentWithOrg | undefined {
-  const rows = listContactEmployments(contactId).filter((row) => row.isCurrent);
+export function resolveCurrentEmployment(
+  contactId: string,
+  opts?: { visibility?: EmploymentVisibility },
+): ContactEmploymentWithOrg | undefined {
+  const visibility = opts?.visibility ?? "all";
+  const rows = filterEmploymentsByVisibility(
+    listContactEmployments(contactId).filter((row) => row.isCurrent),
+    visibility,
+  );
   if (rows.length === 0) return undefined;
 
   const employment = [...rows].sort(compareCurrentEmployments)[0];

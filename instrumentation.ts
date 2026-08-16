@@ -39,11 +39,9 @@ export async function register() {
     }
 
     try {
-      const { sweepContactProfileEmbeddingsAfterEmploymentMigration } = await import(
-        "@/lib/db/queries/embeddings"
-      );
-      const embedSweep = sweepContactProfileEmbeddingsAfterEmploymentMigration();
-      if (!embedSweep.skipped && embedSweep.deleted > 0) {
+      const { runContactProfileEmbedSweep } = await import("@/lib/db/contact-profile-embed-sweep");
+      const embedSweep = await runContactProfileEmbedSweep({ batchSize: 25 });
+      if (embedSweep.processed > 0 || (!embedSweep.complete && embedSweep.remaining > 0)) {
         console.log("[instrumentation] Contact profile embedding sweep:", embedSweep);
       }
     } catch (e) {

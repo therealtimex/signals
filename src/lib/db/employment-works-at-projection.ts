@@ -35,6 +35,17 @@ function aggregateOrgEdgeProperties(stints: ContactEmployment[]) {
   };
 }
 
+function resolveEdgeScope(stints: ContactEmployment[]): "shared" | "local_only" {
+  return stints.some((stint) => stint.scope === "shared") ? "shared" : "local_only";
+}
+
+function stintsForEdgeScope(
+  stints: ContactEmployment[],
+  scope: "shared" | "local_only",
+): ContactEmployment[] {
+  return stints.filter((stint) => stint.scope === scope);
+}
+
 /** Project `works_at` edges from employment rows — employments are the source of truth (ADR-092-2). */
 export function projectWorksAtFromEmployments(
   contactId: string,
@@ -69,8 +80,10 @@ export function projectWorksAtFromEmployments(
     }
   }
 
-  for (const [orgId, stints] of byOrg) {
-    const properties = aggregateOrgEdgeProperties(stints);
+  for (const [orgId, allStints] of byOrg) {
+    const scope = resolveEdgeScope(allStints);
+    const scopedStints = stintsForEdgeScope(allStints, scope);
+    const properties = aggregateOrgEdgeProperties(scopedStints);
     upsertGraphEdge({
       srcType: "contact",
       srcId: contactId,
@@ -78,7 +91,7 @@ export function projectWorksAtFromEmployments(
       dstId: orgId,
       edgeType: "works_at",
       properties: JSON.stringify(properties),
-      scope: "shared",
+      scope,
       source,
     });
   }
