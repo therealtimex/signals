@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -25,33 +25,33 @@ interface ContactIdentitiesInputProps {
 }
 
 export function ContactIdentitiesInput({ onChange }: ContactIdentitiesInputProps) {
-  const [rows, setRows] = useState<DraftContactIdentity[]>([]);
+  const nextRowId = useRef(0);
+  const [rows, setRows] = useState<Array<DraftContactIdentity & { rowId: string }>>([]);
 
-  function sync(next: DraftContactIdentity[]) {
+  function sync(next: Array<DraftContactIdentity & { rowId: string }>) {
     setRows(next);
-    onChange(next);
+    onChange(next.map(({ rowId: _rowId, ...identity }) => identity));
   }
 
-  function updateRow(index: number, patch: Partial<DraftContactIdentity>) {
-    const next = rows.map((row, rowIndex) =>
-      rowIndex === index ? { ...row, ...patch } : row,
-    );
+  function updateRow(rowId: string, patch: Partial<DraftContactIdentity>) {
+    const next = rows.map((row) => (row.rowId === rowId ? { ...row, ...patch } : row));
     sync(next);
   }
 
   function addRow() {
-    sync([...rows, emptyDraftIdentity()]);
+    const rowId = `identity-row-${nextRowId.current++}`;
+    sync([...rows, { ...emptyDraftIdentity(), rowId }]);
   }
 
-  function removeRow(index: number) {
-    sync(rows.filter((_, rowIndex) => rowIndex !== index));
+  function removeRow(rowId: string) {
+    sync(rows.filter((row) => row.rowId !== rowId));
   }
 
-  function setPrimary(index: number) {
+  function setPrimary(rowId: string) {
     sync(
-      rows.map((row, rowIndex) => ({
+      rows.map((row) => ({
         ...row,
-        isPrimary: rowIndex === index,
+        isPrimary: row.rowId === rowId,
       })),
     );
   }
@@ -73,14 +73,14 @@ export function ContactIdentitiesInput({ onChange }: ContactIdentitiesInputProps
       ) : (
         <div className="space-y-3">
           {rows.map((row, index) => (
-            <div key={index} className="rounded-md border p-3 space-y-3">
+            <div key={row.rowId} className="rounded-md border p-3 space-y-3">
               <div className="flex items-center justify-between gap-2">
                 <span className="text-sm font-medium">Identity {index + 1}</span>
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon"
-                  onClick={() => removeRow(index)}
+                  onClick={() => removeRow(row.rowId)}
                   aria-label={`Remove identity ${index + 1}`}
                 >
                   <Trash2 className="h-4 w-4 text-muted-foreground" />
@@ -93,7 +93,7 @@ export function ContactIdentitiesInput({ onChange }: ContactIdentitiesInputProps
                   <Select
                     value={row.platform}
                     onValueChange={(value) =>
-                      updateRow(index, { platform: value as Platform })
+                      updateRow(row.rowId, { platform: value as Platform })
                     }
                   >
                     <SelectTrigger id={`identity-platform-${index}`}>
@@ -114,7 +114,7 @@ export function ContactIdentitiesInput({ onChange }: ContactIdentitiesInputProps
                     id={`identity-user-id-${index}`}
                     value={row.platformUserId}
                     onChange={(event) =>
-                      updateRow(index, { platformUserId: event.target.value })
+                      updateRow(row.rowId, { platformUserId: event.target.value })
                     }
                     placeholder="Platform user ID"
                   />
@@ -128,7 +128,7 @@ export function ContactIdentitiesInput({ onChange }: ContactIdentitiesInputProps
                     id={`identity-handle-${index}`}
                     value={row.platformHandle}
                     onChange={(event) =>
-                      updateRow(index, { platformHandle: event.target.value })
+                      updateRow(row.rowId, { platformHandle: event.target.value })
                     }
                     placeholder="@handle"
                   />
@@ -139,7 +139,7 @@ export function ContactIdentitiesInput({ onChange }: ContactIdentitiesInputProps
                     id={`identity-url-${index}`}
                     value={row.platformUrl}
                     onChange={(event) =>
-                      updateRow(index, { platformUrl: event.target.value })
+                      updateRow(row.rowId, { platformUrl: event.target.value })
                     }
                     placeholder="https://..."
                   />
@@ -151,7 +151,7 @@ export function ContactIdentitiesInput({ onChange }: ContactIdentitiesInputProps
                   type="radio"
                   name="primary-identity"
                   checked={row.isPrimary}
-                  onChange={() => setPrimary(index)}
+                  onChange={() => setPrimary(row.rowId)}
                 />
                 Primary identity
               </label>
