@@ -25,7 +25,10 @@ resolve_server_url() {
 
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
   cat <<'EOF'
-Usage: scripts/qa/run-embedded-generate-persona.sh
+Usage: scripts/qa/run-embedded-generate-persona.sh [--prime-llm]
+
+Options:
+  --prime-llm   Persist LiteLLM virtual key from canonical dev sign-in, restart RTX dev, then run tests
 
 Environment:
   RTX_REPO          RTX worktree with issue-64-sdk-llm-chat-provenance (default: sibling worktree)
@@ -34,13 +37,29 @@ Environment:
   SIGNALS_DATA_DIR  Optional isolated Signals DB directory for the run
 
 Prerequisites:
-  1. RTXTEST_TARGET=local rtxtest dev up --repo "$RTX_REPO" --electron-no-sandbox
-  2. Signals Local App has llm.chat (and llm.embed) granted in RTX Settings → Local Apps
-  3. RTX host has a working chat provider (probe: POST /sdk/llm/chat returns provider + model)
+  1. Canonical dev app signed in (main checkout yarn dev:all)
+  2. RTXTEST_TARGET=local rtxtest dev up --repo "$RTX_REPO" --electron-no-sandbox
+  3. Signals Local App has llm.chat (and llm.embed) granted
+  4. Working chat provider on host (use --prime-llm or node "$RTX_REPO/scripts/qa/persist-embedded-llm-credentials.mjs")
 EOF
   exit 0
 fi
 
+PRIME_LLM=false
+if [[ "${1:-}" == "--prime-llm" ]]; then
+  PRIME_LLM=true
+fi
+
+if [[ "$PRIME_LLM" == true ]]; then
+  echo "Persisting LiteLLM credentials into worktree database..."
+  node "$RTX_REPO/scripts/qa/persist-embedded-llm-credentials.mjs"
+  echo "Restarting owned RTX dev session..."
+  RTXTEST_TARGET=local node "$RTXTEST" dev down --repo "$RTX_REPO" || true
+  RTXTEST_TARGET=local node "$RTXTEST" dev up --repo "$RTX_REPO" --electron-no-sandbox
+fi
+
+# Resolve SERVER_URL from the owned worktree endpoints file unless explicitly set.
+unset SERVER_URL
 SERVER_URL="$(resolve_server_url)"
 if [[ -z "$SERVER_URL" ]]; then
   echo "Could not resolve SERVER_URL; start RTX dev or set SERVER_URL explicitly." >&2

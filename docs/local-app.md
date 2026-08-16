@@ -100,9 +100,11 @@ Unit tests mock RTX chat. To verify persisted `provider:model` provenance agains
 
 4. **Run embedded QA** from the Signals worktree:
    ```bash
-   ./scripts/qa/run-embedded-generate-persona.sh
+   ./scripts/qa/run-embedded-generate-persona.sh --prime-llm
    ```
-   Or explicitly: `SIGNALS_EMBEDDED_QA=1 RTX_APP_ID=... SERVER_URL=http://127.0.0.1:<port> npx vitest run src/lib/workflows/generate-persona.embedded.test.ts`
+   `--prime-llm` fetches a LiteLLM virtual key from the canonical signed-in dev profile, persists it to the worktree DB, restarts the owned RTX dev session, then runs the gated vitest project. Manual alternative: `node "$RTX_REPO/scripts/qa/persist-embedded-llm-credentials.mjs"` then restart RTX dev.
+
+   Or explicitly: `SIGNALS_EMBEDDED_QA=1 RTX_APP_ID=... SERVER_URL=http://127.0.0.1:<port> npx vitest run --project embedded src/lib/workflows/generate-persona.embedded.test.ts`
 
 `SERVER_URL` defaults to `RTX_REPO/tmp/dev-runtime/endpoints.json` → `serverUrl` when the owned dev session is running.
 
