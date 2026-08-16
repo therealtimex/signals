@@ -1,4 +1,7 @@
-# OpenVolo Frontend Design Spec
+# Signals Frontend Design Spec
+
+> Product UI design reference for **Signals** — local-first Social GTM & relationship knowledge graph.
+> Source of truth for tokens: `src/app/globals.css`. Navigation: `src/components/app-sidebar.tsx`.
 
 ## 1. Aesthetic Direction: "Luminous Glass"
 
@@ -100,7 +103,7 @@ className="animate-fade-slide-in"
 
 - `ThemeProvider` from `next-themes` — `attribute="class"`, `defaultTheme="system"`, `disableTransitionOnChange`
 - Font CSS variables applied on `<body>`: `font-sans antialiased`
-- Metadata: "OpenVolo — AI-Native Social CRM"
+- Metadata: `"Signals — Social GTM & Relationship Knowledge Graph"` (`src/app/layout.tsx`)
 
 ### Dashboard Layout (`dashboard/layout.tsx`)
 
@@ -122,10 +125,19 @@ className="animate-fade-slide-in"
 ### Sidebar (`app-sidebar.tsx`)
 
 - **Glass effect**: `bg-sidebar/30 backdrop-blur-sm` + `border-r border-sidebar-border`
-- **Header**: Logo (32x32 `rounded-lg`) + gradient brand text
-- **Navigation items**: Dashboard, Contacts, Content, Workflows
-- **Footer items**: Settings, Help
-- **Removed**: Campaigns and Agents (consolidated into Workflows — see [`specs/06-unified-workflows.md`](./06-unified-workflows.md))
+- **Header**: `favicon-32x32.png` (32×32, `rounded-lg`) + gradient brand text **Signals**
+- **Primary nav** (main group):
+  - Dashboard → `/dashboard`
+  - Contacts → `/dashboard/contacts`
+  - Content → `/dashboard/content`
+  - Launches → `/dashboard/launches`
+  - Automation → `/dashboard/workflows` (workflow runs, agents, scheduled jobs)
+  - Analytics → `/dashboard/analytics`
+  - Goals → `/dashboard/goals`
+- **Footer nav**:
+  - Settings → `/dashboard/settings`
+  - Guide → `/dashboard/guide`
+  - Help → `/dashboard/help`
 - **Active state**: `border-l-2 border-primary bg-primary/8 text-primary font-display font-medium`
 - **Transition**: `transition-all duration-200`
 - **Responsive**: Collapses to trigger button on mobile via `SidebarProvider`
@@ -136,7 +148,7 @@ className="animate-fade-slide-in"
 - **Glass**: `bg-background/80 backdrop-blur-sm` + `border-b border-border/50`
 - **Left**: Sidebar trigger + vertical separator
 - **Center**: Auto-generated breadcrumb from `usePathname()` — last segment bold, earlier segments are links
-- **Right**: Search button (disabled placeholder) + theme toggle (Sun/Moon icons)
+- **Right**: Theme toggle (Sun/Moon icons)
 
 ## 7. Page Structure
 
@@ -147,7 +159,7 @@ className="animate-fade-slide-in"
    - Gradient background wash: `bg-gradient-to-br from-chart-N/10 to-chart-N/5`
    - Icon in circular container: `rounded-full p-2 bg-chart-N/15 text-chart-N`
    - Animated counters + staggered entrance (80ms per card)
-   - Stats: Contacts (Users/chart-1), Active Workflows (GitBranch/chart-3), Pending Tasks (CheckSquare/chart-2), Content (FileText/chart-4)
+   - Stats: Contacts (Users/chart-1), Workflows (Activity/chart-3), Pending Tasks (CheckSquare/chart-2), Content (FileText/chart-4)
 3. **Contact Pipeline** — `FunnelVisualization`: horizontal stacked bar (h-4 rounded-full) + color legend
 4. **Activity Grid** — 2-column: Recent Contacts (with FunnelStageBadge) + Pending Tasks (with PriorityBadge)
    - Row hover: `hover:bg-accent/30 transition-colors`
@@ -160,11 +172,12 @@ className="animate-fade-slide-in"
 
 ### Contact Detail (`/dashboard/contacts/[id]`)
 
-- **Header**: Back button + name/company + EnrichButton (X contacts only) + FunnelStageBadge + EnrichmentScoreBadge
-- **Tabs**: Details | Identities (count) | Tasks (count)
+- **Header**: Back button + name/company + EnrichButton (RTX enrichment guidance for X contacts) + FunnelStageBadge + EnrichmentScoreBadge
+- **Tabs**: Details | Identities (count) | Tasks (count) | Audience
 - **Details tab**: Contact info card (headline, bio, email, phone, location, website, platform, profile link, tags) + Edit form card (with save/delete)
 - **Identities tab**: `IdentitiesSection` — table with add/delete, platform badges, external links
 - **Tasks tab**: Task list with toggle (done/todo), priority badges, add/delete
+- **Audience tab**: Persona summary, per-platform identity stats, niche membership chips — server-loaded via `getContactExploreCard()` in the page component and rendered by `ContactExploreCardView` (props; no client fetch on initial paint). `GET /api/contacts/[id]/explore` exposes the same shape for external/agent callers.
 
 ### Content (`/dashboard/content`)
 
@@ -177,22 +190,43 @@ className="animate-fade-slide-in"
 - Post content display + engagement metrics
 - Engagement actions (like, retweet, reply)
 - Thread context (parent/child tweets)
+- **Wind Tunnel** section — GTM lineage, variant projection, calibration triples (`WindTunnelSection`)
+
+### Launches (`/dashboard/launches`)
+
+- Launch list hub with status and scope filters
+- Launch detail with variant board and links into Wind Tunnel drill-down routes
+
+### Analytics (`/dashboard/analytics`)
+
+- Five-tab dashboard: Overview, Agents, Engagement, Content, Sync Health
+- Shared time-range filter; reusable chart components under `src/components/charts/`
+
+### Goals (`/dashboard/goals`)
+
+- Goal list and detail views linked to workflow templates and GTM planning
+
+### Guide (`/dashboard/guide`)
+
+- In-app user guide rendered from `guide/` markdown (sidebar footer entry)
 
 ### Settings (`/dashboard/settings`)
 
-1. **API Configuration** — Anthropic API key status (env var / config / not set)
-2. **Platform Connections** — X, LinkedIn, Gmail via `PlatformConnectionCard`
-   - Connection status badges (connected/needs_reauth/disconnected)
-   - Sync controls per platform
+1. **API Configuration** — Anthropic API key status (env var / config / not set) for legacy config paths
+2. **Platform Connections** — X, LinkedIn, Gmail via `PlatformConnectionCard` (`showSync={false}`)
+   - Connect / reconnect / disconnect and connection status badges (connected/needs_reauth/disconnected)
    - Granted permissions (collapsible scope display)
-3. **Browser Enrichment** — Session setup/validate/clear + bulk enrich button
-4. **Platform-specific sections**: X content sync, LinkedIn CSV import, Gmail metadata sync
+   - No sync triggers on this page — sync and import run from **Automation → Actions**
+3. **Browser Sessions** — X and LinkedIn publish/engage sessions (setup, validate, clear). Profile enrichment delegates to RealTimeX Browser + agent-browser (not in-app Playwright scraping).
+4. **Search providers** — Serper and Tavily API key configuration
 
-### Workflows (`/dashboard/workflows`)
+### Automation (`/dashboard/workflows`)
 
-- Server-rendered hub page with `WorkflowQuickActions` for triggering sync/enrich
-- `WorkflowViewSwitcher` — 3-view client component with Tabs + URL param `?view=list|kanban|swimlane`
-- Empty state when no runs exist, populated by platform sync/enrich operations
+- Server-rendered hub with `AutomationTabs`: **Agents**, **Actions**, **Runs**
+- **Agents tab**: RTX migration banner, `TemplateGallery`, `ScheduledJobsList`
+- **Actions tab**: `ActionCards` — platform sync (X posts/mentions/contacts, LinkedIn profiles, Gmail contacts), LinkedIn CSV import, Gmail metadata sync, and RTX-labeled enrich actions with migration guidance; connection gate bypass for enrich cards
+- **Runs tab**: `WorkflowViewSwitcher` — list / kanban / swimlane views with URL param `?view=list|kanban|swimlane`
+- Empty state when no runs exist; populated by platform sync, RTX-reported agent runs, and maintenance jobs
 - View components: `WorkflowListView` (table), `WorkflowKanbanView` (4-column status board), `WorkflowSwimlaneView` (horizontal type lanes)
 
 ### Workflow Detail (`/dashboard/workflows/[id]`)
@@ -203,17 +237,17 @@ className="animate-fade-slide-in"
   - Timeline: `WorkflowStepTimeline` — chronological list with 15 step type icons
   - Graph: `WorkflowGraphView` — vertical pipeline with expandable nodes (pure CSS)
 
-### Placeholder Pages
+### Help (`/dashboard/help`)
 
-- Help — shell page, ready for future content
+- Setup and troubleshooting shell; links to external docs where needed
 
 ## 8. Component Inventory
 
-### Custom Domain Components (26)
+### Custom Domain Components (28)
 
 | Component | File | Purpose |
 |-----------|------|---------|
-| `AppSidebar` | `app-sidebar.tsx` | Main navigation sidebar (4 main + 2 footer items) |
+| `AppSidebar` | `app-sidebar.tsx` | Main navigation (7 primary + 3 footer items) |
 | `DashboardHeader` | `dashboard-header.tsx` | Sticky header with breadcrumb + theme toggle |
 | `DashboardGreeting` | `dashboard-greeting.tsx` | Time-based greeting message |
 | `AnimatedStat` | `animated-stat.tsx` | Counter animation (ease-out-cubic, 800ms) |
@@ -225,9 +259,11 @@ className="animate-fade-slide-in"
 | `ContactForm` | `contact-form.tsx` | Contact CRUD form (auto-syncs full name) |
 | `AddTaskDialog` | `add-task-dialog.tsx` | Task creation dialog |
 | `IdentitiesSection` | `identities-section.tsx` | Platform identities table with add/delete |
-| `EnrichButton` | `enrich-button.tsx` | Single/bulk browser enrichment trigger |
-| `ComposeDialog` | `compose-dialog.tsx` | Tweet/thread compose modal (draft + publish) |
-| `TweetInput` | `tweet-input.tsx` | Auto-resize textarea with char counter |
+| `EnrichButton` | `enrich-button.tsx` | RTX enrichment delegation trigger (migration message; no in-process browser scrape) |
+| `ContactExploreCardView` | `contact-explore-card.tsx` | Audience tab — persona, platform stats, niche chips (server-provided `explore` prop) |
+| `ComposeDialog` | `compose-dialog.tsx` | Multi-platform compose modal (X + LinkedIn, draft + publish) |
+| `PostInput` | `post-input.tsx` | Auto-resize textarea with platform-aware char counter and media attachments |
+| `ActionCards` | `dashboard/workflows/action-cards.tsx` | Automation Actions tab — sync/enrich/upload cards per platform |
 | `PaginationControls` | `pagination-controls.tsx` | Page navigation with windowed numbers |
 | `EmptyState` | `empty-state.tsx` | Centered icon + title + CTA |
 | `WorkflowProgressCard` | `workflow-progress-card.tsx` | Card with type icon (6 types), progress bar, stats |
@@ -286,14 +322,16 @@ The `PlatformConnectionCard` is the most complex reusable component. Key feature
 
 ## 10. Compose Dialog Pattern
 
-The `ComposeDialog` supports single tweets and threads:
+The `ComposeDialog` supports X and LinkedIn posts (threads on X only):
 
-- **Single mode**: One `TweetInput` with 280 char limit
-- **Thread mode**: Multiple `TweetInput` components with reordering (up/down arrows) + add/remove
-- **Character counter**: Normal (gray), warning (>=260, yellow), over (>280, red)
+- **Platform toggle**: X (280 chars, thread support) or LinkedIn (3,000 chars, single post)
+- **Publish mode**: **Auto** (headless browser publishes) or **Review** (headed browser; user confirms Post)
+- **Single vs thread** (X only): One or multiple `PostInput` rows with reordering (up/down) + add/remove
+- **Media**: Attach images per post via `PostInput` + `media-thumbnail-grid` validation
+- **Character counter**: Platform-specific limits with warning/over-threshold styling
 - **Actions**: Save as Draft, Publish
-- **Thread limits**: Max 25 tweets per thread
-- **Partial failure**: If some tweets in a thread post but later ones fail, shows posted count + error
+- **Thread limits**: Max 25 posts per X thread
+- **Partial failure**: If some posts in a thread publish but later ones fail, shows posted count + error
 
 ## 11. Dark Mode
 
@@ -320,7 +358,7 @@ The `ComposeDialog` supports single tweets and threads:
 - **Activity grid**: 1 → 2 columns
 - **Contact form**: 1 → 2 column field grid
 - **Sidebar**: Full panel (desktop) → trigger button (mobile)
-- **Settings sync controls**: 1 → 2 column button grid
+- **Settings browser sessions**: Stacked session cards (X, LinkedIn) with inline Setup / Validate / Clear action rows
 
 ## 13. State Management Patterns
 
@@ -353,16 +391,15 @@ The `ComposeDialog` supports single tweets and threads:
 
 | File | Location | Purpose |
 |------|----------|---------|
-| `openvolo-logo-transparent.png` | `public/assets/` | Sidebar logo (32x32, rounded-lg) |
-| `openvolo-logo-black.png` | `public/assets/` | Dark mode sidebar |
-| `openvolo-logo-name.png` | `public/assets/` | Splash screens |
-| `favicon.ico` | `public/` | Browser tab |
+| `favicon-32x32.png` | `public/` | **Sidebar header logo** (used in `app-sidebar.tsx`, 32×32, `rounded-lg`) |
+| `favicon.ico` | `public/` | Browser tab (also referenced in `layout.tsx` metadata) |
 | `favicon-16x16.png` | `public/` | Small favicon |
-| `favicon-32x32.png` | `public/` | Standard favicon |
 | `apple-touch-icon.png` | `public/` | iOS home screen |
 | `android-chrome-192x192.png` | `public/` | Android standard |
 | `android-chrome-512x512.png` | `public/` | Android high-res |
-| `site.webmanifest` | `public/` | PWA manifest (`theme_color: #6366f1`) |
+| `site.webmanifest` | `public/` | PWA manifest (`name`: Signals, `theme_color`: `#6366f1`) |
+
+**Legacy (not used in current UI):** `public/assets/openvolo-logo-*.png` — retained on disk from the OpenVolo fork; sidebar and metadata use Signals favicons instead.
 
 ## 16. Dependencies
 
@@ -416,7 +453,7 @@ No `tailwind.config.js` — all theme values defined in `globals.css` via `@them
 - **Compact mode**: Denser list view for small screens
 
 ### Advanced Components (Phase 3+)
-- **Chat interface**: AI conversation UI for agent interactions (Vercel AI SDK streaming)
 - **Notification center**: Toast/popover for sync results, enrichment completions
-- **Command palette**: `Cmd+K` global search across contacts, content, tasks
-- **Data visualization**: Charts for engagement trends, enrichment score distribution, funnel conversion
+- **Command palette**: Global search across contacts, content, tasks (future)
+- **Data visualization**: Extend analytics charts for funnel conversion and enrichment distribution
+- **RTX agent surfaces**: Deep links and migration banners where in-app AI was removed (#4); intelligence lives in RealTimeX terminal agents
