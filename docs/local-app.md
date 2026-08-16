@@ -39,13 +39,21 @@ On server start (`src/instrumentation.ts`), when `RTX_APP_ID` is set Signals:
 
 ### Requested permissions
 
-Signals intentionally does **not** request `llm.chat` — terminal agents own intelligence (#4).
+Terminal agents own open-ended intelligence: they read evidence (`get_persona_evidence`) and write conclusions (`upsert_persona`) with their own reasoning, and no `workflow_runs` row is fabricated for that compute. Signals requests `llm.chat` solely for **structured, schema-validated workflow synthesis** it orchestrates itself (persona generation; future workflow migrations per ADR-022-9) — always provenance-tracked via `workflow_runs`, never conversational.
 
 | Permission | Why |
 |------------|-----|
 | `credentials.list` | Discover platform credential metadata via RTX broker |
 | `credentials.use` | Use bounded credential broker for OAuth/sync |
 | `webhook.trigger` | Allow RTX flows to trigger agent tasks against Signals |
+| `llm.embed` | On-demand embedding for semantic search (vectors stay local in Signals) |
+| `llm.chat` | Structured persona synthesis workflow (`generate_persona`) |
+
+### RealTimeX host dependency (`llm.chat`)
+
+Persona generation records `${provider}:${model}` provenance on every `workflow_runs` row. Signals **rejects** `POST /sdk/llm/chat` responses that omit `response.provider` or `response.model` (no client-side fabrication).
+
+Deploy Signals persona generation only with a RealTimeX Main App build that includes the SDK chat response contract (`response.provider` + `response.model` in the sync chat payload). See RTX `docs/local-apps/sdk-llm-proxy.md` §3.2 and `server/endpoints/sdk/llm.js` (tracked regression: `server/__tests__/endpoints/sdk/llm.test.js`).
 
 ## Modes
 

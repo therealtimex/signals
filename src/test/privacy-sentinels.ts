@@ -7,6 +7,7 @@ export const PRIVACY_SENTINELS = {
   syncErrors: "SENTINEL_SYNC_ERRORS",
   personaArchetype: "SENTINEL_LOCAL_PERSONA",
   propertiesPrivate: "SENTINEL_PROPERTIES_PRIVATE",
+  interactionSummary: "SENTINEL_LOCAL_INTERACTION",
 } as const;
 
 export function assertNoPrivacySentinels(payload: unknown): void {

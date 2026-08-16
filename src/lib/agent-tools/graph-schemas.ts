@@ -124,7 +124,7 @@ export const upsertVariantSchema = z.object({
 export const semanticSearchSchema = z.object({
   query: z.string().min(1),
   nodeTypes: z.array(graphNodeType).optional(),
-  kind: z.enum(["profile", "description", "body"]).optional(),
+  kind: z.enum(["profile", "description", "body", "persona"]).optional(),
   k: z.number().int().positive().max(100).optional(),
   includeLocalOnly: z.boolean().optional(),
 });

@@ -186,3 +186,159 @@ export async function rtxEmbed(
 export function sha256EmbedText(text: string): string {
   return createHash("sha256").update(text).digest("hex");
 }
+
+export type RtxChatErrorCode =
+  | "RTX_NOT_CONFIGURED"
+  | "PERMISSION_REQUIRED"
+  | "PROVIDER_UNAVAILABLE"
+  | "CHAT_ERROR"
+  | "VALIDATION_ERROR"
+  | "UNKNOWN";
+
+export type RtxChatSuccess = {
+  success: true;
+  text: string;
+  provider: string;
+  model: string;
+  qualifiedModel: string;
+  inputTokens: number | null;
+  outputTokens: number | null;
+};
+
+export type RtxChatFailure = {
+  success: false;
+  code: RtxChatErrorCode;
+  error: string;
+};
+
+export type RtxChatResult = RtxChatSuccess | RtxChatFailure;
+
+type RtxChatApiResponse = {
+  success?: boolean;
+  response?: {
+    content?: string;
+    model?: string;
+    provider?: string;
+    metrics?: {
+      prompt_tokens?: number;
+      completion_tokens?: number;
+      total_tokens?: number;
+    };
+  };
+  code?: string;
+  error?: string;
+  errors?: string[];
+};
+
+function mapChatErrorCode(code: string | undefined, httpStatus: number): RtxChatErrorCode {
+  if (code === "PERMISSION_REQUIRED") return "PERMISSION_REQUIRED";
+  if (code === "PROVIDER_UNAVAILABLE" || code === "OFFLINE_MODE") return "PROVIDER_UNAVAILABLE";
+  if (code === "LLM_ERROR") return "CHAT_ERROR";
+  if (code === "VALIDATION_ERROR" || code === "INVALID_MODEL") return "VALIDATION_ERROR";
+  if (httpStatus === 403) return "PERMISSION_REQUIRED";
+  return "UNKNOWN";
+}
+
+function chatActionableMessage(code: RtxChatErrorCode): string {
+  switch (code) {
+    case "RTX_NOT_CONFIGURED":
+      return "Chat requires Signals running as a RealtimeX Local App (set RTX_APP_ID and SERVER_URL).";
+    case "PERMISSION_REQUIRED":
+      return "Chat permission not granted. Approve llm.chat for Signals in RealtimeX Settings → Local Apps.";
+    case "PROVIDER_UNAVAILABLE":
+      return "RealtimeX chat provider is unavailable. Check RealtimeX LLM configuration and retry.";
+    case "CHAT_ERROR":
+      return "RealtimeX chat request failed.";
+    case "VALIDATION_ERROR":
+      return "RealtimeX rejected the chat request. Check input limits and retry.";
+    default:
+      return "RealtimeX chat request failed.";
+  }
+}
+
+function qualifyChatModel(provider: string, model: string): string {
+  return `${provider}:${model}`;
+}
+
+/** Structured chat completion via RealtimeX SDK proxy (no provider API keys in Signals). */
+export async function rtxChat(
+  messages: Array<{ role: "system" | "user" | "assistant"; content: string }>,
+  fetchImpl: typeof fetch = fetch,
+  env: EnvLike = process.env,
+): Promise<RtxChatResult> {
+  const appId = getRtxAppId(env);
+  const apiBase = resolveRtxApiBase(env);
+
+  if (!appId || !apiBase) {
+    return {
+      success: false,
+      code: "RTX_NOT_CONFIGURED",
+      error: chatActionableMessage("RTX_NOT_CONFIGURED"),
+    };
+  }
+
+  if (messages.length === 0) {
+    return {
+      success: false,
+      code: "VALIDATION_ERROR",
+      error: "At least one chat message is required.",
+    };
+  }
+
+  try {
+    const response = await fetchImpl(`${apiBase}/sdk/llm/chat`, {
+      method: "POST",
+      headers: buildHeaders(appId),
+      body: JSON.stringify({ messages }),
+    });
+
+    const body = (await response.json()) as RtxChatApiResponse;
+    if (!response.ok || body.success === false) {
+      const code = mapChatErrorCode(body.code, response.status);
+      const detail = body.error ?? body.errors?.join("; ");
+      return {
+        success: false,
+        code,
+        error: detail ? `${chatActionableMessage(code)} (${detail})` : chatActionableMessage(code),
+      };
+    }
+
+    const content = body.response?.content;
+    if (!content?.trim()) {
+      return {
+        success: false,
+        code: "CHAT_ERROR",
+        error: chatActionableMessage("CHAT_ERROR"),
+      };
+    }
+
+    const provider = body.response?.provider?.trim();
+    const model = body.response?.model?.trim();
+    if (!provider || !model) {
+      return {
+        success: false,
+        code: "CHAT_ERROR",
+        error:
+          "RealtimeX chat response omitted provider or model — cannot record qualified provenance.",
+      };
+    }
+
+    const metrics = body.response?.metrics;
+
+    return {
+      success: true,
+      text: content,
+      provider,
+      model,
+      qualifiedModel: qualifyChatModel(provider, model),
+      inputTokens: metrics?.prompt_tokens ?? null,
+      outputTokens: metrics?.completion_tokens ?? null,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      code: "UNKNOWN",
+      error: error instanceof Error ? error.message : chatActionableMessage("UNKNOWN"),
+    };
+  }
+}

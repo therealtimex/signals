@@ -25,7 +25,7 @@ test.describe("smoke:core API", () => {
     expect(body.manifest.id).toBe("signals");
     expect(body.permissions).toContain("credentials.use");
     expect(body.permissions).toContain("llm.embed");
-    expect(body.permissions).not.toContain("llm.chat");
+    expect(body.permissions).toContain("llm.chat");
   });
 
   test("contacts API supports list and create", async ({ request }) => {

@@ -37,7 +37,7 @@ describe("rtx sdk", () => {
     );
     expect(body.permissions).toContain("credentials.list");
     expect(body.permissions).toContain("llm.embed");
-    expect(body.permissions).not.toContain("llm.chat");
+    expect(body.permissions).toContain("llm.chat");
   });
 
   it("pings with x-app-id header", async () => {

@@ -14,6 +14,8 @@ import {
   updateContactSchema,
   getPersonaSchema,
   upsertPersonaSchema,
+  getPersonaEvidenceSchema,
+  generatePersonaSchema,
 } from "@/lib/agent-tools/schemas";
 import {
   logInteractionSchema,
@@ -72,6 +74,8 @@ import {
   handleStartWorkflow,
   handleUpdateContact,
   handleGetPersona,
+  handleGetPersonaEvidence,
+  handleGeneratePersona,
   handleUpsertPersona,
 } from "@/lib/agent-tools/handlers";
 import type { AgentToolDefinition } from "@/lib/agent-tools/types";
@@ -205,6 +209,24 @@ export const AGENT_TOOLS: Record<string, AgentToolDefinition> = {
     schema: upsertPersonaSchema,
     parameters: zodToParameters(upsertPersonaSchema),
     execute: handleUpsertPersona,
+  },
+  get_persona_evidence: {
+    name: "get_persona_evidence",
+    description:
+      "Read the shared-scope evidence bundle used for persona synthesis (identities, content, interactions).",
+    category: "contacts",
+    schema: getPersonaEvidenceSchema,
+    parameters: zodToParameters(getPersonaEvidenceSchema),
+    execute: handleGetPersonaEvidence,
+  },
+  generate_persona: {
+    name: "generate_persona",
+    description:
+      "Synthesize and persist a shared-scope persona from contact evidence via RTX llm.chat (requires embedded RealtimeX runtime).",
+    category: "contacts",
+    schema: generatePersonaSchema,
+    parameters: zodToParameters(generatePersonaSchema),
+    execute: handleGeneratePersona,
   },
   query_orgs: {
     name: "query_orgs",

@@ -99,7 +99,16 @@ export function listWorkflowRuns(opts?: {
     conditions.push(
       eq(
         workflowRuns.workflowType,
-        opts.workflowType as "sync" | "enrich" | "search" | "prune" | "sequence" | "agent"
+        opts.workflowType as
+          | "sync"
+          | "enrich"
+          | "search"
+          | "prune"
+          | "sequence"
+          | "agent"
+          | "simulate"
+          | "calibrate"
+          | "persona"
       )
     );
   }

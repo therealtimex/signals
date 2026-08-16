@@ -7,7 +7,8 @@ export type WorkflowType =
   | "sequence"
   | "agent"
   | "simulate"
-  | "calibrate";
+  | "calibrate"
+  | "persona";
 
 /** Step types for workflow observability. */
 export type WorkflowStepType =
@@ -41,6 +42,7 @@ export const WORKFLOW_TYPE_LABELS: Record<WorkflowType, string> = {
   agent: "AI Agent",
   simulate: "Wind Tunnel Simulation",
   calibrate: "Simulation Calibration",
+  persona: "Persona Generation",
 };
 
 /** Sub-type qualifiers for sync workflows. */

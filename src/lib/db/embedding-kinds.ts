@@ -11,8 +11,8 @@ export const EMBEDDING_KIND_NODE_TYPES: Record<EmbeddingKind, readonly GraphNode
   body: ["content", "variant"],
 };
 
-/** v1 on-demand assembly supports these kinds only (persona reserved for a follow-on epic). */
-export const V1_EMBEDDING_KINDS: readonly EmbeddingKind[] = ["profile", "description", "body"];
+/** v1 on-demand assembly supports these embedding kinds (includes persona synthesis). */
+export const V1_EMBEDDING_KINDS: readonly EmbeddingKind[] = ["profile", "description", "body", "persona"];
 
 export function assertEmbeddingKind(kind: string): asserts kind is EmbeddingKind {
   if (!(EMBEDDING_KINDS as readonly string[]).includes(kind)) {

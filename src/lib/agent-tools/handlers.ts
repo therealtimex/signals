@@ -6,6 +6,8 @@ import { listContentItems } from "@/lib/db/queries/content";
 import { listGoals } from "@/lib/db/queries/goals";
 import { createTask } from "@/lib/db/queries/tasks";
 import { getActivePersona, upsertPersona } from "@/lib/db/queries/personas";
+import { assemblePersonaEvidence } from "@/lib/db/queries/persona-evidence";
+import { generatePersona } from "@/lib/workflows/generate-persona";
 import { assertPlatform } from "@/lib/db/platforms";
 import { db } from "@/lib/db/client";
 import { dualWriteContactCompany, syncContactCompanyGraph } from "@/lib/db/contact-org-dual-write";
@@ -28,6 +30,8 @@ import type {
   startWorkflowSchema,
   updateContactSchema,
   getPersonaSchema,
+  getPersonaEvidenceSchema,
+  generatePersonaSchema,
   upsertPersonaSchema,
 } from "@/lib/agent-tools/schemas";
 import type { z } from "zod";
@@ -322,6 +326,10 @@ export async function handleGetPersona(input: z.infer<typeof getPersonaSchema>) 
     return { error: `No persona found for contact: ${input.contactId}` };
   }
 
+  return serializePersonaRow(persona);
+}
+
+function serializePersonaRow(persona: NonNullable<ReturnType<typeof getActivePersona>>) {
   return {
     id: persona.id,
     contactId: persona.contactId,
@@ -338,6 +346,30 @@ export async function handleGetPersona(input: z.infer<typeof getPersonaSchema>) 
     sourceWindow: JSON.parse(persona.sourceWindow ?? "{}"),
     workflowRunId: persona.workflowRunId,
     generatedAt: persona.generatedAt,
+  };
+}
+
+export async function handleGetPersonaEvidence(input: z.infer<typeof getPersonaEvidenceSchema>) {
+  return assemblePersonaEvidence(input.contactId);
+}
+
+export async function handleGeneratePersona(input: z.infer<typeof generatePersonaSchema>) {
+  const result = await generatePersona(input.contactId, {
+    force: input.force,
+    trigger: "user",
+  });
+
+  if (!result.generated) {
+    return result;
+  }
+
+  return {
+    generated: true,
+    workflowRunId: result.workflowRunId,
+    supersededPersonaId: result.supersededPersonaId,
+    nicheEdgesUpserted: result.nicheEdgesUpserted,
+    embedded: result.embedded,
+    persona: serializePersonaRow(result.persona),
   };
 }
 

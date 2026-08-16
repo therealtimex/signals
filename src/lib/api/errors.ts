@@ -6,6 +6,12 @@ import {
   SimulationRunStateError,
   SimulationScopeError,
 } from "@/lib/db/queries/simulation-errors";
+import {
+  PersonaEvidenceError,
+  PersonaGenerationUnavailableError,
+  PersonaScopeError,
+  PersonaSynthesisError,
+} from "@/lib/db/queries/persona-errors";
 
 export type ApiErrorBody = {
   error: string;
@@ -50,6 +56,27 @@ export function toErrorResponse(error: unknown): NextResponse<ApiErrorBody> {
     return NextResponse.json(
       { error: error.message, code: error.code },
       { status: 404 },
+    );
+  }
+
+  if (error instanceof PersonaEvidenceError || error instanceof PersonaScopeError) {
+    return NextResponse.json(
+      { error: error.message, code: error.code },
+      { status: 409 },
+    );
+  }
+
+  if (error instanceof PersonaSynthesisError) {
+    return NextResponse.json(
+      { error: error.message, code: error.code },
+      { status: 502 },
+    );
+  }
+
+  if (error instanceof PersonaGenerationUnavailableError) {
+    return NextResponse.json(
+      { error: error.message, code: error.code },
+      { status: 503 },
     );
   }
 

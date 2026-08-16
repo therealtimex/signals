@@ -7,6 +7,7 @@ import {
 } from "@/lib/db/embedding-kinds";
 import { launches, niches, orgs, variants } from "@/lib/db/schema";
 import { nodeExists } from "@/lib/db/queries/graph";
+import { getActivePersona } from "@/lib/db/queries/personas";
 import type { GraphNodeType } from "@/lib/db/types";
 
 export type EmbeddingSourceScope = "shared" | "local_only";
@@ -21,7 +22,9 @@ export function resolveEmbeddingSourceScope(
   assertEmbeddingNodeType(kind, nodeType);
 
   if (kind === "persona") {
-    throw new Error('Embedding kind "persona" is reserved for a follow-on epic.');
+    const persona = getActivePersona(nodeId, { includeLocalOnly: true });
+    if (!persona) throw new Error(`No active persona for contact: ${nodeId}`);
+    return persona.scope;
   }
 
   switch (kind) {
