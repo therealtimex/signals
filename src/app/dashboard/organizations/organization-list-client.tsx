@@ -2,7 +2,7 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { useCallback, useState } from "react";
+import { Suspense, useCallback, useState } from "react";
 import { Building2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import {
@@ -20,7 +20,7 @@ import { PaginationControls } from "@/components/pagination-controls";
 import type { OrgListRow } from "@/lib/db/queries/orgs";
 
 function formatUpdatedAt(updatedAt: number): string {
-  return new Date(updatedAt * 1000).toLocaleDateString(undefined, {
+  return new Date(updatedAt * 1000).toLocaleDateString("en-US", {
     year: "numeric",
     month: "short",
     day: "numeric",
@@ -35,7 +35,15 @@ interface OrganizationListClientProps {
   currentSearch?: string;
 }
 
-export function OrganizationListClient({
+export function OrganizationListClient(props: OrganizationListClientProps) {
+  return (
+    <Suspense fallback={<div className="animate-pulse h-64 rounded-lg bg-muted" />}>
+      <OrganizationListInner {...props} />
+    </Suspense>
+  );
+}
+
+function OrganizationListInner({
   orgs,
   total,
   page,
