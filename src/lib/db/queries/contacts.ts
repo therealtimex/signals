@@ -126,6 +126,12 @@ export function getContactById(id: string): ContactWithIdentities | undefined {
   return attachIdentities([row])[0];
 }
 
+export function getContactsByIds(ids: string[]): ContactWithIdentities[] {
+  if (ids.length === 0) return [];
+  const rows = db.select().from(contacts).where(inArray(contacts.id, ids)).all();
+  return attachIdentities(rows);
+}
+
 /**
  * Find an existing contact by exact email match or case-insensitive name match.
  * Email takes priority (more reliable). Returns undefined if no match.
