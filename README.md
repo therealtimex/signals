@@ -3,7 +3,7 @@
 <h3 align="center">Local-First Social GTM &amp; Relationship Knowledge Graph</h3>
 
 <p align="center">
-  Unified multi-source knowledge graph across X/Twitter, LinkedIn, and Gmail — powered by Claude AI agents and audience simulation.
+  Unified multi-source knowledge graph across X/Twitter, LinkedIn, and Gmail — powered by RealTimeX agents and audience simulation.
   <br />
   All data stays on your machine. One command to start.
 </p>
@@ -23,7 +23,7 @@
 &nbsp;&bull;&nbsp;
 **Multi-platform** — X + LinkedIn + Gmail in one living graph
 &nbsp;&bull;&nbsp;
-**AI-powered** — Claude AI via Vercel AI SDK
+**RealTimeX agents** — terminal agents and flows call Signals via the local agent-tools API
 
 ---
 
@@ -42,16 +42,13 @@ OAuth 2.0 with OpenID Connect, profile sync, and CSV import for connections (no 
 Google People API contact sync with 2-tier deduplication (identity match then email match). Email metadata enrichment tracks message frequency (sent/received in last 30 days) per contact — no email content is stored.
 
 ### Content Library
-Import posts and mentions from X, LinkedIn, and Gmail. Filter by platform to focus on a single channel. Multi-platform compose with platform-aware constraints (X: 280 chars + threads, LinkedIn: 3,000 char drafts). Platform-aware engagement display with per-platform action labels. Six content types (post, thread, article, newsletter, DM, reply). AI-powered draft generation via the `save-draft` agent tool. Engagement metrics tracked over time with both JSON snapshots (fast display) and structured rows (time-series analysis).
+Import posts and mentions from X, LinkedIn, and Gmail. Filter by platform to focus on a single channel. Multi-platform compose with platform-aware constraints (X: 280 chars + threads, LinkedIn: 3,000 char drafts). Platform-aware engagement display with per-platform action labels. Six content types (post, thread, article, newsletter, DM, reply). Drafts via manual compose or RTX agent workflows. Engagement metrics tracked over time with both JSON snapshots (fast display) and structured rows (time-series analysis).
 
 ### Task Management
 Create, update, and track tasks with status and priority. Link tasks to contacts for relationship-aware workflows.
 
 ### Automation Hub
-Three-tab Automation page — **Agents** (gallery + builder), **Actions** (platform sync operations), **Runs** (execution history). Six workflow types: sync, enrich, search, prune, sequence, and agent. Agent gallery with 10 seed agents (3 search, 3 enrich, 2 prune, plus user-created), activation dialog for quick setup. User agent builder lets you clone any system agent and customize it. Actions tab consolidates all sync operations (X, LinkedIn, Gmail) with platform connection awareness. Four visualization modes (list, kanban, swimlane, graph) with run/step observability and per-step cost tracking. Cron-based workflow scheduling with presets, custom expressions, and a 60-second background runner.
-
-### AI Agent Runner
-Eight agent tools — url-fetch (Cheerio), browser-scrape (Playwright), search-web (Serper + Tavily), enrich-contact, update-progress, archive-contact (prune workflows), save-draft (AI content generation), and engage-post (template-driven engagement). Domain-based routing engine (e.g. x.com → browser, wikipedia → fetch) with automatic escalation on failure.
+Three-tab Automation page — **Agents** (gallery + builder), **Actions** (platform sync operations), **Runs** (execution history). Agent templates are configured in Signals; execution is driven by RealTimeX terminal agents via `/api/agent-tools`. Six workflow types: sync, enrich, search, prune, sequence, and agent. Agent gallery with 10 seed agents (3 search, 3 enrich, 2 prune, plus user-created), activation dialog for quick setup. User agent builder lets you clone any system agent and customize it. Actions tab consolidates all sync operations (X, LinkedIn, Gmail) with platform connection awareness. Four visualization modes (list, kanban, swimlane, graph) with run/step observability. Cron-based workflow scheduling with presets, custom expressions, and a 60-second background runner.
 
 ### Prune & Archive
 Metadata-based contact archiving from prune workflows — contacts are soft-archived (restorable, not deleted). Archive and restore from workflow detail or individual contact pages. "Show Archived" toggle in the contacts list with visual indicators for archived rows.
@@ -65,11 +62,9 @@ Dual search providers: Serper for broad discovery (Google results), Tavily for d
 ### Analytics Dashboard
 Five-tab dashboard — Overview, Agents, Engagement, Content, Sync Health. Six reusable chart components (area, bar, donut, ranked table, stat cards, skeleton). Time range filtering across all tabs.
 
-### AI Chat Assistant
-Streaming chat panel (Cmd+K) powered by Vercel AI SDK 6. Eight CRM tools for querying contacts, analytics, workflows, and content — plus creating contacts, tasks, and starting agents — all conversationally. Page-aware context injection adapts responses to your current view. Smart prompts suggest relevant queries based on your current page. Save conversations and continue them later from the searchable history panel.
-
-### Browser Enrichment
-Playwright-based profile scraping with anti-detection measures, LLM-powered field extraction, and session persistence for authenticated scraping.
+### Agent Tools API
+Local REST API (`/api/agent-tools`) for RealTimeX terminal agents — query contacts, start workflows, enrich data, manage content, and more. See `docs/agent-tools.md` and `docs/rtx-agent-orchestration.md`.
+Playwright-based profile scraping with anti-detection measures, heuristic field extraction, and session persistence for authenticated scraping.
 
 ### Privacy & Security
 AES-256 encrypted credential storage. All data stored locally in SQLite — no cloud dependency, no data leaves your machine.
@@ -87,9 +82,6 @@ On first run, Signals creates `~/.signals/` for your database and config, runs s
 Create a `.env.local` file in your project root:
 
 ```bash
-# Required — for Claude AI features
-ANTHROPIC_API_KEY=
-
 # X/Twitter (optional)
 X_CLIENT_ID=
 X_CLIENT_SECRET=
@@ -126,7 +118,7 @@ SIGNALS_DATA_DIR=~/.signals
 
 **Rendering boundary** — Server Components read the database directly (better-sqlite3 is synchronous). Client Components call API routes via `fetch`.
 
-**AI** — Vercel AI SDK 6 powers both streaming chat in the UI and background agent workflows using Claude models.
+**Agents** — RealTimeX terminal agents call Signals via `/api/agent-tools`. Structured persona synthesis uses RTX `llm.chat` when embedded as a Local App (see `docs/local-app.md`).
 
 **Data layer** — SQLite database at `~/.signals/data.db` managed by Drizzle ORM. Credentials are AES-256 encrypted in `~/.signals/config.json`.
 
@@ -136,7 +128,7 @@ SIGNALS_DATA_DIR=~/.signals
 |----------|---------|
 | Framework | Next.js 16.1, React 19, TypeScript 5.8 |
 | Database | SQLite (better-sqlite3), Drizzle ORM 0.45 |
-| AI | Vercel AI SDK 6, Anthropic SDK |
+| AI | RealTimeX SDK (`llm.chat`, `llm.embed`) + local agent-tools API |
 | UI | Tailwind CSS 4, shadcn/ui (Radix), Lucide Icons |
 | Charts | Recharts (via shadcn/ui chart component) |
 | Browser | Playwright (enrichment scraping) |
@@ -158,7 +150,7 @@ src/
       content/                        #   Content CRUD
       platforms/                      #   X, LinkedIn, Gmail auth + sync
       tasks/                          #   Task CRUD
-      chat/                           #   AI chat streaming + conversation persistence
+      agent-tools/                    #   Local REST API for RTX terminal agents
       analytics/                      #   Analytics endpoints (5 tabs)
       workflows/                      #   Workflow CRUD + templates + agent runs
     dashboard/                        # UI routes

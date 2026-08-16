@@ -2,6 +2,14 @@ import { describe, it, expect } from "vitest";
 import { formatWorkflowError } from "@/lib/workflows/format-error";
 
 describe("formatWorkflowError", () => {
+  it("formats agent orchestration unavailable", () => {
+    const raw =
+      "AGENT_ORCHESTRATION_UNAVAILABLE: In-process agent orchestration was removed from Signals.";
+    const result = formatWorkflowError(raw);
+    expect(result.category).toBe("agent_orchestration");
+    expect(result.title).toBe("Agent orchestration moved to RealTimeX");
+  });
+
   it("formats rate limit with seconds→minutes conversion", () => {
     const raw =
       'Rate limited on /users/123/tweets?tweet.fields=created_at%2Cpublic_metrics&max_results=10&pagination_token=7140dibdnow9c7btw4. Retry after 899s';

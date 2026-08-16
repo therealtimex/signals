@@ -19,11 +19,9 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Loader2, Plus, ListOrdered, AlignLeft, Globe, Eye, ExternalLink, Sparkles, ArrowRightLeft } from "lucide-react";
+import { Loader2, Plus, ListOrdered, AlignLeft, Globe, Eye, ExternalLink } from "lucide-react";
 import type { MediaThumbnailItem } from "@/components/media-thumbnail-grid";
 import { validateMediaFile, validateMediaSet } from "@/lib/media/constraints";
-import { AiAssistPanel } from "@/app/dashboard/content/ai-assist-panel";
-import { cn } from "@/lib/utils";
 
 type Platform = "x" | "linkedin";
 type PublishMode = "auto" | "review";
@@ -86,8 +84,6 @@ export function ComposeDialog({
   const [publishResult, setPublishResult] = useState<{ url?: string } | null>(null);
   const [loadingDraft, setLoadingDraft] = useState(false);
   const [publishMode, setPublishMode] = useState<PublishMode>("auto");
-  const [aiPanelOpen, setAiPanelOpen] = useState(false);
-  const [adapting, setAdapting] = useState(false);
   const blobUrlsRef = useRef<string[]>([]);
 
   const config = PLATFORM_CONFIG[platform];
@@ -546,7 +542,7 @@ export function ComposeDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className={cn("max-h-[85vh] overflow-y-auto", aiPanelOpen ? "sm:max-w-5xl" : "sm:max-w-2xl")}>
+      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             {platform === "linkedin" ? "Compose LinkedIn Post" : "Compose Post"}
@@ -653,86 +649,9 @@ export function ComposeDialog({
               )}
 
               <div className="flex-1" />
-
-              {/* Adapt for other platform */}
-              {posts[0].body.trim().length > 0 && (
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-7 text-xs"
-                        disabled={adapting}
-                        onClick={async () => {
-                          setAdapting(true);
-                          setError(null);
-                          const targetPlatform = platform === "x" ? "linkedin" : "x";
-                          try {
-                            const res = await fetch("/api/content/ai-generate", {
-                              method: "POST",
-                              headers: { "Content-Type": "application/json" },
-                              body: JSON.stringify({
-                                mode: "refine",
-                                platform: targetPlatform,
-                                existingContent: posts[0].body,
-                                topic: `Adapt this ${platform === "x" ? "X/Twitter" : "LinkedIn"} post for ${targetPlatform === "x" ? "X/Twitter (280 chars max, concise)" : "LinkedIn (professional, expanded)"}. Preserve the core message.`,
-                              }),
-                            });
-                            const data = await res.json();
-                            if (res.ok && data.result) {
-                              handlePlatformSwitch(targetPlatform);
-                              updatePost(0, data.result);
-                            } else {
-                              setError(data.error || "Adapt failed");
-                            }
-                          } catch {
-                            setError("Adapt failed");
-                          } finally {
-                            setAdapting(false);
-                          }
-                        }}
-                      >
-                        {adapting ? (
-                          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                        ) : (
-                          <ArrowRightLeft className="mr-1 h-3 w-3" />
-                        )}
-                        Adapt for {platform === "x" ? "LinkedIn" : "X"}
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">
-                      <p className="text-xs">AI adapts your content for {platform === "x" ? "LinkedIn" : "X"}</p>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              )}
-
-              {/* AI Assist toggle */}
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant={aiPanelOpen ? "default" : "outline"}
-                      size="sm"
-                      className="h-7 text-xs"
-                      onClick={() => setAiPanelOpen((prev) => !prev)}
-                    >
-                      <Sparkles className="mr-1 h-3 w-3" />
-                      AI Assist
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom">
-                    <p className="text-xs">Generate drafts, get ideas, or refine content with AI</p>
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
             </div>
 
-            {/* Compose area + AI panel row */}
-            <div className={cn("flex gap-0", aiPanelOpen && "gap-0")}>
-              {/* Left: compose area */}
-              <div className="flex-1 min-w-0 space-y-3">
+            <div className="space-y-3">
                 {/* Post inputs */}
                 {threadMode && config.threadSupport && (
                   <div className="relative pl-3 border-l-2 border-muted space-y-3">
@@ -821,17 +740,6 @@ export function ComposeDialog({
                     </div>
                   </div>
                 )}
-              </div>
-
-              {/* Right: AI Assist panel */}
-              {aiPanelOpen && (
-                <AiAssistPanel
-                  platform={platform}
-                  currentContent={posts[0].body}
-                  onInsert={(text) => updatePost(0, text)}
-                  onClose={() => setAiPanelOpen(false)}
-                />
-              )}
             </div>
           </div>
         )}

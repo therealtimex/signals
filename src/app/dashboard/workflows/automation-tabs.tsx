@@ -10,7 +10,7 @@ import { ActionCards } from "./action-cards";
 import { WorkflowViewSwitcher } from "./workflow-view-switcher";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/empty-state";
-import { Zap } from "lucide-react";
+import { Zap, Info } from "lucide-react";
 import type { WorkflowRun } from "@/lib/db/types";
 
 const TABS = [
@@ -65,6 +65,17 @@ function AutomationTabsInner({ runs, totalRuns }: AutomationTabsProps) {
       {/* Tab content */}
       {activeTab === "agents" && (
         <div className="space-y-6">
+          <Card className="border-border/50 bg-muted/30 p-4 text-sm text-muted-foreground">
+            <div className="flex gap-3">
+              <Info className="mt-0.5 h-4 w-4 shrink-0" />
+              <p>
+                Agent orchestration runs in RealTimeX terminal agents and Agent Flows via{" "}
+                <code className="text-xs">/api/agent-tools</code>. Runs started here are
+                recorded for observability; use RTX to execute migrated workflows (
+                <code className="text-xs">docs/rtx-agent-orchestration.md</code>).
+              </p>
+            </div>
+          </Card>
           <TemplateGallery />
           <ScheduledJobsList />
         </div>

@@ -21,11 +21,9 @@ Signals takes a different approach. It's an AI-native CRM built for founders and
 
 - **One command to start** — `npx @realtimex/signals` boots a full CRM with zero configuration. No Docker, no cloud accounts, no waiting.
 - **Local-first, your data** — Everything lives on your machine in SQLite. No vendor lock-in, no data hostage situations. Encrypted credentials, portable database.
-- **AI agents that work** — 10 pre-built agents for prospecting, enrichment, content creation, and engagement. Not chatbot theater — real tool-using agents that search the web, scrape profiles, and take actions.
+- **RealTimeX agent integration** — Terminal agents call Signals via `/api/agent-tools` for prospecting, enrichment, content, and graph operations.
 - **Browser-based publishing** — Post to X and LinkedIn through actual browser automation. Bypasses expensive APIs and platform restrictions. Choose between full auto or human-in-the-loop review mode.
-- **AI content creation** — Generate drafts, get topic suggestions, refine your writing. Audience-aware, platform-adapted, tone-controlled. One-click cross-platform adaptation.
 - **Goal-driven demand generation** — Set targets (100 new leads, 50 published posts), link workflows, and track auto-computed progress. Outcomes, not just activity.
-- **Natural language CRM** — Every feature is accessible through an AI chat assistant. Query contacts, start workflows, create content — all conversationally with Cmd+K.
 
 ## Guide Directory
 
@@ -36,7 +34,6 @@ Signals takes a different approach. It's an AI-native CRM built for founders and
 | 3 | [Content and Publishing](03-content-and-publishing.md) | Content library, AI-assisted writing, and browser-based publishing |
 | 4 | [AI Agents and Automation](04-ai-agents-and-automation.md) | Agent gallery, workflow execution, scheduling, and observability |
 | 5 | [Analytics and Goals](05-analytics-and-goals.md) | Dashboard analytics, goal tracking, and demand generation |
-| 6 | [AI Chat Assistant](06-ai-chat-assistant.md) | Natural language CRM interface, smart prompts, and conversation history |
 
 ## Quick Start
 

@@ -1,6 +1,6 @@
 # Agent Tools API
 
-Signals exposes a **local REST API** so RealTimeX terminal agents (and other automation) can read and mutate CRM data without going through the in-app chat runner.
+Signals exposes a **local REST API** so RealTimeX terminal agents (and other automation) can read and mutate CRM data. In-app chat and embedded agent orchestration were removed in favor of RTX agents — see `docs/rtx-agent-orchestration.md`.
 
 ## Endpoints
 
@@ -42,7 +42,7 @@ Then pass `Authorization: Bearer your-secret-token` on each request.
 | `query_analytics` | analytics | Dashboard metrics |
 | `query_workflows` | workflows | List workflow runs |
 | `list_workflow_templates` | workflows | List startable templates |
-| `start_workflow` | workflows | Start agent from template |
+| `start_workflow` | workflows | Record a workflow run (failed until migrated to RTX orchestration) |
 | `query_content` | content | List content items |
 | `query_goals` | goals | List goals |
 | `create_task` | tasks | Create a follow-up task |

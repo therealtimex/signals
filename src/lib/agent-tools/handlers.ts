@@ -11,7 +11,10 @@ import { generatePersona } from "@/lib/workflows/generate-persona";
 import { assertPlatform } from "@/lib/db/platforms";
 import { db } from "@/lib/db/client";
 import { dualWriteContactCompany, syncContactCompanyGraph } from "@/lib/db/contact-org-dual-write";
-import { startAgentWorkflow } from "@/lib/agents/run-agent-workflow";
+import {
+  AGENT_ORCHESTRATION_MESSAGE,
+  startAgentWorkflow,
+} from "@/lib/agents/run-agent-workflow";
 import { enrichContact } from "@/lib/agents/tools/enrich-contact";
 import { archiveContactTool } from "@/lib/agents/tools/archive-contact";
 import type { WorkflowType } from "@/lib/workflows/types";
@@ -249,7 +252,7 @@ export async function handleStartWorkflow(input: z.infer<typeof startWorkflowSch
     runId: run.id,
     status: run.status,
     workflowType: run.workflowType,
-    message: `Workflow started. Run ID: ${run.id}`,
+    message: AGENT_ORCHESTRATION_MESSAGE,
   };
 }
 

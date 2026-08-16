@@ -45,15 +45,6 @@ const GUIDES: GuideMeta[] = [
     description: "Dashboard analytics, goal tracking, and demand generation",
     icon: "BarChart3",
   },
-  {
-    slug: "ai-chat-assistant",
-    filename: "06-ai-chat-assistant.md",
-    order: 6,
-    title: "AI Chat Assistant",
-    description:
-      "Natural language CRM interface, smart prompts, and conversation history",
-    icon: "MessageSquare",
-  },
 ];
 
 /** Returns all guide metas ordered by `order`. */

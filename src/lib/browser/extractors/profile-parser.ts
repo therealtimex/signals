@@ -1,133 +1,158 @@
-import { generateObject } from "ai";
-import { anthropic } from "@ai-sdk/anthropic";
-import { z } from "zod";
 import type { RawProfileData, ParsedProfileData } from "@/lib/browser/types";
 
-/**
- * Zod schema for LLM-extracted profile data.
- * Field descriptions guide the model on extraction patterns.
- */
-export const profileExtractionSchema = z.object({
-  company: z
-    .string()
-    .nullable()
-    .describe(
-      "Current company or organization. Extract from patterns like 'CTO @Company', 'Working at Company', 'Company.com'. Null if not stated."
-    ),
-  title: z
-    .string()
-    .nullable()
-    .describe(
-      "Professional title or role. Extract from patterns like 'CTO', 'Software Engineer', 'Founder'. Null if not stated."
-    ),
-  headline: z
-    .string()
-    .nullable()
-    .describe(
-      "Professional headline synthesized from bio. A one-line summary of who this person is professionally. Null if bio is too vague."
-    ),
-  email: z
-    .string()
-    .email()
-    .nullable()
-    .describe(
-      "Email address if explicitly present in bio or tweets. Null if not found. Must be a valid email format."
-    ),
-  phone: z
-    .string()
-    .nullable()
-    .describe("Phone number if explicitly present. Null if not found."),
-  skills: z
-    .array(z.string())
-    .describe(
-      "Technical or professional skills mentioned. E.g., ['AI/ML', 'React', 'Product Management']. Empty array if none found."
-    ),
-  interests: z
-    .array(z.string())
-    .describe(
-      "Professional interests or topics they engage with. E.g., ['Open Source', 'Startups', 'Climate Tech']. Empty array if none found."
-    ),
-  previousCompanies: z
-    .array(z.string())
-    .describe(
-      "Past companies mentioned. Extract from patterns like 'ex-@Google', 'former VP at Meta'. Empty array if none found."
-    ),
-  industry: z
-    .string()
-    .nullable()
-    .describe(
-      "Primary industry. E.g., 'Technology', 'Finance', 'Healthcare'. Null if unclear."
-    ),
-  confidence: z
-    .number()
-    .describe(
-      "Overall confidence in extractions (0.0 to 1.0). 1.0 = explicitly stated, 0.5 = strongly implied, 0.0 = guessing."
-    ),
-});
+const EMAIL_RE = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i;
+const PHONE_RE = /(?:\+?\d{1,3}[-.\s]?)?(?:\(?\d{3}\)?[-.\s]?){2}\d{4}\b/;
+const TITLE_AT_COMPANY_RE =
+  /\b([A-Za-z][A-Za-z0-9\s/&.-]{1,48}?)\s+(?:@|at)\s+([A-Za-z0-9][A-Za-z0-9\s.&'-]{1,48})/i;
+const EX_COMPANY_RE = /\b(?:ex[-\s]?|former(?:ly)?\s+(?:at|@)?)\s*@?([A-Za-z0-9][A-Za-z0-9\s.&'-]{1,48})/gi;
+const HASHTAG_RE = /#([A-Za-z][A-Za-z0-9_]{1,31})/g;
 
-export type ProfileExtraction = z.infer<typeof profileExtractionSchema>;
+const SKILL_KEYWORDS = new Set([
+  "ai",
+  "ml",
+  "react",
+  "typescript",
+  "javascript",
+  "python",
+  "rust",
+  "golang",
+  "kubernetes",
+  "aws",
+  "product",
+  "design",
+  "marketing",
+  "sales",
+  "founder",
+  "engineering",
+  "devops",
+  "data",
+  "security",
+  "blockchain",
+  "saas",
+  "startup",
+]);
 
-const SYSTEM_PROMPT = `You extract structured professional information from social media profiles.
+function uniqueStrings(values: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const value of values) {
+    const trimmed = value.trim();
+    if (!trimmed) continue;
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(trimmed);
+  }
+  return out;
+}
 
-Rules:
-- Only extract information that is explicitly stated or strongly implied
-- Set fields to null when information is missing — never guess
-- Email must be a valid format if present (check for @ and domain)
-- The "headline" field should synthesize who this person is professionally
-- Skills and interests should be concise tags, not sentences
-- Previous companies should be company names only, not roles
-- Confidence reflects how certain you are about ALL extractions combined`;
+function collectText(raw: RawProfileData): string {
+  return [
+    raw.displayName,
+    raw.bio,
+    raw.location,
+    raw.website,
+    raw.pinnedTweetText,
+    ...raw.recentTweetTexts,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
 
-/** Build the user prompt from raw scraped profile data. */
-function buildUserPrompt(raw: RawProfileData): string {
-  const sections: string[] = [
-    "Extract professional information from this X/Twitter profile.",
-    "",
-    `Display Name: ${raw.displayName ?? "(not available)"}`,
-    `Bio: ${raw.bio ?? "(not available)"}`,
-    `Location: ${raw.location ?? "(not available)"}`,
-    `Website: ${raw.website ?? "(not available)"}`,
+function extractHashtags(text: string): string[] {
+  const tags: string[] = [];
+  for (const match of text.matchAll(HASHTAG_RE)) {
+    const tag = match[1];
+    if (tag) tags.push(tag.replace(/_/g, " "));
+  }
+  return uniqueStrings(tags);
+}
+
+function extractTitleAndCompany(bio: string | null): { title: string | null; company: string | null } {
+  if (!bio) return { title: null, company: null };
+  const match = bio.match(TITLE_AT_COMPANY_RE);
+  if (!match) return { title: null, company: null };
+  return {
+    title: match[1]?.trim() ?? null,
+    company: match[2]?.trim() ?? null,
+  };
+}
+
+function extractPreviousCompanies(text: string): string[] {
+  const companies: string[] = [];
+  for (const match of text.matchAll(EX_COMPANY_RE)) {
+    const company = match[1]?.trim();
+    if (company) companies.push(company);
+  }
+  return uniqueStrings(companies);
+}
+
+function buildHeadline(raw: RawProfileData, title: string | null, company: string | null): string | null {
+  if (title && company) return `${title} at ${company}`;
+  if (raw.bio) {
+    const firstLine = raw.bio.split(/\n|\. /)[0]?.trim();
+    if (firstLine && firstLine.length <= 120) return firstLine;
+  }
+  return raw.displayName;
+}
+
+function classifyTags(tags: string[]): { skills: string[]; interests: string[] } {
+  const skills: string[] = [];
+  const interests: string[] = [];
+  for (const tag of tags) {
+    const normalized = tag.toLowerCase();
+    if (SKILL_KEYWORDS.has(normalized) || normalized.includes("engineer")) {
+      skills.push(tag);
+    } else {
+      interests.push(tag);
+    }
+  }
+  return { skills, interests };
+}
+
+function scoreConfidence(parsed: Omit<ParsedProfileData, "confidence">): number {
+  const fields = [
+    parsed.company,
+    parsed.title,
+    parsed.headline,
+    parsed.email,
+    parsed.phone,
+    parsed.industry,
+    parsed.skills.length > 0 ? "skills" : null,
+    parsed.interests.length > 0 ? "interests" : null,
+    parsed.previousCompanies.length > 0 ? "previous" : null,
   ];
-
-  if (raw.pinnedTweetText) {
-    sections.push("", `Pinned Tweet: ${raw.pinnedTweetText}`);
-  }
-
-  if (raw.recentTweetTexts.length > 0) {
-    sections.push(
-      "",
-      "Recent Tweets:",
-      ...raw.recentTweetTexts.map((t) => `- ${t}`)
-    );
-  }
-
-  return sections.join("\n");
+  const filled = fields.filter(Boolean).length;
+  return Math.min(1, filled / 6);
 }
 
 /**
- * Parse raw scraped profile data into structured contact fields using LLM.
- * Uses Vercel AI SDK 6 generateObject() with a Zod schema for type-safe output.
+ * Parse raw scraped profile data into structured contact fields using heuristics.
+ * LLM extraction was removed with the Vercel AI SDK (#4); enrichment agents can
+ * refine results via the agent-tools API.
  */
-export async function parseProfile(
-  raw: RawProfileData
-): Promise<ParsedProfileData> {
-  const { object } = await generateObject({
-    model: anthropic("claude-sonnet-4-5-20250929"),
-    schema: profileExtractionSchema,
-    system: SYSTEM_PROMPT,
-    prompt: buildUserPrompt(raw),
-  });
+export async function parseProfile(raw: RawProfileData): Promise<ParsedProfileData> {
+  const text = collectText(raw);
+  const { title, company } = extractTitleAndCompany(raw.bio);
+  const emailMatch = text.match(EMAIL_RE);
+  const phoneMatch = text.match(PHONE_RE);
+  const tags = extractHashtags(text);
+  const { skills, interests } = classifyTags(tags);
+  const previousCompanies = extractPreviousCompanies(text);
 
-  return {
-    company: object.company,
-    title: object.title,
-    headline: object.headline,
-    email: object.email,
-    phone: object.phone,
-    skills: object.skills,
-    interests: object.interests,
-    previousCompanies: object.previousCompanies,
-    industry: object.industry,
-    confidence: object.confidence,
+  const parsed: ParsedProfileData = {
+    company,
+    title,
+    headline: buildHeadline(raw, title, company),
+    email: emailMatch?.[0] ?? null,
+    phone: phoneMatch?.[0] ?? null,
+    skills,
+    interests,
+    previousCompanies,
+    industry: null,
+    confidence: 0,
   };
+
+  parsed.confidence = scoreConfidence(parsed);
+  return parsed;
 }

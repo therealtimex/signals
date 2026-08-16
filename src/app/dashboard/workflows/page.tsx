@@ -50,7 +50,7 @@ export default function WorkflowsPage() {
       <div>
         <h1 className="text-heading-1">Automation</h1>
         <p className="text-muted-foreground mt-1">
-          Run AI agents and platform sync actions.
+          Configure agent templates and platform sync actions. Execution is driven by RealTimeX agents.
         </p>
       </div>
 
