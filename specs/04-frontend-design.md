@@ -213,19 +213,18 @@ className="animate-fade-slide-in"
 ### Settings (`/dashboard/settings`)
 
 1. **API Configuration** — Anthropic API key status (env var / config / not set) for legacy config paths
-2. **Platform Connections** — X, LinkedIn, Gmail via `PlatformConnectionCard`
-   - Connection status badges (connected/needs_reauth/disconnected)
-   - Sync controls per platform
+2. **Platform Connections** — X, LinkedIn, Gmail via `PlatformConnectionCard` (`showSync={false}`)
+   - Connect / reconnect / disconnect and connection status badges (connected/needs_reauth/disconnected)
    - Granted permissions (collapsible scope display)
+   - No sync triggers on this page — sync and import run from **Automation → Actions**
 3. **Browser Sessions** — X and LinkedIn publish/engage sessions (setup, validate, clear). Profile enrichment delegates to RealTimeX Browser + agent-browser (not in-app Playwright scraping).
 4. **Search providers** — Serper and Tavily API key configuration
-5. **Platform-specific sections**: X content sync, LinkedIn CSV import, Gmail metadata sync
 
 ### Automation (`/dashboard/workflows`)
 
 - Server-rendered hub with `AutomationTabs`: **Agents**, **Actions**, **Runs**
 - **Agents tab**: RTX migration banner, `TemplateGallery`, `ScheduledJobsList`
-- **Actions tab**: `ActionCards` — platform sync/enrich/upload cards (RTX-labeled enrich actions with migration guidance; connection gate bypass for enrich cards)
+- **Actions tab**: `ActionCards` — platform sync (X posts/mentions/contacts, LinkedIn profiles, Gmail contacts), LinkedIn CSV import, Gmail metadata sync, and RTX-labeled enrich actions with migration guidance; connection gate bypass for enrich cards
 - **Runs tab**: `WorkflowViewSwitcher` — list / kanban / swimlane views with URL param `?view=list|kanban|swimlane`
 - Empty state when no runs exist; populated by platform sync, RTX-reported agent runs, and maintenance jobs
 - View components: `WorkflowListView` (table), `WorkflowKanbanView` (4-column status board), `WorkflowSwimlaneView` (horizontal type lanes)
