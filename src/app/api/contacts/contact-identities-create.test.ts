@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/contacts/route";
+import { createContact } from "@/lib/db/queries/contacts";
+import { createIdentity } from "@/lib/db/queries/identities";
 import { db } from "@/lib/db/client";
-import { contactIdentities } from "@/lib/db/schema";
+import { contactIdentities, contacts } from "@/lib/db/schema";
 import { resetCoreTables } from "@/test/db";
 
 describe("POST /api/contacts identities[]", () => {
@@ -121,5 +123,35 @@ describe("POST /api/contacts identities[]", () => {
     );
     expect(primary?.platform).toBe("x");
     expect(primary?.platformUserId).toBe("x-1");
+  });
+
+  it("rolls back contact and partial identities when a later identity conflicts", async () => {
+    const existing = createContact({ name: "Existing Owner" });
+    createIdentity({
+      contactId: existing.id,
+      platform: "x",
+      platformUserId: "taken-user",
+    });
+
+    const contactsBefore = db.select().from(contacts).all().length;
+    const identitiesBefore = db.select().from(contactIdentities).all().length;
+
+    const req = new NextRequest("http://localhost/api/contacts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "Should Not Persist",
+        identities: [
+          { platform: "linkedin", platformUserId: "new-li-user" },
+          { platform: "x", platformUserId: "taken-user" },
+        ],
+      }),
+    });
+
+    const res = await POST(req);
+    expect(res.status).toBe(409);
+
+    expect(db.select().from(contacts).all()).toHaveLength(contactsBefore);
+    expect(db.select().from(contactIdentities).all()).toHaveLength(identitiesBefore);
   });
 });

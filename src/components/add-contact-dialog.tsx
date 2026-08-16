@@ -16,12 +16,28 @@ import { ContactForm } from "@/components/contact-form";
 import type { DraftContactIdentity } from "@/lib/contact-identity-draft";
 import { Plus } from "lucide-react";
 
+const defaultFormData = { funnelStage: "prospect" } as const;
+
 export function AddContactDialog() {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
-  const formData = useRef<Record<string, string>>({ funnelStage: "prospect" });
+  const [formKey, setFormKey] = useState(0);
+  const formData = useRef<Record<string, string>>({ ...defaultFormData });
   const identitiesData = useRef<DraftContactIdentity[]>([]);
+
+  function resetDraft() {
+    formData.current = { ...defaultFormData };
+    identitiesData.current = [];
+    setFormKey((key) => key + 1);
+  }
+
+  function handleOpenChange(nextOpen: boolean) {
+    if (!nextOpen) {
+      resetDraft();
+    }
+    setOpen(nextOpen);
+  }
 
   async function handleSave() {
     const data = formData.current;
@@ -43,8 +59,6 @@ export function AddContactDialog() {
       });
       if (res.ok) {
         setOpen(false);
-        formData.current = { funnelStage: "prospect" };
-        identitiesData.current = [];
         router.refresh();
       }
     } finally {
@@ -53,7 +67,7 @@ export function AddContactDialog() {
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
         <Button>
           <Plus className="mr-2 h-4 w-4" />
@@ -66,6 +80,7 @@ export function AddContactDialog() {
           <DialogDescription>Create a new contact in your CRM.</DialogDescription>
         </DialogHeader>
         <ContactForm
+          key={formKey}
           showIdentities
           onChange={(partial) => {
             formData.current = { ...formData.current, ...partial };
@@ -75,7 +90,7 @@ export function AddContactDialog() {
           }}
         />
         <DialogFooter>
-          <Button variant="outline" onClick={() => setOpen(false)}>
+          <Button variant="outline" onClick={() => handleOpenChange(false)}>
             Cancel
           </Button>
           <Button onClick={handleSave} disabled={saving}>
