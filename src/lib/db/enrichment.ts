@@ -36,14 +36,12 @@ export function calculateEnrichmentScore(
   }
 
   // Company: 5 points
-  const company = currentEmployment?.orgName ?? contact.company;
-  if (company) {
+  if (currentEmployment?.orgName) {
     score += 5;
   }
 
   // Title: 5 points
-  const title = currentEmployment?.title ?? contact.title;
-  if (title) {
+  if (currentEmployment?.title) {
     score += 5;
   }
 

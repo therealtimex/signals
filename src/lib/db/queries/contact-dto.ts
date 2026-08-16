@@ -78,8 +78,6 @@ export function assembleContactDto(
     verifiedEmail: _verifiedEmail,
     email: _legacyEmail,
     phone: _legacyPhone,
-    company: _legacyCompany,
-    title: _legacyTitle,
     ...contactRest
   } = contact;
   const primaryEmailChannel = pickPrimaryChannel(channels, "email");

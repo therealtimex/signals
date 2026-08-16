@@ -138,10 +138,6 @@ describe("simulation runs (slice 3.1)", () => {
       isCurrent: true,
       source: "test",
     });
-    db.update(contacts)
-      .set({ company: "Stale Scalar Co", title: "Stale Title" })
-      .where(eq(contacts.id, contact.id))
-      .run();
 
     const grounding = assembleAgentGrounding(contact.id) as {
       contact: { company: string | null; title: string | null };
@@ -161,10 +157,14 @@ describe("simulation runs (slice 3.1)", () => {
       tags: JSON.stringify([PRIVACY_SENTINELS.tags]),
     });
     const peer = createContact({ name: "Peer", platform: "x", platformUserId: "sim-3-peer" });
-    db.update(contacts)
-      .set({ title: "Engineer", company: "Acme" })
-      .where(eq(contacts.id, contact.id))
-      .run();
+    const acme = createOrg({ name: "Acme", source: "test" });
+    createContactEmployment({
+      contactId: contact.id,
+      orgId: acme.id,
+      title: "Engineer",
+      isCurrent: true,
+      source: "test",
+    });
     db.update(contactIdentities)
       .set({
         platformData: JSON.stringify({ secret: PRIVACY_SENTINELS.platformData }),

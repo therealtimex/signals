@@ -135,10 +135,6 @@ describe("assemblePersonaEvidence", () => {
       isCurrent: true,
       source: "test",
     });
-    db.update(contacts)
-      .set({ company: "Stale Scalar Co", title: "Stale Title" })
-      .where(eq(contacts.id, contact.id))
-      .run();
 
     createIdentity({
       contactId: contact.id,

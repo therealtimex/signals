@@ -3,7 +3,6 @@ import { nanoid } from "nanoid";
 import { db, type DbRunner } from "@/lib/db/client";
 import { recalcContactEnrichment } from "@/lib/db/contact-enrichment-recalc";
 import { projectWorksAtFromEmployments } from "@/lib/db/employment-works-at-projection";
-import { syncEmploymentScalarProjections } from "@/lib/db/contact-scalar-projection";
 import { getOrgById } from "@/lib/db/queries/orgs";
 import { contactEmployments, contacts } from "@/lib/db/schema";
 import type { ContactEmployment, NewContactEmployment } from "@/lib/db/types";
@@ -38,7 +37,6 @@ function nowUnix(): number {
 
 export function afterEmploymentMutation(contactId: string): void {
   recalcContactEnrichment(contactId);
-  syncEmploymentScalarProjections(contactId);
   projectWorksAtFromEmployments(contactId);
 }
 

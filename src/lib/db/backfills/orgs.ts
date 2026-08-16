@@ -1,7 +1,7 @@
-import { sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
+import { sqlite } from "@/lib/db/client";
+import { orgs } from "@/lib/db/schema";
 import { db } from "@/lib/db/client";
-import { contacts, orgs } from "@/lib/db/schema";
 import { normalizeOrgName, orgDedupeKey } from "@/lib/db/backfills/org-names";
 
 const SOURCE = "backfill:contacts-company";
@@ -15,20 +15,28 @@ export function buildOrgLookupByName(): Map<string, { id: string; name: string }
   return lookup;
 }
 
-/** Insert orgs from distinct `contacts.company` values. Idempotent by normalized name. */
-export function backfillOrgs(): { inserted: number } {
-  const rows = db
-    .select({ company: contacts.company })
-    .from(contacts)
-    .where(sql`trim(${contacts.company}) != ''`)
-    .all();
+function readScalarCompanies(): string[] {
+  try {
+    const rows = sqlite
+      .prepare(
+        `SELECT DISTINCT company AS company
+         FROM contacts
+         WHERE company IS NOT NULL AND trim(company) != ''`,
+      )
+      .all() as { company: string }[];
+    return rows.map((row) => row.company);
+  } catch {
+    return [];
+  }
+}
 
+/** Insert orgs from distinct legacy `contacts.company` values when the column still exists. */
+export function backfillOrgs(): { inserted: number } {
   const lookup = buildOrgLookupByName();
   let inserted = 0;
 
-  for (const row of rows) {
-    if (!row.company) continue;
-    const displayName = normalizeOrgName(row.company);
+  for (const company of readScalarCompanies()) {
+    const displayName = normalizeOrgName(company);
     if (!displayName) continue;
 
     const key = orgDedupeKey(displayName);

@@ -5,6 +5,7 @@ import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import { homedir } from "os";
 import { mkdirSync, existsSync } from "fs";
+import { ensureEmploymentBackfillBeforeCompanyDrop } from "@/lib/db/migrate-employment-pre-drop";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -16,6 +17,8 @@ export function runMigrations(dataDir?: string) {
   }
 
   const dbPath = join(dir, "data.db");
+  ensureEmploymentBackfillBeforeCompanyDrop(dbPath);
+
   const sqlite = new Database(dbPath);
   sqlite.pragma("journal_mode = WAL");
   sqlite.pragma("foreign_keys = ON");
