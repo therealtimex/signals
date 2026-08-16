@@ -10,6 +10,7 @@ import { ensureNicheByName } from "@/lib/db/queries/niches";
 import { upsertGraphEdge } from "@/lib/db/queries/graph";
 import { db } from "@/lib/db/client";
 import { contactPersonas, identityMetrics } from "@/lib/db/schema";
+import { PERSONA_STALE_AFTER_SECONDS } from "@/lib/persona/staleness";
 import { resetCoreTables } from "@/test/db";
 
 function countDbSelectCalls(run: () => void): number {
@@ -169,6 +170,41 @@ describe("getContactExploreCard", () => {
 
     expect(sparseSelects).toBe(denseSelects);
     expect(sparseSelects).toBeLessThanOrEqual(5);
+  });
+
+  it("marks shared personas stale by age only", () => {
+    const contact = createContact({ name: "Stale" });
+    const now = Math.floor(Date.now() / 1000);
+    db.insert(contactPersonas)
+      .values({
+        id: nanoid(),
+        contactId: contact.id,
+        status: "active",
+        summary: "Old persona",
+        scope: "shared",
+        generatedAt: now - PERSONA_STALE_AFTER_SECONDS - 1,
+      })
+      .run();
+
+    const card = getContactExploreCard(contact.id)!;
+    expect(card.persona.stale).toBe(true);
+  });
+
+  it("returns null stale for absent and local_only personas", () => {
+    const absent = createContact({ name: "Absent" });
+    expect(getContactExploreCard(absent.id)!.persona.stale).toBeNull();
+
+    const local = createContact({ name: "Local" });
+    db.insert(contactPersonas)
+      .values({
+        id: nanoid(),
+        contactId: local.id,
+        status: "active",
+        summary: "Hidden",
+        scope: "local_only",
+      })
+      .run();
+    expect(getContactExploreCard(local.id)!.persona.stale).toBeNull();
   });
 
   it("tolerates malformed persona interests JSON", () => {

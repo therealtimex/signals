@@ -389,7 +389,7 @@ export function ContactDetailClient({ contact, tasks, explore }: ContactDetailCl
         </TabsContent>
 
         <TabsContent value="audience" className="space-y-4">
-          <ContactExploreCardView explore={explore} />
+          <ContactExploreCardView contactId={contact.id} explore={explore} />
         </TabsContent>
       </Tabs>
     </div>
