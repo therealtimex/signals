@@ -129,7 +129,7 @@ export function truncateExplorePostText(
   return `${text.slice(0, max)}…`;
 }
 
-function latestMetricsForIdentities(identityIds: string[]): Map<string, IdentityMetric> {
+export function latestMetricsForIdentities(identityIds: string[]): Map<string, IdentityMetric> {
   if (identityIds.length === 0) return new Map();
 
   const rows = db
@@ -146,6 +146,38 @@ function latestMetricsForIdentities(identityIds: string[]): Map<string, Identity
     }
   }
   return latest;
+}
+
+/** Max followers across identities; snapshot metric wins over denormalized column (ui-4.2 §2). */
+export function maxFollowersCountByContactIds(
+  contactIds: string[],
+): Map<string, number | null> {
+  const result = new Map<string, number | null>();
+  if (contactIds.length === 0) return result;
+
+  for (const contactId of contactIds) {
+    result.set(contactId, null);
+  }
+
+  const identityRows = db
+    .select()
+    .from(contactIdentities)
+    .where(inArray(contactIdentities.contactId, contactIds))
+    .all();
+
+  const metricByIdentity = latestMetricsForIdentities(identityRows.map((identity) => identity.id));
+
+  for (const identity of identityRows) {
+    const latest = metricByIdentity.get(identity.id);
+    const count = latest?.followersCount ?? identity.followersCount ?? null;
+    if (count === null) continue;
+    const current = result.get(identity.contactId) ?? null;
+    if (current === null || count > current) {
+      result.set(identity.contactId, count);
+    }
+  }
+
+  return result;
 }
 
 function sharedNichesForContact(contactId: string): ContactExploreNiche[] {

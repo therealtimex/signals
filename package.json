@@ -75,6 +75,7 @@
     "radix-ui": "^1.4.3",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
+    "react-force-graph-2d": "^1.29.1",
     "react-markdown": "^10.1.0",
     "recharts": "^2.15.4",
     "remark-gfm": "^4.0.1",

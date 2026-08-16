@@ -31,6 +31,14 @@ export function getRtxBootstrapState(): RtxBootstrapState {
   return state;
 }
 
+/** Idempotent embedded bootstrap; safe to call from API routes (separate workers). */
+export async function ensureRtxBootstrap(
+  fetchImpl: typeof fetch = fetch,
+  env: EnvLike = process.env
+): Promise<RtxBootstrapState> {
+  return bootstrapRtxIfEmbedded(fetchImpl, env);
+}
+
 export function resetRtxBootstrapState(): void {
   state = {
     mode: "standalone",
