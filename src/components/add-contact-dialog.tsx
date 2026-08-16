@@ -13,6 +13,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { ContactForm } from "@/components/contact-form";
+import type { DraftContactIdentity } from "@/lib/contact-identity-draft";
 import { Plus } from "lucide-react";
 
 export function AddContactDialog() {
@@ -20,6 +21,7 @@ export function AddContactDialog() {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const formData = useRef<Record<string, string>>({ funnelStage: "prospect" });
+  const identitiesData = useRef<DraftContactIdentity[]>([]);
 
   async function handleSave() {
     const data = formData.current;
@@ -27,14 +29,22 @@ export function AddContactDialog() {
 
     setSaving(true);
     try {
+      const identities = identitiesData.current.filter(
+        (identity) => identity.platformUserId.trim().length > 0,
+      );
+
       const res = await fetch("/api/contacts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
+        body: JSON.stringify({
+          ...data,
+          ...(identities.length > 0 ? { identities } : {}),
+        }),
       });
       if (res.ok) {
         setOpen(false);
         formData.current = { funnelStage: "prospect" };
+        identitiesData.current = [];
         router.refresh();
       }
     } finally {
@@ -50,14 +60,18 @@ export function AddContactDialog() {
           Add Contact
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Add Contact</DialogTitle>
           <DialogDescription>Create a new contact in your CRM.</DialogDescription>
         </DialogHeader>
         <ContactForm
+          showIdentities
           onChange={(partial) => {
             formData.current = { ...formData.current, ...partial };
+          }}
+          onIdentitiesChange={(identities) => {
+            identitiesData.current = identities;
           }}
         />
         <DialogFooter>
