@@ -358,7 +358,7 @@ The `ComposeDialog` supports X and LinkedIn posts (threads on X only):
 - **Activity grid**: 1 → 2 columns
 - **Contact form**: 1 → 2 column field grid
 - **Sidebar**: Full panel (desktop) → trigger button (mobile)
-- **Settings sync controls**: 1 → 2 column button grid
+- **Settings browser sessions**: Stacked session cards (X, LinkedIn) with inline Setup / Validate / Clear action rows
 
 ## 13. State Management Patterns
 
