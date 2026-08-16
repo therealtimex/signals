@@ -48,6 +48,8 @@ Then pass `Authorization: Bearer your-secret-token` on each request.
 | `create_task` | tasks | Create a follow-up task |
 | `get_persona` | contacts | Get active AI persona for a contact |
 | `upsert_persona` | contacts | Save versioned persona (supersedes prior active) |
+| `get_persona_evidence` | contacts | Read shared-scope evidence bundle for persona synthesis |
+| `generate_persona` | contacts | Synthesize persona from evidence via RTX `llm.chat` |
 | `query_orgs` | graph | Search organization nodes |
 | `query_org_identities` | graph | List org platform identities with profile/stat fields |
 | `upsert_org_identity` | graph | Create or update an org platform identity |
@@ -70,6 +72,8 @@ Simulation run tool responses include additive fields (`populationSpec`, `error`
 `create_contact` / `update_contact` with a `company` field also dual-write an `orgs` row and `works_at` edge (contacts projection unchanged).
 
 `semantic_search` requires Signals running as a RealtimeX Local App with the `llm.embed` permission granted. Vectors are stored locally in SQLite; only embedding generation is delegated to RealtimeX.
+
+`generate_persona` requires the same embedded runtime plus the `llm.chat` permission for structured persona synthesis. Terminal agents can instead call `get_persona_evidence` and write with `upsert_persona` using their own intelligence (no `workflow_runs` row).
 
 Tools that require browser/LLM (web search, scrape, publish, etc.) are **not** exposed here — RTX terminal agents should use platform credentials and their own tools for those operations.
 

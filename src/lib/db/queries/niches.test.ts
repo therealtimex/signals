@@ -72,6 +72,77 @@ describe("niche queries", () => {
     expect(edges.every((edge) => edge.weight === 0.8)).toBe(true);
   });
 
+  it("preserves local_only scope when backfilling persona interests", () => {
+    const contact = createContact({ name: "Private", platform: "x", platformUserId: "n3" });
+    db.insert(contactPersonas)
+      .values({
+        id: nanoid(),
+        contactId: contact.id,
+        status: "active",
+        interests: JSON.stringify(["Confidential Market"]),
+        confidence: 0.9,
+        scope: "local_only",
+      })
+      .run();
+
+    backfillNichesFromInterests();
+
+    const niche = db.select().from(niches).all()[0];
+    expect(niche?.scope).toBe("local_only");
+
+    const edge = db
+      .select()
+      .from(graphEdges)
+      .where(eq(graphEdges.edgeType, "belongs_to_niche"))
+      .get();
+    expect(edge?.scope).toBe("local_only");
+
+    const publicView = listNiches({ includeLocalOnly: false });
+    expect(publicView.data).toHaveLength(0);
+  });
+
+  it("re-scopes backfill-owned edges when persona scope and confidence change", () => {
+    const contact = createContact({ name: "Rescope", platform: "x", platformUserId: "n4" });
+    const personaId = nanoid();
+    db.insert(contactPersonas)
+      .values({
+        id: personaId,
+        contactId: contact.id,
+        status: "active",
+        interests: JSON.stringify(["Growth"]),
+        confidence: 0.7,
+        scope: "shared",
+      })
+      .run();
+
+    backfillNichesFromInterests();
+
+    let edge = db
+      .select()
+      .from(graphEdges)
+      .where(eq(graphEdges.edgeType, "belongs_to_niche"))
+      .get();
+    expect(edge?.scope).toBe("shared");
+    expect(edge?.weight).toBe(0.7);
+    expect(edge?.source).toBe("backfill:persona-interests");
+
+    db.update(contactPersonas)
+      .set({ scope: "local_only", confidence: 0.9 })
+      .where(eq(contactPersonas.id, personaId))
+      .run();
+
+    backfillNichesFromInterests();
+
+    edge = db
+      .select()
+      .from(graphEdges)
+      .where(eq(graphEdges.edgeType, "belongs_to_niche"))
+      .get();
+    expect(edge?.scope).toBe("local_only");
+    expect(edge?.weight).toBe(0.9);
+    expect(edge?.source).toBe("backfill:persona-interests");
+  });
+
   it("upserts niche by id", () => {
     const created = upsertNiche({ name: "Growth" });
     const updated = upsertNiche({

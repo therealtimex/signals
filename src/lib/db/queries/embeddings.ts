@@ -10,6 +10,7 @@ import {
 } from "@/lib/db/embedding-kinds";
 import { contacts, contentItems, embeddings, launches, niches, orgs, variants } from "@/lib/db/schema";
 import { nodeExists } from "@/lib/db/queries/graph";
+import { getActivePersona } from "@/lib/db/queries/personas";
 import type { GraphNodeType } from "@/lib/db/types";
 import {
   bufferToFloat32,
@@ -401,7 +402,19 @@ export function assembleEmbedText(
   assertSharedEmbeddingSource(nodeType, nodeId, kind);
 
   if (kind === "persona") {
-    throw new Error('Embedding kind "persona" is reserved for a follow-on epic.');
+    const persona = getActivePersona(nodeId, { includeLocalOnly: true });
+    if (!persona) throw new Error(`No active persona for contact: ${nodeId}`);
+    const interests = JSON.parse(persona.interests ?? "[]") as string[];
+    const conversionTriggers = JSON.parse(persona.conversionTriggers ?? "[]") as string[];
+    const engagementFormats = JSON.parse(persona.engagementFormats ?? "[]") as string[];
+    return joinText([
+      persona.archetype ? `Archetype: ${persona.archetype}` : null,
+      persona.tone ? `Tone: ${persona.tone}` : null,
+      persona.summary ? `Summary: ${persona.summary}` : null,
+      interests.length > 0 ? `Interests: ${interests.join(", ")}` : null,
+      conversionTriggers.length > 0 ? `Converts on: ${conversionTriggers.join(", ")}` : null,
+      engagementFormats.length > 0 ? `Engages with: ${engagementFormats.join(", ")}` : null,
+    ]);
   }
 
   switch (kind) {

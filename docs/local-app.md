@@ -39,13 +39,21 @@ On server start (`src/instrumentation.ts`), when `RTX_APP_ID` is set Signals:
 
 ### Requested permissions
 
-Signals intentionally does **not** request `llm.chat` — terminal agents own intelligence (#4).
+Terminal agents own open-ended intelligence: they read evidence (`get_persona_evidence`) and write conclusions (`upsert_persona`) with their own reasoning, and no `workflow_runs` row is fabricated for that compute. Signals requests `llm.chat` solely for **structured, schema-validated workflow synthesis** it orchestrates itself (persona generation; future workflow migrations per ADR-022-9) — always provenance-tracked via `workflow_runs`, never conversational.
 
 | Permission | Why |
 |------------|-----|
 | `credentials.list` | Discover platform credential metadata via RTX broker |
 | `credentials.use` | Use bounded credential broker for OAuth/sync |
 | `webhook.trigger` | Allow RTX flows to trigger agent tasks against Signals |
+| `llm.embed` | On-demand embedding for semantic search (vectors stay local in Signals) |
+| `llm.chat` | Structured persona synthesis workflow (`generate_persona`) |
+
+### RealTimeX host dependency (`llm.chat`)
+
+Persona generation records `${provider}:${model}` provenance on every `workflow_runs` row. Signals **rejects** `POST /sdk/llm/chat` responses that omit `response.provider` or `response.model` (no client-side fabrication).
+
+Deploy Signals persona generation only with a RealTimeX Main App build that includes the SDK chat response contract (`response.provider` + `response.model` in the sync chat payload). See RTX `docs/local-apps/sdk-llm-proxy.md` §3.2 and `server/endpoints/sdk/llm.js` (tracked regression: `server/__tests__/endpoints/sdk/llm.test.js`).
 
 ## Modes
 
@@ -73,6 +81,32 @@ npm run dev
 ```
 
 Register the app in **Settings → Local Apps** first so `/sdk/register` resolves the app id.
+
+### Embedded-host QA (`generate_persona`)
+
+Unit tests mock RTX chat. To verify persisted `provider:model` provenance against a real owned RTX dev host:
+
+1. **RTX co-requisite worktree** (not the main checkout — `rtxtest` refuses main):
+   ```bash
+   RTX_REPO="$PWD/../../worktrees/realtimex-ai-app-issue-64-sdk-llm-chat-provenance"
+   RTXTEST="$PWD/../../.claude/skills/rtx-test-runner/scripts/bin/rtxtest"
+   RTXTEST_TARGET=local node "$RTXTEST" dev up --repo "$RTX_REPO" --electron-no-sandbox
+   ```
+   Branch: `issue-64-sdk-llm-chat-provenance` @ MR !1684 (`response.provider` + `response.model` on `POST /sdk/llm/chat`).
+
+2. **Signals Local App permissions** — grant `llm.chat` (and keep `llm.embed`) for the Signals app in **Settings → Local Apps**. Default dev app id: `47e45f71-3279-42f5-8e95-731de01b6eae`.
+
+3. **Chat provider** — the RTX host must return a successful chat with `response.provider` and `response.model` (probe: `POST /sdk/llm/chat` with `x-app-id`).
+
+4. **Run embedded QA** from the Signals worktree:
+   ```bash
+   ./scripts/qa/run-embedded-generate-persona.sh --prime-llm
+   ```
+   `--prime-llm` fetches a LiteLLM virtual key from the canonical signed-in dev profile, persists it to the worktree DB, restarts the owned RTX dev session, then runs the gated vitest project. Manual alternative: `node "$RTX_REPO/scripts/qa/persist-embedded-llm-credentials.mjs"` then restart RTX dev.
+
+   Or explicitly: `SIGNALS_EMBEDDED_QA=1 RTX_APP_ID=... SERVER_URL=http://127.0.0.1:<port> npx vitest run --project embedded src/lib/workflows/generate-persona.embedded.test.ts`
+
+`SERVER_URL` defaults to `RTX_REPO/tmp/dev-runtime/endpoints.json` → `serverUrl` when the owned dev session is running.
 
 ## References
 

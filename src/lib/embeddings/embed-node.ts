@@ -7,6 +7,7 @@ import {
 import type { GraphNodeType } from "@/lib/db/types";
 import { truncateEmbedText } from "@/lib/embeddings/vector-utils";
 import { resolveEmbeddingSourceScope } from "@/lib/embeddings/source-scope";
+import type { EnvLike } from "@/lib/rtx/env";
 import { rtxEmbed, sha256EmbedText, type RtxEmbedFailure } from "@/lib/rtx/llm";
 
 export type EmbedNodeResult =
@@ -38,7 +39,7 @@ export async function embedNodeIfStale(
   nodeType: GraphNodeType,
   nodeId: string,
   kind: EmbeddingKind,
-  opts?: { force?: boolean; fetchImpl?: typeof fetch },
+  opts?: { force?: boolean; fetchImpl?: typeof fetch; env?: EnvLike },
 ): Promise<EmbedNodeResult> {
   const rawText = assembleEmbedText(nodeType, nodeId, kind);
   const text = truncateEmbedText(rawText);
@@ -56,7 +57,7 @@ export async function embedNodeIfStale(
     }
   }
 
-  const embedResult = await rtxEmbed([text], opts?.fetchImpl);
+  const embedResult = await rtxEmbed([text], opts?.fetchImpl, opts?.env ?? process.env);
   if (!embedResult.success) {
     throw new EmbeddingUnavailableError(embedResult.code, embedResult.error);
   }

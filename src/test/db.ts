@@ -41,11 +41,11 @@ export function resetCoreTables(): void {
   db.delete(interactions).run();
   db.delete(contentActivities).run();
   db.delete(engagements).run();
+  db.delete(contactPersonas).run();
   db.delete(workflowRuns).run();
   db.delete(goalProgress).run();
   db.delete(goalWorkflows).run();
   db.delete(goals).run();
-  db.delete(contactPersonas).run();
   db.delete(orgIdentityMetrics).run();
   db.delete(identityMetrics).run();
   db.delete(graphEdges).run();

@@ -118,6 +118,15 @@ export const getPersonaSchema = z.object({
   includeLocalOnly: z.boolean().optional(),
 });
 
+export const getPersonaEvidenceSchema = z.object({
+  contactId: z.string().min(1),
+});
+
+export const generatePersonaSchema = z.object({
+  contactId: z.string().min(1),
+  force: z.boolean().optional(),
+});
+
 export const upsertPersonaSchema = z
   .object({
     contactId: z.string().min(1),
