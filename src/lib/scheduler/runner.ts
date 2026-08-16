@@ -14,6 +14,10 @@ import {
   runSimulationCalibrationSweep,
   SIMULATION_CALIBRATION_SWEEP_JOB_TYPE,
 } from "@/lib/db/simulation-calibration-sweep";
+import {
+  runPersonaRefreshSweep,
+  PERSONA_REFRESH_JOB_TYPE,
+} from "@/lib/db/persona-refresh-sweep";
 import type { WorkflowType } from "@/lib/workflows/types";
 
 const CHECK_INTERVAL_MS = 60_000; // 1 minute
@@ -42,6 +46,7 @@ const MAINTENANCE_HANDLERS: Record<string, MaintenanceHandler> = {
       observedUntil:
         typeof payload.observedUntil === "number" ? payload.observedUntil : undefined,
     }),
+  [PERSONA_REFRESH_JOB_TYPE]: () => runPersonaRefreshSweep(),
 };
 
 let initialized = false;
@@ -109,18 +114,35 @@ export function executeScheduledJob(jobId: string): void {
     const maintenanceHandler = MAINTENANCE_HANDLERS[job.jobType];
     if (maintenanceHandler) {
       const payload = JSON.parse(job.payload ?? "{}") as Record<string, unknown>;
-      maintenanceHandler(payload);
-      console.log(`[scheduler] Ran maintenance job ${jobId} (${job.jobType})`);
+      const maintenanceResult = maintenanceHandler(payload);
+      const completeMaintenance = () => {
+        console.log(`[scheduler] Ran maintenance job ${jobId} (${job.jobType})`);
 
-      updateScheduledJob(jobId, {
-        status: "completed",
-        completedAt: Math.floor(Date.now() / 1000),
-      });
+        updateScheduledJob(jobId, {
+          status: "completed",
+          completedAt: Math.floor(Date.now() / 1000),
+        });
 
-      if (job.cronExpression) {
-        rescheduleJob(jobId);
-        console.log(`[scheduler] Rescheduled maintenance job ${jobId} for next cron interval`);
+        if (job.cronExpression) {
+          rescheduleJob(jobId);
+          console.log(`[scheduler] Rescheduled maintenance job ${jobId} for next cron interval`);
+        }
+      };
+
+      if (maintenanceResult instanceof Promise) {
+        void maintenanceResult.then(completeMaintenance).catch((err: unknown) => {
+          const errorMessage = err instanceof Error ? err.message : String(err);
+          console.error(`[scheduler] Job ${jobId} failed:`, errorMessage);
+          updateScheduledJob(jobId, {
+            status: "failed",
+            error: errorMessage,
+            completedAt: Math.floor(Date.now() / 1000),
+          });
+        });
+        return;
       }
+
+      completeMaintenance();
       return;
     }
 
