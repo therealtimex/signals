@@ -102,4 +102,27 @@ describe("OrgPicker", () => {
 
     expect(onChange).toHaveBeenLastCalledWith({ orgId: "", company: "Different org" });
   });
+
+  it("invalidates parent value when a preloaded company name is edited", async () => {
+    const onChange = vi.fn();
+
+    await act(async () => {
+      root.render(
+        createElement(OrgPicker, {
+          id: "organization",
+          defaultOrgName: "Acme",
+          onChange,
+        }),
+      );
+    });
+
+    const input = container.querySelector("#organization") as HTMLInputElement;
+    expect(input.value).toBe("Acme");
+
+    await act(async () => {
+      setInputValue(input, "Different org");
+    });
+
+    expect(onChange).toHaveBeenCalledWith({ orgId: "", company: "Different org" });
+  });
 });

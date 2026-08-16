@@ -1,6 +1,7 @@
 import {
   syncContactCompanyGraph,
   syncContactOrgGraph,
+  syncContactWorksAtFromContact,
 } from "@/lib/db/contact-org-dual-write";
 import { getOrgById } from "@/lib/db/queries/orgs";
 
@@ -74,5 +75,5 @@ export function syncContactCompanyFromContact(
   title: string | null | undefined,
   source: "api:create_contact" | "api:update_contact",
 ): void {
-  applyContactOrgLink(contactId, { company: company ?? null }, source, title);
+  syncContactWorksAtFromContact(contactId, company, title, source);
 }

@@ -182,4 +182,58 @@ describe("contact org linking API", () => {
       is_current: true,
     });
   });
+
+  it("PATCH /api/contacts/[id] preserves duplicate-name org link on title-only update", async () => {
+    db.insert(orgs)
+      .values({
+        id: "same-name-first",
+        name: "Acme",
+        orgType: "company",
+        scope: "shared",
+        source: "test",
+      })
+      .run();
+    db.insert(orgs)
+      .values({
+        id: "same-name-selected",
+        name: "Acme",
+        orgType: "company",
+        scope: "shared",
+        source: "test",
+      })
+      .run();
+
+    const createReq = new NextRequest("http://localhost/api/contacts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "Duplicate Name",
+        orgId: "same-name-selected",
+        title: "CEO",
+        platform: "x",
+      }),
+    });
+    const createRes = await POST(createReq);
+    expect(createRes.status).toBe(201);
+    const contact = await createRes.json();
+
+    const worksAtBefore = db.select().from(graphEdges).where(eq(graphEdges.edgeType, "works_at")).all();
+    expect(worksAtBefore[0]?.dstId).toBe("same-name-selected");
+
+    const patchReq = new NextRequest(`http://localhost/api/contacts/${contact.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "CTO" }),
+    });
+    const patchRes = await PATCH(patchReq, { params: Promise.resolve({ id: contact.id }) });
+    expect(patchRes.status).toBe(200);
+
+    const worksAt = db.select().from(graphEdges).where(eq(graphEdges.edgeType, "works_at")).all();
+    expect(worksAt).toHaveLength(1);
+    expect(worksAt[0]?.dstId).toBe("same-name-selected");
+    expect(JSON.parse(worksAt[0]?.properties ?? "{}")).toMatchObject({
+      title: "CTO",
+      is_current: true,
+    });
+  });
 });

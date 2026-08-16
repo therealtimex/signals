@@ -144,12 +144,24 @@ export function OrgPicker({
             const next = e.target.value;
             setQuery(next);
             setOpen(true);
+
+            const baseline = (selected?.company ?? defaultOrgName).trim();
+            const trimmed = next.trim();
+            const hadCommittedOrg = Boolean(selected) || Boolean(defaultOrgName.trim());
+
             if (selected) {
               setSelected(null);
-              const trimmed = next.trim();
+            }
+
+            if (!hadCommittedOrg) {
+              if (!trimmed) {
+                onChange({ orgId: "", company: "" });
+              }
+              return;
+            }
+
+            if (trimmed !== baseline) {
               onChange(trimmed ? { orgId: "", company: trimmed } : { orgId: "", company: "" });
-            } else if (!next.trim()) {
-              onChange({ orgId: "", company: "" });
             }
           }}
         />

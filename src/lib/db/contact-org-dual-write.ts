@@ -90,6 +90,38 @@ export function syncContactOrgGraph(
   return { orgId, edgeId: edge.id, retiredEdges };
 }
 
+export function getContactWorksAtOrgId(contactId: string): string | undefined {
+  const edges = db
+    .select()
+    .from(graphEdges)
+    .where(
+      and(
+        eq(graphEdges.srcType, "contact"),
+        eq(graphEdges.srcId, contactId),
+        eq(graphEdges.edgeType, "works_at"),
+      ),
+    )
+    .all();
+
+  if (edges.length === 0) return undefined;
+  const shared = edges.find((edge) => edge.scope === "shared");
+  return (shared ?? edges[0])?.dstId;
+}
+
+/** Refresh `works_at` title while preserving an existing org link when present. */
+export function syncContactWorksAtFromContact(
+  contactId: string,
+  company: string | null | undefined,
+  title?: string | null,
+  source = "api:update_contact",
+): { orgId?: string; edgeId?: string; retiredEdges: number } {
+  const existingOrgId = getContactWorksAtOrgId(contactId);
+  if (existingOrgId) {
+    return syncContactOrgGraph(contactId, existingOrgId, title, source);
+  }
+  return syncContactCompanyGraph(contactId, company, title, source);
+}
+
 /** Dual-write `contacts.company` into org node + `works_at` edge (projection stays on contacts). */
 export function dualWriteContactCompany(
   contactId: string,
