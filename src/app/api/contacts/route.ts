@@ -42,6 +42,7 @@ const createContactSchema = z.object({
     .enum(["prospect", "engaged", "qualified", "opportunity", "customer", "advocate"])
     .optional(),
   score: z.number().int().min(0).optional(),
+  isSelf: z.boolean().optional(),
   identity: contactIdentityInputSchema.optional(),
   identities: z.array(contactIdentityInputSchema).optional(),
 }).refine(

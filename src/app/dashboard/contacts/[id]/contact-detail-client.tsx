@@ -26,6 +26,14 @@ import { IdentitiesSection } from "@/components/identities-section";
 import { EnrichButton } from "@/components/enrich-button";
 import { ArrowLeft, Trash2, Save, CheckCircle2, Circle, Archive, RotateCcw } from "lucide-react";
 import Link from "next/link";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import type { ContactWithIdentities, Task } from "@/lib/db/types";
 import type { ContactExploreCard } from "@/lib/db/queries/contact-explore";
 import { ContactExploreCardView } from "@/components/contact-explore-card";
@@ -48,7 +56,24 @@ export function ContactDetailClient({ contact, tasks, explore }: ContactDetailCl
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [selfSaving, setSelfSaving] = useState(false);
   const formChanges = useRef<Record<string, string>>({});
+
+  async function handleToggleSelf(nextValue: boolean) {
+    setSelfSaving(true);
+    try {
+      const res = await fetch(`/api/contacts/${contact.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isSelf: nextValue }),
+      });
+      if (res.ok) {
+        router.refresh();
+      }
+    } finally {
+      setSelfSaving(false);
+    }
+  }
 
   async function handleSave() {
     const data = formChanges.current;
@@ -178,6 +203,28 @@ export function ContactDetailClient({ contact, tasks, explore }: ContactDetailCl
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {!contactArchived ? (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="flex items-center gap-2 rounded-md border border-border px-3 py-1.5">
+                    <Label htmlFor="contact-is-self" className="text-sm">
+                      This is me
+                    </Label>
+                    <Switch
+                      id="contact-is-self"
+                      checked={contact.isSelf}
+                      disabled={selfSaving}
+                      onCheckedChange={(checked) => void handleToggleSelf(checked)}
+                    />
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent>
+                  Marks this contact as you. Any previous self contact is cleared.
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          ) : null}
           {contact.identities.some((i) => i.platform === "x") && (
             <EnrichButton
               contactId={contact.id}
