@@ -34,7 +34,7 @@ describe("contact-employments", () => {
     expect(listContactEmployments(contact.id)).toHaveLength(1);
   });
 
-  it("projects company/title scalars and works_at edges after mutation", () => {
+  it("projects resolved career fields and works_at edges after mutation", () => {
     const contact = createContact({ name: "Ada" });
     const org = createOrg({ name: "Acme Corp", source: "test" });
 
@@ -44,10 +44,6 @@ describe("contact-employments", () => {
       title: "CEO",
       source: "manual",
     });
-
-    const row = db.select().from(contacts).where(eq(contacts.id, contact.id)).get();
-    expect(row?.company).toBe("Acme Corp");
-    expect(row?.title).toBe("CEO");
 
     const dto = getContactById(contact.id);
     expect(dto?.company).toBe("Acme Corp");

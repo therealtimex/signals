@@ -1,9 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { nanoid } from "nanoid";
-import { mkdtempSync, readFileSync, readdirSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import Database from "better-sqlite3";
 import { createContact } from "@/lib/db/queries/contacts";
 import {
@@ -17,25 +16,12 @@ import {
 import { db } from "@/lib/db/client";
 import { graphEdges, orgs } from "@/lib/db/schema";
 import { runMigrations } from "@/lib/db/migrate";
+import {
+  applyMigrationFiles,
+  columnExists,
+  listMigrationSqlFiles,
+} from "@/lib/db/migration-utils";
 import { resetCoreTables } from "@/test/db";
-
-const migrationsDir = join(dirname(fileURLToPath(import.meta.url)), "../migrations");
-
-function applyMigrationFiles(sqlite: Database.Database, files: string[]) {
-  for (const file of files) {
-    const sql = readFileSync(join(migrationsDir, file), "utf8");
-    for (const statement of sql.split(/--> statement-breakpoint\n?/)) {
-      const trimmed = statement.trim();
-      if (trimmed) sqlite.exec(trimmed);
-    }
-  }
-}
-
-function listMigrationSqlFiles(): string[] {
-  return readdirSync(migrationsDir)
-    .filter((file) => file.endsWith(".sql"))
-    .sort();
-}
 
 describe("graph queries", () => {
   beforeEach(() => {
@@ -188,7 +174,60 @@ describe("schema v0.5 migrations", () => {
       .all()
       .map((row) => (row as { name: string }).name);
     expect(columns).toContain("is_self");
+    expect(columns).not.toContain("company");
+    expect(columns).not.toContain("title");
     sqlite.close();
+  });
+
+  it("drops company/title on P2d migration while preserving employments", () => {
+    const dir = mkdtempSync(join(tmpdir(), "signals-migrate-p2d-"));
+    const dbPath = join(dir, "data.db");
+    const sqlite = new Database(dbPath);
+    sqlite.pragma("foreign_keys = ON");
+
+    const migrationFiles = listMigrationSqlFiles();
+    const through0018 = migrationFiles.filter((file) => !file.startsWith("0019_drop"));
+    applyMigrationFiles(sqlite, through0018);
+
+    const contactId = nanoid();
+    const employmentId = nanoid();
+    const orgId = nanoid();
+    sqlite
+      .prepare("INSERT INTO orgs (id, name, scope, source) VALUES (?, ?, 'shared', 'test')")
+      .run(orgId, "Acme Corp");
+    sqlite
+      .prepare(
+        `INSERT INTO contacts (
+          id, name, funnel_stage, score, enrichment_score, created_at, updated_at
+        ) VALUES (?, ?, 'prospect', 0, 0, 1, 1)`,
+      )
+      .run(contactId, "Worker");
+    sqlite
+      .prepare(
+        `INSERT INTO contact_employments (
+          id, contact_id, org_id, title, is_current, scope, source, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, 1, 'shared', 'test', 1, 1)`,
+      )
+      .run(employmentId, contactId, orgId, "CEO");
+
+    applyMigrationFiles(
+      sqlite,
+      migrationFiles.filter((file) => file.startsWith("0019_drop")),
+    );
+    sqlite.close();
+
+    const upgraded = new Database(dbPath);
+    const columns = upgraded
+      .prepare("PRAGMA table_info(contacts)")
+      .all()
+      .map((row) => (row as { name: string }).name);
+    expect(columns).not.toContain("company");
+    expect(columns).not.toContain("title");
+    expect(columnExists(upgraded, "contacts", "company")).toBe(false);
+    expect(
+      upgraded.prepare("SELECT COUNT(*) AS count FROM contact_employments").get(),
+    ).toEqual({ count: 1 });
+    upgraded.close();
   });
 
   it("applies 0016 additively for N-1 databases (is_self column absent before upgrade)", () => {

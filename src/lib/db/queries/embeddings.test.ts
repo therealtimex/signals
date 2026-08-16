@@ -362,16 +362,10 @@ describe("embeddings query layer", () => {
       isCurrent: true,
       source: "test",
     });
-    db.update(contacts)
-      .set({ company: "Stale Scalar Co", title: "Stale Title" })
-      .where(eq(contacts.id, contact.id))
-      .run();
 
     const text = assembleEmbedText("contact", contact.id, "profile");
     expect(text).toContain("Structured Corp");
     expect(text).toContain("VP Sales");
-    expect(text).not.toContain("Stale Scalar Co");
-    expect(text).not.toContain("Stale Title");
   });
 
   it("semantic_search surfaces RTX embed errors verbatim", async () => {

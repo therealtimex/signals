@@ -134,15 +134,15 @@ describe("contact-employment-writes", () => {
     expect(ids).toEqual([first.id, second.id].sort());
   });
 
-  it("projects scalar company from structured employments on create", () => {
+  it("resolves company/title from structured employments on create", () => {
     const org = createOrg({ name: "Beta LLC", source: "test" });
     const contact = createContact({
       name: "Structured",
       employments: [{ orgId: org.id, title: "Founder", isCurrent: true }],
     });
 
-    const row = db.select().from(contacts).where(eq(contacts.id, contact.id)).get();
-    expect(row?.company).toBe("Beta LLC");
-    expect(row?.title).toBe("Founder");
+    const dto = getContactById(contact.id);
+    expect(dto?.company).toBe("Beta LLC");
+    expect(dto?.title).toBe("Founder");
   });
 });

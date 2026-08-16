@@ -121,14 +121,6 @@ describe("employment privacy on shared surfaces", () => {
       source: "test",
     });
 
-    db.update(contacts)
-      .set({
-        company: PRIVACY_SENTINELS.privateEmployer,
-        title: PRIVACY_SENTINELS.privateEmploymentTitle,
-      })
-      .where(eq(contacts.id, contact.id))
-      .run();
-
     expect(resolveContactCareerSummary(contact.id)).toEqual({
       company: null,
       title: null,

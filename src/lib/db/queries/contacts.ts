@@ -35,17 +35,17 @@ export type ContactWriteExtras = {
   channels?: ChannelInput[];
   employments?: EmploymentInput[];
   orgId?: string | null;
+  company?: string | null;
+  title?: string | null;
   /** Stripped on write — use contact_identities */
   platform?: string | null;
   platformUserId?: string | null;
 };
 
-export type EmploymentWriteExtras = {
-  employments?: EmploymentInput[];
-  orgId?: string | null;
-  company?: string | null;
-  title?: string | null;
-};
+export type EmploymentWriteExtras = Pick<
+  ContactWriteExtras,
+  "employments" | "orgId" | "company" | "title"
+>;
 
 /** Contact create/update payload with optional channel shim fields. */
 export type ContactWriteInput = Omit<NewContact, "id"> & ContactWriteExtras;
@@ -58,7 +58,9 @@ function parseName(fullName: string): { firstName: string; lastName: string } {
   return { firstName: fullName.slice(0, idx), lastName: fullName.slice(idx + 1) };
 }
 
-function stripChannelShim<T extends ContactWriteExtras>(data: T): Omit<T, keyof ContactWriteExtras> {
+function stripContactWriteExtras<T extends ContactWriteExtras>(
+  data: T,
+): Omit<T, keyof ContactWriteExtras> {
   const {
     email: _e,
     phone: _p,
@@ -66,21 +68,10 @@ function stripChannelShim<T extends ContactWriteExtras>(data: T): Omit<T, keyof 
     channels: _c,
     employments: _emp,
     orgId: _orgId,
-    platform: _plat,
-    platformUserId: _puid,
-    ...rest
-  } = data;
-  return rest;
-}
-
-function stripEmploymentShim<T extends EmploymentWriteExtras>(
-  data: T,
-): Omit<T, "employments" | "orgId" | "company" | "title"> {
-  const {
-    employments: _emp,
-    orgId: _orgId,
     company: _company,
     title: _title,
+    platform: _plat,
+    platformUserId: _puid,
     ...rest
   } = data;
   return rest;
@@ -280,7 +271,7 @@ export function createContact(
   channelSource = "api:create_contact",
 ): ContactDTO {
   const id = nanoid();
-  const rowData = stripEmploymentShim(stripChannelShim(data));
+  const rowData = stripContactWriteExtras(data);
 
   const nameFields =
     !rowData.firstName && !rowData.lastName && rowData.name ? parseName(rowData.name) : {};
@@ -325,7 +316,7 @@ export function updateContact(
 
   validateContactWrites(id, data);
 
-  const rowUpdates = stripEmploymentShim(stripChannelShim(data));
+  const rowUpdates = stripContactWriteExtras(data);
   const updates = { ...rowUpdates };
 
   if (data.firstName !== undefined || data.lastName !== undefined) {

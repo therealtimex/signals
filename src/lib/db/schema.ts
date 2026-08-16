@@ -41,8 +41,6 @@ export const contacts = sqliteTable("contacts", {
   firstName: text("first_name"),
   lastName: text("last_name"),
   headline: text("headline"),
-  company: text("company"),
-  title: text("title"),
   // Deprecated: use contactIdentities table instead
   platform: text("platform", { enum: PLATFORM_ENUM }),
   platformUserId: text("platform_user_id"),
@@ -70,7 +68,6 @@ export const contacts = sqliteTable("contacts", {
 }, (table) => [
   index("idx_contacts_email").on(table.email),
   index("idx_contacts_name").on(table.name),
-  index("idx_contacts_company").on(table.company),
 ]);
 
 // --- Contact Identities (multi-platform golden record) ---

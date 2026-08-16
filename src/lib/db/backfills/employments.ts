@@ -1,5 +1,7 @@
 import { eq, and } from "drizzle-orm";
-import { db, sqlite } from "@/lib/db/client";
+import type Database from "better-sqlite3";
+import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
+import { db, sqlite as defaultSqlite } from "@/lib/db/client";
 import { getContactWorksAtOrgId } from "@/lib/db/contact-org-dual-write";
 import { projectWorksAtFromEmployments } from "@/lib/db/employment-works-at-projection";
 import { ensureOrgByName } from "@/lib/db/queries/orgs";
@@ -9,6 +11,7 @@ import {
 } from "@/lib/db/queries/contact-employments";
 import { ensureContactEmployment } from "@/lib/db/queries/contact-employment-writes";
 import { contactEmployments } from "@/lib/db/schema";
+import type * as schema from "@/lib/db/schema";
 
 const SOURCE = "backfill:contacts-company-title";
 
@@ -18,9 +21,9 @@ type ScalarRow = {
   title: string | null;
 };
 
-function readScalarRows(): ScalarRow[] {
+function readScalarRows(runner: Database.Database): ScalarRow[] {
   try {
-    return sqlite
+    return runner
       .prepare(
         `SELECT id, company, title
          FROM contacts
@@ -32,9 +35,17 @@ function readScalarRows(): ScalarRow[] {
   }
 }
 
+function contactsHasCompanyColumn(runner: Database.Database): boolean {
+  const rows = runner.prepare("PRAGMA table_info(contacts)").all() as { name: string }[];
+  return rows.some((row) => row.name === "company");
+}
+
 /** Backfill company/title scalars into `contact_employments` (idempotent). */
-export function backfillEmployments(): { inserted: number; skipped: number } {
-  const rows = readScalarRows();
+export function backfillEmploymentsWithDb(
+  runner: BetterSQLite3Database<typeof schema>,
+  sqliteRunner: Database.Database = defaultSqlite,
+): { inserted: number; skipped: number } {
+  const rows = readScalarRows(sqliteRunner);
   let inserted = 0;
   let skipped = 0;
 
@@ -67,7 +78,7 @@ export function backfillEmployments(): { inserted: number; skipped: number } {
   const contactIds = [
     ...new Set([
       ...rows.map((row) => row.id),
-      ...db.select({ contactId: contactEmployments.contactId }).from(contactEmployments).all().map((row) => row.contactId),
+      ...runner.select({ contactId: contactEmployments.contactId }).from(contactEmployments).all().map((row) => row.contactId),
     ]),
   ];
   for (const contactId of contactIds) {
@@ -77,8 +88,13 @@ export function backfillEmployments(): { inserted: number; skipped: number } {
   return { inserted, skipped };
 }
 
+export function backfillEmployments(): { inserted: number; skipped: number } {
+  return backfillEmploymentsWithDb(db, defaultSqlite);
+}
+
 export function countContactsWithScalarCompany(): number {
-  return readScalarRows().filter((row) => row.company?.trim()).length;
+  if (!contactsHasCompanyColumn(defaultSqlite)) return 0;
+  return readScalarRows(defaultSqlite).filter((row) => row.company?.trim()).length;
 }
 
 export function countEmployments(): number {
@@ -86,8 +102,10 @@ export function countEmployments(): number {
 }
 
 export function countScalarCompaniesMissingEmployment(): number {
+  if (!contactsHasCompanyColumn(defaultSqlite)) return 0;
+
   let missing = 0;
-  for (const row of readScalarRows()) {
+  for (const row of readScalarRows(defaultSqlite)) {
     const company = row.company?.trim();
     if (!company) continue;
     const preferredOrgId = getContactWorksAtOrgId(row.id);

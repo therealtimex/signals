@@ -1,7 +1,9 @@
 import { desc, eq, count } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { contacts, tasks, workflowRuns, contentItems } from "@/lib/db/schema";
-import type { Contact, Task } from "@/lib/db/types";
+import { attachContactDtos } from "@/lib/db/queries/contact-read-model";
+import type { ContactDTO } from "@/lib/db/queries/contact-dto";
+import type { Task } from "@/lib/db/types";
 
 export interface FunnelDistribution {
   stage: string;
@@ -32,7 +34,7 @@ export interface DashboardMetrics {
   activeWorkflows: number;
   pendingTasks: number;
   contentItems: number;
-  recentContacts: Contact[];
+  recentContacts: ContactDTO[];
   pendingTasksList: Task[];
 }
 
@@ -53,12 +55,13 @@ export function getDashboardMetrics(): DashboardMetrics {
 
   const totalContent = db.select({ value: count() }).from(contentItems).get()?.value ?? 0;
 
-  const recentContacts = db
+  const recentContactRows = db
     .select()
     .from(contacts)
     .orderBy(desc(contacts.createdAt))
     .limit(5)
     .all();
+  const recentContacts = attachContactDtos(recentContactRows);
 
   const pendingTasksList = db
     .select()

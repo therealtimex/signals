@@ -24,7 +24,7 @@ describe("graph backfills", () => {
     resetCoreTables();
   });
 
-  it("creates orgs and works_at edges from contacts.company", () => {
+  it("dedupes employments into shared org and works_at edges", () => {
     createContact({
       name: "Alice",
       company: "Acme Corp",
@@ -45,7 +45,7 @@ describe("graph backfills", () => {
 
     const result = runGraphBackfills();
     expect(result.worksAt.upserted).toBe(0);
-    expect(result.worksAt.skipped).toBeGreaterThan(0);
+    expect(result.worksAt.skipped).toBe(0);
 
     const orgRows = db.select().from(orgs).all();
     expect(orgRows).toHaveLength(1);
