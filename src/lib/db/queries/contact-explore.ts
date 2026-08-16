@@ -8,6 +8,7 @@ import {
   niches,
 } from "@/lib/db/schema";
 import { getActivePersona } from "@/lib/db/queries/personas";
+import { isPersonaAgeStale } from "@/lib/persona/staleness";
 import type { IdentityMetric } from "@/lib/db/types";
 
 export type ContactExplorePersona = {
@@ -18,6 +19,8 @@ export type ContactExplorePersona = {
   interests: string[];
   confidence: number | null;
   generatedAt: number | null;
+  /** Age-only staleness on the read path; null when absent or local_only. */
+  stale: boolean | null;
 };
 
 export type ContactExploreIdentity = {
@@ -122,6 +125,7 @@ function buildPersonaProjection(contactId: string): ContactExplorePersona {
       interests: [],
       confidence: null,
       generatedAt: null,
+      stale: null,
     };
   }
 
@@ -134,6 +138,7 @@ function buildPersonaProjection(contactId: string): ContactExplorePersona {
       interests: [],
       confidence: null,
       generatedAt: null,
+      stale: null,
     };
   }
 
@@ -145,6 +150,7 @@ function buildPersonaProjection(contactId: string): ContactExplorePersona {
     interests: parsePersonaInterests(persona.interests),
     confidence: persona.confidence,
     generatedAt: persona.generatedAt,
+    stale: isPersonaAgeStale(persona.generatedAt),
   };
 }
 
