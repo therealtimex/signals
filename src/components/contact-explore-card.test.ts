@@ -11,6 +11,14 @@ import {
 } from "@/components/contact-explore-card";
 import type { ContactExploreCard } from "@/lib/db/queries/contact-explore";
 
+const baseContact = {
+  id: "contact-1",
+  name: "Test Contact",
+  headline: null,
+  avatarUrl: null,
+  location: null,
+};
+
 const baseSharedPersona = {
   visibility: "shared" as const,
   archetype: "Builder",
@@ -19,9 +27,13 @@ const baseSharedPersona = {
   interests: ["AI"],
   confidence: 0.8,
   generatedAt: 1_700_000_000,
+  stale: false,
+  conversionTriggers: [] as string[],
+  engagementFormats: [] as string[],
 };
 
 const absentExplore: ContactExploreCard = {
+  contact: baseContact,
   persona: {
     visibility: "absent",
     archetype: null,
@@ -31,22 +43,32 @@ const absentExplore: ContactExploreCard = {
     confidence: null,
     generatedAt: null,
     stale: null,
+    conversionTriggers: [],
+    engagementFormats: [],
   },
   identities: [],
   niches: [],
+  relationship: null,
+  org: null,
+  recentPosts: [],
 };
 
 function sharedExplore(summary: string, stale = false): ContactExploreCard {
   return {
+    contact: baseContact,
     persona: { ...baseSharedPersona, summary, stale },
     identities: [],
     niches: [],
+    relationship: null,
+    org: null,
+    recentPosts: [],
   };
 }
 
 describe("ContactExploreCardView", () => {
   it("renders shared persona summary and niche chips", () => {
     const explore: ContactExploreCard = {
+      contact: baseContact,
       persona: { ...baseSharedPersona, stale: false },
       identities: [],
       niches: [
@@ -58,6 +80,9 @@ describe("ContactExploreCardView", () => {
           weight: 0.9,
         },
       ],
+      relationship: null,
+      org: null,
+      recentPosts: [],
     };
 
     const html = renderToStaticMarkup(
@@ -94,8 +119,81 @@ describe("ContactExploreCardView", () => {
     expect(formatPlatformHandle("/in/name")).toBe("/in/name");
   });
 
+  it("renders header, relationship chip, org badge, and recent posts", () => {
+    const explore: ContactExploreCard = {
+      contact: {
+        id: "contact-1",
+        name: "Ada Lovelace",
+        headline: "Builder",
+        avatarUrl: "https://example.com/ada.jpg",
+        location: "London",
+      },
+      persona: {
+        ...baseSharedPersona,
+        conversionTriggers: ["case studies"],
+        engagementFormats: ["threads"],
+      },
+      identities: [
+        {
+          id: "id-1",
+          platform: "x",
+          platformHandle: "@ada",
+          displayName: "Ada Lovelace",
+          followersCount: 1200,
+          followingCount: 100,
+          postsCount: 50,
+          listedCount: 10,
+          engagementRate: 0.05,
+          statsUpdatedAt: null,
+          metricSnapshotAt: null,
+          avatarUrl: "https://example.com/ada.jpg",
+          bio: "Math and machines",
+          location: "London",
+          isVerified: true,
+          platformCreatedAt: 1_600_000_000,
+          platformUrl: "https://x.com/ada",
+          isPrimary: true,
+          createdAt: 1_600_000_000,
+        },
+      ],
+      niches: [],
+      relationship: { label: "Follower", edgeType: "follows" },
+      org: {
+        id: "org-1",
+        name: "Analytical Engines",
+        domain: "engines.example",
+        avatarUrl: null,
+      },
+      recentPosts: [
+        {
+          id: "post-1",
+          contentType: "post",
+          platform: "x",
+          text: "Hello world",
+          url: "https://example.com/post",
+          publishedAt: 1_700_000_000,
+        },
+      ],
+    };
+
+    const html = renderToStaticMarkup(
+      createElement(ContactExploreCardView, { contactId: "contact-1", explore }),
+    );
+    expect(html).toContain("Ada Lovelace");
+    expect(html).toContain("Verified");
+    expect(html).toContain("Follower");
+    expect(html).toContain("Analytical Engines");
+    expect(html).toContain("/dashboard/organizations/org-1");
+    expect(html).toContain("What converts them");
+    expect(html).toContain("case studies");
+    expect(html).toContain("Hello world");
+    expect(html).toContain("View post");
+    expect(html).toContain("href=\"https://x.com/ada\"");
+  });
+
   it("shows local-only badge without generate affordance", () => {
     const explore: ContactExploreCard = {
+      contact: baseContact,
       persona: {
         visibility: "local_only",
         archetype: null,
@@ -105,9 +203,14 @@ describe("ContactExploreCardView", () => {
         confidence: null,
         generatedAt: null,
         stale: null,
+        conversionTriggers: [],
+        engagementFormats: [],
       },
       identities: [],
       niches: [],
+      relationship: null,
+      org: null,
+      recentPosts: [],
     };
 
     const html = renderToStaticMarkup(
@@ -116,6 +219,7 @@ describe("ContactExploreCardView", () => {
     expect(html).toContain("Private persona");
     expect(html).toContain("Re-scope it before generating a shared one");
     expect(html).not.toContain("Generate persona");
+    expect(html).not.toContain("case studies");
   });
 
   it("formatRelativeGeneratedAt stays relative beyond seven days", () => {
@@ -185,6 +289,8 @@ describe("ContactExploreCardView interactions", () => {
           summary: "Generated summary",
           stale: false,
           generatedAt: 1_800_000_000,
+          conversionTriggers: [],
+          engagementFormats: [],
         },
       }),
     });

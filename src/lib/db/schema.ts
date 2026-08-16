@@ -65,6 +65,7 @@ export const contacts = sqliteTable("contacts", {
   score: integer("score").notNull().default(0),
   metadata: text("metadata").default("{}"), // JSON
   lastInteractionAt: integer("last_interaction_at"),
+  isSelf: integer("is_self", { mode: "boolean" }).notNull().default(false),
   ...timestamps,
 }, (table) => [
   index("idx_contacts_email").on(table.email),
