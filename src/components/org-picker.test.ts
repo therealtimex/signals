@@ -125,4 +125,67 @@ describe("OrgPicker", () => {
 
     expect(onChange).toHaveBeenCalledWith({ orgId: "", company: "Different org" });
   });
+
+  it("keeps notifying parent on subsequent edits after the first invalidation", async () => {
+    const onChange = vi.fn();
+
+    await act(async () => {
+      root.render(
+        createElement(OrgPicker, {
+          id: "organization",
+          onChange,
+        }),
+      );
+    });
+
+    const input = container.querySelector("#organization") as HTMLInputElement;
+
+    await act(async () => {
+      input.focus();
+      setInputValue(input, "Ac");
+    });
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    });
+
+    const option = container.querySelector('[role="option"]') as HTMLButtonElement;
+    await act(async () => {
+      option.click();
+    });
+
+    await act(async () => {
+      setInputValue(input, "Acm");
+    });
+    await act(async () => {
+      setInputValue(input, "Acme Two");
+    });
+
+    expect(onChange).toHaveBeenLastCalledWith({ orgId: "", company: "Acme Two" });
+  });
+
+  it("notifies parent when a preloaded company name is edited and reverted", async () => {
+    const onChange = vi.fn();
+
+    await act(async () => {
+      root.render(
+        createElement(OrgPicker, {
+          id: "organization",
+          defaultOrgName: "Acme",
+          onChange,
+        }),
+      );
+    });
+
+    const input = container.querySelector("#organization") as HTMLInputElement;
+
+    await act(async () => {
+      setInputValue(input, "Different org");
+    });
+    await act(async () => {
+      setInputValue(input, "Acme");
+    });
+
+    expect(onChange).toHaveBeenLastCalledWith({ orgId: "", company: "Acme" });
+  });
 });

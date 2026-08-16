@@ -39,6 +39,11 @@ export function OrgPicker({
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [editingCommitted, setEditingCommitted] = useState(false);
+
+  function emitEditedValue(trimmed: string) {
+    onChange(trimmed ? { orgId: "", company: trimmed } : { orgId: "", company: "" });
+  }
 
   const searchOrgs = useCallback(async (term: string) => {
     const params = new URLSearchParams();
@@ -83,6 +88,7 @@ export function OrgPicker({
     setQuery(org.name);
     setOpen(false);
     setError(null);
+    setEditingCommitted(false);
     onChange(value);
   }
 
@@ -92,6 +98,7 @@ export function OrgPicker({
     setResults([]);
     setOpen(false);
     setError(null);
+    setEditingCommitted(false);
     onChange({ orgId: "", company: "" });
   }
 
@@ -145,23 +152,29 @@ export function OrgPicker({
             setQuery(next);
             setOpen(true);
 
-            const baseline = (selected?.company ?? defaultOrgName).trim();
             const trimmed = next.trim();
             const hadCommittedOrg = Boolean(selected) || Boolean(defaultOrgName.trim());
 
             if (selected) {
               setSelected(null);
-            }
-
-            if (!hadCommittedOrg) {
-              if (!trimmed) {
-                onChange({ orgId: "", company: "" });
-              }
+              setEditingCommitted(true);
+              emitEditedValue(trimmed);
               return;
             }
 
-            if (trimmed !== baseline) {
-              onChange(trimmed ? { orgId: "", company: trimmed } : { orgId: "", company: "" });
+            if (editingCommitted) {
+              emitEditedValue(trimmed);
+              return;
+            }
+
+            if (hadCommittedOrg) {
+              setEditingCommitted(true);
+              emitEditedValue(trimmed);
+              return;
+            }
+
+            if (!trimmed) {
+              onChange({ orgId: "", company: "" });
             }
           }}
         />
