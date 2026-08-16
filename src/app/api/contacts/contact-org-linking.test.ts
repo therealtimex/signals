@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/contacts/route";
-import { PUT } from "@/app/api/contacts/[id]/route";
+import { PATCH, PUT } from "@/app/api/contacts/[id]/route";
 import { createContact } from "@/lib/db/queries/contacts";
 import { createOrg } from "@/lib/db/queries/orgs";
 import { db } from "@/lib/db/client";
@@ -42,6 +42,44 @@ describe("contact org linking API", () => {
       title: "CEO",
       is_current: true,
     });
+  });
+
+  it("POST /api/contacts honors explicit orgId when duplicate org names exist", async () => {
+    db.insert(orgs)
+      .values({
+        id: "same-name-first",
+        name: "Acme",
+        orgType: "company",
+        scope: "shared",
+        source: "test",
+      })
+      .run();
+    db.insert(orgs)
+      .values({
+        id: "same-name-selected",
+        name: "Acme",
+        orgType: "company",
+        scope: "shared",
+        source: "test",
+      })
+      .run();
+
+    const req = new NextRequest("http://localhost/api/contacts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "Duplicate Name",
+        orgId: "same-name-selected",
+        platform: "x",
+      }),
+    });
+
+    const res = await POST(req);
+    expect(res.status).toBe(201);
+
+    const worksAt = db.select().from(graphEdges).where(eq(graphEdges.edgeType, "works_at")).all();
+    expect(worksAt).toHaveLength(1);
+    expect(worksAt[0]?.dstId).toBe("same-name-selected");
   });
 
   it("POST /api/contacts links org via company string", async () => {
@@ -106,7 +144,7 @@ describe("contact org linking API", () => {
     expect(db.select().from(graphEdges).where(eq(graphEdges.edgeType, "works_at")).all()).toHaveLength(0);
   });
 
-  it("PUT /api/contacts/[id] refreshes works_at title when only title changes", async () => {
+  it("PATCH /api/contacts/[id] refreshes works_at title when only title changes", async () => {
     const contact = createContact({
       name: "Titled",
       company: "Acme Corp",
@@ -130,12 +168,12 @@ describe("contact org linking API", () => {
       .run();
 
     const req = new NextRequest(`http://localhost/api/contacts/${contact.id}`, {
-      method: "PUT",
+      method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title: "CTO" }),
     });
 
-    const res = await PUT(req, { params: Promise.resolve({ id: contact.id }) });
+    const res = await PATCH(req, { params: Promise.resolve({ id: contact.id }) });
     expect(res.status).toBe(200);
 
     const worksAt = db.select().from(graphEdges).where(eq(graphEdges.edgeType, "works_at")).all();

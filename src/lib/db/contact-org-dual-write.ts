@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { graphEdges } from "@/lib/db/schema";
-import { ensureOrgByName } from "@/lib/db/queries/orgs";
+import { ensureOrgByName, getOrgById } from "@/lib/db/queries/orgs";
 import { upsertGraphEdge } from "@/lib/db/queries/graph";
 import { normalizeOrgName } from "@/lib/db/backfills/org-names";
 
@@ -57,6 +57,37 @@ export function syncContactCompanyGraph(
   });
 
   return { orgId: org.id, edgeId: edge.id, retiredEdges };
+}
+
+/** Link a contact to an exact org node by ID (authoritative when `orgId` is supplied). */
+export function syncContactOrgGraph(
+  contactId: string,
+  orgId: string,
+  title?: string | null,
+  source = "api:create_contact",
+): { orgId: string; edgeId?: string; retiredEdges: number } {
+  const org = getOrgById(orgId);
+  if (!org) {
+    throw new Error(`Organization not found: ${orgId}`);
+  }
+
+  const retiredEdges = retireWorksAtEdges(contactId, orgId);
+
+  const edge = upsertGraphEdge({
+    srcType: "contact",
+    srcId: contactId,
+    dstType: "org",
+    dstId: orgId,
+    edgeType: "works_at",
+    properties: JSON.stringify({
+      title: title ?? null,
+      is_current: true,
+    }),
+    scope: "shared",
+    source,
+  });
+
+  return { orgId, edgeId: edge.id, retiredEdges };
 }
 
 /** Dual-write `contacts.company` into org node + `works_at` edge (projection stays on contacts). */

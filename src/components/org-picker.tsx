@@ -143,9 +143,12 @@ export function OrgPicker({
           onChange={(e) => {
             const next = e.target.value;
             setQuery(next);
-            setSelected(null);
             setOpen(true);
-            if (!next.trim()) {
+            if (selected) {
+              setSelected(null);
+              const trimmed = next.trim();
+              onChange(trimmed ? { orgId: "", company: trimmed } : { orgId: "", company: "" });
+            } else if (!next.trim()) {
               onChange({ orgId: "", company: "" });
             }
           }}

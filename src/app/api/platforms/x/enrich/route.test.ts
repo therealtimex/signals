@@ -13,6 +13,7 @@ import { resetCoreTables } from "@/test/db";
 describe("/api/platforms/x/enrich", () => {
   beforeEach(() => {
     resetCoreTables();
+    db.delete(platformAccounts).run();
   });
 
   it("GET returns migration guidance when X is not connected", async () => {

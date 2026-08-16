@@ -4,6 +4,7 @@ import { PLATFORM_ENUM } from "@/lib/db/platforms";
 import { getContactById, updateContact, deleteContact } from "@/lib/db/queries/contacts";
 import { db } from "@/lib/db/client";
 import {
+  applyContactOrgLink,
   resolveContactCompanyFields,
   shouldSyncCompanyGraphOnUpdate,
   syncContactCompanyFromContact,
@@ -46,11 +47,10 @@ export async function GET(
   return NextResponse.json(contact);
 }
 
-export async function PUT(
+async function updateContactHandler(
   req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const { id } = await params;
+  id: string,
+): Promise<NextResponse> {
   try {
     const body = await req.json();
     const { orgId, company, ...data } = updateContactSchema.parse(body);
@@ -71,7 +71,26 @@ export async function PUT(
       ? db.transaction(() => {
           const updated = updateContact(id, updates);
           if (!updated) return undefined;
-          syncContactCompanyFromContact(updated.id, updated.company, updated.title, "api:update_contact");
+
+          if (resolvedCompany.touched) {
+            applyContactOrgLink(
+              updated.id,
+              {
+                company: resolvedCompany.company,
+                orgId: resolvedCompany.orgId,
+              },
+              "api:update_contact",
+              updated.title,
+            );
+          } else {
+            syncContactCompanyFromContact(
+              updated.id,
+              updated.company,
+              updated.title,
+              "api:update_contact",
+            );
+          }
+
           return updated;
         })
       : updateContact(id, updates);
@@ -86,6 +105,22 @@ export async function PUT(
     }
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
+}
+
+export async function PUT(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  return updateContactHandler(req, id);
+}
+
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  return updateContactHandler(req, id);
 }
 
 export async function DELETE(

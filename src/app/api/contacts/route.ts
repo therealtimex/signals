@@ -5,8 +5,7 @@ import { listContacts, createContact } from "@/lib/db/queries/contacts";
 import { createIdentity } from "@/lib/db/queries/identities";
 import { recalcEnrichment } from "@/lib/db/queries/contacts";
 import { db } from "@/lib/db/client";
-import { dualWriteContactCompany } from "@/lib/db/contact-org-dual-write";
-import { resolveContactCompanyFields } from "@/lib/contact-org-api";
+import { applyContactOrgLink, resolveContactCompanyFields } from "@/lib/contact-org-api";
 
 const identitySchema = z.object({
   platform: z.enum(PLATFORM_ENUM),
@@ -84,7 +83,15 @@ export async function POST(req: NextRequest) {
     const contact = db.transaction(() => {
       const created = createContact(contactPayload);
       if (resolvedCompany.touched) {
-        dualWriteContactCompany(created.id, contactPayload.company ?? null, contactPayload.title);
+        applyContactOrgLink(
+          created.id,
+          {
+            company: resolvedCompany.company,
+            orgId: resolvedCompany.orgId,
+          },
+          "api:create_contact",
+          contactPayload.title,
+        );
       }
       return created;
     });

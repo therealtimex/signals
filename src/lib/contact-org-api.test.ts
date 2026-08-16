@@ -14,7 +14,7 @@ describe("contact-org-api", () => {
   it("resolves company from orgId", () => {
     const org = createOrg({ name: "Acme Corp", source: "test" });
     const resolved = resolveContactCompanyFields({ orgId: org.id });
-    expect(resolved).toEqual({ company: "Acme Corp", touched: true });
+    expect(resolved).toEqual({ company: "Acme Corp", orgId: org.id, touched: true });
   });
 
   it("returns error for unknown orgId", () => {
