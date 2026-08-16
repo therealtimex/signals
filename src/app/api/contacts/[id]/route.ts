@@ -2,13 +2,20 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { PLATFORM_ENUM } from "@/lib/db/platforms";
 import { getContactById, updateContact, deleteContact } from "@/lib/db/queries/contacts";
+import { db } from "@/lib/db/client";
+import {
+  resolveContactCompanyFields,
+  shouldSyncCompanyGraphOnUpdate,
+  syncContactCompanyFromContact,
+} from "@/lib/contact-org-api";
 
 const updateContactSchema = z.object({
   name: z.string().min(1).optional(),
   firstName: z.string().optional(),
   lastName: z.string().optional(),
   headline: z.string().optional(),
-  company: z.string().optional(),
+  orgId: z.string().optional().nullable(),
+  company: z.string().optional().nullable(),
   title: z.string().optional(),
   platform: z.enum(PLATFORM_ENUM).nullable().optional(),
   platformUserId: z.string().optional(),
@@ -46,8 +53,29 @@ export async function PUT(
   const { id } = await params;
   try {
     const body = await req.json();
-    const data = updateContactSchema.parse(body);
-    const contact = updateContact(id, data);
+    const { orgId, company, ...data } = updateContactSchema.parse(body);
+
+    const resolvedCompany = resolveContactCompanyFields({ orgId, company });
+    if ("error" in resolvedCompany) {
+      return NextResponse.json({ error: resolvedCompany.error }, { status: 400 });
+    }
+
+    const updates: Record<string, unknown> = { ...data };
+    if (resolvedCompany.touched) {
+      updates.company = resolvedCompany.company;
+    }
+
+    const syncGraph = shouldSyncCompanyGraphOnUpdate({ orgId, company, title: data.title });
+
+    const contact = syncGraph
+      ? db.transaction(() => {
+          const updated = updateContact(id, updates);
+          if (!updated) return undefined;
+          syncContactCompanyFromContact(updated.id, updated.company, updated.title, "api:update_contact");
+          return updated;
+        })
+      : updateContact(id, updates);
+
     if (!contact) {
       return NextResponse.json({ error: "Contact not found" }, { status: 404 });
     }

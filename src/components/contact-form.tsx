@@ -11,6 +11,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { Contact } from "@/lib/db/types";
+import { OrgPicker } from "@/components/org-picker";
 
 const funnelStages = ["prospect", "engaged", "qualified", "opportunity", "customer", "advocate"];
 const platforms = ["x", "linkedin", "gmail", "substack"];
@@ -22,7 +23,7 @@ const platformLabels: Record<string, string> = {
 };
 
 interface ContactFormProps {
-  defaultValues?: Partial<Contact>;
+  defaultValues?: Partial<Contact> & { orgId?: string };
   onChange: (data: Record<string, string>) => void;
 }
 
@@ -67,15 +68,14 @@ export function ContactForm({ defaultValues, onChange }: ContactFormProps) {
       </div>
 
       <div className="grid grid-cols-2 gap-4">
-        <div className="grid gap-2">
-          <Label htmlFor="company">Company</Label>
-          <Input
-            id="company"
-            defaultValue={defaultValues?.company ?? ""}
-            onChange={(e) => handleChange("company", e.target.value)}
-            placeholder="Company name"
-          />
-        </div>
+        <OrgPicker
+          id="organization"
+          defaultOrgId={defaultValues?.orgId}
+          defaultOrgName={defaultValues?.company ?? ""}
+          onChange={(value) => {
+            onChange({ orgId: value.orgId, company: value.company });
+          }}
+        />
         <div className="grid gap-2">
           <Label htmlFor="title">Title</Label>
           <Input
