@@ -65,6 +65,8 @@ The following no longer run inside Signals:
 
 See `docs/rtx-agent-orchestration.md` for migration guidance.
 
+See also `docs/realtimex-local-app.md` for the full RTX integration map.
+
 ## Removed Playwright enrichment (#5)
 
 Profile scraping for contact enrichment no longer runs inside Signals:
@@ -129,6 +131,7 @@ Unit tests mock RTX chat. To verify persisted `provider:model` provenance agains
 
 ## References
 
+- Integration map: [`docs/realtimex-local-app.md`](./realtimex-local-app.md)
 - Epic #1 / issue #2
-- RTX: `docs/local-apps/architecture.md`
+- RTX: `docs/local-apps/architecture.md` (realtimex-ai-app repo)
 - RTX: `frontend/src/electron/features/local-apps/LocalAppsManager.cjs`

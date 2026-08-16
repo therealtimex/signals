@@ -1,5 +1,9 @@
 # Phase 6: Content Studio + Demand Generation
 
+> **Partially superseded (2026-08)** — AI drafting sections reference removed Vercel AI SDK routes (`/api/content/ai-generate`, in-app `generateText`).
+> **Current intelligence path:** RTX agents + [`docs/rtx-agent-orchestration.md`](../docs/rtx-agent-orchestration.md).
+> **Data paths:** use `~/.signals/` (not `~/.openvolo/`). Review against [`docs/realtimex-local-app.md`](../docs/realtimex-local-app.md) before implementing.
+
 **Prerequisite**: Spec 09 (Multi-Channel Content) introduces the platform-agnostic PostInput component, platform filter, and multi-platform compose dialog that Phase 6 content features build upon.
 
 > Extends the CRM with a full content creation pipeline, browser-based publishing

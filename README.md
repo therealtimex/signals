@@ -23,7 +23,7 @@
 &nbsp;&bull;&nbsp;
 **Multi-platform** — X + LinkedIn + Gmail in one living graph
 &nbsp;&bull;&nbsp;
-**RealTimeX agents** — terminal agents and flows call Signals via the local agent-tools API
+**RealTimeX agents** — terminal agents and flows call Signals via the local agent-tools API ([integration guide](./docs/realtimex-local-app.md))
 
 ---
 
@@ -200,6 +200,15 @@ See [docs/qa/README.md](./docs/qa/README.md) for CI and quality gate details.
 ## Design
 
 Frontend tokens, layout patterns, navigation, and component inventory: [`specs/04-frontend-design.md`](./specs/04-frontend-design.md).
+
+## Documentation
+
+| Doc | Purpose |
+|-----|---------|
+| [`docs/realtimex-local-app.md`](./docs/realtimex-local-app.md) | RTX integration map and migration status |
+| [`docs/local-app.md`](./docs/local-app.md) | Startup contract, SDK bootstrap, embedded mode |
+| [`docs/agent-tools.md`](./docs/agent-tools.md) | Terminal agent REST API |
+| [`specs/signals-spec-v0.5.md`](./specs/signals-spec-v0.5.md) | Product vision and graph model |
 
 ## Roadmap
 

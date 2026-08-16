@@ -1,5 +1,9 @@
 # Browser Enrichment Framework
 
+> **Superseded (2026-08)** — Describes pre-#5 in-process Playwright + Vercel AI SDK enrichment.
+> **Current path:** [`docs/rtx-agent-browser-enrichment.md`](../docs/rtx-agent-browser-enrichment.md) and [`docs/realtimex-local-app.md`](../docs/realtimex-local-app.md).
+> Retained for historical context; do not implement new work from this spec.
+
 > Multi-platform Playwright-based browser enrichment for OpenVolo contacts.
 > Scrapes profile pages and uses LLM extraction to fill CRM fields that
 > platform APIs cannot provide. X/Twitter is the first implementation;
