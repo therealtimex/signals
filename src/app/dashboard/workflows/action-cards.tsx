@@ -32,8 +32,8 @@ const ACTIONS: ActionDef[] = [
   { id: "x-sync-posts", label: "Sync Posts", description: "Import your recent tweets from X.", platform: "x", endpoint: "/api/platforms/x/sync", body: { type: "tweets" }, type: "api", icon: RefreshCw },
   { id: "x-sync-mentions", label: "Sync Mentions", description: "Import recent mentions of your account.", platform: "x", endpoint: "/api/platforms/x/sync", body: { type: "mentions" }, type: "api", icon: RefreshCw },
   { id: "x-sync-contacts", label: "Sync Contacts", description: "Import followers and following from X.", platform: "x", endpoint: "/api/platforms/x/sync", body: { type: "contacts" }, type: "api", icon: RefreshCw },
-  { id: "x-enrich", label: "Enrich Profiles", description: "Enrich contacts with X profile data.", platform: "x", endpoint: "/api/platforms/x/enrich", body: {}, type: "api", icon: Sparkles },
-  { id: "x-enrich-low", label: "Enrich Low-Score", description: "Enrich contacts with low enrichment scores.", platform: "x", endpoint: "/api/platforms/x/enrich", body: { lowScore: true }, type: "api", icon: Sparkles },
+  { id: "x-enrich", label: "Enrich Profiles", description: "Delegate profile enrichment to RTX agent-browser (see docs).", platform: "x", endpoint: "/api/platforms/x/enrich", body: {}, type: "api", icon: Sparkles },
+  { id: "x-enrich-low", label: "Enrich Low-Score", description: "Queue low-score contacts for RTX agent-browser enrichment.", platform: "x", endpoint: "/api/platforms/x/enrich", body: { lowScore: true }, type: "api", icon: Sparkles },
   // LinkedIn
   { id: "li-sync-connections", label: "Sync Connections", description: "Import connections from LinkedIn.", platform: "linkedin", endpoint: "/api/platforms/linkedin/sync", body: { type: "contacts" }, type: "api", icon: RefreshCw },
   { id: "li-import-csv", label: "Import Connections CSV", description: "Upload a LinkedIn connections CSV export.", platform: "linkedin", endpoint: "/api/platforms/linkedin/import", body: {}, type: "upload", icon: Upload },
@@ -92,12 +92,6 @@ function getActionRestriction(
       break;
     case "x-enrich":
     case "x-enrich-low":
-      if (!status.hasBrowserSession) {
-        return {
-          reason: "Set up Browser Session in Settings",
-          navigateTo: "/dashboard/settings",
-        };
-      }
       break;
     case "li-sync-connections":
       if (!status.syncCapable) {
@@ -251,6 +245,10 @@ export function ActionCards() {
       if (!res.ok) {
         setError(data.error || "Action failed");
         return;
+      }
+
+      if (data.delegated && data.message) {
+        setError(data.message);
       }
 
       if (data.workflowRunId) {

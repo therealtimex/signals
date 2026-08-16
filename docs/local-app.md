@@ -65,6 +65,15 @@ The following no longer run inside Signals:
 
 See `docs/rtx-agent-orchestration.md` for migration guidance.
 
+## Removed Playwright enrichment (#5)
+
+Profile scraping for contact enrichment no longer runs inside Signals:
+
+- `sync-x-profiles` / `/api/platforms/x/enrich` — delegate to RTX agent-browser
+- In-process scrapers (`x-scraper`, `browser-scrape` tool) — removed
+
+Publish and engage browser flows still use Signals-managed sessions. See `docs/rtx-agent-browser-enrichment.md`.
+
 ## Modes
 
 | Mode | Detection | Browser |

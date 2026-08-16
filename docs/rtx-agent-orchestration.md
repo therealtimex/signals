@@ -12,7 +12,8 @@ Intelligence moves to **RealTimeX terminal agents** and **Agent Flows**, which c
 | In-process agent runner (`run-agent-workflow.ts`) | RTX flows + `POST /api/agent-tools/invoke` |
 | `/api/content/ai-generate` | Agent-driven creative workflows in RTX |
 | `/api/workflows/templates/generate-prompt` | Manual templates or RTX-assisted authoring |
-| LLM profile parsing (`generateObject`) | Heuristic parser + optional RTX enrichment |
+| LLM profile parsing (`generateObject`) | RTX agent-browser + `enrich_contact` |
+| In-process Playwright enrichment | RTX Browser + agent-browser (`docs/rtx-agent-browser-enrichment.md`) |
 
 Starting an agent from the Automation UI or `start_workflow` still creates a **workflow run** for observability, but the run is marked **failed** with `AGENT_ORCHESTRATION_UNAVAILABLE` until the workflow is migrated to RTX.
 

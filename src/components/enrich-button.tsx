@@ -54,8 +54,8 @@ export function EnrichButton({
 
       const data = await res.json();
 
-      if (!res.ok) {
-        setError(data.error || "Enrichment failed");
+      if (!res.ok || data.delegated) {
+        setError(data.message || data.error || "Enrichment runs via RealTimeX agent-browser (see docs/rtx-agent-browser-enrichment.md)");
         return;
       }
 

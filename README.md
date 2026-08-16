@@ -64,7 +64,9 @@ Five-tab dashboard — Overview, Agents, Engagement, Content, Sync Health. Six r
 
 ### Agent Tools API
 Local REST API (`/api/agent-tools`) for RealTimeX terminal agents — query contacts, start workflows, enrich data, manage content, and more. See `docs/agent-tools.md` and `docs/rtx-agent-orchestration.md`.
-Playwright-based profile scraping with anti-detection measures, heuristic field extraction, and session persistence for authenticated scraping.
+
+### Profile enrichment (RTX agent-browser)
+In-process Playwright profile scraping was removed. Terminal agents enrich contacts via RealTimeX Browser + `agent-browser`, writing results through `enrich_contact`. See `docs/rtx-agent-browser-enrichment.md`. Signals browser sessions remain for **publish/engage** only.
 
 ### Privacy & Security
 AES-256 encrypted credential storage. All data stored locally in SQLite — no cloud dependency, no data leaves your machine.
@@ -131,7 +133,7 @@ SIGNALS_DATA_DIR=~/.signals
 | AI | RealTimeX SDK (`llm.chat`, `llm.embed`) + local agent-tools API |
 | UI | Tailwind CSS 4, shadcn/ui (Radix), Lucide Icons |
 | Charts | Recharts (via shadcn/ui chart component) |
-| Browser | Playwright (enrichment scraping) |
+| Browser | Playwright (publish/engage); RTX agent-browser for enrichment |
 | Parsing | Cheerio (HTML), Tiptap (rich text editor) |
 | Drag & Drop | @dnd-kit (kanban, swimlane views) |
 | Testing | Vitest |
@@ -172,7 +174,7 @@ src/
     workflows/                        # Workflow types, sync wrapper
     agents/                           # Agent tools, runner, routing engine
     chat/                             # Chat types, system prompt, 8 CRM tools, smart prompts
-    browser/                          # Browser enrichment (Playwright, anti-detection)
+    browser/                          # Publish/engage sessions (Playwright)
     analytics/                        # Analytics utilities (time range, formatting)
     scheduler/                        # Background scheduler runner (60s interval)
     auth/                             # AES-256 crypto + API key management
