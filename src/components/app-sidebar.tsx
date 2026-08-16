@@ -3,6 +3,7 @@
 import {
   LayoutDashboard,
   Users,
+  Building2,
   FileText,
   Rocket,
   Zap,
@@ -32,6 +33,7 @@ import { cn } from "@/lib/utils";
 const navItems = [
   { title: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { title: "Contacts", href: "/dashboard/contacts", icon: Users },
+  { title: "Organizations", href: "/dashboard/organizations", icon: Building2 },
   { title: "Content", href: "/dashboard/content", icon: FileText },
   { title: "Launches", href: "/dashboard/launches", icon: Rocket },
   { title: "Automation", href: "/dashboard/workflows", icon: Zap },
