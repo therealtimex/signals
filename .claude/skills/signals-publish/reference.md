@@ -51,7 +51,7 @@ Failure:
 
 ## Compose flow
 
-Opens `https://x.com/compose/post`, scopes selectors to `[role="dialog"]`, types into Draft.js textareas with `type` (not `fill`), and adds thread segments via focus+Enter on the modal add button when eval focus succeeds.
+Opens `https://x.com/compose/post` (or home modal fallback). On `/compose/*` URLs the composer is page-scoped (`tweetTextarea_{n}`); modal overlay compose uses `[role="dialog"]` scoping. Types with `type`, adds thread segments via focus+Enter on the last add button.
 
 ## Verification invariant (P6a port) (owned status ids + max snowflake) **before** compose.
 2. Post via compose UI.

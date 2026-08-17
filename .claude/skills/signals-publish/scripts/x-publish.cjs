@@ -86,9 +86,93 @@ function typeIntoComposeTextarea(selector, text, context) {
   sleep(TYPE_SETTLE_MS);
 }
 
-function activateComposeThreadAdd(context) {
+function abUrl() {
+  const result = runAb(["get", "url"]);
+  return result.ok ? result.stdout.trim() : "";
+}
+
+function isComposePageUrl(url = abUrl()) {
+  return /\/compose\//i.test(url);
+}
+
+function buildComposeScope(mode) {
+  if (mode === "page") {
+    return {
+      mode,
+      tweetTextarea: (index) => `[data-testid="tweetTextarea_${index}"]`,
+      tweetTextareaAny: '[data-testid^="tweetTextarea_"]',
+      addButton: '[data-testid="addButton"]',
+      tweetButton: '[data-testid="tweetButton"]',
+      fileInput: 'input[data-testid="fileInput"]',
+      attachments: '[data-testid="attachments"]',
+      addButtonQuery: '[data-testid="addButton"]',
+    };
+  }
+  return {
+    mode: "modal",
+    tweetTextarea: (index) =>
+      `[role="dialog"] [data-testid="tweetTextarea_${index}"]`,
+    tweetTextareaAny: '[role="dialog"] [data-testid^="tweetTextarea_"]',
+    addButton: '[role="dialog"] [data-testid="addButton"]',
+    tweetButton: '[role="dialog"] [data-testid="tweetButton"]',
+    fileInput: '[role="dialog"] input[data-testid="fileInput"]',
+    attachments: '[role="dialog"] [data-testid="attachments"]',
+    addButtonQuery: '[role="dialog"] [data-testid="addButton"]',
+  };
+}
+
+function detectComposeUiMode() {
+  if (isComposePageUrl() && abCount(X_SELECTORS.tweetTextarea(0)) > 0) {
+    return "page";
+  }
+  if (abCount(X_SELECTORS.composeTweetTextarea(0)) > 0) {
+    return "modal";
+  }
+  return null;
+}
+
+function resolveComposeScope() {
+  if (isComposePageUrl()) {
+    sleep(500);
+    const pageMode = detectComposeUiMode();
+    if (pageMode === "page") return buildComposeScope("page");
+  }
+
+  requireAb(["open", X_COMPOSE_POST_URL], "open compose/post");
+  sleep(1500);
+  assertXLoggedIn();
+
+  const deadline = Date.now() + COMPOSE_WAIT_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const mode = detectComposeUiMode();
+    if (mode) return buildComposeScope(mode);
+    sleep(300);
+  }
+
+  requireAb(["open", X_HOME_URL], "open X home for modal compose fallback");
+  sleep(1000);
+  waitForSelector(X_SELECTORS.composeButton, "wait for compose button");
+  requireAb(["click", X_SELECTORS.composeButton], "open compose modal");
+  sleep(1000);
+
+  const modalDeadline = Date.now() + COMPOSE_WAIT_TIMEOUT_MS;
+  while (Date.now() < modalDeadline) {
+    if (abCount(X_SELECTORS.composeTweetTextarea(0)) > 0) {
+      return buildComposeScope("modal");
+    }
+    sleep(300);
+  }
+
+  throw {
+    message:
+      "Compose textarea not found on compose/post or home modal. X UI may have drifted.",
+    errorCode: "timeout",
+  };
+}
+
+function activateComposeThreadAdd(scope, context) {
   const js = `(() => {
-    const btns = document.querySelectorAll('[role="dialog"] [data-testid="addButton"]');
+    const btns = document.querySelectorAll(${JSON.stringify(scope.addButtonQuery)});
     const btn = btns[btns.length - 1];
     if (!btn) return JSON.stringify({ ok: false, reason: "no_add_button" });
     btn.focus();
@@ -99,10 +183,12 @@ function activateComposeThreadAdd(context) {
   if (parsed?.ok) {
     requireAb(["press", "Enter"], `${context} activate add via Enter`);
   } else {
-    requireAb(["click", X_SELECTORS.composeAddButton], context);
+    requireAb(["click", scope.addButton], context);
   }
   sleep(THREAD_ADD_WAIT_MS);
 }
+
+let activeComposeScope = null;
 
 function emit(result) {
   const line = JSON.stringify(result);
@@ -418,36 +504,31 @@ function captureProfileStatusBaseline(handle) {
   };
 }
 
-function uploadMedia(paths) {
+function uploadMedia(paths, scope) {
   if (!paths?.length) return;
-  requireAb(
-    ["upload", X_SELECTORS.composeFileInput, ...paths],
-    "upload media",
-    "upload_failed"
-  );
-  waitForSelector(X_SELECTORS.attachments, "wait for attachments");
+  requireAb(["upload", scope.fileInput, ...paths], "upload media", "upload_failed");
+  waitForSelector(scope.attachments, "wait for attachments");
   sleep(1000);
 }
 
 function fillCompose(payload) {
-  requireAb(["open", X_COMPOSE_POST_URL], "open compose/post modal");
-  sleep(1500);
-  assertXLoggedIn();
+  activeComposeScope = resolveComposeScope();
+  const scope = activeComposeScope;
 
-  const textarea0 = X_SELECTORS.composeTweetTextarea(0);
+  const textarea0 = scope.tweetTextarea(0);
   waitForSelector(textarea0, "wait for main tweet textarea");
   typeIntoComposeTextarea(textarea0, payload.text, "main tweet");
 
   const mediaPaths = Array.isArray(payload.mediaPaths?.[0])
     ? payload.mediaPaths[0]
     : payload.mediaPaths;
-  if (mediaPaths?.length) uploadMedia(mediaPaths);
+  if (mediaPaths?.length) uploadMedia(mediaPaths, scope);
 
   const threadTexts = payload.threadTexts ?? [];
   for (let i = 0; i < threadTexts.length; i++) {
     const threadIndex = i + 1;
-    activateComposeThreadAdd(`add thread tweet ${threadIndex + 1}`);
-    const selector = X_SELECTORS.composeTweetTextarea(threadIndex);
+    activateComposeThreadAdd(scope, `add thread tweet ${threadIndex + 1}`);
+    const selector = scope.tweetTextarea(threadIndex);
     waitForSelector(selector, `wait for thread textarea ${threadIndex}`);
     typeIntoComposeTextarea(
       selector,
@@ -457,7 +538,7 @@ function fillCompose(payload) {
     const threadMedia = Array.isArray(payload.mediaPaths?.[i + 1])
       ? payload.mediaPaths[i + 1]
       : undefined;
-    if (threadMedia?.length) uploadMedia(threadMedia);
+    if (threadMedia?.length) uploadMedia(threadMedia, scope);
   }
 }
 
@@ -511,8 +592,8 @@ function main() {
       return;
     }
 
-    waitForSelector(X_SELECTORS.composeTweetButton, "wait for tweet button");
-    requireAb(["click", X_SELECTORS.composeTweetButton], "click tweet button");
+    waitForSelector(activeComposeScope.tweetButton, "wait for tweet button");
+    requireAb(["click", activeComposeScope.tweetButton], "click tweet button");
     sleep(2000);
 
     const result = waitForVerifiedPost(payload.text, handle, baseline);

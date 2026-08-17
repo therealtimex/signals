@@ -19,6 +19,7 @@ function defaultState() {
     activeTab: "t1",
     postPublished: false,
     composeOpen: false,
+    composeUiMode: "page",
     threadTextareaCount: 0,
   };
 }
@@ -112,6 +113,13 @@ function textareaCountForSelector(selector, state) {
   if (LOGGED_IN_MARKERS.some((marker) => selector.includes(marker))) {
     return 1;
   }
+  const isDialogScoped =
+    selector.includes("role=\"dialog\"") || selector.includes('[role="dialog"]');
+  if (state.composeOpen && state.composeUiMode === "page") {
+    if (isDialogScoped && selector.includes("tweetTextarea")) {
+      return 0;
+    }
+  }
   if (!state.composeOpen) {
     if (selector.includes("tweetTextarea_0") && !selector.includes("tweetTextarea_1")) {
       return 0;
@@ -165,7 +173,13 @@ function handleIs(rest) {
 function handleEval(rest, state) {
   const js = rest[1] ?? "";
   if (js.includes("addButton") && js.includes("activeElement")) {
-    if (!state.composeOpen || textareaCountForSelector("addButton", state) === 0) {
+    const addCount = textareaCountForSelector(
+      state.composeUiMode === "page"
+        ? '[data-testid="addButton"]'
+        : '[role="dialog"] [data-testid="addButton"]',
+      state
+    );
+    if (!state.composeOpen || addCount === 0) {
       return ok(JSON.stringify(JSON.stringify({ ok: false, reason: "no_add_button" })));
     }
     return ok(JSON.stringify(JSON.stringify({ ok: true })));
@@ -186,8 +200,9 @@ function handleEval(rest, state) {
   return ok("null");
 }
 
-function openCompose(state) {
+function openCompose(state, mode = "page") {
   state.composeOpen = true;
+  state.composeUiMode = mode;
   state.threadTextareaCount = 1;
   writeState(state);
 }
@@ -222,7 +237,7 @@ if (cmd === "get") return handleGet(rest, state);
 if (cmd === "is") return handleIs(rest);
 if (cmd === "open") {
   const url = rest[1] ?? "";
-  if (url.includes("compose/post")) openCompose(state);
+  if (url.includes("compose/post")) openCompose(state, "page");
   return ok();
 }
 if (cmd === "wait") return ok();
