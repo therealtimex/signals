@@ -10,7 +10,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
-const { parseEvalJsonArray } = require(
+const { parseEvalJsonArray, parseEvalJsonValue } = require(
   "../.claude/skills/signals-publish/scripts/parse-eval-json-array.cjs"
 );
 
@@ -101,6 +101,11 @@ if (parseEvalJsonArray('"[]"').length !== 0) {
 }
 if (parseEvalJsonArray("[]").length !== 0) {
   console.error("parseEvalJsonArray failed on raw empty array");
+  process.exit(1);
+}
+const focusPayload = parseEvalJsonValue(JSON.stringify(JSON.stringify({ ok: true })));
+if (!focusPayload?.ok) {
+  console.error("parseEvalJsonValue failed on nested object eval");
   process.exit(1);
 }
 

@@ -1,16 +1,25 @@
 "use strict";
 
-function parseEvalJsonArray(raw) {
-  if (!raw) return [];
+function parseEvalJsonValue(raw) {
+  if (!raw) return null;
   try {
     let value = JSON.parse(raw);
     if (typeof value === "string") {
-      value = JSON.parse(value);
+      try {
+        value = JSON.parse(value);
+      } catch {
+        // keep string eval result
+      }
     }
-    return Array.isArray(value) ? value : [];
+    return value;
   } catch {
-    return [];
+    return null;
   }
 }
 
-module.exports = { parseEvalJsonArray };
+function parseEvalJsonArray(raw) {
+  const value = parseEvalJsonValue(raw);
+  return Array.isArray(value) ? value : [];
+}
+
+module.exports = { parseEvalJsonArray, parseEvalJsonValue };

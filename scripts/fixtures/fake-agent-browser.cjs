@@ -14,11 +14,21 @@ const stateFile =
   process.env.FAKE_AB_STATE_FILE ||
   path.join(os.tmpdir(), `fake-agent-browser-${process.env.SIGNALS_PUBLISH_AB_SESSION || "default"}.json`);
 
+function defaultState() {
+  return {
+    activeTab: "t1",
+    postPublished: false,
+    composeOpen: false,
+    threadTextareaCount: 0,
+  };
+}
+
 function readState() {
   try {
-    return JSON.parse(fs.readFileSync(stateFile, "utf8"));
+    const parsed = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+    return { ...defaultState(), ...parsed };
   } catch {
-    return { activeTab: "t1", postPublished: false };
+    return defaultState();
   }
 }
 
@@ -69,13 +79,16 @@ function shellTab(state) {
 }
 
 function contentTab(state) {
+  const url = state.composeOpen
+    ? "https://x.com/compose/post"
+    : "https://x.com/home";
   return {
     active: state.activeTab === "t2",
     label: null,
     tabId: "t2",
-    title: "Home / X",
+    title: state.composeOpen ? "Compose / X" : "Home / X",
     type: "page",
-    url: "https://x.com/home",
+    url,
   };
 }
 
@@ -87,10 +100,48 @@ function tabListJson(state) {
   });
 }
 
-function handleGet(rest) {
+const LOGGED_IN_MARKERS = [
+  "primaryColumn",
+  "SideNav_NewTweet_Button",
+  "SideNav_AccountSwitcher_Button",
+  "AppTabBar_Profile_Link",
+  "aria-label=\"Profile\"",
+];
+
+function textareaCountForSelector(selector, state) {
+  if (LOGGED_IN_MARKERS.some((marker) => selector.includes(marker))) {
+    return 1;
+  }
+  if (!state.composeOpen) {
+    if (selector.includes("tweetTextarea_0") && !selector.includes("tweetTextarea_1")) {
+      return 0;
+    }
+    return 0;
+  }
+  const match = selector.match(/tweetTextarea_(\d+)/);
+  if (match) {
+    const index = Number(match[1]);
+    return state.threadTextareaCount > index ? 1 : 0;
+  }
+  if (selector.includes("tweetTextarea_")) {
+    return state.threadTextareaCount;
+  }
+  if (selector.includes("addButton")) return 1;
+  if (selector.includes("tweetButton")) return 1;
+  if (selector.includes("fileInput")) return 1;
+  if (selector.includes("attachments")) return 1;
+  return 0;
+}
+
+function handleGet(rest, state) {
   const sub = rest[1];
-  if (sub === "url") return ok("https://x.com/home");
-  if (sub === "count") return ok("1");
+  if (sub === "url") {
+    return ok(state.composeOpen ? "https://x.com/compose/post" : "https://x.com/home");
+  }
+  if (sub === "count") {
+    const selector = rest[2] ?? "";
+    return ok(String(textareaCountForSelector(selector, state)));
+  }
   if (sub === "attr") {
     const selector = rest[2];
     const name = rest[3];
@@ -113,6 +164,12 @@ function handleIs(rest) {
 
 function handleEval(rest, state) {
   const js = rest[1] ?? "";
+  if (js.includes("addButton") && js.includes("activeElement")) {
+    if (!state.composeOpen || textareaCountForSelector("addButton", state) === 0) {
+      return ok(JSON.stringify(JSON.stringify({ ok: false, reason: "no_add_button" })));
+    }
+    return ok(JSON.stringify(JSON.stringify({ ok: true })));
+  }
   if (state.postPublished) {
     const ms = Date.now() - 1288834974657;
     const statusId = (BigInt(ms) << 22n).toString();
@@ -123,11 +180,22 @@ function handleEval(rest, state) {
         text: "thread tweet one thread tweet two",
       },
     ];
-    // Real agent-browser JSON-encodes string eval results (stdout is "\"[]\"" form).
     return ok(JSON.stringify(JSON.stringify(payload)));
   }
   if (js.includes("ownedCandidates")) return ok(JSON.stringify("[]"));
   return ok("null");
+}
+
+function openCompose(state) {
+  state.composeOpen = true;
+  state.threadTextareaCount = 1;
+  writeState(state);
+}
+
+function addThreadSlot(state) {
+  if (!state.composeOpen) openCompose(state);
+  state.threadTextareaCount += 1;
+  writeState(state);
 }
 
 const state = readState();
@@ -150,24 +218,36 @@ if (cmd === "tab") {
   return ok();
 }
 
-if (cmd === "get") return handleGet(rest);
+if (cmd === "get") return handleGet(rest, state);
 if (cmd === "is") return handleIs(rest);
-if (cmd === "open") return ok();
+if (cmd === "open") {
+  const url = rest[1] ?? "";
+  if (url.includes("compose/post")) openCompose(state);
+  return ok();
+}
 if (cmd === "wait") return ok();
 if (cmd === "click") {
-  if (process.env.FAKE_AB_FAIL_ADD === "1" && rest[1]?.includes("addButton")) {
+  const selector = rest[1] ?? "";
+  if (process.env.FAKE_AB_FAIL_ADD === "1" && selector.includes("addButton")) {
     fail("simulated add button failure");
   }
-  if (rest[1]?.includes("tweetButton")) {
+  if (selector.includes("addButton")) addThreadSlot(state);
+  if (selector.includes("tweetButton")) {
     state.postPublished = true;
     writeState(state);
   }
   return ok();
 }
-if (cmd === "fill") {
-  if (process.env.FAKE_AB_FAIL_THREAD_FILL === "1" && rest[1]?.includes("tweetTextarea_1")) {
+if (cmd === "type" || cmd === "fill") {
+  const selector = rest[1] ?? "";
+  if (process.env.FAKE_AB_FAIL_THREAD_FILL === "1" && selector.includes("tweetTextarea_1")) {
     fail("simulated thread fill failure");
   }
+  if (selector.includes("tweetTextarea_0")) openCompose(state);
+  return ok();
+}
+if (cmd === "press") {
+  if (state.composeOpen) addThreadSlot(state);
   return ok();
 }
 if (cmd === "upload") return ok();

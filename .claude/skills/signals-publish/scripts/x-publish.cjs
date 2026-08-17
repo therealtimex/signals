@@ -13,7 +13,7 @@
 const { readFileSync } = require("node:fs");
 const { spawnSync } = require("node:child_process");
 
-const { parseEvalJsonArray } = require("./parse-eval-json-array.cjs");
+const { parseEvalJsonArray, parseEvalJsonValue } = require("./parse-eval-json-array.cjs");
 
 const SESSION = process.env.SIGNALS_PUBLISH_AB_SESSION || "signals-publish";
 const AB_BIN = process.env.AGENT_BROWSER_BIN || "agent-browser";
@@ -21,17 +21,28 @@ const AB_PREFIX = process.env.AGENT_BROWSER_BIN_ARGS
   ? process.env.AGENT_BROWSER_BIN_ARGS.split(" ").filter(Boolean)
   : [];
 const X_HOME_URL = "https://x.com/home";
+const X_COMPOSE_POST_URL = "https://x.com/compose/post";
+const TYPE_SETTLE_MS = 2500;
+const THREAD_ADD_WAIT_MS = 1500;
+const COMPOSE_WAIT_TIMEOUT_MS = 15_000;
 
 const X_SELECTORS = {
   primaryColumn: '[data-testid="primaryColumn"]',
   loginButton: '[data-testid="loginButton"]',
   composeButton: '[data-testid="SideNav_NewTweet_Button"]',
   accountSwitcher: '[data-testid="SideNav_AccountSwitcher_Button"]',
+  composeDialog: '[role="dialog"]',
+  composeTweetTextarea: (index) =>
+    `[role="dialog"] [data-testid="tweetTextarea_${index}"]`,
+  composeTweetTextareaAny: '[role="dialog"] [data-testid^="tweetTextarea_"]',
+  composeAddButton: '[role="dialog"] [data-testid="addButton"]',
+  composeTweetButton: '[role="dialog"] [data-testid="tweetButton"]',
+  composeFileInput: '[role="dialog"] input[data-testid="fileInput"]',
   tweetTextarea: (index) => `[data-testid="tweetTextarea_${index}"]`,
   tweetButton: '[data-testid="tweetButton"]',
   addButton: '[data-testid="addButton"]',
   fileInput: 'input[data-testid="fileInput"]',
-  attachments: '[data-testid="attachments"]',
+  attachments: '[role="dialog"] [data-testid="attachments"]',
   profileLink: '[data-testid="AppTabBar_Profile_Link"]',
   desktopProfileLink: 'a[aria-label="Profile"]',
 };
@@ -48,6 +59,49 @@ const TWITTER_EPOCH_MS = 1288834974657;
 
 function sleep(ms) {
   requireAb(["wait", String(ms)], "wait");
+}
+
+function abCount(selector) {
+  const result = runAb(["get", "count", selector]);
+  if (!result.ok) return 0;
+  const count = Number(result.stdout);
+  return Number.isFinite(count) ? count : 0;
+}
+
+function waitForSelector(selector, context, timeoutMs = COMPOSE_WAIT_TIMEOUT_MS) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (abCount(selector) > 0) return;
+    sleep(300);
+  }
+  throw {
+    message: `${context}: timed out waiting for ${selector}`,
+    errorCode: "timeout",
+  };
+}
+
+function typeIntoComposeTextarea(selector, text, context) {
+  requireAb(["click", selector], `${context} focus`);
+  requireAb(["type", selector, text], `${context} type`);
+  sleep(TYPE_SETTLE_MS);
+}
+
+function activateComposeThreadAdd(context) {
+  const js = `(() => {
+    const btns = document.querySelectorAll('[role="dialog"] [data-testid="addButton"]');
+    const btn = btns[btns.length - 1];
+    if (!btn) return JSON.stringify({ ok: false, reason: "no_add_button" });
+    btn.focus();
+    return JSON.stringify({ ok: document.activeElement === btn });
+  })()`;
+  const raw = abText(["eval", js]);
+  const parsed = parseEvalJsonValue(raw);
+  if (parsed?.ok) {
+    requireAb(["press", "Enter"], `${context} activate add via Enter`);
+  } else {
+    requireAb(["click", X_SELECTORS.composeAddButton], context);
+  }
+  sleep(THREAD_ADD_WAIT_MS);
 }
 
 function emit(result) {
@@ -366,23 +420,23 @@ function captureProfileStatusBaseline(handle) {
 
 function uploadMedia(paths) {
   if (!paths?.length) return;
-  requireAb(["upload", X_SELECTORS.fileInput, ...paths], "upload media", "upload_failed");
-  requireAb(["wait", X_SELECTORS.attachments], "wait for attachments");
+  requireAb(
+    ["upload", X_SELECTORS.composeFileInput, ...paths],
+    "upload media",
+    "upload_failed"
+  );
+  waitForSelector(X_SELECTORS.attachments, "wait for attachments");
   sleep(1000);
 }
 
 function fillCompose(payload) {
-  requireAb(["open", X_HOME_URL], "open X home");
-  sleep(1000);
+  requireAb(["open", X_COMPOSE_POST_URL], "open compose/post modal");
+  sleep(1500);
   assertXLoggedIn();
 
-  requireAb(["wait", X_SELECTORS.composeButton], "wait for compose button");
-  requireAb(["click", X_SELECTORS.composeButton], "open compose dialog");
-  sleep(1000);
-
-  const textarea0 = X_SELECTORS.tweetTextarea(0);
-  requireAb(["wait", textarea0], "wait for main tweet textarea");
-  requireAb(["fill", textarea0, payload.text], "fill main tweet text");
+  const textarea0 = X_SELECTORS.composeTweetTextarea(0);
+  waitForSelector(textarea0, "wait for main tweet textarea");
+  typeIntoComposeTextarea(textarea0, payload.text, "main tweet");
 
   const mediaPaths = Array.isArray(payload.mediaPaths?.[0])
     ? payload.mediaPaths[0]
@@ -391,11 +445,15 @@ function fillCompose(payload) {
 
   const threadTexts = payload.threadTexts ?? [];
   for (let i = 0; i < threadTexts.length; i++) {
-    requireAb(["click", X_SELECTORS.addButton], `add thread tweet ${i + 2}`);
-    sleep(800);
-    const selector = X_SELECTORS.tweetTextarea(i + 1);
-    requireAb(["wait", selector], `wait for thread textarea ${i + 1}`);
-    requireAb(["fill", selector, threadTexts[i]], `fill thread tweet ${i + 2}`);
+    const threadIndex = i + 1;
+    activateComposeThreadAdd(`add thread tweet ${threadIndex + 1}`);
+    const selector = X_SELECTORS.composeTweetTextarea(threadIndex);
+    waitForSelector(selector, `wait for thread textarea ${threadIndex}`);
+    typeIntoComposeTextarea(
+      selector,
+      threadTexts[i],
+      `fill thread tweet ${threadIndex + 1}`
+    );
     const threadMedia = Array.isArray(payload.mediaPaths?.[i + 1])
       ? payload.mediaPaths[i + 1]
       : undefined;
@@ -453,8 +511,8 @@ function main() {
       return;
     }
 
-    requireAb(["wait", X_SELECTORS.tweetButton], "wait for tweet button");
-    requireAb(["click", X_SELECTORS.tweetButton], "click tweet button");
+    waitForSelector(X_SELECTORS.composeTweetButton, "wait for tweet button");
+    requireAb(["click", X_SELECTORS.composeTweetButton], "click tweet button");
     sleep(2000);
 
     const result = waitForVerifiedPost(payload.text, handle, baseline);

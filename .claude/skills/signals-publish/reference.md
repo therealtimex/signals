@@ -41,16 +41,19 @@ Failure:
 |-----|----------|
 | primaryColumn | `[data-testid="primaryColumn"]` |
 | composeButton | `[data-testid="SideNav_NewTweet_Button"]` |
-| tweetTextarea | `[data-testid="tweetTextarea_{n}"]` |
-| tweetButton | `[data-testid="tweetButton"]` |
-| addButton | `[data-testid="addButton"]` |
-| fileInput | `input[data-testid="fileInput"]` |
+| composeDialog | `[role="dialog"]` (scope compose modal; avoids home inline composer) |
+| composeTweetTextarea | `[role="dialog"] [data-testid="tweetTextarea_{n}"]` |
+| composeAddButton | `[role="dialog"] [data-testid="addButton"]` — activate via focus+Enter when possible |
+| tweetButton | `[role="dialog"] [data-testid="tweetButton"]` |
+| fileInput | `[role="dialog"] input[data-testid="fileInput"]` |
 | attachments | `[data-testid="attachments"]` |
 | profileLink | `[data-testid="AppTabBar_Profile_Link"]` |
 
-## Verification invariant (P6a port)
+## Compose flow
 
-1. Capture profile baseline (owned status ids + max snowflake) **before** compose.
+Opens `https://x.com/compose/post`, scopes selectors to `[role="dialog"]`, types into Draft.js textareas with `type` (not `fill`), and adds thread segments via focus+Enter on the modal add button when eval focus succeeds.
+
+## Verification invariant (P6a port) (owned status ids + max snowflake) **before** compose.
 2. Post via compose UI.
 3. Poll profile timeline for a **new** owned status where text matches and snowflake id > baseline max.
 
