@@ -39,9 +39,6 @@ describe("contact-channel-writes", () => {
 
     expect(resolvePrimaryChannel(contact.id, "email")).toBeUndefined();
     expect(getContactById(contact.id)?.email).toBeNull();
-
-    const row = db.select().from(contacts).where(eq(contacts.id, contact.id)).get();
-    expect(row?.email).toBeNull();
   });
 
   it("recalculates enrichment when a verified email channel is added directly", () => {

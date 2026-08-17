@@ -176,6 +176,11 @@ describe("schema v0.5 migrations", () => {
     expect(columns).toContain("is_self");
     expect(columns).not.toContain("company");
     expect(columns).not.toContain("title");
+    expect(columns).not.toContain("email");
+    expect(columns).not.toContain("phone");
+    expect(columns).not.toContain("platform");
+    expect(columns).not.toContain("platform_user_id");
+    expect(columns).not.toContain("verified_email");
 
     const mediaAssetColumns = sqlite
       .prepare("PRAGMA table_info(media_assets)")
@@ -294,6 +299,53 @@ describe("schema v0.5 migrations", () => {
     ).toEqual({ count: 1 });
     expect(
       upgraded.prepare("SELECT COUNT(*) AS count FROM media_attachments").get(),
+    ).toEqual({ count: 1 });
+    upgraded.close();
+  });
+
+  it("drops channel/platform scalars on P1e while preserving channel rows", () => {
+    const dir = mkdtempSync(join(tmpdir(), "signals-migrate-p1e-"));
+    const dbPath = join(dir, "data.db");
+    const sqlite = new Database(dbPath);
+    sqlite.pragma("foreign_keys = ON");
+
+    const migrationFiles = listMigrationSqlFiles();
+    const through0021 = migrationFiles.filter((file) => !file.startsWith("0022_drop"));
+    applyMigrationFiles(sqlite, through0021);
+
+    const contactId = nanoid();
+    const channelId = nanoid();
+    sqlite
+      .prepare(
+        `INSERT INTO contacts (
+          id, name, email, phone, platform, platform_user_id, verified_email,
+          funnel_stage, score, enrichment_score, created_at, updated_at
+        ) VALUES (?, 'Reachable', 'ada@example.com', '+15550100', 'x', 'ada-x', 1, 'prospect', 0, 0, 1, 1)`,
+      )
+      .run(contactId);
+    sqlite
+      .prepare(
+        `INSERT INTO contact_channels (
+          id, contact_id, channel_type, value, value_normalized, is_primary, is_verified,
+          scope, source, created_at, updated_at
+        ) VALUES (?, ?, 'email', 'ada@example.com', 'ada@example.com', 1, 1, 'shared', 'test', 1, 1)`,
+      )
+      .run(channelId, contactId);
+
+    applyMigrationFiles(
+      sqlite,
+      migrationFiles.filter((file) => file.startsWith("0022_drop")),
+    );
+    sqlite.close();
+
+    const upgraded = new Database(dbPath);
+    expect(columnExists(upgraded, "contacts", "email")).toBe(false);
+    expect(columnExists(upgraded, "contacts", "phone")).toBe(false);
+    expect(columnExists(upgraded, "contacts", "platform")).toBe(false);
+    expect(columnExists(upgraded, "contacts", "platform_user_id")).toBe(false);
+    expect(columnExists(upgraded, "contacts", "verified_email")).toBe(false);
+    expect(
+      upgraded.prepare("SELECT COUNT(*) AS count FROM contact_channels").get(),
     ).toEqual({ count: 1 });
     upgraded.close();
   });

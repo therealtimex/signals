@@ -155,6 +155,13 @@
       "when": 1786924451081,
       "tag": "0021_drop_media_legacy_columns",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "6",
+      "when": 1786925214616,
+      "tag": "0022_drop_contact_channel_scalars",
+      "breakpoints": true
     }
   ]
 }
