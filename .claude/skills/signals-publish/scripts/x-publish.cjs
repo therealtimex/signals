@@ -14,6 +14,10 @@ const { readFileSync } = require("node:fs");
 const { spawnSync } = require("node:child_process");
 
 const SESSION = process.env.SIGNALS_PUBLISH_AB_SESSION || "signals-publish";
+const AB_BIN = process.env.AGENT_BROWSER_BIN || "agent-browser";
+const AB_PREFIX = process.env.AGENT_BROWSER_BIN_ARGS
+  ? process.env.AGENT_BROWSER_BIN_ARGS.split(" ").filter(Boolean)
+  : [];
 const X_HOME_URL = "https://x.com/home";
 
 const X_SELECTORS = {
@@ -41,7 +45,7 @@ const X_LOGGED_IN_MARKERS = [
 const TWITTER_EPOCH_MS = 1288834974657;
 
 function sleep(ms) {
-  runAb(["wait", String(ms)]);
+  requireAb(["wait", String(ms)], "wait");
 }
 
 function emit(result) {
@@ -51,7 +55,10 @@ function emit(result) {
 }
 
 function runAb(args) {
-  const result = spawnSync("agent-browser", ["--session", SESSION, ...args], {
+  const spawnArgs = AB_PREFIX.length
+    ? [...AB_PREFIX, "--session", SESSION, ...args]
+    : ["--session", SESSION, ...args];
+  const result = spawnSync(AB_BIN, spawnArgs, {
     encoding: "utf8",
     maxBuffer: 16 * 1024 * 1024,
   });
@@ -66,8 +73,20 @@ function runAb(args) {
   };
 }
 
+function requireAb(args, context, errorCode = "unknown") {
+  const result = runAb(args);
+  if (!result.ok) {
+    throw {
+      message: `${context}: ${result.combined || "agent-browser command failed"}`,
+      errorCode,
+    };
+  }
+  return result;
+}
+
 function ensureAgentBrowser() {
-  const probe = spawnSync("agent-browser", ["--version"], { encoding: "utf8" });
+  const probeArgs = AB_PREFIX.length ? [...AB_PREFIX, "--version"] : ["--version"];
+  const probe = spawnSync(AB_BIN, probeArgs, { encoding: "utf8" });
   if (probe.status !== 0) {
     emit({
       success: false,
@@ -102,8 +121,7 @@ function abBool(args) {
 }
 
 function abText(args) {
-  const result = runAb(args);
-  if (!result.ok) return null;
+  const result = requireAb(args, args.join(" "));
   return result.stdout;
 }
 
@@ -188,6 +206,50 @@ function isXLoginUrl(url) {
   );
 }
 
+function isShellTab(tab) {
+  const url = String(tab?.url ?? "");
+  const title = String(tab?.title ?? "");
+  if (/^devtools:/i.test(url)) return true;
+  if (/cli-browser\/index\.html/i.test(url)) return true;
+  if (/^file:/i.test(url)) return true;
+  if (title === "RealTimeX Browser") return true;
+  return false;
+}
+
+function isContentTab(tab) {
+  const url = String(tab?.url ?? "");
+  return /^https?:\/\//i.test(url) && !isShellTab(tab);
+}
+
+function selectContentTab() {
+  const list = requireAb(["tab", "list", "--json"], "list browser tabs");
+  let parsed;
+  try {
+    parsed = JSON.parse(list.stdout);
+  } catch {
+    throw {
+      message: "Failed to parse agent-browser tab list JSON.",
+      errorCode: "unknown",
+    };
+  }
+
+  const tabs = parsed?.data?.tabs ?? [];
+  const contentTabs = tabs.filter(isContentTab);
+  if (!contentTabs.length) {
+    throw {
+      message:
+        "No HTTP(S) content tab found in RealTimeX Browser. Open https://x.com in the signals-publish session before publishing.",
+      errorCode: "unknown",
+    };
+  }
+
+  const preferred =
+    contentTabs.find((tab) => /x\.com|twitter\.com/i.test(String(tab.url))) ??
+    contentTabs[0];
+
+  requireAb(["tab", preferred.tabId], `switch to content tab ${preferred.tabId}`);
+}
+
 function connectSession(port) {
   const connect = runAb(["connect", String(port)]);
   if (!connect.ok && /failed|refused|error/i.test(connect.combined)) {
@@ -196,16 +258,17 @@ function connectSession(port) {
       errorCode: "unknown",
     };
   }
-  runAb(["tab"]);
+  selectContentTab();
 }
 
 function isXLoggedInPage() {
-  const url = abText(["get", "url"]) ?? "";
+  const urlResult = runAb(["get", "url"]);
+  const url = urlResult.ok ? urlResult.stdout : "";
   if (isXLoginUrl(url)) return false;
   if (abBool(["is", "visible", X_SELECTORS.loginButton])) return false;
   for (const selector of X_LOGGED_IN_MARKERS) {
-    const count = abText(["get", "count", selector]);
-    if (count && Number(count) > 0) return true;
+    const countResult = runAb(["get", "count", selector]);
+    if (countResult.ok && Number(countResult.stdout) > 0) return true;
   }
   return false;
 }
@@ -224,7 +287,7 @@ function assertXLoggedIn() {
 
 function detectXDisplayHandle() {
   for (const selector of [X_SELECTORS.profileLink, X_SELECTORS.desktopProfileLink]) {
-    const href = abText(["get", "attr", "href", selector]);
+    const href = abText(["get", "attr", selector, "href"]);
     if (href?.startsWith("/") && !href.includes("/status/")) {
       const segment = href.replace(/^\//, "").split("/")[0];
       if (segment && !["home", "explore", "i"].includes(segment.toLowerCase())) {
@@ -237,7 +300,7 @@ function detectXDisplayHandle() {
 
 function readProfileStatusCandidates(handle) {
   const profileHandle = handle.replace(/^@/, "");
-  runAb(["open", `https://x.com/${profileHandle}`]);
+  requireAb(["open", `https://x.com/${profileHandle}`], "open profile timeline");
   sleep(1000);
 
   const js = `(() => {
@@ -300,32 +363,23 @@ function captureProfileStatusBaseline(handle) {
 
 function uploadMedia(paths) {
   if (!paths?.length) return;
-  const upload = runAb(["upload", X_SELECTORS.fileInput, ...paths]);
-  if (!upload.ok) {
-    throw { message: upload.combined || "Media upload failed.", errorCode: "upload_failed" };
-  }
-  runAb(["wait", X_SELECTORS.attachments]);
+  requireAb(["upload", X_SELECTORS.fileInput, ...paths], "upload media", "upload_failed");
+  requireAb(["wait", X_SELECTORS.attachments], "wait for attachments");
   sleep(1000);
 }
 
 function fillCompose(payload) {
-  runAb(["open", X_HOME_URL]);
+  requireAb(["open", X_HOME_URL], "open X home");
   sleep(1000);
   assertXLoggedIn();
 
-  runAb(["wait", X_SELECTORS.composeButton]);
-  const compose = runAb(["click", X_SELECTORS.composeButton]);
-  if (!compose.ok) {
-    throw { message: compose.combined || "Compose button click failed.", errorCode: "unknown" };
-  }
+  requireAb(["wait", X_SELECTORS.composeButton], "wait for compose button");
+  requireAb(["click", X_SELECTORS.composeButton], "open compose dialog");
   sleep(1000);
 
   const textarea0 = X_SELECTORS.tweetTextarea(0);
-  runAb(["wait", textarea0]);
-  const fill = runAb(["fill", textarea0, payload.text]);
-  if (!fill.ok) {
-    throw { message: fill.combined || "Failed to fill tweet text.", errorCode: "unknown" };
-  }
+  requireAb(["wait", textarea0], "wait for main tweet textarea");
+  requireAb(["fill", textarea0, payload.text], "fill main tweet text");
 
   const mediaPaths = Array.isArray(payload.mediaPaths?.[0])
     ? payload.mediaPaths[0]
@@ -334,11 +388,11 @@ function fillCompose(payload) {
 
   const threadTexts = payload.threadTexts ?? [];
   for (let i = 0; i < threadTexts.length; i++) {
-    runAb(["click", X_SELECTORS.addButton]);
+    requireAb(["click", X_SELECTORS.addButton], `add thread tweet ${i + 2}`);
     sleep(800);
     const selector = X_SELECTORS.tweetTextarea(i + 1);
-    runAb(["wait", selector]);
-    runAb(["fill", selector, threadTexts[i]]);
+    requireAb(["wait", selector], `wait for thread textarea ${i + 1}`);
+    requireAb(["fill", selector, threadTexts[i]], `fill thread tweet ${i + 2}`);
     const threadMedia = Array.isArray(payload.mediaPaths?.[i + 1])
       ? payload.mediaPaths[i + 1]
       : undefined;
@@ -368,7 +422,7 @@ function main() {
   try {
     connectSession(port);
 
-    runAb(["open", X_HOME_URL]);
+    requireAb(["open", X_HOME_URL], "open X home after connect");
     sleep(1000);
     assertXLoggedIn();
 
@@ -385,16 +439,8 @@ function main() {
     const baseline = captureProfileStatusBaseline(handle);
     fillCompose(payload);
 
-    runAb(["wait", X_SELECTORS.tweetButton]);
-    const post = runAb(["click", X_SELECTORS.tweetButton]);
-    if (!post.ok) {
-      emit({
-        success: false,
-        error: post.combined || "Tweet button click failed.",
-        errorCode: "unknown",
-      });
-      return;
-    }
+    requireAb(["wait", X_SELECTORS.tweetButton], "wait for tweet button");
+    requireAb(["click", X_SELECTORS.tweetButton], "click tweet button");
     sleep(2000);
 
     const result = waitForVerifiedPost(payload.text, handle, baseline);

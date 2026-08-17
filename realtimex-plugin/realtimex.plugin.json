@@ -73,7 +73,7 @@
           "external": {
             "lock": true,
             "allow": ["realtimex-moderator-sdk", "agent-browser"],
-            "onMissing": "warn"
+            "onMissing": "error"
           }
         }
       }

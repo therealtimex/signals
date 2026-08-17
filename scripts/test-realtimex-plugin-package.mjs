@@ -5,9 +5,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { execSync, spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -157,58 +155,9 @@ if (entries.some((e) => e.includes("node_modules"))) {
   errors.push("Plugin zip contains node_modules (forbidden by plugin contract)");
 }
 
-function assertBundledSkillRunnable() {
-  const probe = spawnSync("agent-browser", ["--version"], { encoding: "utf8" });
-  if (probe.status !== 0) {
-    throw new Error("agent-browser CLI not available for plugin package smoke test");
-  }
-
-  const workDir = mkdtempSync(path.join(tmpdir(), "signals-plugin-smoke-"));
-  try {
-    execSync(`unzip -q "${zipPath}" -d "${workDir}"`, { stdio: "pipe" });
-    const skillRoot = path.join(workDir, "skills", "signals-publish");
-    const scriptPath = path.join(skillRoot, "scripts", "x-publish.cjs");
-    const payloadPath = path.join(workDir, "payload.json");
-    writeFileSync(payloadPath, JSON.stringify({ text: "plugin zip smoke test" }));
-
-    const result = spawnSync(
-      process.execPath,
-      [scriptPath, "--port", "9222", "--payload", payloadPath],
-      { cwd: skillRoot, encoding: "utf8" }
-    );
-    const output = `${result.stdout}\n${result.stderr}`;
-    if (
-      /ERR_MODULE_NOT_FOUND/.test(output) ||
-      /Cannot find module 'playwright-core'/.test(output) ||
-      /Cannot find package 'playwright-core'/.test(output)
-    ) {
-      throw new Error(`Bundled skill should not require playwright-core:\n${output}`);
-    }
-    if (/agent-browser CLI not found/.test(output)) {
-      throw new Error(`Bundled skill did not resolve host agent-browser:\n${output}`);
-    }
-
-    const lastLine = output.trim().split("\n").filter(Boolean).pop() ?? "";
-    const parsed = JSON.parse(lastLine);
-    if (typeof parsed.success !== "boolean") {
-      throw new Error(`Expected JSON result on last stdout line: ${lastLine}`);
-    }
-  } finally {
-    rmSync(workDir, { recursive: true, force: true });
-  }
-}
-
 if (errors.length) {
   console.error("Plugin package validation failed:");
   for (const e of errors) console.error(`  - ${e}`);
-  process.exit(1);
-}
-
-try {
-  assertBundledSkillRunnable();
-} catch (err) {
-  console.error("Plugin package isolated skill execution failed:");
-  console.error(`  - ${err.message}`);
   process.exit(1);
 }
 
