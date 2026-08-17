@@ -93,6 +93,32 @@ describe("publish agent-tool handlers", () => {
     expect(itemAfter?.status).toBe("draft");
   });
 
+  it("treats duplicate complete_publish failure as idempotent when diagnostics are omitted", async () => {
+    const { job } = seedDraftAndJob();
+
+    await handleCompletePublish({
+      jobId: job.id,
+      platform: "x",
+      success: false,
+    });
+
+    const retry = await handleCompletePublish({
+      jobId: job.id,
+      platform: "x",
+      success: false,
+    });
+
+    expect(retry).toMatchObject({
+      jobId: job.id,
+      idempotent: true,
+    });
+    expect(getPublishJobById(job.id)?.targetsParsed[0]).toMatchObject({
+      status: "failed",
+      error: "Publish failed",
+      errorCode: "unknown",
+    });
+  });
+
   it("recomputes partial job status for active jobs", async () => {
     const item = createContentItem({
       body: "Multi",

@@ -43,18 +43,30 @@ function isTerminalTarget(status: PublishJobTarget["status"]): boolean {
   return status === "published" || status === "failed" || status === "skipped";
 }
 
+type CompletePublishInput = z.infer<typeof completePublishSchema>;
+
+function normalizeCompletePublishInput(input: CompletePublishInput): CompletePublishInput {
+  if (input.success) return input;
+  return {
+    ...input,
+    error: input.error ?? "Publish failed",
+    errorCode: (input.errorCode ?? "unknown") as PublishErrorCode,
+  };
+}
+
 function targetMatchesResult(
   target: PublishJobTarget,
-  input: z.infer<typeof completePublishSchema>
+  input: CompletePublishInput
 ): boolean {
-  if (target.platform !== input.platform) return false;
-  if (!input.success) {
-    return target.error === input.error && target.errorCode === input.errorCode;
+  const normalized = normalizeCompletePublishInput(input);
+  if (target.platform !== normalized.platform) return false;
+  if (!normalized.success) {
+    return target.error === normalized.error && target.errorCode === normalized.errorCode;
   }
   return (
-    target.platformPostId === input.platformPostId &&
-    target.platformUrl === input.platformUrl &&
-    target.handle === input.handle
+    target.platformPostId === normalized.platformPostId &&
+    target.platformUrl === normalized.platformUrl &&
+    target.handle === normalized.handle
   );
 }
 
@@ -148,19 +160,20 @@ export async function handleUpdatePublishJob(input: z.infer<typeof updatePublish
 }
 
 export async function handleCompletePublish(input: z.infer<typeof completePublishSchema>) {
-  const job = getPublishJobById(input.jobId);
+  const normalized = normalizeCompletePublishInput(input);
+  const job = getPublishJobById(normalized.jobId);
   if (!job) {
     return { error: `Publish job not found: ${input.jobId}` };
   }
 
   const recordOnly = job.status === "superseded";
-  const existingTarget = job.targetsParsed.find((t) => t.platform === input.platform);
+  const existingTarget = job.targetsParsed.find((t) => t.platform === normalized.platform);
   if (!existingTarget) {
-    return { error: `Platform ${input.platform} is not a target for this job` };
+    return { error: `Platform ${normalized.platform} is not a target for this job` };
   }
 
   if (isTerminalTarget(existingTarget.status)) {
-    if (targetMatchesResult(existingTarget, input)) {
+    if (targetMatchesResult(existingTarget, normalized)) {
       return {
         jobId: job.id,
         status: job.status,
@@ -170,59 +183,59 @@ export async function handleCompletePublish(input: z.infer<typeof completePublis
       };
     }
     return {
-      error: `Target for ${input.platform} is already terminal with a different result`,
+      error: `Target for ${normalized.platform} is already terminal with a different result`,
     };
   }
 
   const now = Math.floor(Date.now() / 1000);
   let targets: PublishJobTarget[];
 
-  if (input.success) {
-    if (!input.handle?.trim() || !input.platformPostId?.trim()) {
+  if (normalized.success) {
+    if (!normalized.handle?.trim() || !normalized.platformPostId?.trim()) {
       return { error: "handle and platformPostId are required on success" };
     }
 
     if (!recordOnly) {
       const account = ensureSessionPlatformAccount(
-        input.platform as PublishPlatformTarget,
-        input.handle
+        normalized.platform as PublishPlatformTarget,
+        normalized.handle
       );
 
       createContentPost({
         contentItemId: job.contentItemId,
         platformAccountId: account.id,
-        platformPostId: input.platformPostId,
-        platformUrl: input.platformUrl ?? null,
+        platformPostId: normalized.platformPostId,
+        platformUrl: normalized.platformUrl ?? null,
         publishedAt: now,
         status: "published",
       });
 
       publishVariantForContentItem(job.contentItemId, {
-        platform: input.platform,
+        platform: normalized.platform,
         publishedAt: now,
       });
     }
 
     targets = job.targetsParsed.map((target) =>
-      target.platform === input.platform
+      target.platform === normalized.platform
         ? {
             ...target,
             status: "published" as const,
-            handle: input.handle,
-            platformPostId: input.platformPostId,
-            platformUrl: input.platformUrl,
+            handle: normalized.handle,
+            platformPostId: normalized.platformPostId,
+            platformUrl: normalized.platformUrl,
             completedAt: now,
           }
         : target
     );
   } else {
     targets = job.targetsParsed.map((target) =>
-      target.platform === input.platform
+      target.platform === normalized.platform
         ? {
             ...target,
             status: "failed" as const,
-            error: input.error ?? "Publish failed",
-            errorCode: (input.errorCode ?? "unknown") as PublishErrorCode,
+            error: normalized.error,
+            errorCode: normalized.errorCode as PublishErrorCode,
             completedAt: now,
           }
         : target
