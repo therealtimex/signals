@@ -12,12 +12,14 @@ import {
   XCircle,
   Clock,
   Loader2,
+  Upload,
 } from "lucide-react";
 import Link from "next/link";
 import type { WorkflowRun } from "@/lib/db/types";
 
 const TYPE_ICONS: Record<string, typeof RefreshCw> = {
   sync: RefreshCw,
+  import: Upload,
   enrich: Sparkles,
   search: Search,
   prune: Trash2,
@@ -27,6 +29,7 @@ const TYPE_ICONS: Record<string, typeof RefreshCw> = {
 
 const TYPE_LABELS: Record<string, string> = {
   sync: "Sync",
+  import: "Import",
   enrich: "Enrich",
   search: "Search",
   prune: "Prune",
@@ -71,6 +74,22 @@ function parseTemplateName(run: WorkflowRun): string | null {
   }
 }
 
+const IMPORT_SUBTYPE_LABELS: Record<string, string> = {
+  linkedin_connections: "LinkedIn Import",
+};
+
+/** Display label for file-import runs (platform + file name when available). */
+function parseImportLabel(run: WorkflowRun): string | null {
+  if (run.workflowType !== "import") return null;
+  try {
+    const config = JSON.parse(run.config ?? "{}");
+    const base = IMPORT_SUBTYPE_LABELS[config.importSubType] ?? "File Import";
+    return config.fileName ? `${base} — ${config.fileName}` : base;
+  } catch {
+    return "File Import";
+  }
+}
+
 function formatRelativeTime(unixSeconds: number): string {
   const now = Math.floor(Date.now() / 1000);
   const diff = now - unixSeconds;
@@ -98,7 +117,8 @@ export function WorkflowRunCard({
   const Icon = TYPE_ICONS[run.workflowType] ?? RefreshCw;
   const subType = parseSyncSubType(run);
   const templateName = parseTemplateName(run);
-  const label = subType ? (SYNC_SUBTYPE_LABELS[subType] ?? subType) : (templateName ?? TYPE_LABELS[run.workflowType] ?? run.workflowType);
+  const importLabel = parseImportLabel(run);
+  const label = importLabel ?? (subType ? (SYNC_SUBTYPE_LABELS[subType] ?? subType) : (templateName ?? TYPE_LABELS[run.workflowType] ?? run.workflowType));
   const statusColor = STATUS_COLORS[run.status] ?? STATUS_COLORS.pending;
   const progressPercent =
     run.totalItems && run.totalItems > 0

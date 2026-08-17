@@ -9,6 +9,7 @@ import {
   Trash2,
   Megaphone,
   Bot,
+  Upload,
 } from "lucide-react";
 import { WorkflowRunCard } from "@/components/workflow-run-card";
 import type { WorkflowRun } from "@/lib/db/types";
@@ -16,6 +17,7 @@ import type { WorkflowRun } from "@/lib/db/types";
 /** All possible lanes — ordered by display priority. */
 const LANES = [
   { key: "sync", label: "Sync", icon: RefreshCw },
+  { key: "import", label: "Import", icon: Upload },
   { key: "search", label: "Search", icon: Search },
   { key: "enrich", label: "Enrich", icon: Sparkles },
   { key: "prune", label: "Prune", icon: Trash2 },

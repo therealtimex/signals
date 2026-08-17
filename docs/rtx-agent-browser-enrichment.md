@@ -97,7 +97,7 @@ curl -s http://127.0.0.1:3000/api/agent-tools/invoke \
 
 ## Signals UI behavior
 
-- **Automation → Actions → Enrich Profiles (RTX)** shows migration guidance on the Actions page. It does not queue or run in-app enrichment.
+- **Automation → Workflows → Enrich Profiles (RTX)** shows migration guidance on the Workflows tab. It does not queue or run in-app enrichment.
 - **Contact detail → RTX enrich** shows the same migration message, including when X is not connected in Signals.
 - **Settings → Browser Session** remains for **publish/engage**, not in-app enrichment.
 

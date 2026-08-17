@@ -19,6 +19,8 @@ export function getActionRunButtonLabel(
     restrictionNavigateTo?: string;
     hasRestriction: boolean;
     isRunning: boolean;
+    isUpload?: boolean;
+    hasImportHistory?: boolean;
   }
 ): string {
   if (opts.needsConnection) return "Connect first";
@@ -26,5 +28,6 @@ export function getActionRunButtonLabel(
   if (opts.hasRestriction) return "Restricted";
   if (opts.isRunning) return "Running...";
   if (ENRICH_ACTION_IDS.has(actionId)) return "Show RTX steps";
+  if (opts.isUpload) return opts.hasImportHistory ? "Import again" : "Upload export";
   return "Run";
 }

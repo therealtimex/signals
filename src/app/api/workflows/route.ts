@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
     | "pending" | "running" | "paused" | "completed" | "failed" | "cancelled"
     | null;
   const workflowType = url.searchParams.get("workflowType") as
-    | "sync" | "enrich" | "search" | "prune" | "sequence" | "agent"
+    | "sync" | "import" | "enrich" | "search" | "prune" | "sequence" | "agent"
     | null;
   const templateId = url.searchParams.get("templateId") ?? undefined;
   const page = parseInt(url.searchParams.get("page") ?? "1", 10);

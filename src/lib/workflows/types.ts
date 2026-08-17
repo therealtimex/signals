@@ -1,6 +1,7 @@
 /** Workflow type identifiers. */
 export type WorkflowType =
   | "sync"
+  | "import"
   | "enrich"
   | "search"
   | "prune"
@@ -35,6 +36,7 @@ export type WorkflowStepType =
 /** Human-readable labels for workflow types. */
 export const WORKFLOW_TYPE_LABELS: Record<WorkflowType, string> = {
   sync: "Platform Sync",
+  import: "File Import",
   enrich: "Contact Enrichment",
   search: "Web Search",
   prune: "Contact Pruning",
