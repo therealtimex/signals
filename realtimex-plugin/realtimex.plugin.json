@@ -2,7 +2,7 @@
   "id": "com.realtimex.signals",
   "name": "realtimex-signals",
   "displayName": "Signals",
-  "version": "0.1.10",
+  "version": "0.1.12",
   "kind": "workspace-provision",
   "description": "Local-first social GTM and relationship CRM — workspace, agent skills, flows, and marketplace local app integration for Signals.",
   "author": {
@@ -44,6 +44,27 @@
       "description": "Local SQLite and graph data path. Override with SIGNALS_DATA_DIR env when starting the Local App."
     },
     {
+      "key": "DEFAULT_TERMINAL_AGENT",
+      "label": "Default terminal agent",
+      "type": "terminal-agent",
+      "description": "Default CLI agent for CRM work and Send to agent publish jobs in the Signals workspace."
+    },
+    {
+      "key": "DEFAULT_TERMINAL_MODEL",
+      "label": "Default model",
+      "type": "terminal-agent-model",
+      "agentKey": "DEFAULT_TERMINAL_AGENT",
+      "description": "Optional. Leave empty to use the agent's default model."
+    },
+    {
+      "key": "DEFAULT_TERMINAL_EFFORT",
+      "label": "Reasoning effort",
+      "type": "terminal-agent-effort",
+      "agentKey": "DEFAULT_TERMINAL_AGENT",
+      "modelKey": "DEFAULT_TERMINAL_MODEL",
+      "description": "Optional. Only applies when the selected model supports reasoning effort."
+    },
+    {
       "key": "SYSTEM_PROMPT",
       "label": "Terminal agent system prompt",
       "type": "text",
@@ -60,7 +81,12 @@
         "settings": {
           "openAiPrompt": "{{SYSTEM_PROMPT}}"
         },
-        "managedSettings": ["openAiPrompt"],
+        "managedSettings": ["openAiPrompt", "defaultTerminalAgent"],
+        "defaultTerminalAgent": {
+          "canonical": "{{DEFAULT_TERMINAL_AGENT}}",
+          "modelId": "{{DEFAULT_TERMINAL_MODEL}}",
+          "effort": "{{DEFAULT_TERMINAL_EFFORT}}"
+        },
         "workingDirectory": {
           "source": "templates/signals",
           "copyPolicy": "copy-missing",
