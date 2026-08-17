@@ -41,7 +41,7 @@ export SIGNALS_BASE_URL="$(.claude/skills/realtimex-signals/scripts/resolve-base
 
 ```bash
 .claude/skills/realtimex-signals/scripts/invoke-tool.sh query_contacts '{"search":"acme"}'
-.claude/skills/realtimex-signals/scripts/invoke-tool.sh create_contact '{"name":"Alex Rivera","company":"Northwind","platform":"linkedin"}'
+.claude/skills/realtimex-signals/scripts/invoke-tool.sh create_contact '{"name":"Alex Rivera","company":"Northwind","channels":[{"channelType":"email","value":"alex@northwind.example","isPrimary":true}]}'
 ```
 
 From repo root you can also use `scripts/invoke-agent-tool.sh` with `SIGNALS_BASE_URL` set.
@@ -107,11 +107,14 @@ flowchart TD
 
 ```bash
 .claude/skills/realtimex-signals/scripts/invoke-tool.sh create_contact \
-  '{"name":"Jane Doe","company":"Acme","platform":"linkedin"}'
+  '{"name":"Jane Doe","company":"Acme","channels":[{"channelType":"email","value":"jane@acme.com","isPrimary":true}]}'
 
 # Use contact id from result:
+.claude/skills/realtimex-signals/scripts/invoke-tool.sh upsert_contact_identity \
+  '{"contactId":"<id>","platform":"linkedin","platformUserId":"jane-doe","platformHandle":"jane-doe"}'
+
 .claude/skills/realtimex-signals/scripts/invoke-tool.sh enrich_contact \
-  '{"contactId":"<id>","title":"Head of Partnerships","email":"jane@acme.com"}'
+  '{"contactId":"<id>","title":"Head of Partnerships"}'
 ```
 
 ### Find and summarize pipeline

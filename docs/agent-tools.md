@@ -35,8 +35,9 @@ Then pass `Authorization: Bearer your-secret-token` on each request.
 |------|----------|-------------|
 | `query_contacts` | contacts | Search/filter contacts |
 | `get_contact` | contacts | Full contact by ID |
-| `create_contact` | contacts | Create a contact |
+| `create_contact` | contacts | Create a contact (`channels[]`, `employments[]` supported) |
 | `update_contact` | contacts | Update contact fields |
+| `upsert_contact_identity` | contacts | Create or update a platform identity for a contact |
 | `enrich_contact` | contacts | Fill gaps without overwriting |
 | `archive_contact` | contacts | Archive with reason |
 | `query_analytics` | analytics | Dashboard metrics |
@@ -93,11 +94,27 @@ curl -s -X POST http://localhost:3010/api/agent-tools/invoke \
     "input": {
       "name": "Alex Rivera",
       "company": "Northwind",
-      "platform": "linkedin"
+      "channels": [
+        { "channelType": "email", "value": "alex@northwind.example", "isPrimary": true }
+      ]
     }
   }' | jq
 
-# 3. Enrich with title and email (fill-gaps only)
+# 2b. Link a platform identity (optional)
+CONTACT_ID="<id from step 2>"
+curl -s -X POST http://localhost:3010/api/agent-tools/invoke \
+  -H 'Content-Type: application/json' \
+  -d "{
+    \"tool\": \"upsert_contact_identity\",
+    \"input\": {
+      \"contactId\": \"$CONTACT_ID\",
+      \"platform\": \"linkedin\",
+      \"platformUserId\": \"alex-rivera\",
+      \"platformHandle\": \"alexrivera\"
+    }
+  }" | jq
+
+# 3. Enrich with title (fill-gaps only)
 CONTACT_ID="<id from step 2>"
 curl -s -X POST http://localhost:3010/api/agent-tools/invoke \
   -H 'Content-Type: application/json' \
@@ -105,8 +122,7 @@ curl -s -X POST http://localhost:3010/api/agent-tools/invoke \
     \"tool\": \"enrich_contact\",
     \"input\": {
       \"contactId\": \"$CONTACT_ID\",
-      \"title\": \"Director of Partnerships\",
-      \"email\": \"alex@northwind.example\"
+      \"title\": \"Director of Partnerships\"
     }
   }" | jq
 

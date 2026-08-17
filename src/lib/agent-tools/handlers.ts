@@ -1,4 +1,5 @@
-import { listContacts, getContactById, createContact, updateContact } from "@/lib/db/queries/contacts";
+import { listContacts, getContactById, createContact, updateContact, recalcEnrichment } from "@/lib/db/queries/contacts";
+import { createIdentity, getIdentityById, updateIdentity } from "@/lib/db/queries/identities";
 import { getDashboardMetrics } from "@/lib/db/queries/dashboard";
 import { listWorkflowRuns } from "@/lib/db/queries/workflows";
 import { listTemplates } from "@/lib/db/queries/workflow-templates";
@@ -33,8 +34,11 @@ import type {
   getPersonaEvidenceSchema,
   generatePersonaSchema,
   upsertPersonaSchema,
+  upsertContactIdentitySchema,
 } from "@/lib/agent-tools/schemas";
 import type { z } from "zod";
+import type { ContactIdentity } from "@/lib/db/types";
+import { assertPlatform } from "@/lib/db/platforms";
 
 const DEFAULT_PAGE_SIZE = 20;
 
@@ -43,6 +47,26 @@ function primaryPlatform(
 ): string | null {
   const primary = identities.find((id) => id.isPrimary);
   return primary?.platform ?? identities[0]?.platform ?? null;
+}
+
+function serializeContactIdentity(identity: ContactIdentity) {
+  return {
+    id: identity.id,
+    platform: identity.platform,
+    platformUserId: identity.platformUserId,
+    handle: identity.platformHandle,
+    profileUrl: identity.platformUrl,
+    displayName: identity.displayName,
+    headline: identity.headline,
+    avatarUrl: identity.avatarUrl,
+    bio: identity.bio,
+    location: identity.location,
+    websiteUrl: identity.websiteUrl,
+    isVerified: identity.isVerified,
+    followersCount: identity.followersCount,
+    isPrimary: Boolean(identity.isPrimary),
+    isActive: Boolean(identity.isActive),
+  };
 }
 
 export async function handleQueryContacts(input: z.infer<typeof queryContactsSchema>) {
@@ -70,6 +94,7 @@ export async function handleQueryContacts(input: z.infer<typeof queryContactsSch
       stage: c.funnelStage,
       platform: primaryPlatform(c.identities),
       identityCount: c.identities.length,
+      resolvedAvatarUrl: c.resolvedAvatarUrl,
     })),
   };
 }
@@ -108,15 +133,12 @@ export async function handleGetContact(input: z.infer<typeof getContactSchema>) 
     bio: contact.bio,
     location: contact.location,
     website: contact.website,
+    resolvedAvatarUrl: contact.resolvedAvatarUrl,
     platform: primaryPlatform(contact.identities),
     funnelStage: contact.funnelStage,
     enrichmentScore: contact.enrichmentScore,
     tags: contact.tags,
-    identities: contact.identities.map((id) => ({
-      platform: id.platform,
-      handle: id.platformHandle,
-      profileUrl: id.platformUrl,
-    })),
+    identities: contact.identities.map(serializeContactIdentity),
   };
 }
 
@@ -190,6 +212,69 @@ export async function handleUpdateContact(input: z.infer<typeof updateContactSch
 export async function handleEnrichContact(input: z.infer<typeof enrichContactSchema>) {
   const { contactId, ...data } = input;
   return enrichContact(contactId, data);
+}
+
+export async function handleUpsertContactIdentity(
+  input: z.infer<typeof upsertContactIdentitySchema>,
+) {
+  const contact = getContactById(input.contactId);
+  if (!contact) {
+    return { error: `Contact not found: ${input.contactId}` };
+  }
+
+  const sharedFields = {
+    platformHandle: input.platformHandle,
+    platformUrl: input.platformUrl,
+    platformData: input.platformData ? JSON.stringify(input.platformData) : undefined,
+    displayName: input.displayName,
+    headline: input.headline,
+    bio: input.bio,
+    avatarUrl: input.avatarUrl,
+    location: input.location,
+    websiteUrl: input.websiteUrl,
+    isVerified: input.isVerified,
+    followersCount: input.followersCount,
+    followingCount: input.followingCount,
+    postsCount: input.postsCount,
+    listedCount: input.listedCount,
+    platformCreatedAt: input.platformCreatedAt,
+    isPrimary: input.isPrimary === undefined ? undefined : input.isPrimary ? 1 : 0,
+    isActive: input.isActive === undefined ? undefined : input.isActive ? 1 : 0,
+    lastSyncedAt: input.lastSyncedAt,
+  };
+
+  let identity: ContactIdentity | undefined;
+  if (input.id) {
+    const existing = getIdentityById(input.id);
+    if (!existing || existing.contactId !== input.contactId) {
+      return { error: `Identity not found for contact: ${input.id}` };
+    }
+
+    identity = updateIdentity(input.id, {
+      ...sharedFields,
+      ...(input.platform ? { platform: assertPlatform(input.platform) } : {}),
+      ...(input.platformUserId ? { platformUserId: input.platformUserId } : {}),
+    });
+  } else {
+    identity = createIdentity({
+      contactId: input.contactId,
+      platform: assertPlatform(input.platform!),
+      platformUserId: input.platformUserId!,
+      ...sharedFields,
+    });
+  }
+
+  if (!identity) {
+    return { error: `Failed to upsert identity for contact: ${input.contactId}` };
+  }
+
+  recalcEnrichment(input.contactId);
+
+  return {
+    ...serializeContactIdentity(identity),
+    contactId: input.contactId,
+    message: "Contact identity upserted.",
+  };
 }
 
 export async function handleArchiveContact(input: z.infer<typeof archiveContactSchema>) {

@@ -17,8 +17,9 @@ Invoke body: `{ "tool": "<name>", "input": { ... } }`
 |------|----------|
 | `query_contacts` | Search/filter CRM contacts |
 | `get_contact` | Full record by `contactId` |
-| `create_contact` | New contact (requires `name`) |
+| `create_contact` | New contact (requires `name`; optional `channels[]`, `employments[]`) |
 | `update_contact` | Overwrite fields on existing contact |
+| `upsert_contact_identity` | Create or update a platform identity for a contact |
 | `enrich_contact` | Fill gaps only; needs `contactId` |
 | `archive_contact` | Archive with `reason` |
 | `query_analytics` | Dashboard metrics |
@@ -46,12 +47,29 @@ Scores and metrics are validated at the query layer. Grounding uses shared-scope
 
 **create_contact**
 ```json
-{ "name": "Alex Rivera", "company": "Northwind", "platform": "linkedin", "funnelStage": "prospect" }
+{
+  "name": "Alex Rivera",
+  "company": "Northwind",
+  "channels": [{ "channelType": "email", "value": "alex@northwind.example", "isPrimary": true }],
+  "employments": [{ "orgName": "Northwind", "title": "VP Sales", "isCurrent": true }]
+}
+```
+
+**upsert_contact_identity**
+```json
+{
+  "contactId": "<id>",
+  "platform": "linkedin",
+  "platformUserId": "alex-rivera",
+  "platformHandle": "alexrivera",
+  "headline": "VP Sales at Northwind",
+  "avatarUrl": "https://example.com/avatar.jpg"
+}
 ```
 
 **enrich_contact** (fill-gaps — does not overwrite existing fields)
 ```json
-{ "contactId": "<id>", "title": "VP Sales", "email": "alex@example.com", "tags": ["saas"] }
+{ "contactId": "<id>", "title": "VP Sales", "headline": "Partnerships leader" }
 ```
 
 **query_contacts**
