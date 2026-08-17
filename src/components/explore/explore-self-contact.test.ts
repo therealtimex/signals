@@ -98,6 +98,7 @@ const contactFixture: ContactWithIdentities = {
       platformUrl: null,
       platformData: "{}",
       displayName: "Jordan Lee",
+      headline: null,
       bio: null,
       avatarUrl: null,
       location: null,

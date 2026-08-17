@@ -3,6 +3,7 @@ import type { NewContactIdentity } from "@/lib/db/types";
 type IdentityStatFields = Pick<
   NewContactIdentity,
   | "displayName"
+  | "headline"
   | "bio"
   | "avatarUrl"
   | "location"
@@ -19,6 +20,7 @@ type IdentityStatFields = Pick<
 export type IdentityStatsLiftInput = {
   platformData?: string | null;
   displayName?: string | null;
+  headline?: string | null;
   bio?: string | null;
   avatarUrl?: string | null;
   location?: string | null;
@@ -94,6 +96,9 @@ export function liftIdentityStatsFromPlatformData(
 
   const displayName = readString(parsed, ["displayName", "display_name", "name"]);
   if (displayName) stats.displayName = displayName;
+
+  const headline = readString(parsed, ["headline", "occupation", "tagline"]);
+  if (headline) stats.headline = headline;
 
   const bio = readString(parsed, ["bio", "description"]);
   if (bio) stats.bio = bio;

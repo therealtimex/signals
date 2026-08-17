@@ -1,6 +1,6 @@
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, and } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { contactChannels, contactEmployments, contactIdentities, contacts, orgs } from "@/lib/db/schema";
+import { contactChannels, contactEmployments, contactIdentities, contacts, mediaAttachments, orgs } from "@/lib/db/schema";
 import { assembleContactDto, type ContactDTO, type ContactEmploymentDTO } from "@/lib/db/queries/contact-dto";
 import type { Contact } from "@/lib/db/types";
 
@@ -24,6 +24,18 @@ export function attachContactDtos(rows: Contact[]): ContactDTO[] {
     .select()
     .from(contactEmployments)
     .where(inArray(contactEmployments.contactId, ids))
+    .all();
+
+  const avatarAttachments = db
+    .select()
+    .from(mediaAttachments)
+    .where(
+      and(
+        eq(mediaAttachments.parentType, "contact"),
+        inArray(mediaAttachments.parentId, ids),
+        eq(mediaAttachments.role, "avatar"),
+      ),
+    )
     .all();
 
   const orgIds = [...new Set(allEmployments.map((employment) => employment.orgId))];
@@ -57,12 +69,18 @@ export function attachContactDtos(rows: Contact[]): ContactDTO[] {
     employmentMap.set(employment.contactId, list);
   }
 
+  const avatarAssetByContact = new Map<string, string>();
+  for (const attachment of avatarAttachments) {
+    avatarAssetByContact.set(attachment.parentId, attachment.mediaAssetId);
+  }
+
   return rows.map((row) =>
     assembleContactDto(
       row,
       identityMap.get(row.id) ?? [],
       channelMap.get(row.id) ?? [],
       employmentMap.get(row.id) ?? [],
+      avatarAssetByContact.get(row.id) ?? null,
     ),
   );
 }

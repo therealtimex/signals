@@ -8,6 +8,7 @@ import { mkdirSync, existsSync } from "fs";
 import { ensureEmploymentBackfillBeforeCompanyDrop } from "@/lib/db/migrate-employment-pre-drop";
 import { ensureChannelBackfillBeforeDrop } from "@/lib/db/migrate-channel-pre-drop";
 import { ensureMediaAttachmentBackfillBeforeDrop } from "@/lib/db/migrate-media-pre-drop";
+import { ensureAvatarBackfillBeforeDrop } from "@/lib/db/migrate-avatar-pre-drop";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -22,6 +23,7 @@ export function runMigrations(dataDir?: string) {
   ensureEmploymentBackfillBeforeCompanyDrop(dbPath);
   ensureChannelBackfillBeforeDrop(dbPath);
   ensureMediaAttachmentBackfillBeforeDrop(dbPath);
+  ensureAvatarBackfillBeforeDrop(dbPath);
 
   const sqlite = new Database(dbPath);
   sqlite.pragma("journal_mode = WAL");
@@ -29,7 +31,6 @@ export function runMigrations(dataDir?: string) {
 
   const db = drizzle(sqlite);
 
-  // Run migrations from the migrations directory
   const migrationsDir = join(__dirname, "migrations");
   if (existsSync(migrationsDir)) {
     migrate(db, { migrationsFolder: migrationsDir });
