@@ -2,9 +2,9 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { uploadAndAttachContactAvatar } from "@/lib/contact-avatar-client";
 
 type ContactAvatarUploadProps = {
   contactId: string;
@@ -20,31 +20,7 @@ export function ContactAvatarUpload({ contactId, currentAvatarUrl }: ContactAvat
     setUploading(true);
     setError(null);
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-      formData.append("context", "attachment");
-      const uploadRes = await fetch("/api/media", { method: "POST", body: formData });
-      if (!uploadRes.ok) {
-        const body = await uploadRes.json().catch(() => null);
-        throw new Error(body?.error ?? "Upload failed");
-      }
-      const asset = (await uploadRes.json()) as { id: string };
-
-      const attachRes = await fetch("/api/media/attachments", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          mediaAssetId: asset.id,
-          parentType: "contact",
-          parentId: contactId,
-          role: "avatar",
-        }),
-      });
-      if (!attachRes.ok) {
-        const body = await attachRes.json().catch(() => null);
-        throw new Error(body?.error ?? "Failed to attach avatar");
-      }
-
+      await uploadAndAttachContactAvatar(contactId, file);
       router.refresh();
     } catch (uploadError) {
       setError(uploadError instanceof Error ? uploadError.message : "Upload failed");

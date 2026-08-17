@@ -13,9 +13,11 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { ContactForm } from "@/components/contact-form";
+import { ContactAvatarDraftPicker } from "@/components/contact-avatar-draft-picker";
 import type { DraftContactIdentity } from "@/lib/contact-identity-draft";
 import type { DraftContactChannel } from "@/lib/contact-channel-draft";
 import type { DraftContactEmployment } from "@/lib/contact-employment-draft";
+import { uploadAndAttachContactAvatar } from "@/lib/contact-avatar-client";
 import { Plus } from "lucide-react";
 
 const defaultFormData = { funnelStage: "prospect" } as const;
@@ -37,16 +39,24 @@ export function AddContactDialog({
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [formKey, setFormKey] = useState(0);
+  const [displayName, setDisplayName] = useState("");
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
   const formData = useRef<Record<string, string>>({ ...defaultFormData });
   const identitiesData = useRef<DraftContactIdentity[]>([]);
   const channelsData = useRef<DraftContactChannel[]>([]);
   const employmentsData = useRef<DraftContactEmployment[]>([]);
+  const avatarFile = useRef<File | null>(null);
 
   function resetDraft() {
     formData.current = { ...defaultFormData };
     identitiesData.current = [];
     channelsData.current = [];
     employmentsData.current = [];
+    avatarFile.current = null;
+    setDisplayName("");
+    setFirstName("");
+    setLastName("");
     setFormKey((key) => key + 1);
   }
 
@@ -83,6 +93,15 @@ export function AddContactDialog({
         }),
       });
       if (res.ok) {
+        const created = (await res.json()) as { id: string };
+        const pendingAvatar = avatarFile.current;
+        if (pendingAvatar) {
+          try {
+            await uploadAndAttachContactAvatar(created.id, pendingAvatar);
+          } catch {
+            // Contact was created; avatar can be fixed on the detail page.
+          }
+        }
         handleOpenChange(false);
         onCreated?.();
         router.refresh();
@@ -107,16 +126,33 @@ export function AddContactDialog({
           </Button>
         )}
       </DialogTrigger>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
-        <ContactForm
-          key={formKey}
-          showIdentities
-          onChange={(partial) => {
+        <div key={formKey} className="grid gap-4">
+          <ContactAvatarDraftPicker
+            displayName={displayName}
+            firstName={firstName}
+            lastName={lastName}
+            onFileChange={(file) => {
+              avatarFile.current = file;
+            }}
+          />
+          <ContactForm
+            showIdentities
+            onChange={(partial) => {
             formData.current = { ...formData.current, ...partial };
+            if (partial.name !== undefined) {
+              setDisplayName(partial.name);
+            }
+            if (partial.firstName !== undefined) {
+              setFirstName(partial.firstName);
+            }
+            if (partial.lastName !== undefined) {
+              setLastName(partial.lastName);
+            }
           }}
           onIdentitiesChange={(identities) => {
             identitiesData.current = identities;
@@ -128,6 +164,7 @@ export function AddContactDialog({
             employmentsData.current = employments;
           }}
         />
+        </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => handleOpenChange(false)}>
             Cancel

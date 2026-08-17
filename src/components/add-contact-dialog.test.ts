@@ -40,7 +40,10 @@ describe("AddContactDialog", () => {
     document.body.appendChild(container);
     root = createRoot(container);
     fetchMock.mockReset();
-    fetchMock.mockResolvedValue({ ok: true });
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ id: "contact-id" }),
+    });
     vi.stubGlobal("fetch", fetchMock);
   });
 
@@ -158,5 +161,58 @@ describe("AddContactDialog", () => {
     expect(secondBody.identities).toBeUndefined();
     expect(secondBody.firstName).toBe("Second Contact");
     expect(secondBody.firstName).not.toBe("First Contact");
+  });
+
+  it("uploads and attaches an avatar after the contact is created", async () => {
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ id: "contact-123" }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ id: "asset-456" }),
+      })
+      .mockResolvedValueOnce({ ok: true });
+
+    await act(async () => {
+      root.render(createElement(AddContactDialog));
+    });
+
+    await clickButton("Add Contact");
+
+    const firstNameInput = document.querySelector("#firstName") as HTMLInputElement;
+    expect(firstNameInput).toBeTruthy();
+    await act(async () => {
+      setInputValue(firstNameInput, "Avatar");
+    });
+
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+    expect(fileInput).toBeTruthy();
+    const file = new File(["avatar"], "avatar.png", { type: "image/png" });
+    await act(async () => {
+      Object.defineProperty(fileInput, "files", { value: [file] });
+      fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    await clickButton("Save Contact");
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    const [createUrl, createInit] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(createUrl).toBe("/api/contacts");
+    expect(JSON.parse(String(createInit.body)).name).toBe("Avatar");
+
+    const [mediaUrl, mediaInit] = fetchMock.mock.calls[1] as [string, RequestInit];
+    expect(mediaUrl).toBe("/api/media");
+    expect(mediaInit.body).toBeInstanceOf(FormData);
+
+    const [attachUrl, attachInit] = fetchMock.mock.calls[2] as [string, RequestInit];
+    expect(attachUrl).toBe("/api/media/attachments");
+    expect(JSON.parse(String(attachInit.body))).toEqual({
+      mediaAssetId: "asset-456",
+      parentType: "contact",
+      parentId: "contact-123",
+      role: "avatar",
+    });
   });
 });
