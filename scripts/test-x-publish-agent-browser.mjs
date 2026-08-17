@@ -20,12 +20,14 @@ const scriptPath = join(
 );
 const fakeAb = join(root, "fixtures", "fake-agent-browser.cjs");
 
-function runXPublish(payload, extraEnv = {}) {
+function runXPublish(payload, extraEnv = {}, extraArgs = []) {
   const workDir = mkdtempSync(join(tmpdir(), "x-publish-adapter-"));
   const payloadPath = join(workDir, "payload.json");
   const stateFile = join(workDir, "fake-ab-state.json");
   writeFileSync(payloadPath, JSON.stringify(payload));
-  const result = spawnSync(process.execPath, [scriptPath, "--port", "9222", "--payload", payloadPath], {
+  const result = spawnSync(
+    process.execPath,
+    [scriptPath, "--port", "9222", "--payload", payloadPath, ...extraArgs], {
     cwd: join(root, "..", ".claude", "skills", "signals-publish"),
     encoding: "utf8",
     env: {
@@ -72,9 +74,17 @@ if (threadFail.status === 0) {
   console.error("thread fill failure should not succeed");
   process.exit(1);
 }
-const threadFailJson = lastJson(threadFail.stdout);
-if (threadFailJson.success) {
-  console.error("thread fill failure emitted success");
+
+const dryRun = runXPublish({ text: "dry only", threadTexts: ["dry two"] }, {}, [
+  "--dry-run",
+]);
+if (dryRun.status !== 0) {
+  console.error("dry-run failed:", dryRun.stdout, dryRun.stderr);
+  process.exit(1);
+}
+const dryJson = lastJson(dryRun.stdout);
+if (!dryJson.success || !dryJson.dryRun) {
+  console.error("unexpected dry-run result:", dryJson);
   process.exit(1);
 }
 

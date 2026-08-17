@@ -41,6 +41,8 @@ node .claude/skills/signals-publish/scripts/x-publish.cjs \
   --payload /tmp/x-publish-job.json
 ```
 
+For QA without sending a public post, add `--dry-run` (fills compose and thread fields, skips Tweet).
+
 3. Parse the **last stdout line** as JSON. On success call `complete_publish` with `handle`, `platformPostId`, `platformUrl`. On failure pass `error` + `errorCode` (`session_expired`, `captcha`, `upload_failed`, `timeout`, `unknown`).
 4. **LinkedIn (beta):** no deterministic script in v1. Use `agent-browser` interactively or call `complete_publish` with `success: false` and a clear error if unsupported.
 

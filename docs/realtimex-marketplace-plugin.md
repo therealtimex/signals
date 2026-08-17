@@ -33,9 +33,11 @@ Plugin validation uses `scripts/vendor/validate-plugin.cjs` (override with `REAL
 ## Local dev install (before #1614 automation)
 
 1. **Plugin:** RTX Admin → Plugins → Upload `dist/com.realtimex.signals-plugin.zip`, enable, configure, **Deploy** workspace provision.
-2. **Local app (dev fallback):** `node scripts/qa/provision-signals-local-app.mjs` or register manually with `marketplace/local-app.manifest.json` after extracting standalone zip.
-3. **Flows:** Import `flows/*.agent-flow.json` from the plugin zip via Admin → Agent Flows (until platform auto-import lands).
-4. Start Signals from **Settings → Local Apps**, open provisioned workspace terminal agent.
+2. **Verify provision (QA):** `node scripts/qa/verify-signals-plugin-provision.mjs` (after Deploy). Deploy is UI-only today — not on `realtimex-pp-cli`.
+3. **Publish QA (no public post):** `x-publish.cjs --dry-run` after `signals-publish` browser session is on an `https://x.com` tab.
+4. **Local app (dev fallback):** `node scripts/qa/provision-signals-local-app.mjs` or register manually with `marketplace/local-app.manifest.json` after extracting standalone zip.
+5. **Flows:** Import `flows/*.agent-flow.json` from the plugin zip via Admin → Agent Flows (until platform auto-import lands).
+6. Start Signals from **Settings → Local Apps**, open provisioned workspace terminal agent.
 
 ## Production path (after #1614)
 

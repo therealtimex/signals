@@ -100,18 +100,24 @@ function ensureAgentBrowser() {
 function parseArgs(argv) {
   let port = null;
   let payloadPath = null;
+  let dryRun = false;
   for (let i = 2; i < argv.length; i++) {
     if (argv[i] === "--port") port = Number(argv[++i]);
     else if (argv[i] === "--payload") payloadPath = argv[++i];
+    else if (argv[i] === "--dry-run") dryRun = true;
   }
   if (!port || !payloadPath) {
     emit({
       success: false,
-      error: "Usage: node x-publish.cjs --port <cdpPort> --payload <job.json>",
+      error: "Usage: node x-publish.cjs --port <cdpPort> --payload <job.json> [--dry-run]",
       errorCode: "unknown",
     });
   }
-  return { port, payload: JSON.parse(readFileSync(payloadPath, "utf8")) };
+  return {
+    port,
+    payload: JSON.parse(readFileSync(payloadPath, "utf8")),
+    dryRun,
+  };
 }
 
 function abBool(args) {
@@ -416,7 +422,7 @@ function waitForVerifiedPost(expectedText, handle, baseline, timeoutMs = 20_000)
 }
 
 function main() {
-  const { port, payload } = parseArgs(process.argv);
+  const { port, payload, dryRun } = parseArgs(process.argv);
   ensureAgentBrowser();
 
   try {
@@ -438,6 +444,17 @@ function main() {
 
     const baseline = captureProfileStatusBaseline(handle);
     fillCompose(payload);
+
+    if (dryRun) {
+      emit({
+        success: true,
+        dryRun: true,
+        handle,
+        message:
+          "Compose and thread fields populated; Tweet was not clicked (dry-run).",
+      });
+      return;
+    }
 
     requireAb(["wait", X_SELECTORS.tweetButton], "wait for tweet button");
     requireAb(["click", X_SELECTORS.tweetButton], "click tweet button");
