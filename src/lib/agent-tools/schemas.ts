@@ -147,7 +147,19 @@ export const queryWorkflowsSchema = z.object({
 
 export const queryContentSchema = z.object({
   contentType: z.enum(["post", "thread", "article", "newsletter", "dm", "reply"]).optional(),
-  status: z.enum(["draft", "scheduled", "published", "archived"]).optional(),
+  status: z
+    .enum([
+      "draft",
+      "review",
+      "approved",
+      "scheduled",
+      "published",
+      "imported",
+      "queued",
+      "publishing",
+      "failed",
+    ])
+    .optional(),
   page: z.number().int().positive().optional(),
   pageSize: z.number().int().positive().max(100).optional(),
 });

@@ -67,6 +67,9 @@ Then pass `Authorization: Bearer your-secret-token` on each request.
 | `query_simulations` | graph | List simulation runs with optional agent grounding. With `includeCalibrations: true`, detail payloads include `latestCalibration` and the full per-horizon `calibrations[]` history (same shape as `GET /api/simulations/[id]?includeCalibration=true`). |
 | `record_simulation_results` | graph | Batch per-agent simulation outcomes on a running run |
 | `complete_simulation_run` | graph | Complete/fail/cancel a run and project variant predictions. Default `status` is `completed`, which requires `predictedScore`, `predictionConfidence`, and `predictedMetrics` (engagement_metrics keyspace). `failed` requires `error`. |
+| `get_publish_job` | content | Load a publish job payload + targets for the agent lane |
+| `update_publish_job` | content | Mark job/target in-flight (`publishing`) |
+| `complete_publish` | content | Record per-platform publish result; creates `content_posts` on success |
 
 Simulation run tool responses include additive fields (`populationSpec`, `error`, `workflowRunId`, `createdAt`, `updatedAt`, `transcriptsPrunedAt`) shared with the dashboard REST API (`specs/ui-4.1-rest-api.md`).
 
@@ -76,7 +79,9 @@ Simulation run tool responses include additive fields (`populationSpec`, `error`
 
 `generate_persona` requires the same embedded runtime plus the `llm.chat` permission for structured persona synthesis. Terminal agents can instead call `get_persona_evidence` and write with `upsert_persona` using their own intelligence (no `workflow_runs` row).
 
-Tools that require browser/LLM (web search, scrape, publish, etc.) are **not** exposed here — RTX terminal agents should use platform credentials and their own tools for those operations.
+**Publish lane** (`get_publish_job`, `update_publish_job`, `complete_publish`) coordinates CRM publish jobs with RTX terminal agents. Browser automation runs in the `signals-publish` skill — not in Signals server code. See `docs/rtx-browser-publish.md` and `.claude/skills/signals-publish/SKILL.md`.
+
+Tools that require browser/LLM for ad-hoc research (web search, scrape, etc.) are **not** exposed here — RTX terminal agents should use platform credentials and their own tools for those operations.
 
 **Avatar uploads** are also not agent-tools. Terminal agents should use the `realtimex-signals` skill script `upload-avatar.sh` (multipart `POST /api/media` + `POST /api/media/attachments` with `role: avatar`). Never persist `file://` or local filesystem paths as `avatarUrl` — identity `avatarUrl` accepts `http(s)` platform URLs only; uploaded photos resolve as `/api/media/<assetId>`.
 

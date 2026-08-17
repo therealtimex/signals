@@ -56,7 +56,8 @@ From repo root you can also use `scripts/invoke-agent-tool.sh` with `SIGNALS_BAS
 ## When NOT to use
 
 - **In-app Signals chat** (`/api/chat`) — deprecated path; use agent-tools instead
-- **Browser scrape / web search / publish** — not on agent-tools API; use RTX browser/credentials, then write to Signals
+- **Ad-hoc browser scrape / web search** — use RTX browser/credentials, then write to Signals via agent-tools
+- **Inline server publish** — retired; compose uses **Send to agent** + `get_publish_job` / `complete_publish` (see `signals-publish` skill)
 - **Deterministic scheduled automation** — use Agent Flows in `flows/` instead
 
 ## Discovery order
