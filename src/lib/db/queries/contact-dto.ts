@@ -72,14 +72,6 @@ export function assembleContactDto(
   channels: ContactChannel[],
   employments: ContactEmploymentDTO[],
 ): ContactDTO {
-  const {
-    platform: _platform,
-    platformUserId: _platformUserId,
-    verifiedEmail: _verifiedEmail,
-    email: _legacyEmail,
-    phone: _legacyPhone,
-    ...contactRest
-  } = contact;
   const primaryEmailChannel = pickPrimaryChannel(channels, "email");
   const primaryPhoneChannel = pickPrimaryChannel(channels, "phone");
   const primaryEmail = primaryEmailChannel?.value ?? null;
@@ -94,7 +86,7 @@ export function assembleContactDto(
     : null;
 
   return {
-    ...contactRest,
+    ...contact,
     identities,
     channels,
     employments,
