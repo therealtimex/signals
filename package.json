@@ -30,6 +30,7 @@
     "check": "npm run typecheck && npm run lint && npm run test:coverage && npm run test:skill-package && npm run db:migrate && npm run build",
     "package:realtimex-plugin": "bash scripts/package-realtimex-plugin.sh",
     "build:standalone-artifact": "bash scripts/build-standalone-artifact.sh",
+    "gate": "npm run check",
     "prepublishOnly": "npm run build:cli",
     "doctor": "npx react-doctor@latest"
   },

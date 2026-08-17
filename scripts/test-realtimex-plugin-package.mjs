@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 /**
- * Smoke test: com.realtimex.signals plugin zip structure.
+ * Smoke test: com.realtimex.signals plugin zip structure and bundled skill runtime.
  * Usage: node scripts/test-realtimex-plugin-package.mjs [path-to-zip]
  */
 import fs from "node:fs";
 import path from "node:path";
-import { execSync } from "node:child_process";
+import { execSync, spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -134,17 +136,80 @@ if (skillMd.includes(".claude/skills/realtimex-signals")) {
   errors.push("realtimex-signals SKILL.md still references .claude/skills paths");
 }
 
-if (entries.some((e) => e.endsWith(".mjs"))) {
-  errors.push("Plugin zip contains .mjs files (validator requires CommonJS)");
+const publishSkillMd = execSync(
+  `unzip -p "${zipPath}" skills/signals-publish/SKILL.md`,
+  { encoding: "utf8" }
+);
+if (publishSkillMd.includes(".claude/skills/signals-publish")) {
+  errors.push(
+    "signals-publish SKILL.md still references .claude/skills paths (expected staged skills/ path)"
+  );
+}
+if (!publishSkillMd.includes("skills/signals-publish/scripts/x-publish.cjs")) {
+  errors.push("signals-publish SKILL.md missing staged script path");
 }
 
-if (entries.some((e) => e.includes("node_modules"))) {
-  errors.push("Plugin zip contains node_modules (should be excluded)");
+if (entries.some((e) => e.endsWith(".mjs") && !e.includes("node_modules"))) {
+  errors.push("Plugin zip contains .mjs files outside node_modules (validator requires CommonJS skill scripts)");
+}
+
+const nodeModuleEntries = entries.filter((e) => e.includes("node_modules"));
+const allowedNodeModulePrefix = "skills/signals-publish/node_modules";
+const disallowedNodeModules = nodeModuleEntries.filter((e) => {
+  if (e === allowedNodeModulePrefix) return false;
+  return !e.startsWith(`${allowedNodeModulePrefix}/`);
+});
+if (disallowedNodeModules.length > 0) {
+  errors.push(
+    `Plugin zip contains node_modules outside signals-publish skill: ${disallowedNodeModules[0]}`
+  );
+}
+if (
+  !entries.some((e) =>
+    e.startsWith("skills/signals-publish/node_modules/playwright-core/")
+  )
+) {
+  errors.push("Plugin zip missing bundled playwright-core for signals-publish");
+}
+
+function assertBundledSkillRunnable() {
+  const workDir = mkdtempSync(path.join(tmpdir(), "signals-plugin-smoke-"));
+  try {
+    execSync(`unzip -q "${zipPath}" -d "${workDir}"`, { stdio: "pipe" });
+    const skillRoot = path.join(workDir, "skills", "signals-publish");
+    const scriptPath = path.join(skillRoot, "scripts", "x-publish.cjs");
+    const payloadPath = path.join(workDir, "payload.json");
+    writeFileSync(payloadPath, JSON.stringify({ text: "plugin zip smoke test" }));
+
+    const result = spawnSync(
+      process.execPath,
+      [scriptPath, "--port", "9222", "--payload", payloadPath],
+      { cwd: skillRoot, encoding: "utf8" }
+    );
+    const output = `${result.stdout}\n${result.stderr}`;
+    if (
+      /ERR_MODULE_NOT_FOUND/.test(output) ||
+      /Cannot find module 'playwright-core'/.test(output) ||
+      /Cannot find package 'playwright-core'/.test(output)
+    ) {
+      throw new Error(`playwright-core missing from plugin zip:\n${output}`);
+    }
+  } finally {
+    rmSync(workDir, { recursive: true, force: true });
+  }
 }
 
 if (errors.length) {
   console.error("Plugin package validation failed:");
   for (const e of errors) console.error(`  - ${e}`);
+  process.exit(1);
+}
+
+try {
+  assertBundledSkillRunnable();
+} catch (err) {
+  console.error("Plugin package isolated skill execution failed:");
+  console.error(`  - ${err.message}`);
   process.exit(1);
 }
 

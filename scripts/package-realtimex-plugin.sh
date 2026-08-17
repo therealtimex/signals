@@ -7,7 +7,34 @@ PLUGIN_SRC="${ROOT}/realtimex-plugin"
 STAGING="${ROOT}/dist/realtimex-plugin-staging"
 OUT="${1:-${ROOT}/dist/com.realtimex.signals-plugin.zip}"
 RELEASE_MANIFEST="${ROOT}/marketplace/release-manifest.json"
-VALIDATOR="${ROOT}/../../.claude/skills/realtimex-plugin-developer/scripts/validate-plugin.cjs"
+
+resolve_validator() {
+  if [[ -n "${REALTIMEX_PLUGIN_VALIDATOR:-}" && -f "${REALTIMEX_PLUGIN_VALIDATOR}" ]]; then
+    return 0
+  fi
+
+  local candidate
+  for candidate in \
+    "${ROOT}/scripts/vendor/validate-plugin.cjs" \
+    "${ROOT}/.claude/skills/realtimex-plugin-developer/scripts/validate-plugin.cjs"; do
+    if [[ -f "$candidate" ]]; then
+      REALTIMEX_PLUGIN_VALIDATOR="$candidate"
+      return 0
+    fi
+  done
+
+  local dir="$ROOT"
+  while [[ "$dir" != "/" ]]; do
+    candidate="${dir}/.claude/skills/realtimex-plugin-developer/scripts/validate-plugin.cjs"
+    if [[ -f "$candidate" ]]; then
+      REALTIMEX_PLUGIN_VALIDATOR="$candidate"
+      return 0
+    fi
+    dir="$(dirname "$dir")"
+  done
+
+  return 1
+}
 
 if [[ ! -f "${PLUGIN_SRC}/realtimex.plugin.json" ]]; then
   echo "Missing ${PLUGIN_SRC}/realtimex.plugin.json" >&2
@@ -25,6 +52,12 @@ if [[ -z "$CHECKSUM" ]]; then
   exit 1
 fi
 
+if ! resolve_validator; then
+  echo "RealtimeX plugin validator not found." >&2
+  echo "Set REALTIMEX_PLUGIN_VALIDATOR or vendor scripts/vendor/validate-plugin.cjs" >&2
+  exit 1
+fi
+
 rm -rf "$STAGING"
 mkdir -p "$STAGING"
 
@@ -38,7 +71,7 @@ mkdir -p "$STAGING/flows"
 cp "${ROOT}/flows/signals-crm-agent-task.agent-flow.json" "$STAGING/flows/"
 cp "${ROOT}/flows/signals-create-enrich-contact.agent-flow.json" "$STAGING/flows/"
 
-echo "==> Copying workspace skills (excluding node_modules, .mjs)..."
+echo "==> Copying workspace skills..."
 mkdir -p "$STAGING/skills"
 rsync -a --exclude node_modules --exclude '*.mjs' \
   "${ROOT}/.claude/skills/realtimex-signals/" "$STAGING/skills/realtimex-signals/"
@@ -46,20 +79,29 @@ rsync -a --exclude node_modules --exclude '*.mjs' \
   "${ROOT}/.claude/skills/signals-publish/" "$STAGING/skills/signals-publish/"
 
 chmod +x "$STAGING/skills/realtimex-signals/scripts/"*.sh 2>/dev/null || true
+chmod +x "$STAGING/skills/signals-publish/scripts/"*.cjs 2>/dev/null || true
 
 if [[ -f "$STAGING/skills/realtimex-signals/SKILL.md" ]]; then
   perl -pi -e 's|\.claude/skills/realtimex-signals|skills/realtimex-signals|g' \
     "$STAGING/skills/realtimex-signals/SKILL.md"
 fi
 
+if [[ -f "$STAGING/skills/signals-publish/SKILL.md" ]]; then
+  perl -pi -e 's|\.claude/skills/signals-publish|skills/signals-publish|g' \
+    "$STAGING/skills/signals-publish/SKILL.md"
+fi
+
+echo "==> Installing signals-publish skill runtime dependencies..."
+(
+  cd "$STAGING/skills/signals-publish"
+  npm install --omit=dev --no-audit --no-fund --no-bin-links
+  rm -rf node_modules/.bin 2>/dev/null || true
+)
+
 cp "$RELEASE_MANIFEST" "$STAGING/marketplace/release-manifest.json"
 
-if [[ -f "$VALIDATOR" ]]; then
-  echo "==> Running RealtimeX plugin validator on staging directory..."
-  node "$VALIDATOR" "$STAGING"
-else
-  echo "Warning: validate-plugin.cjs not found at ${VALIDATOR}; skipping official validator" >&2
-fi
+echo "==> Running RealtimeX plugin validator on staging directory..."
+node "$REALTIMEX_PLUGIN_VALIDATOR" "$STAGING"
 
 rm -f "$OUT"
 (
