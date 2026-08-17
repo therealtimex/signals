@@ -8,6 +8,8 @@
  *   node scripts/qa/verify-signals-plugin-provision.mjs
  *
  * Optional: pass --plugin-id <uuid> (default: installed "signals" plugin).
+ *
+ * Requires STORAGE_DIR when verifying deployed skill files on disk.
  */
 import { createHash } from "node:crypto";
 import fs from "node:fs";
@@ -16,7 +18,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(__dirname, "..");
+const repoRoot = path.resolve(__dirname, "..", "..");
 const DEFAULT_PLUGIN_ID = "79f6f094-a15f-4af0-8dbb-605552701218";
 const WORKSPACE_SLUG = "f3a8c2e1-4d5b-4a7c-8e9f-0a1b2c3d4e5f";
 const REQUIRED_SKILLS = ["realtimex-signals", "signals-publish"];
@@ -36,15 +38,25 @@ function parsePluginId() {
 }
 
 function runPp(args) {
-  const result = spawnSync("realtimex-pp-cli", args, { encoding: "utf8" });
+  const withAgent = args.includes("--agent") ? args : [...args, "--agent"];
+  const result = spawnSync("realtimex-pp-cli", withAgent, { encoding: "utf8" });
   if (result.status !== 0) {
     throw new Error(
-      `realtimex-pp-cli ${args.join(" ")} failed: ${result.stderr || result.stdout}`
+      `realtimex-pp-cli ${withAgent.join(" ")} failed: ${result.stderr || result.stdout}`
     );
   }
   const jsonStart = result.stdout.indexOf("{");
   if (jsonStart === -1) throw new Error(`No JSON from pp-cli: ${result.stdout}`);
   return JSON.parse(result.stdout.slice(jsonStart));
+}
+
+function resolveStorageDir() {
+  const storageDir = process.env.STORAGE_DIR?.trim();
+  if (storageDir) return storageDir;
+  throw new Error(
+    "STORAGE_DIR is required to verify deployed signals-publish files on disk. " +
+      "Set STORAGE_DIR to the RealtimeX storage root (the directory that contains working-data/)."
+  );
 }
 
 function listWorkspaces() {
@@ -82,6 +94,16 @@ function deployedPublishCandidates(storageDir) {
   return out;
 }
 
+if (process.argv.includes("--deploy-instructions")) {
+  console.log("Deploy (required once after install):");
+  console.log("  1. Open RealtimeX → Settings → Plugins");
+  console.log("  2. Select Signals (com.realtimex.signals)");
+  console.log("  3. Click Deploy (not just Enable)");
+  console.log("  4. Rebuild/reinstall plugin zip if you changed source since last install");
+  console.log("  5. Re-run: node scripts/qa/verify-signals-plugin-provision.mjs");
+  process.exit(0);
+}
+
 const pluginId = parsePluginId();
 const expectedVersion = JSON.parse(
   fs.readFileSync(path.join(repoRoot, "package.json"), "utf8")
@@ -98,16 +120,6 @@ if (expectedPublishSha) {
   console.log(`  expected x-publish sha256: ${expectedPublishSha}`);
 }
 console.log("");
-
-if (process.argv.includes("--deploy-instructions")) {
-  console.log("Deploy (required once after install):");
-  console.log("  1. Open RealtimeX → Settings → Plugins");
-  console.log("  2. Select Signals (com.realtimex.signals)");
-  console.log("  3. Click Deploy (not just Enable)");
-  console.log("  4. Rebuild/reinstall plugin zip if you changed source since last install");
-  console.log("  5. Re-run: node scripts/qa/verify-signals-plugin-provision.mjs");
-  process.exit(0);
-}
 
 const pluginData = runPp(["get-plugin", pluginId, "--json", "--data-source", "live"]);
 const plugin = pluginData.results?.plugin ?? pluginData.plugin;
@@ -163,9 +175,13 @@ for (const name of REQUIRED_SKILLS) {
 }
 
 if (expectedPublishSha) {
-  const storageDir =
-    process.env.STORAGE_DIR ||
-    path.join(process.env.HOME || "", ".realtimex.ai/desktop-user-data/app/users/trungle_rta_vn/storage");
+  let storageDir;
+  try {
+    storageDir = resolveStorageDir();
+  } catch (err) {
+    console.error(`BLOCKED: ${err.message}`);
+    process.exit(5);
+  }
   let deployedPath = null;
   let deployedHash = null;
   for (const candidate of deployedPublishCandidates(storageDir)) {
