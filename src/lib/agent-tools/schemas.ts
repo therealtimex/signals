@@ -94,6 +94,35 @@ export const archiveContactSchema = z.object({
   reason: z.string().min(1),
 });
 
+export const upsertContactIdentitySchema = z
+  .object({
+    id: z.string().optional(),
+    contactId: z.string().min(1),
+    platform: platform.optional(),
+    platformUserId: z.string().min(1).optional(),
+    platformHandle: z.string().optional(),
+    platformUrl: z.string().optional(),
+    platformData: z.record(z.unknown()).optional(),
+    displayName: z.string().optional(),
+    headline: z.string().optional(),
+    bio: z.string().optional(),
+    avatarUrl: z.string().optional(),
+    location: z.string().optional(),
+    websiteUrl: z.string().optional(),
+    isVerified: z.boolean().optional(),
+    followersCount: z.number().int().optional(),
+    followingCount: z.number().int().optional(),
+    postsCount: z.number().int().optional(),
+    listedCount: z.number().int().optional(),
+    platformCreatedAt: z.number().int().optional(),
+    isPrimary: z.boolean().optional(),
+    isActive: z.boolean().optional(),
+    lastSyncedAt: z.number().int().optional(),
+  })
+  .refine((data) => data.id || (data.platform && data.platformUserId), {
+    message: "platform and platformUserId are required when creating a new identity",
+  });
+
 export const queryGoalsSchema = z.object({
   status: z.enum(["active", "achieved", "missed", "paused"]).optional(),
   goalType: z

@@ -12,6 +12,7 @@ import {
   queryWorkflowsSchema,
   startWorkflowSchema,
   updateContactSchema,
+  upsertContactIdentitySchema,
   getPersonaSchema,
   upsertPersonaSchema,
   getPersonaEvidenceSchema,
@@ -73,6 +74,7 @@ import {
   handleQueryWorkflows,
   handleStartWorkflow,
   handleUpdateContact,
+  handleUpsertContactIdentity,
   handleGetPersona,
   handleGetPersonaEvidence,
   handleGeneratePersona,
@@ -124,6 +126,15 @@ export const AGENT_TOOLS: Record<string, AgentToolDefinition> = {
     schema: enrichContactSchema,
     parameters: zodToParameters(enrichContactSchema),
     execute: handleEnrichContact,
+  },
+  upsert_contact_identity: {
+    name: "upsert_contact_identity",
+    description:
+      "Create or update a platform identity for a contact. Cross-claim conflicts return a reassign error.",
+    category: "contacts",
+    schema: upsertContactIdentitySchema,
+    parameters: zodToParameters(upsertContactIdentitySchema),
+    execute: handleUpsertContactIdentity,
   },
   archive_contact: {
     name: "archive_contact",

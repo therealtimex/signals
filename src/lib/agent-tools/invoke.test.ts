@@ -20,6 +20,7 @@ describe("agent-tools registry", () => {
     expect(names).toContain("query_contacts");
     expect(names).toContain("create_contact");
     expect(names).toContain("enrich_contact");
+    expect(names).toContain("upsert_contact_identity");
     expect(names).toContain("query_org_identities");
     expect(names).toContain("upsert_org_identity");
 
@@ -138,5 +139,43 @@ describe("invokeAgentTool", () => {
     expect(rows[0]?.id).toBe(low.id);
     expect(rows[0]?.score).toBe(5);
     expect(rows[1]?.id).toBe(high.id);
+  });
+
+  it("upserts a contact identity and returns it from get_contact", async () => {
+    const created = await invokeAgentTool("create_contact", {
+      name: "Identity Contact",
+    });
+    const contactId = (created as { id: string }).id;
+
+    const identity = await invokeAgentTool("upsert_contact_identity", {
+      contactId,
+      platform: "linkedin",
+      platformUserId: "identity-contact-li",
+      platformHandle: "identitycontact",
+      headline: "Builder",
+      avatarUrl: "https://example.com/avatar.jpg",
+    });
+
+    expect(identity).toMatchObject({
+      platform: "linkedin",
+      platformUserId: "identity-contact-li",
+      handle: "identitycontact",
+      headline: "Builder",
+      avatarUrl: "https://example.com/avatar.jpg",
+      message: "Contact identity upserted.",
+    });
+
+    const contact = await invokeAgentTool("get_contact", { contactId });
+    expect(contact).toMatchObject({
+      resolvedAvatarUrl: "https://example.com/avatar.jpg",
+      identities: [
+        expect.objectContaining({
+          platform: "linkedin",
+          platformUserId: "identity-contact-li",
+          headline: "Builder",
+          avatarUrl: "https://example.com/avatar.jpg",
+        }),
+      ],
+    });
   });
 });
