@@ -1,9 +1,9 @@
 # signals-publish reference
 
-## x-publish.mjs CLI
+## x-publish.cjs CLI
 
 ```bash
-node scripts/x-publish.mjs --port <cdpPort> --payload <job.json>
+node scripts/x-publish.cjs --port <cdpPort> --payload <job.json>
 ```
 
 ### Payload (`job.json`)

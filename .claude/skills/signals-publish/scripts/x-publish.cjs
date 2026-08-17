@@ -3,15 +3,15 @@
  * Deterministic X publish over CDP (ported from P6a rtx-publish steps).
  *
  * Usage:
- *   node scripts/x-publish.mjs --port <cdpPort> --payload <job.json>
+ *   node scripts/x-publish.cjs --port <cdpPort> --payload <job.json>
  *
  * Payload: { text, threadTexts?, mediaPaths?, expectedHandle? }
  * mediaPaths: string[] for single post, or string[][] per thread tweet
  *
  * stdout (last line): JSON result
  */
-import { readFileSync } from "node:fs";
-import { chromium } from "playwright-core";
+const { readFileSync } = require("node:fs");
+const { chromium } = require("playwright-core");
 
 const X_HOME_URL = "https://x.com/home";
 
@@ -59,7 +59,7 @@ function parseArgs(argv) {
   if (!port || !payloadPath) {
     emit({
       success: false,
-      error: "Usage: node x-publish.mjs --port <cdpPort> --payload <job.json>",
+      error: "Usage: node x-publish.cjs --port <cdpPort> --payload <job.json>",
       errorCode: "unknown",
     });
   }

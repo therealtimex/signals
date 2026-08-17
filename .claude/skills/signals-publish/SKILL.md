@@ -34,7 +34,7 @@ Resolve/create/start the session with `realtimex-pp-cli` or the `agent-browser` 
    - Run:
 
 ```bash
-node .claude/skills/signals-publish/scripts/x-publish.mjs \
+node skills/signals-publish/scripts/x-publish.cjs \
   --port <cdpPort> \
   --payload /tmp/x-publish-job.json
 ```

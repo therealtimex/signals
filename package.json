@@ -1,6 +1,6 @@
 {
   "name": "@realtimex/signals",
-  "version": "0.1.8",
+  "version": "0.1.10",
   "description": "Signals — Local-first Social GTM & Relationship Knowledge Graph",
   "type": "module",
   "bin": {
@@ -22,12 +22,14 @@
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage --project unit && vitest run --project latency",
     "test:skill-package": "node scripts/test-signals-publish-skill-package.mjs",
+    "test:plugin-package": "node scripts/test-realtimex-plugin-package.mjs",
     "verify:fresh-import": "vitest run --project import-safety",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "smoke:core": "playwright test e2e/smoke",
     "check": "npm run typecheck && npm run lint && npm run test:coverage && npm run test:skill-package && npm run db:migrate && npm run build",
-    "gate": "npm run check",
+    "package:realtimex-plugin": "bash scripts/package-realtimex-plugin.sh",
+    "build:standalone-artifact": "bash scripts/build-standalone-artifact.sh",
     "prepublishOnly": "npm run build:cli",
     "doctor": "npx react-doctor@latest"
   },

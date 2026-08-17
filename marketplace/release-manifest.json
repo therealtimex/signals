@@ -1,0 +1,21 @@
+{
+  "signalsVersion": "0.1.10",
+  "pluginVersion": "0.1.10",
+  "pluginId": "com.realtimex.signals",
+  "localAppId": "47e45f71-3279-42f5-8e95-731de01b6eae",
+  "artifactName": "signals-0.1.10-standalone.zip",
+  "artifactPath": "dist/signals-0.1.10-standalone.zip",
+  "checksumSha256": "b30f42319a383168bc72dc96171e935dc4cb3fb012ff32d9ecc6a3a2b9be3dc9",
+  "minRealtimeXVersion": "1.0.0",
+  "permissions": [
+    "credentials.list",
+    "credentials.use",
+    "webhook.trigger",
+    "llm.embed",
+    "llm.chat",
+    "desktop.browser",
+    "desktop.runtime-sessions"
+  ],
+  "platformDependency": "https://rtgit.rta.vn/rtlab/rtwebteam/realtimex-ai-app/-/issues/1614",
+  "builtAt": "2026-08-17T10:07:25.640Z"
+}

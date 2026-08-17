@@ -34,7 +34,7 @@ try {
     workDir,
     "signals-publish",
     "scripts",
-    "x-publish.mjs"
+    "x-publish.cjs"
   );
   const payloadPath = join(workDir, "payload.json");
   writeFileSync(payloadPath, JSON.stringify({ text: "smoke test" }));

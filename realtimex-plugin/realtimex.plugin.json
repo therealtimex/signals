@@ -1,0 +1,95 @@
+{
+  "id": "com.realtimex.signals",
+  "name": "realtimex-signals",
+  "displayName": "Signals",
+  "version": "0.1.10",
+  "kind": "workspace-provision",
+  "description": "Local-first social GTM and relationship CRM — workspace, agent skills, flows, and marketplace local app integration for Signals.",
+  "author": {
+    "name": "RealtimeX"
+  },
+  "license": "Apache-2.0",
+  "capabilities": {
+    "workspace_provisions": ["signals"],
+    "workspace_skills": [
+      {
+        "key": "realtimex-signals",
+        "name": "realtimex-signals",
+        "displayName": "RealtimeX Signals",
+        "description": "Operate Signals CRM via agent-tools REST API.",
+        "directory": "skills/realtimex-signals"
+      },
+      {
+        "key": "signals-publish",
+        "name": "signals-publish",
+        "displayName": "Signals Publish",
+        "description": "Publish Signals content via RealTimeX Browser and agent-tools.",
+        "directory": "skills/signals-publish"
+      }
+    ]
+  },
+  "configSchema": [
+    {
+      "key": "WORKSPACE_NAME",
+      "label": "Workspace name",
+      "type": "text",
+      "default": "Signals",
+      "description": "Display name for the provisioned Signals workspace."
+    },
+    {
+      "key": "SIGNALS_DATA_DIR",
+      "label": "Signals data directory",
+      "type": "text",
+      "default": "~/.signals",
+      "description": "Local SQLite and graph data path. Override with SIGNALS_DATA_DIR env when starting the Local App."
+    },
+    {
+      "key": "SYSTEM_PROMPT",
+      "label": "Terminal agent system prompt",
+      "type": "text",
+      "default": "You operate Signals CRM through agent-tools and RealTimeX browser sessions. Persist research into Signals via enrich_contact and update_contact. Use realtimex-signals and signals-publish skills."
+    }
+  ],
+  "provisions": {
+    "workspaces": [
+      {
+        "key": "signals",
+        "slug": "f3a8c2e1-4d5b-4a7c-8e9f-0a1b2c3d4e5f",
+        "name": "{{WORKSPACE_NAME}}",
+        "type": "default",
+        "settings": {
+          "openAiPrompt": "{{SYSTEM_PROMPT}}"
+        },
+        "managedSettings": ["openAiPrompt"],
+        "workingDirectory": {
+          "source": "templates/signals",
+          "copyPolicy": "copy-missing",
+          "managedPaths": ["AGENTS.md"]
+        },
+        "skills": {
+          "workspace": {
+            "include": ["realtimex-signals", "signals-publish"]
+          },
+          "external": {
+            "lock": true,
+            "allow": ["realtimex-moderator-sdk", "agent-browser"],
+            "onMissing": "warn"
+          }
+        }
+      }
+    ]
+  },
+  "metadata": {
+    "marketplace": {
+      "distribution": "realtimex-marketplace",
+      "platformIssue": "https://rtgit.rta.vn/rtlab/rtwebteam/realtimex-ai-app/-/issues/1614",
+      "localAppManifest": "marketplace/local-app.manifest.json",
+      "releaseManifest": "marketplace/release-manifest.json",
+      "bundledFlows": [
+        "flows/signals-crm-agent-task.agent-flow.json",
+        "flows/signals-create-enrich-contact.agent-flow.json"
+      ],
+      "notes": "Import bundled flows via Admin → Agent Flows after workspace deploy until platform #1614 auto-imports plugin flows."
+    }
+  }
+}
