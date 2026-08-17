@@ -157,7 +157,7 @@ if (!resetOnClickJson.success || !resetOnClickJson.dryRun) {
 
 const globalAddOnly = runXPublish(
   { text: "thread tweet one", threadTexts: ["thread tweet two"] },
-  { FAKE_AB_DIALOG_ADD_ONLY: "1" },
+  { FAKE_AB_GLOBAL_ADD_ONLY: "1" },
   ["--dry-run"]
 );
 if (globalAddOnly.status !== 0) {
@@ -167,6 +167,21 @@ if (globalAddOnly.status !== 0) {
 const globalAddOnlyJson = lastJson(globalAddOnly.stdout);
 if (!globalAddOnlyJson.success || !globalAddOnlyJson.dryRun) {
   console.error("unexpected global-add-only dry-run result:", globalAddOnlyJson);
+  process.exit(1);
+}
+
+const dialogAddOnly = runXPublish(
+  { text: "thread tweet one", threadTexts: ["thread tweet two"] },
+  { FAKE_AB_DIALOG_ADD_ONLY: "1" },
+  ["--dry-run"]
+);
+if (dialogAddOnly.status !== 0) {
+  console.error("dialog-add-only path failed:", dialogAddOnly.stdout, dialogAddOnly.stderr);
+  process.exit(1);
+}
+const dialogAddOnlyJson = lastJson(dialogAddOnly.stdout);
+if (!dialogAddOnlyJson.success || !dialogAddOnlyJson.dryRun) {
+  console.error("unexpected dialog-add-only dry-run result:", dialogAddOnlyJson);
   process.exit(1);
 }
 

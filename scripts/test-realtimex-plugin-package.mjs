@@ -5,6 +5,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
@@ -153,6 +154,29 @@ if (entries.some((e) => e.endsWith(".mjs") && !e.includes("node_modules"))) {
 
 if (entries.some((e) => e.includes("node_modules"))) {
   errors.push("Plugin zip contains node_modules (forbidden by plugin contract)");
+}
+
+const bundledPublishPath = "skills/signals-publish/scripts/x-publish.cjs";
+const sourcePublishPath = path.join(
+  root,
+  ".claude/skills/signals-publish/scripts/x-publish.cjs"
+);
+if (!fs.existsSync(sourcePublishPath)) {
+  errors.push(`Source missing for freshness check: ${sourcePublishPath}`);
+} else {
+  const sourceHash = createHash("sha256")
+    .update(fs.readFileSync(sourcePublishPath))
+    .digest("hex");
+  const zipBytes = execSync(`unzip -p "${zipPath}" ${bundledPublishPath}`, {
+    encoding: "buffer",
+    maxBuffer: 16 * 1024 * 1024,
+  });
+  const zipHash = createHash("sha256").update(zipBytes).digest("hex");
+  if (sourceHash !== zipHash) {
+    errors.push(
+      `Stale bundle: ${bundledPublishPath} sha256 ${zipHash} != source ${sourceHash} (rebuild plugin zip)`
+    );
+  }
 }
 
 if (errors.length) {

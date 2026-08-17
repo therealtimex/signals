@@ -163,6 +163,13 @@ function textareaCountForSelector(selector, state) {
         return 0;
       }
     }
+    if (process.env.FAKE_AB_GLOBAL_ADD_ONLY === "1") {
+      const dialogScoped =
+        selector.includes("role=\"dialog\"") || selector.includes('[role="dialog"]');
+      if (dialogScoped) {
+        return 0;
+      }
+    }
     if (process.env.FAKE_AB_DIALOG_ADD_ONLY === "1") {
       const dialogScoped =
         selector.includes("role=\"dialog\"") || selector.includes('[role="dialog"]');
@@ -226,6 +233,21 @@ function rememberSelector(state, selector) {
   writeState(state);
 }
 
+function focusableAddButtonFromEvalJs(js, state) {
+  if (!state.composeOpen || !state.mainTweetTyped) return false;
+  const match = js.match(/const queries = (\[[\s\S]*?\]);/);
+  if (!match) return false;
+  try {
+    const queries = JSON.parse(match[1]);
+    for (const q of queries) {
+      if (textareaCountForSelector(q, state) > 0) return true;
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
 function handleEval(rest, state) {
   const js = rest[1] ?? "";
   if (js.includes("ownedCandidates")) {
@@ -244,15 +266,13 @@ function handleEval(rest, state) {
     return ok(JSON.stringify("[]"));
   }
   if (js.includes("addButton") && js.includes("activeElement")) {
-    const addCount = state.composeOpen && state.mainTweetTyped ? 1 : 0;
-    if (!state.composeOpen || addCount === 0) {
+    if (!focusableAddButtonFromEvalJs(js, state)) {
       return ok(JSON.stringify(JSON.stringify({ ok: false, reason: "no_add_button" })));
     }
     return ok(JSON.stringify(JSON.stringify({ ok: true })));
   }
   if (js.includes("queries") && js.includes("btn.focus") && js.includes("addButton")) {
-    const addCount = state.composeOpen && state.mainTweetTyped ? 1 : 0;
-    if (!state.composeOpen || addCount === 0) {
+    if (!focusableAddButtonFromEvalJs(js, state)) {
       return ok(JSON.stringify(JSON.stringify({ ok: false, reason: "no_add_button" })));
     }
     return ok(JSON.stringify(JSON.stringify({ ok: true })));
@@ -262,7 +282,7 @@ function handleEval(rest, state) {
     js.includes("addButton") &&
     js.includes("keydown")
   ) {
-    if (!state.composeOpen || !state.mainTweetTyped) {
+    if (!focusableAddButtonFromEvalJs(js, state)) {
       return ok(JSON.stringify(JSON.stringify({ ok: false, reason: "no_add_button" })));
     }
     addThreadSlot(state);
@@ -495,7 +515,27 @@ if (cmd === "keyboard") {
   return ok();
 }
 if (cmd === "press") {
-  if (state.composeOpen) addThreadSlot(state);
+  const key = rest[1] ?? "";
+  if (
+    key === "Enter" &&
+    state.composeOpen &&
+    state.mainTweetTyped &&
+    focusableAddButtonFromEvalJs(
+      `const queries = ${JSON.stringify([
+        '[role="dialog"] [data-testid="addButton"]',
+        '[role="dialog"] button[aria-label="Add post"]',
+        '[role="dialog"] button[aria-label="添加帖子"]',
+        '[role="dialog"] [aria-label="Add post"]',
+        '[data-testid="addButton"]',
+        'button[aria-label="Add post"]',
+        'button[aria-label="添加帖子"]',
+        '[aria-label="Add post"]',
+      ])};`,
+      state
+    )
+  ) {
+    addThreadSlot(state);
+  }
   return ok();
 }
 if (cmd === "upload") return ok();

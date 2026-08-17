@@ -9,11 +9,25 @@
  *
  * Optional: pass --plugin-id <uuid> (default: installed "signals" plugin).
  */
+import { createHash } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(__dirname, "..");
 const DEFAULT_PLUGIN_ID = "79f6f094-a15f-4af0-8dbb-605552701218";
 const WORKSPACE_SLUG = "f3a8c2e1-4d5b-4a7c-8e9f-0a1b2c3d4e5f";
 const REQUIRED_SKILLS = ["realtimex-signals", "signals-publish"];
+const SOURCE_PUBLISH = path.join(
+  repoRoot,
+  ".claude/skills/signals-publish/scripts/x-publish.cjs"
+);
+
+function sha256File(filePath) {
+  return createHash("sha256").update(fs.readFileSync(filePath)).digest("hex");
+}
 
 function parsePluginId() {
   const idx = process.argv.indexOf("--plugin-id");
@@ -49,11 +63,40 @@ function listWorkspaceSkills(slug) {
   return data.results?.skills ?? data.skills ?? [];
 }
 
+function deployedPublishCandidates(storageDir) {
+  const bases = [
+    path.join(storageDir, "working-data", WORKSPACE_SLUG),
+    path.join(storageDir, "working-data", "signals"),
+  ];
+  const rels = [
+    ".claude/skills/signals-publish/scripts/x-publish.cjs",
+    ".agents/skills/signals-publish/scripts/x-publish.cjs",
+    "skills/signals-publish/scripts/x-publish.cjs",
+  ];
+  const out = [];
+  for (const base of bases) {
+    for (const rel of rels) {
+      out.push(path.join(base, rel));
+    }
+  }
+  return out;
+}
+
 const pluginId = parsePluginId();
+const expectedVersion = JSON.parse(
+  fs.readFileSync(path.join(repoRoot, "package.json"), "utf8")
+).version;
+const expectedPublishSha = fs.existsSync(SOURCE_PUBLISH)
+  ? sha256File(SOURCE_PUBLISH)
+  : null;
 
 console.log("Signals plugin provision QA");
 console.log(`  plugin id: ${pluginId}`);
 console.log(`  expected workspace slug: ${WORKSPACE_SLUG}`);
+console.log(`  expected plugin version: ${expectedVersion}`);
+if (expectedPublishSha) {
+  console.log(`  expected x-publish sha256: ${expectedPublishSha}`);
+}
 console.log("");
 
 if (process.argv.includes("--deploy-instructions")) {
@@ -61,9 +104,33 @@ if (process.argv.includes("--deploy-instructions")) {
   console.log("  1. Open RealtimeX → Settings → Plugins");
   console.log("  2. Select Signals (com.realtimex.signals)");
   console.log("  3. Click Deploy (not just Enable)");
-  console.log("  4. Re-run: node scripts/qa/verify-signals-plugin-provision.mjs");
+  console.log("  4. Rebuild/reinstall plugin zip if you changed source since last install");
+  console.log("  5. Re-run: node scripts/qa/verify-signals-plugin-provision.mjs");
   process.exit(0);
 }
+
+const pluginData = runPp(["get-plugin", pluginId, "--json", "--data-source", "live"]);
+const plugin = pluginData.results?.plugin ?? pluginData.plugin;
+
+if (!plugin) {
+  console.error("BLOCKED: plugin not found for id", pluginId);
+  process.exit(4);
+}
+
+if (plugin.id !== pluginId) {
+  console.error(`BLOCKED: get-plugin returned id ${plugin.id}, expected ${pluginId}`);
+  process.exit(4);
+}
+
+if (plugin.version !== expectedVersion) {
+  console.error(
+    `BLOCKED: installed plugin version ${plugin.version} != repo package.json ${expectedVersion}`
+  );
+  console.error("Rebuild dist/com.realtimex.signals-plugin.zip and reinstall/update before Deploy.");
+  process.exit(4);
+}
+
+console.log(`OK installed plugin: ${plugin.displayName} v${plugin.version}`);
 
 const workspaces = listWorkspaces();
 const workspace = workspaces.find((w) => w.slug === WORKSPACE_SLUG);
@@ -93,6 +160,35 @@ for (const name of REQUIRED_SKILLS) {
   console.log(
     `OK skill: ${name} (enabled=${skill?.enabled ?? skill?.isEnabled ?? "unknown"})`
   );
+}
+
+if (expectedPublishSha) {
+  const storageDir =
+    process.env.STORAGE_DIR ||
+    path.join(process.env.HOME || "", ".realtimex.ai/desktop-user-data/app/users/trungle_rta_vn/storage");
+  let deployedPath = null;
+  let deployedHash = null;
+  for (const candidate of deployedPublishCandidates(storageDir)) {
+    if (fs.existsSync(candidate)) {
+      deployedPath = candidate;
+      deployedHash = sha256File(candidate);
+      break;
+    }
+  }
+  if (!deployedPath) {
+    console.error("BLOCKED: deployed signals-publish x-publish.cjs not found on disk.");
+    console.error("Redeploy plugin workspace provision after reinstalling current zip.");
+    process.exit(5);
+  }
+  if (deployedHash !== expectedPublishSha) {
+    console.error("BLOCKED: deployed x-publish.cjs is stale vs repo source.");
+    console.error(`  deployed: ${deployedPath}`);
+    console.error(`  deployed sha256: ${deployedHash}`);
+    console.error(`  expected sha256: ${expectedPublishSha}`);
+    console.error("Reinstall current plugin zip with --force, then Settings → Plugins → Signals → Deploy.");
+    process.exit(5);
+  }
+  console.log(`OK deployed x-publish.cjs matches repo (${deployedPath})`);
 }
 
 console.log("");
