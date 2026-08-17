@@ -658,11 +658,11 @@ LINKEDIN_CLIENT_SECRET="your-linkedin-client-secret"`}</CodeBlock>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <FileDown className="h-5 w-5" />
-            Alternative: Import via CSV (No API Required)
+            Alternative: Import from Data Export (No API Required)
           </CardTitle>
           <CardDescription>
-            Import LinkedIn connections from a data export — works without a
-            connected LinkedIn account.
+            Import LinkedIn connections from a Basic Data Export zip or
+            Connections CSV — works without a connected LinkedIn account.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3 text-sm text-muted-foreground">
@@ -683,28 +683,29 @@ LINKEDIN_CLIENT_SECRET="your-linkedin-client-secret"`}</CodeBlock>
               only and request the archive
             </li>
             <li>
-              Download the CSV when LinkedIn emails the link (usually within 10
-              minutes)
+              Download the zip archive when LinkedIn emails the link (usually
+              within 10 minutes)
             </li>
             <li>
               In Signals{" "}
               <Link
-                href="/dashboard/settings"
+                href="/dashboard/workflows"
                 className="text-primary underline underline-offset-2"
               >
-                Settings
+                Workflows
               </Link>
-              , scroll to{" "}
-              <strong className="text-foreground">LinkedIn CSV Import</strong>,
-              click{" "}
-              <strong className="text-foreground">Import CSV</strong>, and
-              select the downloaded file
+              , find{" "}
+              <strong className="text-foreground">Import Connections Export</strong>{" "}
+              under LinkedIn, and upload the zip (or extracted{" "}
+              <strong className="text-foreground">Connections.csv</strong>)
             </li>
           </ol>
           <div className="rounded-lg border bg-muted/50 p-3 text-xs">
-            <strong className="text-foreground">Note:</strong> The CSV includes
+            <strong className="text-foreground">Note:</strong> The export includes
             name, company, position, connected date, and email (if the
-            connection shared it). No LinkedIn API access is needed.
+            connection shared it). Upload the full zip — Signals extracts{" "}
+            <strong className="text-foreground">Connections.csv</strong>{" "}
+            automatically. No LinkedIn API access is needed.
           </div>
         </CardContent>
       </Card>

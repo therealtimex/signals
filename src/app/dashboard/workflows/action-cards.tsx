@@ -61,7 +61,7 @@ const ACTIONS: ActionDef[] = [
   },
   // LinkedIn
   { id: "li-sync-connections", label: "Sync Connections", description: "Import connections from LinkedIn.", platform: "linkedin", endpoint: "/api/platforms/linkedin/sync", body: { type: "contacts" }, type: "api", icon: RefreshCw },
-  { id: "li-import-csv", label: "Import Connections CSV", description: "Upload a LinkedIn connections CSV export.", platform: "linkedin", endpoint: "/api/platforms/linkedin/import", body: {}, type: "upload", icon: Upload },
+  { id: "li-import-csv", label: "Import Connections Export", description: "Upload a LinkedIn connections CSV or Basic Data Export zip.", platform: "linkedin", endpoint: "/api/platforms/linkedin/import", body: {}, type: "upload", icon: Upload },
   // Gmail
   { id: "gm-sync-contacts", label: "Sync Contacts", description: "Import contacts from Google Contacts.", platform: "gmail", endpoint: "/api/platforms/gmail/sync", body: { type: "contacts" }, type: "api", icon: Mail },
   { id: "gm-sync-metadata", label: "Sync Metadata", description: "Enrich contacts with email interaction data.", platform: "gmail", endpoint: "/api/platforms/gmail/sync", body: { type: "metadata" }, type: "api", icon: Mail },
@@ -344,11 +344,11 @@ export function ActionCards() {
 
   return (
     <div className="space-y-6">
-      {/* Hidden file input for CSV uploads */}
+      {/* Hidden file input for LinkedIn export uploads */}
       <input
         ref={fileInputRef}
         type="file"
-        accept=".csv"
+        accept=".csv,.zip"
         className="hidden"
         onChange={(e) => {
           const file = e.target.files?.[0];
