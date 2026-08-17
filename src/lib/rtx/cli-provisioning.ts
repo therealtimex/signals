@@ -14,7 +14,7 @@ async function rtxCliRequest(
   init: RequestInit,
   env: EnvLike = process.env,
   fetchImpl: typeof fetch = fetch
-): Promise<RtxCliBody> {
+): Promise<{ response: Response; body: RtxCliBody }> {
   const appId = getRtxAppId(env);
   const apiBase = resolveRtxApiBase(env);
   if (!appId || !apiBase) {
@@ -36,19 +36,39 @@ async function rtxCliRequest(
     body = {};
   }
 
+  return { response, body };
+}
+
+async function rtxCliRequestOk(
+  path: string,
+  init: RequestInit,
+  env: EnvLike = process.env,
+  fetchImpl: typeof fetch = fetch
+): Promise<RtxCliBody> {
+  const { response, body } = await rtxCliRequest(path, init, env, fetchImpl);
   if (!response.ok) {
     const message =
       typeof body.error === "string"
         ? body.error
         : `RealTimeX CLI API failed (${response.status})`;
-    throw new Error(message);
+    const err = new Error(message) as Error & { status?: number };
+    err.status = response.status;
+    throw err;
   }
-
   return body;
 }
 
 export function getSignalsRtxWorkspaceSlug(env: EnvLike = process.env): string {
   return env.SIGNALS_RTX_WORKSPACE_SLUG?.trim() || "signals";
+}
+
+function extractWorkspaceSlug(body: RtxCliBody, fallback: string): string {
+  const workspace = body.workspace as { slug?: string } | undefined;
+  return (
+    workspace?.slug ??
+    (typeof body.slug === "string" ? body.slug : null) ??
+    fallback
+  );
 }
 
 export async function ensureRtxWorkspace(
@@ -57,23 +77,40 @@ export async function ensureRtxWorkspace(
   env: EnvLike = process.env,
   fetchImpl: typeof fetch = fetch
 ): Promise<string> {
+  const slug = workspaceSlug.trim();
+
   try {
-    await rtxCliRequest(
-      "/cli/create-workspace",
-      {
-        method: "POST",
-        body: JSON.stringify({ name: workspaceName, slug: workspaceSlug }),
-      },
+    await rtxCliRequestOk(
+      `/cli/get-workspace/${encodeURIComponent(slug)}`,
+      { method: "GET" },
       env,
       fetchImpl
     );
+    return slug;
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (!/already exists|duplicate/i.test(message)) {
+    const status = (error as Error & { status?: number }).status;
+    if (status !== 404) {
       throw error;
     }
   }
-  return workspaceSlug;
+
+  const created = await rtxCliRequestOk(
+    "/cli/create-workspace",
+    {
+      method: "POST",
+      body: JSON.stringify({ name: workspaceName, slug }),
+    },
+    env,
+    fetchImpl
+  );
+
+  const resolvedSlug = extractWorkspaceSlug(created, slug);
+  if (resolvedSlug !== slug) {
+    throw new Error(
+      `Workspace slug mismatch: expected "${slug}", got "${resolvedSlug}"`
+    );
+  }
+  return resolvedSlug;
 }
 
 export async function createRtxPublishThread(
@@ -82,7 +119,7 @@ export async function createRtxPublishThread(
   env: EnvLike = process.env,
   fetchImpl: typeof fetch = fetch
 ): Promise<string> {
-  const body = await rtxCliRequest(
+  const body = await rtxCliRequestOk(
     `/cli/create-thread/${encodeURIComponent(workspaceSlug)}`,
     {
       method: "POST",
@@ -93,15 +130,15 @@ export async function createRtxPublishThread(
   );
 
   const thread = body.thread as { slug?: string } | undefined;
-  const slug =
+  const threadSlug =
     thread?.slug ??
     (typeof body.slug === "string" ? body.slug : null) ??
     (typeof body.threadSlug === "string" ? body.threadSlug : null);
 
-  if (!slug) {
+  if (!threadSlug) {
     throw new Error("RealTimeX did not return a thread slug");
   }
-  return slug;
+  return threadSlug;
 }
 
 export function buildPublishThreadName(title: string | null | undefined): string {

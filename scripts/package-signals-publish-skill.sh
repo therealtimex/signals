@@ -14,8 +14,15 @@ chmod +x "${SKILL_DIR}"/scripts/*.mjs 2>/dev/null || true
 rm -f "${OUT}"
 
 (
+  cd "${SKILL_DIR}"
+  npm install --omit=dev --no-audit --no-fund
+)
+
+(
   cd "$(dirname "${SKILL_DIR}")"
   zip -r "${OUT}" "$(basename "${SKILL_DIR}")"
 )
 
 echo "Wrote ${OUT}"
+echo "Upload: curl -X POST http://127.0.0.1:3101/api/workspace/signals/agent-skills \\"
+echo "  -F zip_file=@${OUT} -F type=zip -F display_name='Signals Publish' -F name=signals-publish"

@@ -281,18 +281,16 @@ export function ComposeDialog({
     !isUploading;
 
   async function saveDraft(): Promise<string | null> {
-    const mediaAssetIds = [media.filter((m) => m.assetId).map((m) => m.assetId!)];
-    const platformTarget = selectedPlatforms.join(",");
+    const mediaAssetIds = media.filter((m) => m.assetId).map((m) => m.assetId!);
 
-    const res = await fetch(`/api/platforms/${primaryPlatform}/compose`, {
+    const res = await fetch("/api/content/draft", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        tweets: [body],
-        saveAsDraft: true,
+        body,
+        platforms: selectedPlatforms,
         draftId: draftId || undefined,
-        platformTarget,
-        mediaAssetIds,
+        mediaAssetIds: mediaAssetIds.length > 0 ? mediaAssetIds : undefined,
       }),
     });
 
@@ -302,7 +300,7 @@ export function ComposeDialog({
       return null;
     }
 
-    return data.contentItemId || data.id || data.items?.[0]?.id || null;
+    return data.contentItemId ?? null;
   }
 
   async function handleSaveDraft() {

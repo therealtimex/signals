@@ -206,6 +206,26 @@ export function applyPublishJobTargets(
   return updated;
 }
 
+/** Update targets on a superseded job without recomputing job/item status. */
+export function recordPublishJobTargets(
+  jobId: string,
+  targets: PublishJobTarget[]
+): PublishJobView | null {
+  const existing = getPublishJobById(jobId);
+  if (!existing) return null;
+
+  const ts = nowSec();
+  db.update(publishJobs)
+    .set({
+      targets: JSON.stringify(targets),
+      updatedAt: ts,
+    })
+    .where(eq(publishJobs.id, jobId))
+    .run();
+
+  return getPublishJobById(jobId);
+}
+
 export function syncItemStatusFromJob(job: PublishJobView): void {
   if (job.status === "superseded") return;
   const itemStatus = deriveItemStatusFromJob(

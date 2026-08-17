@@ -5,6 +5,7 @@ import { publishVariantForContentItem } from "@/lib/db/queries/variants";
 import {
   applyPublishJobTargets,
   getPublishJobById,
+  recordPublishJobTargets,
 } from "@/lib/db/queries/publish-jobs";
 import { resolveMediaPaths } from "@/lib/browser/publishers/publish-utils";
 import { ensureSessionPlatformAccount } from "@/lib/publish/ensure-platform-account";
@@ -57,6 +58,16 @@ function targetMatchesResult(
   );
 }
 
+function persistJobTargets(
+  jobId: string,
+  targets: PublishJobTarget[],
+  recordOnly: boolean
+) {
+  return recordOnly
+    ? recordPublishJobTargets(jobId, targets)
+    : applyPublishJobTargets(jobId, targets, { driveItemStatus: true });
+}
+
 export async function handleGetPublishJob(input: z.infer<typeof getPublishJobSchema>) {
   const job = getPublishJobById(input.jobId);
   if (!job) {
@@ -101,13 +112,12 @@ export async function handleUpdatePublishJob(input: z.infer<typeof updatePublish
   if (!job) {
     return { error: `Publish job not found: ${input.jobId}` };
   }
-  if (job.status === "superseded") {
-    return { jobId: job.id, status: job.status, targets: job.targetsParsed, superseded: true };
-  }
 
+  const recordOnly = job.status === "superseded";
   const now = Math.floor(Date.now() / 1000);
   const targets = job.targetsParsed.map((target) => {
     if (input.platform && target.platform !== input.platform) return target;
+    if (isTerminalTarget(target.status)) return target;
 
     if (input.status === "publishing") {
       return {
@@ -126,9 +136,14 @@ export async function handleUpdatePublishJob(input: z.infer<typeof updatePublish
     };
   });
 
-  const updated = applyPublishJobTargets(job.id, targets, { driveItemStatus: true });
+  const updated = persistJobTargets(job.id, targets, recordOnly);
   return updated
-    ? { jobId: updated.id, status: updated.status, targets: updated.targetsParsed }
+    ? {
+        jobId: updated.id,
+        status: updated.status,
+        targets: updated.targetsParsed,
+        ...(recordOnly ? { superseded: true, recorded: true } : {}),
+      }
     : { error: "Failed to update publish job" };
 }
 
@@ -137,10 +152,8 @@ export async function handleCompletePublish(input: z.infer<typeof completePublis
   if (!job) {
     return { error: `Publish job not found: ${input.jobId}` };
   }
-  if (job.status === "superseded") {
-    return { jobId: job.id, status: job.status, targets: job.targetsParsed, superseded: true };
-  }
 
+  const recordOnly = job.status === "superseded";
   const existingTarget = job.targetsParsed.find((t) => t.platform === input.platform);
   if (!existingTarget) {
     return { error: `Platform ${input.platform} is not a target for this job` };
@@ -153,6 +166,7 @@ export async function handleCompletePublish(input: z.infer<typeof completePublis
         status: job.status,
         targets: job.targetsParsed,
         idempotent: true,
+        ...(recordOnly ? { superseded: true } : {}),
       };
     }
     return {
@@ -168,21 +182,26 @@ export async function handleCompletePublish(input: z.infer<typeof completePublis
       return { error: "handle and platformPostId are required on success" };
     }
 
-    const account = ensureSessionPlatformAccount(input.platform, input.handle);
+    if (!recordOnly) {
+      const account = ensureSessionPlatformAccount(
+        input.platform as PublishPlatformTarget,
+        input.handle
+      );
 
-    createContentPost({
-      contentItemId: job.contentItemId,
-      platformAccountId: account.id,
-      platformPostId: input.platformPostId,
-      platformUrl: input.platformUrl ?? null,
-      publishedAt: now,
-      status: "published",
-    });
+      createContentPost({
+        contentItemId: job.contentItemId,
+        platformAccountId: account.id,
+        platformPostId: input.platformPostId,
+        platformUrl: input.platformUrl ?? null,
+        publishedAt: now,
+        status: "published",
+      });
 
-    publishVariantForContentItem(job.contentItemId, {
-      platform: input.platform,
-      publishedAt: now,
-    });
+      publishVariantForContentItem(job.contentItemId, {
+        platform: input.platform,
+        publishedAt: now,
+      });
+    }
 
     targets = job.targetsParsed.map((target) =>
       target.platform === input.platform
@@ -210,9 +229,14 @@ export async function handleCompletePublish(input: z.infer<typeof completePublis
     );
   }
 
-  const updated = applyPublishJobTargets(job.id, targets, { driveItemStatus: true });
+  const updated = persistJobTargets(job.id, targets, recordOnly);
 
   return updated
-    ? { jobId: updated.id, status: updated.status, targets: updated.targetsParsed }
+    ? {
+        jobId: updated.id,
+        status: updated.status,
+        targets: updated.targetsParsed,
+        ...(recordOnly ? { superseded: true, recorded: true } : {}),
+      }
     : { error: "Failed to complete publish" };
 }

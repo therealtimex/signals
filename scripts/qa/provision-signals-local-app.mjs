@@ -23,6 +23,7 @@ const SIGNALS_PERMISSIONS = [
   "webhook.trigger",
   "llm.embed",
   "llm.chat",
+  "desktop.runtime-sessions",
 ];
 
 function parseDbArg() {
@@ -124,3 +125,14 @@ const verify = runSqlite(
 );
 console.log(`Verified row: ${verify}`);
 console.log("Pre-granted permissions:", SIGNALS_PERMISSIONS.join(", "));
+console.log("");
+console.log("Next: package and upload agent skills to the signals workspace:");
+console.log("  bash scripts/package-realtimex-signals-skill.sh /tmp/realtimex-signals.zip");
+console.log("  bash scripts/package-signals-publish-skill.sh /tmp/signals-publish.zip");
+console.log("  node scripts/test-signals-publish-skill-package.mjs");
+console.log("");
+console.log("Then upload each zip via:");
+console.log("  curl -X POST http://127.0.0.1:3101/api/workspace/signals/agent-skills \\");
+console.log("    -F zip_file=@/tmp/realtimex-signals.zip -F type=zip -F display_name='RealtimeX Signals' -F name=realtimex-signals");
+console.log("  curl -X POST http://127.0.0.1:3101/api/workspace/signals/agent-skills \\");
+console.log("    -F zip_file=@/tmp/signals-publish.zip -F type=zip -F display_name='Signals Publish' -F name=signals-publish");
