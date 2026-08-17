@@ -1,12 +1,8 @@
 export async function register() {
   if (process.env.NEXT_RUNTIME === "nodejs") {
     // Run base schema migrations
-    try {
-      const { runMigrations } = await import("@/lib/db/migrate");
-      runMigrations();
-    } catch (e) {
-      console.warn("[instrumentation] Base schema migrations skipped:", (e as Error).message);
-    }
+    // Migrations run synchronously in src/lib/db/client.ts before the first query.
+    // Keep this hook for backfills that must run after migrate on server boot.
 
     try {
       const { ensureContactScalarColumns } = await import("@/lib/db/migrate-contact-scalars");
