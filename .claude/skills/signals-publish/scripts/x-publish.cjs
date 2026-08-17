@@ -41,9 +41,16 @@ const ADD_BUTTON_CANDIDATES_PAGE = [
   '[aria-label="Add post"]',
 ];
 
-const MODAL_ADD_BUTTON_CANDIDATES = ADD_BUTTON_CANDIDATES_DIALOG;
+const MODAL_ADD_BUTTON_CANDIDATES = ADD_BUTTON_CANDIDATES_PAGE;
 
 const PAGE_ADD_BUTTON_CANDIDATES = ADD_BUTTON_CANDIDATES_PAGE;
+
+function addButtonCountAvailable(scope) {
+  for (const selector of scope.addButtonCandidates) {
+    if (abCount(selector) > 0) return true;
+  }
+  return false;
+}
 
 const X_SELECTORS = {
   primaryColumn: '[data-testid="primaryColumn"]',
@@ -279,6 +286,7 @@ function focusAddButtonEval(scope) {
 function waitForFocusableAddButton(scope, context, timeoutMs = COMPOSE_WAIT_TIMEOUT_MS) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
+    if (addButtonCountAvailable(scope)) return { ok: true, via: "count" };
     const parsed = focusAddButtonEval(scope);
     if (parsed?.ok) return parsed;
     sleep(300);
@@ -289,16 +297,63 @@ function waitForFocusableAddButton(scope, context, timeoutMs = COMPOSE_WAIT_TIME
   };
 }
 
+function activateAddKeyboardEvalJs(candidates) {
+  return `(() => {
+    const queries = ${JSON.stringify(candidates)};
+    let btn = null;
+    for (const q of queries) {
+      const found = document.querySelectorAll(q);
+      if (found.length) btn = found[found.length - 1];
+    }
+    if (!btn) return JSON.stringify({ ok: false, reason: "no_add_button" });
+    try {
+      btn.focus();
+    } catch {}
+    try {
+      btn.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Enter",
+          code: "Enter",
+          keyCode: 13,
+          which: 13,
+          bubbles: true,
+        })
+      );
+      btn.dispatchEvent(
+        new KeyboardEvent("keyup", {
+          key: "Enter",
+          code: "Enter",
+          keyCode: 13,
+          which: 13,
+          bubbles: true,
+        })
+      );
+    } catch {}
+    return JSON.stringify({ ok: true, via: "keyboard_eval" });
+  })()`;
+}
+
 function activateAddViaA11y(scope, context) {
   const focusParsed = focusAddButtonEval(scope);
-  if (!focusParsed?.ok) {
+  if (!focusParsed?.ok && !addButtonCountAvailable(scope)) {
     throw {
-      message: `${context}: could not focus add post button for a11y activation`,
+      message: `${context}: could not find add post button for a11y activation`,
       errorCode: "timeout",
     };
   }
   // X rejects programmatic addButton clicks (resets composer). Screen-reader path: focus + Enter.
-  requireAb(["press", "Enter"], `${context} activate add via Enter`);
+  const pressed = runAb(["press", "Enter"]);
+  if (!pressed.ok) {
+    const evalParsed = parseEvalJsonValue(
+      abText(["eval", activateAddKeyboardEvalJs(scope.addButtonCandidates)])
+    );
+    if (!evalParsed?.ok) {
+      throw {
+        message: `${context}: Enter activation failed for add post button`,
+        errorCode: "unknown",
+      };
+    }
+  }
 }
 
 function ensureMainTweetCommitted(scope, text, context) {
@@ -318,8 +373,13 @@ function focusLastAddButtonEvalJs(candidates) {
       if (found.length) btn = found[found.length - 1];
     }
     if (!btn) return JSON.stringify({ ok: false, reason: "no_add_button" });
-    btn.focus();
-    return JSON.stringify({ ok: document.activeElement === btn });
+    try {
+      btn.focus();
+    } catch {}
+    return JSON.stringify({
+      ok: true,
+      focused: document.activeElement === btn,
+    });
   })()`;
 }
 
@@ -346,7 +406,7 @@ function buildComposeScope(mode) {
       attachments: '[data-testid="attachments"]',
     };
   }
-  const addButtonCandidates = MODAL_ADD_BUTTON_CANDIDATES;
+  const addButtonCandidates = ADD_BUTTON_CANDIDATES_PAGE;
   return {
     mode: "modal",
     tweetTextarea: (index) =>

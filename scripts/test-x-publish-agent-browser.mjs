@@ -155,4 +155,19 @@ if (!resetOnClickJson.success || !resetOnClickJson.dryRun) {
   process.exit(1);
 }
 
+const globalAddOnly = runXPublish(
+  { text: "thread tweet one", threadTexts: ["thread tweet two"] },
+  { FAKE_AB_DIALOG_ADD_ONLY: "1" },
+  ["--dry-run"]
+);
+if (globalAddOnly.status !== 0) {
+  console.error("global-add-only path failed:", globalAddOnly.stdout, globalAddOnly.stderr);
+  process.exit(1);
+}
+const globalAddOnlyJson = lastJson(globalAddOnly.stdout);
+if (!globalAddOnlyJson.success || !globalAddOnlyJson.dryRun) {
+  console.error("unexpected global-add-only dry-run result:", globalAddOnlyJson);
+  process.exit(1);
+}
+
 console.log("x-publish agent-browser adapter: OK");

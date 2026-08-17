@@ -163,6 +163,13 @@ function textareaCountForSelector(selector, state) {
         return 0;
       }
     }
+    if (process.env.FAKE_AB_DIALOG_ADD_ONLY === "1") {
+      const dialogScoped =
+        selector.includes("role=\"dialog\"") || selector.includes('[role="dialog"]');
+      if (!dialogScoped) {
+        return 0;
+      }
+    }
     return state.composeOpen && state.mainTweetTyped ? 1 : 0;
   }
   if (selector.includes("tweetButton")) return 1;
@@ -249,6 +256,17 @@ function handleEval(rest, state) {
       return ok(JSON.stringify(JSON.stringify({ ok: false, reason: "no_add_button" })));
     }
     return ok(JSON.stringify(JSON.stringify({ ok: true })));
+  }
+  if (
+    js.includes("KeyboardEvent") &&
+    js.includes("addButton") &&
+    js.includes("keydown")
+  ) {
+    if (!state.composeOpen || !state.mainTweetTyped) {
+      return ok(JSON.stringify(JSON.stringify({ ok: false, reason: "no_add_button" })));
+    }
+    addThreadSlot(state);
+    return ok(JSON.stringify(JSON.stringify({ ok: true, via: "keyboard_eval" })));
   }
   if (js.includes("contenteditable") && js.includes("activeElement")) {
     return ok(JSON.stringify(JSON.stringify({ ok: true })));

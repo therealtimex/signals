@@ -51,7 +51,7 @@ Failure:
 
 ## Compose flow
 
-Thread add: scope selectors to `[role="dialog"]` on compose/post (bare `tweetTextarea_0` / `addButton` also match the home inline composer). X lazy-renders the add control after the first tweet has content — wait ~2.5s. **Do not programmatically click** `addButton`; X anti-automation resets the composer. Use focus on the last dialog-scoped add control + **Enter** (a11y path). Duplicate `tweetTextarea_0` slots may appear instead of `tweetTextarea_1`.
+Thread add: prefer `[role="dialog"]`-scoped textareas on compose/post, but add controls may be **global** (`[data-testid="addButton"]` outside dialog). Candidate list includes dialog-scoped then global fallbacks. X lazy-renders add after first tweet has content (~2.5s). **Do not click** add — focus last matching control + Enter (a11y). Duplicate `tweetTextarea_0` slots may appear instead of `tweetTextarea_1`.
 
 ## Verification invariant (P6a port) (owned status ids + max snowflake) **before** compose.
 2. Post via compose UI.
