@@ -1,7 +1,7 @@
 {
   "id": "signals",
   "name": "Signals",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "Local-first social GTM and relationship knowledge graph",
   "healthPath": "/api/health",
   "homePath": "/dashboard",
@@ -11,6 +11,7 @@
     "webhook.trigger",
     "llm.embed",
     "llm.chat",
-    "desktop.browser"
+    "desktop.browser",
+    "desktop.runtime-sessions"
   ]
 }

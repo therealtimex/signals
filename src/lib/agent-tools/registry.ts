@@ -38,6 +38,14 @@ import {
   calibrateSimulationRunSchema,
 } from "@/lib/agent-tools/graph-schemas";
 import {
+  completePublishSchema,
+  getPublishJobSchema,
+  handleCompletePublish,
+  handleGetPublishJob,
+  handleUpdatePublishJob,
+  updatePublishJobSchema,
+} from "@/lib/agent-tools/publish-handlers";
+import {
   handleLogInteraction,
   handleQueryGraph,
   handleQueryLaunches,
@@ -383,6 +391,33 @@ export const AGENT_TOOLS: Record<string, AgentToolDefinition> = {
     schema: calibrateSimulationRunSchema,
     parameters: zodToParameters(calibrateSimulationRunSchema),
     execute: handleCalibrateSimulationRun,
+  },
+  get_publish_job: {
+    name: "get_publish_job",
+    description:
+      "Load a publish job snapshot (text, media paths, per-platform targets) for terminal-agent publishing.",
+    category: "content",
+    schema: getPublishJobSchema,
+    parameters: zodToParameters(getPublishJobSchema),
+    execute: handleGetPublishJob,
+  },
+  update_publish_job: {
+    name: "update_publish_job",
+    description:
+      "Mark a publish job or platform target as publishing or failed before completion callbacks.",
+    category: "content",
+    schema: updatePublishJobSchema,
+    parameters: zodToParameters(updatePublishJobSchema),
+    execute: handleUpdatePublishJob,
+  },
+  complete_publish: {
+    name: "complete_publish",
+    description:
+      "Record per-platform publish results for a terminal-agent job and update CRM bookkeeping.",
+    category: "content",
+    schema: completePublishSchema,
+    parameters: zodToParameters(completePublishSchema),
+    execute: handleCompletePublish,
   },
 };
 

@@ -222,7 +222,17 @@ export const contentItems = sqliteTable("content_items", {
   }).notNull(),
   platformTarget: text("platform_target"),
   status: text("status", {
-    enum: ["draft", "review", "approved", "scheduled", "published", "imported"],
+    enum: [
+      "draft",
+      "review",
+      "approved",
+      "scheduled",
+      "published",
+      "imported",
+      "queued",
+      "publishing",
+      "failed",
+    ],
   })
     .notNull()
     .default("draft"),
@@ -244,6 +254,41 @@ export const contentItems = sqliteTable("content_items", {
   index("idx_content_items_origin").on(table.origin),
   index("idx_content_items_account").on(table.platformAccountId),
 ]);
+
+// --- Publish jobs (terminal-agent execution lane) ---
+
+export const publishJobs = sqliteTable(
+  "publish_jobs",
+  {
+    id: text("id").primaryKey(),
+    contentItemId: text("content_item_id")
+      .notNull()
+      .references(() => contentItems.id, { onDelete: "cascade" }),
+    status: text("status", {
+      enum: ["queued", "publishing", "completed", "partial", "failed", "superseded"],
+    })
+      .notNull()
+      .default("queued"),
+    payload: text("payload").notNull(),
+    targets: text("targets").notNull(),
+    rtxWorkspaceSlug: text("rtx_workspace_slug"),
+    rtxThreadSlug: text("rtx_thread_slug"),
+    rtxRuntimeSessionId: text("rtx_runtime_session_id"),
+    error: text("error"),
+    errorCode: text("error_code"),
+    createdAt: integer("created_at")
+      .notNull()
+      .default(sql`(unixepoch())`),
+    updatedAt: integer("updated_at")
+      .notNull()
+      .default(sql`(unixepoch())`),
+    completedAt: integer("completed_at"),
+  },
+  (table) => [
+    index("idx_publish_jobs_content_item").on(table.contentItemId),
+    index("idx_publish_jobs_status").on(table.status),
+  ]
+);
 
 // --- Media Assets ---
 

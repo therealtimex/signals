@@ -6,7 +6,7 @@ import {
   selectNewOwnedStatus,
   statusIdToTimestampMs,
   TWITTER_EPOCH_MS,
-} from "@/lib/browser/rtx-publish/x-publish-verification";
+} from "@/lib/publish/x-browser/x-publish-verification";
 
 function timestampMsToStatusId(timestampMs: number): string {
   const delta = BigInt(timestampMs - TWITTER_EPOCH_MS);

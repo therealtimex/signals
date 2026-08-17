@@ -36,6 +36,7 @@
     "public/",
     "guide/",
     "docs/",
+    ".claude/skills/",
     "rtx-manifest.json",
     "rtx-local-app.example.json",
     "next.config.mjs",
