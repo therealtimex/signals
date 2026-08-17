@@ -178,4 +178,20 @@ describe("invokeAgentTool", () => {
       ],
     });
   });
+
+  it("rejects local file avatarUrl on upsert_contact_identity", async () => {
+    const created = await invokeAgentTool("create_contact", { name: "Avatar Guard" });
+    const contactId = (created as { id: string }).id;
+
+    const result = await invokeAgentTool("upsert_contact_identity", {
+      contactId,
+      platform: "linkedin",
+      platformUserId: "avatar-guard",
+      avatarUrl: "file:///tmp/avatar.jpg",
+    });
+
+    expect(result).toMatchObject({
+      error: expect.stringContaining("upload-avatar"),
+    });
+  });
 });
