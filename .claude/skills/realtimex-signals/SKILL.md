@@ -101,6 +101,45 @@ flowchart TD
 4. Prefer `enrich_contact` over `update_contact` when filling missing fields
 5. Reply with contact IDs, fields changed, enrichment score, suggested follow-ups
 
+## Contact avatars
+
+Signals resolves avatars in this order:
+
+1. **Local upload** — `POST /api/media` + attachment with `role: "avatar"` (best for generated or edited photos)
+2. **Identity `avatarUrl`** — `https://` URL from a synced platform via `upsert_contact_identity`
+3. **Gravatar** — from primary email
+4. **Initials** — UI fallback when nothing else resolves
+
+**Critical rules for agents:**
+
+- **Never** set `avatarUrl` to `file://`, absolute filesystem paths, or bare filenames — they will not render in Signals.
+- **Never** treat `GenerateImage` output as linked until you upload it through Signals media.
+- After upload, `get_contact` returns `resolvedAvatarUrl` like `/api/media/<assetId>` (served by the Local App).
+
+### Set avatar from a local/generated image
+
+```bash
+export SIGNALS_BASE_URL="$(.claude/skills/realtimex-signals/scripts/resolve-base-url.sh)"
+
+# Find target contact id first:
+.claude/skills/realtimex-signals/scripts/invoke-tool.sh query_contacts '{"search":"Trung"}' | jq '.result.contacts[] | {id,name}'
+
+# Upload and attach (use absolute path to the image file):
+.claude/skills/realtimex-signals/scripts/upload-avatar.sh "<contactId>" "/path/to/avatar.png"
+
+# Verify:
+.claude/skills/realtimex-signals/scripts/invoke-tool.sh get_contact '{"contactId":"<contactId>"}' | jq '.result.resolvedAvatarUrl'
+```
+
+### Set avatar from a platform profile URL
+
+Only when you have a real `https://` URL from sync or public profile:
+
+```bash
+.claude/skills/realtimex-signals/scripts/invoke-tool.sh upsert_contact_identity \
+  '{"contactId":"<id>","platform":"linkedin","platformUserId":"handle","avatarUrl":"https://media.licdn.com/..."}'
+```
+
 ## Playbooks
 
 ### Add a new person
@@ -183,3 +222,4 @@ Ensure the Signals Local App is running (RTX **Settings → Local Apps**). See [
 | `VALIDATION_ERROR` | Re-read manifest schema for that tool; fix `input` shape |
 | `403` / unauthorized | API called off-localhost — set `SIGNALS_AGENT_TOOL_TOKEN` |
 | Empty contacts | Expected on fresh DB — create first contact |
+| Avatar shows broken / `file://` in summary | Re-upload with `scripts/upload-avatar.sh`; do not set local paths on `avatarUrl` |

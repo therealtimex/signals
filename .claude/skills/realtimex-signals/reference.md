@@ -88,3 +88,29 @@ Scores and metrics are validated at the query layer. Grounding uses shared-scope
 ## Not exposed via agent-tools
 
 Browser scrape, web search, publish, engage — use RTX terminal agent capabilities (browser session, platform credentials) then write results into Signals via `enrich_contact` / `update_contact`.
+
+**Avatar file upload** — not an agent-tool. Use `scripts/upload-avatar.sh <contactId> <file>` in the skill (wraps `POST /api/media` + `role: avatar` attachment). Do **not** set `file://` or local paths on `identity.avatarUrl`.
+
+## Avatar resolution
+
+| Priority | Source | How agents set it |
+|----------|--------|-------------------|
+| 1 | Local upload | `upload-avatar.sh` → `resolvedAvatarUrl` = `/api/media/<id>` |
+| 2 | Identity URL | `upsert_contact_identity` with `avatarUrl` = `https://...` only |
+| 3 | Gravatar | Automatic from primary email |
+| 4 | Initials | UI fallback |
+
+**upsert_contact_identity** (platform profile URL only)
+```json
+{
+  "contactId": "<id>",
+  "platform": "linkedin",
+  "platformUserId": "alex-rivera",
+  "avatarUrl": "https://media.licdn.com/dms/image/..."
+}
+```
+
+**upload-avatar.sh** (generated or local file)
+```bash
+.claude/skills/realtimex-signals/scripts/upload-avatar.sh "<contactId>" "/absolute/path/to/avatar.png"
+```

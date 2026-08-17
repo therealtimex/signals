@@ -19,6 +19,22 @@ export function contactDisplayInitials(input: {
   return parts[0].slice(0, 2).toUpperCase();
 }
 
+/** Identity avatarUrl must be an external https URL from a synced platform — not local paths. */
+export function validateIdentityAvatarUrl(avatarUrl: string | undefined): string | undefined {
+  if (avatarUrl === undefined) return undefined;
+
+  const trimmed = avatarUrl.trim();
+  if (!trimmed) return undefined;
+
+  if (trimmed.startsWith("https://") || trimmed.startsWith("http://")) {
+    return trimmed;
+  }
+
+  throw new Error(
+    "avatarUrl must be an http(s) URL from a synced platform. For generated or local images, upload via upload-avatar.sh (POST /api/media + role=avatar attachment) instead of setting avatarUrl.",
+  );
+}
+
 export async function uploadAndAttachContactAvatar(
   contactId: string,
   file: File,

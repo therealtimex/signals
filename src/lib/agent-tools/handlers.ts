@@ -39,6 +39,7 @@ import type {
 import type { z } from "zod";
 import type { ContactIdentity } from "@/lib/db/types";
 import { assertPlatform } from "@/lib/db/platforms";
+import { validateIdentityAvatarUrl } from "@/lib/contact-avatar-client";
 
 const DEFAULT_PAGE_SIZE = 20;
 
@@ -222,6 +223,13 @@ export async function handleUpsertContactIdentity(
     return { error: `Contact not found: ${input.contactId}` };
   }
 
+  let avatarUrl: string | undefined;
+  try {
+    avatarUrl = validateIdentityAvatarUrl(input.avatarUrl);
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Invalid avatarUrl" };
+  }
+
   const sharedFields = {
     platformHandle: input.platformHandle,
     platformUrl: input.platformUrl,
@@ -229,7 +237,7 @@ export async function handleUpsertContactIdentity(
     displayName: input.displayName,
     headline: input.headline,
     bio: input.bio,
-    avatarUrl: input.avatarUrl,
+    avatarUrl,
     location: input.location,
     websiteUrl: input.websiteUrl,
     isVerified: input.isVerified,

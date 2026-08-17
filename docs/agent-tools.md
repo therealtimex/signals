@@ -78,6 +78,8 @@ Simulation run tool responses include additive fields (`populationSpec`, `error`
 
 Tools that require browser/LLM (web search, scrape, publish, etc.) are **not** exposed here — RTX terminal agents should use platform credentials and their own tools for those operations.
 
+**Avatar uploads** are also not agent-tools. Terminal agents should use the `realtimex-signals` skill script `upload-avatar.sh` (multipart `POST /api/media` + `POST /api/media/attachments` with `role: avatar`). Never persist `file://` or local filesystem paths as `avatarUrl` — identity `avatarUrl` accepts `http(s)` platform URLs only; uploaded photos resolve as `/api/media/<assetId>`.
+
 ## Example: create and enrich a contact
 
 Start Signals (standalone or embedded Local App), then:
