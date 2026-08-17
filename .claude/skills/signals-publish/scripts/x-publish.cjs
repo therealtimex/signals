@@ -94,13 +94,88 @@ function waitForSelector(selector, context, timeoutMs = COMPOSE_WAIT_TIMEOUT_MS)
   };
 }
 
-function typeIntoComposeTextarea(selector, text, context) {
-  requireAb(["click", selector], `${context} focus`);
-  const typed = runAb(["type", selector, text]);
-  if (!typed.ok) {
-    requireAb(["click", selector], `${context} refocus`);
-    requireAb(["keyboard", "type", text], `${context} keyboard type`);
+function composeEditableSelectors(wrapperSelector) {
+  return [
+    `${wrapperSelector} [contenteditable="true"]`,
+    `${wrapperSelector} div[role="textbox"]`,
+    `${wrapperSelector} [data-testid*="RichText"]`,
+    wrapperSelector,
+  ];
+}
+
+function readComposeText(wrapperSelector) {
+  const js = `(() => {
+    const root = document.querySelector(${JSON.stringify(wrapperSelector)});
+    if (!root) return JSON.stringify("");
+    return JSON.stringify(String(root.innerText || "").replace(/\\s+/g, " ").trim());
+  })()`;
+  const raw = abText(["eval", js]);
+  const value = parseEvalJsonValue(raw);
+  return normalizeTweetText(String(value ?? ""));
+}
+
+function composeTextMatches(wrapperSelector, expected) {
+  const needle = normalizeTweetText(expected).slice(0, 80);
+  if (!needle) return true;
+  return readComposeText(wrapperSelector).includes(needle);
+}
+
+function focusComposeEditable(wrapperSelector, context) {
+  for (const sel of composeEditableSelectors(wrapperSelector)) {
+    if (abCount(sel) > 0) {
+      requireAb(["click", sel], `${context} focus editable`);
+      return sel;
+    }
   }
+  requireAb(["click", wrapperSelector], `${context} focus wrapper`);
+  return wrapperSelector;
+}
+
+function typeIntoComposeTextarea(wrapperSelector, text, context) {
+  focusComposeEditable(wrapperSelector, context);
+  const focusJs = `(() => {
+    const root = document.querySelector(${JSON.stringify(wrapperSelector)});
+    if (!root) return JSON.stringify({ ok: false });
+    const editable =
+      root.querySelector('[contenteditable="true"]') ||
+      root.querySelector('[role="textbox"]') ||
+      root;
+    editable.focus();
+    return JSON.stringify({
+      ok:
+        editable === document.activeElement ||
+        root.contains(document.activeElement),
+    });
+  })()`;
+  parseEvalJsonValue(abText(["eval", focusJs]));
+
+  requireAb(["keyboard", "type", text], `${context} keyboard type`);
+  sleep(400);
+
+  if (!composeTextMatches(wrapperSelector, text)) {
+    focusComposeEditable(wrapperSelector, `${context} refocus`);
+    requireAb(["press", "Control+a"], `${context} select all`);
+    requireAb(["keyboard", "inserttext", text], `${context} inserttext`);
+    sleep(400);
+  }
+
+  if (!composeTextMatches(wrapperSelector, text)) {
+    for (const sel of composeEditableSelectors(wrapperSelector)) {
+      if (abCount(sel) === 0) continue;
+      requireAb(["click", sel], `${context} refocus editable`);
+      const typed = runAb(["type", sel, text]);
+      sleep(400);
+      if (typed.ok && composeTextMatches(wrapperSelector, text)) break;
+    }
+  }
+
+  if (!composeTextMatches(wrapperSelector, text)) {
+    throw {
+      message: `${context}: typed text did not commit to compose editor`,
+      errorCode: "unknown",
+    };
+  }
+
   sleep(TYPE_SETTLE_MS);
 }
 

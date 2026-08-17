@@ -21,6 +21,9 @@ function defaultState() {
     composeOpen: false,
     composeUiMode: "page",
     mainTweetTyped: false,
+    mainTweetText: "",
+    composedTextByIndex: {},
+    activeTextareaIndex: 0,
     threadTextareaCount: 0,
   };
 }
@@ -135,6 +138,9 @@ function textareaCountForSelector(selector, state) {
   if (selector.includes("tweetTextarea_")) {
     return state.threadTextareaCount;
   }
+  if (selector.includes("contenteditable") || selector.includes("role=\"textbox\"")) {
+    return state.composeOpen ? 1 : 0;
+  }
   if (selector.includes("addButton") || selector.includes("Add post")) {
     return state.composeOpen && state.mainTweetTyped ? 1 : 0;
   }
@@ -173,8 +179,35 @@ function handleIs(rest) {
   return ok("true");
 }
 
+function recordTypedText(state, selector, text) {
+  const match = String(selector).match(/tweetTextarea_(\d+)/);
+  const index = match ? Number(match[1]) : 0;
+  if (!state.composedTextByIndex) state.composedTextByIndex = {};
+  state.composedTextByIndex[index] = text;
+  if (index === 0) {
+    state.mainTweetTyped = Boolean(String(text).trim());
+    state.mainTweetText = text;
+  }
+  writeState(state);
+}
+
 function handleEval(rest, state) {
   const js = rest[1] ?? "";
+  if (js.includes("ownedCandidates")) {
+    if (state.postPublished) {
+      const ms = Date.now() - 1288834974657;
+      const statusId = (BigInt(ms) << 22n).toString();
+      const payload = [
+        {
+          statusId,
+          href: `/${profileHandle}/status/${statusId}`,
+          text: "thread tweet one thread tweet two",
+        },
+      ];
+      return ok(JSON.stringify(JSON.stringify(payload)));
+    }
+    return ok(JSON.stringify("[]"));
+  }
   if (js.includes("addButton") && js.includes("activeElement")) {
     const addCount = state.composeOpen && state.mainTweetTyped ? 1 : 0;
     if (!state.composeOpen || addCount === 0) {
@@ -182,19 +215,16 @@ function handleEval(rest, state) {
     }
     return ok(JSON.stringify(JSON.stringify({ ok: true })));
   }
-  if (state.postPublished) {
-    const ms = Date.now() - 1288834974657;
-    const statusId = (BigInt(ms) << 22n).toString();
-    const payload = [
-      {
-        statusId,
-        href: `/${profileHandle}/status/${statusId}`,
-        text: "thread tweet one thread tweet two",
-      },
-    ];
-    return ok(JSON.stringify(JSON.stringify(payload)));
+  if (js.includes("contenteditable") && js.includes("activeElement")) {
+    return ok(JSON.stringify(JSON.stringify({ ok: true })));
   }
-  if (js.includes("ownedCandidates")) return ok(JSON.stringify("[]"));
+  if (js.includes("tweetTextarea_") && js.includes("root.innerText")) {
+    const match = js.match(/tweetTextarea_(\d+)/);
+    const index = match ? Number(match[1]) : 0;
+    const text =
+      state.composedTextByIndex?.[index] ?? (index === 0 ? state.mainTweetText : "") ?? "";
+    return ok(JSON.stringify(JSON.stringify(text)));
+  }
   return ok("null");
 }
 
@@ -250,6 +280,11 @@ if (cmd === "click") {
   if (selector.includes("addButton") || selector.includes("Add post")) {
     addThreadSlot(state);
   }
+  const textareaMatch = selector.match(/tweetTextarea_(\d+)/);
+  if (textareaMatch) {
+    state.activeTextareaIndex = Number(textareaMatch[1]);
+    writeState(state);
+  }
   if (selector.includes("tweetButton")) {
     state.postPublished = true;
     writeState(state);
@@ -258,20 +293,22 @@ if (cmd === "click") {
 }
 if (cmd === "type" || cmd === "fill") {
   const selector = rest[1] ?? "";
+  const text = rest[2] ?? "";
   if (process.env.FAKE_AB_FAIL_THREAD_FILL === "1" && selector.includes("tweetTextarea_1")) {
     fail("simulated thread fill failure");
   }
   if (selector.includes("tweetTextarea_0")) {
     openCompose(state, state.composeUiMode || "page");
-    state.mainTweetTyped = true;
-    writeState(state);
   }
+  recordTypedText(state, selector, text);
   return ok();
 }
 if (cmd === "keyboard") {
-  if (rest[1] === "type") {
-    state.mainTweetTyped = true;
-    writeState(state);
+  const sub = rest[1] ?? "";
+  const text = rest.slice(2).join(" ");
+  if (sub === "type" || sub === "inserttext") {
+    const index = state.activeTextareaIndex ?? 0;
+    recordTypedText(state, `tweetTextarea_${index}`, text);
   }
   return ok();
 }

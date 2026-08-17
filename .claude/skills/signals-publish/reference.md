@@ -51,7 +51,7 @@ Failure:
 
 ## Compose flow
 
-Opens `https://x.com/compose/post` (or home modal fallback). On `/compose/*` URLs the composer is page-scoped. Types with `type` (keyboard fallback), waits for lazy-rendered add button (`addButton` or `aria-label="Add post"`), then adds thread segments via focus+Enter on the last match.
+Opens `https://x.com/compose/post` (or home modal fallback). Focuses the Draft.js `contenteditable`, types via `keyboard type` (with `inserttext` / selector `type` fallbacks), and verifies `innerText` before waiting for the thread add button.
 
 ## Verification invariant (P6a port) (owned status ids + max snowflake) **before** compose.
 2. Post via compose UI.
