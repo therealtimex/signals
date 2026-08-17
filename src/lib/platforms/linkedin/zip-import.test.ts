@@ -77,4 +77,21 @@ describe("extractConnectionsCsvFromZip", () => {
       /Invalid zip archive/
     );
   });
+
+  it("does not decompress oversized non-connections members (zip-bomb guard)", () => {
+    const zip = makeZip({
+      "Profile.csv": "x".repeat(8 * 1024 * 1024),
+      "Connections.csv": SAMPLE_CSV,
+    });
+
+    expect(extractConnectionsCsvFromZip(zip)).toBe(SAMPLE_CSV);
+  });
+
+  it("rejects Connections.csv whose declared size exceeds the CSV cap", () => {
+    const zip = makeZip({
+      "Connections.csv": "a".repeat(5 * 1024 * 1024 + 1),
+    });
+
+    expect(() => extractConnectionsCsvFromZip(zip)).toThrow(/too large/i);
+  });
 });

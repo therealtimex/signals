@@ -66,7 +66,10 @@ export async function POST(req: NextRequest) {
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Import failed";
-    const status = message.startsWith("File too large") ? 400 : 500;
+    const status =
+      message.startsWith("File too large") || message.includes("too large")
+        ? 400
+        : 500;
     return NextResponse.json({ error: message }, { status });
   }
 }
