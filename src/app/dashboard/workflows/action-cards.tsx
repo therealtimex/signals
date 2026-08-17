@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -20,6 +20,12 @@ import {
   actionNeedsPlatformConnection,
   getActionRunButtonLabel,
 } from "@/app/dashboard/workflows/action-cards-utils";
+import {
+  ImportDialog,
+  type ImportDialogConfig,
+  type ImportSuccess,
+} from "@/components/import-dialog";
+import { ActionToast } from "@/components/action-toast";
 
 type ActionDef = {
   id: string;
@@ -85,6 +91,27 @@ const ACTION_STAT_MAP: Record<string, { dataTypes: string[]; label: string }> = 
 };
 
 const PLATFORM_GROUPS = ["x", "linkedin", "gmail"] as const;
+
+/** Import modal config per upload action. LinkedIn Connections is the first platform. */
+function getImportDialogConfig(action: ActionDef): ImportDialogConfig {
+  return {
+    title: action.label,
+    description: action.description,
+    accept: ".csv,.zip",
+    help: (
+      <p>
+        On LinkedIn, go to <strong className="text-foreground">Settings &amp; Privacy</strong> →{" "}
+        <strong className="text-foreground">Data privacy</strong> →{" "}
+        <strong className="text-foreground">Get a copy of your data</strong>, select{" "}
+        <strong className="text-foreground">Connections</strong>, and upload the emailed zip (or
+        the extracted Connections.csv).
+      </p>
+    ),
+    previewEndpoint: `${action.endpoint}/preview`,
+    importEndpoint: action.endpoint,
+    reimportNote: "Safe to run again — existing contacts are updated, not duplicated.",
+  };
+}
 
 type SyncStat = { totalSynced: number; lastSyncedAt: number | null };
 
@@ -194,8 +221,8 @@ export function ActionCards() {
   const [error, setError] = useState<string | null>(null);
   const [migrationNotice, setMigrationNotice] = useState<string | null>(null);
   const [result, setResult] = useState<{ id: string; message: string } | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [uploadActionId, setUploadActionId] = useState<string | null>(null);
+  const [importAction, setImportAction] = useState<ActionDef | null>(null);
+  const [toast, setToast] = useState<{ message: string; runId: string | null } | null>(null);
 
   // Connection status for each platform (expanded with capability data)
   const [platformStatus, setPlatformStatus] = useState<Record<string, PlatformStatus>>({
@@ -266,8 +293,8 @@ export function ActionCards() {
 
   const handleAction = useCallback(async (action: ActionDef) => {
     if (action.type === "upload") {
-      setUploadActionId(action.id);
-      fileInputRef.current?.click();
+      setError(null);
+      setImportAction(action);
       return;
     }
 
@@ -319,76 +346,33 @@ export function ActionCards() {
     }
   }, [router]);
 
-  const handleFileUpload = useCallback(async (file: File) => {
-    const action = ACTIONS.find((a) => a.id === uploadActionId);
-    if (!action) return;
-
-    setRunning(action.id);
-    setError(null);
-    setResult(null);
-
-    try {
-      const formData = new FormData();
-      formData.append("file", file);
-
-      const res = await fetch(action.endpoint, {
-        method: "POST",
-        body: formData,
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error || "Import failed");
-        return;
-      }
-
-      const added = data.result?.added ?? 0;
-      const updated = data.result?.updated ?? 0;
-      const skipped = data.result?.skipped ?? 0;
-      setResult({
-        id: action.id,
-        message: `Import complete. Added: ${added}, Updated: ${updated}, Skipped: ${skipped}`,
-      });
-      // Reflect the new last-run stats on the import card without a refetch
-      setPlatformStatus((prev) => ({
-        ...prev,
-        [action.platform]: {
-          ...prev[action.platform],
-          importStats: {
-            status: "completed",
-            added,
-            updated,
-            skipped,
-            lastRunAt: Math.floor(Date.now() / 1000),
-            source: data.source ?? null,
-            fileName: file.name,
-          },
+  const handleImportSuccess = useCallback((action: ActionDef, result: ImportSuccess) => {
+    setImportAction(null);
+    setToast({
+      message: `Imported ${result.fileName}: ${result.added} added, ${result.updated} updated, ${result.skipped} skipped`,
+      runId: result.workflowRunId,
+    });
+    // Reflect the new last-run stats on the import card without a refetch
+    setPlatformStatus((prev) => ({
+      ...prev,
+      [action.platform]: {
+        ...prev[action.platform],
+        importStats: {
+          status: "completed",
+          added: result.added,
+          updated: result.updated,
+          skipped: result.skipped,
+          lastRunAt: Math.floor(Date.now() / 1000),
+          source: result.source,
+          fileName: result.fileName,
         },
-      }));
-      router.refresh();
-    } catch {
-      setError("Import failed");
-    } finally {
-      setRunning(null);
-      setUploadActionId(null);
-    }
-  }, [uploadActionId, router]);
+      },
+    }));
+    router.refresh();
+  }, [router]);
 
   return (
     <div className="space-y-6">
-      {/* Hidden file input for LinkedIn export uploads */}
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept=".csv,.zip"
-        className="hidden"
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (file) handleFileUpload(file);
-          e.target.value = "";
-        }}
-      />
-
       {/* Error / migration / result banners */}
       {error && (
         <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200">
@@ -558,7 +542,6 @@ export function ActionCards() {
                           hasRestriction: !!restriction,
                           isRunning,
                           isUpload: action.type === "upload",
-                          hasImportHistory: !!status.importStats,
                         })}
                       </Button>
                     </CardContent>
@@ -569,6 +552,30 @@ export function ActionCards() {
           </div>
         );
       })}
+
+      {importAction && (
+        <ImportDialog
+          config={getImportDialogConfig(importAction)}
+          open
+          onClose={() => setImportAction(null)}
+          onSuccess={(result) => handleImportSuccess(importAction, result)}
+        />
+      )}
+
+      {toast && (
+        <ActionToast
+          message={toast.message}
+          actionLabel="View in Runs"
+          onAction={() => {
+            const target = toast.runId
+              ? `/dashboard/workflows/${toast.runId}`
+              : "/dashboard/workflows?tab=runs";
+            setToast(null);
+            router.push(target);
+          }}
+          onDismiss={() => setToast(null)}
+        />
+      )}
     </div>
   );
 }

@@ -229,3 +229,34 @@ LinkedIn is the first import hub surface:
   `GET /api/platforms/linkedin` — not `sync_cursors`.
 - Re-import is idempotent (dedup by LinkedIn identity), and the card says so.
 - Import runs appear in Runs with an **Import** type badge and the file name.
+
+## 9. Import Modal (issue #133)
+
+The card's **Import…** button opens a guided modal instead of a raw file picker:
+
+```
+Card "Import…" → Modal → pick/drop file → inspect → Run import → close
+→ toast with "View in Runs" + updated last-run stats on card
+```
+
+- **Reusable shell:** `src/components/import-dialog.tsx` (`ImportDialog`) takes an
+  `ImportDialogConfig` — title, description, accepted extensions, inline help,
+  preview + import endpoints, and re-import note. LinkedIn Connections is the
+  first platform config (built in `action-cards.tsx`); Gmail Takeout and X
+  archive imports should reuse the shell with their own configs.
+- **Phases:** `pick` (click-to-browse + drag & drop, inline help) →
+  `previewing` → `ready` (inspection: file name, size, CSV/ZIP badge,
+  Connections.csv confirmation for zips, row count, idempotency note) →
+  `importing`. Cancel never calls the import API; import failures keep the
+  modal open for retry or another file.
+- **Preview API:** `POST /api/platforms/linkedin/import/preview` — parse-only,
+  no DB writes. Returns `{ source, fileName, fileSize, totalRows }` or a 400
+  with a user-facing error. Logic lives in
+  `src/lib/platforms/linkedin/import-preview.ts`; the file-kind/size/zip
+  helpers are shared with the import route via
+  `src/lib/platforms/linkedin/import-file.ts`.
+- **Runs handoff:** on success the modal closes and a local toast
+  (`src/components/action-toast.tsx`) shows added/updated/skipped with a
+  **View in Runs** action that navigates to the run detail page (or
+  `?tab=runs` when no run id). The app has no global toast system; the toast
+  is deliberately local until one exists.

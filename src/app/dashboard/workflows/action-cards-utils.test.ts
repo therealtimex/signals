@@ -46,24 +46,14 @@ describe("action-cards utils", () => {
     ).toBe(false);
   });
 
-  it("labels upload cards by import history", () => {
+  it("labels upload cards with the modal entry point", () => {
     expect(
       getActionRunButtonLabel("li-import-csv", {
         needsConnection: false,
         hasRestriction: false,
         isRunning: false,
         isUpload: true,
-        hasImportHistory: false,
       })
-    ).toBe("Upload export");
-    expect(
-      getActionRunButtonLabel("li-import-csv", {
-        needsConnection: false,
-        hasRestriction: false,
-        isRunning: false,
-        isUpload: true,
-        hasImportHistory: true,
-      })
-    ).toBe("Import again");
+    ).toBe("Import…");
   });
 });
