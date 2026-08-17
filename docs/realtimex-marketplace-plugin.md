@@ -18,6 +18,8 @@ Local app id: `47e45f71-3279-42f5-8e95-731de01b6eae`
 ## Build
 
 ```bash
+npm run verify:marketplace-versions
+
 # Standalone Local App artifact first (populates release-manifest checksum)
 npm run build:standalone-artifact
 
@@ -25,6 +27,23 @@ npm run build:standalone-artifact
 npm run package:realtimex-plugin
 npm run test:plugin-package
 ```
+
+## CI / GitHub Releases
+
+| Workflow | When | What |
+|----------|------|------|
+| `.github/workflows/ci.yml` | PR + `main` | App quality gate + Playwright smoke |
+| `.github/workflows/plugin-release.yml` | PR + `main` | Standalone zip, plugin zip, `test:plugin-package` |
+| `.github/workflows/plugin-release.yml` (`release` job) | Push tag `v*` | Same build + GitHub Release with plugin zip, standalone zip, `release-manifest.json` |
+
+Before tagging, bump `package.json` and `realtimex.plugin.json` to the same version, then:
+
+```bash
+git tag v0.1.10
+git push origin v0.1.10
+```
+
+Marketplace store upload remains manual until RealtimeX #1614 provides publisher automation.
 
 Source layout: `realtimex-plugin/` (manifest, templates, marketplace specs). Skills are copied from `.claude/skills/` at package time. The `signals-publish` skill's `x-publish.cjs` delegates to the host **`agent-browser` CLI** (locked external skill); the plugin zip contains **no** `node_modules`. Source `SKILL.md` paths stay under `.claude/skills/`; packaging rewrites them to `skills/` in the zip.
 
