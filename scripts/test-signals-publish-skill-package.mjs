@@ -66,11 +66,14 @@ try {
     throw new Error(`agent-browser missing from packaged skill run:\n${output}`);
   }
 
-  const lastLine = output.trim().split("\n").filter(Boolean).pop() ?? "";
+  const lastStdoutLine =
+    result.stdout.trim().split("\n").filter(Boolean).pop() ?? "";
   try {
-    const parsed = JSON.parse(lastLine);
+    const parsed = JSON.parse(lastStdoutLine);
     if (typeof parsed.success !== "boolean") {
-      throw new Error(`Expected JSON result on last stdout line: ${lastLine}`);
+      throw new Error(
+        `Expected JSON result on last stdout line: ${lastStdoutLine}`
+      );
     }
     if (!parsed.success || !parsed.dryRun) {
       throw new Error(`Packaged skill dry-run failed:\n${output}`);
