@@ -67,7 +67,25 @@ export async function launchTerminalCliAgent(
     };
   }
 
-  const agentName = input.agentName?.trim() || env.SIGNALS_RTX_AGENT_NAME?.trim() || "claude";
+  const explicitAgent = input.agentName?.trim();
+  const envAgent = env.SIGNALS_RTX_AGENT_NAME?.trim();
+  const agentName = explicitAgent || envAgent || undefined;
+
+  const launchBody: Record<string, unknown> = {
+    workspaceSlug: input.workspaceSlug,
+    threadSlug: input.threadSlug,
+    agentType: "terminal-cli",
+    interactionMode: "chat-linked",
+    primarySurface: "chat",
+    firstTurnDelivery: "queued",
+    message: input.message,
+    spawnSource: "signals-publish",
+    requestedBy: "Signals",
+    reason: input.reason,
+  };
+  if (agentName) {
+    launchBody.agentName = agentName;
+  }
 
   try {
     const response = await fetchImpl(
@@ -75,19 +93,7 @@ export async function launchTerminalCliAgent(
       {
         method: "POST",
         headers: buildAppHeaders(appId),
-        body: JSON.stringify({
-          workspaceSlug: input.workspaceSlug,
-          threadSlug: input.threadSlug,
-          agentName,
-          agentType: "terminal-cli",
-          interactionMode: "chat-linked",
-          primarySurface: "chat",
-          firstTurnDelivery: "queued",
-          message: input.message,
-          spawnSource: "signals-publish",
-          requestedBy: "Signals",
-          reason: input.reason,
-        }),
+        body: JSON.stringify(launchBody),
       }
     );
 

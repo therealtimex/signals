@@ -57,6 +57,7 @@ Plugin validation uses `scripts/vendor/validate-plugin.cjs` (override with `REAL
 ## Local dev install (before #1614 automation)
 
 1. **Plugin:** RTX Admin → Plugins → Upload `dist/com.realtimex.signals-plugin.zip`, enable, configure, **Deploy** workspace provision.
+   - **Configure** includes default terminal agent, model, and reasoning effort (RTX #1625). Applied to the provisioned workspace on Deploy/Redeploy. Also editable in Workspace settings.
 2. **Verify provision (QA):** `node scripts/qa/verify-signals-plugin-provision.mjs` (after Deploy). Set `STORAGE_DIR` to the RealtimeX storage root when checking deployed skill files. Deploy is UI-only today — not on `realtimex-pp-cli`.
    - Confirms installed plugin id/version matches repo `package.json`
    - When workspace is deployed, compares deployed `x-publish.cjs` sha256 to repo source
