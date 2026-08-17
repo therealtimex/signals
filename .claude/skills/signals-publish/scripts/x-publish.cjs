@@ -26,6 +26,20 @@ const TYPE_SETTLE_MS = 2500;
 const THREAD_ADD_WAIT_MS = 1500;
 const COMPOSE_WAIT_TIMEOUT_MS = 15_000;
 
+const PAGE_ADD_BUTTON_CANDIDATES = [
+  '[data-testid="addButton"]',
+  'button[aria-label="Add post"]',
+  'button[aria-label="添加帖子"]',
+  '[aria-label="Add post"]',
+];
+
+const MODAL_ADD_BUTTON_CANDIDATES = [
+  '[role="dialog"] [data-testid="addButton"]',
+  '[role="dialog"] button[aria-label="Add post"]',
+  '[role="dialog"] button[aria-label="添加帖子"]',
+  '[role="dialog"] [aria-label="Add post"]',
+];
+
 const X_SELECTORS = {
   primaryColumn: '[data-testid="primaryColumn"]',
   loginButton: '[data-testid="loginButton"]',
@@ -82,8 +96,40 @@ function waitForSelector(selector, context, timeoutMs = COMPOSE_WAIT_TIMEOUT_MS)
 
 function typeIntoComposeTextarea(selector, text, context) {
   requireAb(["click", selector], `${context} focus`);
-  requireAb(["type", selector, text], `${context} type`);
+  const typed = runAb(["type", selector, text]);
+  if (!typed.ok) {
+    requireAb(["click", selector], `${context} refocus`);
+    requireAb(["keyboard", "type", text], `${context} keyboard type`);
+  }
   sleep(TYPE_SETTLE_MS);
+}
+
+function waitForAddButton(scope, context, timeoutMs = COMPOSE_WAIT_TIMEOUT_MS) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    for (const selector of scope.addButtonCandidates) {
+      if (abCount(selector) > 0) return selector;
+    }
+    sleep(300);
+  }
+  throw {
+    message: `${context}: timed out waiting for thread add button`,
+    errorCode: "timeout",
+  };
+}
+
+function focusLastAddButtonEvalJs(candidates) {
+  return `(() => {
+    const queries = ${JSON.stringify(candidates)};
+    let btn = null;
+    for (const q of queries) {
+      const found = document.querySelectorAll(q);
+      if (found.length) btn = found[found.length - 1];
+    }
+    if (!btn) return JSON.stringify({ ok: false, reason: "no_add_button" });
+    btn.focus();
+    return JSON.stringify({ ok: document.activeElement === btn });
+  })()`;
 }
 
 function abUrl() {
@@ -97,27 +143,29 @@ function isComposePageUrl(url = abUrl()) {
 
 function buildComposeScope(mode) {
   if (mode === "page") {
+    const addButtonCandidates = PAGE_ADD_BUTTON_CANDIDATES;
     return {
       mode,
       tweetTextarea: (index) => `[data-testid="tweetTextarea_${index}"]`,
       tweetTextareaAny: '[data-testid^="tweetTextarea_"]',
-      addButton: '[data-testid="addButton"]',
+      addButtonCandidates,
+      addButton: addButtonCandidates[0],
       tweetButton: '[data-testid="tweetButton"]',
       fileInput: 'input[data-testid="fileInput"]',
       attachments: '[data-testid="attachments"]',
-      addButtonQuery: '[data-testid="addButton"]',
     };
   }
+  const addButtonCandidates = MODAL_ADD_BUTTON_CANDIDATES;
   return {
     mode: "modal",
     tweetTextarea: (index) =>
       `[role="dialog"] [data-testid="tweetTextarea_${index}"]`,
     tweetTextareaAny: '[role="dialog"] [data-testid^="tweetTextarea_"]',
-    addButton: '[role="dialog"] [data-testid="addButton"]',
+    addButtonCandidates,
+    addButton: addButtonCandidates[0],
     tweetButton: '[role="dialog"] [data-testid="tweetButton"]',
     fileInput: '[role="dialog"] input[data-testid="fileInput"]',
     attachments: '[role="dialog"] [data-testid="attachments"]',
-    addButtonQuery: '[role="dialog"] [data-testid="addButton"]',
   };
 }
 
@@ -171,19 +219,14 @@ function resolveComposeScope() {
 }
 
 function activateComposeThreadAdd(scope, context) {
-  const js = `(() => {
-    const btns = document.querySelectorAll(${JSON.stringify(scope.addButtonQuery)});
-    const btn = btns[btns.length - 1];
-    if (!btn) return JSON.stringify({ ok: false, reason: "no_add_button" });
-    btn.focus();
-    return JSON.stringify({ ok: document.activeElement === btn });
-  })()`;
+  const resolved = waitForAddButton(scope, context);
+  const js = focusLastAddButtonEvalJs(scope.addButtonCandidates);
   const raw = abText(["eval", js]);
   const parsed = parseEvalJsonValue(raw);
   if (parsed?.ok) {
     requireAb(["press", "Enter"], `${context} activate add via Enter`);
   } else {
-    requireAb(["click", scope.addButton], context);
+    requireAb(["click", resolved], context);
   }
   sleep(THREAD_ADD_WAIT_MS);
 }
@@ -525,6 +568,9 @@ function fillCompose(payload) {
   if (mediaPaths?.length) uploadMedia(mediaPaths, scope);
 
   const threadTexts = payload.threadTexts ?? [];
+  if (threadTexts.length > 0) {
+    waitForAddButton(scope, "wait for thread add button after main tweet");
+  }
   for (let i = 0; i < threadTexts.length; i++) {
     const threadIndex = i + 1;
     activateComposeThreadAdd(scope, `add thread tweet ${threadIndex + 1}`);

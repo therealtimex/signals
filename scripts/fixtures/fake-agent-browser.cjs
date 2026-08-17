@@ -20,6 +20,7 @@ function defaultState() {
     postPublished: false,
     composeOpen: false,
     composeUiMode: "page",
+    mainTweetTyped: false,
     threadTextareaCount: 0,
   };
 }
@@ -134,7 +135,9 @@ function textareaCountForSelector(selector, state) {
   if (selector.includes("tweetTextarea_")) {
     return state.threadTextareaCount;
   }
-  if (selector.includes("addButton")) return 1;
+  if (selector.includes("addButton") || selector.includes("Add post")) {
+    return state.composeOpen && state.mainTweetTyped ? 1 : 0;
+  }
   if (selector.includes("tweetButton")) return 1;
   if (selector.includes("fileInput")) return 1;
   if (selector.includes("attachments")) return 1;
@@ -173,12 +176,7 @@ function handleIs(rest) {
 function handleEval(rest, state) {
   const js = rest[1] ?? "";
   if (js.includes("addButton") && js.includes("activeElement")) {
-    const addCount = textareaCountForSelector(
-      state.composeUiMode === "page"
-        ? '[data-testid="addButton"]'
-        : '[role="dialog"] [data-testid="addButton"]',
-      state
-    );
+    const addCount = state.composeOpen && state.mainTweetTyped ? 1 : 0;
     if (!state.composeOpen || addCount === 0) {
       return ok(JSON.stringify(JSON.stringify({ ok: false, reason: "no_add_button" })));
     }
@@ -243,10 +241,15 @@ if (cmd === "open") {
 if (cmd === "wait") return ok();
 if (cmd === "click") {
   const selector = rest[1] ?? "";
-  if (process.env.FAKE_AB_FAIL_ADD === "1" && selector.includes("addButton")) {
+  if (
+    process.env.FAKE_AB_FAIL_ADD === "1" &&
+    (selector.includes("addButton") || selector.includes("Add post"))
+  ) {
     fail("simulated add button failure");
   }
-  if (selector.includes("addButton")) addThreadSlot(state);
+  if (selector.includes("addButton") || selector.includes("Add post")) {
+    addThreadSlot(state);
+  }
   if (selector.includes("tweetButton")) {
     state.postPublished = true;
     writeState(state);
@@ -258,7 +261,18 @@ if (cmd === "type" || cmd === "fill") {
   if (process.env.FAKE_AB_FAIL_THREAD_FILL === "1" && selector.includes("tweetTextarea_1")) {
     fail("simulated thread fill failure");
   }
-  if (selector.includes("tweetTextarea_0")) openCompose(state);
+  if (selector.includes("tweetTextarea_0")) {
+    openCompose(state, state.composeUiMode || "page");
+    state.mainTweetTyped = true;
+    writeState(state);
+  }
+  return ok();
+}
+if (cmd === "keyboard") {
+  if (rest[1] === "type") {
+    state.mainTweetTyped = true;
+    writeState(state);
+  }
   return ok();
 }
 if (cmd === "press") {

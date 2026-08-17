@@ -43,7 +43,7 @@ Failure:
 | composeButton | `[data-testid="SideNav_NewTweet_Button"]` |
 | composeDialog | `[role="dialog"]` (scope compose modal; avoids home inline composer) |
 | composeTweetTextarea | `[role="dialog"] [data-testid="tweetTextarea_{n}"]` |
-| composeAddButton | `[role="dialog"] [data-testid="addButton"]` — activate via focus+Enter when possible |
+| composeAddButton | `[data-testid="addButton"]` or `button[aria-label="Add post"]` (focus+Enter preferred) |
 | tweetButton | `[role="dialog"] [data-testid="tweetButton"]` |
 | fileInput | `[role="dialog"] input[data-testid="fileInput"]` |
 | attachments | `[data-testid="attachments"]` |
@@ -51,7 +51,7 @@ Failure:
 
 ## Compose flow
 
-Opens `https://x.com/compose/post` (or home modal fallback). On `/compose/*` URLs the composer is page-scoped (`tweetTextarea_{n}`); modal overlay compose uses `[role="dialog"]` scoping. Types with `type`, adds thread segments via focus+Enter on the last add button.
+Opens `https://x.com/compose/post` (or home modal fallback). On `/compose/*` URLs the composer is page-scoped. Types with `type` (keyboard fallback), waits for lazy-rendered add button (`addButton` or `aria-label="Add post"`), then adds thread segments via focus+Enter on the last match.
 
 ## Verification invariant (P6a port) (owned status ids + max snowflake) **before** compose.
 2. Post via compose UI.
