@@ -33,15 +33,20 @@ npm run test:plugin-package
 | Workflow | When | What |
 |----------|------|------|
 | `.github/workflows/ci.yml` | PR + `main` | App quality gate + Playwright smoke |
-| `.github/workflows/plugin-release.yml` | PR + `main` | Standalone zip, plugin zip, `test:plugin-package` |
-| `.github/workflows/plugin-release.yml` (`release` job) | Push tag `v*` | Same build + GitHub Release with plugin zip, standalone zip, `release-manifest.json` |
+| `.github/workflows/plugin-release.yml` (`plugin-package`) | PR + `main` | Standalone zip, plugin zip, `test:plugin-package` |
+| `.github/workflows/plugin-release.yml` (`release`) | Push to `main` or tag `v*` | Publish GitHub Release when `package.json` version is new |
 
-Before tagging, bump `package.json` and `realtimex.plugin.json` to the same version, then:
+**Release on merge (recommended):** bump `package.json` and `realtimex-plugin/realtimex.plugin.json` to the same version in your PR. After merge to `main`, the `release` job compares that version to the latest GitHub Release. If it is newer and no `vX.Y.Z` release exists yet, CI builds artifacts and creates the release (tag `vX.Y.Z` is created automatically). Docs-only or CI-only merges without a version bump do not publish.
+
+**Manual tag (optional):** pushing `vX.Y.Z` still triggers the same `release` job when the tag matches `package.json` and the release does not already exist.
 
 ```bash
+# Optional manual path (same outcome as merge when version already bumped)
 git tag v0.1.10
 git push origin v0.1.10
 ```
+
+Gate logic: `scripts/ci/should-publish-marketplace-release.mjs` (`--main` or `--tag=vX.Y.Z`).
 
 Marketplace store upload remains manual until RealtimeX #1614 provides publisher automation.
 
