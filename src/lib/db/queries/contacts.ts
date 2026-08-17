@@ -262,7 +262,7 @@ export function listContacts(opts?: {
     .select()
     .from(contacts)
     .where(whereClause)
-    .orderBy(orderByClause)
+    .orderBy(desc(contacts.isSelf), orderByClause)
     .limit(pageSize)
     .offset((page - 1) * pageSize)
     .all();
