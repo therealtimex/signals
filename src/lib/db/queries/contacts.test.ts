@@ -58,6 +58,24 @@ describe("contacts queries", () => {
     expect(result.data[1]?.id).toBe(high.id);
   });
 
+  it("lists the self contact first regardless of enrichment score", () => {
+    const self = createContact({ name: "Self", platform: "x", platformUserId: "self" });
+    const other = createContact({ name: "Other", platform: "x", platformUserId: "other" });
+
+    db.update(contacts).set({ enrichmentScore: 5 }).where(eq(contacts.id, self.id)).run();
+    db.update(contacts).set({ enrichmentScore: 95 }).where(eq(contacts.id, other.id)).run();
+    updateContact(self.id, { isSelf: true });
+
+    const result = listContacts({
+      sort: "enrichmentScore",
+      order: "asc",
+      pageSize: 10,
+    });
+
+    expect(result.data[0]?.id).toBe(self.id);
+    expect(result.data[0]?.isSelf).toBe(true);
+  });
+
   it("updates contact and recomputes display name from name parts", () => {
     const created = createContact({
       name: "Old Name",

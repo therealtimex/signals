@@ -1,4 +1,4 @@
-import { listContacts } from "@/lib/db/queries/contacts";
+import { getOwnerContactId, listContacts, getContactById } from "@/lib/db/queries/contacts";
 import { parsePaginationParams } from "@/lib/pagination";
 import { ContactListClient } from "./contact-list-client";
 
@@ -10,6 +10,8 @@ export default async function ContactsPage({
   const params = await searchParams;
   const { page, pageSize } = parsePaginationParams(params);
   const includeArchived = params.archived === "true";
+  const ownerId = getOwnerContactId();
+  const selfContact = ownerId ? getContactById(ownerId) : undefined;
   const { data, total } = listContacts({
     search: params.search,
     funnelStage: params.funnelStage,
@@ -29,6 +31,7 @@ export default async function ContactsPage({
       </div>
       <ContactListClient
         contacts={data}
+        selfContact={selfContact}
         total={total}
         page={page}
         pageSize={pageSize}

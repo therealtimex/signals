@@ -22,12 +22,13 @@ import {
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { AddContactDialog } from "@/components/add-contact-dialog";
+import { ContactListAvatar } from "@/components/contact-list-avatar";
 import { FunnelStageBadge } from "@/components/funnel-stage-badge";
 import { EnrichmentScoreBadge } from "@/components/enrichment-score-badge";
 import { PaginationControls } from "@/components/pagination-controls";
 import { Users, Archive } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import type { ContactWithIdentities } from "@/lib/db/types";
+import type { ContactDTO } from "@/lib/db/queries/contact-dto";
 
 const funnelStages = ["all", "prospect", "engaged", "qualified", "opportunity", "customer", "advocate"];
 const platformLabels: Record<string, string> = {
@@ -38,7 +39,7 @@ const platformLabels: Record<string, string> = {
 };
 
 /** Check if a contact is archived by parsing its metadata JSON. */
-function isArchived(contact: ContactWithIdentities): boolean {
+function isArchived(contact: ContactDTO): boolean {
   try {
     const meta = JSON.parse(contact.metadata ?? "{}");
     return meta.archived === 1;
@@ -48,7 +49,8 @@ function isArchived(contact: ContactWithIdentities): boolean {
 }
 
 interface ContactListClientProps {
-  contacts: ContactWithIdentities[];
+  contacts: ContactDTO[];
+  selfContact?: ContactDTO;
   total: number;
   page: number;
   pageSize: number;
@@ -59,6 +61,7 @@ interface ContactListClientProps {
 
 export function ContactListClient({
   contacts,
+  selfContact,
   total,
   page,
   pageSize,
@@ -123,6 +126,17 @@ export function ContactListClient({
 
   return (
     <div className="space-y-4">
+      {selfContact ? (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Badge variant="secondary">You</Badge>
+          <span>
+            Your profile:{" "}
+            <Link href={`/dashboard/contacts/${selfContact.id}`} className="font-medium text-foreground hover:underline">
+              {selfContact.name}
+            </Link>
+          </span>
+        </div>
+      ) : null}
       <div className="flex items-center gap-4">
         <form onSubmit={handleSearchSubmit} className="flex-1">
           <Input
@@ -185,25 +199,35 @@ export function ContactListClient({
                 return (
                 <TableRow key={contact.id} className={`hover:bg-accent/30 transition-colors ${archived ? "opacity-60" : ""}`}>
                   <TableCell>
-                    <div className="flex items-center gap-2">
-                      <Link
-                        href={`/dashboard/contacts/${contact.id}`}
-                        className="font-medium hover:underline"
-                      >
-                        {contact.name}
-                      </Link>
-                      {archived && (
-                        <Badge variant="outline" className="text-[10px] px-1.5 py-0 gap-1">
-                          <Archive className="h-2.5 w-2.5" />
-                          Archived
-                        </Badge>
-                      )}
+                    <div className="flex items-center gap-3 min-w-0">
+                      <ContactListAvatar contact={contact} />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <Link
+                            href={`/dashboard/contacts/${contact.id}`}
+                            className="font-medium hover:underline truncate"
+                          >
+                            {contact.name}
+                          </Link>
+                          {contact.isSelf ? (
+                            <Badge variant="secondary" className="text-[10px] px-1.5 py-0 shrink-0">
+                              You
+                            </Badge>
+                          ) : null}
+                          {archived && (
+                            <Badge variant="outline" className="text-[10px] px-1.5 py-0 gap-1 shrink-0">
+                              <Archive className="h-2.5 w-2.5" />
+                              Archived
+                            </Badge>
+                          )}
+                        </div>
+                        {contact.headline ? (
+                          <p className="text-xs text-muted-foreground truncate">
+                            {contact.headline}
+                          </p>
+                        ) : null}
+                      </div>
                     </div>
-                    {contact.headline && (
-                      <p className="text-xs text-muted-foreground truncate max-w-[200px]">
-                        {contact.headline}
-                      </p>
-                    )}
                   </TableCell>
                   <TableCell className="text-muted-foreground truncate">
                     {contact.company ?? "—"}
