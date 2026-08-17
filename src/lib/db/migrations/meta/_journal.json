@@ -148,6 +148,13 @@
       "when": 1786923105002,
       "tag": "0020_media_attachments",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1786924451081,
+      "tag": "0021_drop_media_legacy_columns",
+      "breakpoints": true
     }
   ]
 }

@@ -6,6 +6,7 @@ import { fileURLToPath } from "url";
 import { homedir } from "os";
 import { mkdirSync, existsSync } from "fs";
 import { ensureEmploymentBackfillBeforeCompanyDrop } from "@/lib/db/migrate-employment-pre-drop";
+import { ensureMediaAttachmentBackfillBeforeDrop } from "@/lib/db/migrate-media-pre-drop";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -18,6 +19,7 @@ export function runMigrations(dataDir?: string) {
 
   const dbPath = join(dir, "data.db");
   ensureEmploymentBackfillBeforeCompanyDrop(dbPath);
+  ensureMediaAttachmentBackfillBeforeDrop(dbPath);
 
   const sqlite = new Database(dbPath);
   sqlite.pragma("journal_mode = WAL");

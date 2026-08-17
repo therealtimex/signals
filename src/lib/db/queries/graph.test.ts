@@ -176,6 +176,19 @@ describe("schema v0.5 migrations", () => {
     expect(columns).toContain("is_self");
     expect(columns).not.toContain("company");
     expect(columns).not.toContain("title");
+
+    const mediaAssetColumns = sqlite
+      .prepare("PRAGMA table_info(media_assets)")
+      .all()
+      .map((row) => (row as { name: string }).name);
+    expect(mediaAssetColumns).not.toContain("content_item_id");
+    expect(mediaAssetColumns).not.toContain("platform_target");
+
+    const contentItemColumns = sqlite
+      .prepare("PRAGMA table_info(content_items)")
+      .all()
+      .map((row) => (row as { name: string }).name);
+    expect(contentItemColumns).not.toContain("media_paths");
     sqlite.close();
   });
 
@@ -226,6 +239,61 @@ describe("schema v0.5 migrations", () => {
     expect(columnExists(upgraded, "contacts", "company")).toBe(false);
     expect(
       upgraded.prepare("SELECT COUNT(*) AS count FROM contact_employments").get(),
+    ).toEqual({ count: 1 });
+    upgraded.close();
+  });
+
+  it("drops legacy media columns on P3e while preserving junction-linked assets", () => {
+    const dir = mkdtempSync(join(tmpdir(), "signals-migrate-p3e-"));
+    const dbPath = join(dir, "data.db");
+    const sqlite = new Database(dbPath);
+    sqlite.pragma("foreign_keys = ON");
+
+    const migrationFiles = listMigrationSqlFiles();
+    const through0020 = migrationFiles.filter((file) => !file.startsWith("0021_drop"));
+    applyMigrationFiles(sqlite, through0020);
+
+    const contentItemId = nanoid();
+    const assetId = nanoid();
+    const attachmentId = nanoid();
+    sqlite
+      .prepare(
+        `INSERT INTO content_items (
+          id, content_type, status, media_paths, created_at, updated_at
+        ) VALUES (?, 'post', 'draft', ?, 1, 1)`,
+      )
+      .run(contentItemId, JSON.stringify([assetId]));
+    sqlite
+      .prepare(
+        `INSERT INTO media_assets (
+          id, filename, storage_path, mime_type, file_size, origin, scope,
+          content_item_id, platform_target, created_at, updated_at
+        ) VALUES (?, 'deck.pdf', 'deck.pdf', 'application/pdf', 100, 'upload', 'shared', ?, 'linkedin', 1, 1)`,
+      )
+      .run(assetId, contentItemId);
+    sqlite
+      .prepare(
+        `INSERT INTO media_attachments (
+          id, media_asset_id, parent_type, parent_id, role, sort_order, source, created_at, updated_at
+        ) VALUES (?, ?, 'content_item', ?, 'attachment', 0, 'test', 1, 1)`,
+      )
+      .run(attachmentId, assetId, contentItemId);
+
+    applyMigrationFiles(
+      sqlite,
+      migrationFiles.filter((file) => file.startsWith("0021_drop")),
+    );
+    sqlite.close();
+
+    const upgraded = new Database(dbPath);
+    expect(columnExists(upgraded, "media_assets", "content_item_id")).toBe(false);
+    expect(columnExists(upgraded, "media_assets", "platform_target")).toBe(false);
+    expect(columnExists(upgraded, "content_items", "media_paths")).toBe(false);
+    expect(
+      upgraded.prepare("SELECT COUNT(*) AS count FROM media_assets").get(),
+    ).toEqual({ count: 1 });
+    expect(
+      upgraded.prepare("SELECT COUNT(*) AS count FROM media_attachments").get(),
     ).toEqual({ count: 1 });
     upgraded.close();
   });

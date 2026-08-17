@@ -234,7 +234,6 @@ export const contentItems = sqliteTable("content_items", {
     enum: ["post", "article", "thread", "reply", "image", "video", "email", "dm", "newsletter"],
   }).notNull(),
   platformTarget: text("platform_target"),
-  mediaPaths: text("media_paths").default("[]"), // JSON array of local paths
   status: text("status", {
     enum: ["draft", "review", "approved", "scheduled", "published", "imported"],
   })
@@ -278,12 +277,8 @@ export const mediaAssets = sqliteTable("media_assets", {
   scope: text("scope", { enum: ["shared", "local_only"] })
     .notNull()
     .default("shared"),
-  contentItemId: text("content_item_id").references(() => contentItems.id, { onDelete: "set null" }),
-  platformTarget: text("platform_target", { enum: PLATFORM_ENUM }),
   ...timestamps,
-}, (table) => [
-  index("idx_media_assets_content_item").on(table.contentItemId),
-]);
+});
 
 export const mediaAttachments = sqliteTable("media_attachments", {
   id: text("id").primaryKey(),

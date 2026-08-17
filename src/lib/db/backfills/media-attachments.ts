@@ -1,19 +1,47 @@
-import { and, eq, isNotNull } from "drizzle-orm";
-import { db } from "@/lib/db/client";
+import { and, eq } from "drizzle-orm";
+import { db, sqlite } from "@/lib/db/client";
 import { createMediaAttachment } from "@/lib/db/queries/media-attachments";
-import { mediaAssets, contentItems, mediaAttachments } from "@/lib/db/schema";
+import { mediaAssets, mediaAttachments } from "@/lib/db/schema";
 
 const SOURCE = "backfill:content-media";
 
-function readMediaPaths(contentItemId: string): string[] {
-  const item = db
-    .select({ mediaPaths: contentItems.mediaPaths })
-    .from(contentItems)
-    .where(eq(contentItems.id, contentItemId))
-    .get();
-  if (!item?.mediaPaths) return [];
+type LegacyAssetRow = {
+  id: string;
+  contentItemId: string;
+};
+
+function readLegacyLinkedAssets(): LegacyAssetRow[] {
   try {
-    return JSON.parse(item.mediaPaths) as string[];
+    return sqlite
+      .prepare(
+        `SELECT id, content_item_id AS contentItemId
+         FROM media_assets
+         WHERE content_item_id IS NOT NULL`,
+      )
+      .all() as LegacyAssetRow[];
+  } catch {
+    return [];
+  }
+}
+
+function readLegacyMediaPaths(contentItemId: string): string[] {
+  try {
+    const row = sqlite
+      .prepare(`SELECT media_paths AS mediaPaths FROM content_items WHERE id = ?`)
+      .get(contentItemId) as { mediaPaths: string | null } | undefined;
+    if (!row?.mediaPaths) return [];
+    return JSON.parse(row.mediaPaths) as string[];
+  } catch {
+    return [];
+  }
+}
+
+function readLegacyContentItemIds(): string[] {
+  try {
+    const rows = sqlite
+      .prepare(`SELECT id FROM content_items`)
+      .all() as { id: string }[];
+    return rows.map((row) => row.id);
   } catch {
     return [];
   }
@@ -41,28 +69,19 @@ export function backfillMediaAttachments(): { inserted: number; skipped: number 
   let inserted = 0;
   let skipped = 0;
 
-  const linkedAssets = db
-    .select()
-    .from(mediaAssets)
-    .where(isNotNull(mediaAssets.contentItemId))
-    .all();
-
-  for (const asset of linkedAssets) {
-    const contentItemId = asset.contentItemId;
-    if (!contentItemId) continue;
-
-    if (hasAttachment(asset.id, contentItemId)) {
+  for (const asset of readLegacyLinkedAssets()) {
+    if (hasAttachment(asset.id, asset.contentItemId)) {
       skipped++;
       continue;
     }
 
-    const paths = readMediaPaths(contentItemId);
+    const paths = readLegacyMediaPaths(asset.contentItemId);
     const sortOrder = Math.max(0, paths.indexOf(asset.id));
 
     createMediaAttachment({
       mediaAssetId: asset.id,
       parentType: "content_item",
-      parentId: contentItemId,
+      parentId: asset.contentItemId,
       role: "attachment",
       sortOrder: sortOrder >= 0 ? sortOrder : 0,
       source: SOURCE,
@@ -70,14 +89,14 @@ export function backfillMediaAttachments(): { inserted: number; skipped: number 
     inserted++;
   }
 
-  for (const item of db.select({ id: contentItems.id }).from(contentItems).all()) {
-    const paths = readMediaPaths(item.id);
+  for (const contentItemId of readLegacyContentItemIds()) {
+    const paths = readLegacyMediaPaths(contentItemId);
     for (let index = 0; index < paths.length; index++) {
       const assetId = paths[index];
       if (!db.select({ id: mediaAssets.id }).from(mediaAssets).where(eq(mediaAssets.id, assetId)).get()) {
         continue;
       }
-      if (hasAttachment(assetId, item.id)) {
+      if (hasAttachment(assetId, contentItemId)) {
         skipped++;
         continue;
       }
@@ -85,7 +104,7 @@ export function backfillMediaAttachments(): { inserted: number; skipped: number 
       createMediaAttachment({
         mediaAssetId: assetId,
         parentType: "content_item",
-        parentId: item.id,
+        parentId: contentItemId,
         role: "attachment",
         sortOrder: index,
         source: SOURCE,

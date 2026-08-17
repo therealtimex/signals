@@ -8,7 +8,6 @@ import {
   listAttachmentsForParent,
 } from "@/lib/db/queries/media-attachments";
 import { createMediaAsset, linkMediaToContent } from "@/lib/db/queries/media";
-import { backfillMediaAttachments } from "@/lib/db/backfills/media-attachments";
 import { runMediaIntegrityJob } from "@/lib/db/media-integrity";
 import { db } from "@/lib/db/client";
 import { contacts, contentItems, mediaAttachments } from "@/lib/db/schema";
@@ -28,8 +27,6 @@ describe("media attachments", () => {
       fileSize: 10,
       origin: "upload",
       scope: "shared",
-      contentItemId: null,
-      platformTarget: null,
     });
     const avatarB = createMediaAsset({
       filename: "b.png",
@@ -38,8 +35,6 @@ describe("media attachments", () => {
       fileSize: 10,
       origin: "upload",
       scope: "shared",
-      contentItemId: null,
-      platformTarget: null,
     });
 
     createMediaAttachment({
@@ -64,14 +59,13 @@ describe("media attachments", () => {
     expect(avatars[0]?.mediaAssetId).toBe(avatarB.id);
   });
 
-  it("links compose media through junction rows and backfills legacy FK links", () => {
+  it("links compose media through junction rows", () => {
     const contentItemId = nanoid();
     db.insert(contentItems)
       .values({
         id: contentItemId,
         contentType: "post",
         status: "draft",
-        mediaPaths: "[]",
       })
       .run();
 
@@ -82,8 +76,6 @@ describe("media attachments", () => {
       fileSize: 100,
       origin: "upload",
       scope: "shared",
-      contentItemId,
-      platformTarget: "linkedin",
     });
 
     linkMediaToContent(asset.id, contentItemId);
@@ -91,11 +83,6 @@ describe("media attachments", () => {
     const linked = listAssetsForParent("content_item", contentItemId);
     expect(linked).toHaveLength(1);
     expect(linked[0]?.id).toBe(asset.id);
-
-    db.delete(mediaAttachments).run();
-    const backfill = backfillMediaAttachments();
-    expect(backfill.inserted).toBeGreaterThan(0);
-    expect(listAssetsForParent("content_item", contentItemId)).toHaveLength(1);
   });
 
   it("filters local_only assets from shared parent reads", () => {
@@ -107,8 +94,6 @@ describe("media attachments", () => {
       fileSize: 10,
       origin: "upload",
       scope: "shared",
-      contentItemId: null,
-      platformTarget: null,
     });
     const local = createMediaAsset({
       filename: "local.png",
@@ -117,8 +102,6 @@ describe("media attachments", () => {
       fileSize: 10,
       origin: "upload",
       scope: "local_only",
-      contentItemId: null,
-      platformTarget: null,
     });
 
     createMediaAttachment({
@@ -147,8 +130,6 @@ describe("media attachments", () => {
       fileSize: 10,
       origin: "upload",
       scope: "local_only",
-      contentItemId: null,
-      platformTarget: null,
     });
 
     createMediaAttachment({
