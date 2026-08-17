@@ -26,7 +26,7 @@ npm run package:realtimex-plugin
 npm run test:plugin-package
 ```
 
-Source layout: `realtimex-plugin/` (manifest, templates, marketplace specs). Skills are copied from `.claude/skills/` at package time. The `signals-publish` skill is bundled with its `playwright-core` runtime dependency (`skills/signals-publish/node_modules/`). Source `SKILL.md` paths stay under `.claude/skills/`; packaging rewrites them to `skills/` in the zip.
+Source layout: `realtimex-plugin/` (manifest, templates, marketplace specs). Skills are copied from `.claude/skills/` at package time. The `signals-publish` skill's `x-publish.cjs` delegates to the host **`agent-browser` CLI** (locked external skill); the plugin zip contains **no** `node_modules`. Source `SKILL.md` paths stay under `.claude/skills/`; packaging rewrites them to `skills/` in the zip.
 
 Plugin validation uses `scripts/vendor/validate-plugin.cjs` (override with `REALTIMEX_PLUGIN_VALIDATOR`). Packaging fails if the validator is missing.
 

@@ -1,8 +1,5 @@
 {
   "name": "signals-publish-skill-runtime",
   "private": true,
-  "type": "module",
-  "dependencies": {
-    "playwright-core": "^1.58.2"
-  }
+  "description": "Runtime metadata for signals-publish skill packaging (no bundled npm deps; uses host agent-browser CLI)."
 }

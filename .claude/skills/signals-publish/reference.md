@@ -2,6 +2,8 @@
 
 ## x-publish.cjs CLI
 
+Requires **`agent-browser`** on PATH (locked external skill). The script delegates CDP automation to the CLI; it does not bundle npm packages.
+
 ```bash
 node scripts/x-publish.cjs --port <cdpPort> --payload <job.json>
 ```

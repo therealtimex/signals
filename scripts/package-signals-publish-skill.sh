@@ -14,13 +14,8 @@ chmod +x "${SKILL_DIR}"/scripts/*.cjs 2>/dev/null || true
 rm -f "${OUT}"
 
 (
-  cd "${SKILL_DIR}"
-  npm install --omit=dev --no-audit --no-fund
-)
-
-(
   cd "$(dirname "${SKILL_DIR}")"
-  zip -r "${OUT}" "$(basename "${SKILL_DIR}")"
+  zip -r "${OUT}" "$(basename "${SKILL_DIR}")" -x "**/node_modules/*"
 )
 
 echo "Wrote ${OUT}"

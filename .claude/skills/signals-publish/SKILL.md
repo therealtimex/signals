@@ -24,6 +24,8 @@ Publish content from **Signals** publish jobs through a named RealTimeX Browser 
 
 Resolve/create/start the session with `realtimex-pp-cli` or the `agent-browser` skill before running publish scripts.
 
+**Dependency:** `x-publish.cjs` delegates browser automation to the host **`agent-browser` CLI** (locked external skill). It does not bundle npm packages.
+
 ## Workflow (per publish job)
 
 1. Load `realtimex-signals` and call `get_publish_job` with the job id from the initial message.

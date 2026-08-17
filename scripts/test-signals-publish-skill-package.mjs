@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Smoke test: packaged signals-publish skill resolves playwright-core in a clean dir.
+ * Smoke test: packaged signals-publish skill resolves agent-browser on the host.
  */
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -40,6 +40,11 @@ try {
   writeFileSync(payloadPath, JSON.stringify({ text: "smoke test" }));
   readFileSync(scriptPath);
 
+  const probe = spawnSync("agent-browser", ["--version"], { encoding: "utf8" });
+  if (probe.status !== 0) {
+    throw new Error("agent-browser CLI not available for skill package smoke test");
+  }
+
   const result = spawnSync(
     process.execPath,
     [scriptPath, "--port", "9222", "--payload", payloadPath],
@@ -47,8 +52,21 @@ try {
   );
 
   const output = `${result.stdout}\n${result.stderr}`;
-  if (/ERR_MODULE_NOT_FOUND/.test(output) || /Cannot find package 'playwright-core'/.test(output)) {
-    throw new Error(`playwright-core missing from packaged skill:\n${output}`);
+  if (/Cannot find module 'playwright-core'/.test(output)) {
+    throw new Error(`playwright-core should not be required:\n${output}`);
+  }
+  if (/agent-browser CLI not found/.test(output)) {
+    throw new Error(`agent-browser missing from packaged skill run:\n${output}`);
+  }
+
+  const lastLine = output.trim().split("\n").filter(Boolean).pop() ?? "";
+  try {
+    const parsed = JSON.parse(lastLine);
+    if (typeof parsed.success !== "boolean") {
+      throw new Error(`Expected JSON result on last stdout line: ${lastLine}`);
+    }
+  } catch {
+    throw new Error(`Packaged skill did not emit JSON result:\n${output}`);
   }
 
   console.log("signals-publish skill package smoke: OK");

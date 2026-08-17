@@ -1,18 +1,19 @@
 #!/usr/bin/env node
 /**
- * Deterministic X publish over CDP (ported from P6a rtx-publish steps).
+ * Deterministic X publish via host agent-browser CLI (external skill dependency).
  *
  * Usage:
  *   node scripts/x-publish.cjs --port <cdpPort> --payload <job.json>
  *
- * Payload: { text, threadTexts?, mediaPaths?, expectedHandle? }
- * mediaPaths: string[] for single post, or string[][] per thread tweet
- *
+ * Requires `agent-browser` on PATH (provisioned external skill).
  * stdout (last line): JSON result
  */
-const { readFileSync } = require("node:fs");
-const { chromium } = require("playwright-core");
+"use strict";
 
+const { readFileSync } = require("node:fs");
+const { spawnSync } = require("node:child_process");
+
+const SESSION = process.env.SIGNALS_PUBLISH_AB_SESSION || "signals-publish";
 const X_HOME_URL = "https://x.com/home";
 
 const X_SELECTORS = {
@@ -40,13 +41,41 @@ const X_LOGGED_IN_MARKERS = [
 const TWITTER_EPOCH_MS = 1288834974657;
 
 function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  runAb(["wait", String(ms)]);
 }
 
 function emit(result) {
   const line = JSON.stringify(result);
   console.log(line);
   process.exit(result.success ? 0 : 1);
+}
+
+function runAb(args) {
+  const result = spawnSync("agent-browser", ["--session", SESSION, ...args], {
+    encoding: "utf8",
+    maxBuffer: 16 * 1024 * 1024,
+  });
+  const stdout = (result.stdout || "").trim();
+  const stderr = (result.stderr || "").trim();
+  return {
+    ok: result.status === 0,
+    stdout,
+    stderr,
+    combined: [stdout, stderr].filter(Boolean).join("\n"),
+    status: result.status ?? 1,
+  };
+}
+
+function ensureAgentBrowser() {
+  const probe = spawnSync("agent-browser", ["--version"], { encoding: "utf8" });
+  if (probe.status !== 0) {
+    emit({
+      success: false,
+      error:
+        "agent-browser CLI not found on PATH. Install or enable the agent-browser external skill before publishing.",
+      errorCode: "unknown",
+    });
+  }
 }
 
 function parseArgs(argv) {
@@ -64,6 +93,18 @@ function parseArgs(argv) {
     });
   }
   return { port, payload: JSON.parse(readFileSync(payloadPath, "utf8")) };
+}
+
+function abBool(args) {
+  const result = runAb(args);
+  if (!result.ok) return false;
+  return result.stdout.toLowerCase() === "true";
+}
+
+function abText(args) {
+  const result = runAb(args);
+  if (!result.ok) return null;
+  return result.stdout;
 }
 
 function normalizeTweetText(text) {
@@ -138,7 +179,7 @@ function selectNewOwnedStatus(candidates, handle, expectedText, baseline) {
 }
 
 function isXLoginUrl(url) {
-  const lower = url.toLowerCase();
+  const lower = String(url).toLowerCase();
   return (
     lower.includes("/login") ||
     lower.includes("/i/flow/login") ||
@@ -147,32 +188,43 @@ function isXLoginUrl(url) {
   );
 }
 
-async function isXLoggedInPage(page) {
-  if (isXLoginUrl(page.url())) return false;
-  const loginVisible = await page
-    .locator(X_SELECTORS.loginButton)
-    .first()
-    .isVisible()
-    .catch(() => false);
-  if (loginVisible) return false;
+function connectSession(port) {
+  const connect = runAb(["connect", String(port)]);
+  if (!connect.ok && /failed|refused|error/i.test(connect.combined)) {
+    throw {
+      message: `Failed to connect agent-browser to CDP port ${port}: ${connect.combined}`,
+      errorCode: "unknown",
+    };
+  }
+  runAb(["tab"]);
+}
+
+function isXLoggedInPage() {
+  const url = abText(["get", "url"]) ?? "";
+  if (isXLoginUrl(url)) return false;
+  if (abBool(["is", "visible", X_SELECTORS.loginButton])) return false;
   for (const selector of X_LOGGED_IN_MARKERS) {
-    if ((await page.locator(selector).count().catch(() => 0)) > 0) return true;
+    const count = abText(["get", "count", selector]);
+    if (count && Number(count) > 0) return true;
   }
   return false;
 }
 
-async function assertXLoggedIn(page) {
+function assertXLoggedIn() {
   const deadline = Date.now() + 20_000;
   while (Date.now() < deadline) {
-    if (await isXLoggedInPage(page)) return;
-    await sleep(500);
+    if (isXLoggedInPage()) return;
+    sleep(500);
   }
-  throw { message: "X is not logged in on RealTimeX Browser.", errorCode: "session_expired" };
+  throw {
+    message: "X is not logged in on RealTimeX Browser.",
+    errorCode: "session_expired",
+  };
 }
 
-async function detectXDisplayHandle(page) {
+function detectXDisplayHandle() {
   for (const selector of [X_SELECTORS.profileLink, X_SELECTORS.desktopProfileLink]) {
-    const href = await page.locator(selector).first().getAttribute("href").catch(() => null);
+    const href = abText(["get", "attr", "href", selector]);
     if (href?.startsWith("/") && !href.includes("/status/")) {
       const segment = href.replace(/^\//, "").split("/")[0];
       if (segment && !["home", "explore", "i"].includes(segment.toLowerCase())) {
@@ -183,38 +235,61 @@ async function detectXDisplayHandle(page) {
   return null;
 }
 
-async function readProfileStatusCandidates(page, handle) {
+function readProfileStatusCandidates(handle) {
   const profileHandle = handle.replace(/^@/, "");
-  await page.goto(`https://x.com/${profileHandle}`, {
-    waitUntil: "domcontentloaded",
-    timeout: 15_000,
-  });
-  await sleep(1000);
+  runAb(["open", `https://x.com/${profileHandle}`]);
+  sleep(1000);
 
-  const articles = page.locator("article");
-  const count = await articles.count();
-  const ownedCandidates = [];
-
-  for (let i = 0; i < Math.min(count, 12); i++) {
-    const article = articles.nth(i);
-    const text = normalizeTweetText((await article.innerText().catch(() => "")) || "");
-    const links = article.locator('a[href*="/status/"]');
-    const linkCount = await links.count();
-    for (let j = 0; j < linkCount; j++) {
-      const href = await links.nth(j).getAttribute("href").catch(() => null);
-      const statusId = extractStatusIdFromHref(href);
-      if (!href || !statusId) continue;
-      if (isStatusOwnedByHandle(href, handle)) {
-        ownedCandidates.push({ statusId, href, text });
-        break;
+  const js = `(() => {
+    function normalize(text) {
+      return String(text || "").replace(/\\s+/g, " ").trim();
+    }
+    function extractStatusId(href) {
+      if (!href) return null;
+      const match = href.match(/\\/status\\/(\\d+)/);
+      return match ? match[1] : null;
+    }
+    function owned(href, handle) {
+      const clean = handle.replace(/^@/, "").toLowerCase();
+      try {
+        const path = href.startsWith("http") ? new URL(href).pathname : href;
+        const match = path.match(/^\\/([^/]+)\\/status\\/(\\d+)/);
+        return match && match[1].toLowerCase() === clean;
+      } catch {
+        return false;
       }
     }
+    const handle = ${JSON.stringify(handle)};
+    const articles = document.querySelectorAll("article");
+    const ownedCandidates = [];
+    for (let i = 0; i < Math.min(articles.length, 12); i++) {
+      const article = articles[i];
+      const text = normalize(article.innerText);
+      const links = article.querySelectorAll("a[href*='/status/']");
+      for (const link of links) {
+        const href = link.getAttribute("href");
+        const statusId = extractStatusId(href);
+        if (!href || !statusId) continue;
+        if (owned(href, handle)) {
+          ownedCandidates.push({ statusId, href, text });
+          break;
+        }
+      }
+    }
+    return JSON.stringify(ownedCandidates);
+  })()`;
+
+  const raw = abText(["eval", js]);
+  if (!raw) return [];
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return [];
   }
-  return ownedCandidates;
 }
 
-async function captureProfileStatusBaseline(page, handle) {
-  const candidates = await readProfileStatusCandidates(page, handle);
+function captureProfileStatusBaseline(handle) {
+  const candidates = readProfileStatusCandidates(handle);
   const statusIds = new Set(candidates.map((c) => c.statusId));
   return {
     statusIds,
@@ -223,64 +298,61 @@ async function captureProfileStatusBaseline(page, handle) {
   };
 }
 
-async function humanType(page, selector, text) {
-  await page.click(selector);
-  await page.fill(selector, "");
-  for (const char of text) {
-    await page.keyboard.type(char, { delay: 20 });
-  }
-}
-
-async function uploadMedia(page, paths) {
+function uploadMedia(paths) {
   if (!paths?.length) return;
-  const fileInput = page.locator(X_SELECTORS.fileInput).first();
-  await fileInput.waitFor({ timeout: 5_000 });
-  await fileInput.setInputFiles(paths);
-  await page.waitForSelector(X_SELECTORS.attachments, { timeout: 30_000 });
-  await sleep(1000);
+  const upload = runAb(["upload", X_SELECTORS.fileInput, ...paths]);
+  if (!upload.ok) {
+    throw { message: upload.combined || "Media upload failed.", errorCode: "upload_failed" };
+  }
+  runAb(["wait", X_SELECTORS.attachments]);
+  sleep(1000);
 }
 
-async function fillCompose(page, payload) {
-  await page.goto(X_HOME_URL, { waitUntil: "domcontentloaded", timeout: 30_000 });
-  await sleep(1000);
-  await assertXLoggedIn(page);
+function fillCompose(payload) {
+  runAb(["open", X_HOME_URL]);
+  sleep(1000);
+  assertXLoggedIn();
 
-  await page.locator(X_SELECTORS.composeButton).waitFor({ timeout: 10_000 });
-  await page.locator(X_SELECTORS.composeButton).click();
-  await sleep(1000);
+  runAb(["wait", X_SELECTORS.composeButton]);
+  const compose = runAb(["click", X_SELECTORS.composeButton]);
+  if (!compose.ok) {
+    throw { message: compose.combined || "Compose button click failed.", errorCode: "unknown" };
+  }
+  sleep(1000);
 
   const textarea0 = X_SELECTORS.tweetTextarea(0);
-  await page.waitForSelector(textarea0, { timeout: 10_000 });
-  await humanType(page, textarea0, payload.text);
+  runAb(["wait", textarea0]);
+  const fill = runAb(["fill", textarea0, payload.text]);
+  if (!fill.ok) {
+    throw { message: fill.combined || "Failed to fill tweet text.", errorCode: "unknown" };
+  }
 
   const mediaPaths = Array.isArray(payload.mediaPaths?.[0])
     ? payload.mediaPaths[0]
     : payload.mediaPaths;
-  if (mediaPaths?.length) {
-    await uploadMedia(page, mediaPaths);
-  }
+  if (mediaPaths?.length) uploadMedia(mediaPaths);
 
   const threadTexts = payload.threadTexts ?? [];
   for (let i = 0; i < threadTexts.length; i++) {
-    await page.locator(X_SELECTORS.addButton).click();
-    await sleep(800);
+    runAb(["click", X_SELECTORS.addButton]);
+    sleep(800);
     const selector = X_SELECTORS.tweetTextarea(i + 1);
-    await page.waitForSelector(selector, { timeout: 5_000 });
-    await humanType(page, selector, threadTexts[i]);
+    runAb(["wait", selector]);
+    runAb(["fill", selector, threadTexts[i]]);
     const threadMedia = Array.isArray(payload.mediaPaths?.[i + 1])
       ? payload.mediaPaths[i + 1]
       : undefined;
-    if (threadMedia?.length) await uploadMedia(page, threadMedia);
+    if (threadMedia?.length) uploadMedia(threadMedia);
   }
 }
 
-async function waitForVerifiedPost(page, expectedText, handle, baseline, timeoutMs = 20_000) {
+function waitForVerifiedPost(expectedText, handle, baseline, timeoutMs = 20_000) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
-    const candidates = await readProfileStatusCandidates(page, handle);
+    const candidates = readProfileStatusCandidates(handle);
     const match = selectNewOwnedStatus(candidates, handle, expectedText, baseline);
     if (match) return match;
-    await sleep(2000);
+    sleep(2000);
   }
   return {
     success: false,
@@ -289,18 +361,18 @@ async function waitForVerifiedPost(page, expectedText, handle, baseline, timeout
   };
 }
 
-async function main() {
+function main() {
   const { port, payload } = parseArgs(process.argv);
-  let browser;
-  try {
-    browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
-    const context = browser.contexts()[0] ?? (await browser.newContext());
-    const pages = context.pages();
-    const page = pages.find((p) => p.url().includes("x.com")) ?? pages[0] ?? (await context.newPage());
+  ensureAgentBrowser();
 
-    await page.bringToFront().catch(() => {});
-    await assertXLoggedIn(page);
-    const handle = payload.expectedHandle ?? (await detectXDisplayHandle(page));
+  try {
+    connectSession(port);
+
+    runAb(["open", X_HOME_URL]);
+    sleep(1000);
+    assertXLoggedIn();
+
+    const handle = payload.expectedHandle ?? detectXDisplayHandle();
     if (!handle) {
       emit({
         success: false,
@@ -310,21 +382,29 @@ async function main() {
       return;
     }
 
-    const baseline = await captureProfileStatusBaseline(page, handle);
-    await fillCompose(page, payload);
+    const baseline = captureProfileStatusBaseline(handle);
+    fillCompose(payload);
 
-    await page.locator(X_SELECTORS.tweetButton).waitFor({ timeout: 5_000 });
-    await page.locator(X_SELECTORS.tweetButton).click();
-    await sleep(2000);
+    runAb(["wait", X_SELECTORS.tweetButton]);
+    const post = runAb(["click", X_SELECTORS.tweetButton]);
+    if (!post.ok) {
+      emit({
+        success: false,
+        error: post.combined || "Tweet button click failed.",
+        errorCode: "unknown",
+      });
+      return;
+    }
+    sleep(2000);
 
-    const result = await waitForVerifiedPost(page, payload.text, handle, baseline);
+    const result = waitForVerifiedPost(payload.text, handle, baseline);
     emit(result.success ? { ...result, handle } : result);
   } catch (err) {
     const message = err?.message ?? String(err);
-    const errorCode = err?.errorCode ?? (message.toLowerCase().includes("captcha") ? "captcha" : "unknown");
+    const errorCode =
+      err?.errorCode ??
+      (message.toLowerCase().includes("captcha") ? "captcha" : "unknown");
     emit({ success: false, error: message, errorCode });
-  } finally {
-    if (browser) await browser.close().catch(() => {});
   }
 }
 

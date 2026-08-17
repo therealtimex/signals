@@ -153,26 +153,16 @@ if (entries.some((e) => e.endsWith(".mjs") && !e.includes("node_modules"))) {
   errors.push("Plugin zip contains .mjs files outside node_modules (validator requires CommonJS skill scripts)");
 }
 
-const nodeModuleEntries = entries.filter((e) => e.includes("node_modules"));
-const allowedNodeModulePrefix = "skills/signals-publish/node_modules";
-const disallowedNodeModules = nodeModuleEntries.filter((e) => {
-  if (e === allowedNodeModulePrefix) return false;
-  return !e.startsWith(`${allowedNodeModulePrefix}/`);
-});
-if (disallowedNodeModules.length > 0) {
-  errors.push(
-    `Plugin zip contains node_modules outside signals-publish skill: ${disallowedNodeModules[0]}`
-  );
-}
-if (
-  !entries.some((e) =>
-    e.startsWith("skills/signals-publish/node_modules/playwright-core/")
-  )
-) {
-  errors.push("Plugin zip missing bundled playwright-core for signals-publish");
+if (entries.some((e) => e.includes("node_modules"))) {
+  errors.push("Plugin zip contains node_modules (forbidden by plugin contract)");
 }
 
 function assertBundledSkillRunnable() {
+  const probe = spawnSync("agent-browser", ["--version"], { encoding: "utf8" });
+  if (probe.status !== 0) {
+    throw new Error("agent-browser CLI not available for plugin package smoke test");
+  }
+
   const workDir = mkdtempSync(path.join(tmpdir(), "signals-plugin-smoke-"));
   try {
     execSync(`unzip -q "${zipPath}" -d "${workDir}"`, { stdio: "pipe" });
@@ -192,7 +182,16 @@ function assertBundledSkillRunnable() {
       /Cannot find module 'playwright-core'/.test(output) ||
       /Cannot find package 'playwright-core'/.test(output)
     ) {
-      throw new Error(`playwright-core missing from plugin zip:\n${output}`);
+      throw new Error(`Bundled skill should not require playwright-core:\n${output}`);
+    }
+    if (/agent-browser CLI not found/.test(output)) {
+      throw new Error(`Bundled skill did not resolve host agent-browser:\n${output}`);
+    }
+
+    const lastLine = output.trim().split("\n").filter(Boolean).pop() ?? "";
+    const parsed = JSON.parse(lastLine);
+    if (typeof parsed.success !== "boolean") {
+      throw new Error(`Expected JSON result on last stdout line: ${lastLine}`);
     }
   } finally {
     rmSync(workDir, { recursive: true, force: true });

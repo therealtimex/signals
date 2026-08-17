@@ -75,7 +75,7 @@ echo "==> Copying workspace skills..."
 mkdir -p "$STAGING/skills"
 rsync -a --exclude node_modules --exclude '*.mjs' \
   "${ROOT}/.claude/skills/realtimex-signals/" "$STAGING/skills/realtimex-signals/"
-rsync -a --exclude node_modules --exclude '*.mjs' \
+rsync -a --exclude node_modules --exclude 'package-lock.json' --exclude '*.mjs' \
   "${ROOT}/.claude/skills/signals-publish/" "$STAGING/skills/signals-publish/"
 
 chmod +x "$STAGING/skills/realtimex-signals/scripts/"*.sh 2>/dev/null || true
@@ -90,13 +90,6 @@ if [[ -f "$STAGING/skills/signals-publish/SKILL.md" ]]; then
   perl -pi -e 's|\.claude/skills/signals-publish|skills/signals-publish|g' \
     "$STAGING/skills/signals-publish/SKILL.md"
 fi
-
-echo "==> Installing signals-publish skill runtime dependencies..."
-(
-  cd "$STAGING/skills/signals-publish"
-  npm install --omit=dev --no-audit --no-fund --no-bin-links
-  rm -rf node_modules/.bin 2>/dev/null || true
-)
 
 cp "$RELEASE_MANIFEST" "$STAGING/marketplace/release-manifest.json"
 
