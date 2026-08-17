@@ -27,6 +27,34 @@ const composeSchema = z.object({
  */
 export async function POST(req: NextRequest) {
   try {
+    const body = await req.json();
+    const { tweets, saveAsDraft, draftId, mediaAssetIds } = composeSchema.parse(body);
+
+    const isThread = tweets.length > 1;
+    const threadId = draftId
+      ? getExistingThreadId(draftId)
+      : (isThread ? nanoid() : null);
+
+    // --- Save as draft (browser publish path — OAuth account optional per P6a) ---
+    if (saveAsDraft) {
+      const account = getPlatformAccountByPlatform("x");
+      const items = saveDraftItems(tweets, threadId, draftId, account?.id);
+      if (mediaAssetIds) {
+        items.forEach((item, i) => {
+          const assetIds = mediaAssetIds[i] ?? [];
+          for (const assetId of assetIds) {
+            linkMediaToContent(assetId, item.id);
+          }
+        });
+      }
+      return NextResponse.json({
+        success: true,
+        draft: true,
+        items,
+        contentItemId: items[0]?.id,
+      });
+    }
+
     const account = getPlatformAccountByPlatform("x");
     if (!account) {
       return NextResponse.json({ error: "No X account connected" }, { status: 400 });
@@ -36,30 +64,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "X account needs re-authentication" }, { status: 401 });
     }
 
-    const body = await req.json();
-    const { tweets, saveAsDraft, draftId, mediaAssetIds } = composeSchema.parse(body);
-
-    const isThread = tweets.length > 1;
-    const threadId = draftId
-      ? getExistingThreadId(draftId)
-      : (isThread ? nanoid() : null);
-
-    // --- Save as draft ---
-    if (saveAsDraft) {
-      const items = saveDraftItems(tweets, threadId, draftId, account.id);
-      // Link media assets to content items
-      if (mediaAssetIds) {
-        items.forEach((item, i) => {
-          const assetIds = mediaAssetIds[i] ?? [];
-          for (const assetId of assetIds) {
-            linkMediaToContent(assetId, item.id);
-          }
-        });
-      }
-      return NextResponse.json({ success: true, draft: true, items });
-    }
-
-    // --- Publish ---
+    // --- Publish via X API (OAuth) ---
 
     // Upload media assets to X and get platform media IDs (per-tweet)
     const uploadedMediaIds: string[][] = [];
@@ -198,7 +203,7 @@ function saveDraftItems(
   tweets: string[],
   threadId: string | null,
   draftId: string | undefined,
-  accountId: string
+  accountId: string | undefined
 ) {
   const isThread = tweets.length > 1;
 
@@ -229,6 +234,7 @@ function saveDraftItems(
             origin: "authored",
             direction: "outbound",
             platformAccountId: accountId,
+            platformTarget: "x",
             threadId: threadId,
           });
           updatedItems.push(item);
@@ -254,6 +260,7 @@ function saveDraftItems(
       origin: "authored",
       direction: "outbound",
       platformAccountId: accountId,
+      platformTarget: "x",
       threadId: isThread ? threadId : null,
     });
   });

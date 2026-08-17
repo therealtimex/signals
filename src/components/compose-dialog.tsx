@@ -66,6 +66,23 @@ const PLATFORM_CONFIG: Record<Platform, {
 
 const MAX_THREAD_SIZE = 25;
 
+function formatApiError(data: unknown, fallback: string): string {
+  if (!data || typeof data !== "object") return fallback;
+  const error = (data as { error?: unknown }).error;
+  if (typeof error === "string") return error;
+  if (Array.isArray(error)) {
+    return error
+      .map((entry) => {
+        if (entry && typeof entry === "object" && "message" in entry) {
+          return String((entry as { message: unknown }).message);
+        }
+        return String(entry);
+      })
+      .join("; ");
+  }
+  return fallback;
+}
+
 export function ComposeDialog({
   open,
   onOpenChange,
@@ -395,7 +412,7 @@ export function ComposeDialog({
 
       const data = await res.json();
       if (!res.ok) {
-        setError(typeof data.error === "string" ? data.error : "Publish failed");
+        setError(formatApiError(data, "Publish failed"));
         return;
       }
 
@@ -448,7 +465,7 @@ export function ComposeDialog({
 
       const draftData = await draftRes.json();
       if (!draftRes.ok) {
-        setError(typeof draftData.error === "string" ? draftData.error : "Failed to save draft");
+        setError(formatApiError(draftData, "Failed to save draft"));
         return;
       }
 
@@ -490,7 +507,7 @@ export function ComposeDialog({
           onSuccess?.();
         }
       } else {
-        setError(publishData.error || "Browser publish failed");
+        setError(formatApiError(publishData, publishData.error || "Browser publish failed"));
       }
     } catch {
       setError("Browser publish failed");
@@ -527,7 +544,7 @@ export function ComposeDialog({
 
       const data = await res.json();
       if (!res.ok) {
-        setError(typeof data.error === "string" ? data.error : "Save failed");
+        setError(formatApiError(data, "Save failed"));
         return;
       }
 
