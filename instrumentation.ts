@@ -49,6 +49,26 @@ export async function register() {
     }
 
     try {
+      const { backfillIdentityAvatars } = await import("@/lib/db/backfills/identity-avatars");
+      const avatarBackfill = backfillIdentityAvatars();
+      if (avatarBackfill.identitiesUpdated > 0 || avatarBackfill.legacyMetadata > 0) {
+        console.log("[instrumentation] Identity avatar backfill applied:", avatarBackfill);
+      }
+    } catch (e) {
+      console.warn("[instrumentation] Identity avatar backfill skipped:", (e as Error).message);
+    }
+
+    try {
+      const { backfillIdentityProfile } = await import("@/lib/db/backfills/identity-profile");
+      const profileBackfill = backfillIdentityProfile();
+      if (profileBackfill.identitiesUpdated > 0) {
+        console.log("[instrumentation] Identity profile backfill applied:", profileBackfill);
+      }
+    } catch (e) {
+      console.warn("[instrumentation] Identity profile backfill skipped:", (e as Error).message);
+    }
+
+    try {
       const { runContactProfileEmbedSweep } = await import("@/lib/db/contact-profile-embed-sweep");
       const embedSweep = await runContactProfileEmbedSweep({ batchSize: 25 });
       if (embedSweep.processed > 0 || (!embedSweep.complete && embedSweep.remaining > 0)) {

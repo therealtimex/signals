@@ -1,5 +1,6 @@
 import type { Contact, ContactChannel, ContactIdentity } from "./types";
 import type { ContactEmploymentWithOrg } from "@/lib/db/queries/contact-employments";
+import type { ContactProfile } from "@/lib/db/queries/resolve-contact-profile";
 
 /**
  * Calculates an enrichment score (0-100) based on how complete
@@ -10,6 +11,8 @@ export function calculateEnrichmentScore(
   identities: ContactIdentity[],
   channels: ContactChannel[] = [],
   currentEmployment?: ContactEmploymentWithOrg | null,
+  profile?: ContactProfile | null,
+  resolvedAvatarUrl?: string | null,
 ): number {
   let score = 0;
 
@@ -31,7 +34,7 @@ export function calculateEnrichmentScore(
   }
 
   // Headline: 5 points
-  if (contact.headline) {
+  if (profile?.headline) {
     score += 5;
   }
 
@@ -46,22 +49,22 @@ export function calculateEnrichmentScore(
   }
 
   // Location: 5 points
-  if (contact.location) {
+  if (profile?.location) {
     score += 5;
   }
 
   // Bio: 5 points
-  if (contact.bio) {
+  if (profile?.bio) {
     score += 5;
   }
 
-  // Photo (photoUrl or legacy avatarUrl): 5 points
-  if (contact.photoUrl || contact.avatarUrl) {
+  // Photo: 5 points
+  if (resolvedAvatarUrl) {
     score += 5;
   }
 
   // Website: 5 points
-  if (contact.website) {
+  if (profile?.website) {
     score += 5;
   }
 

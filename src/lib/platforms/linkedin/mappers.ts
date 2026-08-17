@@ -3,15 +3,14 @@ import type { ContactWriteExtras } from "@/lib/db/queries/contacts";
 import type { LinkedInProfile, LinkedInConnection } from "@/lib/platforms/linkedin/client";
 
 /** Extract profile photo URL from LinkedIn's nested profilePicture structure. */
-function extractPhotoUrl(
-  profilePicture: LinkedInProfile["profilePicture"] | undefined
+export function extractPhotoUrl(
+  profilePicture: LinkedInProfile["profilePicture"] | undefined,
 ): string | null {
   if (!profilePicture) return null;
 
   const elements = profilePicture["displayImage~"]?.elements;
   if (!elements || elements.length === 0) return null;
 
-  // Last element is typically highest resolution
   const lastElement = elements[elements.length - 1];
   return lastElement?.identifiers?.[0]?.identifier ?? null;
 }
@@ -19,9 +18,8 @@ function extractPhotoUrl(
 /** Map a LinkedIn profile (userinfo or legacy) to Signals contact fields. */
 export function mapLinkedInProfileToContact(
   profile: LinkedInProfile,
-  email?: string | null
+  email?: string | null,
 ): Omit<NewContact, "id"> & ContactWriteExtras {
-  // Support both OpenID Connect userinfo and legacy /me response shapes
   const firstName = profile.given_name ?? profile.localizedFirstName ?? "";
   const lastName = profile.family_name ?? profile.localizedLastName ?? "";
   const name = profile.name ?? `${firstName} ${lastName}`.trim();
@@ -47,13 +45,14 @@ export function mapLinkedInProfileToContact(
 export function mapLinkedInProfileToIdentity(
   profile: LinkedInProfile,
   contactId: string,
-  email?: string | null
+  email?: string | null,
 ): Omit<NewContactIdentity, "id"> {
   const vanityName = profile.vanityName;
   const firstName = profile.given_name ?? profile.localizedFirstName ?? "";
   const lastName = profile.family_name ?? profile.localizedLastName ?? "";
   const displayName = profile.name ?? `${firstName} ${lastName}`.trim();
   const resolvedEmail = profile.email ?? email ?? null;
+  const photoUrl = profile.picture ?? extractPhotoUrl(profile.profilePicture);
 
   return {
     contactId,
@@ -68,6 +67,8 @@ export function mapLinkedInProfileToIdentity(
       lastName,
       email: resolvedEmail,
     }),
+    headline: profile.localizedHeadline || null,
+    avatarUrl: photoUrl,
     isPrimary: 0,
     isActive: 1,
     lastSyncedAt: Math.floor(Date.now() / 1000),
@@ -76,7 +77,7 @@ export function mapLinkedInProfileToIdentity(
 
 /** Map a LinkedIn connection to Signals contact fields. */
 export function mapLinkedInConnectionToContact(
-  connection: LinkedInConnection
+  connection: LinkedInConnection,
 ): Omit<NewContact, "id"> & ContactWriteExtras {
   const firstName = connection.localizedFirstName ?? "";
   const lastName = connection.localizedLastName ?? "";
@@ -100,10 +101,11 @@ export function mapLinkedInConnectionToContact(
 /** Map a LinkedIn connection to a contactIdentity row. */
 export function mapLinkedInConnectionToIdentity(
   connection: LinkedInConnection,
-  contactId: string
+  contactId: string,
 ): Omit<NewContactIdentity, "id"> {
   const vanityName = connection.vanityName;
   const displayName = `${connection.localizedFirstName ?? ""} ${connection.localizedLastName ?? ""}`.trim();
+  const photoUrl = extractPhotoUrl(connection.profilePicture);
 
   return {
     contactId,
@@ -117,6 +119,8 @@ export function mapLinkedInConnectionToIdentity(
       firstName: connection.localizedFirstName ?? null,
       lastName: connection.localizedLastName ?? null,
     }),
+    headline: connection.localizedHeadline || null,
+    avatarUrl: photoUrl,
     isPrimary: 0,
     isActive: 1,
     lastSyncedAt: Math.floor(Date.now() / 1000),

@@ -1,7 +1,12 @@
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, inArray } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { contactChannels } from "@/lib/db/schema";
+import { contactChannels, mediaAttachments } from "@/lib/db/schema";
 import type { Contact, ContactChannel, ContactEmployment, ContactIdentity } from "@/lib/db/types";
+import { resolveContactAvatar } from "@/lib/db/queries/resolve-contact-avatar";
+import {
+  resolveContactProfile,
+  type ContactProfile,
+} from "@/lib/db/queries/resolve-contact-profile";
 
 export type ContactEmploymentDTO = ContactEmployment & { orgName: string };
 
@@ -10,15 +15,6 @@ export type ContactDTO = {
   name: string;
   firstName: string | null;
   lastName: string | null;
-  headline: string | null;
-  company: string | null;
-  title: string | null;
-  profileUrl: string | null;
-  avatarUrl: string | null;
-  bio: string | null;
-  location: string | null;
-  website: string | null;
-  photoUrl: string | null;
   enrichmentScore: number;
   tags: string | null;
   funnelStage: Contact["funnelStage"];
@@ -35,8 +31,19 @@ export type ContactDTO = {
   primaryEmail: string | null;
   primaryPhone: string | null;
   channelCount: number;
+  resolvedAvatarUrl: string | null;
+  profile: ContactProfile;
   email: string | null;
   phone: string | null;
+  company: string | null;
+  title: string | null;
+  avatarUrl: string | null;
+  photoUrl: string | null;
+  profileUrl: string | null;
+  headline: string | null;
+  bio: string | null;
+  location: string | null;
+  website: string | null;
 };
 
 function pickPrimaryChannel(
@@ -66,11 +73,23 @@ function resolveCurrentFromEmployments(
   })[0];
 }
 
+function resolvePrimaryIdentityPlatformUrl(identities: ContactIdentity[]): string | null {
+  const primary =
+    identities.find((identity) => identity.isPrimary) ??
+    [...identities].sort((a, b) => {
+      const syncA = a.lastSyncedAt ?? a.createdAt;
+      const syncB = b.lastSyncedAt ?? b.createdAt;
+      return syncB - syncA;
+    })[0];
+  return primary?.platformUrl ?? null;
+}
+
 export function assembleContactDto(
   contact: Contact,
   identities: ContactIdentity[],
   channels: ContactChannel[],
   employments: ContactEmploymentDTO[],
+  avatarUploadAssetId?: string | null,
 ): ContactDTO {
   const primaryEmailChannel = pickPrimaryChannel(channels, "email");
   const primaryPhoneChannel = pickPrimaryChannel(channels, "phone");
@@ -85,8 +104,28 @@ export function assembleContactDto(
       }
     : null;
 
+  const resolvedAvatarUrl = resolveContactAvatar({
+    avatarUploadAssetId,
+    identities,
+    primaryEmail,
+  });
+  const profile = resolveContactProfile({ identities });
+  const profileUrl = resolvePrimaryIdentityPlatformUrl(identities);
+
   return {
-    ...contact,
+    id: contact.id,
+    name: contact.name,
+    firstName: contact.firstName,
+    lastName: contact.lastName,
+    enrichmentScore: contact.enrichmentScore,
+    tags: contact.tags,
+    funnelStage: contact.funnelStage,
+    score: contact.score,
+    metadata: contact.metadata,
+    lastInteractionAt: contact.lastInteractionAt,
+    isSelf: contact.isSelf,
+    createdAt: contact.createdAt,
+    updatedAt: contact.updatedAt,
     identities,
     channels,
     employments,
@@ -94,10 +133,19 @@ export function assembleContactDto(
     primaryEmail,
     primaryPhone,
     channelCount: channels.length,
+    resolvedAvatarUrl,
+    profile,
     email: primaryEmail,
     phone: primaryPhone,
     company: currentEmployment?.orgName ?? null,
     title: currentEmployment?.title ?? null,
+    avatarUrl: resolvedAvatarUrl,
+    photoUrl: resolvedAvatarUrl,
+    profileUrl,
+    headline: profile.headline,
+    bio: profile.bio,
+    location: profile.location,
+    website: profile.website,
   };
 }
 
@@ -114,6 +162,22 @@ export function resolveContactPrimaryPhone(contactId: string): string | null {
 export function resolveContactPrimaryEmailVerified(contactId: string): boolean {
   const channel = loadPrimaryChannel(contactId, "email");
   return channel?.isVerified ?? false;
+}
+
+export function loadContactAvatarUploadAssetId(contactId: string): string | null {
+  const row = db
+    .select({ mediaAssetId: mediaAttachments.mediaAssetId })
+    .from(mediaAttachments)
+    .where(
+      and(
+        eq(mediaAttachments.parentType, "contact"),
+        eq(mediaAttachments.parentId, contactId),
+        eq(mediaAttachments.role, "avatar"),
+      ),
+    )
+    .orderBy(desc(mediaAttachments.updatedAt))
+    .get();
+  return row?.mediaAssetId ?? null;
 }
 
 function loadPrimaryChannel(contactId: string, channelType: string) {

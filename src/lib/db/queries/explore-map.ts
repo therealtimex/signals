@@ -3,6 +3,7 @@ import { db } from "@/lib/db/client";
 import { contacts, graphEdges, niches } from "@/lib/db/schema";
 import type { GraphEdge } from "@/lib/db/types";
 import { maxFollowersCountByContactIds } from "@/lib/db/queries/contact-explore";
+import { attachContactDtos } from "@/lib/db/queries/contact-read-model";
 import { getOwnerContactId } from "@/lib/db/queries/contacts";
 
 export type ExploreMapContactNode = {
@@ -82,13 +83,14 @@ function emptyExploreMap(limit: number, ownerContactId: string | null = null): E
 
 function ownerMetaFromRow(
   ownerContactId: string,
-  rows: { id: string; name: string; avatarUrl: string | null }[],
+  rows: { id: string; name: string }[],
+  avatarByContactId: Map<string, string | null>,
 ): { id: string; name: string; avatarUrl: string | null } {
   const row = rows.find((entry) => entry.id === ownerContactId);
   return {
     id: ownerContactId,
     name: row?.name ?? "You",
-    avatarUrl: row?.avatarUrl ?? null,
+    avatarUrl: avatarByContactId.get(ownerContactId) ?? null,
   };
 }
 
@@ -228,15 +230,15 @@ export function getExploreMap(opts?: { limit?: number }): ExploreMapResponse {
   const includedContactIds = [ownerContactId, ...shownAudienceIds];
 
   const contactRows = db
-    .select({
-      id: contacts.id,
-      name: contacts.name,
-      avatarUrl: contacts.avatarUrl,
-    })
+    .select()
     .from(contacts)
     .where(inArray(contacts.id, includedContactIds))
     .orderBy(asc(contacts.name))
     .all();
+  const contactDtos = attachContactDtos(contactRows);
+  const avatarByContactId = new Map(
+    contactDtos.map((contact) => [contact.id, contact.resolvedAvatarUrl]),
+  );
 
   const followersByContact = maxFollowersCountByContactIds(includedContactIds);
 
@@ -308,7 +310,7 @@ export function getExploreMap(opts?: { limit?: number }): ExploreMapResponse {
     kind: "contact",
     entityId: row.id,
     label: row.name,
-    avatarUrl: row.avatarUrl,
+    avatarUrl: avatarByContactId.get(row.id) ?? null,
     isOwner: row.id === ownerContactId,
     followersCount: followersByContact.get(row.id) ?? null,
     nicheIds: nicheIdsByContact.get(row.id) ?? [],
@@ -346,7 +348,7 @@ export function getExploreMap(opts?: { limit?: number }): ExploreMapResponse {
     edges,
     meta: {
       ownerContactId,
-      owner: ownerMetaFromRow(ownerContactId, contactRows),
+      owner: ownerMetaFromRow(ownerContactId, contactRows, avatarByContactId),
       totalContacts,
       shownContacts: shownAudienceIds.length,
       truncated: totalContacts > limit,

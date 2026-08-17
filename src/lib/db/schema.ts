@@ -40,13 +40,6 @@ export const contacts = sqliteTable("contacts", {
   name: text("name").notNull(),
   firstName: text("first_name"),
   lastName: text("last_name"),
-  headline: text("headline"),
-  profileUrl: text("profile_url"),
-  avatarUrl: text("avatar_url"),
-  bio: text("bio"),
-  location: text("location"),
-  website: text("website"),
-  photoUrl: text("photo_url"),
   enrichmentScore: integer("enrichment_score").notNull().default(0),
   tags: text("tags").default("[]"), // JSON array
   funnelStage: text("funnel_stage", {
@@ -76,6 +69,7 @@ export const contactIdentities = sqliteTable("contact_identities", {
   platformUrl: text("platform_url"),
   platformData: text("platform_data").default("{}"), // JSON
   displayName: text("display_name"),
+  headline: text("headline"),
   bio: text("bio"),
   avatarUrl: text("avatar_url"),
   location: text("location"),

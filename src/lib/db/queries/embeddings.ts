@@ -11,6 +11,7 @@ import {
 import { contacts, contentItems, embeddings, launches, niches, orgs, variants } from "@/lib/db/schema";
 import { nodeExists } from "@/lib/db/queries/graph";
 import { resolveContactCareerSummary } from "@/lib/db/queries/contact-employments";
+import { getContactDtoById } from "@/lib/db/queries/contact-read-model";
 import { getActivePersona } from "@/lib/db/queries/personas";
 import type { GraphNodeType } from "@/lib/db/types";
 import {
@@ -441,16 +442,16 @@ export function assembleEmbedText(
     }
     case "profile": {
       if (nodeType === "contact") {
-        const contact = db.select().from(contacts).where(eq(contacts.id, nodeId)).get();
+        const contact = getContactDtoById(nodeId);
         if (!contact) throw new Error(`Contact not found: ${nodeId}`);
         const career = resolveContactCareerSummary(nodeId);
         return joinText([
           contact.name,
-          contact.headline,
+          contact.profile.headline,
           career.company,
           career.title,
-          contact.bio,
-          contact.location,
+          contact.profile.bio,
+          contact.profile.location,
         ]);
       }
       const org = db.select().from(orgs).where(eq(orgs.id, nodeId)).get();

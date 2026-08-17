@@ -118,11 +118,6 @@ function processGooglePerson(person: GooglePerson, result: SyncResult): void {
       phone: contactData.phone,
       company: contactData.company,
       title: contactData.title,
-      location: contactData.location,
-      bio: contactData.bio,
-      photoUrl: contactData.photoUrl,
-      avatarUrl: contactData.avatarUrl,
-      website: contactData.website,
     });
 
     // Update identity with latest platform data
@@ -131,6 +126,10 @@ function processGooglePerson(person: GooglePerson, result: SyncResult): void {
       .set({
         platformHandle: identityData.platformHandle,
         platformData: identityData.platformData,
+        bio: identityData.bio,
+        avatarUrl: identityData.avatarUrl,
+        location: identityData.location,
+        websiteUrl: identityData.websiteUrl,
         lastSyncedAt: Math.floor(Date.now() / 1000),
         updatedAt: Math.floor(Date.now() / 1000),
       })
@@ -158,11 +157,6 @@ function processGooglePerson(person: GooglePerson, result: SyncResult): void {
         phone: contactData.phone ?? emailMatch.phone,
         company: contactData.company ?? emailMatch.company,
         title: contactData.title ?? emailMatch.title,
-        location: contactData.location ?? emailMatch.location,
-        bio: contactData.bio ?? emailMatch.bio,
-        photoUrl: contactData.photoUrl ?? emailMatch.photoUrl,
-        avatarUrl: contactData.avatarUrl ?? emailMatch.avatarUrl,
-        website: contactData.website ?? emailMatch.website,
         email: contactData.email,
       }, "sync:gmail_contacts");
 

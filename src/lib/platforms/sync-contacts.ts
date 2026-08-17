@@ -1,7 +1,7 @@
 import { eq, and } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { contactIdentities } from "@/lib/db/schema";
-import { createContact, updateContact, recalcEnrichment } from "@/lib/db/queries/contacts";
+import { createContact, recalcEnrichment } from "@/lib/db/queries/contacts";
 import { createIdentity } from "@/lib/db/queries/identities";
 import { updatePlatformAccount } from "@/lib/db/queries/platform-accounts";
 import { mapXUserToContact, mapXUserToIdentity, xUserIdentitySyncPatch } from "@/lib/platforms/x/mappers";
@@ -81,16 +81,6 @@ function processXUser(xUser: XUser, result: SyncResult): void {
     .get();
 
   if (existingIdentity) {
-    // Update existing contact with latest X data
-    const contactData = mapXUserToContact(xUser);
-    updateContact(existingIdentity.contactId, {
-      bio: contactData.bio,
-      location: contactData.location,
-      website: contactData.website,
-      photoUrl: contactData.photoUrl,
-      avatarUrl: contactData.avatarUrl,
-    });
-
     // Update identity with latest platform data + explore-card stat columns
     db.update(contactIdentities)
       .set({

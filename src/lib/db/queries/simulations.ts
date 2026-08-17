@@ -15,6 +15,7 @@ import {
 } from "@/lib/db/schema";
 import { getActivePersona } from "@/lib/db/queries/personas";
 import { resolveContactCareerSummary } from "@/lib/db/queries/contact-employments";
+import { resolveContactProfile } from "@/lib/db/queries/resolve-contact-profile";
 import { getLaunchById } from "@/lib/db/queries/launches";
 import { getVariantById } from "@/lib/db/queries/variants";
 import {
@@ -262,12 +263,13 @@ export function assembleAgentGrounding(contactId: string): Record<string, unknow
     throw new Error(`Contact not found: ${contactId}`);
   }
 
-  const identities = db
+  const identityRows = db
     .select()
     .from(contactIdentities)
     .where(eq(contactIdentities.contactId, contactId))
-    .all()
-    .map((identity) => ({
+    .all();
+
+  const identities = identityRows.map((identity) => ({
       platform: identity.platform,
       platformHandle: identity.platformHandle,
       displayName: identity.displayName,
@@ -278,6 +280,8 @@ export function assembleAgentGrounding(contactId: string): Record<string, unknow
       postsCount: identity.postsCount,
       platformCreatedAt: identity.platformCreatedAt,
     }));
+
+  const profile = resolveContactProfile({ identities: identityRows });
 
   const persona = getActivePersona(contactId);
   const personaFields =
@@ -313,8 +317,8 @@ export function assembleAgentGrounding(contactId: string): Record<string, unknow
       name: contact.name,
       title: career.title,
       company: career.company,
-      location: contact.location,
-      bio: contact.bio,
+      location: profile.location,
+      bio: profile.bio,
     },
     identities,
     persona: personaFields,
