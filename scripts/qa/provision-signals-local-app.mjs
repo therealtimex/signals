@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
  * Upsert the canonical dev Signals Local App into the RealTimeX SQLite database.
+ * DEV / QA FALLBACK — production uses marketplace bundle + platform #1614 install.
  * Required before embedded-mode QA when /sdk/register returns "App not found".
  *
  * Usage:

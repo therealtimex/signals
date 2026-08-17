@@ -71,7 +71,12 @@ Pre-migration implementation specs under `specs/` (e.g. `05-browser-enrichment.m
 
 ## Quick start (embedded)
 
-1. Register Signals in RTX **Settings → Local Apps** (see `rtx-local-app.example.json`).
+**Production:** Install via RealtimeX marketplace plugin — see [`realtimex-marketplace-plugin.md`](./realtimex-marketplace-plugin.md).
+
+**Local dev:**
+
+1. Register Signals in RTX **Settings → Local Apps** (see `rtx-local-app.example.json` or `scripts/qa/provision-signals-local-app.mjs`).
 2. Start Signals from RTX or locally with `RTX_APP_ID` + `SERVER_URL` — details in [`local-app.md`](./local-app.md).
-3. Use a terminal agent with the Signals skill / agent-tools to query and mutate CRM data.
-4. For enrichment, follow [`rtx-agent-browser-enrichment.md`](./rtx-agent-browser-enrichment.md).
+3. Install plugin pack: `npm run package:realtimex-plugin` → upload zip → Deploy workspace provision.
+4. Use a terminal agent with the Signals skill / agent-tools to query and mutate CRM data.
+5. For enrichment, follow [`rtx-agent-browser-enrichment.md`](./rtx-agent-browser-enrichment.md).

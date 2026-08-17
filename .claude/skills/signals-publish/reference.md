@@ -1,9 +1,11 @@
 # signals-publish reference
 
-## x-publish.mjs CLI
+## x-publish.cjs CLI
+
+Requires **`agent-browser`** on PATH (locked external skill). The script delegates CDP automation to the CLI; it does not bundle npm packages.
 
 ```bash
-node scripts/x-publish.mjs --port <cdpPort> --payload <job.json>
+node scripts/x-publish.cjs --port <cdpPort> --payload <job.json> [--dry-run]
 ```
 
 ### Payload (`job.json`)
@@ -39,16 +41,19 @@ Failure:
 |-----|----------|
 | primaryColumn | `[data-testid="primaryColumn"]` |
 | composeButton | `[data-testid="SideNav_NewTweet_Button"]` |
-| tweetTextarea | `[data-testid="tweetTextarea_{n}"]` |
-| tweetButton | `[data-testid="tweetButton"]` |
-| addButton | `[data-testid="addButton"]` |
-| fileInput | `input[data-testid="fileInput"]` |
+| composeDialog | `[role="dialog"]` (scope compose modal; avoids home inline composer) |
+| composeTweetTextarea | `[role="dialog"] [data-testid="tweetTextarea_{n}"]` |
+| composeAddButton | `[data-testid="addButton"]` or `button[aria-label="Add post"]` (focus+Enter preferred) |
+| tweetButton | `[role="dialog"] [data-testid="tweetButton"]` |
+| fileInput | `[role="dialog"] input[data-testid="fileInput"]` |
 | attachments | `[data-testid="attachments"]` |
 | profileLink | `[data-testid="AppTabBar_Profile_Link"]` |
 
-## Verification invariant (P6a port)
+## Compose flow
 
-1. Capture profile baseline (owned status ids + max snowflake) **before** compose.
+Thread add: prefer `[role="dialog"]`-scoped textareas on compose/post, but add controls may be **global** (`[data-testid="addButton"]` outside dialog). Candidate list includes dialog-scoped then global fallbacks. X lazy-renders add after first tweet has content (~2.5s). **Do not click** add — focus last matching control + Enter (a11y). Duplicate `tweetTextarea_0` slots may appear instead of `tweetTextarea_1`.
+
+## Verification invariant (P6a port) (owned status ids + max snowflake) **before** compose.
 2. Post via compose UI.
 3. Poll profile timeline for a **new** owned status where text matches and snowflake id > baseline max.
 

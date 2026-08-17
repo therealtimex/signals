@@ -1,0 +1,29 @@
+{
+  "id": "47e45f71-3279-42f5-8e95-731de01b6eae",
+  "name": "signals",
+  "display_name": "Signals",
+  "description": "Local-first social GTM and relationship knowledge graph",
+  "app_type": "node",
+  "healthPath": "/api/health",
+  "homePath": "/dashboard",
+  "permissions": [
+    "credentials.list",
+    "credentials.use",
+    "webhook.trigger",
+    "llm.embed",
+    "llm.chat",
+    "desktop.browser",
+    "desktop.runtime-sessions"
+  ],
+  "configuration": {
+    "command": "node",
+    "args": ["server.js"],
+    "working_dir": "{artifact_dir}",
+    "home_url": "http://localhost:{port}/dashboard",
+    "env": {
+      "HOSTNAME": "127.0.0.1",
+      "PORT": "{port}"
+    }
+  },
+  "notes": "Consumed by RealtimeX marketplace install (#1614). Replace {artifact_dir} and {port} at install time. Production does not use npx."
+}

@@ -24,6 +24,8 @@ Publish content from **Signals** publish jobs through a named RealTimeX Browser 
 
 Resolve/create/start the session with `realtimex-pp-cli` or the `agent-browser` skill before running publish scripts.
 
+**Dependency:** `x-publish.cjs` delegates browser automation to the host **`agent-browser` CLI** (locked external skill). It does not bundle npm packages.
+
 ## Workflow (per publish job)
 
 1. Load `realtimex-signals` and call `get_publish_job` with the job id from the initial message.
@@ -34,10 +36,12 @@ Resolve/create/start the session with `realtimex-pp-cli` or the `agent-browser` 
    - Run:
 
 ```bash
-node .claude/skills/signals-publish/scripts/x-publish.mjs \
+node .claude/skills/signals-publish/scripts/x-publish.cjs \
   --port <cdpPort> \
   --payload /tmp/x-publish-job.json
 ```
+
+For QA without sending a public post, add `--dry-run` (fills compose and thread fields, skips Tweet).
 
 3. Parse the **last stdout line** as JSON. On success call `complete_publish` with `handle`, `platformPostId`, `platformUrl`. On failure pass `error` + `errorCode` (`session_expired`, `captcha`, `upload_failed`, `timeout`, `unknown`).
 4. **LinkedIn (beta):** no deterministic script in v1. Use `agent-browser` interactively or call `complete_publish` with `success: false` and a clear error if unsupported.

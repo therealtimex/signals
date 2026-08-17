@@ -1,0 +1,95 @@
+# Marketplace plugin + standalone artifact CI gate and tag releases.
+# See docs/realtimex-marketplace-plugin.md
+
+name: Plugin release
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: ["main"]
+    tags: ["v*"]
+
+concurrency:
+  group: plugin-release-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  plugin-package:
+    name: Marketplace bundle
+    runs-on: ubuntu-latest
+    if: github.event_name != 'push' || !startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify marketplace version alignment
+        run: npm run verify:marketplace-versions
+
+      - name: Build standalone artifact and release manifest
+        run: npm run build:standalone-artifact
+        env:
+          SIGNALS_DATA_DIR: ${{ github.workspace }}/.ci/signals-data
+
+      - name: Package RealtimeX plugin zip
+        run: npm run package:realtimex-plugin
+
+      - name: Test plugin package structure and adapter
+        run: npm run test:plugin-package
+
+  release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify tag matches package version
+        run: npm run verify:marketplace-versions -- --tag="${GITHUB_REF_NAME}"
+        env:
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+
+      - name: Build standalone artifact and release manifest
+        run: npm run build:standalone-artifact
+        env:
+          SIGNALS_DATA_DIR: ${{ github.workspace }}/.ci/signals-data
+
+      - name: Package RealtimeX plugin zip
+        run: npm run package:realtimex-plugin
+
+      - name: Test plugin package structure and adapter
+        run: npm run test:plugin-package
+
+      - name: Stage release artifacts
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          mkdir -p release-upload
+          cp "dist/com.realtimex.signals-plugin.zip" release-upload/
+          cp "dist/signals-${VERSION}-standalone.zip" release-upload/
+          cp marketplace/release-manifest.json release-upload/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-upload/*
+          generate_release_notes: true

@@ -1,7 +1,10 @@
 {
-  "command": "npx",
-  "args": ["-y", "@realtimex/signals", "--port", "3000"],
-  "env": {},
-  "working_dir": "",
-  "home_url": "http://localhost:{port}/dashboard"
+  "command": "node",
+  "args": ["server.js"],
+  "env": {
+    "HOSTNAME": "127.0.0.1"
+  },
+  "working_dir": "{artifact_dir}",
+  "home_url": "http://localhost:{port}/dashboard",
+  "_comment": "Production marketplace path. Dev fallback: scripts/qa/provision-signals-local-app.mjs or npx for local iteration only."
 }
