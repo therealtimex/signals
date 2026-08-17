@@ -125,4 +125,19 @@ if (!evalInsertJson.success || !evalInsertJson.dryRun) {
   process.exit(1);
 }
 
+const scopedAdd = runXPublish(
+  { text: "thread tweet one", threadTexts: ["thread tweet two"] },
+  { FAKE_AB_HIDE_GLOBAL_ADD: "1" },
+  ["--dry-run"]
+);
+if (scopedAdd.status !== 0) {
+  console.error("scoped add path failed:", scopedAdd.stdout, scopedAdd.stderr);
+  process.exit(1);
+}
+const scopedAddJson = lastJson(scopedAdd.stdout);
+if (!scopedAddJson.success || !scopedAddJson.dryRun) {
+  console.error("unexpected scoped add dry-run result:", scopedAddJson);
+  process.exit(1);
+}
+
 console.log("x-publish agent-browser adapter: OK");

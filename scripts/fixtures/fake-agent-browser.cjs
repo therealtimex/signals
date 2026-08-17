@@ -156,6 +156,9 @@ function textareaCountForSelector(selector, state) {
     return state.composeOpen ? 1 : 0;
   }
   if (selector.includes("addButton") || selector.includes("Add post")) {
+    if (process.env.FAKE_AB_HIDE_GLOBAL_ADD === "1") {
+      return 0;
+    }
     return state.composeOpen && state.mainTweetTyped ? 1 : 0;
   }
   if (selector.includes("tweetButton")) return 1;
@@ -242,6 +245,23 @@ function handleEval(rest, state) {
   if (js.includes("nextElementSibling") && js.includes("addButton")) {
     addThreadSlot(state);
     return ok(JSON.stringify(JSON.stringify({ ok: true, via: "sibling" })));
+  }
+  if (
+    js.includes("parentElement") &&
+    (js.includes("addButton") || js.includes("Add post")) &&
+    !js.includes("innerText") &&
+    !js.includes("textContent")
+  ) {
+    if (!state.composeOpen || !state.mainTweetTyped) {
+      return ok(
+        JSON.stringify(JSON.stringify({ ok: false, reason: "no_button_near_anchor" }))
+      );
+    }
+    if (js.includes("btn.click()")) {
+      addThreadSlot(state);
+      return ok(JSON.stringify(JSON.stringify({ ok: true, via: "ancestor", depth: 1 })));
+    }
+    return ok(JSON.stringify(JSON.stringify({ ok: true, depth: 1 })));
   }
   if (
     js.includes("signals-publish-thread") &&

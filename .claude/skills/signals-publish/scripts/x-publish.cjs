@@ -265,11 +265,78 @@ function typeIntoComposeTextarea(wrapperSelector, text, context) {
   sleep(TYPE_SETTLE_MS);
 }
 
+function findAddButton(scope) {
+  for (const selector of scope.addButtonCandidates) {
+    if (abCount(selector) > 0) return selector;
+  }
+  return null;
+}
+
+function probeAddNearTweetEvalJs(scope, tweetIndex) {
+  const numbered = scope.tweetTextarea(tweetIndex);
+  const zeroSelector = threadTextareaZeroSelector(scope);
+  return `(() => {
+    let anchor = document.querySelector(${JSON.stringify(numbered)});
+    if (!anchor) {
+      const zeros = document.querySelectorAll(${JSON.stringify(zeroSelector)});
+      anchor = zeros[${tweetIndex}] || null;
+    }
+    if (!anchor) return JSON.stringify({ ok: false, reason: "no_anchor" });
+    let node = anchor;
+    for (let depth = 0; depth < 12 && node; depth++) {
+      const btn =
+        node.querySelector('[data-testid="addButton"]') ||
+        node.querySelector('button[aria-label="Add post"]') ||
+        node.querySelector('button[aria-label="添加帖子"]');
+      if (btn) return JSON.stringify({ ok: true, depth });
+      node = node.parentElement;
+    }
+    return JSON.stringify({ ok: false, reason: "no_button_near_anchor" });
+  })()`;
+}
+
+function clickAddNearTweetEvalJs(scope, tweetIndex) {
+  const numbered = scope.tweetTextarea(tweetIndex);
+  const zeroSelector = threadTextareaZeroSelector(scope);
+  return `(() => {
+    let anchor = document.querySelector(${JSON.stringify(numbered)});
+    if (!anchor) {
+      const zeros = document.querySelectorAll(${JSON.stringify(zeroSelector)});
+      anchor = zeros[${tweetIndex}] || null;
+    }
+    if (!anchor) return JSON.stringify({ ok: false, reason: "no_anchor" });
+    let node = anchor;
+    for (let depth = 0; depth < 12 && node; depth++) {
+      const btn =
+        node.querySelector('[data-testid="addButton"]') ||
+        node.querySelector('button[aria-label="Add post"]') ||
+        node.querySelector('button[aria-label="添加帖子"]');
+      if (btn) {
+        try {
+          btn.focus();
+        } catch {}
+        btn.click();
+        return JSON.stringify({ ok: true, via: "ancestor", depth });
+      }
+      node = node.parentElement;
+    }
+    return JSON.stringify({ ok: false, reason: "no_button_near_anchor" });
+  })()`;
+}
+
+function addButtonAvailable(scope, tweetIndex = 0) {
+  if (findAddButton(scope)) return true;
+  const parsed = parseEvalJsonValue(
+    abText(["eval", probeAddNearTweetEvalJs(scope, tweetIndex)])
+  );
+  return Boolean(parsed?.ok);
+}
+
 function waitForAddButton(scope, context, timeoutMs = COMPOSE_WAIT_TIMEOUT_MS) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    for (const selector of scope.addButtonCandidates) {
-      if (abCount(selector) > 0) return selector;
+    if (addButtonAvailable(scope, 0)) {
+      return findAddButton(scope) || scope.addButtonCandidates[0];
     }
     sleep(300);
   }
@@ -449,31 +516,43 @@ function waitForThreadTextarea(scope, threadIndex, context) {
   };
 }
 
+function tryActivateThreadAdd(scope, context, previousTweetIndex) {
+  parseEvalJsonValue(
+    abText(["eval", clickAddNearTweetEvalJs(scope, previousTweetIndex)])
+  );
+
+  const addSelector = findAddButton(scope);
+  if (addSelector) {
+    const clicked = runAb(["click", addSelector]);
+    if (!clicked.ok) {
+      parseEvalJsonValue(
+        abText(["eval", activateAddButtonClickEvalJs(addSelector)])
+      );
+    }
+  }
+
+  for (const selector of scope.addButtonCandidates) {
+    parseEvalJsonValue(abText(["eval", activateAddButtonClickEvalJs(selector)]));
+  }
+
+  const focusParsed = parseEvalJsonValue(
+    abText(["eval", focusLastAddButtonEvalJs(scope.addButtonCandidates)])
+  );
+  if (focusParsed?.ok) {
+    runAb(["press", "Enter"]);
+    runAb(["press", " "]);
+  }
+}
+
 function activateComposeThreadAdd(scope, context, threadIndex) {
-  const resolved = waitForAddButton(scope, context);
+  waitForAddButton(scope, context);
   const deadline = Date.now() + COMPOSE_WAIT_TIMEOUT_MS;
+  const previousTweetIndex = threadIndex - 1;
 
   while (Date.now() < deadline) {
     if (threadTextareaReady(scope, threadIndex)) return;
 
-    requireAb(["click", resolved], `${context} click add`);
-    sleep(800);
-    if (threadTextareaReady(scope, threadIndex)) return;
-
-    parseEvalJsonValue(
-      abText(["eval", activateAddButtonClickEvalJs("[data-testid=\"addButton\"]")])
-    );
-    sleep(800);
-    if (threadTextareaReady(scope, threadIndex)) return;
-
-    const focusParsed = parseEvalJsonValue(
-      abText(["eval", focusLastAddButtonEvalJs(scope.addButtonCandidates)])
-    );
-    if (focusParsed?.ok) {
-      requireAb(["press", "Enter"], `${context} activate add via Enter`);
-    } else {
-      requireAb(["click", resolved], `${context} click add fallback`);
-    }
+    tryActivateThreadAdd(scope, context, previousTweetIndex);
     sleep(THREAD_ADD_WAIT_MS);
     if (threadTextareaReady(scope, threadIndex)) return;
   }

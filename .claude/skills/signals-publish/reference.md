@@ -51,7 +51,7 @@ Failure:
 
 ## Compose flow
 
-Thread add: click `addButton` first, then sibling click / focus+Enter retries until a new slot appears. On `/compose/post`, slots may duplicate `tweetTextarea_0` instead of `tweetTextarea_1`.
+Thread add: walk up from the previous tweet row to click a scoped `addButton` (global selectors may disappear). Then sibling click / focus+Enter retries. On `/compose/post`, slots may duplicate `tweetTextarea_0` instead of `tweetTextarea_1`.
 
 ## Verification invariant (P6a port) (owned status ids + max snowflake) **before** compose.
 2. Post via compose UI.
