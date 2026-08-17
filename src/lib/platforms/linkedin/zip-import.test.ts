@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { zipSync } from "fflate";
+import { unzipSync, zipSync } from "fflate";
 import {
   extractConnectionsCsvFromZip,
   findConnectionsCsvEntry,
@@ -19,6 +19,48 @@ function makeZip(files: Record<string, string>): Uint8Array {
     encoded[name] = new TextEncoder().encode(contents);
   }
   return zipSync(encoded);
+}
+
+/** Patch a central-directory compression method (tests only). */
+function setEntryCompressionMethod(
+  zip: Uint8Array,
+  entryName: string,
+  method: number
+): Uint8Array {
+  const patched = new Uint8Array(zip);
+
+  for (let i = 0; i < patched.length - 46; i++) {
+    if (
+      patched[i] === 0x50 &&
+      patched[i + 1] === 0x4b &&
+      patched[i + 2] === 0x01 &&
+      patched[i + 3] === 0x02
+    ) {
+      const nameLen = patched[i + 28]! | (patched[i + 29]! << 8);
+      const nameStart = i + 46;
+      const name = new TextDecoder().decode(
+        patched.subarray(nameStart, nameStart + nameLen)
+      );
+
+      if (name === entryName) {
+        patched[i + 10] = method & 0xff;
+        patched[i + 11] = (method >> 8) & 0xff;
+        return patched;
+      }
+    }
+  }
+
+  throw new Error(`entry not found: ${entryName}`);
+}
+
+/** Previous implementation: inflate every archive member before selection. */
+function extractConnectionsCsvEager(zipBytes: Uint8Array): string {
+  const entries = unzipSync(zipBytes);
+  const entryPath = findConnectionsCsvEntry(Object.keys(entries));
+  if (!entryPath) {
+    throw new Error("No Connections.csv found in zip");
+  }
+  return new TextDecoder("utf-8").decode(entries[entryPath]!);
 }
 
 describe("findConnectionsCsvEntry", () => {
@@ -76,6 +118,20 @@ describe("extractConnectionsCsvFromZip", () => {
     expect(() => extractConnectionsCsvFromZip(new Uint8Array([1, 2, 3]))).toThrow(
       /Invalid zip archive/
     );
+  });
+
+  it("skips irrelevant members that would break eager full-archive extraction", () => {
+    const zip = setEntryCompressionMethod(
+      makeZip({
+        "Profile.csv": "ignored profile payload",
+        "Connections.csv": SAMPLE_CSV,
+      }),
+      "Profile.csv",
+      99
+    );
+
+    expect(() => extractConnectionsCsvEager(zip)).toThrow();
+    expect(extractConnectionsCsvFromZip(zip)).toBe(SAMPLE_CSV);
   });
 
   it("does not decompress oversized non-connections members (zip-bomb guard)", () => {
