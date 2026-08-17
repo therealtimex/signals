@@ -10,6 +10,7 @@
     "credentials.use",
     "webhook.trigger",
     "llm.embed",
-    "llm.chat"
+    "llm.chat",
+    "desktop.browser"
   ]
 }

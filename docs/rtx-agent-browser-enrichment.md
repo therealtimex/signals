@@ -2,7 +2,7 @@
 
 Signals no longer scrapes X profiles with in-process Playwright. Enrichment runs through **RealTimeX Browser** sessions and the **agent-browser** CLI, with CRM writes via the local **Agent Tools API**.
 
-Publish and engage flows still use Signals-managed browser sessions for posting — that is separate from enrichment (#5).
+Publish and engage flows for **X** use the RTX Browser `signals-publish` session via CDP (`docs/rtx-browser-publish.md`). LinkedIn publish still uses Signals-managed browser sessions until P6b.
 
 ## Architecture
 

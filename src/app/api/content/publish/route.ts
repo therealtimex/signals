@@ -3,7 +3,8 @@ import { z } from "zod";
 import { getContentItem, updateContentItem, createContentPost } from "@/lib/db/queries/content";
 import { publishVariantForContentItem } from "@/lib/db/queries/variants";
 import { getPlatformAccountByPlatform } from "@/lib/db/queries/platform-accounts";
-import { publishToX } from "@/lib/browser/publishers/x-publisher";
+import { executeXPublishRtx } from "@/lib/browser/rtx-publish/x-publish-executor";
+import type { XPublishRtxResult } from "@/lib/browser/rtx-publish/types";
 import { publishToLinkedIn } from "@/lib/browser/publishers/linkedin-publisher";
 import type { PublishRequest } from "@/lib/browser/publishers/types";
 
@@ -45,13 +46,15 @@ export async function POST(req: Request) {
       );
     }
 
-    // Get platform account
-    const account = getPlatformAccountByPlatform(platform);
-    if (!account) {
-      return NextResponse.json(
-        { error: `No ${platform} account connected. Connect one in Settings.` },
-        { status: 400 }
-      );
+    // LinkedIn still requires a connected platform account (P6b migrates to RTX).
+    if (platform === "linkedin") {
+      const linkedInAccount = getPlatformAccountByPlatform("linkedin");
+      if (!linkedInAccount) {
+        return NextResponse.json(
+          { error: "No linkedin account connected. Connect one in Settings." },
+          { status: 400 }
+        );
+      }
     }
 
     // Set intermediate "review" status while publishing
@@ -71,17 +74,31 @@ export async function POST(req: Request) {
     // Route to the correct publisher
     const result =
       platform === "x"
-        ? await publishToX(publishRequest)
+        ? await executeXPublishRtx(publishRequest)
         : await publishToLinkedIn(publishRequest);
 
     if (result.success) {
+      const platformAccountId =
+        platform === "x"
+          ? (result as XPublishRtxResult).platformAccountId ??
+            getPlatformAccountByPlatform("x")?.id
+          : getPlatformAccountByPlatform("linkedin")?.id;
+
+      if (!platformAccountId) {
+        updateContentItem(contentItemId, { status: "draft" });
+        return NextResponse.json(
+          { success: false, error: "Missing platform account after publish", errorCode: "unknown" },
+          { status: 500 }
+        );
+      }
+
       // Update content item to published
       updateContentItem(contentItemId, { status: "published" });
 
       // Create the content post record
       createContentPost({
         contentItemId,
-        platformAccountId: account.id,
+        platformAccountId,
         platformPostId: result.platformPostId ?? null,
         platformUrl: result.platformUrl ?? null,
         publishedAt: Math.floor(Date.now() / 1000),
