@@ -477,29 +477,19 @@ function threadTextareaZeroSelector(scope) {
 
 function threadTextareaReady(scope, threadIndex) {
   if (abCount(scope.tweetTextarea(threadIndex)) > 0) return true;
-  return abCount(threadTextareaZeroSelector(scope)) > threadIndex;
+  // Thread slots must use tweetTextarea_1, tweetTextarea_2, … — never duplicate tweetTextarea_0.
+  if (threadIndex === 0) {
+    return abCount(threadTextareaZeroSelector(scope)) > 0;
+  }
+  return false;
 }
 
 function markThreadTextareaViaEval(scope, threadIndex) {
-  const numbered = scope.tweetTextarea(threadIndex);
-  const zeroSelector = threadTextareaZeroSelector(scope);
-  const js = `(() => {
-    const numbered = document.querySelector(${JSON.stringify(numbered)});
-    if (numbered) return JSON.stringify({ ok: true, selector: ${JSON.stringify(numbered)} });
-    const zeros = document.querySelectorAll(${JSON.stringify(zeroSelector)});
-    if (zeros.length <= ${threadIndex}) return JSON.stringify({ ok: false });
-    const target = zeros[${threadIndex}];
-    const mark = "signals-publish-thread-${threadIndex}";
-    target.setAttribute("data-signals-publish-target", mark);
-    const editable = target.querySelector('[contenteditable="true"]') || target;
-    if (editable !== target) editable.setAttribute("data-signals-publish-target", mark);
-    return JSON.stringify({
-      ok: true,
-      selector: '[data-signals-publish-target="' + mark + '"]',
-    });
-  })()`;
-  const parsed = parseEvalJsonValue(abText(["eval", js]));
-  return parsed?.ok ? String(parsed.selector) : null;
+  if (threadIndex === 0) {
+    const numbered = scope.tweetTextarea(0);
+    if (abCount(numbered) > 0) return numbered;
+  }
+  return null;
 }
 
 function resolveThreadTextareaSelector(scope, threadIndex) {
@@ -523,6 +513,131 @@ function waitForThreadTextarea(scope, threadIndex, context) {
     message: `${context}: timed out waiting for thread textarea ${threadIndex}`,
     errorCode: "timeout",
   };
+}
+
+function collectComposeSlotsEvalJs(scope) {
+  const rootExpr =
+    scope.mode === "modal"
+      ? "document.querySelector('[role=\"dialog\"]')"
+      : "document.body";
+  return `(() => {
+    const root = ${rootExpr};
+    if (!root) return JSON.stringify({ ok: false, reason: "no_compose_root" });
+    const nodes = root.querySelectorAll('[data-testid^="tweetTextarea_"]');
+    const slots = [];
+    for (const node of nodes) {
+      const testId = node.getAttribute("data-testid") || "";
+      const m = testId.match(/^tweetTextarea_(\\d+)$/);
+      if (!m) continue;
+      const editable =
+        node.querySelector('[contenteditable="true"]') ||
+        node.querySelector('[role="textbox"]') ||
+        node.querySelector('[data-contents="true"]') ||
+        node;
+      const text = String(editable.innerText || editable.textContent || "")
+        .replace(/\\s+/g, " ")
+        .trim();
+      slots.push({ testId, index: Number(m[1]), text });
+    }
+    return JSON.stringify({ ok: true, slots });
+  })()`;
+}
+
+function collectComposeSlots(scope) {
+  const parsed = parseEvalJsonValue(abText(["eval", collectComposeSlotsEvalJs(scope)]));
+  if (!parsed?.ok || !Array.isArray(parsed.slots)) {
+    throw {
+      message: "Could not read compose textarea slots from X UI.",
+      errorCode: "unknown",
+    };
+  }
+  return parsed.slots;
+}
+
+function validateComposeState(scope, payload) {
+  const slots = collectComposeSlots(scope);
+  const byIndex = new Map();
+  const duplicateTestIds = new Set();
+  const testIdCounts = new Map();
+
+  for (const slot of slots) {
+    testIdCounts.set(slot.testId, (testIdCounts.get(slot.testId) || 0) + 1);
+    if (!byIndex.has(slot.index)) byIndex.set(slot.index, []);
+    byIndex.get(slot.index).push(slot);
+  }
+
+  for (const [testId, count] of testIdCounts.entries()) {
+    if (count > 1) duplicateTestIds.add(testId);
+  }
+
+  const mainNeedle = normalizeTweetText(payload.text).slice(0, 80);
+  const threadTexts = payload.threadTexts ?? [];
+  const errors = [];
+
+  if (duplicateTestIds.size > 0) {
+    errors.push(
+      `duplicate compose testids: ${[...duplicateTestIds].join(", ")}`
+    );
+  }
+
+  const slot0 = byIndex.get(0)?.[0];
+  if (!slot0 || !normalizeTweetText(slot0.text).includes(mainNeedle)) {
+    errors.push("main tweet missing from tweetTextarea_0");
+  }
+
+  for (let i = 0; i < threadTexts.length; i++) {
+    const threadIndex = i + 1;
+    const threadNeedle = normalizeTweetText(threadTexts[i]).slice(0, 80);
+    const numberedSlots = byIndex.get(threadIndex) || [];
+    if (numberedSlots.length === 0) {
+      errors.push(`tweetTextarea_${threadIndex} not found`);
+      continue;
+    }
+    if (numberedSlots.length > 1) {
+      errors.push(`tweetTextarea_${threadIndex} is duplicated`);
+    }
+    const threadText = normalizeTweetText(numberedSlots[0].text);
+    if (!threadText.includes(threadNeedle)) {
+      errors.push(`thread slot ${threadIndex} text mismatch`);
+    }
+    if (mainNeedle && threadText.includes(mainNeedle) && threadNeedle !== mainNeedle) {
+      errors.push(`thread slot ${threadIndex} duplicates main tweet text`);
+    }
+  }
+
+  if (slot0 && threadTexts.length > 0) {
+    const mainText = normalizeTweetText(slot0.text);
+    const firstThreadNeedle = normalizeTweetText(threadTexts[0]).slice(0, 80);
+    if (firstThreadNeedle && mainText.includes(firstThreadNeedle)) {
+      errors.push("main tweetTextarea_0 contains continuation text");
+    }
+  }
+
+  if (errors.length > 0) {
+    throw {
+      message: `Compose validation failed: ${errors.join("; ")}`,
+      errorCode: "unknown",
+    };
+  }
+
+  return { slots, slotCount: slots.length };
+}
+
+function openXHomeResilient() {
+  const currentUrl = abUrl();
+  if (/x\.com|twitter\.com/i.test(currentUrl) && isXLoggedInPage()) {
+    return;
+  }
+  const result = runAb(["open", X_HOME_URL]);
+  if (!result.ok) {
+    if (/ERR_ABORTED/i.test(result.combined) && isXLoggedInPage()) {
+      return;
+    }
+    throw {
+      message: `open X home after connect: ${result.combined || "agent-browser command failed"}`,
+      errorCode: "unknown",
+    };
+  }
 }
 
 function activateComposeThreadAdd(scope, context, threadIndex, mainTweetText) {
@@ -909,6 +1024,8 @@ function fillCompose(payload) {
       : undefined;
     if (threadMedia?.length) uploadMedia(threadMedia, scope);
   }
+
+  validateComposeState(scope, payload);
 }
 
 function waitForVerifiedPost(expectedText, handle, baseline, timeoutMs = 20_000) {
@@ -933,7 +1050,7 @@ function main() {
   try {
     connectSession(port);
 
-    requireAb(["open", X_HOME_URL], "open X home after connect");
+    openXHomeResilient();
     sleep(1000);
     assertXLoggedIn();
 
@@ -951,12 +1068,14 @@ function main() {
     fillCompose(payload);
 
     if (dryRun) {
+      const composeCheck = validateComposeState(activeComposeScope, payload);
       emit({
         success: true,
         dryRun: true,
         handle,
+        composeSlots: composeCheck.slotCount,
         message:
-          "Compose and thread fields populated; Tweet was not clicked (dry-run).",
+          "Compose and thread fields populated and validated; Tweet was not clicked (dry-run).",
       });
       return;
     }

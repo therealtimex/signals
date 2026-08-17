@@ -129,7 +129,7 @@ function textareaCountForSelector(selector, state) {
       !selector.includes("tweetTextarea_1") &&
       !isDialogScoped
     ) {
-      return state.threadTextareaCount;
+      return state.threadTextareaCount > 0 ? 1 : 0;
     }
   }
   if (!state.composeOpen) {
@@ -138,12 +138,20 @@ function textareaCountForSelector(selector, state) {
     }
     return 0;
   }
+  if (process.env.FAKE_AB_DUPLICATE_TEXTAREA_0 === "1") {
+    if (selector.includes("tweetTextarea_1")) {
+      return 0;
+    }
+    if (
+      selector.includes("tweetTextarea_0") &&
+      !selector.includes("tweetTextarea_1")
+    ) {
+      return state.threadTextareaCount > 1 ? 2 : state.threadTextareaCount > 0 ? 1 : 0;
+    }
+  }
   const match = selector.match(/tweetTextarea_(\d+)/);
   if (match) {
     const index = Number(match[1]);
-    if (state.composeUiMode === "page" && index > 0) {
-      return 0;
-    }
     return state.threadTextareaCount > index ? 1 : 0;
   }
   if (selector.includes("signals-publish-target")) {
@@ -311,6 +319,34 @@ function handleEval(rest, state) {
       return ok(JSON.stringify(JSON.stringify({ ok: true, via: "ancestor", depth: 1 })));
     }
     return ok(JSON.stringify(JSON.stringify({ ok: true, depth: 1 })));
+  }
+  if (
+    js.includes("data-testid^=\"tweetTextarea_\"") &&
+    js.includes("slots.push")
+  ) {
+    const slots = [];
+    if (process.env.FAKE_AB_DUPLICATE_TEXTAREA_0 === "1" && state.threadTextareaCount > 1) {
+      slots.push({
+        testId: "tweetTextarea_0",
+        index: 0,
+        text: state.composedTextByIndex?.[1] ?? "",
+      });
+      slots.push({
+        testId: "tweetTextarea_0",
+        index: 0,
+        text: `${state.composedTextByIndex?.[0] ?? ""} ${state.composedTextByIndex?.[1] ?? ""}`.trim(),
+      });
+    } else {
+      for (let i = 0; i < state.threadTextareaCount; i++) {
+        const text = state.composedTextByIndex?.[i] ?? (i === 0 ? state.mainTweetText : "");
+        slots.push({
+          testId: `tweetTextarea_${i}`,
+          index: i,
+          text,
+        });
+      }
+    }
+    return ok(JSON.stringify(JSON.stringify({ ok: true, slots })));
   }
   if (
     js.includes("signals-publish-thread") &&

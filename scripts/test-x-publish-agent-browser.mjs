@@ -185,4 +185,20 @@ if (!dialogAddOnlyJson.success || !dialogAddOnlyJson.dryRun) {
   process.exit(1);
 }
 
+// Live QA regression: duplicate tweetTextarea_0 without tweetTextarea_1 must fail validation.
+const duplicateZero = runXPublish(
+  { text: "thread tweet one", threadTexts: ["thread tweet two"] },
+  { FAKE_AB_DUPLICATE_TEXTAREA_0: "1" },
+  ["--dry-run"]
+);
+if (duplicateZero.status === 0) {
+  console.error("duplicate tweetTextarea_0 should fail compose validation");
+  process.exit(1);
+}
+const duplicateZeroJson = lastJson(duplicateZero.stdout);
+if (duplicateZeroJson.success) {
+  console.error("duplicate tweetTextarea_0 should not return success");
+  process.exit(1);
+}
+
 console.log("x-publish agent-browser adapter: OK");
