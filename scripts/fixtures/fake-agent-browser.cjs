@@ -24,6 +24,7 @@ function defaultState() {
     mainTweetText: "",
     composedTextByIndex: {},
     activeTextareaIndex: 0,
+    lastSelector: "",
     threadTextareaCount: 0,
   };
 }
@@ -123,6 +124,13 @@ function textareaCountForSelector(selector, state) {
     if (isDialogScoped && selector.includes("tweetTextarea")) {
       return 0;
     }
+    if (
+      selector.includes("tweetTextarea_0") &&
+      !selector.includes("tweetTextarea_1") &&
+      !isDialogScoped
+    ) {
+      return state.threadTextareaCount;
+    }
   }
   if (!state.composeOpen) {
     if (selector.includes("tweetTextarea_0") && !selector.includes("tweetTextarea_1")) {
@@ -133,7 +141,13 @@ function textareaCountForSelector(selector, state) {
   const match = selector.match(/tweetTextarea_(\d+)/);
   if (match) {
     const index = Number(match[1]);
+    if (state.composeUiMode === "page" && index > 0) {
+      return 0;
+    }
     return state.threadTextareaCount > index ? 1 : 0;
+  }
+  if (selector.includes("signals-publish-target")) {
+    return state.composeOpen ? 1 : 0;
   }
   if (selector.includes("tweetTextarea_")) {
     return state.threadTextareaCount;
@@ -180,14 +194,21 @@ function handleIs(rest) {
 }
 
 function recordTypedText(state, selector, text) {
-  const match = String(selector).match(/tweetTextarea_(\d+)/);
-  const index = match ? Number(match[1]) : 0;
+  const sel = String(selector);
+  const mark = sel.match(/signals-publish-thread-(\d+)/);
+  const num = sel.match(/tweetTextarea_(\d+)/);
+  const index = mark ? Number(mark[1]) : num ? Number(num[1]) : 0;
   if (!state.composedTextByIndex) state.composedTextByIndex = {};
   state.composedTextByIndex[index] = text;
   if (index === 0) {
     state.mainTweetTyped = Boolean(String(text).trim());
     state.mainTweetText = text;
   }
+  writeState(state);
+}
+
+function rememberSelector(state, selector) {
+  state.lastSelector = selector;
   writeState(state);
 }
 
@@ -218,7 +239,60 @@ function handleEval(rest, state) {
   if (js.includes("contenteditable") && js.includes("activeElement")) {
     return ok(JSON.stringify(JSON.stringify({ ok: true })));
   }
-  if (js.includes("tweetTextarea_") && (js.includes("innerText") || js.includes("textContent"))) {
+  if (js.includes("nextElementSibling") && js.includes("addButton")) {
+    addThreadSlot(state);
+    return ok(JSON.stringify(JSON.stringify({ ok: true, via: "sibling" })));
+  }
+  if (
+    js.includes("signals-publish-thread") &&
+    !js.includes("innerText") &&
+    !js.includes("textContent")
+  ) {
+    const match = js.match(/signals-publish-thread-(\d+)/);
+    const index = match ? Number(match[1]) : 0;
+    const mark = `signals-publish-thread-${index}`;
+    return ok(
+      JSON.stringify(
+        JSON.stringify({
+          ok: true,
+          selector: `[data-signals-publish-target="${mark}"]`,
+        })
+      )
+    );
+  }
+  if (
+    js.includes("querySelectorAll") &&
+    js.includes("tweetTextarea_0") &&
+    js.includes("zeros.length")
+  ) {
+    const indexMatch = js.match(/zeros\.length <= (\d+)/);
+    const needIndex = indexMatch ? Number(indexMatch[1]) : 0;
+    if (state.threadTextareaCount > needIndex) {
+      const mark = `signals-publish-thread-${needIndex}`;
+      return ok(
+        JSON.stringify(
+          JSON.stringify({
+            ok: true,
+            selector: `[data-signals-publish-target="${mark}"]`,
+          })
+        )
+      );
+    }
+    return ok(JSON.stringify(JSON.stringify({ ok: false })));
+  }
+  if ((js.includes("innerText") || js.includes("textContent"))) {
+    const zerosMatch = js.match(/zeros\[(\d+)\]/);
+    if (zerosMatch) {
+      const index = Number(zerosMatch[1]);
+      const text = state.composedTextByIndex?.[index] ?? "";
+      return ok(JSON.stringify(JSON.stringify(text)));
+    }
+    const markMatch = js.match(/signals-publish-thread-(\d+)/);
+    if (markMatch) {
+      const index = Number(markMatch[1]);
+      const text = state.composedTextByIndex?.[index] ?? "";
+      return ok(JSON.stringify(JSON.stringify(text)));
+    }
     const match = js.match(/tweetTextarea_(\d+)/);
     const index = match ? Number(match[1]) : 0;
     const text =
@@ -234,7 +308,11 @@ function handleEval(rest, state) {
         const end = slice.indexOf(";");
         const text = JSON.parse(slice.slice(0, end).trim());
         const index = state.activeTextareaIndex ?? 0;
-        recordTypedText(state, `tweetTextarea_${index}`, text);
+        recordTypedText(
+          state,
+          state.lastSelector || `tweetTextarea_${index}`,
+          text
+        );
         const normalized = String(text).replace(/\s+/g, " ").trim();
         return ok(JSON.stringify(JSON.stringify({ ok: true, text: normalized })));
       } catch {
@@ -286,16 +364,30 @@ if (cmd === "open") {
   return ok();
 }
 if (cmd === "wait") return ok();
-if (cmd === "focus") return ok();
+if (cmd === "focus") {
+  const sel = rest[1] ?? "";
+  rememberSelector(state, sel);
+  const markerMatch = sel.match(/signals-publish-thread-(\d+)/);
+  if (markerMatch) state.activeTextareaIndex = Number(markerMatch[1]);
+  const textareaMatch = sel.match(/tweetTextarea_(\d+)/);
+  if (textareaMatch) state.activeTextareaIndex = Number(textareaMatch[1]);
+  writeState(state);
+  return ok();
+}
 if (cmd === "clipboard") {
   if (rest[1] === "write") {
     const text = rest[2] ?? "";
-    recordTypedText(state, `tweetTextarea_${state.activeTextareaIndex ?? 0}`, text);
+    recordTypedText(
+      state,
+      state.lastSelector || `tweetTextarea_${state.activeTextareaIndex ?? 0}`,
+      text
+    );
   }
   return ok();
 }
 if (cmd === "click") {
   const selector = rest[1] ?? "";
+  rememberSelector(state, selector);
   if (
     process.env.FAKE_AB_FAIL_ADD === "1" &&
     (selector.includes("addButton") || selector.includes("Add post"))
@@ -310,6 +402,11 @@ if (cmd === "click") {
     state.activeTextareaIndex = Number(textareaMatch[1]);
     writeState(state);
   }
+  const markerMatch = selector.match(/signals-publish-thread-(\d+)/);
+  if (markerMatch) {
+    state.activeTextareaIndex = Number(markerMatch[1]);
+    writeState(state);
+  }
   if (selector.includes("tweetButton")) {
     state.postPublished = true;
     writeState(state);
@@ -318,6 +415,7 @@ if (cmd === "click") {
 }
 if (cmd === "type" || cmd === "fill") {
   const selector = rest[1] ?? "";
+  rememberSelector(state, selector);
   const text = rest[2] ?? "";
   if (process.env.FAKE_AB_FAIL_THREAD_FILL === "1" && selector.includes("tweetTextarea_1")) {
     fail("simulated thread fill failure");
@@ -333,8 +431,11 @@ if (cmd === "keyboard") {
   const text = rest.slice(2).join(" ");
   if (sub === "type" || sub === "inserttext") {
     if (process.env.FAKE_AB_SKIP_KEYBOARD !== "1") {
-      const index = state.activeTextareaIndex ?? 0;
-      recordTypedText(state, `tweetTextarea_${index}`, text);
+      recordTypedText(
+        state,
+        state.lastSelector || `tweetTextarea_${state.activeTextareaIndex ?? 0}`,
+        text
+      );
     }
   }
   return ok();

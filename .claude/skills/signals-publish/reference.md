@@ -51,7 +51,7 @@ Failure:
 
 ## Compose flow
 
-Opens compose surface, then commits Draft.js text via keyboard type, eval `insertText`, clipboard paste, and legacy fallbacks; verifies editor text before thread add.
+Thread add: click `addButton` first, then sibling click / focus+Enter retries until a new slot appears. On `/compose/post`, slots may duplicate `tweetTextarea_0` instead of `tweetTextarea_1`.
 
 ## Verification invariant (P6a port) (owned status ids + max snowflake) **before** compose.
 2. Post via compose UI.
