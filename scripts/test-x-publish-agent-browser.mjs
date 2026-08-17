@@ -140,4 +140,19 @@ if (!scopedAddJson.success || !scopedAddJson.dryRun) {
   process.exit(1);
 }
 
+const resetOnClick = runXPublish(
+  { text: "thread tweet one", threadTexts: ["thread tweet two"] },
+  { FAKE_AB_RESET_ON_ADD_CLICK: "1" },
+  ["--dry-run"]
+);
+if (resetOnClick.status !== 0) {
+  console.error("reset-on-click recovery failed:", resetOnClick.stdout, resetOnClick.stderr);
+  process.exit(1);
+}
+const resetOnClickJson = lastJson(resetOnClick.stdout);
+if (!resetOnClickJson.success || !resetOnClickJson.dryRun) {
+  console.error("unexpected reset-on-click dry-run result:", resetOnClickJson);
+  process.exit(1);
+}
+
 console.log("x-publish agent-browser adapter: OK");

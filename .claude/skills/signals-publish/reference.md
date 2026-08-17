@@ -51,7 +51,7 @@ Failure:
 
 ## Compose flow
 
-Thread add: walk up from the previous tweet row to click a scoped `addButton` (global selectors may disappear). Then sibling click / focus+Enter retries. On `/compose/post`, slots may duplicate `tweetTextarea_0` instead of `tweetTextarea_1`.
+Thread add: scope selectors to `[role="dialog"]` on compose/post (bare `tweetTextarea_0` / `addButton` also match the home inline composer). X lazy-renders the add control after the first tweet has content — wait ~2.5s. **Do not programmatically click** `addButton`; X anti-automation resets the composer. Use focus on the last dialog-scoped add control + **Enter** (a11y path). Duplicate `tweetTextarea_0` slots may appear instead of `tweetTextarea_1`.
 
 ## Verification invariant (P6a port) (owned status ids + max snowflake) **before** compose.
 2. Post via compose UI.

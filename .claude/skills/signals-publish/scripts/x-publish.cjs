@@ -26,19 +26,24 @@ const TYPE_SETTLE_MS = 2500;
 const THREAD_ADD_WAIT_MS = 2500;
 const COMPOSE_WAIT_TIMEOUT_MS = 15_000;
 
-const PAGE_ADD_BUTTON_CANDIDATES = [
+const ADD_BUTTON_CANDIDATES_DIALOG = [
+  '[role="dialog"] [data-testid="addButton"]',
+  '[role="dialog"] button[aria-label="Add post"]',
+  '[role="dialog"] button[aria-label="添加帖子"]',
+  '[role="dialog"] [aria-label="Add post"]',
+];
+
+const ADD_BUTTON_CANDIDATES_PAGE = [
+  ...ADD_BUTTON_CANDIDATES_DIALOG,
   '[data-testid="addButton"]',
   'button[aria-label="Add post"]',
   'button[aria-label="添加帖子"]',
   '[aria-label="Add post"]',
 ];
 
-const MODAL_ADD_BUTTON_CANDIDATES = [
-  '[role="dialog"] [data-testid="addButton"]',
-  '[role="dialog"] button[aria-label="Add post"]',
-  '[role="dialog"] button[aria-label="添加帖子"]',
-  '[role="dialog"] [aria-label="Add post"]',
-];
+const MODAL_ADD_BUTTON_CANDIDATES = ADD_BUTTON_CANDIDATES_DIALOG;
+
+const PAGE_ADD_BUTTON_CANDIDATES = ADD_BUTTON_CANDIDATES_PAGE;
 
 const X_SELECTORS = {
   primaryColumn: '[data-testid="primaryColumn"]',
@@ -265,85 +270,43 @@ function typeIntoComposeTextarea(wrapperSelector, text, context) {
   sleep(TYPE_SETTLE_MS);
 }
 
-function findAddButton(scope) {
-  for (const selector of scope.addButtonCandidates) {
-    if (abCount(selector) > 0) return selector;
-  }
-  return null;
-}
-
-function probeAddNearTweetEvalJs(scope, tweetIndex) {
-  const numbered = scope.tweetTextarea(tweetIndex);
-  const zeroSelector = threadTextareaZeroSelector(scope);
-  return `(() => {
-    let anchor = document.querySelector(${JSON.stringify(numbered)});
-    if (!anchor) {
-      const zeros = document.querySelectorAll(${JSON.stringify(zeroSelector)});
-      anchor = zeros[${tweetIndex}] || null;
-    }
-    if (!anchor) return JSON.stringify({ ok: false, reason: "no_anchor" });
-    let node = anchor;
-    for (let depth = 0; depth < 12 && node; depth++) {
-      const btn =
-        node.querySelector('[data-testid="addButton"]') ||
-        node.querySelector('button[aria-label="Add post"]') ||
-        node.querySelector('button[aria-label="添加帖子"]');
-      if (btn) return JSON.stringify({ ok: true, depth });
-      node = node.parentElement;
-    }
-    return JSON.stringify({ ok: false, reason: "no_button_near_anchor" });
-  })()`;
-}
-
-function clickAddNearTweetEvalJs(scope, tweetIndex) {
-  const numbered = scope.tweetTextarea(tweetIndex);
-  const zeroSelector = threadTextareaZeroSelector(scope);
-  return `(() => {
-    let anchor = document.querySelector(${JSON.stringify(numbered)});
-    if (!anchor) {
-      const zeros = document.querySelectorAll(${JSON.stringify(zeroSelector)});
-      anchor = zeros[${tweetIndex}] || null;
-    }
-    if (!anchor) return JSON.stringify({ ok: false, reason: "no_anchor" });
-    let node = anchor;
-    for (let depth = 0; depth < 12 && node; depth++) {
-      const btn =
-        node.querySelector('[data-testid="addButton"]') ||
-        node.querySelector('button[aria-label="Add post"]') ||
-        node.querySelector('button[aria-label="添加帖子"]');
-      if (btn) {
-        try {
-          btn.focus();
-        } catch {}
-        btn.click();
-        return JSON.stringify({ ok: true, via: "ancestor", depth });
-      }
-      node = node.parentElement;
-    }
-    return JSON.stringify({ ok: false, reason: "no_button_near_anchor" });
-  })()`;
-}
-
-function addButtonAvailable(scope, tweetIndex = 0) {
-  if (findAddButton(scope)) return true;
-  const parsed = parseEvalJsonValue(
-    abText(["eval", probeAddNearTweetEvalJs(scope, tweetIndex)])
+function focusAddButtonEval(scope) {
+  return parseEvalJsonValue(
+    abText(["eval", focusLastAddButtonEvalJs(scope.addButtonCandidates)])
   );
-  return Boolean(parsed?.ok);
 }
 
-function waitForAddButton(scope, context, timeoutMs = COMPOSE_WAIT_TIMEOUT_MS) {
+function waitForFocusableAddButton(scope, context, timeoutMs = COMPOSE_WAIT_TIMEOUT_MS) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (addButtonAvailable(scope, 0)) {
-      return findAddButton(scope) || scope.addButtonCandidates[0];
-    }
+    const parsed = focusAddButtonEval(scope);
+    if (parsed?.ok) return parsed;
     sleep(300);
   }
   throw {
-    message: `${context}: timed out waiting for thread add button`,
+    message: `${context}: timed out waiting for focusable thread add button`,
     errorCode: "timeout",
   };
+}
+
+function activateAddViaA11y(scope, context) {
+  const focusParsed = focusAddButtonEval(scope);
+  if (!focusParsed?.ok) {
+    throw {
+      message: `${context}: could not focus add post button for a11y activation`,
+      errorCode: "timeout",
+    };
+  }
+  // X rejects programmatic addButton clicks (resets composer). Screen-reader path: focus + Enter.
+  requireAb(["press", "Enter"], `${context} activate add via Enter`);
+}
+
+function ensureMainTweetCommitted(scope, text, context) {
+  if (!text) return;
+  const selector = scope.tweetTextarea(0);
+  if (composeTextMatches(selector, text)) return;
+  typeIntoComposeTextarea(selector, text, `${context} restore main tweet`);
+  waitForFocusableAddButton(scope, `${context} wait for add after main restore`);
 }
 
 function focusLastAddButtonEvalJs(candidates) {
@@ -398,11 +361,11 @@ function buildComposeScope(mode) {
 }
 
 function detectComposeUiMode() {
-  if (isComposePageUrl() && abCount(X_SELECTORS.tweetTextarea(0)) > 0) {
-    return "page";
-  }
   if (abCount(X_SELECTORS.composeTweetTextarea(0)) > 0) {
     return "modal";
+  }
+  if (abCount(X_SELECTORS.tweetTextarea(0)) > 0) {
+    return "page";
   }
   return null;
 }
@@ -410,8 +373,8 @@ function detectComposeUiMode() {
 function resolveComposeScope() {
   if (isComposePageUrl()) {
     sleep(500);
-    const pageMode = detectComposeUiMode();
-    if (pageMode === "page") return buildComposeScope("page");
+    const mode = detectComposeUiMode();
+    if (mode) return buildComposeScope(mode);
   }
 
   requireAb(["open", X_COMPOSE_POST_URL], "open compose/post");
@@ -455,20 +418,6 @@ function threadTextareaZeroSelector(scope) {
 function threadTextareaReady(scope, threadIndex) {
   if (abCount(scope.tweetTextarea(threadIndex)) > 0) return true;
   return abCount(threadTextareaZeroSelector(scope)) > threadIndex;
-}
-
-function activateAddButtonClickEvalJs(selector) {
-  return `(() => {
-    const btn = document.querySelector(${JSON.stringify(selector)});
-    if (!btn) return JSON.stringify({ ok: false, reason: "no_button" });
-    const sibling = btn.nextElementSibling;
-    if (sibling && sibling instanceof HTMLElement) {
-      sibling.click();
-      return JSON.stringify({ ok: true, via: "sibling" });
-    }
-    btn.click();
-    return JSON.stringify({ ok: true, via: "click" });
-  })()`;
 }
 
 function markThreadTextareaViaEval(scope, threadIndex) {
@@ -516,49 +465,23 @@ function waitForThreadTextarea(scope, threadIndex, context) {
   };
 }
 
-function tryActivateThreadAdd(scope, context, previousTweetIndex) {
-  parseEvalJsonValue(
-    abText(["eval", clickAddNearTweetEvalJs(scope, previousTweetIndex)])
-  );
-
-  const addSelector = findAddButton(scope);
-  if (addSelector) {
-    const clicked = runAb(["click", addSelector]);
-    if (!clicked.ok) {
-      parseEvalJsonValue(
-        abText(["eval", activateAddButtonClickEvalJs(addSelector)])
-      );
-    }
-  }
-
-  for (const selector of scope.addButtonCandidates) {
-    parseEvalJsonValue(abText(["eval", activateAddButtonClickEvalJs(selector)]));
-  }
-
-  const focusParsed = parseEvalJsonValue(
-    abText(["eval", focusLastAddButtonEvalJs(scope.addButtonCandidates)])
-  );
-  if (focusParsed?.ok) {
-    runAb(["press", "Enter"]);
-    runAb(["press", " "]);
-  }
-}
-
-function activateComposeThreadAdd(scope, context, threadIndex) {
-  waitForAddButton(scope, context);
+function activateComposeThreadAdd(scope, context, threadIndex, mainTweetText) {
+  waitForFocusableAddButton(scope, context);
   const deadline = Date.now() + COMPOSE_WAIT_TIMEOUT_MS;
-  const previousTweetIndex = threadIndex - 1;
 
   while (Date.now() < deadline) {
     if (threadTextareaReady(scope, threadIndex)) return;
 
-    tryActivateThreadAdd(scope, context, previousTweetIndex);
+    activateAddViaA11y(scope, context);
     sleep(THREAD_ADD_WAIT_MS);
     if (threadTextareaReady(scope, threadIndex)) return;
+
+    ensureMainTweetCommitted(scope, mainTweetText, context);
+    sleep(500);
   }
 
   throw {
-    message: `${context}: thread compose slot did not appear after add-button activation`,
+    message: `${context}: thread compose slot did not appear after a11y add activation`,
     errorCode: "timeout",
   };
 }
@@ -901,11 +824,16 @@ function fillCompose(payload) {
 
   const threadTexts = payload.threadTexts ?? [];
   if (threadTexts.length > 0) {
-    waitForAddButton(scope, "wait for thread add button after main tweet");
+    waitForFocusableAddButton(scope, "wait for thread add button after main tweet");
   }
   for (let i = 0; i < threadTexts.length; i++) {
     const threadIndex = i + 1;
-    activateComposeThreadAdd(scope, `add thread tweet ${threadIndex + 1}`, threadIndex);
+    activateComposeThreadAdd(
+      scope,
+      `add thread tweet ${threadIndex + 1}`,
+      threadIndex,
+      payload.text
+    );
     const selector = waitForThreadTextarea(
       scope,
       threadIndex,

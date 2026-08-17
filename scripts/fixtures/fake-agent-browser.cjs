@@ -157,7 +157,11 @@ function textareaCountForSelector(selector, state) {
   }
   if (selector.includes("addButton") || selector.includes("Add post")) {
     if (process.env.FAKE_AB_HIDE_GLOBAL_ADD === "1") {
-      return 0;
+      const dialogScoped =
+        selector.includes("role=\"dialog\"") || selector.includes('[role="dialog"]');
+      if (!dialogScoped) {
+        return 0;
+      }
     }
     return state.composeOpen && state.mainTweetTyped ? 1 : 0;
   }
@@ -233,6 +237,13 @@ function handleEval(rest, state) {
     return ok(JSON.stringify("[]"));
   }
   if (js.includes("addButton") && js.includes("activeElement")) {
+    const addCount = state.composeOpen && state.mainTweetTyped ? 1 : 0;
+    if (!state.composeOpen || addCount === 0) {
+      return ok(JSON.stringify(JSON.stringify({ ok: false, reason: "no_add_button" })));
+    }
+    return ok(JSON.stringify(JSON.stringify({ ok: true })));
+  }
+  if (js.includes("queries") && js.includes("btn.focus") && js.includes("addButton")) {
     const addCount = state.composeOpen && state.mainTweetTyped ? 1 : 0;
     if (!state.composeOpen || addCount === 0) {
       return ok(JSON.stringify(JSON.stringify({ ok: false, reason: "no_add_button" })));
@@ -415,7 +426,12 @@ if (cmd === "click") {
     fail("simulated add button failure");
   }
   if (selector.includes("addButton") || selector.includes("Add post")) {
-    addThreadSlot(state);
+    if (process.env.FAKE_AB_RESET_ON_ADD_CLICK === "1") {
+      state.composedTextByIndex[0] = "\n";
+      state.mainTweetText = "\n";
+      state.mainTweetTyped = false;
+      writeState(state);
+    }
   }
   const textareaMatch = selector.match(/tweetTextarea_(\d+)/);
   if (textareaMatch) {
