@@ -1,10 +1,10 @@
 {
-  "signalsVersion": "0.1.11",
-  "pluginVersion": "0.1.11",
+  "signalsVersion": "0.1.12",
+  "pluginVersion": "0.1.12",
   "pluginId": "com.realtimex.signals",
   "localAppId": "47e45f71-3279-42f5-8e95-731de01b6eae",
-  "artifactName": "signals-0.1.11-standalone.zip",
-  "artifactPath": "dist/signals-0.1.11-standalone.zip",
+  "artifactName": "signals-0.1.12-standalone.zip",
+  "artifactPath": "dist/signals-0.1.12-standalone.zip",
   "checksumSha256": "f753f457a504f50c6eec328b22c4e8b43ef82449950f44cb638a7003d1c6f18f",
   "minRealtimeXVersion": "1.0.0",
   "permissions": [
