@@ -293,7 +293,9 @@ function handleEval(rest, state) {
     if (!focusableAddButtonFromEvalJs(js, state)) {
       return ok(JSON.stringify(JSON.stringify({ ok: false, reason: "no_add_button" })));
     }
-    addThreadSlot(state);
+    if (process.env.FAKE_AB_NO_THREAD_ADD !== "1") {
+      addThreadSlot(state);
+    }
     return ok(JSON.stringify(JSON.stringify({ ok: true, via: "keyboard_eval" })));
   }
   if (js.includes("contenteditable") && js.includes("activeElement")) {
@@ -556,6 +558,7 @@ if (cmd === "press") {
     key === "Enter" &&
     state.composeOpen &&
     state.mainTweetTyped &&
+    process.env.FAKE_AB_NO_THREAD_ADD !== "1" &&
     focusableAddButtonFromEvalJs(
       `const queries = ${JSON.stringify([
         '[role="dialog"] [data-testid="addButton"]',

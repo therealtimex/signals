@@ -23,8 +23,49 @@ const AB_PREFIX = process.env.AGENT_BROWSER_BIN_ARGS
 const X_HOME_URL = "https://x.com/home";
 const X_COMPOSE_POST_URL = "https://x.com/compose/post";
 const TYPE_SETTLE_MS = 2500;
-const THREAD_ADD_WAIT_MS = 2500;
+const THREAD_ADD_WAIT_MS = 3500;
 const COMPOSE_WAIT_TIMEOUT_MS = 15_000;
+
+let activeComposeScope = null;
+let resultEmitted = false;
+
+function logPhase(message) {
+  process.stderr.write(`x-publish: ${message}\n`);
+}
+
+function emit(result) {
+  resultEmitted = true;
+  const line = JSON.stringify(result);
+  process.stdout.write(`${line}\n`);
+  process.exit(result.success ? 0 : 1);
+}
+
+function emitFatal(message, errorCode = "unknown") {
+  emit({ success: false, error: message, errorCode });
+}
+
+function normalizeThreadTexts(payload) {
+  const raw = payload?.threadTexts;
+  if (!raw) return [];
+  if (!Array.isArray(raw)) return [];
+  return raw.map((entry) => String(entry)).filter((entry) => entry.trim());
+}
+
+function validatePayload(payload) {
+  if (!String(payload?.text ?? "").trim()) {
+    throw {
+      message: "payload.text is required and must be non-empty",
+      errorCode: "unknown",
+    };
+  }
+  if (payload?.threadText != null && payload.threadTexts == null) {
+    throw {
+      message:
+        "payload.threadTexts array is required for thread posts (found legacy threadText field)",
+      errorCode: "unknown",
+    };
+  }
+}
 
 const ADD_BUTTON_CANDIDATES_DIALOG = [
   '[role="dialog"] [data-testid="addButton"]',
@@ -333,14 +374,32 @@ function activateAddKeyboardEvalJs(candidates) {
   })()`;
 }
 
+function focusComposeAddButton(scope) {
+  for (const selector of scope.addButtonCandidates) {
+    if (abCount(selector) > 0) {
+      runAb(["focus", selector]);
+      return selector;
+    }
+  }
+  const parsed = focusAddButtonEval(scope);
+  if (parsed?.ok) {
+    for (const selector of scope.addButtonCandidates) {
+      if (abCount(selector) > 0) return selector;
+    }
+    return scope.addButton;
+  }
+  return null;
+}
+
 function activateAddViaA11y(scope, context) {
-  const focusParsed = focusAddButtonEval(scope);
-  if (!focusParsed?.ok && !addButtonCountAvailable(scope)) {
+  const focused = focusComposeAddButton(scope);
+  if (!focused && !addButtonCountAvailable(scope)) {
     throw {
       message: `${context}: could not find add post button for a11y activation`,
       errorCode: "timeout",
     };
   }
+  sleep(300);
   // X rejects programmatic addButton clicks (resets composer). Screen-reader path: focus + Enter.
   const pressed = runAb(["press", "Enter"]);
   if (!pressed.ok) {
@@ -353,6 +412,13 @@ function activateAddViaA11y(scope, context) {
         errorCode: "unknown",
       };
     }
+  }
+  sleep(400);
+  if (focused) {
+    runAb(["focus", focused]);
+    sleep(200);
+    runAb(["press", "Space"]);
+    sleep(400);
   }
 }
 
@@ -571,7 +637,7 @@ function validateComposeState(scope, payload) {
   }
 
   const mainNeedle = normalizeTweetText(payload.text).slice(0, 80);
-  const threadTexts = payload.threadTexts ?? [];
+  const threadTexts = normalizeThreadTexts(payload);
   const errors = [];
 
   if (duplicateTestIds.size > 0) {
@@ -616,7 +682,7 @@ function validateComposeState(scope, payload) {
   if (errors.length > 0) {
     throw {
       message: `Compose validation failed: ${errors.join("; ")}`,
-      errorCode: "unknown",
+      errorCode: "compose_invalid",
     };
   }
 
@@ -657,16 +723,8 @@ function activateComposeThreadAdd(scope, context, threadIndex, mainTweetText) {
 
   throw {
     message: `${context}: thread compose slot did not appear after a11y add activation`,
-    errorCode: "timeout",
+    errorCode: "compose_invalid",
   };
-}
-
-let activeComposeScope = null;
-
-function emit(result) {
-  const line = JSON.stringify(result);
-  console.log(line);
-  process.exit(result.success ? 0 : 1);
 }
 
 function runAb(args) {
@@ -985,6 +1043,8 @@ function uploadMedia(paths, scope) {
 }
 
 function fillCompose(payload) {
+  const threadTexts = normalizeThreadTexts(payload);
+  logPhase(`fillCompose threadSlots=${threadTexts.length}`);
   activeComposeScope = resolveComposeScope();
   const scope = activeComposeScope;
 
@@ -997,7 +1057,6 @@ function fillCompose(payload) {
     : payload.mediaPaths;
   if (mediaPaths?.length) uploadMedia(mediaPaths, scope);
 
-  const threadTexts = payload.threadTexts ?? [];
   if (threadTexts.length > 0) {
     waitForFocusableAddButton(scope, "wait for thread add button after main tweet");
   }
@@ -1025,7 +1084,7 @@ function fillCompose(payload) {
     if (threadMedia?.length) uploadMedia(threadMedia, scope);
   }
 
-  validateComposeState(scope, payload);
+  validateComposeState(scope, { ...payload, threadTexts });
 }
 
 function waitForVerifiedPost(expectedText, handle, baseline, timeoutMs = 20_000) {
@@ -1048,6 +1107,8 @@ function main() {
   ensureAgentBrowser();
 
   try {
+    validatePayload(payload);
+    logPhase(`start dryRun=${dryRun}`);
     connectSession(port);
 
     openXHomeResilient();
@@ -1064,16 +1125,25 @@ function main() {
       return;
     }
 
-    const baseline = captureProfileStatusBaseline(handle);
+    const baseline = dryRun ? null : captureProfileStatusBaseline(handle);
     fillCompose(payload);
 
+    const normalizedPayload = {
+      ...payload,
+      threadTexts: normalizeThreadTexts(payload),
+    };
+
     if (dryRun) {
-      const composeCheck = validateComposeState(activeComposeScope, payload);
+      const composeCheck = validateComposeState(
+        activeComposeScope,
+        normalizedPayload
+      );
       emit({
         success: true,
         dryRun: true,
         handle,
         composeSlots: composeCheck.slotCount,
+        threadSlots: normalizedPayload.threadTexts.length,
         message:
           "Compose and thread fields populated and validated; Tweet was not clicked (dry-run).",
       });
@@ -1094,5 +1164,15 @@ function main() {
     emit({ success: false, error: message, errorCode });
   }
 }
+
+process.on("uncaughtException", (err) => {
+  if (resultEmitted) return;
+  emitFatal(err?.message ?? String(err), "unknown");
+});
+
+process.on("unhandledRejection", (reason) => {
+  if (resultEmitted) return;
+  emitFatal(String(reason ?? "unhandled rejection"), "unknown");
+});
 
 main();

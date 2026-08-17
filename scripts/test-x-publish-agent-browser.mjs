@@ -201,4 +201,32 @@ if (duplicateZeroJson.success) {
   process.exit(1);
 }
 
+const noThreadAdd = runXPublish(
+  { text: "thread tweet one", threadTexts: ["thread tweet two"] },
+  { FAKE_AB_NO_THREAD_ADD: "1" },
+  ["--dry-run"]
+);
+if (noThreadAdd.status === 0) {
+  console.error("no thread add should fail dry-run");
+  process.exit(1);
+}
+const noThreadAddJson = lastJson(noThreadAdd.stdout);
+if (
+  noThreadAddJson.success ||
+  !String(noThreadAddJson.error || "").includes("thread compose slot")
+) {
+  console.error("unexpected no-thread-add result:", noThreadAddJson);
+  process.exit(1);
+}
+
+const legacyThreadField = runXPublish(
+  { text: "main only", threadText: "should fail" },
+  {},
+  ["--dry-run"]
+);
+if (legacyThreadField.status === 0) {
+  console.error("legacy threadText field should fail");
+  process.exit(1);
+}
+
 console.log("x-publish agent-browser adapter: OK");
