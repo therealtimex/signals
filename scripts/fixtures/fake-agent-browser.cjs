@@ -116,17 +116,17 @@ function handleEval(rest, state) {
   if (state.postPublished) {
     const ms = Date.now() - 1288834974657;
     const statusId = (BigInt(ms) << 22n).toString();
-    return ok(
-      JSON.stringify([
-        {
-          statusId,
-          href: `/${profileHandle}/status/${statusId}`,
-          text: "thread tweet one thread tweet two",
-        },
-      ])
-    );
+    const payload = [
+      {
+        statusId,
+        href: `/${profileHandle}/status/${statusId}`,
+        text: "thread tweet one thread tweet two",
+      },
+    ];
+    // Real agent-browser JSON-encodes string eval results (stdout is "\"[]\"" form).
+    return ok(JSON.stringify(JSON.stringify(payload)));
   }
-  if (js.includes("ownedCandidates")) return ok("[]");
+  if (js.includes("ownedCandidates")) return ok(JSON.stringify("[]"));
   return ok("null");
 }
 

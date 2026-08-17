@@ -13,6 +13,8 @@
 const { readFileSync } = require("node:fs");
 const { spawnSync } = require("node:child_process");
 
+const { parseEvalJsonArray } = require("./parse-eval-json-array.cjs");
+
 const SESSION = process.env.SIGNALS_PUBLISH_AB_SESSION || "signals-publish";
 const AB_BIN = process.env.AGENT_BROWSER_BIN || "agent-browser";
 const AB_PREFIX = process.env.AGENT_BROWSER_BIN_ARGS
@@ -349,12 +351,7 @@ function readProfileStatusCandidates(handle) {
   })()`;
 
   const raw = abText(["eval", js]);
-  if (!raw) return [];
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return [];
-  }
+  return parseEvalJsonArray(raw);
 }
 
 function captureProfileStatusBaseline(handle) {

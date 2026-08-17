@@ -3,10 +3,16 @@
  * Deterministic adapter tests for x-publish.cjs against a fake agent-browser CLI.
  */
 import { spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+
+const require = createRequire(import.meta.url);
+const { parseEvalJsonArray } = require(
+  "../.claude/skills/signals-publish/scripts/parse-eval-json-array.cjs"
+);
 
 const root = dirname(fileURLToPath(import.meta.url));
 const scriptPath = join(
@@ -85,6 +91,16 @@ if (dryRun.status !== 0) {
 const dryJson = lastJson(dryRun.stdout);
 if (!dryJson.success || !dryJson.dryRun) {
   console.error("unexpected dry-run result:", dryJson);
+  process.exit(1);
+}
+
+// Regression: real agent-browser JSON-encodes string eval results.
+if (parseEvalJsonArray('"[]"').length !== 0) {
+  console.error("parseEvalJsonArray failed on quoted empty array");
+  process.exit(1);
+}
+if (parseEvalJsonArray("[]").length !== 0) {
+  console.error("parseEvalJsonArray failed on raw empty array");
   process.exit(1);
 }
 
