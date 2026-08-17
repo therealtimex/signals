@@ -40,6 +40,8 @@ import type { DraftContactChannel } from "@/lib/contact-channel-draft";
 import type { DraftContactEmployment } from "@/lib/contact-employment-draft";
 import { ContactExploreCardView } from "@/components/contact-explore-card";
 import { ContactTimelineTab } from "@/components/contact-timeline-tab";
+import { ContactAvatarUpload } from "@/components/contact-avatar-upload";
+import { ContactRelationshipSection } from "@/components/contact-relationship-section";
 
 const platformLabels: Record<string, string> = {
   x: "X / Twitter",
@@ -266,6 +268,10 @@ export function ContactDetailClient({ contact, tasks, explore }: ContactDetailCl
               <CardTitle>Contact Information</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
+              <ContactAvatarUpload
+                contactId={contact.id}
+                currentAvatarUrl={contact.resolvedAvatarUrl ?? contact.avatarUrl}
+              />
               {contact.headline && (
                 <p className="text-sm text-muted-foreground">{contact.headline}</p>
               )}
@@ -340,6 +346,8 @@ export function ContactDetailClient({ contact, tasks, explore }: ContactDetailCl
               )}
             </CardContent>
           </Card>
+
+          <ContactRelationshipSection contactId={contact.id} />
 
           <Card>
             <CardHeader>

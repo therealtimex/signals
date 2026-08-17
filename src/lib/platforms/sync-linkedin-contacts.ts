@@ -107,19 +107,14 @@ function processLinkedInConnection(connection: LinkedInConnection, result: SyncR
     .get();
 
   if (existingIdentity) {
-    // Update existing contact with latest LinkedIn data
-    const contactData = mapLinkedInConnectionToContact(connection);
-    updateContact(existingIdentity.contactId, {
-      headline: contactData.headline,
-      photoUrl: contactData.photoUrl,
-      avatarUrl: contactData.avatarUrl,
-    });
-
-    // Update identity with latest platform data
+    const identityPatch = mapLinkedInConnectionToIdentity(connection, existingIdentity.contactId);
     db.update(contactIdentities)
       .set({
-        platformHandle: mapLinkedInConnectionToIdentity(connection, existingIdentity.contactId).platformHandle,
-        platformData: mapLinkedInConnectionToIdentity(connection, existingIdentity.contactId).platformData,
+        platformHandle: identityPatch.platformHandle,
+        platformUrl: identityPatch.platformUrl,
+        platformData: identityPatch.platformData,
+        headline: identityPatch.headline,
+        avatarUrl: identityPatch.avatarUrl,
         lastSyncedAt: Math.floor(Date.now() / 1000),
         updatedAt: Math.floor(Date.now() / 1000),
       })

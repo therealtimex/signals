@@ -1,7 +1,11 @@
 import {
   getContactById,
+  recalcEnrichment,
   updateContact,
 } from "@/lib/db/queries/contacts";
+import { db } from "@/lib/db/client";
+import { contactIdentities } from "@/lib/db/schema";
+import { eq } from "drizzle-orm";
 import {
   createWorkflowStep,
   nextStepIndex,
@@ -65,12 +69,26 @@ export async function enrichContact(
   // Fill gaps — only set if the contact field is currently empty
   if (!contact.company && data.company) { updates.company = data.company; fieldsUpdated.push("company"); }
   if (!contact.title && data.title) { updates.title = data.title; fieldsUpdated.push("title"); }
-  if (!contact.headline && data.headline) { updates.headline = data.headline; fieldsUpdated.push("headline"); }
   if (!contact.primaryEmail && data.email) { updates.email = data.email; fieldsUpdated.push("email"); }
   if (!contact.primaryPhone && data.phone) { updates.phone = data.phone; fieldsUpdated.push("phone"); }
-  if (!contact.location && data.location) { updates.location = data.location; fieldsUpdated.push("location"); }
-  if (!contact.website && data.website) { updates.website = data.website; fieldsUpdated.push("website"); }
-  if (!contact.bio && data.bio) { updates.bio = data.bio; fieldsUpdated.push("bio"); }
+
+  const identityPatch: Record<string, string> = {};
+  if (!contact.profile.headline && data.headline) {
+    identityPatch.headline = data.headline;
+    fieldsUpdated.push("headline");
+  }
+  if (!contact.profile.location && data.location) {
+    identityPatch.location = data.location;
+    fieldsUpdated.push("location");
+  }
+  if (!contact.profile.website && data.website) {
+    identityPatch.websiteUrl = data.website;
+    fieldsUpdated.push("website");
+  }
+  if (!contact.profile.bio && data.bio) {
+    identityPatch.bio = data.bio;
+    fieldsUpdated.push("bio");
+  }
 
   // Merge tags additively
   if (data.tags && data.tags.length > 0) {
@@ -99,8 +117,25 @@ export async function enrichContact(
 
   // Apply updates if any
   let newScore = previousScore;
-  if (fieldsUpdated.length > 0) {
+  if (Object.keys(identityPatch).length > 0) {
+    const primary =
+      contact.identities.find((identity) => identity.isPrimary) ?? contact.identities[0];
+    if (primary) {
+      db.update(contactIdentities)
+        .set({
+          ...identityPatch,
+          updatedAt: Math.floor(Date.now() / 1000),
+        })
+        .where(eq(contactIdentities.id, primary.id))
+        .run();
+    }
+  }
+  if (Object.keys(updates).length > 0) {
     const updated = updateContact(contactId, updates);
+    newScore = updated?.enrichmentScore ?? previousScore;
+  } else if (Object.keys(identityPatch).length > 0) {
+    recalcEnrichment(contactId);
+    const updated = getContactById(contactId);
     newScore = updated?.enrichmentScore ?? previousScore;
   }
 

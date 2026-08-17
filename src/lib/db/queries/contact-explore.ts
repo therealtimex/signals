@@ -11,7 +11,10 @@ import {
   orgs,
 } from "@/lib/db/schema";
 import { getOwnerContactId } from "@/lib/db/queries/contacts";
+import { loadContactAvatarUploadAssetId, resolveContactPrimaryEmail } from "@/lib/db/queries/contact-dto";
 import { getActivePersona } from "@/lib/db/queries/personas";
+import { resolveContactAvatar } from "@/lib/db/queries/resolve-contact-avatar";
+import { resolveContactProfile } from "@/lib/db/queries/resolve-contact-profile";
 import { isPersonaAgeStale } from "@/lib/persona/staleness";
 import type { ContactIdentity, IdentityMetric } from "@/lib/db/types";
 
@@ -465,9 +468,6 @@ export function getContactExploreCard(contactId: string): ContactExploreCard | u
     .select({
       id: contacts.id,
       name: contacts.name,
-      headline: contacts.headline,
-      avatarUrl: contacts.avatarUrl,
-      location: contacts.location,
     })
     .from(contacts)
     .where(eq(contacts.id, contactId))
@@ -488,14 +488,20 @@ export function getContactExploreCard(contactId: string): ContactExploreCard | u
   );
 
   const ownerId = getOwnerContactId();
+  const profile = resolveContactProfile({ identities: identityRows });
+  const avatarUrl = resolveContactAvatar({
+    avatarUploadAssetId: loadContactAvatarUploadAssetId(contactId),
+    identities: identityRows,
+    primaryEmail: resolveContactPrimaryEmail(contactId),
+  });
 
   return {
     contact: {
       id: contactRow.id,
       name: contactRow.name,
-      headline: contactRow.headline,
-      avatarUrl: contactRow.avatarUrl,
-      location: contactRow.location,
+      headline: profile.headline,
+      avatarUrl,
+      location: profile.location,
     },
     persona: buildPersonaProjection(contactId),
     identities,

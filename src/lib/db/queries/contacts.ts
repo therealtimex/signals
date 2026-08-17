@@ -40,6 +40,13 @@ export type ContactWriteExtras = {
   /** Stripped on write — use contact_identities */
   platform?: string | null;
   platformUserId?: string | null;
+  headline?: string | null;
+  bio?: string | null;
+  location?: string | null;
+  website?: string | null;
+  avatarUrl?: string | null;
+  photoUrl?: string | null;
+  profileUrl?: string | null;
 };
 
 export type EmploymentWriteExtras = Pick<
@@ -72,6 +79,13 @@ function stripContactWriteExtras<T extends ContactWriteExtras>(
     title: _title,
     platform: _plat,
     platformUserId: _puid,
+    headline: _headline,
+    bio: _bio,
+    location: _location,
+    website: _website,
+    avatarUrl: _avatarUrl,
+    photoUrl: _photoUrl,
+    profileUrl: _profileUrl,
     ...rest
   } = data;
   return rest;

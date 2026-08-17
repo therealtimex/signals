@@ -3,6 +3,7 @@ import { nanoid } from "nanoid";
 import { db, type DbRunner } from "@/lib/db/client";
 import { assertInteractionType } from "@/lib/db/interaction-types";
 import { touchContactLastInteraction } from "@/lib/db/queries/contact-interaction-projection";
+import { touchRelationshipLastMeaningfulInteraction } from "@/lib/db/queries/contact-relationship";
 import { interactions, mediaAssets, mediaAttachments } from "@/lib/db/schema";
 import type { Interaction, NewInteraction } from "@/lib/db/types";
 
@@ -115,6 +116,9 @@ export function logInteraction(input: LogInteractionInput): Interaction {
     }
     const interaction = tx.select().from(interactions).where(eq(interactions.id, id)).get()!;
     touchContactLastInteraction(input.contactId, interaction.occurredAt, tx);
+    if (interaction.isMeaningful) {
+      touchRelationshipLastMeaningfulInteraction(input.contactId, interaction.occurredAt, tx);
+    }
     return interaction;
   });
 }

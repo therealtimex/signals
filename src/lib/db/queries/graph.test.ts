@@ -350,6 +350,49 @@ describe("schema v0.5 migrations", () => {
     upgraded.close();
   });
 
+  it("drops avatar/profile scalars on P5/P7 while preserving identity profile fields", () => {
+    const dir = mkdtempSync(join(tmpdir(), "signals-migrate-p5p7-"));
+    const dbPath = join(dir, "data.db");
+    const sqlite = new Database(dbPath);
+    sqlite.pragma("foreign_keys = ON");
+
+    const migrationFiles = listMigrationSqlFiles();
+    const through0022 = migrationFiles.filter((file) => !file.startsWith("0023_"));
+    applyMigrationFiles(sqlite, through0022);
+
+    const contactId = nanoid();
+    const identityId = nanoid();
+    sqlite
+      .prepare(
+        `INSERT INTO contacts (
+          id, name, headline, avatar_url, photo_url, profile_url, bio, location, website,
+          funnel_stage, score, enrichment_score, created_at, updated_at
+        ) VALUES (?, 'Profile Subject', 'Builder', 'https://example.com/a.jpg', NULL, 'https://example.com/p', 'Bio', 'NYC', 'https://example.com', 'prospect', 0, 0, 1, 1)`,
+      )
+      .run(contactId);
+    sqlite
+      .prepare(
+        `INSERT INTO contact_identities (
+          id, contact_id, platform, platform_user_id, is_primary, is_active, created_at, updated_at
+        ) VALUES (?, ?, 'x', 'profile-subject', 1, 1, 1, 1)`,
+      )
+      .run(identityId, contactId);
+
+    applyMigrationFiles(
+      sqlite,
+      migrationFiles.filter((file) => file.startsWith("0023_")),
+    );
+    sqlite.close();
+
+    const upgraded = new Database(dbPath);
+    expect(columnExists(upgraded, "contacts", "headline")).toBe(false);
+    expect(columnExists(upgraded, "contacts", "avatar_url")).toBe(false);
+    expect(columnExists(upgraded, "contacts", "photo_url")).toBe(false);
+    expect(columnExists(upgraded, "contacts", "profile_url")).toBe(false);
+    expect(columnExists(upgraded, "contact_identities", "headline")).toBe(true);
+    upgraded.close();
+  });
+
   it("applies 0016 additively for N-1 databases (is_self column absent before upgrade)", () => {
     const dir = mkdtempSync(join(tmpdir(), "signals-migrate-n-1-is-self-"));
     const dbPath = join(dir, "data.db");
