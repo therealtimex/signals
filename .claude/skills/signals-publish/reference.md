@@ -51,7 +51,7 @@ Failure:
 
 ## Compose flow
 
-Opens `https://x.com/compose/post` (or home modal fallback). Focuses the Draft.js `contenteditable`, types via `keyboard type` (with `inserttext` / selector `type` fallbacks), and verifies `innerText` before waiting for the thread add button.
+Opens compose surface, then commits Draft.js text via keyboard type, eval `insertText`, clipboard paste, and legacy fallbacks; verifies editor text before thread add.
 
 ## Verification invariant (P6a port) (owned status ids + max snowflake) **before** compose.
 2. Post via compose UI.

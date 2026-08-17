@@ -98,6 +98,8 @@ function composeEditableSelectors(wrapperSelector) {
   return [
     `${wrapperSelector} [contenteditable="true"]`,
     `${wrapperSelector} div[role="textbox"]`,
+    `${wrapperSelector} [data-contents="true"]`,
+    `${wrapperSelector} .public-DraftEditor-content`,
     `${wrapperSelector} [data-testid*="RichText"]`,
     wrapperSelector,
   ];
@@ -107,7 +109,16 @@ function readComposeText(wrapperSelector) {
   const js = `(() => {
     const root = document.querySelector(${JSON.stringify(wrapperSelector)});
     if (!root) return JSON.stringify("");
-    return JSON.stringify(String(root.innerText || "").replace(/\\s+/g, " ").trim());
+    const editable =
+      root.querySelector('[contenteditable="true"]') ||
+      root.querySelector('[role="textbox"]') ||
+      root.querySelector('[data-contents="true"]') ||
+      root;
+    return JSON.stringify(
+      String(editable.innerText || editable.textContent || "")
+        .replace(/\\s+/g, " ")
+        .trim()
+    );
   })()`;
   const raw = abText(["eval", js]);
   const value = parseEvalJsonValue(raw);
@@ -123,7 +134,10 @@ function composeTextMatches(wrapperSelector, expected) {
 function focusComposeEditable(wrapperSelector, context) {
   for (const sel of composeEditableSelectors(wrapperSelector)) {
     if (abCount(sel) > 0) {
-      requireAb(["click", sel], `${context} focus editable`);
+      const focused = runAb(["focus", sel]);
+      if (!focused.ok) {
+        requireAb(["click", sel], `${context} focus editable`);
+      }
       return sel;
     }
   }
@@ -131,14 +145,14 @@ function focusComposeEditable(wrapperSelector, context) {
   return wrapperSelector;
 }
 
-function typeIntoComposeTextarea(wrapperSelector, text, context) {
-  focusComposeEditable(wrapperSelector, context);
-  const focusJs = `(() => {
+function focusComposeEditableEvalJs(wrapperSelector) {
+  return `(() => {
     const root = document.querySelector(${JSON.stringify(wrapperSelector)});
     if (!root) return JSON.stringify({ ok: false });
     const editable =
       root.querySelector('[contenteditable="true"]') ||
       root.querySelector('[role="textbox"]') ||
+      root.querySelector('[data-contents="true"]') ||
       root;
     editable.focus();
     return JSON.stringify({
@@ -147,10 +161,76 @@ function typeIntoComposeTextarea(wrapperSelector, text, context) {
         root.contains(document.activeElement),
     });
   })()`;
-  parseEvalJsonValue(abText(["eval", focusJs]));
+}
+
+function insertComposeTextViaEval(wrapperSelector, text) {
+  const js = `(() => {
+    const root = document.querySelector(${JSON.stringify(wrapperSelector)});
+    if (!root) return JSON.stringify({ ok: false, reason: "no_root" });
+    const editable =
+      root.querySelector('[contenteditable="true"]') ||
+      root.querySelector('[role="textbox"]') ||
+      root.querySelector('[data-contents="true"]') ||
+      root;
+    const payload = ${JSON.stringify(text)};
+    editable.focus();
+    try {
+      const selection = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(editable);
+      range.collapse(false);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    } catch {}
+    let inserted = false;
+    try {
+      inserted = document.execCommand("insertText", false, payload);
+    } catch {}
+    try {
+      editable.dispatchEvent(
+        new InputEvent("input", {
+          bubbles: true,
+          cancelable: true,
+          inputType: "insertText",
+          data: payload,
+        })
+      );
+      editable.dispatchEvent(new Event("change", { bubbles: true }));
+    } catch {}
+    const normalized = String(editable.innerText || editable.textContent || "")
+      .replace(/\\s+/g, " ")
+      .trim();
+    return JSON.stringify({ ok: inserted || normalized.length > 0, text: normalized });
+  })()`;
+  const raw = abText(["eval", js]);
+  const parsed = parseEvalJsonValue(raw);
+  if (!parsed) return false;
+  const needle = normalizeTweetText(text).slice(0, 80);
+  const actual = normalizeTweetText(String(parsed.text ?? ""));
+  return actual.includes(needle);
+}
+
+function insertComposeTextViaClipboard(wrapperSelector, text, context) {
+  focusComposeEditable(wrapperSelector, `${context} clipboard focus`);
+  requireAb(["clipboard", "write", text], `${context} clipboard write`);
+  requireAb(["clipboard", "paste"], `${context} clipboard paste`);
+}
+
+function typeIntoComposeTextarea(wrapperSelector, text, context) {
+  focusComposeEditable(wrapperSelector, context);
+  parseEvalJsonValue(abText(["eval", focusComposeEditableEvalJs(wrapperSelector)]));
 
   requireAb(["keyboard", "type", text], `${context} keyboard type`);
   sleep(400);
+
+  if (!composeTextMatches(wrapperSelector, text) && insertComposeTextViaEval(wrapperSelector, text)) {
+    sleep(400);
+  }
+
+  if (!composeTextMatches(wrapperSelector, text)) {
+    insertComposeTextViaClipboard(wrapperSelector, text, context);
+    sleep(400);
+  }
 
   if (!composeTextMatches(wrapperSelector, text)) {
     focusComposeEditable(wrapperSelector, `${context} refocus`);

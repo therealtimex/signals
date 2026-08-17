@@ -218,12 +218,29 @@ function handleEval(rest, state) {
   if (js.includes("contenteditable") && js.includes("activeElement")) {
     return ok(JSON.stringify(JSON.stringify({ ok: true })));
   }
-  if (js.includes("tweetTextarea_") && js.includes("root.innerText")) {
+  if (js.includes("tweetTextarea_") && (js.includes("innerText") || js.includes("textContent"))) {
     const match = js.match(/tweetTextarea_(\d+)/);
     const index = match ? Number(match[1]) : 0;
     const text =
       state.composedTextByIndex?.[index] ?? (index === 0 ? state.mainTweetText : "") ?? "";
     return ok(JSON.stringify(JSON.stringify(text)));
+  }
+  if (js.includes("execCommand") && js.includes("insertText")) {
+    const marker = "const payload = ";
+    const idx = js.indexOf(marker);
+    if (idx >= 0) {
+      try {
+        const slice = js.slice(idx + marker.length);
+        const end = slice.indexOf(";");
+        const text = JSON.parse(slice.slice(0, end).trim());
+        const index = state.activeTextareaIndex ?? 0;
+        recordTypedText(state, `tweetTextarea_${index}`, text);
+        const normalized = String(text).replace(/\s+/g, " ").trim();
+        return ok(JSON.stringify(JSON.stringify({ ok: true, text: normalized })));
+      } catch {
+        return ok(JSON.stringify(JSON.stringify({ ok: false, text: "" })));
+      }
+    }
   }
   return ok("null");
 }
@@ -269,6 +286,14 @@ if (cmd === "open") {
   return ok();
 }
 if (cmd === "wait") return ok();
+if (cmd === "focus") return ok();
+if (cmd === "clipboard") {
+  if (rest[1] === "write") {
+    const text = rest[2] ?? "";
+    recordTypedText(state, `tweetTextarea_${state.activeTextareaIndex ?? 0}`, text);
+  }
+  return ok();
+}
 if (cmd === "click") {
   const selector = rest[1] ?? "";
   if (
@@ -307,8 +332,10 @@ if (cmd === "keyboard") {
   const sub = rest[1] ?? "";
   const text = rest.slice(2).join(" ");
   if (sub === "type" || sub === "inserttext") {
-    const index = state.activeTextareaIndex ?? 0;
-    recordTypedText(state, `tweetTextarea_${index}`, text);
+    if (process.env.FAKE_AB_SKIP_KEYBOARD !== "1") {
+      const index = state.activeTextareaIndex ?? 0;
+      recordTypedText(state, `tweetTextarea_${index}`, text);
+    }
   }
   return ok();
 }

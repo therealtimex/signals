@@ -109,4 +109,20 @@ if (!focusPayload?.ok) {
   process.exit(1);
 }
 
+// Eval insert path when keyboard type does not commit (fake simulates live Draft.js)
+const evalInsert = runXPublish(
+  { text: "thread tweet one", threadTexts: ["thread tweet two"] },
+  { FAKE_AB_SKIP_KEYBOARD: "1" },
+  ["--dry-run"]
+);
+if (evalInsert.status !== 0) {
+  console.error("eval insert path failed:", evalInsert.stdout, evalInsert.stderr);
+  process.exit(1);
+}
+const evalInsertJson = lastJson(evalInsert.stdout);
+if (!evalInsertJson.success || !evalInsertJson.dryRun) {
+  console.error("unexpected eval insert dry-run result:", evalInsertJson);
+  process.exit(1);
+}
+
 console.log("x-publish agent-browser adapter: OK");
