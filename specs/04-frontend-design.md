@@ -216,17 +216,16 @@ className="animate-fade-slide-in"
 2. **Platform Connections** — X, LinkedIn, Gmail via `PlatformConnectionCard` (`showSync={false}`)
    - Connect / reconnect / disconnect and connection status badges (connected/needs_reauth/disconnected)
    - Granted permissions (collapsible scope display)
-   - No sync triggers on this page — sync and import run from **Automation → Actions**
+   - No sync triggers on this page — sync and import run from **Automation → Workflows**
 3. **Browser Sessions** — X and LinkedIn publish/engage sessions (setup, validate, clear). Profile enrichment delegates to RealTimeX Browser + agent-browser (not in-app Playwright scraping).
 4. **Search providers** — Serper and Tavily API key configuration
 
 ### Automation (`/dashboard/workflows`)
 
-- Server-rendered hub with `AutomationTabs`: **Agents**, **Actions**, **Runs**
-- **Agents tab**: RTX migration banner, `TemplateGallery`, `ScheduledJobsList`
-- **Actions tab**: `ActionCards` — platform sync (X posts/mentions/contacts, LinkedIn profiles, Gmail contacts), LinkedIn CSV import, Gmail metadata sync, and RTX-labeled enrich actions with migration guidance; connection gate bypass for enrich cards
-- **Runs tab**: `WorkflowViewSwitcher` — list / kanban / swimlane views with URL param `?view=list|kanban|swimlane`
-- Empty state when no runs exist; populated by platform sync, RTX-reported agent runs, and maintenance jobs
+- Server-rendered hub with `AutomationTabs`: **Workflows** (default), **Runs** (legacy `?tab=agents` / `?tab=actions` params resolve to Workflows)
+- **Workflows tab**: RTX migration banner, then `ActionCards` (Platform Workflows — platform sync, LinkedIn CSV/zip import with last-run stats and re-import messaging, Gmail metadata sync, RTX-labeled enrich actions with migration guidance; connection gate bypass for enrich and upload cards), `TemplateGallery` (Agent Workflows), and `ScheduledJobsList`
+- **Runs tab**: `WorkflowViewSwitcher` — list / kanban / swimlane views with URL param `?view=list|kanban|swimlane`; rows carry a workflow-type badge, and file imports appear as `import` runs with file name
+- Empty state when no runs exist; populated by platform sync, file imports, RTX-reported agent runs, and maintenance jobs
 - View components: `WorkflowListView` (table), `WorkflowKanbanView` (4-column status board), `WorkflowSwimlaneView` (horizontal type lanes)
 
 ### Workflow Detail (`/dashboard/workflows/[id]`)
@@ -263,7 +262,7 @@ className="animate-fade-slide-in"
 | `ContactExploreCardView` | `contact-explore-card.tsx` | Audience tab — persona, platform stats, niche chips (server-provided `explore` prop) |
 | `ComposeDialog` | `compose-dialog.tsx` | Multi-platform compose modal (X + LinkedIn, draft + publish) |
 | `PostInput` | `post-input.tsx` | Auto-resize textarea with platform-aware char counter and media attachments |
-| `ActionCards` | `dashboard/workflows/action-cards.tsx` | Automation Actions tab — sync/enrich/upload cards per platform |
+| `ActionCards` | `dashboard/workflows/action-cards.tsx` | Automation Workflows tab — sync/enrich/upload cards per platform |
 | `PaginationControls` | `pagination-controls.tsx` | Page navigation with windowed numbers |
 | `EmptyState` | `empty-state.tsx` | Centered icon + title + CTA |
 | `WorkflowProgressCard` | `workflow-progress-card.tsx` | Card with type icon (6 types), progress bar, stats |

@@ -1,8 +1,14 @@
 # Agents & Actions — Automation Restructure
 
-> Renames "Workflows" to "Automation" with three tabs: Agents, Actions, and Runs.
-> Moves sync/import operations out of Content and Settings into a centralized Actions tab.
-> UI-only changes -- no schema modifications.
+> Renames "Workflows" to "Automation" with two tabs: **Workflows** and **Runs**.
+> Moves sync/import operations out of Content and Settings into the Workflows tab.
+>
+> **Revised (issue #128):** the original three-tab layout (Agents / Actions / Runs)
+> is merged into two tabs. Users don't distinguish "run an agent template" from
+> "sync LinkedIn" or "upload an export" — both are automation work. Platform action
+> cards, the agent template gallery, and scheduled jobs now live together on the
+> **Workflows** tab; **Runs** shows all execution history, including file imports
+> persisted as `workflow_runs` rows with `workflow_type: "import"`.
 >
 > See [`09-multi-channel-content.md`](./09-multi-channel-content.md) for the Content page
 > cleanup that pairs with this restructure.
@@ -40,21 +46,23 @@ Schema tables (`workflowTemplates`, `workflowTemplateSteps`, etc.) are **not ren
 
 ---
 
-## 3. Three-Tab Automation Page
+## 3. Two-Tab Automation Page
 
 Replace the current single-page layout with a tabbed interface.
 
 ### 3.1 Tab Structure
 
 ```
-[Agents]  [Actions]  [Runs]
+[Workflows]  [Runs]
 ```
 
 | Tab | Content | Source |
 |-----|---------|--------|
-| **Agents** | Agent Gallery (renamed from Template Gallery) + Scheduled Jobs list | Existing `template-gallery.tsx` + `scheduled-jobs-list.tsx` |
-| **Actions** | Action Cards grid for manual sync/import operations | New component (see section 4) |
-| **Runs** | Workflow run history (list/kanban/swimlane/graph views) | Existing `workflow-view-switcher.tsx` |
+| **Workflows** | Platform action cards (sync + import, grouped by platform) + agent template gallery + scheduled jobs list | `action-cards.tsx` + `template-gallery.tsx` + `scheduled-jobs-list.tsx` |
+| **Runs** | Workflow run history (list/kanban/swimlane views) over `workflow_runs`, including sync, import, and agent runs | Existing `workflow-view-switcher.tsx` |
+
+Legacy URL params map onto the merged layout: `?tab=agents` and `?tab=actions`
+resolve to **Workflows** (the default); `?tab=runs` keeps working.
 
 ### 3.2 Page Layout
 
@@ -72,10 +80,9 @@ export default function AutomationPage() {
         </div>
         <WorkflowQuickActions />
       </div>
-      <Tabs defaultValue="agents">
+      <Tabs defaultValue="workflows">
         <TabsList>
-          <TabsTrigger value="agents">Agents</TabsTrigger>
-          <TabsTrigger value="actions">Actions</TabsTrigger>
+          <TabsTrigger value="workflows">Workflows</TabsTrigger>
           <TabsTrigger value="runs">Runs</TabsTrigger>
         </TabsList>
         {/* Tab content panels */}
@@ -85,7 +92,7 @@ export default function AutomationPage() {
 }
 ```
 
-Default tab: **Agents** (most common entry point).
+Default tab: **Workflows** (most common entry point).
 
 ---
 
@@ -93,7 +100,8 @@ Default tab: **Agents** (most common entry point).
 
 New component: `src/app/dashboard/automation/action-cards.tsx`
 
-Displays all manual sync/import operations as a grid of cards, grouped by platform.
+Displays all manual sync/import operations as a grid of cards, grouped by platform,
+in the **Platform Workflows** section of the Workflows tab.
 
 ### 4.1 Card Structure
 
@@ -143,7 +151,7 @@ Cards use `grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4`. Platform group
 
 The action definitions already exist in `workflow-quick-actions.tsx` as the `SYNC_ACTIONS` array. The Action Cards component reuses the same endpoints and request bodies, just presented as cards instead of a dropdown menu.
 
-The `WorkflowQuickActions` dropdown remains in the page header as a quick-launch shortcut. The Actions tab provides the full, visible grid.
+The `WorkflowQuickActions` dropdown remains in the page header as a quick-launch shortcut. The Workflows tab provides the full, visible grid.
 
 ---
 
@@ -164,7 +172,7 @@ The Settings page (`src/app/dashboard/settings/page.tsx`) currently mixes platfo
 - Browser session management
 - Data export/import
 
-Settings becomes config-only. All trigger actions live on the Automation > Actions tab.
+Settings becomes config-only. All trigger actions live on the Automation → Workflows tab.
 
 ---
 
@@ -201,4 +209,23 @@ Tool names (`query_workflows`, `start_workflow`) stay the same for backward comp
 | `src/lib/chat/system-prompt.ts` | Update page references |
 | `src/lib/chat/smart-prompts.ts` | Update prompt labels |
 
-No schema changes. No new tables. No migration needed.
+No new tables. The `workflow_runs.workflow_type` enum gains an `"import"` value
+(TypeScript-only — the column is plain `text` with no CHECK constraint, so no
+migration is needed).
+
+---
+
+## 8. Import UX and Run Persistence (issue #128)
+
+LinkedIn is the first import hub surface:
+
+- The **Import Connections Export** card on Workflows accepts `.csv` / `.zip`
+  (Basic Data Export) uploads and works without a connected LinkedIn account.
+- Successful and failed file imports are recorded as `workflow_runs` rows with
+  `workflow_type: "import"`, config `{ importSubType, platform, source, fileName }`,
+  and the `SyncResult` JSON in `result` (see `src/lib/workflows/record-import-run.ts`).
+- The latest import run drives last-run stats on the card (added / updated /
+  skipped, relative timestamp, source, file name) via `importStats` on
+  `GET /api/platforms/linkedin` — not `sync_cursors`.
+- Re-import is idempotent (dedup by LinkedIn identity), and the card says so.
+- Import runs appear in Runs with an **Import** type badge and the file name.

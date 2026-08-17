@@ -101,6 +101,7 @@ export function listWorkflowRuns(opts?: {
         workflowRuns.workflowType,
         opts.workflowType as
           | "sync"
+          | "import"
           | "enrich"
           | "search"
           | "prune"
@@ -138,6 +139,28 @@ export function listWorkflowRuns(opts?: {
     .all();
 
   return { data, total };
+}
+
+/**
+ * Latest file-import run for a platform (config.platform), regardless of
+ * status. Drives last-run stats on the Workflows import card.
+ */
+export function getLatestImportRun(platform: string): WorkflowRun | undefined {
+  const runs = db
+    .select()
+    .from(workflowRuns)
+    .where(eq(workflowRuns.workflowType, "import"))
+    .orderBy(desc(workflowRuns.createdAt), desc(workflowRuns.startedAt))
+    .limit(50)
+    .all();
+
+  return runs.find((run) => {
+    try {
+      return JSON.parse(run.config ?? "{}").platform === platform;
+    } catch {
+      return false;
+    }
+  });
 }
 
 // ── Workflow Steps ─────────────────────────────

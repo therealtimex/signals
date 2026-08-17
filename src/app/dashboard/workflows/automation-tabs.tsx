@@ -14,12 +14,17 @@ import { Zap, Info } from "lucide-react";
 import type { WorkflowRun } from "@/lib/db/types";
 
 const TABS = [
-  { key: "agents", label: "Agents" },
-  { key: "actions", label: "Actions" },
+  { key: "workflows", label: "Workflows" },
   { key: "runs", label: "Runs" },
 ] as const;
 
 type TabKey = (typeof TABS)[number]["key"];
+
+/** Map legacy tab params (agents, actions) onto the merged Workflows tab. */
+function resolveTab(param: string | null): TabKey {
+  if (param === "runs") return "runs";
+  return "workflows";
+}
 
 interface AutomationTabsProps {
   runs: WorkflowRun[];
@@ -29,11 +34,11 @@ interface AutomationTabsProps {
 function AutomationTabsInner({ runs, totalRuns }: AutomationTabsProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const activeTab = (searchParams.get("tab") as TabKey) || "agents";
+  const activeTab = resolveTab(searchParams.get("tab"));
 
   function setTab(tab: TabKey) {
     const params = new URLSearchParams(searchParams.toString());
-    if (tab === "agents") {
+    if (tab === "workflows") {
       params.delete("tab");
     } else {
       params.set("tab", tab);
@@ -63,8 +68,8 @@ function AutomationTabsInner({ runs, totalRuns }: AutomationTabsProps) {
       </div>
 
       {/* Tab content */}
-      {activeTab === "agents" && (
-        <div className="space-y-6">
+      {activeTab === "workflows" && (
+        <div className="space-y-8">
           <Card className="border-border/50 bg-muted/30 p-4 text-sm text-muted-foreground">
             <div className="flex gap-3">
               <Info className="mt-0.5 h-4 w-4 shrink-0" />
@@ -76,13 +81,29 @@ function AutomationTabsInner({ runs, totalRuns }: AutomationTabsProps) {
               </p>
             </div>
           </Card>
-          <TemplateGallery />
+
+          <section className="space-y-3">
+            <div>
+              <h2 className="text-lg font-semibold">Platform Workflows</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Sync and import data from connected platforms and file exports.
+              </p>
+            </div>
+            <ActionCards />
+          </section>
+
+          <section className="space-y-3">
+            <div>
+              <h2 className="text-lg font-semibold">Agent Workflows</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Agent templates for search, enrichment, content, and engagement.
+              </p>
+            </div>
+            <TemplateGallery />
+          </section>
+
           <ScheduledJobsList />
         </div>
-      )}
-
-      {activeTab === "actions" && (
-        <ActionCards />
       )}
 
       {activeTab === "runs" && (
@@ -92,7 +113,7 @@ function AutomationTabsInner({ runs, totalRuns }: AutomationTabsProps) {
               <EmptyState
                 icon={Zap}
                 title="No runs yet"
-                description="Runs are created when you execute agents or sync actions."
+                description="Runs are created when you run agents, sync platforms, or import files."
               />
             </Card>
           ) : (

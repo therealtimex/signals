@@ -8,6 +8,7 @@ import {
   Megaphone,
   Bot,
   ArrowLeft,
+  Upload,
 } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -15,11 +16,16 @@ import { WorkflowRunLive } from "./workflow-run-live";
 
 const TYPE_ICONS: Record<string, typeof RefreshCw> = {
   sync: RefreshCw,
+  import: Upload,
   enrich: Sparkles,
   search: Search,
   prune: Trash2,
   sequence: Megaphone,
   agent: Bot,
+};
+
+const IMPORT_SUBTYPE_LABELS: Record<string, string> = {
+  linkedin_connections: "LinkedIn Connections Import",
 };
 
 const SYNC_SUBTYPE_LABELS: Record<string, string> = {
@@ -56,7 +62,10 @@ export default async function WorkflowDetailPage({
   let title = run.workflowType.charAt(0).toUpperCase() + run.workflowType.slice(1) + " Workflow";
   try {
     const config = JSON.parse(run.config ?? "{}");
-    if (config.syncSubType && SYNC_SUBTYPE_LABELS[config.syncSubType]) {
+    if (config.importSubType && run.workflowType === "import") {
+      title = IMPORT_SUBTYPE_LABELS[config.importSubType] ?? "File Import";
+      if (config.fileName) title += ` — ${config.fileName}`;
+    } else if (config.syncSubType && SYNC_SUBTYPE_LABELS[config.syncSubType]) {
       title = SYNC_SUBTYPE_LABELS[config.syncSubType];
     } else if (config.templateName) {
       title = config.templateName;

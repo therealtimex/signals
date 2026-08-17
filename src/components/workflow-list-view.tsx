@@ -22,12 +22,14 @@ import {
   Loader2,
   Pause,
   Ban,
+  Upload,
 } from "lucide-react";
 import Link from "next/link";
 import type { WorkflowRun } from "@/lib/db/types";
 
 const TYPE_ICONS: Record<string, typeof RefreshCw> = {
   sync: RefreshCw,
+  import: Upload,
   enrich: Sparkles,
   search: Search,
   prune: Trash2,
@@ -37,6 +39,7 @@ const TYPE_ICONS: Record<string, typeof RefreshCw> = {
 
 const TYPE_LABELS: Record<string, string> = {
   sync: "Sync",
+  import: "Import",
   enrich: "Enrich",
   search: "Search",
   prune: "Prune",
@@ -76,6 +79,24 @@ const SYNC_SUBTYPE_LABELS: Record<string, string> = {
   gmail_metadata: "Gmail Metadata",
   linkedin_contacts: "LinkedIn",
 };
+
+const IMPORT_SUBTYPE_LABELS: Record<string, string> = {
+  linkedin_connections: "LinkedIn Import",
+};
+
+/** Display info for file-import runs (platform label + file name when available). */
+function parseImportInfo(run: WorkflowRun): { label: string; fileName: string | null } | null {
+  if (run.workflowType !== "import") return null;
+  try {
+    const config = JSON.parse(run.config ?? "{}");
+    return {
+      label: IMPORT_SUBTYPE_LABELS[config.importSubType] ?? "File Import",
+      fileName: config.fileName ?? null,
+    };
+  } catch {
+    return { label: "File Import", fileName: null };
+  }
+}
 
 function parseSyncSubType(run: WorkflowRun): string | null {
   try {
@@ -153,8 +174,8 @@ export function WorkflowListView({ runs }: { runs: WorkflowRun[] }) {
             const subLabel = subType ? (SYNC_SUBTYPE_LABELS[subType] ?? null) : null;
             const templateName = parseTemplateName(run);
             const templateCategory = parseTemplateCategory(run);
-            const displayName = subLabel ?? templateName ?? (TYPE_LABELS[run.workflowType] ?? run.workflowType);
-            const hasSecondaryLabel = !!(subLabel || templateName);
+            const importInfo = parseImportInfo(run);
+            const displayName = importInfo?.label ?? subLabel ?? templateName ?? (TYPE_LABELS[run.workflowType] ?? run.workflowType);
             // Use templateCategory for the type badge (e.g. "Content" instead of "Agent")
             const typeLabel = (templateCategory ? CATEGORY_LABELS[templateCategory] : null)
               ?? TYPE_LABELS[run.workflowType] ?? run.workflowType;
@@ -175,9 +196,12 @@ export function WorkflowListView({ runs }: { runs: WorkflowRun[] }) {
                     <span className="text-sm font-medium">
                       {displayName}
                     </span>
-                    {hasSecondaryLabel && (
-                      <span className="text-xs text-muted-foreground ml-2">
-                        {typeLabel}
+                    <Badge variant="outline" className="ml-2 px-1.5 py-0 text-[10px] font-normal align-middle">
+                      {typeLabel}
+                    </Badge>
+                    {importInfo?.fileName && (
+                      <span className="text-xs text-muted-foreground ml-2 break-all">
+                        {importInfo.fileName}
                       </span>
                     )}
                   </Link>

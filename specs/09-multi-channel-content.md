@@ -184,7 +184,7 @@ The "Import Tweets" and "Import Mentions" buttons currently live in the content 
 - Keep only the **Compose** button in the toolbar.
 - Remove the sync result display card below the toolbar.
 
-The sync functionality itself (API routes, query functions) is untouched -- it moves to the Actions tab on the Automation page.
+The sync functionality itself (API routes, query functions) is untouched -- it moves to the Workflows tab on the Automation page.
 
 ---
 

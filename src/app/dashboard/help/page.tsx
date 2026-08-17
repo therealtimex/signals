@@ -692,7 +692,7 @@ LINKEDIN_CLIENT_SECRET="your-linkedin-client-secret"`}</CodeBlock>
                 href="/dashboard/workflows"
                 className="text-primary underline underline-offset-2"
               >
-                Workflows
+                Automation &rarr; Workflows
               </Link>
               , find{" "}
               <strong className="text-foreground">Import Connections Export</strong>{" "}
@@ -705,7 +705,9 @@ LINKEDIN_CLIENT_SECRET="your-linkedin-client-secret"`}</CodeBlock>
             name, company, position, connected date, and email (if the
             connection shared it). Upload the full zip — Signals extracts{" "}
             <strong className="text-foreground">Connections.csv</strong>{" "}
-            automatically. No LinkedIn API access is needed.
+            automatically. No LinkedIn API access is needed. Re-importing is
+            safe: existing contacts are updated, not duplicated, and each
+            import is recorded under Automation &rarr; Runs.
           </div>
         </CardContent>
       </Card>

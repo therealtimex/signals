@@ -88,6 +88,17 @@ const PLATFORM_GROUPS = ["x", "linkedin", "gmail"] as const;
 
 type SyncStat = { totalSynced: number; lastSyncedAt: number | null };
 
+/** Last-run stats for a file import card, from the latest import workflow run. */
+type ImportStats = {
+  status: string;
+  added: number;
+  updated: number;
+  skipped: number;
+  lastRunAt: number;
+  source: "csv" | "zip" | null;
+  fileName: string | null;
+};
+
 type PlatformStatus = {
   connected: boolean;
   loading: boolean;
@@ -97,6 +108,7 @@ type PlatformStatus = {
   contactsWithEmailCount: number;
   googleContactCount: number | null;
   syncStats: Record<string, SyncStat>;
+  importStats: ImportStats | null;
 };
 
 /** Per-action restriction: reason text, optional navigation target, and whether the button is disabled (no nav target). */
@@ -187,9 +199,9 @@ export function ActionCards() {
 
   // Connection status for each platform (expanded with capability data)
   const [platformStatus, setPlatformStatus] = useState<Record<string, PlatformStatus>>({
-    x: { connected: false, loading: true, syncCapable: false, grantedScopes: "", hasBrowserSession: false, contactsWithEmailCount: 999, googleContactCount: null, syncStats: {} },
-    linkedin: { connected: false, loading: true, syncCapable: false, grantedScopes: "", hasBrowserSession: false, contactsWithEmailCount: 999, googleContactCount: null, syncStats: {} },
-    gmail: { connected: false, loading: true, syncCapable: false, grantedScopes: "", hasBrowserSession: false, contactsWithEmailCount: 999, googleContactCount: null, syncStats: {} },
+    x: { connected: false, loading: true, syncCapable: false, grantedScopes: "", hasBrowserSession: false, contactsWithEmailCount: 999, googleContactCount: null, syncStats: {}, importStats: null },
+    linkedin: { connected: false, loading: true, syncCapable: false, grantedScopes: "", hasBrowserSession: false, contactsWithEmailCount: 999, googleContactCount: null, syncStats: {}, importStats: null },
+    gmail: { connected: false, loading: true, syncCapable: false, grantedScopes: "", hasBrowserSession: false, contactsWithEmailCount: 999, googleContactCount: null, syncStats: {}, importStats: null },
   });
 
   useEffect(() => {
@@ -224,6 +236,7 @@ export function ActionCards() {
           contactsWithEmailCount: 999,
           googleContactCount: null,
           syncStats: xSyncStats,
+          importStats: null,
         },
         linkedin: {
           connected: !!liData.connected,
@@ -234,6 +247,7 @@ export function ActionCards() {
           contactsWithEmailCount: 999,
           googleContactCount: null,
           syncStats: liData.syncStats ?? {},
+          importStats: liData.importStats ?? null,
         },
         gmail: {
           connected: !!gmData.connected,
@@ -244,6 +258,7 @@ export function ActionCards() {
           contactsWithEmailCount: gmData.contactsWithEmailCount ?? 0,
           googleContactCount: gmData.googleContactCount ?? null,
           syncStats: gmData.syncStats ?? {},
+          importStats: null,
         },
       });
     });
@@ -329,10 +344,27 @@ export function ActionCards() {
 
       const added = data.result?.added ?? 0;
       const updated = data.result?.updated ?? 0;
+      const skipped = data.result?.skipped ?? 0;
       setResult({
         id: action.id,
-        message: `Import complete. Added: ${added}, Updated: ${updated}`,
+        message: `Import complete. Added: ${added}, Updated: ${updated}, Skipped: ${skipped}`,
       });
+      // Reflect the new last-run stats on the import card without a refetch
+      setPlatformStatus((prev) => ({
+        ...prev,
+        [action.platform]: {
+          ...prev[action.platform],
+          importStats: {
+            status: "completed",
+            added,
+            updated,
+            skipped,
+            lastRunAt: Math.floor(Date.now() / 1000),
+            source: data.source ?? null,
+            fileName: file.name,
+          },
+        },
+      }));
       router.refresh();
     } catch {
       setError("Import failed");
@@ -448,19 +480,45 @@ export function ActionCards() {
                         {action.description}
                       </p>
 
-                      {(() => {
-                        const stats = getActionStats(action.id, status.syncStats);
-                        if (!stats) return null;
-                        const mapping = ACTION_STAT_MAP[action.id];
-                        return (
-                          <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                            <span>{stats.total} {mapping.label}</span>
-                            {stats.lastSyncedAt && (
-                              <span>Last: {formatRelativeTime(stats.lastSyncedAt)}</span>
-                            )}
-                          </div>
-                        );
-                      })()}
+                      {action.type === "upload" ? (
+                        (() => {
+                          const stats = status.importStats;
+                          if (!stats) return null;
+                          return (
+                            <div className="space-y-1 text-xs text-muted-foreground">
+                              {stats.status === "failed" ? (
+                                <p className="text-destructive">Last import failed</p>
+                              ) : (
+                                <p>
+                                  {stats.added} added · {stats.updated} updated · {stats.skipped} skipped
+                                </p>
+                              )}
+                              <p>
+                                Last: {formatRelativeTime(stats.lastRunAt)}
+                                {stats.source && <> · {stats.source.toUpperCase()}</>}
+                                {stats.fileName && (
+                                  <> · <span className="break-all">{stats.fileName}</span></>
+                                )}
+                              </p>
+                              <p>Safe to run again — existing contacts are updated, not duplicated.</p>
+                            </div>
+                          );
+                        })()
+                      ) : (
+                        (() => {
+                          const stats = getActionStats(action.id, status.syncStats);
+                          if (!stats) return null;
+                          const mapping = ACTION_STAT_MAP[action.id];
+                          return (
+                            <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                              <span>{stats.total} {mapping.label}</span>
+                              {stats.lastSyncedAt && (
+                                <span>Last: {formatRelativeTime(stats.lastSyncedAt)}</span>
+                              )}
+                            </div>
+                          );
+                        })()
+                      )}
 
                       {restriction && (
                         <p className="text-xs text-amber-600 dark:text-amber-400">
@@ -499,6 +557,8 @@ export function ActionCards() {
                           restrictionNavigateTo: restriction?.navigateTo,
                           hasRestriction: !!restriction,
                           isRunning,
+                          isUpload: action.type === "upload",
+                          hasImportHistory: !!status.importStats,
                         })}
                       </Button>
                     </CardContent>

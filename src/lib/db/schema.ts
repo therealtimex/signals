@@ -496,7 +496,7 @@ export const workflowRuns = sqliteTable("workflow_runs", {
   id: text("id").primaryKey(),
   templateId: text("template_id").references(() => workflowTemplates.id),
   workflowType: text("workflow_type", {
-    enum: ["sync", "enrich", "search", "prune", "sequence", "agent", "simulate", "calibrate", "persona"],
+    enum: ["sync", "import", "enrich", "search", "prune", "sequence", "agent", "simulate", "calibrate", "persona"],
   }).notNull(),
   platformAccountId: text("platform_account_id").references(() => platformAccounts.id),
   status: text("status", {

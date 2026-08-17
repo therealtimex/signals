@@ -39,4 +39,31 @@ describe("action-cards utils", () => {
       })
     ).toBe("Connect first");
   });
+
+  it("does not require connection for upload actions", () => {
+    expect(
+      actionNeedsPlatformConnection("li-import-csv", "upload", false, false)
+    ).toBe(false);
+  });
+
+  it("labels upload cards by import history", () => {
+    expect(
+      getActionRunButtonLabel("li-import-csv", {
+        needsConnection: false,
+        hasRestriction: false,
+        isRunning: false,
+        isUpload: true,
+        hasImportHistory: false,
+      })
+    ).toBe("Upload export");
+    expect(
+      getActionRunButtonLabel("li-import-csv", {
+        needsConnection: false,
+        hasRestriction: false,
+        isRunning: false,
+        isUpload: true,
+        hasImportHistory: true,
+      })
+    ).toBe("Import again");
+  });
 });
