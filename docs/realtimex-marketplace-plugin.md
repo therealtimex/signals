@@ -32,11 +32,10 @@ npm run test:plugin-package
 
 | Workflow | When | What |
 |----------|------|------|
-| `.github/workflows/ci.yml` | PR + `main` | App quality gate + Playwright smoke |
-| `.github/workflows/plugin-release.yml` (`plugin-package`) | PR + `main` | Standalone zip, plugin zip, `test:plugin-package` |
-| `.github/workflows/plugin-release.yml` (`release`) | Push to `main` or tag `v*` | Publish GitHub Release when `package.json` version is new |
+| `.github/workflows/ci.yml` | PR + `main` + tag `v*` | React Doctor, app quality gate, integration smoke, and marketplace bundle validation |
+| `.github/workflows/ci.yml` (`release`) | Push to `main` or tag `v*` | After every gate passes, publish the verified artifacts when `package.json` version is new |
 
-**Release on merge (recommended):** bump `package.json` and `realtimex-plugin/realtimex.plugin.json` to the same version in your PR. After merge to `main`, the `release` job compares that version to the latest GitHub Release. If it is newer and no `vX.Y.Z` release exists yet, CI builds artifacts and creates the release (tag `vX.Y.Z` is created automatically). Docs-only or CI-only merges without a version bump do not publish.
+**Release on merge (recommended):** bump `package.json` and `realtimex-plugin/realtimex.plugin.json` to the same version in your PR. After merge to `main`, the `release` job waits for React Doctor, the quality gate, integration smoke tests, and marketplace package validation. If the version is newer and no `vX.Y.Z` release exists yet, it publishes the artifacts produced by the verified marketplace-bundle job (tag `vX.Y.Z` is created automatically). Docs-only or CI-only merges without a version bump do not publish.
 
 **Manual tag (optional):** pushing `vX.Y.Z` still triggers the same `release` job when the tag matches `package.json` and the release does not already exist.
 
