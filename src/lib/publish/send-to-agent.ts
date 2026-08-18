@@ -14,6 +14,7 @@ import {
   getSignalsRtxWorkspaceSlug,
 } from "@/lib/rtx/cli-provisioning";
 import { isRtxEmbedded } from "@/lib/rtx/env";
+import { resolveSignalsBaseUrlFromEnv } from "@/lib/rtx/resolve-signals-base-url";
 import {
   buildPublishAgentInitialMessage,
   launchTerminalCliAgent,
@@ -26,6 +27,8 @@ export type SendToAgentInput = {
   platforms: PublishPlatformTarget[];
   text: string;
   mediaAssetIds?: string[];
+  /** Base URL of the running Signals instance (derive from the incoming HTTP request). */
+  signalsBaseUrl?: string;
 };
 
 export type SendToAgentResult =
@@ -42,11 +45,6 @@ export type SendToAgentResult =
       errorCode: string;
       httpStatus: number;
     };
-
-function resolveSignalsBaseUrl(env: NodeJS.ProcessEnv = process.env): string {
-  const port = env.PORT?.trim() || "3010";
-  return `http://127.0.0.1:${port}`;
-}
 
 export async function sendContentToAgent(
   input: SendToAgentInput,
@@ -112,12 +110,14 @@ export async function sendContentToAgent(
       fetchImpl
     );
 
+    const signalsBaseUrl = input.signalsBaseUrl ?? resolveSignalsBaseUrlFromEnv(env);
+
     const message = buildPublishAgentInitialMessage({
       jobId: job.id,
       contentItemId: input.contentItemId,
       title: item.title,
       platforms: input.platforms,
-      signalsBaseUrl: resolveSignalsBaseUrl(env),
+      signalsBaseUrl,
     });
 
     const launch = await launchTerminalCliAgent(

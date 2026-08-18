@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { sendContentToAgent } from "@/lib/publish/send-to-agent";
+import { resolveSignalsBaseUrlFromRequest } from "@/lib/rtx/resolve-signals-base-url";
 
 const sendToAgentSchema = z.object({
   contentItemId: z.string(),
@@ -20,7 +21,10 @@ export async function POST(req: Request) {
       );
     }
 
-    const result = await sendContentToAgent(parsed.data);
+    const result = await sendContentToAgent({
+      ...parsed.data,
+      signalsBaseUrl: resolveSignalsBaseUrlFromRequest(req),
+    });
     if (!result.success) {
       return NextResponse.json(
         {

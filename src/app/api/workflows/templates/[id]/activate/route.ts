@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { getTemplate } from "@/lib/db/queries/workflow-templates";
 import { runTemplateViaRtx } from "@/lib/agents/run-template-via-rtx";
+import { resolveSignalsBaseUrlFromRequest } from "@/lib/rtx/resolve-signals-base-url";
 
 const activateSchema = z.object({
   config: z.record(z.unknown()).optional(),
@@ -31,6 +32,7 @@ export async function POST(
       templateId: id,
       config: data.config,
       systemPrompt: data.systemPrompt,
+      signalsBaseUrl: resolveSignalsBaseUrlFromRequest(req),
     });
 
     if (!result.success) {

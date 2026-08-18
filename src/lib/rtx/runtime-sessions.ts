@@ -286,8 +286,11 @@ export function buildPublishAgentInitialMessage(input: {
 Job: ${input.jobId} — publish content item "${title}" (${input.contentItemId}) to: ${platformList}.
 Signals base URL: ${input.signalsBaseUrl}
 
-1. Load the \`signals-publish\` skill (and \`realtimex-signals\` for the agent-tools API) — use those exact names.
-2. Call agent-tool \`get_publish_job\` with jobId "${input.jobId}" to get the full text, media file paths, and targets.
+Signals is already running — do not start or manage Local Apps via pp-cli.
+Verify: curl -s ${input.signalsBaseUrl}/api/health
+
+1. Call agent-tool \`get_publish_job\` with jobId "${input.jobId}" via POST ${input.signalsBaseUrl}/api/agent-tools/invoke.
+2. If workspace skill scripts exist, you may use \`signals-publish\` and \`realtimex-signals\` scripts under \`.claude/skills/\`; otherwise call agent-tools directly at the base URL above.
 3. The author's threading/format intent is expressed in the post body. Apply each platform's best practices (e.g., split into a thread on X if the content warrants it; single post on LinkedIn).
 4. Publish deterministically using the skill's publish script against the RealTimeX Browser session "signals-publish". Call \`update_publish_job\` when you start each platform.
 5. After each platform, call \`complete_publish\` with the result (success requires the detected handle, post id, and URL; failures need error + errorCode from: session_expired, captcha, upload_failed, timeout, unknown).
