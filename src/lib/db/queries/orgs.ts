@@ -198,3 +198,31 @@ export function ensureOrgByName(name: string, source = "agent"): Org {
 
   return db.select().from(orgs).where(eq(orgs.id, id)).get()!;
 }
+
+/** Find or create an org by email domain (work email org projection). */
+export function ensureOrgByDomain(domain: string, source = "email_domain"): Org {
+  const normalized = domain.trim().toLowerCase();
+  if (!normalized) {
+    throw new Error("Domain is required");
+  }
+
+  const byDomain = db.select().from(orgs).where(eq(orgs.domain, normalized)).get();
+  if (byDomain) return byDomain;
+
+  const name = normalized.split(".")[0] ?? normalized;
+  const displayName = name.charAt(0).toUpperCase() + name.slice(1);
+
+  const id = nanoid();
+  db.insert(orgs)
+    .values({
+      id,
+      name: displayName,
+      domain: normalized,
+      orgType: "company",
+      source,
+      scope: "shared",
+    })
+    .run();
+
+  return db.select().from(orgs).where(eq(orgs.id, id)).get()!;
+}

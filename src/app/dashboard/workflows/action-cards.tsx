@@ -68,13 +68,16 @@ const ACTIONS: ActionDef[] = [
   // LinkedIn
   { id: "li-sync-connections", label: "Sync Connections", description: "Import connections from LinkedIn.", platform: "linkedin", endpoint: "/api/platforms/linkedin/sync", body: { type: "contacts" }, type: "api", icon: RefreshCw },
   { id: "li-import-csv", label: "Import Connections Export", description: "Upload a LinkedIn connections CSV or Basic Data Export zip.", platform: "linkedin", endpoint: "/api/platforms/linkedin/import", body: {}, type: "upload", icon: Upload },
-  // Gmail OAuth sync removed — use Himalaya mail accounts (Settings) or Takeout import (#119)
+  // Google mail (Himalaya) — #146
+  { id: "gm-import-takeout", label: "Import Google Contacts (Takeout)", description: "Upload a Google Takeout contacts zip or vCard — no OAuth required.", platform: "gmail", endpoint: "/api/platforms/gmail/import", body: {}, type: "upload", icon: Upload },
+  { id: "gm-sync-correspondents", label: "Import Correspondents", description: "Scan Sent and INBOX headers for addresses you've exchanged mail with.", platform: "gmail", endpoint: "/api/platforms/gmail/sync", body: { type: "correspondents" }, type: "api", icon: RefreshCw },
+  { id: "gm-sync-mail-activity", label: "Enrich Mail Activity", description: "Update recent mail activity and work-email org links from Himalaya headers.", platform: "gmail", endpoint: "/api/platforms/gmail/sync", body: { type: "mail_activity" }, type: "api", icon: RefreshCw },
 ];
 
 const PLATFORM_LABELS: Record<string, string> = {
   x: "X / Twitter",
   linkedin: "LinkedIn",
-  gmail: "Gmail / Google",
+  gmail: "Google mail (Himalaya)",
 };
 
 const ACTION_STAT_MAP: Record<string, { dataTypes: string[]; label: string }> = {
@@ -84,11 +87,11 @@ const ACTION_STAT_MAP: Record<string, { dataTypes: string[]; label: string }> = 
   "x-enrich":            { dataTypes: ["x_profiles"],            label: "profiles enriched" },
   "x-enrich-low":        { dataTypes: ["x_profiles"],            label: "profiles enriched" },
   "li-sync-connections": { dataTypes: ["connections"],            label: "connections synced" },
-  "gm-sync-contacts":   { dataTypes: ["google_contacts"],        label: "contacts synced" },
-  "gm-sync-metadata":   { dataTypes: ["gmail_metadata"],         label: "contacts enriched" },
+  "gm-sync-correspondents": { dataTypes: ["himalaya_correspondents"], label: "contacts imported" },
+  "gm-sync-mail-activity": { dataTypes: ["himalaya_mail_activity"], label: "contacts enriched" },
 };
 
-const PLATFORM_GROUPS = ["x", "linkedin"] as const;
+const PLATFORM_GROUPS = ["x", "linkedin", "gmail"] as const;
 
 /** Import modal config per upload action. */
 function getImportDialogConfig(action: ActionDef): ImportDialogConfig {
@@ -110,6 +113,25 @@ function getImportDialogConfig(action: ActionDef): ImportDialogConfig {
       importEndpoint: action.endpoint,
       reimportNote:
         "Safe to run again — existing contacts and tweets are updated or skipped, not duplicated.",
+    };
+  }
+
+  if (action.id === "gm-import-takeout") {
+    return {
+      title: action.label,
+      description: action.description,
+      accept: ".zip,.vcf",
+      help: (
+        <p>
+          In Google Takeout, select <strong className="text-foreground">Contacts</strong> and
+          download the archive, then upload the zip or extracted <code>.vcf</code> file. No
+          connected Google OAuth account is required.
+        </p>
+      ),
+      previewEndpoint: `${action.endpoint}/preview`,
+      importEndpoint: action.endpoint,
+      reimportNote:
+        "Safe to run again — existing contacts are updated or skipped, not duplicated.",
     };
   }
 
@@ -153,6 +175,7 @@ type PlatformStatus = {
   hasBrowserSession: boolean;
   contactsWithEmailCount: number;
   googleContactCount: number | null;
+  mailAccountCount: number;
   syncStats: Record<string, SyncStat>;
   importStats: ImportStats | null;
 };
@@ -184,17 +207,12 @@ function getActionRestriction(
         };
       }
       break;
-    case "gm-sync-contacts":
-      if (status.googleContactCount === 0) {
+    case "gm-sync-correspondents":
+    case "gm-sync-mail-activity":
+      if (status.mailAccountCount === 0) {
         return {
-          reason: "No contacts in Google account",
-        };
-      }
-      break;
-    case "gm-sync-metadata":
-      if (status.contactsWithEmailCount === 0) {
-        return {
-          reason: "No contacts with email — Sync Contacts first",
+          reason: "No mail accounts registered — add Himalaya mail in Settings",
+          navigateTo: "/dashboard/settings",
         };
       }
       break;
@@ -245,8 +263,9 @@ export function ActionCards() {
 
   // Connection status for each platform (expanded with capability data)
   const [platformStatus, setPlatformStatus] = useState<Record<string, PlatformStatus>>({
-    x: { connected: false, loading: true, syncCapable: false, grantedScopes: "", hasBrowserSession: false, contactsWithEmailCount: 999, googleContactCount: null, syncStats: {}, importStats: null },
-    linkedin: { connected: false, loading: true, syncCapable: false, grantedScopes: "", hasBrowserSession: false, contactsWithEmailCount: 999, googleContactCount: null, syncStats: {}, importStats: null },
+    x: { connected: false, loading: true, syncCapable: false, grantedScopes: "", hasBrowserSession: false, contactsWithEmailCount: 999, googleContactCount: null, mailAccountCount: 0, syncStats: {}, importStats: null },
+    linkedin: { connected: false, loading: true, syncCapable: false, grantedScopes: "", hasBrowserSession: false, contactsWithEmailCount: 999, googleContactCount: null, mailAccountCount: 0, syncStats: {}, importStats: null },
+    gmail: { connected: false, loading: true, syncCapable: false, grantedScopes: "", hasBrowserSession: false, contactsWithEmailCount: 999, googleContactCount: null, mailAccountCount: 0, syncStats: {}, importStats: null },
   });
 
   useEffect(() => {
@@ -254,10 +273,12 @@ export function ActionCards() {
     Promise.allSettled([
       fetch("/api/platforms/x").then((r) => r.json()),
       fetch("/api/platforms/linkedin").then((r) => r.json()),
+      fetch("/api/platforms/gmail/status").then((r) => r.json()),
       fetch("/api/platforms/x/enrich").then((r) => r.json()),
-    ]).then(([xRes, liRes, xEnrichRes]) => {
+    ]).then(([xRes, liRes, gmRes, xEnrichRes]) => {
       const xData = xRes.status === "fulfilled" ? xRes.value : {};
       const liData = liRes.status === "fulfilled" ? liRes.value : {};
+      const gmData = gmRes.status === "fulfilled" ? gmRes.value : {};
       const xEnrichData = xEnrichRes.status === "fulfilled" ? xEnrichRes.value : {};
 
       // Merge X enrich data into X sync stats
@@ -278,6 +299,7 @@ export function ActionCards() {
           hasBrowserSession: !!xEnrichData.hasBrowserSession,
           contactsWithEmailCount: 999,
           googleContactCount: null,
+          mailAccountCount: 0,
           syncStats: xSyncStats,
           importStats: xData.importStats ?? null,
         },
@@ -289,8 +311,21 @@ export function ActionCards() {
           hasBrowserSession: false,
           contactsWithEmailCount: 999,
           googleContactCount: null,
+          mailAccountCount: 0,
           syncStats: liData.syncStats ?? {},
           importStats: liData.importStats ?? null,
+        },
+        gmail: {
+          connected: !!gmData.connected,
+          loading: false,
+          syncCapable: (gmData.mailAccountCount ?? 0) > 0,
+          grantedScopes: "",
+          hasBrowserSession: false,
+          contactsWithEmailCount: 999,
+          googleContactCount: null,
+          mailAccountCount: gmData.mailAccountCount ?? 0,
+          syncStats: gmData.syncStats ?? {},
+          importStats: gmData.importStats ?? null,
         },
       });
     });
@@ -399,7 +434,9 @@ export function ActionCards() {
       {PLATFORM_GROUPS.map((platform) => {
         const actions = ACTIONS.filter((a) => a.platform === platform);
         const status = platformStatus[platform];
-        const isConnected = status?.connected;
+        const isConnected = platform === "gmail"
+          ? (status?.mailAccountCount ?? 0) > 0 || actions.some((a) => a.type === "upload")
+          : status?.connected;
         const isLoading = status?.loading;
 
         return (
@@ -413,7 +450,9 @@ export function ActionCards() {
                 </Badge>
               ) : isConnected ? (
                 <Badge variant="default" className="bg-green-600 text-[10px]">
-                  Connected
+                  {platform === "gmail" && (status?.mailAccountCount ?? 0) === 0
+                    ? "Takeout ready"
+                    : "Connected"}
                 </Badge>
               ) : (
                 <Badge variant="secondary" className="text-[10px]">
@@ -432,7 +471,7 @@ export function ActionCards() {
                   isLoading
                 );
                 // Check per-action restrictions (only when connected)
-                const restriction = isConnected && !isLoading
+                const restriction = !isLoading && action.type === "api"
                   ? getActionRestriction(action.id, status)
                   : null;
                 const isBlocked = needsConnection || !!restriction;
