@@ -90,8 +90,8 @@ const X_LOGIN_PATH_MARKERS = ["/login", "/i/flow/login", "/i/flow/signup"] as co
 export function isXLoggedInUrl(rawUrl: string): boolean {
   try {
     if (!urlMatchesPlatformHost(rawUrl, "x.com")) return false;
+    if (isXLoggedOutUrl(rawUrl)) return false;
     const path = new URL(rawUrl).pathname.toLowerCase();
-    if (X_LOGIN_PATH_MARKERS.some((marker) => path.includes(marker))) return false;
     if (path.startsWith("/home") || path.startsWith("/compose")) return true;
     const segment = path.split("/").filter(Boolean)[0];
     if (!segment) return false;
@@ -102,12 +102,24 @@ export function isXLoggedInUrl(rawUrl: string): boolean {
   }
 }
 
+/** True when an X tab URL indicates a logged-out or login-flow page. */
+export function isXLoggedOutUrl(rawUrl: string): boolean {
+  try {
+    if (!urlMatchesPlatformHost(rawUrl, "x.com")) return false;
+    const path = new URL(rawUrl).pathname.toLowerCase();
+    if (path === "/" || path === "") return true;
+    return X_LOGIN_PATH_MARKERS.some((marker) => path.includes(marker));
+  } catch {
+    return false;
+  }
+}
+
 /** True when a LinkedIn tab URL indicates an authenticated session. */
 export function isLinkedInLoggedInUrl(rawUrl: string): boolean {
   try {
     if (!urlMatchesPlatformHost(rawUrl, "linkedin.com")) return false;
+    if (isLinkedInLoggedOutUrl(rawUrl)) return false;
     const path = new URL(rawUrl).pathname.toLowerCase();
-    if (path.includes("/login") || path.includes("/checkpoint") || path === "/") return false;
     return (
       path.startsWith("/feed") ||
       path.startsWith("/in/") ||
@@ -117,6 +129,22 @@ export function isLinkedInLoggedInUrl(rawUrl: string): boolean {
       path.startsWith("/jobs") ||
       path.startsWith("/company/") ||
       path.startsWith("/search")
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** True when a LinkedIn tab URL indicates a logged-out or login-flow page. */
+export function isLinkedInLoggedOutUrl(rawUrl: string): boolean {
+  try {
+    if (!urlMatchesPlatformHost(rawUrl, "linkedin.com")) return false;
+    const path = new URL(rawUrl).pathname.toLowerCase();
+    return (
+      path === "/" ||
+      path.includes("/login") ||
+      path.includes("/checkpoint") ||
+      path.includes("/authwall")
     );
   } catch {
     return false;
@@ -261,19 +289,27 @@ async function detectLoggedInViaCdp(
     }
 
     const pageUrl = page.url();
+
+    const loggedOut = await page
+      .locator(LOGGED_OUT_SELECTORS[platform])
+      .first()
+      .isVisible({ timeout: 2_000 })
+      .catch(() => false);
+    if (loggedOut) {
+      return { isLoggedIn: false, detectedHandle: null };
+    }
+
+    const urlLoggedOut =
+      platform === "x" ? isXLoggedOutUrl(pageUrl) : isLinkedInLoggedOutUrl(pageUrl);
+    if (urlLoggedOut) {
+      return { isLoggedIn: false, detectedHandle: null };
+    }
+
     const urlLoggedIn =
       platform === "x" ? isXLoggedInUrl(pageUrl) : isLinkedInLoggedInUrl(pageUrl);
 
-    const loggedOut = urlLoggedIn
-      ? false
-      : await page
-          .locator(LOGGED_OUT_SELECTORS[platform])
-          .first()
-          .isVisible({ timeout: 2_000 })
-          .catch(() => false);
-
     let loggedIn = urlLoggedIn;
-    if (!loggedOut && !loggedIn) {
+    if (!loggedIn) {
       loggedIn = await page
         .locator(LOGGED_IN_SELECTORS[platform])
         .first()
@@ -286,7 +322,7 @@ async function detectLoggedInViaCdp(
       detectedHandle = await detectPlatformHandle(platform, page, pageUrl);
     }
 
-    return { isLoggedIn: loggedIn && !loggedOut, detectedHandle };
+    return { isLoggedIn: loggedIn, detectedHandle };
   } catch {
     return { isLoggedIn: false, detectedHandle: null };
   } finally {

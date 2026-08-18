@@ -10,9 +10,11 @@ import {
   extractXHandleFromProfileHref,
   formatLinkedInHandle,
   isLinkedInLoggedInUrl,
+  isLinkedInLoggedOutUrl,
   isOAuthConnected,
   isSessionAccountConnected,
   isXLoggedInUrl,
+  isXLoggedOutUrl,
   urlMatchesPlatformHost,
 } from "@/lib/platforms/browser-connection";
 import type { PlatformSessionStatus } from "@/lib/platforms/browser-connection";
@@ -38,6 +40,16 @@ describe("rtx browser session helpers", () => {
     expect(isLinkedInLoggedInUrl("https://www.linkedin.com/checkpoint/challenge")).toBe(
       false
     );
+    expect(isLinkedInLoggedInUrl("https://www.linkedin.com/authwall?trk=foo")).toBe(false);
+  });
+
+  it("detects logged-out LinkedIn and X URLs", () => {
+    expect(isLinkedInLoggedOutUrl("https://www.linkedin.com/")).toBe(true);
+    expect(isLinkedInLoggedOutUrl("https://www.linkedin.com/authwall")).toBe(true);
+    expect(isLinkedInLoggedOutUrl("https://www.linkedin.com/in/jane-doe")).toBe(false);
+    expect(isXLoggedOutUrl("https://x.com/")).toBe(true);
+    expect(isXLoggedOutUrl("https://x.com/login")).toBe(true);
+    expect(isXLoggedOutUrl("https://x.com/trung_rta")).toBe(false);
   });
 
   it("detects authenticated X URLs from profile and home paths", () => {
@@ -45,6 +57,7 @@ describe("rtx browser session helpers", () => {
     expect(isXLoggedInUrl("https://x.com/brandhandle")).toBe(true);
     expect(isXLoggedInUrl("https://x.com/login")).toBe(false);
     expect(isXLoggedInUrl("https://x.com/i/flow/login")).toBe(false);
+    expect(isXLoggedInUrl("https://x.com/")).toBe(false);
   });
 
   it("extracts platform handles from profile URLs and hrefs", () => {
