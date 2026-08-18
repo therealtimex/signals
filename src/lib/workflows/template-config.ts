@@ -1,13 +1,29 @@
-export type TemplateLimits = {
-  maxResults?: number;
-  maxContacts?: number;
-  maxEnrichmentScore?: number;
-  companyName?: string;
-  inactivityDays?: number;
-  topics?: string[];
-  tone?: string;
-  maxEngagements?: number;
-};
+import { z } from "zod";
+
+export const templateLimitsSchema = z.object({
+  maxResults: z.number().int().positive().optional(),
+  maxContacts: z.number().int().positive().optional(),
+  maxEnrichmentScore: z.number().int().optional(),
+  companyName: z.string().optional(),
+  inactivityDays: z.number().int().positive().optional(),
+  topics: z.array(z.string()).optional(),
+  tone: z.string().optional(),
+  maxEngagements: z.number().int().positive().optional(),
+});
+
+export type TemplateLimits = z.infer<typeof templateLimitsSchema>;
+
+const LIMIT_CONFIG_KEYS = [
+  "maxResults",
+  "maxContacts",
+  "maxEnrichmentScore",
+  "companyName",
+  "inactivityDays",
+  "topics",
+  "tone",
+  "maxEngagements",
+  "maxReplies",
+] as const;
 
 export function parseTemplateConfig(config: string | null | undefined): Record<string, unknown> {
   if (!config?.trim()) return {};
@@ -26,6 +42,9 @@ export function buildTemplateConfig(
 ): string {
   const base = parseTemplateConfig(existingConfig);
   const config: Record<string, unknown> = { ...base };
+  for (const key of LIMIT_CONFIG_KEYS) {
+    delete config[key];
+  }
 
   switch (templateType) {
     case "prospecting":

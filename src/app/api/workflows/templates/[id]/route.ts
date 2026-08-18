@@ -6,19 +6,8 @@ import {
   updateTemplate,
   deleteTemplate,
 } from "@/lib/db/queries/workflow-templates";
-import { buildTemplateConfig } from "@/lib/workflows/template-config";
+import { buildTemplateConfig, templateLimitsSchema } from "@/lib/workflows/template-config";
 import { serializeTemplateForUi } from "@/lib/workflows/template-serializer";
-
-const limitsSchema = z.object({
-  maxResults: z.number().int().positive().optional(),
-  maxContacts: z.number().int().positive().optional(),
-  maxEnrichmentScore: z.number().int().optional(),
-  companyName: z.string().optional(),
-  inactivityDays: z.number().int().positive().optional(),
-  topics: z.array(z.string()).optional(),
-  tone: z.string().optional(),
-  maxEngagements: z.number().int().positive().optional(),
-});
 
 const updateTemplateSchema = z.object({
   name: z.string().min(1).optional(),
@@ -29,7 +18,7 @@ const updateTemplateSchema = z.object({
   ]).optional(),
   status: z.enum(["draft", "active", "paused", "completed"]).optional(),
   config: z.string().optional(),
-  limits: limitsSchema.optional(),
+  limits: templateLimitsSchema.optional(),
   goalMetrics: z.string().optional(),
   startsAt: z.number().int().nullable().optional(),
   endsAt: z.number().int().nullable().optional(),

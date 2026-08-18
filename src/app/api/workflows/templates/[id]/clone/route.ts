@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { cloneTemplate } from "@/lib/db/queries/workflow-templates";
+import { serializeTemplateForUi } from "@/lib/workflows/template-serializer";
 
 const cloneSchema = z.object({
   name: z.string().optional(),
@@ -26,7 +27,7 @@ export async function POST(
     if (!template) {
       return NextResponse.json({ error: "Source template not found" }, { status: 404 });
     }
-    return NextResponse.json(template, { status: 201 });
+    return NextResponse.json(serializeTemplateForUi(template), { status: 201 });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: error.errors }, { status: 400 });

@@ -13,6 +13,18 @@ describe("template-config", () => {
     expect(parseTemplateConfig(config)).toEqual({ maxResults: 15 });
   });
 
+  it("replaces stale limit keys when category changes", () => {
+    const config = buildTemplateConfig(
+      "content",
+      { topics: ["AI"], tone: "casual" },
+      JSON.stringify({ maxResults: 20, topics: ["old"], tone: "formal" })
+    );
+    expect(parseTemplateConfig(config)).toEqual({
+      topics: ["AI"],
+      tone: "casual",
+    });
+  });
+
   it("extracts enrichment limits from stored config", () => {
     const limits = extractLimitsFromConfig(
       "enrichment",
