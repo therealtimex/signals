@@ -125,10 +125,13 @@ export async function runTemplateViaRtx(
     startedAt: now,
   });
 
-  const workspaceSlug = getSignalsRtxWorkspaceSlug(env);
-
   try {
-    await ensureRtxWorkspace(workspaceSlug, "Signals", env, fetchImpl);
+    const workspaceSlug = await ensureRtxWorkspace(
+      getSignalsRtxWorkspaceSlug(env),
+      "Signals",
+      env,
+      fetchImpl
+    );
     const threadSlug = await createRtxPublishThread(
       workspaceSlug,
       buildAgentWorkflowThreadName(template.name),

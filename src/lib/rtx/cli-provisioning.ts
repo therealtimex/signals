@@ -71,6 +71,72 @@ function extractWorkspaceSlug(body: RtxCliBody, fallback: string): string {
   );
 }
 
+type ListedWorkspace = { slug?: string; name?: string };
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function matchesWorkspaceName(candidate: string, workspaceName: string): boolean {
+  if (candidate === workspaceName) return true;
+  const pattern = new RegExp(`^${escapeRegExp(workspaceName)} \\(\\d+\\)$`);
+  return pattern.test(candidate);
+}
+
+function rankWorkspaceMatch(
+  workspace: ListedWorkspace,
+  preferredSlug: string,
+  workspaceName: string
+): number {
+  if (workspace.slug === preferredSlug) return 0;
+  if (workspace.name === workspaceName) return 1;
+  const suffixMatch = workspace.name?.match(new RegExp(`^${escapeRegExp(workspaceName)} \\((\\d+)\\)$`));
+  if (suffixMatch) return 2 + Number.parseInt(suffixMatch[1], 10);
+  return Number.MAX_SAFE_INTEGER;
+}
+
+function pickExistingWorkspaceSlug(
+  workspaces: ListedWorkspace[],
+  preferredSlug: string,
+  workspaceName: string
+): string | null {
+  const matches = workspaces.filter(
+    (workspace) =>
+      typeof workspace.slug === "string" &&
+      typeof workspace.name === "string" &&
+      matchesWorkspaceName(workspace.name, workspaceName)
+  );
+  if (matches.length === 0) return null;
+
+  matches.sort(
+    (left, right) =>
+      rankWorkspaceMatch(left, preferredSlug, workspaceName) -
+      rankWorkspaceMatch(right, preferredSlug, workspaceName)
+  );
+
+  return matches[0]?.slug ?? null;
+}
+
+async function findExistingRtxWorkspaceSlug(
+  preferredSlug: string,
+  workspaceName: string,
+  env: EnvLike = process.env,
+  fetchImpl: typeof fetch = fetch
+): Promise<string | null> {
+  const { response, body } = await rtxCliRequest(
+    "/cli/list-workspaces",
+    { method: "GET" },
+    env,
+    fetchImpl
+  );
+  if (!response.ok) return null;
+
+  const workspaces = Array.isArray(body.workspaces)
+    ? (body.workspaces as ListedWorkspace[])
+    : [];
+  return pickExistingWorkspaceSlug(workspaces, preferredSlug, workspaceName);
+}
+
 export async function ensureRtxWorkspace(
   workspaceSlug: string,
   workspaceName: string,
@@ -94,6 +160,16 @@ export async function ensureRtxWorkspace(
     }
   }
 
+  const existingSlug = await findExistingRtxWorkspaceSlug(
+    slug,
+    workspaceName,
+    env,
+    fetchImpl
+  );
+  if (existingSlug) {
+    return existingSlug;
+  }
+
   const created = await rtxCliRequestOk(
     "/cli/create-workspace",
     {
@@ -104,13 +180,8 @@ export async function ensureRtxWorkspace(
     fetchImpl
   );
 
-  const resolvedSlug = extractWorkspaceSlug(created, slug);
-  if (resolvedSlug !== slug) {
-    throw new Error(
-      `Workspace slug mismatch: expected "${slug}", got "${resolvedSlug}"`
-    );
-  }
-  return resolvedSlug;
+  // RTX may dedupe slugs (e.g. "signals" -> "signals-2") when the name already exists.
+  return extractWorkspaceSlug(created, slug);
 }
 
 export async function createRtxPublishThread(

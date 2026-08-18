@@ -98,9 +98,13 @@ export async function sendContentToAgent(
 
   updateContentItem(input.contentItemId, { status: "queued" });
 
-  const workspaceSlug = getSignalsRtxWorkspaceSlug(env);
   try {
-    await ensureRtxWorkspace(workspaceSlug, "Signals", env, fetchImpl);
+    const workspaceSlug = await ensureRtxWorkspace(
+      getSignalsRtxWorkspaceSlug(env),
+      "Signals",
+      env,
+      fetchImpl
+    );
     const threadSlug = await createRtxPublishThread(
       workspaceSlug,
       buildPublishThreadName(item.title),
