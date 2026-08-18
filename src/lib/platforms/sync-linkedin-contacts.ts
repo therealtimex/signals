@@ -12,6 +12,7 @@ import {
 import { getConnections } from "@/lib/platforms/linkedin/client";
 import type { LinkedInConnection } from "@/lib/platforms/linkedin/client";
 import type { SyncResult } from "@/lib/platforms/adapter";
+import { projectOwnerConnectedTo } from "@/lib/graph/relationship-edges";
 
 /**
  * Sync contacts from LinkedIn connections into Signals.
@@ -122,6 +123,7 @@ function processLinkedInConnection(connection: LinkedInConnection, result: SyncR
       .run();
 
     recalcEnrichment(existingIdentity.contactId);
+    projectOwnerConnectedTo(existingIdentity.contactId, "sync:linkedin");
     result.updated++;
     return;
   }
@@ -139,5 +141,6 @@ function processLinkedInConnection(connection: LinkedInConnection, result: SyncR
 
   // Recompute enrichment with the new identity
   recalcEnrichment(contact.id);
+  projectOwnerConnectedTo(contact.id, "sync:linkedin");
   result.added++;
 }

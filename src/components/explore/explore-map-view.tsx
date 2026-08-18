@@ -163,6 +163,10 @@ export function ExploreMapView() {
   }
 
   if (data.meta.totalContacts === 0) {
+    const emptyDescription = hasContactCandidates
+      ? "You have contacts, but none are linked to your audience graph yet. Sync or import platform relationships (X followers/following, LinkedIn connections) from Automation → Workflows."
+      : "Sync or import platform relationships — X followers and following, LinkedIn connections, and other social imports — to populate your audience map.";
+
     return (
       <div className="min-h-[60vh] flex flex-col items-center justify-center gap-4">
         <ExploreOwnerChip
@@ -172,8 +176,12 @@ export function ExploreMapView() {
         <EmptyState
           icon={Telescope}
           title="No audience connections synced yet"
-          description="Followers and connections will appear here once your graph syncs."
-          cta={{ label: "View contacts", href: "/dashboard/contacts" }}
+          description={emptyDescription}
+          cta={
+            hasContactCandidates
+              ? { label: "View contacts", href: "/dashboard/contacts" }
+              : { label: "Open workflows", href: "/dashboard/workflows" }
+          }
         />
         {picker}
       </div>

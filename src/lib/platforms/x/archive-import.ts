@@ -26,6 +26,7 @@ import {
 } from "@/lib/platforms/x/mappers";
 import type { SyncResult } from "@/lib/platforms/adapter";
 import type { PlatformAccount } from "@/lib/db/types";
+import { projectXArchiveRelationships } from "@/lib/graph/relationship-edges";
 
 /** Owner account info from data/account.js (used for the archive account). */
 export interface XArchiveAccountInfo {
@@ -227,16 +228,20 @@ function processArchiveUser(user: MergedArchiveUser, result: SyncResult): void {
     const alreadyFlagged =
       (!user.follower || platformData.archiveFollower === true) &&
       (!user.following || platformData.archiveFollowing === true);
-    if (alreadyFlagged) {
+
+    if (!alreadyFlagged) {
+      if (user.follower) platformData.archiveFollower = true;
+      if (user.following) platformData.archiveFollowing = true;
+      updateIdentity(existing.id, { platformData: JSON.stringify(platformData) });
+      result.updated++;
+    } else {
       result.skipped++;
-      return;
     }
 
-    if (user.follower) platformData.archiveFollower = true;
-    if (user.following) platformData.archiveFollowing = true;
-
-    updateIdentity(existing.id, { platformData: JSON.stringify(platformData) });
-    result.updated++;
+    projectXArchiveRelationships(existing.contactId, {
+      follower: user.follower,
+      following: user.following,
+    });
     return;
   }
 
@@ -248,6 +253,10 @@ function processArchiveUser(user: MergedArchiveUser, result: SyncResult): void {
     })
   );
   recalcEnrichment(contact.id);
+  projectXArchiveRelationships(contact.id, {
+    follower: user.follower,
+    following: user.following,
+  });
   result.added++;
 }
 

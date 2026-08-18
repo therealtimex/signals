@@ -5,6 +5,7 @@ import { createContact, updateContact, recalcEnrichment } from "@/lib/db/queries
 import { findContactByChannel } from "@/lib/db/queries/contact-channels";
 import { createIdentity } from "@/lib/db/queries/identities";
 import type { SyncResult } from "@/lib/platforms/adapter";
+import { projectOwnerConnectedTo } from "@/lib/graph/relationship-edges";
 
 /** Shape of a single row from LinkedIn's Connections CSV export. */
 export interface LinkedInCsvRow {
@@ -208,6 +209,7 @@ function processRow(row: LinkedInCsvRow, result: SyncResult): void {
       }
 
       recalcEnrichment(existingIdentity.contactId);
+      projectOwnerConnectedTo(existingIdentity.contactId, "import:linkedin_csv");
       result.updated++;
       return;
     }
@@ -243,6 +245,7 @@ function processRow(row: LinkedInCsvRow, result: SyncResult): void {
       }
 
       recalcEnrichment(existingContact.id);
+      projectOwnerConnectedTo(existingContact.id, "import:linkedin_csv");
       result.updated++;
       return;
     }
@@ -275,5 +278,6 @@ function processRow(row: LinkedInCsvRow, result: SyncResult): void {
     recalcEnrichment(contact.id);
   }
 
+  projectOwnerConnectedTo(contact.id, "import:linkedin_csv");
   result.added++;
 }

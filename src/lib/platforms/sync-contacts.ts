@@ -8,6 +8,7 @@ import { mapXUserToContact, mapXUserToIdentity, xUserIdentitySyncPatch } from "@
 import { getFollowing, getAuthenticatedUser } from "@/lib/platforms/x/client";
 import type { XUser } from "@/lib/platforms/x/client";
 import type { SyncResult } from "@/lib/platforms/adapter";
+import { projectOwnerFollowsContact } from "@/lib/graph/relationship-edges";
 
 /**
  * Sync contacts from a platform account's following list into Signals.
@@ -91,6 +92,7 @@ function processXUser(xUser: XUser, result: SyncResult): void {
       .run();
 
     recalcEnrichment(existingIdentity.contactId);
+    projectOwnerFollowsContact(existingIdentity.contactId, "sync:x");
     result.updated++;
     return;
   }
@@ -105,5 +107,6 @@ function processXUser(xUser: XUser, result: SyncResult): void {
 
   // Recompute enrichment with the new identity
   recalcEnrichment(contact.id);
+  projectOwnerFollowsContact(contact.id, "sync:x");
   result.added++;
 }

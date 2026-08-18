@@ -30,6 +30,7 @@ import {
   Key,
   Mail,
   FileDown,
+  Telescope,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -976,6 +977,45 @@ function FeaturesTab() {
             <li>Search across name and email fields</li>
             <li>Filter by funnel stage and platform</li>
             <li>Each contact tracks an enrichment score (0 &ndash; 100)</li>
+          </ul>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Telescope className="h-5 w-5" />
+            Explore audience map
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2 text-sm text-muted-foreground">
+          <p>
+            The{" "}
+            <Link
+              href="/dashboard/explore"
+              className="text-primary underline underline-offset-2"
+            >
+              Explore
+            </Link>{" "}
+            map visualizes your audience — contacts linked to you through
+            platform relationships, not every CRM row.
+          </p>
+          <ul className="list-disc pl-5 space-y-1">
+            <li>
+              Set which contact is you; the map anchors on that profile
+            </li>
+            <li>
+              X: following sync and archive import write follower/following
+              edges
+            </li>
+            <li>
+              LinkedIn: connection sync and Connections CSV/zip import write
+              connection edges
+            </li>
+            <li>
+              Gmail address-book sync imports contacts but does not add audience
+              graph edges (no follow/connection semantics)
+            </li>
           </ul>
         </CardContent>
       </Card>

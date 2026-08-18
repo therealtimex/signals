@@ -13,6 +13,8 @@ import {
 import { createContact } from "@/lib/db/queries/contacts";
 import { createIdentity } from "@/lib/db/queries/identities";
 import { createPlatformAccount } from "@/lib/db/queries/platform-accounts";
+import { updateContact } from "@/lib/db/queries/contacts";
+import { getExploreMap } from "@/lib/db/queries/explore-map";
 import {
   importXArchiveContacts,
   importXArchiveTweets,
@@ -183,6 +185,19 @@ describe("importXArchiveContacts", () => {
 
     expect(second).toMatchObject({ added: 0, updated: 0, skipped: 3 });
     expect(db.select().from(contacts).all()).toHaveLength(3);
+  });
+
+  it("projects audience edges for Explore when owner is set", () => {
+    const owner = createContact({ name: "Me" }, "test");
+    updateContact(owner.id, { isSelf: true });
+
+    const contents = parseXArchive(makeArchiveZip());
+    const merged = mergeArchiveUsers(contents.followers, contents.following);
+    importXArchiveContacts(merged);
+
+    const map = getExploreMap();
+    expect(map.meta.totalContacts).toBeGreaterThan(0);
+    expect(map.edges.length).toBeGreaterThan(0);
   });
 
   it("merges archive flags into identities that already exist from API sync", () => {
