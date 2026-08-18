@@ -120,6 +120,9 @@ jobs:
         env:
           SIGNALS_DATA_DIR: ${{ github.workspace }}/.ci/signals-data
 
+      - name: Test standalone runtime artifact
+        run: npm run test:standalone-artifact
+
       - name: Package RealtimeX plugin zip
         run: npm run package:realtimex-plugin
 

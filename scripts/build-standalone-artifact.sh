@@ -23,15 +23,39 @@ rm -rf "$STAGING"
 mkdir -p "$STAGING"
 
 echo "==> Staging standalone artifact..."
-cp -R "${STANDALONE}/." "$STAGING/"
-mkdir -p "$STAGING/.next"
+# Next's file tracer can conservatively copy repository source, tests, docs, and
+# previous build output into .next/standalone. Stage an explicit runtime
+# allowlist so release contents do not depend on whatever happened to exist in
+# the build workspace.
+for required in server.js package.json node_modules .next; do
+  if [[ ! -e "${STANDALONE}/${required}" ]]; then
+    echo "Expected ${STANDALONE}/${required} after build" >&2
+    exit 1
+  fi
+done
+
+cp "${STANDALONE}/server.js" "$STAGING/"
+cp "${STANDALONE}/package.json" "$STAGING/"
+cp "${ROOT}/LICENSE" "$STAGING/"
+mkdir -p "$STAGING/node_modules" "$STAGING/.next"
+cp -R "${STANDALONE}/node_modules/." "$STAGING/node_modules/"
+cp -R "${STANDALONE}/.next/." "$STAGING/.next/"
+
+# Runtime content read directly from process.cwd().
+cp -R "${ROOT}/guide" "$STAGING/guide"
+mkdir -p "$STAGING/src/lib/db/migrations"
+cp "${ROOT}/src/lib/db/migrations/"*.sql "$STAGING/src/lib/db/migrations/"
+cp -R "${ROOT}/src/lib/db/migrations/meta" "$STAGING/src/lib/db/migrations/meta"
+
 cp -R "${ROOT}/.next/static" "$STAGING/.next/static"
 cp -R "${ROOT}/public" "$STAGING/public"
 
 rm -f "${DIST}/${ARTIFACT_NAME}"
 (
   cd "$STAGING"
-  zip -rq "${DIST}/${ARTIFACT_NAME}" .
+  # Source maps are useful during development but disclose source and are not
+  # required by the production runtime.
+  zip -rq "${DIST}/${ARTIFACT_NAME}" . -x '*.map'
 )
 
 SHA256="$(shasum -a 256 "${DIST}/${ARTIFACT_NAME}" | awk '{print $1}')"

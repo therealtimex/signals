@@ -22,6 +22,7 @@ npm run verify:marketplace-versions
 
 # Standalone Local App artifact first (populates release-manifest checksum)
 npm run build:standalone-artifact
+npm run test:standalone-artifact
 
 # Plugin pack (installs signals-publish skill deps, runs validate-plugin.cjs)
 npm run package:realtimex-plugin
@@ -36,6 +37,8 @@ npm run test:plugin-package
 | `.github/workflows/ci.yml` (`release`) | Push to `main` or tag `v*` | After every gate passes, publish the verified artifacts when `package.json` version is new |
 
 **Release on merge (recommended):** bump `package.json` and `realtimex-plugin/realtimex.plugin.json` to the same version in your PR. After merge to `main`, the `release` job waits for React Doctor, the quality gate, integration smoke tests, and marketplace package validation. If the version is newer and no `vX.Y.Z` release exists yet, it publishes the artifacts produced by the verified marketplace-bundle job (tag `vX.Y.Z` is created automatically). Docs-only or CI-only merges without a version bump do not publish.
+
+The standalone archive is a production-runtime allowlist: compiled Next.js output, traced runtime dependencies, public and guide assets, and database migration data. CI rejects raw application source, tests, coverage reports, build scripts, source maps, and nested archives, then boots the extracted artifact against a fresh database before it can be released.
 
 **Manual tag (optional):** pushing `vX.Y.Z` still triggers the same `release` job when the tag matches `package.json` and the release does not already exist.
 
@@ -74,9 +77,10 @@ Plugin validation uses `scripts/vendor/validate-plugin.cjs` (override with `REAL
 
 1. Bump `package.json` version (plugin `realtimex.plugin.json` version should match).
 2. `npm run build:standalone-artifact`
-3. `npm run package:realtimex-plugin`
-4. Upload plugin zip + standalone zip + `marketplace/release-manifest.json` to marketplace store bundle.
-5. Verify `checksumSha256` matches `dist/signals-*-standalone.zip`.
+3. `npm run test:standalone-artifact`
+4. `npm run package:realtimex-plugin`
+5. Upload plugin zip + standalone zip + `marketplace/release-manifest.json` to marketplace store bundle.
+6. Verify `checksumSha256` matches `dist/signals-*-standalone.zip`.
 
 ## Permissions
 
