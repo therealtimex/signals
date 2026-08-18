@@ -43,6 +43,7 @@ const ACTIONS: ActionDef[] = [
   { id: "x-sync-posts", label: "Sync Posts", description: "Import your recent tweets from X.", platform: "x", endpoint: "/api/platforms/x/sync", body: { type: "tweets" }, type: "api", icon: RefreshCw },
   { id: "x-sync-mentions", label: "Sync Mentions", description: "Import recent mentions of your account.", platform: "x", endpoint: "/api/platforms/x/sync", body: { type: "mentions" }, type: "api", icon: RefreshCw },
   { id: "x-sync-contacts", label: "Sync Contacts", description: "Import followers and following from X.", platform: "x", endpoint: "/api/platforms/x/sync", body: { type: "contacts" }, type: "api", icon: RefreshCw },
+  { id: "x-import-archive", label: "Import X archive", description: "Upload your official X data archive zip — followers, following, and tweets.", platform: "x", endpoint: "/api/platforms/x/import", body: {}, type: "upload", icon: Upload },
   {
     id: "x-enrich",
     label: "Enrich Profiles (RTX)",
@@ -92,8 +93,29 @@ const ACTION_STAT_MAP: Record<string, { dataTypes: string[]; label: string }> = 
 
 const PLATFORM_GROUPS = ["x", "linkedin", "gmail"] as const;
 
-/** Import modal config per upload action. LinkedIn Connections is the first platform. */
+/** Import modal config per upload action. */
 function getImportDialogConfig(action: ActionDef): ImportDialogConfig {
+  if (action.id === "x-import-archive") {
+    return {
+      title: action.label,
+      description: action.description,
+      accept: ".zip",
+      help: (
+        <p>
+          On X, go to <strong className="text-foreground">Settings and privacy</strong> →{" "}
+          <strong className="text-foreground">Your account</strong> →{" "}
+          <strong className="text-foreground">Download an archive of your data</strong>, then
+          upload the zip you receive. Followers and following become contacts; your tweets are
+          imported as content. No connected X account is required.
+        </p>
+      ),
+      previewEndpoint: `${action.endpoint}/preview`,
+      importEndpoint: action.endpoint,
+      reimportNote:
+        "Safe to run again — existing contacts and tweets are updated or skipped, not duplicated.",
+    };
+  }
+
   return {
     title: action.label,
     description: action.description,
@@ -263,7 +285,7 @@ export function ActionCards() {
           contactsWithEmailCount: 999,
           googleContactCount: null,
           syncStats: xSyncStats,
-          importStats: null,
+          importStats: xData.importStats ?? null,
         },
         linkedin: {
           connected: !!liData.connected,
@@ -484,7 +506,7 @@ export function ActionCards() {
                                   <> · <span className="break-all">{stats.fileName}</span></>
                                 )}
                               </p>
-                              <p>Safe to run again — existing contacts are updated, not duplicated.</p>
+                              <p>{getImportDialogConfig(action).reimportNote}</p>
                             </div>
                           );
                         })()

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getPlatformAccountByPlatform } from "@/lib/db/queries/platform-accounts";
 import { listSyncCursors } from "@/lib/db/queries/sync";
+import { getPlatformImportStats } from "@/lib/workflows/import-stats";
 import { disconnectXAccount } from "@/lib/platforms/x/auth";
 import { decrypt } from "@/lib/auth/crypto";
 import type { PlatformCredentials } from "@/lib/platforms/adapter";
@@ -8,12 +9,14 @@ import type { PlatformCredentials } from "@/lib/platforms/adapter";
 /**
  * GET /api/platforms/x
  * Check X connection status including granted scopes / sync capability.
+ * Also reports file-import stats, which exist even without a connected account.
  */
 export async function GET() {
   const account = getPlatformAccountByPlatform("x");
+  const importStats = getPlatformImportStats("x");
 
   if (!account) {
-    return NextResponse.json({ connected: false });
+    return NextResponse.json({ connected: false, importStats });
   }
 
   // Determine granted scopes from encrypted credentials
@@ -39,8 +42,11 @@ export async function GET() {
   }
 
   return NextResponse.json({
-    connected: true,
+    // Archive imports may create a credential-less placeholder account row —
+    // that isn't a connection. OAuth always stores encrypted credentials.
+    connected: !!account.credentialsEncrypted,
     syncStats,
+    importStats,
     account: {
       id: account.id,
       displayName: account.displayName,

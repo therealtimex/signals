@@ -82,6 +82,9 @@ const SYNC_SUBTYPE_LABELS: Record<string, string> = {
 
 const IMPORT_SUBTYPE_LABELS: Record<string, string> = {
   linkedin_connections: "LinkedIn Import",
+  x_archive: "X Archive Import",
+  x_archive_contacts: "X Archive Contacts",
+  x_archive_posts: "X Archive Posts",
 };
 
 /** Display info for file-import runs (platform label + file name when available). */
