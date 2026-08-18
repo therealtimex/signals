@@ -99,7 +99,11 @@ for (const entry of entries) {
   if (/^(?!node_modules\/).*\.(?:test|spec)\.[cm]?[jt]sx?$/.test(entry)) {
     errors.push(`Test source: ${entry}`);
   }
-  if (!entry.startsWith("node_modules/") && /\.[cm]?tsx?$/.test(entry)) {
+  if (
+    !entry.startsWith("node_modules/") &&
+    !entry.startsWith(".next/node_modules/") &&
+    /\.[cm]?tsx?$/.test(entry)
+  ) {
     errors.push(`TypeScript source: ${entry}`);
   }
 }

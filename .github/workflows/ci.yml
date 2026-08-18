@@ -108,7 +108,9 @@ jobs:
         run: npm run verify:fresh-import
 
       - name: Build production app
-        run: npm run build
+        run: |
+          npm run db:migrate
+          SIGNALS_BOOT_MIGRATIONS_DONE=1 npm run build
         env:
           SIGNALS_DATA_DIR: ${{ github.workspace }}/.ci/signals-data
 
