@@ -29,8 +29,11 @@ if (!manifest.artifactContract?.supportedTargets?.includes(target)) {
 }
 "
 
+echo "==> Preparing database for standalone build..."
+npm run db:migrate
+
 echo "==> Building Next.js (standalone)..."
-npm run build
+SIGNALS_BOOT_MIGRATIONS_DONE=1 npm run build
 
 if [[ ! -f "${STANDALONE}/server.js" ]]; then
   echo "Expected ${STANDALONE}/server.js after build. Is output: 'standalone' set in next.config.mjs?" >&2
