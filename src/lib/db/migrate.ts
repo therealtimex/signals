@@ -31,7 +31,9 @@ export function runMigrations(dataDir?: string) {
 
   const db = drizzle(sqlite);
 
-  const migrationsDir = join(__dirname, "migrations");
+  const migrationsDir =
+    process.env.SIGNALS_MIGRATIONS_DIR?.replace("~", homedir()) ??
+    join(__dirname, "migrations");
   if (existsSync(migrationsDir)) {
     migrate(db, { migrationsFolder: migrationsDir });
   }

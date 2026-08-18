@@ -1,10 +1,10 @@
 {
-  "command": "node",
+  "command": "{runtime.executable}",
   "args": ["server.js"],
   "env": {
     "HOSTNAME": "127.0.0.1"
   },
   "working_dir": "{artifact_dir}",
   "home_url": "http://localhost:{port}/dashboard",
-  "_comment": "Production marketplace path. Dev fallback: scripts/qa/provision-signals-local-app.mjs or npx for local iteration only."
+  "_comment": "Production marketplace v2 path. RealtimeX selects the signed native artifact and resolves the managed Node runtime."
 }

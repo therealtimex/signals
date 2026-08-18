@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Decide whether plugin-release should publish a GitHub Release.
+ * Decide whether the gated release job should publish a GitHub Release.
  *
  *   node scripts/ci/should-publish-marketplace-release.mjs --main
  *   node scripts/ci/should-publish-marketplace-release.mjs --tag=v0.1.10

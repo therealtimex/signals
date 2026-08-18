@@ -15,7 +15,8 @@
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const SIGNALS_APP_ID = "47e45f71-3279-42f5-8e95-731de01b6eae";
 const SIGNALS_PERMISSIONS = [
@@ -24,8 +25,10 @@ const SIGNALS_PERMISSIONS = [
   "webhook.trigger",
   "llm.embed",
   "llm.chat",
+  "desktop.browser",
   "desktop.runtime-sessions",
 ];
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
 function parseDbArg() {
   const idx = process.argv.indexOf("--db");
@@ -54,9 +57,21 @@ function runSqlite(dbPath, sql) {
   return result.stdout.trim();
 }
 
+if (process.argv.includes("--deploy-instructions")) {
+  console.log("Settings → Plugins → Signals → Deploy the workspace provision.");
+  console.log("For Local App source QA, run this script again without --deploy-instructions.");
+  process.exit(0);
+}
+
 const config = JSON.stringify({
-  command: "npx",
-  args: ["-y", "@realtimex/signals", "--port", "3000"],
+  command: process.execPath,
+  args: [
+    join(REPO_ROOT, "node_modules/next/dist/bin/next"),
+    "dev",
+    "-p",
+    "{port}",
+  ],
+  working_dir: REPO_ROOT,
   home_url: "http://localhost:{port}/dashboard",
 });
 
@@ -86,7 +101,7 @@ if (existing) {
       display_name = 'Signals',
       name = 'signals',
       description = 'Local-first social GTM and relationship knowledge graph',
-      app_type = 'npx',
+      app_type = 'node',
       config = ${sqlQuote(config)},
       metadata = ${sqlQuote(metadata)},
       enabled = 1,
@@ -107,7 +122,7 @@ if (existing) {
       'Signals',
       'signals',
       'Local-first social GTM and relationship knowledge graph',
-      'npx',
+      'node',
       ${sqlQuote(config)},
       ${sqlQuote(metadata)},
       1,

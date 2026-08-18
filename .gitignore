@@ -40,3 +40,6 @@ data/
 coverage/
 test-results/
 playwright-report/
+
+# generated marketplace signatures
+marketplace/release-manifest.sig.json

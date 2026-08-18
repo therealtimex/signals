@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="LICENSE"><img alt="License: Apache 2.0" src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" /></a>
+  <a href="LICENSE"><img alt="License: Proprietary" src="https://img.shields.io/badge/License-Proprietary-red.svg" /></a>
   <img alt="Node 20+" src="https://img.shields.io/badge/Node-20%2B-green.svg" />
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5.8-blue.svg" />
   <img alt="Next.js 16" src="https://img.shields.io/badge/Next.js-16.1-black.svg" />
@@ -17,7 +17,7 @@
 
 ---
 
-**One-command boot** — `npx @realtimex/signals` starts everything
+**Marketplace install** — RealTimeX installs the native platform runtime and starts Signals locally
 &nbsp;&bull;&nbsp;
 **Local-first** — SQLite database under `~/.signals/`; graph and credentials stay local. Semantic search and persona workflows may send inputs through RealTimeX `llm.embed` / `llm.chat` (provider-dependent).
 &nbsp;&bull;&nbsp;
@@ -73,8 +73,11 @@ AES-256 encrypted credential storage. CRM graph, credentials, and embeddings are
 
 ## Quick Start
 
+Install Signals from the RealTimeX Marketplace. For source-checkout development, run:
+
 ```bash
-npx @realtimex/signals
+npm ci
+npm run dev
 ```
 
 On first run, Signals creates `~/.signals/` for your database and config, runs schema migrations, and starts the dashboard at `http://localhost:3000`.
@@ -116,7 +119,7 @@ SIGNALS_DATA_DIR=~/.signals
 
 ## Architecture
 
-**Boot flow** — `npx @realtimex/signals` runs `bin/cli.ts`, which ensures `~/.signals/` directories exist, pushes the latest schema to SQLite, and spawns Next.js.
+**Boot flow** — RealTimeX selects the signed runtime artifact for the host platform, starts its compiled Next.js server with a managed Node runtime, and keeps application data under `~/.signals/` by default.
 
 **Rendering boundary** — Server Components read the database directly (better-sqlite3 is synchronous). Client Components call API routes via `fetch`.
 
@@ -223,4 +226,4 @@ Frontend tokens, layout patterns, navigation, and component inventory: [`specs/0
 
 ## License
 
-[Apache License 2.0](LICENSE) © 2026 @realtimex
+Proprietary software. See [LICENSE](LICENSE). © 2026 RealtimeX.

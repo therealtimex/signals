@@ -1,11 +1,15 @@
 {
-  "signalsVersion": "0.1.10",
-  "pluginVersion": "0.1.10",
+  "schemaVersion": 2,
+  "signalsVersion": "0.1.12",
+  "pluginVersion": "0.1.12",
   "pluginId": "com.realtimex.signals",
   "localAppId": "47e45f71-3279-42f5-8e95-731de01b6eae",
-  "artifactName": "signals-0.1.10-standalone.zip",
-  "artifactPath": "dist/signals-0.1.10-standalone.zip",
-  "checksumSha256": "b30f42319a383168bc72dc96171e935dc4cb3fb012ff32d9ecc6a3a2b9be3dc9",
+  "proprietary": true,
+  "runtime": {
+    "kind": "node",
+    "version": "20.x",
+    "managedBy": "realtimex"
+  },
   "minRealtimeXVersion": "1.0.0",
   "permissions": [
     "credentials.list",
@@ -17,5 +21,15 @@
     "desktop.runtime-sessions"
   ],
   "platformDependency": "https://rtgit.rta.vn/rtlab/rtwebteam/realtimex-ai-app/-/issues/1614",
-  "builtAt": "2026-08-17T10:07:25.640Z"
+  "artifacts": {
+    "darwin-arm64": {
+      "platform": "darwin",
+      "arch": "arm64",
+      "artifactName": "signals-0.1.12-darwin-arm64.tar.gz",
+      "artifactPath": "signals-0.1.12-darwin-arm64.tar.gz",
+      "checksumSha256": "15f1a3a9d60e677fd9de746d4951ef27a7eace4dc8d59e022880973e99dc51b2",
+      "sizeBytes": 25803110
+    }
+  },
+  "builtAt": "2026-08-18T20:25:34.568Z"
 }
