@@ -1,37 +1,82 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getLegacyGmailOAuthAccount } from "@/lib/db/queries/mail-accounts";
+import { getLegacyGmailOAuthAccount, listHimalayaMailAccounts } from "@/lib/db/queries/mail-accounts";
 import { listSyncCursors } from "@/lib/db/queries/sync";
+import {
+  syncHimalayaCorrespondents,
+  syncHimalayaMailActivity,
+} from "@/lib/platforms/gmail/himalaya-mail-scan";
 import { syncContactsFromGmail } from "@/lib/platforms/sync-gmail-contacts";
 import { syncGmailMetadata } from "@/lib/platforms/sync-gmail-metadata";
 import { runSyncWorkflow } from "@/lib/workflows/run-sync-workflow";
 
 /**
  * POST /api/platforms/gmail/sync
- * Trigger a sync from Gmail/Google.
- * Body: { type: "contacts" | "metadata" }
+ * Trigger Gmail/Google sync workflows.
+ * Body: { type: "contacts" | "metadata" | "correspondents" | "mail_activity", mailAccountId?: string }
  */
 export async function POST(req: NextRequest) {
   try {
-    const account = getLegacyGmailOAuthAccount();
-    if (!account) {
-      return NextResponse.json(
-        { error: "No Gmail account connected" },
-        { status: 400 }
-      );
-    }
-
-    if (account.status === "needs_reauth") {
-      return NextResponse.json(
-        { error: "Gmail account needs re-authentication" },
-        { status: 401 }
-      );
-    }
-
     const body = await req.json().catch(() => ({}));
     const syncType = body.type || "contacts";
 
     switch (syncType) {
+      case "correspondents": {
+        const mailAccounts = listHimalayaMailAccounts();
+        if (mailAccounts.length === 0) {
+          return NextResponse.json(
+            { error: "No Himalaya mail accounts registered — add one in Settings" },
+            { status: 400 }
+          );
+        }
+
+        const mailAccountId = body.mailAccountId as string | undefined;
+        const account =
+          mailAccounts.find((row) => row.id === mailAccountId) ??
+          mailAccounts.find((row) => row.isDefault) ??
+          mailAccounts[0]!;
+
+        const { workflowRun, syncResult } = await runSyncWorkflow({
+          workflowType: "sync",
+          syncSubType: "himalaya_correspondents",
+          platformAccountId: account.id,
+          syncFunction: () => syncHimalayaCorrespondents(account.id, { maxEnvelopes: body.maxEnvelopes }),
+        });
+        return NextResponse.json({ success: true, result: syncResult, workflowRunId: workflowRun.id });
+      }
+
+      case "mail_activity": {
+        const mailAccounts = listHimalayaMailAccounts();
+        if (mailAccounts.length === 0) {
+          return NextResponse.json(
+            { error: "No Himalaya mail accounts registered — add one in Settings" },
+            { status: 400 }
+          );
+        }
+
+        const mailAccountId = body.mailAccountId as string | undefined;
+        const account =
+          mailAccounts.find((row) => row.id === mailAccountId) ??
+          mailAccounts.find((row) => row.isDefault) ??
+          mailAccounts[0]!;
+
+        const { workflowRun, syncResult } = await runSyncWorkflow({
+          workflowType: "enrich",
+          syncSubType: "himalaya_mail_activity",
+          platformAccountId: account.id,
+          syncFunction: () => syncHimalayaMailActivity(account.id, { maxEnvelopes: body.maxEnvelopes }),
+        });
+        return NextResponse.json({ success: true, result: syncResult, workflowRunId: workflowRun.id });
+      }
+
       case "metadata": {
+        const account = getLegacyGmailOAuthAccount();
+        if (!account) {
+          return NextResponse.json({ error: "No legacy Gmail OAuth account connected" }, { status: 400 });
+        }
+        if (account.status === "needs_reauth") {
+          return NextResponse.json({ error: "Gmail account needs re-authentication" }, { status: 401 });
+        }
+
         const maxContacts = body.maxContacts ?? 50;
         const { workflowRun, syncResult } = await runSyncWorkflow({
           workflowType: "enrich",
@@ -41,8 +86,17 @@ export async function POST(req: NextRequest) {
         });
         return NextResponse.json({ success: true, result: syncResult, workflowRunId: workflowRun.id });
       }
+
       case "contacts":
       default: {
+        const account = getLegacyGmailOAuthAccount();
+        if (!account) {
+          return NextResponse.json({ error: "No legacy Gmail OAuth account connected" }, { status: 400 });
+        }
+        if (account.status === "needs_reauth") {
+          return NextResponse.json({ error: "Gmail account needs re-authentication" }, { status: 401 });
+        }
+
         const maxPages = body.maxPages ?? 10;
         const { workflowRun, syncResult } = await runSyncWorkflow({
           workflowType: "sync",
@@ -61,16 +115,20 @@ export async function POST(req: NextRequest) {
 
 /**
  * GET /api/platforms/gmail/sync
- * Get sync status for the Gmail account.
+ * Get sync status for Gmail/Himalaya accounts.
  */
 export async function GET() {
-  const account = getLegacyGmailOAuthAccount();
-  if (!account) {
+  const himalayaAccounts = listHimalayaMailAccounts();
+  const oauthAccount = getLegacyGmailOAuthAccount();
+  const himalayaAccount =
+    himalayaAccounts.find((row) => row.isDefault) ?? himalayaAccounts[0] ?? null;
+
+  if (!himalayaAccount && !oauthAccount) {
     return NextResponse.json({ synced: false });
   }
 
-  // Get sync cursors for detailed per-type status
-  const cursors = listSyncCursors(account.id);
+  const accountId = himalayaAccount?.id ?? oauthAccount!.id;
+  const cursors = listSyncCursors(accountId);
   const cursorMap: Record<string, {
     status: string;
     totalSynced: number;
@@ -88,9 +146,13 @@ export async function GET() {
   }
 
   return NextResponse.json({
-    synced: !!account.lastSyncedAt,
-    lastSyncedAt: account.lastSyncedAt,
-    status: account.status,
+    synced: cursors.some((c) => !!c.lastSyncCompletedAt),
+    lastSyncedAt: cursors.reduce<number | null>((latest, cursor) => {
+      if (!cursor.lastSyncCompletedAt) return latest;
+      if (!latest || cursor.lastSyncCompletedAt > latest) return cursor.lastSyncCompletedAt;
+      return latest;
+    }, null),
+    status: himalayaAccount?.status ?? oauthAccount?.status ?? "unknown",
     cursors: cursorMap,
   });
 }

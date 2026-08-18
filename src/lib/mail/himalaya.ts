@@ -17,6 +17,15 @@ type ExecHimalayaResult = {
   stderr: string;
 };
 
+export type HimalayaEnvelope = Record<string, unknown>;
+
+export type ListHimalayaEnvelopesResult = {
+  envelopes: HimalayaEnvelope[];
+  page: number;
+  pageSize: number;
+  hasMore: boolean;
+};
+
 function execHimalaya(
   args: string[],
   configPath: string,
@@ -158,4 +167,59 @@ export async function checkHimalayaAccount(
       message: output || "Himalaya account doctor failed — is himalaya installed and configured?",
     };
   }
+}
+
+/** Build argv for `himalaya envelope list` (exported for tests). */
+export function buildEnvelopeListArgs(
+  alias: string,
+  folder: string,
+  page: number,
+  pageSize: number
+): string[] {
+  return [
+    "envelope",
+    "list",
+    "-a",
+    alias,
+    "-f",
+    folder,
+    "-p",
+    String(page),
+    "-s",
+    String(pageSize),
+    "--output",
+    "json",
+  ];
+}
+
+/** List envelope headers from a Himalaya folder (headers only — no message bodies). */
+export async function listHimalayaEnvelopes(
+  alias: string,
+  folder: string,
+  opts?: {
+    page?: number;
+    pageSize?: number;
+    configPath?: string;
+    timeoutMs?: number;
+  }
+): Promise<ListHimalayaEnvelopesResult> {
+  const configPath = opts?.configPath ?? getHimalayaConfigPath();
+  const page = opts?.page ?? 1;
+  const pageSize = opts?.pageSize ?? 50;
+
+  const { stdout } = await execHimalaya(
+    buildEnvelopeListArgs(alias, folder, page, pageSize),
+    configPath,
+    opts?.timeoutMs ?? 60_000
+  );
+
+  const parsed = JSON.parse(stdout.trim() || "[]") as unknown;
+  const envelopes = Array.isArray(parsed) ? (parsed as HimalayaEnvelope[]) : [];
+
+  return {
+    envelopes,
+    page,
+    pageSize,
+    hasMore: envelopes.length >= pageSize,
+  };
 }

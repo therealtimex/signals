@@ -35,6 +35,8 @@ const SYNC_SUBTYPE_LABELS: Record<string, string> = {
   x_enrich: "X Profile Enrichment",
   gmail_contacts: "Gmail Contact Sync",
   gmail_metadata: "Gmail Metadata Enrichment",
+  himalaya_correspondents: "Himalaya Correspondent Import",
+  himalaya_mail_activity: "Himalaya Mail Activity Enrichment",
   linkedin_contacts: "LinkedIn Contact Sync",
 };
 

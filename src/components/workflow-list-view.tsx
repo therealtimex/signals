@@ -77,6 +77,8 @@ const SYNC_SUBTYPE_LABELS: Record<string, string> = {
   x_enrich: "X Profiles",
   gmail_contacts: "Gmail Contacts",
   gmail_metadata: "Gmail Metadata",
+  himalaya_correspondents: "Himalaya Correspondents",
+  himalaya_mail_activity: "Himalaya Mail Activity",
   linkedin_contacts: "LinkedIn",
 };
 

@@ -55,6 +55,8 @@ export type SyncSubType =
   | "x_enrich"
   | "gmail_contacts"
   | "gmail_metadata"
+  | "himalaya_correspondents"
+  | "himalaya_mail_activity"
   | "linkedin_contacts";
 
 /** Human-readable labels for sync sub-types. */
@@ -65,6 +67,8 @@ export const SYNC_SUBTYPE_LABELS: Record<SyncSubType, string> = {
   x_enrich: "X Profile Enrichment",
   gmail_contacts: "Gmail Contacts",
   gmail_metadata: "Gmail Email Metadata",
+  himalaya_correspondents: "Himalaya Correspondents",
+  himalaya_mail_activity: "Himalaya Mail Activity",
   linkedin_contacts: "LinkedIn Connections",
 };
 

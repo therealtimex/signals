@@ -752,9 +752,10 @@ function GmailSetupTab() {
               mode)
             </li>
             <li>
-              <strong className="text-foreground">People API</strong> and{" "}
-              <strong className="text-foreground">Gmail API</strong> enabled on
-              your project
+              <strong className="text-foreground">Google Takeout</strong> for
+              bulk contact import (Automation → Import Google Contacts), or a
+              registered <strong className="text-foreground">Himalaya</strong>{" "}
+              mail account in Settings for correspondent and activity workflows
             </li>
           </ul>
         </CardContent>
@@ -787,15 +788,16 @@ function GmailSetupTab() {
               <strong className="text-foreground">Library</strong>
             </li>
             <li>
-              Search for and enable{" "}
+              For legacy OAuth only: enable{" "}
               <strong className="text-foreground">People API</strong> and{" "}
-              <strong className="text-foreground">Gmail API</strong>
+              <strong className="text-foreground">Gmail API</strong> if you still
+              use the deprecated OAuth sync path
             </li>
           </ol>
           <div className="rounded-lg border bg-muted/50 p-3 text-xs">
-            <strong className="text-foreground">Note:</strong> Both APIs must be
-            enabled — People API for contact import, Gmail API for email metadata
-            enrichment.
+            <strong className="text-foreground">Note:</strong> Recommended path is
+            Google Takeout contact import plus Himalaya mail workflows — no Google
+            Cloud OAuth project required for day-to-day use.
           </div>
         </CardContent>
       </Card>
@@ -917,25 +919,25 @@ GOOGLE_CLIENT_SECRET="your-google-client-secret"`}</CodeBlock>
             <li>
               Go to{" "}
               <Link
+                href="/dashboard/workflows"
+                className="text-primary underline underline-offset-2"
+              >
+                Automation
+              </Link>{" "}
+              → <strong className="text-foreground">Import Google Contacts (Takeout)</strong>{" "}
+              to upload a Takeout zip or vCard (no OAuth required)
+            </li>
+            <li>
+              Register a Himalaya mail account in{" "}
+              <Link
                 href="/dashboard/settings"
                 className="text-primary underline underline-offset-2"
               >
                 Settings
               </Link>{" "}
-              &rarr; Platform Connections &rarr; Click{" "}
-              <strong className="text-foreground">Connect</strong> on Gmail
-            </li>
-            <li>Authorize Signals on your Google account</li>
-            <li>
-              Click{" "}
-              <strong className="text-foreground">Sync Now</strong> to import
-              Google contacts via the People API
-            </li>
-            <li>
-              Click{" "}
-              <strong className="text-foreground">Sync Metadata</strong> to
-              enrich contacts with email frequency data (sent/received counts in
-              last 30 days, last message date)
+              , then run <strong className="text-foreground">Import Correspondents</strong>{" "}
+              and <strong className="text-foreground">Enrich Mail Activity</strong> from
+              Automation
             </li>
             <li>
               Contacts appear in{" "}
@@ -1062,10 +1064,13 @@ function FeaturesTab() {
         </CardHeader>
         <CardContent className="space-y-2 text-sm text-muted-foreground">
           <ul className="list-disc pl-5 space-y-1">
-            <li>Imports contacts from Google Contacts (People API)</li>
+            <li>Import contacts from Google Takeout (zip/vcf upload)</li>
             <li>
-              Email metadata enrichment: sent/received counts in last 30 days
-              and last interaction date
+              Himalaya mail workflows: import correspondents from Sent/INBOX headers
+            </li>
+            <li>
+              Mail activity enrichment: sent/received counts in last 30 days,
+              last interaction date, and work-email org links
             </li>
             <li>
               Cross-platform dedup with X and LinkedIn contacts
@@ -1159,12 +1164,17 @@ function FaqTab() {
     },
     {
       icon: Mail,
-      q: "What Google APIs do I need?",
-      a: "People API (for importing Google contacts) and Gmail API (for email metadata enrichment). Both must be enabled in your Google Cloud Console project under APIs & Services.",
+      q: "How do I import Google contacts?",
+      a: "Use Automation → Import Google Contacts (Takeout) with a Google Takeout contacts export. For ongoing mail-based enrichment, register a Himalaya mail account in Settings and run Import Correspondents / Enrich Mail Activity.",
     },
     {
       icon: Mail,
-      q: "What does Gmail metadata sync do?",
+      q: "What Google APIs do I need?",
+      a: "None for the recommended Takeout + Himalaya workflows. Legacy OAuth sync (deprecated) required People API and Gmail API in Google Cloud Console.",
+    },
+    {
+      icon: Mail,
+      q: "What does mail activity enrichment do?",
       a: "Enriches contacts with email frequency data — sent and received message counts in the last 30 days, plus the last message date. No email content is read or stored, only aggregate metadata.",
     },
     {
