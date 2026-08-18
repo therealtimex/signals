@@ -1,4 +1,5 @@
 import { getRtxAppId, resolveRtxApiBase, type EnvLike } from "@/lib/rtx/env";
+import { getWorkspaceDefaultTerminalAgent } from "@/lib/rtx/cli-provisioning";
 import type { PublishLaunchErrorCode } from "@/lib/publish/types";
 
 export type RuntimeSessionDescriptor = {
@@ -15,6 +16,9 @@ export type LaunchTerminalAgentInput = {
   message: string;
   reason: string;
   agentName?: string;
+  agentId?: string;
+  providerId?: string;
+  modelId?: string;
 };
 
 export type LaunchTerminalAgentResult =
@@ -93,14 +97,24 @@ function mapLaunchHttpError(
   return { success: false, error, errorCode: "launch_failed", httpStatus: status };
 }
 
+type ResolvedLaunchAgent = {
+  agentName: string;
+  agentId?: string;
+  providerId?: string;
+  modelId?: string;
+};
+
 function buildLaunchRequestBody(
   input: LaunchTerminalAgentInput,
-  agentName: string
+  agent: ResolvedLaunchAgent
 ): Record<string, unknown> {
   return {
     workspaceSlug: input.workspaceSlug,
     threadSlug: input.threadSlug,
-    agentName,
+    agentName: agent.agentName,
+    ...(agent.agentId ? { agentId: agent.agentId } : {}),
+    ...(agent.providerId ? { providerId: agent.providerId } : {}),
+    ...(agent.modelId ? { modelId: agent.modelId } : {}),
     agentType: "terminal-cli",
     interactionMode: "chat-linked",
     primarySurface: "chat",
@@ -109,6 +123,29 @@ function buildLaunchRequestBody(
     spawnSource: "signals-publish",
     requestedBy: "Signals",
     reason: input.reason,
+  };
+}
+
+async function resolveLaunchTerminalAgent(
+  input: LaunchTerminalAgentInput,
+  env: EnvLike,
+  fetchImpl: typeof fetch
+): Promise<ResolvedLaunchAgent> {
+  const workspaceDefault = await getWorkspaceDefaultTerminalAgent(
+    input.workspaceSlug,
+    env,
+    fetchImpl
+  );
+
+  return {
+    agentName:
+      input.agentName?.trim() ||
+      workspaceDefault?.agentName ||
+      env.SIGNALS_RTX_AGENT_NAME?.trim() ||
+      "claude",
+    agentId: input.agentId ?? workspaceDefault?.agentId,
+    providerId: input.providerId ?? workspaceDefault?.providerId,
+    modelId: input.modelId ?? workspaceDefault?.modelId,
   };
 }
 
@@ -140,7 +177,7 @@ function parseCliSessionDescriptor(
 
 async function launchTerminalCliAgentViaCli(
   input: LaunchTerminalAgentInput,
-  agentName: string,
+  agent: ResolvedLaunchAgent,
   appId: string,
   apiBase: string,
   fetchImpl: typeof fetch
@@ -148,7 +185,7 @@ async function launchTerminalCliAgentViaCli(
   const response = await fetchImpl(`${apiBase}/cli/open-terminal-session`, {
     method: "POST",
     headers: buildAppHeaders(appId),
-    body: JSON.stringify(buildLaunchRequestBody(input, agentName)),
+    body: JSON.stringify(buildLaunchRequestBody(input, agent)),
   });
 
   const body = await readRtxJsonBody(response);
@@ -190,7 +227,7 @@ export async function launchTerminalCliAgent(
     };
   }
 
-  const agentName = input.agentName?.trim() || env.SIGNALS_RTX_AGENT_NAME?.trim() || "claude";
+  const agent = await resolveLaunchTerminalAgent(input, env, fetchImpl);
 
   try {
     const response = await fetchImpl(
@@ -198,14 +235,14 @@ export async function launchTerminalCliAgent(
       {
         method: "POST",
         headers: buildAppHeaders(appId),
-        body: JSON.stringify(buildLaunchRequestBody(input, agentName)),
+        body: JSON.stringify(buildLaunchRequestBody(input, agent)),
       }
     );
 
     const body = await readRtxJsonBody(response);
     if (!response.ok || body.success === false) {
       if (shouldFallbackToCliLaunch(response.status, body)) {
-        return launchTerminalCliAgentViaCli(input, agentName, appId, apiBase, fetchImpl);
+        return launchTerminalCliAgentViaCli(input, agent, appId, apiBase, fetchImpl);
       }
       return mapLaunchHttpError(response.status, body);
     }
