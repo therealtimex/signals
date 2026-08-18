@@ -6,8 +6,13 @@ import {
 } from "@/lib/rtx/browser-sessions";
 import {
   buildSocialPlatformConnectionPayload,
+  extractLinkedInVanityFromUrl,
+  extractXHandleFromProfileHref,
+  formatLinkedInHandle,
+  isLinkedInLoggedInUrl,
   isOAuthConnected,
   isSessionAccountConnected,
+  isXLoggedInUrl,
   urlMatchesPlatformHost,
 } from "@/lib/platforms/browser-connection";
 import type { PlatformSessionStatus } from "@/lib/platforms/browser-connection";
@@ -24,6 +29,32 @@ describe("rtx browser session helpers", () => {
     expect(urlMatchesPlatformHost("https://www.linkedin.com/feed/", "linkedin.com")).toBe(
       true
     );
+  });
+
+  it("detects authenticated LinkedIn URLs including profile pages", () => {
+    expect(isLinkedInLoggedInUrl("https://www.linkedin.com/feed/")).toBe(true);
+    expect(isLinkedInLoggedInUrl("https://www.linkedin.com/in/jane-doe")).toBe(true);
+    expect(isLinkedInLoggedInUrl("https://www.linkedin.com/login")).toBe(false);
+    expect(isLinkedInLoggedInUrl("https://www.linkedin.com/checkpoint/challenge")).toBe(
+      false
+    );
+  });
+
+  it("detects authenticated X URLs from profile and home paths", () => {
+    expect(isXLoggedInUrl("https://x.com/home")).toBe(true);
+    expect(isXLoggedInUrl("https://x.com/brandhandle")).toBe(true);
+    expect(isXLoggedInUrl("https://x.com/login")).toBe(false);
+    expect(isXLoggedInUrl("https://x.com/i/flow/login")).toBe(false);
+  });
+
+  it("extracts platform handles from profile URLs and hrefs", () => {
+    expect(extractLinkedInVanityFromUrl("https://www.linkedin.com/in/jane-doe?trk=foo")).toBe(
+      "jane-doe"
+    );
+    expect(formatLinkedInHandle("jane-doe")).toBe("/in/jane-doe");
+    expect(extractXHandleFromProfileHref("/brandhandle")).toBe("@brandhandle");
+    expect(extractXHandleFromProfileHref("/home")).toBe(null);
+    expect(extractXHandleFromProfileHref("/brand/status/123")).toBe(null);
   });
 
   it("finds a session case-insensitively", () => {

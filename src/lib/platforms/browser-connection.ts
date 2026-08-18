@@ -18,6 +18,11 @@ import { getPlatformImportStats } from "@/lib/workflows/import-stats";
 import { listSyncCursors } from "@/lib/db/queries/sync";
 import { ensureSessionPlatformAccount } from "@/lib/publish/ensure-platform-account";
 import { RTX_PUBLISH_SESSION_NAME } from "@/lib/publish/constants";
+import {
+  X_LOGGED_IN_MARKERS,
+  X_PROFILE_HANDLE_SELECTORS,
+  X_SELECTORS,
+} from "@/lib/publish/x-browser/x-publish-selectors";
 import { isRtxEmbedded, type EnvLike } from "@/lib/rtx/env";
 import {
   createRtxBrowserSession,
@@ -54,8 +59,9 @@ const PLATFORM_URLS: Record<SocialPlatform, { setupUrl: string; homeUrl: string;
   };
 
 const LOGGED_IN_SELECTORS: Record<SocialPlatform, string> = {
-  x: '[data-testid="primaryColumn"]',
-  linkedin: ".global-nav__me, .scaffold-layout__main, [data-test-icon=\"nav-home-icon\"]",
+  x: X_LOGGED_IN_MARKERS.join(", "),
+  linkedin:
+    '.global-nav__me, .scaffold-layout, .scaffold-layout__main, [data-finite-scroll-hotkey-context="FEED"], [data-test-icon="nav-home-icon"], nav[aria-label="Primary"]',
 };
 
 const LOGGED_OUT_SELECTORS: Record<SocialPlatform, string> = {
@@ -76,6 +82,63 @@ export function urlMatchesPlatformHost(rawUrl: string, host: string): boolean {
   } catch {
     return false;
   }
+}
+
+const X_LOGIN_PATH_MARKERS = ["/login", "/i/flow/login", "/i/flow/signup"] as const;
+
+/** True when an X tab URL indicates an authenticated session (not the login flow). */
+export function isXLoggedInUrl(rawUrl: string): boolean {
+  try {
+    if (!urlMatchesPlatformHost(rawUrl, "x.com")) return false;
+    const path = new URL(rawUrl).pathname.toLowerCase();
+    if (X_LOGIN_PATH_MARKERS.some((marker) => path.includes(marker))) return false;
+    if (path.startsWith("/home") || path.startsWith("/compose")) return true;
+    const segment = path.split("/").filter(Boolean)[0];
+    if (!segment) return false;
+    const reserved = new Set(["home", "explore", "search", "settings", "i", "intent", "share"]);
+    return !reserved.has(segment);
+  } catch {
+    return false;
+  }
+}
+
+/** True when a LinkedIn tab URL indicates an authenticated session. */
+export function isLinkedInLoggedInUrl(rawUrl: string): boolean {
+  try {
+    if (!urlMatchesPlatformHost(rawUrl, "linkedin.com")) return false;
+    const path = new URL(rawUrl).pathname.toLowerCase();
+    if (path.includes("/login") || path.includes("/checkpoint") || path === "/") return false;
+    return (
+      path.startsWith("/feed") ||
+      path.startsWith("/in/") ||
+      path.startsWith("/mynetwork") ||
+      path.startsWith("/notifications") ||
+      path.startsWith("/messaging") ||
+      path.startsWith("/jobs") ||
+      path.startsWith("/company/") ||
+      path.startsWith("/search")
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function extractLinkedInVanityFromUrl(rawUrl: string): string | null {
+  const match = rawUrl.match(/\/in\/([^/?#]+)/i);
+  return match?.[1] ?? null;
+}
+
+export function formatLinkedInHandle(vanity: string): string {
+  return `/in/${vanity}`;
+}
+
+export function extractXHandleFromProfileHref(href: string | null | undefined): string | null {
+  if (!href?.startsWith("/") || href.includes("/status/")) return null;
+  const segment = href.replace(/^\//, "").split("/")[0];
+  if (!segment) return null;
+  const reserved = new Set(["home", "explore", "search", "settings", "i", "compose", "intent"]);
+  if (reserved.has(segment.toLowerCase())) return null;
+  return segment.startsWith("@") ? segment : `@${segment}`;
 }
 
 function sessionValidationTimestamp(
@@ -197,51 +260,86 @@ async function detectLoggedInViaCdp(
       await page.goto(urls.homeUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
     }
 
-    const loggedOut = await page
-      .locator(LOGGED_OUT_SELECTORS[platform])
-      .first()
-      .isVisible({ timeout: 2_000 })
-      .catch(() => false);
-    if (loggedOut) {
-      return { isLoggedIn: false, detectedHandle: null };
-    }
+    const pageUrl = page.url();
+    const urlLoggedIn =
+      platform === "x" ? isXLoggedInUrl(pageUrl) : isLinkedInLoggedInUrl(pageUrl);
 
-    const loggedIn = await page
-      .locator(LOGGED_IN_SELECTORS[platform])
-      .first()
-      .isVisible({ timeout: 8_000 })
-      .catch(() => false);
+    const loggedOut = urlLoggedIn
+      ? false
+      : await page
+          .locator(LOGGED_OUT_SELECTORS[platform])
+          .first()
+          .isVisible({ timeout: 2_000 })
+          .catch(() => false);
+
+    let loggedIn = urlLoggedIn;
+    if (!loggedOut && !loggedIn) {
+      loggedIn = await page
+        .locator(LOGGED_IN_SELECTORS[platform])
+        .first()
+        .isVisible({ timeout: 8_000 })
+        .catch(() => false);
+    }
 
     let detectedHandle: string | null = null;
     if (loggedIn) {
-      if (platform === "x") {
-        detectedHandle = await page
-          .locator('[data-testid="SideNav_AccountSwitcher_Button"]')
-          .getAttribute("aria-label")
-          .then((label) => {
-            const match = label?.match(/@(\w+)/);
-            return match ? `@${match[1]}` : null;
-          })
-          .catch(() => null);
-      } else {
-        detectedHandle = await page
-          .locator('a.global-nav__primary-link[href*="/in/"]')
-          .first()
-          .getAttribute("href")
-          .then((href) => {
-            const match = href?.match(/\/in\/([^/?#]+)/);
-            return match?.[1] ?? null;
-          })
-          .catch(() => null);
-      }
+      detectedHandle = await detectPlatformHandle(platform, page, pageUrl);
     }
 
-    return { isLoggedIn: loggedIn, detectedHandle };
+    return { isLoggedIn: loggedIn && !loggedOut, detectedHandle };
   } catch {
     return { isLoggedIn: false, detectedHandle: null };
   } finally {
     await browser?.close().catch(() => undefined);
   }
+}
+
+async function detectPlatformHandle(
+  platform: SocialPlatform,
+  page: Page,
+  pageUrl: string
+): Promise<string | null> {
+  if (platform === "x") {
+    for (const selector of X_PROFILE_HANDLE_SELECTORS) {
+      const href = await page
+        .locator(selector)
+        .first()
+        .getAttribute("href")
+        .catch(() => null);
+      const handle = extractXHandleFromProfileHref(href);
+      if (handle) return handle;
+    }
+
+    const label = await page
+      .locator(X_SELECTORS.accountSwitcher)
+      .getAttribute("aria-label")
+      .then((value) => {
+        const match = value?.match(/@(\w+)/);
+        return match ? `@${match[1]}` : null;
+      })
+      .catch(() => null);
+    return label;
+  }
+
+  const navSelectors = [
+    'a.global-nav__primary-link[href*="/in/"]',
+    '.global-nav__me a[href*="/in/"]',
+    'button.global-nav__me a[href*="/in/"]',
+    'nav a[href*="/in/"]',
+  ];
+
+  for (const selector of navSelectors) {
+    const href = await page
+      .locator(selector)
+      .first()
+      .getAttribute("href")
+      .catch(() => null);
+    const vanity = extractLinkedInVanityFromUrl(href ?? "");
+    if (vanity) return formatLinkedInHandle(vanity);
+  }
+
+  const pageVanity = extractLinkedInVanityFromUrl(pageUrl);
+  return pageVanity ? formatLinkedInHandle(pageVanity) : null;
 }
 
 async function ensureRtxSessionRunning(
