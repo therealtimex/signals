@@ -17,8 +17,13 @@ import { isRtxEmbedded } from "@/lib/rtx/env";
 import { resolveSignalsBaseUrlFromEnv } from "@/lib/rtx/resolve-signals-base-url";
 import {
   buildPublishAgentInitialMessage,
-  launchTerminalCliAgent,
+  dispatchTerminalAgentViaSendMessage,
 } from "@/lib/rtx/runtime-sessions";
+import {
+  buildPublishJobBriefRoutingMessage,
+  publishJobBriefRelativePath,
+  writeRtxWorkspaceBriefFile,
+} from "@/lib/rtx/workspace-brief-files";
 
 const SENDABLE_ITEM_STATUSES = new Set(["draft", "approved", "failed"]);
 
@@ -112,7 +117,7 @@ export async function sendContentToAgent(
 
     const signalsBaseUrl = input.signalsBaseUrl ?? resolveSignalsBaseUrlFromEnv(env);
 
-    const message = buildPublishAgentInitialMessage({
+    const brief = buildPublishAgentInitialMessage({
       jobId: job.id,
       contentItemId: input.contentItemId,
       title: item.title,
@@ -120,11 +125,22 @@ export async function sendContentToAgent(
       signalsBaseUrl,
     });
 
-    const launch = await launchTerminalCliAgent(
+    const briefPath = publishJobBriefRelativePath(job.id);
+    const briefWrite = await writeRtxWorkspaceBriefFile(
+      workspaceSlug,
+      briefPath,
+      brief,
+      env
+    );
+    if (!briefWrite.success) {
+      throw new Error(briefWrite.error);
+    }
+
+    const launch = await dispatchTerminalAgentViaSendMessage(
       {
         workspaceSlug,
         threadSlug,
-        message,
+        message: buildPublishJobBriefRoutingMessage(job.id),
         reason: `Publish content item ${input.contentItemId} to ${input.platforms.join(", ")}`,
       },
       env,
@@ -139,6 +155,8 @@ export async function sendContentToAgent(
           ? 403
           : launch.errorCode === "standalone"
             ? 400
+            : launch.errorCode === "terminal_dispatch_required"
+              ? 409
             : launch.errorCode === "launch_failed"
               ? 502
               : 503;
