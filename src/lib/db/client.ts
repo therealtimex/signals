@@ -26,6 +26,7 @@ function applyMigrationsOnce(): void {
   if (migrationsApplied) return;
   migrationsApplied = true;
   if (process.env.VITEST === "true") return;
+  if (process.env.SIGNALS_BOOT_MIGRATIONS_DONE === "1") return;
   require("./migrate").runMigrations(dataDir);
 }
 
