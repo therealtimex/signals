@@ -20,10 +20,29 @@ describe("launchTerminalCliAgent", () => {
   it("falls back to /cli/open-terminal-session when the SDK route returns plain-text 404", async () => {
     const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.endsWith("/cli/get-workspace/signals") && init?.method === "GET") {
+        return new Response(
+          JSON.stringify({
+            workspace: {
+              workspace_configs: {
+                defaultAgent: {
+                  id: "terminal-antigravity",
+                  name: "antigravity",
+                  terminal: { providerId: "antigravity-cli", modelId: "gemini-3.7-flash-high" },
+                },
+              },
+            },
+          }),
+          { status: 200 }
+        );
+      }
       if (url.endsWith("/sdk/desktop/runtime-sessions/launch-terminal-cli-agent")) {
         return new Response("Not Found", { status: 404 });
       }
       if (url.endsWith("/cli/open-terminal-session") && init?.method === "POST") {
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+        expect(body.agentName).toBe("antigravity");
+        expect(body.providerId).toBe("antigravity-cli");
         return new Response(
           JSON.stringify({
             success: true,
@@ -60,12 +79,17 @@ describe("launchTerminalCliAgent", () => {
         linkage: { workspaceSlug: "signals", threadSlug: "thread-1" },
       },
     });
-    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
   });
 
   it("returns rtx_unavailable when both SDK and CLI launch fail", async () => {
-    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.endsWith("/cli/get-workspace/signals") && init?.method === "GET") {
+        return new Response(JSON.stringify({ workspace: { workspace_configs: {} } }), {
+          status: 200,
+        });
+      }
       if (
         url.endsWith("/sdk/desktop/runtime-sessions/launch-terminal-cli-agent") ||
         url.endsWith("/cli/open-terminal-session")
@@ -95,6 +119,6 @@ describe("launchTerminalCliAgent", () => {
       errorCode: "rtx_unavailable",
       httpStatus: 404,
     });
-    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
   });
 });

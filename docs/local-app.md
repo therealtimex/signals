@@ -114,6 +114,12 @@ This pre-grants manifest permissions so `/sdk/register` and `/sdk/ping` succeed 
 
 **Agent Workflow Run QA** (issue #153) uses the same `desktop.runtime-sessions` bridge as publish. If `POST /api/workflows/templates/{id}/run` returns `503` with a plain `Not Found` body, the RealTimeX host at `SERVER_URL` / `RTX_API_BASE_URL` does not expose `/sdk/desktop/runtime-sessions/*` — update or restart the RealTimeX desktop app, confirm `desktop.runtime-sessions` is granted, and re-run `provision-signals-local-app.mjs` if needed.
 
+**Agent workflow preflight** (issue #157):
+
+1. Signals Local App **running** (`curl -s http://localhost:3000/api/health` — use your actual port).
+2. Plugin workspace provision deployed with `realtimex-signals` skill: `node scripts/qa/verify-signals-plugin-provision.mjs`.
+3. Run a built-in template → **Run Agent**; confirm the RTX thread brief `Signals base URL` matches step 1 and the agent can `GET {base}/api/agent-tools`.
+
 ### Embedded-host QA (`generate_persona`)
 
 Unit tests mock RTX chat. To verify persisted `provider:model` provenance against a real owned RTX dev host:

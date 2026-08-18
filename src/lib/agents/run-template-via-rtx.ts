@@ -12,6 +12,7 @@ import {
   getSignalsRtxWorkspaceSlug,
 } from "@/lib/rtx/cli-provisioning";
 import { isRtxEmbedded } from "@/lib/rtx/env";
+import { resolveSignalsBaseUrlFromEnv } from "@/lib/rtx/resolve-signals-base-url";
 import { launchTerminalCliAgent, openRtxRuntimeLauncher } from "@/lib/rtx/runtime-sessions";
 import type { WorkflowType } from "@/lib/workflows/types";
 
@@ -29,6 +30,8 @@ export type RunTemplateViaRtxInput = {
   templateId: string;
   config?: Record<string, unknown>;
   systemPrompt?: string;
+  /** Base URL of the running Signals instance (derive from the incoming HTTP request). */
+  signalsBaseUrl?: string;
 };
 
 export type RunTemplateViaRtxResult =
@@ -47,11 +50,6 @@ export type RunTemplateViaRtxResult =
       httpStatus: number;
       workflowRunId?: string;
     };
-
-function resolveSignalsBaseUrl(env: NodeJS.ProcessEnv = process.env): string {
-  const port = env.PORT?.trim() || "3010";
-  return `http://127.0.0.1:${port}`;
-}
 
 function buildStoredRunConfig(
   template: WorkflowTemplate,
@@ -139,11 +137,13 @@ export async function runTemplateViaRtx(
       fetchImpl
     );
 
+    const signalsBaseUrl = input.signalsBaseUrl ?? resolveSignalsBaseUrlFromEnv(env);
+
     const message = buildAgentWorkflowBrief({
       template,
       workflowRunId: run.id,
       config: mergedConfig,
-      signalsBaseUrl: resolveSignalsBaseUrl(env),
+      signalsBaseUrl,
       systemPromptOverride: input.systemPrompt,
     });
 

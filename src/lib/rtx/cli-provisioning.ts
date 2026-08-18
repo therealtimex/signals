@@ -184,6 +184,76 @@ export async function ensureRtxWorkspace(
   return extractWorkspaceSlug(created, slug);
 }
 
+export type WorkspaceTerminalAgentRef = {
+  agentName: string;
+  agentId?: string;
+  providerId?: string;
+  modelId?: string;
+};
+
+export function parseWorkspaceDefaultTerminalAgent(
+  body: RtxCliBody
+): WorkspaceTerminalAgentRef | null {
+  const workspace = body.workspace as Record<string, unknown> | undefined;
+  const configs = workspace?.workspace_configs as Record<string, unknown> | undefined;
+  const rawDefaultAgent = configs?.defaultAgent;
+
+  let parsed: Record<string, unknown> | null = null;
+  if (typeof rawDefaultAgent === "string" && rawDefaultAgent.trim()) {
+    try {
+      const candidate = JSON.parse(rawDefaultAgent) as unknown;
+      if (typeof candidate === "object" && candidate !== null) {
+        parsed = candidate as Record<string, unknown>;
+      }
+    } catch {
+      parsed = null;
+    }
+  } else if (typeof rawDefaultAgent === "object" && rawDefaultAgent !== null) {
+    parsed = rawDefaultAgent as Record<string, unknown>;
+  }
+
+  if (!parsed) return null;
+
+  const agentName = typeof parsed.name === "string" ? parsed.name.trim() : "";
+  if (!agentName) return null;
+
+  const terminal = parsed.terminal as Record<string, unknown> | undefined;
+  const modelId =
+    typeof terminal?.modelId === "string"
+      ? terminal.modelId
+      : typeof terminal?.defaultModelId === "string"
+        ? terminal.defaultModelId
+        : undefined;
+
+  return {
+    agentName,
+    agentId: typeof parsed.id === "string" ? parsed.id : undefined,
+    providerId: typeof terminal?.providerId === "string" ? terminal.providerId : undefined,
+    modelId,
+  };
+}
+
+export async function getWorkspaceDefaultTerminalAgent(
+  workspaceSlug: string,
+  env: EnvLike = process.env,
+  fetchImpl: typeof fetch = fetch
+): Promise<WorkspaceTerminalAgentRef | null> {
+  const slug = workspaceSlug.trim();
+  if (!slug) return null;
+
+  try {
+    const body = await rtxCliRequestOk(
+      `/cli/get-workspace/${encodeURIComponent(slug)}`,
+      { method: "GET" },
+      env,
+      fetchImpl
+    );
+    return parseWorkspaceDefaultTerminalAgent(body);
+  } catch {
+    return null;
+  }
+}
+
 export async function createRtxPublishThread(
   workspaceSlug: string,
   threadName: string,

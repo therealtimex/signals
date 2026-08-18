@@ -148,7 +148,8 @@ export function TemplateBuilder({ open, onClose, onSaved, editTemplate }: Templa
       },
       workflowRunId: "preview",
       config: {},
-      signalsBaseUrl: "http://127.0.0.1:3010",
+      signalsBaseUrl:
+        typeof window !== "undefined" ? window.location.origin : "http://localhost:3000",
     });
   }, [name, description, templateType, platform, systemPrompt, targetPersona, editTemplate?.id]);
 

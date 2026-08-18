@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { ensureRtxWorkspace } from "@/lib/rtx/cli-provisioning";
+import {
+  ensureRtxWorkspace,
+  getWorkspaceDefaultTerminalAgent,
+  parseWorkspaceDefaultTerminalAgent,
+} from "@/lib/rtx/cli-provisioning";
 
 describe("ensureRtxWorkspace", () => {
   it("reuses an existing workspace via get-workspace without create-workspace", async () => {
@@ -113,5 +117,69 @@ describe("ensureRtxWorkspace", () => {
     );
 
     expect(slug).toBe("signals-2");
+  });
+});
+
+describe("parseWorkspaceDefaultTerminalAgent", () => {
+  it("parses workspace_configs.defaultAgent JSON", () => {
+    const agent = parseWorkspaceDefaultTerminalAgent({
+      workspace: {
+        workspace_configs: {
+          defaultAgent: JSON.stringify({
+            id: "terminal-antigravity",
+            name: "antigravity",
+            terminal: {
+              providerId: "antigravity-cli",
+              modelId: "gemini-3.7-flash-high",
+            },
+          }),
+        },
+      },
+    });
+
+    expect(agent).toEqual({
+      agentName: "antigravity",
+      agentId: "terminal-antigravity",
+      providerId: "antigravity-cli",
+      modelId: "gemini-3.7-flash-high",
+    });
+  });
+});
+
+describe("getWorkspaceDefaultTerminalAgent", () => {
+  it("loads the workspace default terminal agent via get-workspace", async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.endsWith("/cli/get-workspace/signals") && init?.method === "GET") {
+        return new Response(
+          JSON.stringify({
+            workspace: {
+              workspace_configs: {
+                defaultAgent: {
+                  id: "terminal-antigravity",
+                  name: "antigravity",
+                  terminal: { providerId: "antigravity-cli", defaultModelId: "gemini-3.7-flash-high" },
+                },
+              },
+            },
+          }),
+          { status: 200 }
+        );
+      }
+      return new Response(JSON.stringify({ error: "unexpected" }), { status: 500 });
+    });
+
+    await expect(
+      getWorkspaceDefaultTerminalAgent(
+        "signals",
+        { RTX_APP_ID: "app-1", SERVER_URL: "http://127.0.0.1:3101" },
+        fetchImpl
+      )
+    ).resolves.toEqual({
+      agentName: "antigravity",
+      agentId: "terminal-antigravity",
+      providerId: "antigravity-cli",
+      modelId: "gemini-3.7-flash-high",
+    });
   });
 });

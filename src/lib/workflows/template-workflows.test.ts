@@ -48,12 +48,15 @@ describe("template-brief", () => {
       },
       workflowRunId: "run_1",
       config: { maxResults: 10 },
-      signalsBaseUrl: "http://127.0.0.1:3010",
+      signalsBaseUrl: "http://localhost:3000",
     });
 
     expect(brief).toContain("Founder Search");
     expect(brief).toContain("Search X for founders.");
     expect(brief).toContain(getTemplateToolsHint("prospecting").join(", "));
+    expect(brief).toContain("http://localhost:3000/api/agent-tools");
+    expect(brief).toContain("do not start or manage Local Apps via pp-cli");
+    expect(brief).not.toContain("Load the `realtimex-signals` skill");
   });
 });
 
