@@ -120,12 +120,12 @@ function getImportDialogConfig(action: ActionDef): ImportDialogConfig {
     return {
       title: action.label,
       description: action.description,
-      accept: ".zip,.vcf",
+      accept: ".zip,.csv,.vcf",
       help: (
         <p>
           In Google Takeout, select <strong className="text-foreground">Contacts</strong> and
-          download the archive, then upload the zip or extracted <code>.vcf</code> file. No
-          connected Google OAuth account is required.
+          download the archive, then upload the zip or extracted <code>.csv</code> /{" "}
+          <code>.vcf</code> file. No connected Google OAuth account is required.
         </p>
       ),
       previewEndpoint: `${action.endpoint}/preview`,

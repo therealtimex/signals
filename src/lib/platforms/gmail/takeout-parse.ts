@@ -179,8 +179,13 @@ export function parseTakeoutContactsCsv(text: string): TakeoutContactRow[] {
   const getName = pick("name");
   const getEmail = pick("e-mail 1 - value", "email", "e-mail address");
   const getPhone = pick("phone 1 - value", "phone");
-  const getOrg = pick("organization 1 - name", "organization", "company");
-  const getTitle = pick("organization 1 - title", "title", "position");
+  const getOrg = pick(
+    "organization 1 - name",
+    "organization name",
+    "organization",
+    "company"
+  );
+  const getTitle = pick("organization 1 - title", "organization title", "title", "position");
   const getLocation = pick("address 1 - formatted", "location");
 
   const rows: TakeoutContactRow[] = [];
