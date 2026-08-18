@@ -1,36 +1,35 @@
 # Signals smoke tests
 
-End-to-end smoke tier (`smoke:core`) verifies that Signals boots, serves the dashboard, and exposes working API routes. Implementation uses **Playwright** (`@playwright/test`) — distinct from production Playwright browser automation slated for removal in #5/#6.
+Integration smoke tier (`test:integration`) verifies that Signals boots, serves key pages, and exposes working API routes. Implementation uses **Vitest** against a production `next start` server — no browser or Playwright install required.
+
+Runtime Playwright in `src/lib/browser/*` (publish/engage sessions) is separate and slated for agent-browser migration.
 
 ## Quick start
 
 ```bash
-# One-time: install Chromium for Playwright
-npx playwright install chromium
+# Build production app first (integration uses next start)
+npm run build
 
-# Run smoke (builds server via webServer hook on first run)
-npm run smoke:core
+# Run integration smoke (starts server via vitest globalSetup)
+npm run test:integration
 ```
 
-`smoke:core` starts a production Next.js server on port **3456** with an isolated SQLite database under `.ci/signals-e2e/`.
+Uses port **3456** by default with an isolated SQLite database under `.ci/signals-e2e/`.
 
 ## Scripts
 
 | Command | Purpose |
 |---------|---------|
-| `npm run smoke:core` | Playwright smoke suite (`e2e/smoke/`) |
-| `npm run test:e2e` | Alias for full Playwright run |
-| `npm run test:e2e:ui` | Playwright UI mode (debugging) |
+| `npm run test:integration` | Vitest integration project (`src/test/integration/`) |
+| `npm run verify:fresh-import` | Import-safety vitest project (no server) |
 
-## What `smoke:core` covers
+## What `test:integration` covers
 
-### UI
+### HTTP (no browser)
 
 1. `/` redirects to `/dashboard`
-2. Dashboard renders stat cards and pipeline section
-3. Contacts page loads (empty state OK)
-4. Settings page loads
-5. Sidebar navigation: Contacts → Settings
+2. Dashboard HTML includes pipeline / stat copy
+3. Contacts and Settings pages return expected HTML
 
 ### API
 
@@ -38,41 +37,45 @@ npm run smoke:core
 2. Contacts list + create + validation error
 3. Settings auth metadata (no secrets)
 4. Goals list + create
+5. `GET /api/rtx/status` manifest + permissions
+
+### Agent tools
+
+1. `GET /api/agent-tools` manifest
+2. `invoke` create + enrich contact
+3. Unknown tool → 404 `TOOL_NOT_FOUND`
 
 ### RTX Local App (optional)
 
-When `RTX_APP_ID` is set, health reports the app id. Full SDK registration smoke lands with Local App bootstrap (#2).
+When `RTX_APP_ID` is set, health reports embedded mode.
 
 ## Environment variables
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `E2E_PORT` | `3456` | Server port for smoke |
+| `E2E_PORT` | `3456` | Server port |
 | `SIGNALS_DATA_DIR` | `.ci/signals-e2e` | Hermetic SQLite data |
-| `E2E_FRESH_DB` | `1` | Wipe data dir before each run |
-| `PLAYWRIGHT_BASE_URL` | — | Skip webServer; point at running instance |
+| `E2E_FRESH_DB` | `1` in CI | Wipe data dir before each run |
+| `INTEGRATION_SERVER_LOG` | — | Set `1` to print server stdout/stderr |
 
 ## CI
 
-The **Smoke** job in `.github/workflows/ci.yml` runs after the quality gate:
+The **Smoke (integration)** job in `.github/workflows/ci.yml` runs after the quality gate:
 
-1. `npm run build`
-2. `npx playwright install chromium --with-deps`
-3. `npm run smoke:core`
+1. `npm run verify:fresh-import`
+2. `npm run build`
+3. `npm run test:integration`
 
-CI sets `SIGNALS_DATA_DIR` to `${{ github.workspace }}/.ci/signals-e2e`.
+No Chromium or Playwright Test install step.
 
 ## Adding scenarios
 
-Place new specs under `e2e/smoke/`. Prefix files with order when tests share state (`01-core.spec.ts` before `02-api.spec.ts`). Prefer stable selectors:
+Add specs under `src/test/integration/` with suffix `.integration.test.ts`. Use `smokeFetch` / `smokeJson` from `src/test/integration/http-client.ts`.
 
-- `getByRole("heading", { name: "..." })`
-- `getByRole("link", { name: "..." })`
+Prefer stable API contracts over brittle HTML substring matches when possible.
 
-Avoid coupling to CSS class names or animation timing.
-
-## Non-goals (see #20)
+## Non-goals
 
 - Full Gherkin/BDD suite
-- Visual regression
-- Browser enrichment or OAuth flows (require external credentials)
+- Visual regression or real browser navigation
+- OAuth or live platform flows in CI

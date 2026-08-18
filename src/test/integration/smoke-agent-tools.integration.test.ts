@@ -1,9 +1,10 @@
-import { test, expect } from "@playwright/test";
+import { describe, expect, it } from "vitest";
+import { smokeFetch, smokeJson } from "./http-client";
 
-test.describe("smoke: agent tools API", () => {
-  test("manifest lists tools", async ({ request }) => {
-    const response = await request.get("/api/agent-tools");
-    expect(response.ok()).toBeTruthy();
+describe("smoke: agent tools API", () => {
+  it("manifest lists tools", async () => {
+    const response = await smokeFetch("/api/agent-tools");
+    expect(response.ok).toBe(true);
 
     const body = await response.json();
     expect(body.success).toBe(true);
@@ -19,17 +20,19 @@ test.describe("smoke: agent tools API", () => {
     );
   });
 
-  test("invoke creates and enriches a contact", async ({ request }) => {
-    const create = await request.post("/api/agent-tools/invoke", {
-      data: {
+  it("invoke creates and enriches a contact", async () => {
+    const create = await smokeFetch("/api/agent-tools/invoke", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
         tool: "create_contact",
         input: {
           name: "Agent Tool Smoke",
           company: "Signals QA",
         },
-      },
+      }),
     });
-    expect(create.ok()).toBeTruthy();
+    expect(create.ok).toBe(true);
 
     const created = await create.json();
     expect(created).toMatchObject({
@@ -43,17 +46,19 @@ test.describe("smoke: agent tools API", () => {
 
     const contactId = created.result.id as string;
 
-    const enrich = await request.post("/api/agent-tools/invoke", {
-      data: {
+    const enrich = await smokeFetch("/api/agent-tools/invoke", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
         tool: "enrich_contact",
         input: {
           contactId,
           title: "Head of QA",
           email: "qa@signals.test",
         },
-      },
+      }),
     });
-    expect(enrich.ok()).toBeTruthy();
+    expect(enrich.ok).toBe(true);
 
     const enriched = await enrich.json();
     expect(enriched.result).toMatchObject({
@@ -63,11 +68,13 @@ test.describe("smoke: agent tools API", () => {
     });
   });
 
-  test("invoke rejects unknown tools", async ({ request }) => {
-    const response = await request.post("/api/agent-tools/invoke", {
-      data: { tool: "does_not_exist", input: {} },
+  it("invoke rejects unknown tools", async () => {
+    const response = await smokeFetch("/api/agent-tools/invoke", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tool: "does_not_exist", input: {} }),
     });
-    expect(response.status()).toBe(404);
+    expect(response.status).toBe(404);
 
     const body = await response.json();
     expect(body).toMatchObject({
