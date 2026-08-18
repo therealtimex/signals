@@ -67,6 +67,24 @@ function asBrowserPlatform(platform: SocialPlatform): BrowserPlatform {
   return platform;
 }
 
+/** Match platform host exactly — avoid substring false positives (e.g. netflix.com ⊃ x.com). */
+export function urlMatchesPlatformHost(rawUrl: string, host: string): boolean {
+  try {
+    const hostname = new URL(rawUrl).hostname.toLowerCase();
+    const target = host.toLowerCase();
+    return hostname === target || hostname.endsWith(`.${target}`);
+  } catch {
+    return false;
+  }
+}
+
+function sessionValidationTimestamp(
+  account: ReturnType<typeof getPlatformAccountByPlatform>
+): number | null {
+  if (account?.authType !== "session") return null;
+  return account.lastSyncedAt ?? null;
+}
+
 function readOAuthScopes(account: ReturnType<typeof getPlatformAccountByPlatform>): {
   grantedScopes: string;
   syncCapable: boolean;
@@ -96,9 +114,9 @@ export function isSessionAccountConnected(
   sessionStatus: PlatformSessionStatus
 ): boolean {
   if (!sessionStatus.hasSession) return false;
-  if (account?.authType === "session" && account.status === "active") return true;
+  // Running alone does not mean logged in — require validate or an active session row.
   if (sessionStatus.lastValidatedAt) return true;
-  return sessionStatus.sessionRunning;
+  return account?.authType === "session" && account.status === "active";
 }
 
 export function isOAuthConnected(
@@ -123,8 +141,9 @@ export async function getPlatformSessionStatus(
         mode: "rtx",
         hasSession: !!entry,
         sessionRunning: !!entry?.running || entry?.runtime?.status === "running",
-        lastValidatedAt: account?.lastSyncedAt ?? null,
-        detectedHandle: account?.displayName ?? null,
+        lastValidatedAt: sessionValidationTimestamp(account),
+        detectedHandle:
+          account?.authType === "session" ? account.displayName ?? null : null,
         sessionName,
       };
     } catch {
@@ -164,8 +183,7 @@ async function detectLoggedInViaCdp(
 
     for (const context of contexts) {
       for (const candidate of context.pages()) {
-        const url = candidate.url();
-        if (url.includes(urls.host)) {
+        if (urlMatchesPlatformHost(candidate.url(), urls.host)) {
           page = candidate;
           break;
         }
@@ -175,7 +193,7 @@ async function detectLoggedInViaCdp(
 
     if (!page) {
       const context = contexts[0] ?? (await browser.newContext());
-      page = context.pages()[0] ?? (await context.newPage());
+      page = await context.newPage();
       await page.goto(urls.homeUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
     }
 
@@ -195,15 +213,27 @@ async function detectLoggedInViaCdp(
       .catch(() => false);
 
     let detectedHandle: string | null = null;
-    if (platform === "x" && loggedIn) {
-      detectedHandle = await page
-        .locator('[data-testid="SideNav_AccountSwitcher_Button"]')
-        .getAttribute("aria-label")
-        .then((label) => {
-          const match = label?.match(/@(\w+)/);
-          return match ? `@${match[1]}` : null;
-        })
-        .catch(() => null);
+    if (loggedIn) {
+      if (platform === "x") {
+        detectedHandle = await page
+          .locator('[data-testid="SideNav_AccountSwitcher_Button"]')
+          .getAttribute("aria-label")
+          .then((label) => {
+            const match = label?.match(/@(\w+)/);
+            return match ? `@${match[1]}` : null;
+          })
+          .catch(() => null);
+      } else {
+        detectedHandle = await page
+          .locator('a.global-nav__primary-link[href*="/in/"]')
+          .first()
+          .getAttribute("href")
+          .then((href) => {
+            const match = href?.match(/\/in\/([^/?#]+)/);
+            return match?.[1] ?? null;
+          })
+          .catch(() => null);
+      }
     }
 
     return { isLoggedIn: loggedIn, detectedHandle };

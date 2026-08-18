@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   findRtxBrowserSession,
   resolveRtxDebugPort,
@@ -8,10 +8,24 @@ import {
   buildSocialPlatformConnectionPayload,
   isOAuthConnected,
   isSessionAccountConnected,
+  urlMatchesPlatformHost,
 } from "@/lib/platforms/browser-connection";
 import type { PlatformSessionStatus } from "@/lib/platforms/browser-connection";
+import { createPlatformAccount } from "@/lib/db/queries/platform-accounts";
+import { db } from "@/lib/db/client";
+import { platformAccounts } from "@/lib/db/schema";
+import { resetCoreTables } from "@/test/db";
 
 describe("rtx browser session helpers", () => {
+  it("matches platform hostnames without substring false positives", () => {
+    expect(urlMatchesPlatformHost("https://x.com/home", "x.com")).toBe(true);
+    expect(urlMatchesPlatformHost("https://www.x.com/home", "x.com")).toBe(true);
+    expect(urlMatchesPlatformHost("https://netflix.com/browse", "x.com")).toBe(false);
+    expect(urlMatchesPlatformHost("https://www.linkedin.com/feed/", "linkedin.com")).toBe(
+      true
+    );
+  });
+
   it("finds a session case-insensitively", () => {
     const entry = findRtxBrowserSession(
       [{ sessionName: "signals-publish", running: true }],
@@ -58,6 +72,11 @@ describe("rtx browser session helpers", () => {
 });
 
 describe("browser connection status", () => {
+  beforeEach(() => {
+    resetCoreTables();
+    db.delete(platformAccounts).run();
+  });
+
   it("treats oauth rows as connected only with encrypted credentials", () => {
     expect(isOAuthConnected(undefined)).toBe(false);
     expect(
@@ -77,7 +96,20 @@ describe("browser connection status", () => {
     ).toBe(true);
   });
 
-  it("marks session accounts connected when RTX session exists", () => {
+  it("does not treat a running RTX session alone as connected", () => {
+    const sessionStatus: PlatformSessionStatus = {
+      mode: "rtx",
+      hasSession: true,
+      sessionRunning: true,
+      lastValidatedAt: null,
+      detectedHandle: null,
+      sessionName: "signals-publish",
+    };
+
+    expect(isSessionAccountConnected(undefined, sessionStatus)).toBe(false);
+  });
+
+  it("marks session accounts connected when validated", () => {
     const sessionStatus: PlatformSessionStatus = {
       mode: "rtx",
       hasSession: true,
@@ -107,7 +139,36 @@ describe("browser connection status", () => {
     ).toBe(true);
   });
 
-  it("builds connected payload from RTX session without oauth", async () => {
+  it("reports session present but not connected until validated", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        success: true,
+        sessions: [{ sessionName: "signals-publish", running: true }],
+      }),
+    });
+
+    const payload = await buildSocialPlatformConnectionPayload(
+      "x",
+      { RTX_APP_ID: "app-1", SERVER_URL: "http://127.0.0.1:3001" },
+      fetchImpl as unknown as typeof fetch
+    );
+
+    expect(payload.connected).toBe(false);
+    expect(payload.connectionVia).toBe(null);
+    expect(payload.hasBrowserSession).toBe(true);
+    expect(payload.oauthConnected).toBe(false);
+  });
+
+  it("builds connected payload after session account is validated", async () => {
+    createPlatformAccount({
+      platform: "x",
+      displayName: "@brand",
+      authType: "session",
+      credentialsEncrypted: null,
+      status: "active",
+    });
+
     const fetchImpl = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -125,6 +186,34 @@ describe("browser connection status", () => {
     expect(payload.connected).toBe(true);
     expect(payload.connectionVia).toBe("browser");
     expect(payload.hasBrowserSession).toBe(true);
-    expect(payload.oauthConnected).toBe(false);
+  });
+
+  it("labels OAuth accounts separately when RTX session is running", async () => {
+    createPlatformAccount({
+      platform: "x",
+      displayName: "@oauth-user",
+      authType: "oauth",
+      credentialsEncrypted: "enc",
+      status: "active",
+      lastSyncedAt: 1_700_000_000,
+    });
+
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        success: true,
+        sessions: [{ sessionName: "signals-publish", running: true }],
+      }),
+    });
+
+    const payload = await buildSocialPlatformConnectionPayload(
+      "x",
+      { RTX_APP_ID: "app-1", SERVER_URL: "http://127.0.0.1:3001" },
+      fetchImpl as unknown as typeof fetch
+    );
+
+    expect(payload.oauthConnected).toBe(true);
+    expect(payload.connectionVia).toBe("oauth");
+    expect(payload.connected).toBe(true);
   });
 });

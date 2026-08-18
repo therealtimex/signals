@@ -40,6 +40,26 @@ const EMPTY_PLATFORM: PlatformUiState = {
   session: null,
 };
 
+function oauthStatus(payload: PlatformPayload | null): ConnectionStatus {
+  if (!payload?.oauthConnected) return "disconnected";
+  if (payload.account?.status === "needs_reauth") return "needs_reauth";
+  return "connected";
+}
+
+function oauthConnected(payload: PlatformPayload | null): boolean {
+  return !!payload?.oauthConnected;
+}
+
+async function fetchJson<T>(url: string): Promise<T | null> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    return (await res.json()) as T;
+  } catch {
+    return null;
+  }
+}
+
 export default function SettingsPage() {
   return (
     <Suspense>
@@ -71,13 +91,13 @@ function SettingsContent() {
 
   const fetchPlatform = useCallback(async (platform: "x" | "linkedin") => {
     const [platformRes, sessionRes] = await Promise.all([
-      fetch(`/api/platforms/${platform}`).then((r) => r.json()),
-      fetch(`/api/platforms/${platform}/browser-session`).then((r) => r.json()),
+      fetchJson<PlatformPayload>(`/api/platforms/${platform}`),
+      fetchJson<SessionPayload>(`/api/platforms/${platform}/browser-session`),
     ]);
 
     return {
-      payload: platformRes as PlatformPayload,
-      session: sessionRes as SessionPayload,
+      payload: platformRes,
+      session: sessionRes,
     };
   }, []);
 
@@ -96,10 +116,9 @@ function SettingsContent() {
   }, [refreshX, refreshLinkedIn]);
 
   useEffect(() => {
-    fetch("/api/health")
-      .then((r) => r.json())
-      .then((data) => setRtxEmbedded(data?.rtx?.mode === "embedded"))
-      .catch(() => setRtxEmbedded(false));
+    fetchJson<{ rtx?: { mode?: string } }>("/api/health").then((data) => {
+      setRtxEmbedded(data?.rtx?.mode === "embedded");
+    });
 
     refreshAll();
   }, [refreshAll]);
@@ -231,16 +250,6 @@ function SettingsContent() {
     } finally {
       setDisconnecting(false);
     }
-  }
-
-  function oauthStatus(payload: PlatformPayload | null): ConnectionStatus {
-    if (!payload?.oauthConnected) return "disconnected";
-    if (payload.account?.status === "needs_reauth") return "needs_reauth";
-    return "connected";
-  }
-
-  function oauthConnected(payload: PlatformPayload | null): boolean {
-    return !!payload?.oauthConnected;
   }
 
   const xPayload = xState.payload;
