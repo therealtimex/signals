@@ -15,14 +15,14 @@ Intelligence moves to **RealTimeX terminal agents** and **Agent Flows**, which c
 | LLM profile parsing (`generateObject`) | RTX agent-browser + `enrich_contact` |
 | In-process Playwright enrichment | RTX Browser + agent-browser (`docs/rtx-agent-browser-enrichment.md`) |
 
-Starting an agent from the Automation UI now provisions a **RealTimeX workspace thread** and launches a terminal agent with the template brief. Workflow runs are recorded for observability with RTX thread references in the run config.
+Starting an agent from the Automation UI now provisions a **RealTimeX workspace thread** and dispatches the terminal agent through the canonical `/cli/send-message` path (RTX resolves the workspace or per-thread default agent server-side). Workflow runs are recorded for observability with RTX thread references in the run config.
 
 ## Agent Workflows gallery
 
 The **Automation → Workflows → Agent Workflows** gallery is the template source for terminal-agent briefs:
 
 1. Pick a built-in or custom template (unified list).
-2. Click **Run** — Signals provisions an RTX workspace thread and launches the terminal agent with the rendered brief. The brief embeds the **same base URL as the running Local App** (derived from the HTTP request), so the agent calls the correct port.
+2. Click **Run** — Signals provisions an RTX workspace thread, writes the full brief to `workflow-runs/<runId>/brief.md` in the workspace working directory, and dispatches the workspace default terminal agent via `POST /cli/send-message` with `requireTerminalDispatch: true`. The thread shows a short routing message pointing at the brief file (not the full prompt inline). The brief embeds the **same base URL as the running Local App** (derived from the HTTP request).
 3. The agent calls `POST /api/agent-tools/invoke` at that base URL (optionally using `realtimex-signals` skill scripts when deployed in the workspace).
 4. Use `POST /api/workflows/runs/{id}/open-thread` to refocus RealTimeX on a prior run thread.
 

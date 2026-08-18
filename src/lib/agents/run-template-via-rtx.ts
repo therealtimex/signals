@@ -13,7 +13,15 @@ import {
 } from "@/lib/rtx/cli-provisioning";
 import { isRtxEmbedded } from "@/lib/rtx/env";
 import { resolveSignalsBaseUrlFromEnv } from "@/lib/rtx/resolve-signals-base-url";
-import { launchTerminalCliAgent, openRtxRuntimeLauncher } from "@/lib/rtx/runtime-sessions";
+import {
+  dispatchTerminalAgentViaSendMessage,
+  openRtxRuntimeLauncher,
+} from "@/lib/rtx/runtime-sessions";
+import {
+  buildWorkflowRunBriefRoutingMessage,
+  workflowRunBriefRelativePath,
+  writeRtxWorkspaceBriefFile,
+} from "@/lib/rtx/workspace-brief-files";
 import type { WorkflowType } from "@/lib/workflows/types";
 
 const TEMPLATE_TO_WORKFLOW_TYPE: Record<string, WorkflowType> = {
@@ -139,7 +147,7 @@ export async function runTemplateViaRtx(
 
     const signalsBaseUrl = input.signalsBaseUrl ?? resolveSignalsBaseUrlFromEnv(env);
 
-    const message = buildAgentWorkflowBrief({
+    const brief = buildAgentWorkflowBrief({
       template,
       workflowRunId: run.id,
       config: mergedConfig,
@@ -147,11 +155,22 @@ export async function runTemplateViaRtx(
       systemPromptOverride: input.systemPrompt,
     });
 
-    const launch = await launchTerminalCliAgent(
+    const briefPath = workflowRunBriefRelativePath(run.id);
+    const briefWrite = await writeRtxWorkspaceBriefFile(
+      workspaceSlug,
+      briefPath,
+      brief,
+      env
+    );
+    if (!briefWrite.success) {
+      throw new Error(briefWrite.error);
+    }
+
+    const launch = await dispatchTerminalAgentViaSendMessage(
       {
         workspaceSlug,
         threadSlug,
-        message,
+        message: buildWorkflowRunBriefRoutingMessage(run.id),
         reason: `Run agent workflow template ${template.name} (${template.id})`,
       },
       env,
@@ -181,6 +200,8 @@ export async function runTemplateViaRtx(
           ? 403
           : launch.errorCode === "standalone"
             ? 400
+            : launch.errorCode === "terminal_dispatch_required"
+              ? 409
             : launch.errorCode === "launch_failed"
               ? 502
               : 503;

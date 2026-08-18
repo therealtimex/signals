@@ -39,6 +39,7 @@ export type PublishLaunchErrorCode =
   | "standalone"
   | "permission_required"
   | "rtx_unavailable"
-  | "launch_failed";
+  | "launch_failed"
+  | "terminal_dispatch_required";
 
 export const PUBLISH_JOB_STALE_MS = 30 * 60 * 1000;
