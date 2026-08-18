@@ -81,6 +81,9 @@ if (manifest.version !== canonicalVersion) {
     `Plugin manifest version ${manifest.version} != package.json ${canonicalVersion}`
   );
 }
+if (manifest.license !== "UNLICENSED") {
+  errors.push(`Plugin manifest must be UNLICENSED, received ${manifest.license}`);
+}
 if (!manifest.capabilities?.workspace_provisions?.includes("signals")) {
   errors.push("Missing workspace_provisions signals");
 }
@@ -110,8 +113,36 @@ if (releaseManifest.pluginVersion !== canonicalVersion) {
     `Release manifest pluginVersion ${releaseManifest.pluginVersion} != package.json ${canonicalVersion}`
   );
 }
-if (!releaseManifest.checksumSha256 || releaseManifest.checksumSha256.length < 64) {
-  errors.push("Release manifest missing checksumSha256");
+if (releaseManifest.schemaVersion !== 2) {
+  errors.push(`Unsupported release manifest schema: ${releaseManifest.schemaVersion}`);
+}
+if (releaseManifest.proprietary !== true) {
+  errors.push("Release manifest must mark Signals proprietary");
+}
+if (
+  releaseManifest.runtime?.kind !== "node" ||
+  releaseManifest.runtime?.version !== "20.x" ||
+  releaseManifest.runtime?.managedBy !== "realtimex"
+) {
+  errors.push("Release manifest has an invalid managed Node runtime contract");
+}
+const releaseArtifacts = Object.entries(releaseManifest.artifacts ?? {});
+if (releaseArtifacts.length === 0) {
+  errors.push("Release manifest has no platform artifacts");
+}
+for (const [target, artifact] of releaseArtifacts) {
+  if (`${artifact.platform}-${artifact.arch}` !== target) {
+    errors.push(`Release artifact selector mismatch: ${target}`);
+  }
+  if (!/^[a-f0-9]{64}$/.test(artifact.checksumSha256 ?? "")) {
+    errors.push(`Release artifact missing sha256: ${target}`);
+  }
+  if (!artifact.artifactName?.endsWith(`-${target}.tar.gz`)) {
+    errors.push(`Release artifact filename mismatch: ${target}`);
+  }
+  if (artifact.artifactPath !== artifact.artifactName) {
+    errors.push(`Release artifact path must be bundle-relative: ${target}`);
+  }
 }
 if (releaseManifest.localAppId !== localAppId) {
   errors.push(`Release manifest localAppId mismatch: ${releaseManifest.localAppId}`);
@@ -125,6 +156,41 @@ if (rtxManifest.version !== canonicalVersion) {
 
 if (localAppManifest.id !== localAppId) {
   errors.push(`local-app.manifest.json id mismatch: ${localAppManifest.id}`);
+}
+if (localAppManifest.configuration?.command !== "{runtime.executable}") {
+  errors.push("Local app must use the RealtimeX-managed runtime executable");
+}
+if (localAppManifest.artifactContract?.schemaVersion !== 2) {
+  errors.push("Local app is missing artifact contract v2");
+}
+const supportedTargets = localAppManifest.artifactContract?.supportedTargets ?? [];
+for (const [target] of releaseArtifacts) {
+  if (!supportedTargets.includes(target)) {
+    errors.push(`Release artifact target is not supported by local app: ${target}`);
+  }
+}
+
+const signatureEntry = "marketplace/release-manifest.sig.json";
+const requireSignature = process.env.SIGNALS_REQUIRE_RELEASE_SIGNATURE === "1";
+if (requireSignature && !entries.includes(signatureEntry)) {
+  errors.push(`Missing entry: ${signatureEntry}`);
+}
+if (entries.includes(signatureEntry)) {
+  const signature = JSON.parse(
+    execSync(`unzip -p "${zipPath}" ${signatureEntry}`, { encoding: "utf8" }),
+  );
+  const manifestSha256 = createHash("sha256")
+    .update(Buffer.from(releaseManifestRaw))
+    .digest("hex");
+  if (
+    signature.algorithm !== "Ed25519" ||
+    signature.manifest !== "release-manifest.json" ||
+    signature.manifestSha256 !== manifestSha256 ||
+    !signature.keyId ||
+    !signature.signatureBase64
+  ) {
+    errors.push("Invalid release manifest signature envelope");
+  }
 }
 
 const skillMd = execSync(

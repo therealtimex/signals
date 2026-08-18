@@ -1,15 +1,33 @@
 #!/usr/bin/env bash
-# Build Next.js standalone output and zip for RealtimeX marketplace local app artifact.
+# Build a native-platform Next.js standalone runtime for RealtimeX Marketplace.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VERSION="$(node -p "require('${ROOT}/package.json').version")"
+cd "$ROOT"
+
+VERSION="$(node -p "require('./package.json').version")"
 DIST="${ROOT}/dist"
-ARTIFACT_NAME="signals-${VERSION}-standalone.zip"
-STAGING="${DIST}/standalone-staging"
+HOST_TARGET="$(node -p "process.platform + '-' + process.arch")"
+TARGET="${SIGNALS_ARTIFACT_TARGET:-${HOST_TARGET}}"
+ARTIFACT_NAME="signals-${VERSION}-${TARGET}.tar.gz"
+STAGING="${DIST}/standalone-staging-${TARGET}"
 STANDALONE="${ROOT}/.next/standalone"
 
-cd "$ROOT"
+if [[ "$TARGET" != "$HOST_TARGET" ]]; then
+  echo "Target ${TARGET} does not match native build host ${HOST_TARGET}" >&2
+  echo "Build each artifact on its matching operating system and architecture." >&2
+  exit 1
+fi
+
+SIGNALS_TARGET_TO_VALIDATE="$TARGET" node --input-type=module -e "
+import fs from 'node:fs';
+const manifest = JSON.parse(fs.readFileSync('realtimex-plugin/marketplace/local-app.manifest.json', 'utf8'));
+const target = process.env.SIGNALS_TARGET_TO_VALIDATE;
+if (!manifest.artifactContract?.supportedTargets?.includes(target)) {
+  console.error('Unsupported marketplace target: ' + target);
+  process.exit(1);
+}
+"
 
 echo "==> Building Next.js (standalone)..."
 npm run build
@@ -34,7 +52,8 @@ for required in server.js package.json node_modules .next; do
   fi
 done
 
-cp "${STANDALONE}/server.js" "$STAGING/"
+cp "${ROOT}/scripts/standalone-entry.mjs" "$STAGING/server.js"
+cp "${STANDALONE}/server.js" "$STAGING/next-server.js"
 cp "${STANDALONE}/package.json" "$STAGING/"
 cp "${ROOT}/LICENSE" "$STAGING/"
 mkdir -p "$STAGING/node_modules" "$STAGING/.next"
@@ -43,43 +62,23 @@ cp -R "${STANDALONE}/.next/." "$STAGING/.next/"
 
 # Runtime content read directly from process.cwd().
 cp -R "${ROOT}/guide" "$STAGING/guide"
-mkdir -p "$STAGING/src/lib/db/migrations"
-cp "${ROOT}/src/lib/db/migrations/"*.sql "$STAGING/src/lib/db/migrations/"
-cp -R "${ROOT}/src/lib/db/migrations/meta" "$STAGING/src/lib/db/migrations/meta"
+mkdir -p "$STAGING/resources/migrations"
+cp "${ROOT}/src/lib/db/migrations/"*.sql "$STAGING/resources/migrations/"
+cp -R "${ROOT}/src/lib/db/migrations/meta" "$STAGING/resources/migrations/meta"
 
 cp -R "${ROOT}/.next/static" "$STAGING/.next/static"
 cp -R "${ROOT}/public" "$STAGING/public"
 
+find "$STAGING" -type f -name '*.map' -delete
 rm -f "${DIST}/${ARTIFACT_NAME}"
 (
   cd "$STAGING"
-  # Source maps are useful during development but disclose source and are not
-  # required by the production runtime.
-  zip -rq "${DIST}/${ARTIFACT_NAME}" . -x '*.map'
+  # tar is available on every supported GitHub runner. The marketplace
+  # extracts the archive once, so compression has no steady-state runtime cost.
+  tar -czf "${DIST}/${ARTIFACT_NAME}" .
 )
 
-SHA256="$(shasum -a 256 "${DIST}/${ARTIFACT_NAME}" | awk '{print $1}')"
-MANIFEST="${ROOT}/marketplace/release-manifest.json"
+node scripts/create-release-target-manifest.mjs "$TARGET" "${DIST}/${ARTIFACT_NAME}"
 
-node --input-type=module -e "
-import fs from 'node:fs';
-const pkg = JSON.parse(fs.readFileSync('${ROOT}/package.json', 'utf8'));
-const manifest = {
-  signalsVersion: pkg.version,
-  pluginVersion: pkg.version,
-  pluginId: 'com.realtimex.signals',
-  localAppId: '47e45f71-3279-42f5-8e95-731de01b6eae',
-  artifactName: '${ARTIFACT_NAME}',
-  artifactPath: 'dist/${ARTIFACT_NAME}',
-  checksumSha256: '${SHA256}',
-  minRealtimeXVersion: '1.0.0',
-  permissions: JSON.parse(fs.readFileSync('${ROOT}/rtx-manifest.json', 'utf8')).permissions,
-  platformDependency: 'https://rtgit.rta.vn/rtlab/rtwebteam/realtimex-ai-app/-/issues/1614',
-  builtAt: new Date().toISOString(),
-};
-fs.mkdirSync('${ROOT}/marketplace', { recursive: true });
-fs.writeFileSync('${MANIFEST}', JSON.stringify(manifest, null, 2) + '\n');
-"
-
-echo "Wrote ${DIST}/${ARTIFACT_NAME} (sha256: ${SHA256})"
-echo "Updated ${MANIFEST}"
+echo "Wrote ${DIST}/${ARTIFACT_NAME}"
+echo "Updated marketplace/release-manifest.json for ${TARGET}"

@@ -16,7 +16,7 @@ RTX terminal agent
 
 ## Prerequisites
 
-1. Signals running (`npx @realtimex/signals` or RTX Local App).
+1. Signals running from a private source checkout or as an RTX Local App.
 2. RealTimeX Browser session with an authenticated X tab (see workspace `agent-browser` skill).
 3. Agent Tools API reachable at `http://127.0.0.1:3000/api/agent-tools/invoke` (or your Signals port).
 

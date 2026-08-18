@@ -19,6 +19,7 @@ function readJson(rel) {
 
 const pkg = readJson("package.json");
 const plugin = readJson("realtimex-plugin/realtimex.plugin.json");
+const localApp = readJson("realtimex-plugin/marketplace/local-app.manifest.json");
 
 const tagArg =
   process.argv.find((arg) => arg.startsWith("--tag="))?.slice("--tag=".length) ||
@@ -31,6 +32,30 @@ if (plugin.version !== pkg.version) {
   errors.push(
     `realtimex.plugin.json version ${plugin.version} != package.json ${pkg.version}`
   );
+}
+
+if (pkg.private !== true || pkg.license !== "UNLICENSED") {
+  errors.push("package.json must be private and UNLICENSED for proprietary distribution");
+}
+if (plugin.license !== "UNLICENSED") {
+  errors.push("realtimex.plugin.json must be UNLICENSED");
+}
+if (
+  localApp.runtime?.kind !== "node" ||
+  localApp.runtime?.version !== "20.x" ||
+  localApp.runtime?.managedBy !== "realtimex"
+) {
+  errors.push("local-app.manifest.json must require the RealtimeX-managed Node 20.x runtime");
+}
+if (localApp.configuration?.command !== "{runtime.executable}") {
+  errors.push("local-app.manifest.json must launch the managed runtime executable");
+}
+const requiredTargets = ["darwin-arm64", "darwin-x64", "win32-x64", "linux-x64"];
+const supportedTargets = localApp.artifactContract?.supportedTargets ?? [];
+for (const target of requiredTargets) {
+  if (!supportedTargets.includes(target)) {
+    errors.push(`local-app.manifest.json missing supported target ${target}`);
+  }
 }
 
 if (tagArg.startsWith("v")) {

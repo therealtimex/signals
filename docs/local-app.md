@@ -1,19 +1,20 @@
 # Signals as a RealTimeX Local App
 
-Signals can run standalone (`npx @realtimex/signals`) or as a **RealTimeX Local App** managed by the RTX Electron shell.
+Signals is distributed as a **RealTimeX Local App**. Developers can also run it from a private source checkout with `npm run dev`.
 
 ## Startup contract
 
 | Item | Value |
 |------|-------|
-| **Command** | `npx` |
-| **Args** | `["-y", "@realtimex/signals", "--port", "3000"]` |
+| **Runtime** | RealtimeX-managed Node 20.x |
+| **Command** | `{runtime.executable}` |
+| **Args** | `["server.js"]` |
 | **Health check** | `GET /api/health` → `{ status: "ok", app: "signals", rtx: { ... } }` |
 | **Home URL** | `http://localhost:{port}/dashboard` |
 | **Default port** | `3000` (override with `--port`, `PORT`, or `RTX_PORT`) |
 | **Data directory** | `~/.signals/` (override with `SIGNALS_DATA_DIR`) |
 
-See [`rtx-local-app.example.json`](../rtx-local-app.example.json) for a copy-paste Local Apps admin config.
+See [`rtx-local-app.example.json`](../rtx-local-app.example.json) for the marketplace v2 runtime contract. For current source-checkout QA, use `scripts/qa/provision-signals-local-app.mjs`.
 
 ## Environment injection (RTX Electron)
 

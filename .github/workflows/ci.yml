@@ -20,6 +20,35 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  release_plan:
+    name: Release plan
+    runs-on: ubuntu-24.04
+    outputs:
+      action: ${{ steps.plan.outputs.action }}
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Select validation targets
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            ACTION="validate"
+          elif [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            ACTION="$(node scripts/ci/should-publish-marketplace-release.mjs --tag="${{ github.ref_name }}")"
+          else
+            ACTION="$(node scripts/ci/should-publish-marketplace-release.mjs --main)"
+          fi
+
+          echo "action=${ACTION}" >> "$GITHUB_OUTPUT"
+          if [[ "$ACTION" == "publish" ]]; then
+            echo 'matrix={"include":[{"target":"darwin-arm64","runner":"macos-15"},{"target":"darwin-x64","runner":"macos-15-intel"},{"target":"win32-x64","runner":"windows-2025"},{"target":"linux-x64","runner":"ubuntu-24.04"}]}' >> "$GITHUB_OUTPUT"
+          else
+            echo 'matrix={"include":[{"target":"linux-x64","runner":"ubuntu-24.04"}]}' >> "$GITHUB_OUTPUT"
+          fi
+
   react-doctor:
     runs-on: ubuntu-latest
     permissions:
@@ -90,10 +119,13 @@ jobs:
           E2E_FRESH_DB: "1"
           CI: "true"
 
-  plugin-package:
-    name: Marketplace bundle
-    runs-on: ubuntu-latest
-    needs: check
+  standalone-artifacts:
+    name: Runtime (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.release_plan.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    needs: [check, release_plan]
     steps:
       - uses: actions/checkout@v5
 
@@ -105,6 +137,43 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Build native standalone artifact
+        run: npm run build:standalone-artifact
+        env:
+          SIGNALS_DATA_DIR: ${{ github.workspace }}/.ci/signals-data
+          SIGNALS_ARTIFACT_TARGET: ${{ matrix.target }}
+
+      - name: Test standalone runtime artifact
+        run: npm run test:standalone-artifact
+
+      - name: Upload target artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: standalone-${{ matrix.target }}-${{ github.sha }}
+          path: |
+            dist/signals-*-${{ matrix.target }}.tar.gz
+            dist/release-target-${{ matrix.target }}.json
+          if-no-files-found: error
+          retention-days: 2
+
+  plugin-package:
+    name: Marketplace bundle
+    runs-on: ubuntu-24.04
+    needs: [standalone-artifacts, release_plan]
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Download target artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: standalone-*-${{ github.sha }}
+          path: dist
+          merge-multiple: true
+
       - name: Verify marketplace version alignment
         run: |
           if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
@@ -115,31 +184,40 @@ jobs:
         env:
           GITHUB_REF_NAME: ${{ github.ref_name }}
 
-      - name: Build standalone artifact and release manifest
-        run: npm run build:standalone-artifact
+      - name: Merge platform release manifests
+        run: npm run merge:release-manifests
         env:
-          SIGNALS_DATA_DIR: ${{ github.workspace }}/.ci/signals-data
+          SIGNALS_REQUIRED_ARTIFACT_TARGETS: ${{ needs.release_plan.outputs.action == 'publish' && 'darwin-arm64,darwin-x64,win32-x64,linux-x64' || 'linux-x64' }}
 
-      - name: Test standalone runtime artifact
-        run: npm run test:standalone-artifact
+      - name: Sign release manifest
+        if: needs.release_plan.outputs.action == 'publish'
+        run: npm run sign:release-manifest
+        env:
+          SIGNALS_RELEASE_SIGNING_PRIVATE_KEY_B64: ${{ secrets.SIGNALS_RELEASE_SIGNING_PRIVATE_KEY_B64 }}
+          SIGNALS_RELEASE_SIGNING_KEY_ID: ${{ vars.SIGNALS_RELEASE_SIGNING_KEY_ID }}
 
       - name: Package RealtimeX plugin zip
         run: npm run package:realtimex-plugin
+        env:
+          SIGNALS_REQUIRE_RELEASE_SIGNATURE: ${{ needs.release_plan.outputs.action == 'publish' && '1' || '0' }}
 
       - name: Test plugin package structure and adapter
         run: npm run test:plugin-package
+        env:
+          SIGNALS_REQUIRE_RELEASE_SIGNATURE: ${{ needs.release_plan.outputs.action == 'publish' && '1' || '0' }}
 
       - name: Stage verified release artifacts
-        if: github.event_name == 'push'
+        if: needs.release_plan.outputs.action == 'publish'
         run: |
           VERSION="$(node -p "require('./package.json').version")"
           mkdir -p release-upload
           cp "dist/com.realtimex.signals-plugin.zip" release-upload/
-          cp "dist/signals-${VERSION}-standalone.zip" release-upload/
+          cp dist/signals-${VERSION}-*.tar.gz release-upload/
           cp marketplace/release-manifest.json release-upload/
+          cp marketplace/release-manifest.sig.json release-upload/
 
       - name: Upload verified release artifacts
-        if: github.event_name == 'push'
+        if: needs.release_plan.outputs.action == 'publish'
         uses: actions/upload-artifact@v4
         with:
           name: release-artifacts-${{ github.sha }}
@@ -150,41 +228,24 @@ jobs:
   release:
     name: Publish GitHub Release
     runs-on: ubuntu-latest
-    needs: [react-doctor, check, smoke, plugin-package]
-    if: >-
-      github.event_name == 'push' &&
-      (startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main')
+    needs: [release_plan, react-doctor, check, smoke, plugin-package]
+    if: needs.release_plan.outputs.action == 'publish'
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v5
 
-      - name: Decide whether to publish
-        id: publish
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            node scripts/ci/should-publish-marketplace-release.mjs --tag="${{ github.ref_name }}"
-          else
-            node scripts/ci/should-publish-marketplace-release.mjs --main
-          fi | tee /tmp/publish-action.txt
-          echo "action=$(cat /tmp/publish-action.txt)" >> "$GITHUB_OUTPUT"
-
       - name: Download verified release artifacts
-        if: steps.publish.outputs.action == 'publish'
         uses: actions/download-artifact@v4
         with:
           name: release-artifacts-${{ github.sha }}
           path: release-upload
 
       - name: Read release version
-        if: steps.publish.outputs.action == 'publish'
         id: release-version
         run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
-        if: steps.publish.outputs.action == 'publish'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.release-version.outputs.version }}

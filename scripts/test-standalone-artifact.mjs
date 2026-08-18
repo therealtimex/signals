@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 /**
- * Validate and boot the release-ready Signals standalone runtime archive.
- * Usage: node scripts/test-standalone-artifact.mjs [path-to-zip]
+ * Validate and boot the release-ready Signals native-platform runtime archive.
+ * Usage: node scripts/test-standalone-artifact.mjs [path-to-tar.gz]
  */
 import { createHash } from "node:crypto";
 import { execFileSync, spawn } from "node:child_process";
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -19,18 +20,19 @@ import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const packageJson = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
-const zipPath =
+const hostTarget = `${process.platform}-${process.arch}`;
+const archivePath =
   process.argv[2] ??
-  path.join(root, `dist/signals-${packageJson.version}-standalone.zip`);
+  path.join(root, `dist/signals-${packageJson.version}-${hostTarget}.tar.gz`);
 const releaseManifestPath = path.join(root, "marketplace/release-manifest.json");
 
-if (!existsSync(zipPath)) {
-  console.error(`Standalone zip not found: ${zipPath}`);
+if (!existsSync(archivePath)) {
+  console.error(`Standalone archive not found: ${archivePath}`);
   console.error("Run: npm run build:standalone-artifact");
   process.exit(1);
 }
 
-const entries = execFileSync("unzip", ["-Z1", zipPath], {
+const entries = execFileSync("tar", ["-tzf", archivePath], {
   encoding: "utf8",
   maxBuffer: 32 * 1024 * 1024,
 })
@@ -41,14 +43,15 @@ const errors = [];
 
 const requiredEntries = [
   "server.js",
+  "next-server.js",
   "package.json",
   "LICENSE",
   ".next/BUILD_ID",
   ".next/required-server-files.json",
   "public/favicon.ico",
   "guide/index.md",
-  "src/lib/db/migrations/0000_tired_thanos.sql",
-  "src/lib/db/migrations/meta/_journal.json",
+  "resources/migrations/0000_tired_thanos.sql",
+  "resources/migrations/meta/_journal.json",
 ];
 for (const entry of requiredEntries) {
   if (!entries.includes(entry)) errors.push(`Missing runtime entry: ${entry}`);
@@ -64,8 +67,19 @@ for (const [prefix, label] of [
   }
 }
 
-const allowedRootFiles = new Set(["LICENSE", "package.json", "server.js"]);
-const allowedRootDirectories = new Set([".next", "guide", "node_modules", "public", "src"]);
+const allowedRootFiles = new Set([
+  "LICENSE",
+  "next-server.js",
+  "package.json",
+  "server.js",
+]);
+const allowedRootDirectories = new Set([
+  ".next",
+  "guide",
+  "node_modules",
+  "public",
+  "resources",
+]);
 for (const entry of entries) {
   const [rootSegment] = entry.split("/");
   if (
@@ -75,13 +89,13 @@ for (const entry of entries) {
     errors.push(`Unexpected release entry: ${entry}`);
   }
   if (
-    entry.startsWith("src/") &&
-    !/^src\/lib\/db\/migrations\/(?:[^/]+\.sql|meta\/[^/]+\.json)$/.test(entry)
+    entry.startsWith("resources/") &&
+    !/^resources\/migrations\/(?:[^/]+\.sql|meta\/[^/]+\.json)$/.test(entry)
   ) {
-    errors.push(`Raw application source: ${entry}`);
+    errors.push(`Unexpected runtime resource: ${entry}`);
   }
   if (entry.endsWith(".map")) errors.push(`Source map: ${entry}`);
-  if (entry.endsWith(".zip")) errors.push(`Nested archive: ${entry}`);
+  if (/\.(?:zip|tgz|tar|tar\.gz)$/.test(entry)) errors.push(`Nested archive: ${entry}`);
   if (/^(?!node_modules\/).*\.(?:test|spec)\.[cm]?[jt]sx?$/.test(entry)) {
     errors.push(`Test source: ${entry}`);
   }
@@ -94,14 +108,34 @@ if (!existsSync(releaseManifestPath)) {
   errors.push(`Release manifest not found: ${releaseManifestPath}`);
 } else {
   const releaseManifest = JSON.parse(readFileSync(releaseManifestPath, "utf8"));
-  const checksum = createHash("sha256").update(readFileSync(zipPath)).digest("hex");
-  if (releaseManifest.artifactName !== path.basename(zipPath)) {
-    errors.push(
-      `Release manifest artifact ${releaseManifest.artifactName} != ${path.basename(zipPath)}`,
-    );
+  if (releaseManifest.schemaVersion !== 2 || releaseManifest.proprietary !== true) {
+    errors.push("Release manifest must use proprietary artifact contract v2");
   }
-  if (releaseManifest.checksumSha256 !== checksum) {
+  if (
+    releaseManifest.runtime?.kind !== "node" ||
+    releaseManifest.runtime?.version !== "20.x" ||
+    releaseManifest.runtime?.managedBy !== "realtimex"
+  ) {
+    errors.push("Release manifest does not require the managed Node 20.x runtime");
+  }
+  const artifact = Object.values(releaseManifest.artifacts ?? {}).find(
+    (candidate) => candidate.artifactName === path.basename(archivePath),
+  );
+  const checksum = createHash("sha256")
+    .update(readFileSync(archivePath))
+    .digest("hex");
+  if (!artifact) {
+    errors.push(`Release manifest does not select ${path.basename(archivePath)}`);
+  } else if (artifact.checksumSha256 !== checksum) {
     errors.push("Release manifest checksum does not match standalone artifact");
+  } else if (artifact.sizeBytes !== statSync(archivePath).size) {
+    errors.push("Release manifest size does not match standalone artifact");
+  }
+  const selected = releaseManifest.artifacts?.[hostTarget];
+  if (selected?.artifactName !== path.basename(archivePath)) {
+    errors.push(`Release manifest does not map host target ${hostTarget} to archive`);
+  } else if (`${selected.platform}-${selected.arch}` !== hostTarget) {
+    errors.push(`Release manifest selector fields do not match ${hostTarget}`);
   }
 }
 
@@ -119,7 +153,19 @@ let child;
 let logs = "";
 
 try {
-  execFileSync("unzip", ["-q", zipPath, "-d", extractDir]);
+  mkdirSync(extractDir, { recursive: true });
+  execFileSync("tar", ["-xzf", archivePath, "-C", extractDir]);
+
+  const artifactPackage = JSON.parse(
+    readFileSync(path.join(extractDir, "package.json"), "utf8"),
+  );
+  if (artifactPackage.private !== true || artifactPackage.license !== "UNLICENSED") {
+    throw new Error("Runtime package is not marked private and UNLICENSED");
+  }
+  const license = readFileSync(path.join(extractDir, "LICENSE"), "utf8");
+  if (!license.includes("All rights reserved") || license.includes("Apache License")) {
+    throw new Error("Runtime artifact does not contain the proprietary license notice");
+  }
   const port = await reservePort();
   child = spawn(process.execPath, ["server.js"], {
     cwd: extractDir,
@@ -145,12 +191,18 @@ try {
   if (!guideAsset.ok) {
     throw new Error(`Guide asset request failed (${guideAsset.status})`);
   }
+  const optimizedImage = await fetch(
+    `${baseUrl}/_next/image?url=%2Fandroid-chrome-192x192.png&w=64&q=75`,
+  );
+  if (!optimizedImage.ok) {
+    throw new Error(`Native image optimization failed (${optimizedImage.status})`);
+  }
   if (!existsSync(path.join(dataDir, "data.db"))) {
     throw new Error("Fresh runtime boot did not create the Signals database");
   }
 
   console.log(
-    `OK: ${zipPath} (${entries.length} entries, ${formatBytes(statSync(zipPath).size)})`,
+    `OK: ${archivePath} (${entries.length} entries, ${formatBytes(statSync(archivePath).size)})`,
   );
   console.log("OK: extracted runtime booted, migrated a fresh database, and served guide assets");
 } catch (error) {

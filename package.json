@@ -1,6 +1,7 @@
 {
   "name": "@realtimex/signals",
   "version": "0.1.12",
+  "private": true,
   "description": "Signals — Local-first Social GTM & Relationship Knowledge Graph",
   "type": "module",
   "bin": {
@@ -23,9 +24,12 @@
     "test:coverage": "vitest run --coverage --project unit && vitest run --project latency",
     "test:skill-package": "node scripts/test-signals-publish-skill-package.mjs",
     "test:standalone-artifact": "node scripts/test-standalone-artifact.mjs",
-    "test:plugin-package": "node scripts/test-verify-signals-plugin-provision.mjs && node scripts/test-realtimex-plugin-package.mjs && node scripts/test-x-publish-agent-browser.mjs",
+    "test:plugin-package": "node scripts/test-verify-signals-plugin-provision.mjs && node scripts/test-release-signature.mjs && node scripts/test-realtimex-plugin-package.mjs && node scripts/test-x-publish-agent-browser.mjs",
     "test:provision-verifier": "node scripts/test-verify-signals-plugin-provision.mjs",
     "verify:marketplace-versions": "node scripts/verify-marketplace-versions.mjs",
+    "merge:release-manifests": "node scripts/merge-release-manifests.mjs",
+    "validate:release-artifacts": "node scripts/validate-release-artifacts.mjs",
+    "sign:release-manifest": "node scripts/sign-release-manifest.mjs",
     "verify:fresh-import": "vitest run --project import-safety",
     "test:integration": "vitest run --project integration",
     "check": "npm run typecheck && npm run lint && npm run test:coverage && npm run test:skill-package && npm run test:provision-verifier && npm run db:migrate && npm run build",
@@ -118,7 +122,7 @@
     "linkedin",
     "automation"
   ],
-  "license": "Apache-2.0",
+  "license": "UNLICENSED",
   "repository": {
     "type": "git",
     "url": "https://github.com/therealtimex/signals.git"
