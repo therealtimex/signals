@@ -72,24 +72,22 @@ Restart the dev server after changing environment variables.
 
 ## Settings and platform connections
 
-Navigate to **Settings** in the sidebar. This is where you connect platforms and manage browser sessions — not third-party LLM API keys.
+Navigate to **Settings** in the sidebar. Connect X and LinkedIn via **RealTimeX Browser** — one unified card per platform with Setup, Validate, and Disconnect. OAuth API sync is optional (collapsed under **Advanced**) and not required for archive import, publish via agent, or Explore.
 
-![Settings page — platform connections and browser sessions](assets/settings-page.png)
-*Settings: connect platforms, manage browser sessions, and view the Local App LLM notice when embedded.*
+![Settings page — platform connections](assets/settings-page.png)
+*Settings: browser-native platform cards, Himalaya mail accounts, and the Local App LLM notice when embedded.*
 
 ## Connecting platforms
 
-In **Settings**, open **Platform Connections**. Signals supports three OAuth platforms:
+In **Settings → Platform Connections**:
 
-- **X / Twitter** — OAuth connection for contact sync and engagement tracking
-- **LinkedIn** — OAuth connection for professional network integration
-- **Gmail / Google** — OAuth connection for email contact sync
+- **X / Twitter** — Sign in via the `signals-publish` RealTimeX Browser session. Import followers from an X archive zip (Automation → Workflows). Publish through the terminal agent lane (`docs/rtx-browser-publish.md`).
+- **LinkedIn** — Same browser session model. Import connections from a LinkedIn export zip. Publish is beta via the agent lane.
+- **Google mail** — Himalaya CLI accounts (see Settings mail section and issue #137); no Gmail OAuth in Signals.
 
-Each connection shows its status (Connected/Disconnected), the signed-in account, granted permissions, and last sync time.
+Optional **Advanced: OAuth API sync** unlocks paid API contact sync (X Basic `follows.read`, LinkedIn `r_connections`). File-based imports and agent publish do not require OAuth.
 
-### Browser Sessions (Publish / Engage)
-
-At the bottom of Settings, **Browser Session** supports **publish and engage** flows on X and LinkedIn. Profile enrichment no longer runs inside Signals — use RealTimeX Browser + agent-browser (see `docs/rtx-agent-browser-enrichment.md`).
+Profile enrichment runs via RealTimeX agent-browser — see `docs/rtx-agent-browser-enrichment.md`.
 
 ## The Help Page
 

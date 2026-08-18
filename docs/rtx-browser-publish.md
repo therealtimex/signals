@@ -10,7 +10,7 @@ LinkedIn is best-effort (beta): the agent may use interactive browser automation
 2. Manifest permission **`desktop.runtime-sessions`** granted (Local Apps consent).
 3. RealTimeX desktop running (relay for terminal agent launch).
 4. Skills installed in the Signals workspace: `realtimex-signals` + `signals-publish`.
-5. One-time login: open the **`signals-publish`** RTX Browser session and sign in to X.
+5. One-time login: open the **`signals-publish`** RTX Browser session from **Settings → Platform Connections → X** and sign in to X (and LinkedIn in the same session when needed).
 
 ## User flow
 

@@ -1,16 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
-  hasSession,
-  loadSession,
-  clearSession,
-  setupSession,
-  validateSession,
-} from "@/lib/browser/session";
+  disconnectPlatformBrowserSession,
+  getPlatformSessionStatus,
+  openPlatformBrowserSession,
+  validatePlatformBrowserSession,
+} from "@/lib/platforms/browser-connection";
 
 /**
  * POST /api/platforms/linkedin/browser-session
- * Manage browser session for LinkedIn.
- * Body: { action: "setup" | "validate" }
  */
 export async function POST(req: NextRequest) {
   try {
@@ -19,18 +16,20 @@ export async function POST(req: NextRequest) {
 
     switch (action) {
       case "setup": {
-        const session = await setupSession("linkedin");
+        const result = await openPlatformBrowserSession("linkedin");
         return NextResponse.json({
           status: "session_created",
-          createdAt: session.createdAt,
+          sessionName: result.sessionName,
         });
       }
 
       case "validate": {
-        const isValid = await validateSession("linkedin");
+        const result = await validatePlatformBrowserSession("linkedin");
         return NextResponse.json({
-          status: isValid ? "valid" : "invalid",
-          isValid,
+          status: result.isValid ? "valid" : "invalid",
+          isValid: result.isValid,
+          detectedHandle: result.detectedHandle,
+          lastValidatedAt: result.lastValidatedAt,
         });
       }
 
@@ -49,30 +48,23 @@ export async function POST(req: NextRequest) {
 
 /**
  * GET /api/platforms/linkedin/browser-session
- * Check browser session status.
  */
 export async function GET() {
-  const exists = hasSession("linkedin");
-
-  if (!exists) {
-    return NextResponse.json({
-      hasSession: false,
-    });
-  }
-
-  const session = loadSession("linkedin");
+  const status = await getPlatformSessionStatus("linkedin");
   return NextResponse.json({
-    hasSession: true,
-    lastValidatedAt: session?.lastValidatedAt ?? null,
-    createdAt: session?.createdAt ?? null,
+    hasSession: status.hasSession,
+    sessionRunning: status.sessionRunning,
+    mode: status.mode,
+    sessionName: status.sessionName,
+    lastValidatedAt: status.lastValidatedAt,
+    detectedHandle: status.detectedHandle,
   });
 }
 
 /**
  * DELETE /api/platforms/linkedin/browser-session
- * Clear stored browser session.
  */
 export async function DELETE() {
-  clearSession("linkedin");
+  await disconnectPlatformBrowserSession("linkedin");
   return NextResponse.json({ status: "cleared" });
 }
