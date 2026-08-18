@@ -201,6 +201,7 @@ const FACEBOOK_RESERVED_PATHS = new Set([
   "l.php",
   "hashtag",
   "me",
+  "profile.php",
 ]);
 
 const FACEBOOK_LOGGED_IN_PREFIXES = [
@@ -208,17 +209,9 @@ const FACEBOOK_LOGGED_IN_PREFIXES = [
   "/friends",
   "/messages",
   "/notifications",
-  "/watch",
-  "/marketplace",
-  "/groups/feed",
-  "/gaming",
-  "/events",
   "/bookmarks",
   "/saved",
   "/settings",
-  "/stories",
-  "/reels/create",
-  "/profile.php",
 ] as const;
 
 /**
@@ -269,7 +262,8 @@ export function isFacebookLoggedOutUrl(rawUrl: string): boolean {
   try {
     if (!urlMatchesPlatformHost(rawUrl, "facebook.com")) return false;
     const path = new URL(rawUrl).pathname.toLowerCase();
-    if (path === "/" || path === "") return true;
+    // Logged-in News Feed is served at `/` — treat root as neutral; DOM selectors decide.
+    if (path === "/" || path === "") return false;
     return (
       path.includes("/login") ||
       path.includes("login.php") ||

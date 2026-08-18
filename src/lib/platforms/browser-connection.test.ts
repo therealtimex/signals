@@ -85,9 +85,12 @@ describe("rtx browser session helpers", () => {
     expect(isFacebookLoggedInUrl("https://www.facebook.com/home")).toBe(true);
     expect(isFacebookLoggedInUrl("https://www.facebook.com/messages")).toBe(true);
     expect(isFacebookLoggedInUrl("https://www.facebook.com/zuck")).toBe(false);
-    expect(isFacebookLoggedOutUrl("https://www.facebook.com/")).toBe(true);
+    expect(isFacebookLoggedInUrl("https://www.facebook.com/")).toBe(false);
+    expect(isFacebookLoggedInUrl("https://www.facebook.com/watch")).toBe(false);
+    expect(isFacebookLoggedOutUrl("https://www.facebook.com/")).toBe(false);
     expect(isFacebookLoggedOutUrl("https://www.facebook.com/login")).toBe(true);
     expect(isFacebookLoggedOutUrl("https://www.facebook.com/login/?next=foo")).toBe(true);
+    expect(extractFacebookProfileSlugFromUrl("https://www.facebook.com/profile.php")).toBe(null);
   });
 
   it("finds a session case-insensitively", () => {
