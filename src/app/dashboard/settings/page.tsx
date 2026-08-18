@@ -3,23 +3,13 @@
 import { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { Key, CheckCircle, XCircle, Loader2, Monitor, Globe, Trash2, Search } from "lucide-react";
+import { CheckCircle, XCircle, Loader2, Globe, Trash2 } from "lucide-react";
 import { PlatformConnectionCard } from "@/components/platform-connection-card";
 import { ComingSoonPlatformCards } from "@/components/coming-soon-platform-cards";
 import { HimalayaMailAccountsSection } from "@/components/himalaya-mail-accounts-section";
-
-type AuthSource = "env_var" | "config" | "none";
-
-interface AuthState {
-  status: "loading" | "ready";
-  source: AuthSource;
-  keyPrefix: string | null;
-}
 
 interface XConnectionState {
   loading: boolean;
@@ -50,9 +40,7 @@ export default function SettingsPage() {
 
 function SettingsContent() {
   const searchParams = useSearchParams();
-  const [apiKey, setApiKey] = useState("");
-  const [auth, setAuth] = useState<AuthState>({ status: "loading", source: "none", keyPrefix: null });
-  const [saving, setSaving] = useState(false);
+  const [rtxEmbedded, setRtxEmbedded] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // X connection state
@@ -103,131 +91,13 @@ function SettingsContent() {
   const [liBrowserValidating, setLiBrowserValidating] = useState(false);
   const [liBrowserClearing, setLiBrowserClearing] = useState(false);
 
-  // Search API state — Serper
-  const [searchApiKey, setSearchApiKey] = useState("");
-  const [searchApi, setSearchApi] = useState<{
-    loading: boolean;
-    configured: boolean;
-    source: string;
-    keyPrefix: string | null;
-  }>({ loading: true, configured: false, source: "none", keyPrefix: null });
-  const [searchApiSaving, setSearchApiSaving] = useState(false);
-
-  // Search API state — Tavily
-  const [tavilyApiKey, setTavilyApiKey] = useState("");
-  const [tavilyApi, setTavilyApi] = useState<{
-    loading: boolean;
-    configured: boolean;
-    source: string;
-    keyPrefix: string | null;
-  }>({ loading: true, configured: false, source: "none", keyPrefix: null });
-  const [tavilyApiSaving, setTavilyApiSaving] = useState(false);
-
-  function fetchSearchApiStatus() {
-    fetch("/api/settings/search-api")
+  function fetchRtxMode() {
+    fetch("/api/health")
       .then((r) => r.json())
       .then((data) => {
-        if (data.serper) {
-          setSearchApi({
-            loading: false,
-            configured: data.serper.configured,
-            source: data.serper.source ?? "none",
-            keyPrefix: data.serper.keyPrefix ?? null,
-          });
-          setTavilyApi({
-            loading: false,
-            configured: data.tavily?.configured ?? false,
-            source: data.tavily?.source ?? "none",
-            keyPrefix: data.tavily?.keyPrefix ?? null,
-          });
-        } else {
-          setSearchApi((prev) => ({ ...prev, loading: false }));
-          setTavilyApi((prev) => ({ ...prev, loading: false }));
-        }
+        setRtxEmbedded(data?.rtx?.mode === "embedded");
       })
-      .catch(() => {
-        setSearchApi((prev) => ({ ...prev, loading: false }));
-        setTavilyApi((prev) => ({ ...prev, loading: false }));
-      });
-  }
-
-  async function handleSearchApiSave() {
-    if (!searchApiKey.trim()) return;
-    setSearchApiSaving(true);
-    setError(null);
-
-    try {
-      const res = await fetch("/api/settings/search-api", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "save_key", apiKey: searchApiKey.trim(), provider: "serper" }),
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error);
-      } else {
-        setSearchApiKey("");
-        fetchSearchApiStatus();
-      }
-    } catch {
-      setError("Failed to save Serper API key");
-    } finally {
-      setSearchApiSaving(false);
-    }
-  }
-
-  async function handleSearchApiClear() {
-    await fetch("/api/settings/search-api", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "clear_key", provider: "serper" }),
-    });
-    fetchSearchApiStatus();
-  }
-
-  async function handleTavilyApiSave() {
-    if (!tavilyApiKey.trim()) return;
-    setTavilyApiSaving(true);
-    setError(null);
-
-    try {
-      const res = await fetch("/api/settings/search-api", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "save_key", apiKey: tavilyApiKey.trim(), provider: "tavily" }),
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error);
-      } else {
-        setTavilyApiKey("");
-        fetchSearchApiStatus();
-      }
-    } catch {
-      setError("Failed to save Tavily API key");
-    } finally {
-      setTavilyApiSaving(false);
-    }
-  }
-
-  async function handleTavilyApiClear() {
-    await fetch("/api/settings/search-api", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "clear_key", provider: "tavily" }),
-    });
-    fetchSearchApiStatus();
-  }
-
-  function fetchAuth() {
-    fetch("/api/settings")
-      .then((r) => r.json())
-      .then((data) => {
-        setAuth({ status: "ready", source: data.source ?? "none", keyPrefix: data.keyPrefix ?? null });
-      })
-      .catch(() => setAuth({ status: "ready", source: "none", keyPrefix: null }));
+      .catch(() => setRtxEmbedded(false));
   }
 
   function fetchXStatus() {
@@ -428,12 +298,11 @@ function SettingsContent() {
   }
 
   useEffect(() => {
-    fetchAuth();
+    fetchRtxMode();
     fetchXStatus();
     fetchLinkedInStatus();
     fetchBrowserSession();
     fetchLiBrowserSession();
-    fetchSearchApiStatus();
   }, []);
 
   // Handle OAuth callback query params
@@ -454,41 +323,6 @@ function SettingsContent() {
       window.history.replaceState({}, "", "/dashboard/settings");
     }
   }, [searchParams]);
-
-  async function handleSave() {
-    if (!apiKey.trim()) return;
-    setSaving(true);
-    setError(null);
-
-    try {
-      const res = await fetch("/api/settings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "save_key", apiKey: apiKey.trim() }),
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error);
-      } else {
-        setApiKey("");
-        fetchAuth();
-      }
-    } catch {
-      setError("Failed to save API key");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function handleClear() {
-    await fetch("/api/settings", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "clear_key" }),
-    });
-    fetchAuth();
-  }
 
   async function handleXConnect(extended = false) {
     setConnecting(true);
@@ -616,9 +450,18 @@ function SettingsContent() {
       <div>
         <h1 className="text-heading-1">Settings</h1>
         <p className="text-muted-foreground mt-1">
-          Configure API keys and platform connections.
+          Connect your platforms and accounts.
         </p>
       </div>
+
+      {rtxEmbedded && (
+        <div className="rounded-lg border bg-muted/40 p-4 text-sm text-muted-foreground">
+          AI chat, embeddings, and search are provided by RealtimeX. Configure models and approve{" "}
+          <code className="rounded bg-muted px-1 py-0.5 text-xs">llm.chat</code> and{" "}
+          <code className="rounded bg-muted px-1 py-0.5 text-xs">llm.embed</code> in RealtimeX{" "}
+          <strong className="font-medium text-foreground">Settings → Local Apps</strong>.
+        </div>
+      )}
 
       {/* Success message */}
       {successMessage && (
@@ -636,295 +479,6 @@ function SettingsContent() {
           {error}
         </div>
       )}
-
-      {/* Claude / Anthropic API Key */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div className="space-y-1">
-              <CardTitle className="flex items-center gap-2">
-                <Key className="h-5 w-5" />
-                Anthropic API Key
-              </CardTitle>
-              <CardDescription>
-                Required for Claude-powered agents and AI chat. Get a key at{" "}
-                <a
-                  href="https://console.anthropic.com/"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="underline"
-                >
-                  console.anthropic.com
-                </a>
-              </CardDescription>
-            </div>
-            {auth.status === "loading" ? (
-              <Badge variant="outline">
-                <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                Checking
-              </Badge>
-            ) : auth.source === "env_var" ? (
-              <Badge variant="default" className="bg-green-600">
-                <Monitor className="mr-1 h-3 w-3" />
-                Environment Variable
-              </Badge>
-            ) : auth.source === "config" ? (
-              <Badge variant="default" className="bg-green-600">
-                <CheckCircle className="mr-1 h-3 w-3" />
-                Connected
-              </Badge>
-            ) : (
-              <Badge variant="secondary">
-                <XCircle className="mr-1 h-3 w-3" />
-                Not configured
-              </Badge>
-            )}
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {auth.status === "loading" ? null : auth.source === "env_var" ? (
-            /* State A: Env var detected */
-            <div className="space-y-3">
-              <p className="text-sm text-muted-foreground">
-                API key detected from environment variable <code className="rounded bg-muted px-1 py-0.5 text-xs">ANTHROPIC_API_KEY</code>
-              </p>
-              {auth.keyPrefix && (
-                <p className="font-mono text-sm text-muted-foreground">
-                  {auth.keyPrefix}
-                </p>
-              )}
-              <p className="text-xs text-muted-foreground">
-                To change this key, update your <code className="rounded bg-muted px-1 py-0.5 text-xs">.env.local</code> file and restart the server.
-              </p>
-            </div>
-          ) : auth.source === "config" ? (
-            /* State B: Saved key in config */
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="space-y-1">
-                  <p className="text-sm text-muted-foreground">
-                    API key saved and encrypted on this machine.
-                  </p>
-                  {auth.keyPrefix && (
-                    <p className="font-mono text-sm text-muted-foreground">
-                      {auth.keyPrefix}
-                    </p>
-                  )}
-                </div>
-                <Button variant="destructive" size="sm" onClick={handleClear}>
-                  Remove Key
-                </Button>
-              </div>
-            </div>
-          ) : (
-            /* State C: No key configured */
-            <>
-              <div className="space-y-2">
-                <Label htmlFor="api-key">API Key</Label>
-                <Input
-                  id="api-key"
-                  type="password"
-                  placeholder="sk-ant-..."
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleSave()}
-                />
-              </div>
-              <Button onClick={handleSave} disabled={saving || !apiKey.trim()}>
-                {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Save & Validate
-              </Button>
-              <p className="text-xs text-muted-foreground">
-                Or set <code className="rounded bg-muted px-1 py-0.5 text-xs">ANTHROPIC_API_KEY</code> in <code className="rounded bg-muted px-1 py-0.5 text-xs">.env.local</code> and restart the server.
-              </p>
-            </>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Serper API Key */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div className="space-y-1">
-              <CardTitle className="flex items-center gap-2">
-                <Search className="h-5 w-5" />
-                Serper API Key
-              </CardTitle>
-              <CardDescription>
-                Used for broad discovery queries (prospecting, trending topics). Get a free key at{" "}
-                <a
-                  href="https://serper.dev"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="underline"
-                >
-                  serper.dev
-                </a>
-                {" "}(2,500 free queries, one-time).
-              </CardDescription>
-            </div>
-            {searchApi.loading ? (
-              <Badge variant="outline">
-                <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                Checking
-              </Badge>
-            ) : searchApi.configured ? (
-              <Badge variant="default" className="bg-green-600">
-                <CheckCircle className="mr-1 h-3 w-3" />
-                {searchApi.source === "env_var" ? "Environment Variable" : "Connected"}
-              </Badge>
-            ) : (
-              <Badge variant="secondary">
-                <XCircle className="mr-1 h-3 w-3" />
-                Not configured
-              </Badge>
-            )}
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {searchApi.loading ? null : searchApi.configured ? (
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="space-y-1">
-                  <p className="text-sm text-muted-foreground">
-                    {searchApi.source === "env_var"
-                      ? "Key detected from environment variable."
-                      : "API key saved and encrypted."}
-                  </p>
-                  {searchApi.keyPrefix && (
-                    <p className="font-mono text-sm text-muted-foreground">
-                      {searchApi.keyPrefix}
-                    </p>
-                  )}
-                </div>
-                {searchApi.source !== "env_var" && (
-                  <Button variant="destructive" size="sm" onClick={handleSearchApiClear}>
-                    Remove Key
-                  </Button>
-                )}
-              </div>
-            </div>
-          ) : (
-            <>
-              <div className="space-y-2">
-                <Label htmlFor="search-api-key">Serper API Key</Label>
-                <Input
-                  id="search-api-key"
-                  type="password"
-                  placeholder="Enter your Serper API key"
-                  value={searchApiKey}
-                  onChange={(e) => setSearchApiKey(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleSearchApiSave()}
-                />
-              </div>
-              <Button
-                onClick={handleSearchApiSave}
-                disabled={searchApiSaving || !searchApiKey.trim()}
-              >
-                {searchApiSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Save & Validate
-              </Button>
-              <p className="text-xs text-muted-foreground">
-                Or set <code className="rounded bg-muted px-1 py-0.5 text-xs">SERPER_API_KEY</code> in <code className="rounded bg-muted px-1 py-0.5 text-xs">.env.local</code> and restart.
-              </p>
-            </>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Tavily Search API Key */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div className="space-y-1">
-              <CardTitle className="flex items-center gap-2">
-                <Search className="h-5 w-5" />
-                Tavily Search API Key
-              </CardTitle>
-              <CardDescription>
-                Used for deep research queries (enrichment, person lookup). Get a free key at{" "}
-                <a
-                  href="https://tavily.com"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="underline"
-                >
-                  tavily.com
-                </a>
-                {" "}(1,000 free searches/month).
-              </CardDescription>
-            </div>
-            {tavilyApi.loading ? (
-              <Badge variant="outline">
-                <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                Checking
-              </Badge>
-            ) : tavilyApi.configured ? (
-              <Badge variant="default" className="bg-green-600">
-                <CheckCircle className="mr-1 h-3 w-3" />
-                {tavilyApi.source === "env_var" ? "Environment Variable" : "Connected"}
-              </Badge>
-            ) : (
-              <Badge variant="secondary">
-                <XCircle className="mr-1 h-3 w-3" />
-                Not configured
-              </Badge>
-            )}
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {tavilyApi.loading ? null : tavilyApi.configured ? (
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="space-y-1">
-                  <p className="text-sm text-muted-foreground">
-                    {tavilyApi.source === "env_var"
-                      ? "Key detected from environment variable."
-                      : "API key saved and encrypted."}
-                  </p>
-                  {tavilyApi.keyPrefix && (
-                    <p className="font-mono text-sm text-muted-foreground">
-                      {tavilyApi.keyPrefix}
-                    </p>
-                  )}
-                </div>
-                {tavilyApi.source !== "env_var" && (
-                  <Button variant="destructive" size="sm" onClick={handleTavilyApiClear}>
-                    Remove Key
-                  </Button>
-                )}
-              </div>
-            </div>
-          ) : (
-            <>
-              <div className="space-y-2">
-                <Label htmlFor="tavily-api-key">Tavily API Key</Label>
-                <Input
-                  id="tavily-api-key"
-                  type="password"
-                  placeholder="tvly-..."
-                  value={tavilyApiKey}
-                  onChange={(e) => setTavilyApiKey(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleTavilyApiSave()}
-                />
-              </div>
-              <Button
-                onClick={handleTavilyApiSave}
-                disabled={tavilyApiSaving || !tavilyApiKey.trim()}
-              >
-                {tavilyApiSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Save & Validate
-              </Button>
-              <p className="text-xs text-muted-foreground">
-                Or set <code className="rounded bg-muted px-1 py-0.5 text-xs">TAVILY_API_KEY</code> in <code className="rounded bg-muted px-1 py-0.5 text-xs">.env.local</code> and restart.
-              </p>
-            </>
-          )}
-        </CardContent>
-      </Card>
-
-      <Separator />
 
       {/* Platform Connections */}
       <Card>

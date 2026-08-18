@@ -167,10 +167,11 @@ The Settings page (`src/app/dashboard/settings/page.tsx`) currently mixes platfo
 
 ### 5.2 Keep in Settings
 
-- API key management (Anthropic, Brave, Tavily)
 - Platform connection cards (connect/disconnect, status display, scope info)
 - Browser session management
 - Data export/import
+
+Provider API keys (Anthropic, Serper, Tavily) are **not** configured in Settings. Local App LLM/search uses the RealtimeX SDK proxy (`llm.chat`, `llm.embed`); standalone dev uses `.env.local` only (ADR-022-9).
 
 Settings becomes config-only. All trigger actions live on the Automation → Workflows tab.
 

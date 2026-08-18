@@ -45,6 +45,8 @@ export default function HelpPage() {
 
 interface ChecklistState {
   loading: boolean;
+  rtxEmbedded: boolean;
+  rtxLlmReady: boolean;
   anthropicKey: boolean;
   xConnected: boolean;
   xSynced: boolean;
@@ -55,6 +57,8 @@ interface ChecklistState {
 function useSetupChecklist(): ChecklistState {
   const [state, setState] = useState<ChecklistState>({
     loading: true,
+    rtxEmbedded: false,
+    rtxLlmReady: false,
     anthropicKey: false,
     xConnected: false,
     xSynced: false,
@@ -64,6 +68,9 @@ function useSetupChecklist(): ChecklistState {
 
   useEffect(() => {
     Promise.all([
+      fetch("/api/health")
+        .then((r) => r.json())
+        .catch(() => ({ rtx: { mode: "standalone" } })),
       fetch("/api/settings")
         .then((r) => r.json())
         .catch(() => ({ source: "none" })),
@@ -76,9 +83,12 @@ function useSetupChecklist(): ChecklistState {
       fetch("/api/platforms/gmail")
         .then((r) => r.json())
         .catch(() => ({ connected: false })),
-    ]).then(([settings, xStatus, linkedinStatus, gmailStatus]) => {
+    ]).then(([health, settings, xStatus, linkedinStatus, gmailStatus]) => {
+      const rtxEmbedded = health?.rtx?.mode === "embedded";
       setState({
         loading: false,
+        rtxEmbedded,
+        rtxLlmReady: rtxEmbedded && health?.rtx?.pingOk === true,
         anthropicKey: settings.source !== "none",
         xConnected: xStatus.connected === true,
         xSynced: xStatus.account?.lastSyncedAt != null,
@@ -126,7 +136,7 @@ function ChecklistItem({
   label: string;
   done: boolean;
   loading: boolean;
-  href: string;
+  href?: string;
 }) {
   return (
     <div className="flex items-center gap-3">
@@ -140,7 +150,7 @@ function ChecklistItem({
       <span className={done ? "text-muted-foreground line-through" : ""}>
         {label}
       </span>
-      {!done && !loading && (
+      {!done && !loading && href && (
         <Link
           href={href}
           className="ml-auto text-xs text-primary underline underline-offset-2"
@@ -226,10 +236,13 @@ function GettingStartedTab() {
         </CardHeader>
         <CardContent className="space-y-4">
           <ChecklistItem
-            label="Anthropic API Key configured"
-            done={checklist.anthropicKey}
+            label={
+              checklist.rtxEmbedded
+                ? "RealtimeX LLM connected (llm.chat / llm.embed)"
+                : "Anthropic API key configured (.env.local)"
+            }
+            done={checklist.rtxEmbedded ? checklist.rtxLlmReady : checklist.anthropicKey}
             loading={checklist.loading}
-            href="/dashboard/settings"
           />
           <ChecklistItem
             label="X/Twitter account connected"
@@ -274,7 +287,9 @@ function GettingStartedTab() {
             Copy <Code>.env.example</Code> to <Code>.env.local</Code> and fill
             in your credentials:
           </p>
-          <CodeBlock>{`ANTHROPIC_API_KEY="sk-ant-..."
+          <CodeBlock>{`ANTHROPIC_API_KEY="sk-ant-..."   # standalone dev only; Local App uses RealtimeX LLM proxy
+SERPER_API_KEY="..."             # optional; search migration in progress
+TAVILY_API_KEY="..."             # optional; search migration in progress
 X_CLIENT_ID="your-oauth2-client-id"
 X_CLIENT_SECRET="your-oauth2-client-secret"
 LINKEDIN_CLIENT_ID="your-linkedin-client-id"
@@ -282,15 +297,13 @@ LINKEDIN_CLIENT_SECRET="your-linkedin-client-secret"
 GOOGLE_CLIENT_ID="your-google-client-id"
 GOOGLE_CLIENT_SECRET="your-google-client-secret"`}</CodeBlock>
           <p className="text-xs text-muted-foreground">
-            The Anthropic key can also be set via the{" "}
-            <Link
-              href="/dashboard/settings"
-              className="text-primary underline underline-offset-2"
-            >
-              Settings
-            </Link>{" "}
-            page. X, LinkedIn, and Google credentials must be set as environment
-            variables.
+            When Signals runs as a RealtimeX Local App, configure LLM models and approve{" "}
+            <code className="rounded bg-muted px-1 py-0.5 text-xs">llm.chat</code> /{" "}
+            <code className="rounded bg-muted px-1 py-0.5 text-xs">llm.embed</code> in
+            RealtimeX <strong className="font-medium text-foreground">Settings → Local Apps</strong>
+            — not in Signals Settings. For standalone development, set provider keys in{" "}
+            <Code>.env.local</Code> and restart the server. X, LinkedIn, and Google credentials
+            must be set as environment variables.
           </p>
         </CardContent>
       </Card>
@@ -1164,15 +1177,10 @@ function FaqTab() {
       q: "How do I update my API keys?",
       a: (
         <>
-          Edit <Code>.env.local</Code> and restart the dev server. For the
-          Anthropic key, you can also update via the{" "}
-          <Link
-            href="/dashboard/settings"
-            className="text-primary underline underline-offset-2"
-          >
-            Settings
-          </Link>{" "}
-          UI.
+          When running as a RealtimeX Local App, configure LLM and search through
+          RealtimeX <strong className="font-medium text-foreground">Settings → Local Apps</strong>
+          (approve <Code>llm.chat</Code> and <Code>llm.embed</Code> for Signals). For
+          standalone development, edit <Code>.env.local</Code> and restart the dev server.
         </>
       ),
     },
