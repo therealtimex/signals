@@ -39,6 +39,8 @@ export interface ImportPreview {
   fileName: string;
   fileSize: number;
   totalRows: number;
+  /** Optional per-slice breakdown lines (e.g. X archive follower/following/tweet counts). */
+  details?: string[];
 }
 
 export interface ImportSuccess {
@@ -226,12 +228,19 @@ export function ImportDialog({ config, open, onClose, onSuccess }: ImportDialogP
               </div>
               <div className="text-xs text-muted-foreground space-y-1">
                 <p>{formatFileSize(preview.fileSize)}</p>
-                {preview.source === "zip" && (
+                {preview.details?.length ? (
+                  preview.details.map((line) => (
+                    <p key={line} className="flex items-center gap-1">
+                      <CheckCircle className="h-3 w-3 text-green-600" />
+                      {line}
+                    </p>
+                  ))
+                ) : preview.source === "zip" ? (
                   <p className="flex items-center gap-1">
                     <CheckCircle className="h-3 w-3 text-green-600" />
                     Connections.csv found in archive
                   </p>
-                )}
+                ) : null}
                 <p>
                   <span className="font-medium text-foreground">{preview.totalRows}</span>{" "}
                   {preview.totalRows === 1 ? "row" : "rows"} ready to import

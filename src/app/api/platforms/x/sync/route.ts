@@ -19,7 +19,8 @@ import type { PlatformCredentials } from "@/lib/platforms/adapter";
 export async function POST(req: NextRequest) {
   try {
     const account = getPlatformAccountByPlatform("x");
-    if (!account) {
+    // A credential-less row is an archive-import placeholder, not a connection.
+    if (!account || !account.credentialsEncrypted) {
       return NextResponse.json(
         { error: "No X account connected" },
         { status: 400 }

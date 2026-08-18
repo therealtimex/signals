@@ -148,6 +148,93 @@ export function mapXTweetToContentPost(
   };
 }
 
+// ── X data archive imports (no API access — see archive-import.ts) ──
+
+/** Thin user reference from archive follower.js / following.js rows. */
+export interface XArchiveUserRef {
+  accountId: string;
+  /** e.g. "https://twitter.com/intent/user?user_id=…" */
+  userLink: string | null;
+}
+
+/** Parsed tweet row from archive tweets.js (subset we import). */
+export interface XArchiveTweetRef {
+  idStr: string;
+  fullText: string;
+  /** ISO 8601, converted from the archive's legacy date format. */
+  createdAt: string | null;
+  favoriteCount: number;
+  retweetCount: number;
+  isReply: boolean;
+}
+
+/** Canonical profile URL for an X account known only by numeric id. */
+export function xArchiveProfileUrl(accountId: string): string {
+  return `https://x.com/i/user/${accountId}`;
+}
+
+/**
+ * Map a thin archive follower/following row to contact fields. Archive
+ * snapshots carry only the account id and an intent link — no handle or
+ * display name — so the contact is a placeholder until enrichment fills it.
+ */
+export function mapXArchiveUserToContact(
+  user: XArchiveUserRef
+): Omit<NewContact, "id"> & ContactWriteExtras {
+  return {
+    name: `X user ${user.accountId}`,
+    platform: "x" as const,
+    platformUserId: user.accountId,
+    profileUrl: xArchiveProfileUrl(user.accountId),
+  };
+}
+
+/** Map a thin archive follower/following row to a contactIdentity row. */
+export function mapXArchiveUserToIdentity(
+  user: XArchiveUserRef,
+  contactId: string,
+  relationship: { follower: boolean; following: boolean }
+): Omit<NewContactIdentity, "id"> {
+  const now = Math.floor(Date.now() / 1000);
+  return {
+    contactId,
+    platform: "x" as const,
+    platformUserId: user.accountId,
+    platformUrl: xArchiveProfileUrl(user.accountId),
+    platformData: JSON.stringify({
+      source: "x_archive_import",
+      userLink: user.userLink,
+      archiveFollower: relationship.follower,
+      archiveFollowing: relationship.following,
+    }),
+    isPrimary: 1,
+    isActive: 1,
+    lastSyncedAt: now,
+  };
+}
+
+/**
+ * Adapt an archive tweet row to the API XTweet shape so the content mappers
+ * below can be reused. Reply/quote counts aren't in the archive export.
+ */
+export function archiveTweetToXTweet(
+  row: XArchiveTweetRef,
+  authorId: string | null
+): XTweet {
+  return {
+    id: row.idStr,
+    text: row.fullText,
+    created_at: row.createdAt ?? undefined,
+    author_id: authorId ?? undefined,
+    public_metrics: {
+      like_count: row.favoriteCount,
+      retweet_count: row.retweetCount,
+      reply_count: 0,
+      quote_count: 0,
+    },
+  };
+}
+
 /** Extract structured engagement metrics from a tweet. */
 export function extractTweetMetrics(tweet: XTweet): {
   likes: number;

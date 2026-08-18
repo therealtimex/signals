@@ -101,8 +101,11 @@ export async function GET(req: NextRequest) {
     // Upsert platform account
     const existing = getPlatformAccountByPlatform("x");
     if (existing) {
+      // Upgrades archive-import placeholder accounts (authType "session",
+      // no credentials) in place, keeping imported content attached.
       updatePlatformAccount(existing.id, {
         displayName: `@${xUser.username}`,
+        authType: "oauth",
         credentialsEncrypted: encrypt(JSON.stringify(creds)),
         status: "active",
       });

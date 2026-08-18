@@ -41,6 +41,31 @@ describe("/api/platforms/x/enrich", () => {
     expect(body.workflowRunId).toBeUndefined();
   });
 
+  it("POST returns migration guidance for a credential-less archive placeholder", async () => {
+    db.insert(platformAccounts)
+      .values({
+        id: nanoid(),
+        platform: "x",
+        displayName: "X archive",
+        authType: "session",
+        status: "paused",
+      })
+      .run();
+
+    const res = await POST(
+      new NextRequest("http://localhost/api/platforms/x/enrich", {
+        method: "POST",
+        body: JSON.stringify({}),
+      })
+    );
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.delegated).toBe(true);
+    expect(body.message).toBe(BROWSER_ENRICHMENT_MESSAGE);
+    expect(body.workflowRunId).toBeUndefined();
+  });
+
   it("POST records a failed enrich workflow when X is connected", async () => {
     db.insert(platformAccounts)
       .values({
@@ -48,6 +73,9 @@ describe("/api/platforms/x/enrich", () => {
         platform: "x",
         displayName: "Test X",
         authType: "oauth",
+        // Connected means credentials exist — credential-less rows are
+        // archive-import placeholders and get the migration no-op instead.
+        credentialsEncrypted: "test-encrypted-creds",
         status: "active",
       })
       .run();
