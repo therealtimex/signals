@@ -1,9 +1,6 @@
 import { execFile } from "node:child_process";
 import { readFileSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { promisify } from "node:util";
-
-const execFileAsync = promisify(execFile);
 
 export type HimalayaDiscoveredAccount = {
   alias: string;
@@ -14,6 +11,35 @@ export type HimalayaCheckResult = {
   ok: boolean;
   message?: string;
 };
+
+type ExecHimalayaResult = {
+  stdout: string;
+  stderr: string;
+};
+
+function execHimalaya(
+  args: string[],
+  configPath: string,
+  timeoutMs = 30_000
+): Promise<ExecHimalayaResult> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      "himalaya",
+      ["-c", configPath, ...args],
+      { timeout: timeoutMs, maxBuffer: 1024 * 1024 },
+      (error, stdout, stderr) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve({
+          stdout: stdout?.toString() ?? "",
+          stderr: stderr?.toString() ?? "",
+        });
+      }
+    );
+  });
+}
 
 /** Resolve Himalaya config path from env or default location. */
 export function getHimalayaConfigPath(): string {
@@ -75,11 +101,7 @@ export async function listHimalayaAccounts(
   const emailByAlias = new Map(configAccounts.map((account) => [account.alias, account.email]));
 
   try {
-    const { stdout } = await execFileAsync(
-      "himalaya",
-      ["-c", configPath, "account", "list", "--output", "json"],
-      { timeout: 15_000, maxBuffer: 1024 * 1024 }
-    );
+    const { stdout } = await execHimalaya(["account", "list", "--output", "json"], configPath, 15_000);
     const parsed = JSON.parse(stdout.trim()) as unknown;
     if (Array.isArray(parsed)) {
       const accounts = parsed
@@ -104,27 +126,36 @@ export async function listHimalayaAccounts(
   return configAccounts;
 }
 
-/** Validate a Himalaya account via `himalaya account check`. */
+/** Validate a Himalaya account via `himalaya account doctor` (v1.2+). */
 export async function checkHimalayaAccount(
   alias: string,
   configPath = getHimalayaConfigPath()
 ): Promise<HimalayaCheckResult> {
   try {
-    const { stdout, stderr } = await execFileAsync(
-      "himalaya",
-      ["-c", configPath, "account", "check", "-a", alias],
-      { timeout: 30_000, maxBuffer: 1024 * 1024 }
-    );
+    const { stdout, stderr } = await execHimalaya(["account", "doctor", alias], configPath);
     const output = `${stdout}\n${stderr}`.trim();
-    if (/error|failed|invalid/i.test(output)) {
-      return { ok: false, message: output || "Account check failed" };
-    }
     return { ok: true, message: output || undefined };
   } catch (error) {
-    const message =
-      error instanceof Error
-        ? error.message
-        : "Himalaya account check failed — is himalaya installed and configured?";
-    return { ok: false, message };
+    const execError = error as NodeJS.ErrnoException & {
+      stderr?: string;
+      stdout?: string;
+    };
+    const output = [execError.stdout, execError.stderr, execError.message]
+      .filter((line): line is string => Boolean(line))
+      .join("\n")
+      .trim();
+
+    if (/unrecognized subcommand/i.test(output)) {
+      return {
+        ok: false,
+        message:
+          "Installed Himalaya CLI does not support `account doctor`. Upgrade to Himalaya v1.2+ or configure mail in terminal.",
+      };
+    }
+
+    return {
+      ok: false,
+      message: output || "Himalaya account doctor failed — is himalaya installed and configured?",
+    };
   }
 }

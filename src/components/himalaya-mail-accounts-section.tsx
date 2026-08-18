@@ -347,6 +347,8 @@ export function HimalayaMailAccountsSection() {
                   className="text-destructive hover:text-destructive"
                   onClick={() => handleRemove(account.id)}
                   disabled={removingId === account.id}
+                  aria-label={`Remove mail account ${account.alias}`}
+                  title={`Remove ${account.alias}`}
                 >
                   {removingId === account.id ? (
                     <Loader2 className="h-3 w-3 animate-spin" />

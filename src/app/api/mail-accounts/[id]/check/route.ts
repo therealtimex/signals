@@ -9,7 +9,7 @@ type RouteContext = { params: Promise<{ id: string }> };
 
 /**
  * POST /api/mail-accounts/:id/check
- * Validate account via `himalaya account check -a <alias>`.
+ * Validate account via `himalaya account doctor <alias>` (Himalaya v1.2+).
  */
 export async function POST(_req: Request, context: RouteContext) {
   const { id } = await context.params;
