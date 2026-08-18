@@ -15,7 +15,18 @@ Intelligence moves to **RealTimeX terminal agents** and **Agent Flows**, which c
 | LLM profile parsing (`generateObject`) | RTX agent-browser + `enrich_contact` |
 | In-process Playwright enrichment | RTX Browser + agent-browser (`docs/rtx-agent-browser-enrichment.md`) |
 
-Starting an agent from the Automation UI or `start_workflow` still creates a **workflow run** for observability, but the run is marked **failed** with `AGENT_ORCHESTRATION_UNAVAILABLE` until the workflow is migrated to RTX.
+Starting an agent from the Automation UI now provisions a **RealTimeX workspace thread** and launches a terminal agent with the template brief. Workflow runs are recorded for observability with RTX thread references in the run config.
+
+## Agent Workflows gallery
+
+The **Automation → Workflows → Agent Workflows** gallery is the template source for terminal-agent briefs:
+
+1. Pick a built-in or custom template (unified list).
+2. Click **Run** — Signals provisions an RTX workspace thread and launches the terminal agent with the rendered brief.
+3. The agent executes via `realtimex-signals` and `POST /api/agent-tools/invoke`.
+4. Use `POST /api/workflows/runs/{id}/open-thread` to refocus RealTimeX on a prior run thread.
+
+Recurring schedules for agent templates belong in **RealTimeX Agent Flows** (not Signals `scheduled_jobs`).
 
 ## Running agents
 

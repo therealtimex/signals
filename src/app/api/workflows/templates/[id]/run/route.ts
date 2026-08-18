@@ -1,16 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { getTemplate } from "@/lib/db/queries/workflow-templates";
 import { runTemplateViaRtx } from "@/lib/agents/run-template-via-rtx";
 
-const activateSchema = z.object({
+const runSchema = z.object({
   config: z.record(z.unknown()).optional(),
   systemPrompt: z.string().optional(),
 });
 
 /**
- * POST /api/workflows/templates/[id]/activate
- * @deprecated Use POST /api/workflows/templates/[id]/run instead.
+ * POST /api/workflows/templates/[id]/run
+ * Provision an RTX workspace thread and launch a terminal agent with the template brief.
  */
 export async function POST(
   req: NextRequest,
@@ -18,15 +17,9 @@ export async function POST(
 ) {
   const { id } = await params;
 
-  const template = getTemplate(id);
-  if (!template) {
-    return NextResponse.json({ error: "Template not found" }, { status: 404 });
-  }
-
   try {
     const body = await req.json().catch(() => ({}));
-    const data = activateSchema.parse(body);
-
+    const data = runSchema.parse(body);
     const result = await runTemplateViaRtx({
       templateId: id,
       config: data.config,
@@ -46,8 +39,8 @@ export async function POST(
 
     return NextResponse.json(
       {
-        workflowRun: result.workflowRun,
         workflowRunId: result.workflowRunId,
+        workflowRun: result.workflowRun,
         workspaceSlug: result.workspaceSlug,
         threadSlug: result.threadSlug,
         threadPath: result.threadPath,

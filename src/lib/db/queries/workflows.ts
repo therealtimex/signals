@@ -42,6 +42,7 @@ export function updateWorkflowRun(
       | "costUsd"
       | "sourceTotal"
       | "sourceProcessed"
+      | "config"
     >
   >
 ): WorkflowRun | undefined {

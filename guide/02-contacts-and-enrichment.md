@@ -76,7 +76,7 @@ Signals no longer runs in-process enrichment agents. Use **RealTimeX terminal ag
 
 See `docs/rtx-agent-browser-enrichment.md` and `docs/rtx-agent-orchestration.md`.
 
-The **Automation → Workflows** agent gallery still documents enrichment *templates* (instructions and target personas). **Run** and **Schedule** record workflow runs for observability, but execution must happen through RTX Agent Flows calling `POST /api/agent-tools/invoke`. When orchestration is unavailable, template schedules fail once, stay **disabled**, and cannot be re-enabled from Signals — configure recurring runs in **RealTimeX Agent Flows** instead.
+The **Automation → Workflows** agent gallery provides task briefs for RealTimeX terminal agents. Click **Run** to launch an agent on an RTX workspace thread; the agent executes via `realtimex-signals` and `POST /api/agent-tools/invoke`. Recurring schedules belong in **RealTimeX Agent Flows** — Signals `scheduled_jobs` do not execute agent templates locally.
 
 ## Smart Pruning
 

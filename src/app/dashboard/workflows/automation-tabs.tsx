@@ -74,10 +74,10 @@ function AutomationTabsInner({ runs, totalRuns }: AutomationTabsProps) {
             <div className="flex gap-3">
               <Info className="mt-0.5 h-4 w-4 shrink-0" />
               <p>
-                Agent orchestration runs in RealTimeX terminal agents and Agent Flows via{" "}
-                <code className="text-xs">/api/agent-tools</code>. Runs started here are
-                recorded for observability; use RTX to execute migrated workflows (
-                <code className="text-xs">docs/rtx-agent-orchestration.md</code>).
+                Agent Workflows launch a RealTimeX terminal agent on a workspace thread. The agent
+                executes the template brief using <code className="text-xs">realtimex-signals</code>{" "}
+                and <code className="text-xs">POST /api/agent-tools/invoke</code>. Recurring
+                schedules belong in RealTimeX Agent Flows.
               </p>
             </div>
           </Card>
