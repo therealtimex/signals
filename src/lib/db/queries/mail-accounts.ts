@@ -104,13 +104,16 @@ export function getLegacyGmailOAuthAccount(): PlatformAccount | undefined {
 export function syncMailAccountsFromHimalaya(
   discovered: HimalayaDiscoveredAccount[]
 ): MailAccountView[] {
+  const uniqueDiscovered = [
+    ...new Map(discovered.map((row) => [row.alias, row])).values(),
+  ];
   const existing = listHimalayaMailAccountRows();
   const existingByAlias = new Map(
     existing.map((account) => [parseMetadata(account).himalayaAlias, account])
   );
-  const discoveredAliases = new Set(discovered.map((row) => row.alias));
+  const discoveredAliases = new Set(uniqueDiscovered.map((row) => row.alias));
 
-  for (const row of discovered) {
+  for (const row of uniqueDiscovered) {
     const current = existingByAlias.get(row.alias);
     if (current) {
       db.update(platformAccounts)
@@ -152,8 +155,8 @@ export function syncMailAccountsFromHimalaya(
   }
 
   const defaultAlias = getDefaultMailAccountAlias();
-  if (!defaultAlias && discovered.length > 0) {
-    setDefaultMailAccountAlias(discovered[0].alias);
+  if (!defaultAlias && uniqueDiscovered.length > 0) {
+    setDefaultMailAccountAlias(uniqueDiscovered[0].alias);
   }
 
   return listHimalayaMailAccounts();

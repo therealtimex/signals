@@ -50,4 +50,14 @@ describe("mail-accounts queries", () => {
     expect(listHimalayaMailAccounts()).toHaveLength(1);
     expect(getDefaultMailAccountAlias()).toBe("personal");
   });
+
+  it("deduplicates discovered aliases during sync", () => {
+    const accounts = syncMailAccountsFromHimalaya([
+      { alias: "work", email: "work@company.com" },
+      { alias: "work", email: "duplicate@company.com" },
+    ]);
+
+    expect(accounts).toHaveLength(1);
+    expect(accounts[0].email).toBe("duplicate@company.com");
+  });
 });

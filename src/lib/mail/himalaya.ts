@@ -38,6 +38,9 @@ export function parseHimalayaConfigAccounts(configPath: string): HimalayaDiscove
 
   while ((match = sectionRe.exec(raw)) !== null) {
     const alias = match[1].trim();
+    // Skip sub-tables like [accounts.work.backend] — only direct account sections.
+    if (alias.includes(".")) continue;
+
     const start = match.index + match[0].length;
     const nextSection = raw.slice(start).search(/^\[/m);
     const block = nextSection === -1 ? raw.slice(start) : raw.slice(start, start + nextSection);
@@ -55,9 +58,22 @@ export function parseHimalayaConfigAccounts(configPath: string): HimalayaDiscove
 }
 
 /** List accounts from Himalaya CLI JSON output, falling back to config parse. */
+function resolveAccountEmail(
+  record: Record<string, unknown>,
+  alias: string,
+  emailByAlias: Map<string, string>
+): string {
+  const fromRecord =
+    typeof record.email === "string" && record.email.trim() ? record.email.trim() : null;
+  return fromRecord ?? emailByAlias.get(alias) ?? alias;
+}
+
 export async function listHimalayaAccounts(
   configPath = getHimalayaConfigPath()
 ): Promise<HimalayaDiscoveredAccount[]> {
+  const configAccounts = parseHimalayaConfigAccounts(configPath);
+  const emailByAlias = new Map(configAccounts.map((account) => [account.alias, account.email]));
+
   try {
     const { stdout } = await execFileAsync(
       "himalaya",
@@ -66,22 +82,26 @@ export async function listHimalayaAccounts(
     );
     const parsed = JSON.parse(stdout.trim()) as unknown;
     if (Array.isArray(parsed)) {
-      return parsed
+      const accounts = parsed
         .map((row) => {
           if (!row || typeof row !== "object") return null;
           const record = row as Record<string, unknown>;
           const alias = String(record.name ?? record.alias ?? record.account ?? "").trim();
-          const email = String(record.email ?? record.default ?? alias).trim();
-          if (!alias) return null;
-          return { alias, email };
+          if (!alias || alias.includes(".")) return null;
+          return {
+            alias,
+            email: resolveAccountEmail(record, alias, emailByAlias),
+          };
         })
         .filter((row): row is HimalayaDiscoveredAccount => row !== null);
+
+      if (accounts.length > 0) return accounts;
     }
   } catch {
     // Fall through to config.toml parse when CLI is missing or JSON unsupported.
   }
 
-  return parseHimalayaConfigAccounts(configPath);
+  return configAccounts;
 }
 
 /** Validate a Himalaya account via `himalaya account check`. */

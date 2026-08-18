@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getPlatformAccountByPlatform } from "@/lib/db/queries/platform-accounts";
+import { getLegacyGmailOAuthAccount } from "@/lib/db/queries/mail-accounts";
 import { countContactsWithEmail } from "@/lib/db/queries/contacts";
 import { listSyncCursors } from "@/lib/db/queries/sync";
 import { disconnectGmailAccount } from "@/lib/platforms/gmail/auth";
@@ -12,7 +12,7 @@ import type { PlatformCredentials } from "@/lib/platforms/adapter";
  * Check Gmail connection status including granted scopes.
  */
 export async function GET() {
-  const account = getPlatformAccountByPlatform("gmail");
+  const account = getLegacyGmailOAuthAccount();
 
   if (!account) {
     return NextResponse.json({ connected: false });
@@ -77,7 +77,7 @@ export async function GET() {
  * Disconnect Gmail account (revoke token + delete platform account row).
  */
 export async function DELETE() {
-  const account = getPlatformAccountByPlatform("gmail");
+  const account = getLegacyGmailOAuthAccount();
 
   if (!account) {
     return NextResponse.json({ error: "No Gmail account connected" }, { status: 404 });
