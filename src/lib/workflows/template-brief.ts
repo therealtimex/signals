@@ -1,0 +1,89 @@
+import type { WorkflowTemplate } from "@/lib/db/types";
+import { parseTemplateConfig } from "@/lib/workflows/template-config";
+
+const CATEGORY_LABELS: Record<string, string> = {
+  prospecting: "Search",
+  enrichment: "Enrich",
+  pruning: "Prune",
+  content: "Content",
+  engagement: "Engage",
+  outreach: "Outreach",
+  nurture: "Nurture",
+};
+
+const TOOLS_BY_TYPE: Record<string, string[]> = {
+  prospecting: ["query_contacts", "enrich_contact", "create_task"],
+  enrichment: ["query_contacts", "enrich_contact"],
+  pruning: ["query_contacts", "create_task"],
+  content: ["query_content", "create_task"],
+  engagement: ["query_contacts", "create_task"],
+  outreach: ["query_contacts", "create_task"],
+  nurture: ["query_contacts", "query_goals", "create_task"],
+};
+
+export function getTemplateToolsHint(templateType: string): string[] {
+  return TOOLS_BY_TYPE[templateType] ?? ["query_contacts", "create_task"];
+}
+
+export function buildAgentWorkflowThreadName(templateName: string): string {
+  const label = templateName.trim().slice(0, 60) || "Agent";
+  return `agent: ${label}`;
+}
+
+export function buildAgentWorkflowBrief(input: {
+  template: Pick<
+    WorkflowTemplate,
+    "id" | "name" | "description" | "templateType" | "platform" | "systemPrompt" | "targetPersona"
+  >;
+  workflowRunId: string;
+  config: Record<string, unknown>;
+  signalsBaseUrl: string;
+  systemPromptOverride?: string;
+}): string {
+  const category = CATEGORY_LABELS[input.template.templateType] ?? input.template.templateType;
+  const instructions = input.systemPromptOverride?.trim() || input.template.systemPrompt?.trim();
+  const tools = getTemplateToolsHint(input.template.templateType).join(", ");
+  const configJson = JSON.stringify(input.config, null, 2);
+
+  const sections = [
+    `You are executing the Signals agent workflow template "${input.template.name}".`,
+    "",
+    `Workflow run: ${input.workflowRunId}`,
+    `Template ID: ${input.template.id}`,
+    `Category: ${category}`,
+    input.template.platform ? `Platform: ${input.template.platform}` : null,
+    input.template.description ? `Goal: ${input.template.description}` : null,
+    input.template.targetPersona ? `Audience / scope: ${input.template.targetPersona}` : null,
+    "",
+    "Instructions for your RealTimeX agent:",
+    instructions || "(No custom instructions — follow the category defaults below.)",
+    "",
+    "Runtime config:",
+    "```json",
+    configJson,
+    "```",
+    "",
+    `Signals base URL: ${input.signalsBaseUrl}`,
+    "",
+    "Execution requirements:",
+    "1. Load the `realtimex-signals` skill for the agent-tools API.",
+    `2. Use agent-tools as needed (${tools}). Invoke via POST /api/agent-tools/invoke.`,
+    "3. Perform web search and browser work in RealTimeX (not via agent-tools).",
+    "4. Write structured results back to Signals through agent-tools.",
+    "5. Report a concise summary in this thread when finished.",
+    "",
+    "Do not call legacy in-process workflow runners. This thread is the execution lane.",
+  ];
+
+  return sections.filter((line) => line !== null).join("\n");
+}
+
+export function mergeRunConfig(
+  template: Pick<WorkflowTemplate, "config">,
+  overrides?: Record<string, unknown>
+): Record<string, unknown> {
+  return {
+    ...parseTemplateConfig(template.config),
+    ...(overrides ?? {}),
+  };
+}

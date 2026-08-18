@@ -1,7 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { PLATFORM_ENUM } from "@/lib/db/platforms";
-import { listTemplates, createTemplate } from "@/lib/db/queries/workflow-templates";
+import { getTemplate, listTemplates, createTemplate } from "@/lib/db/queries/workflow-templates";
+import { buildTemplateConfig } from "@/lib/workflows/template-config";
+import { serializeTemplatesForUi } from "@/lib/workflows/template-serializer";
+
+const limitsSchema = z.object({
+  maxResults: z.number().int().positive().optional(),
+  maxContacts: z.number().int().positive().optional(),
+  maxEnrichmentScore: z.number().int().optional(),
+  companyName: z.string().optional(),
+  inactivityDays: z.number().int().positive().optional(),
+  topics: z.array(z.string()).optional(),
+  tone: z.string().optional(),
+  maxEngagements: z.number().int().positive().optional(),
+});
 
 const createTemplateSchema = z.object({
   name: z.string().min(1, "Name is required"),
@@ -12,12 +25,12 @@ const createTemplateSchema = z.object({
   ]),
   status: z.enum(["draft", "active", "paused", "completed"]).optional(),
   config: z.string().optional(),
+  limits: limitsSchema.optional(),
   goalMetrics: z.string().optional(),
   startsAt: z.number().int().optional(),
   endsAt: z.number().int().optional(),
   systemPrompt: z.string().optional(),
   targetPersona: z.string().optional(),
-  estimatedCost: z.number().optional(),
   sourceTemplateId: z.string().optional(),
 });
 
@@ -45,7 +58,10 @@ export async function GET(req: NextRequest) {
     pageSize,
   });
 
-  return NextResponse.json(result);
+  return NextResponse.json({
+    ...result,
+    data: serializeTemplatesForUi(result.data),
+  });
 }
 
 /**
@@ -56,11 +72,46 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const data = createTemplateSchema.parse(body);
+
+    let config = data.config;
+    let systemPrompt = data.systemPrompt;
+    let targetPersona = data.targetPersona;
+    let description = data.description;
+    let platform = data.platform;
+
+    if (data.sourceTemplateId) {
+      const source = getTemplate(data.sourceTemplateId);
+      if (!source) {
+        return NextResponse.json({ error: "Source template not found" }, { status: 404 });
+      }
+      systemPrompt = systemPrompt ?? source.systemPrompt ?? undefined;
+      targetPersona = targetPersona ?? source.targetPersona ?? undefined;
+      description = description ?? source.description ?? undefined;
+      platform = platform ?? source.platform ?? undefined;
+      config = config ?? source.config ?? undefined;
+    }
+
+    const builtConfig =
+      data.limits !== undefined
+        ? buildTemplateConfig(data.templateType, data.limits, config)
+        : config ?? buildTemplateConfig(data.templateType, {}, config);
+
     const template = createTemplate({
-      ...data,
+      name: data.name,
+      description: description ?? undefined,
+      platform: platform ?? undefined,
+      templateType: data.templateType,
+      status: data.status,
+      config: builtConfig,
+      goalMetrics: data.goalMetrics,
+      startsAt: data.startsAt,
+      endsAt: data.endsAt,
+      systemPrompt,
+      targetPersona,
+      sourceTemplateId: data.sourceTemplateId,
       isSystem: 0,
     });
-    return NextResponse.json(template, { status: 201 });
+    return NextResponse.json(serializeTemplatesForUi([template])[0], { status: 201 });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: error.errors }, { status: 400 });

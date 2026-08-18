@@ -6,6 +6,19 @@ import {
   updateTemplate,
   deleteTemplate,
 } from "@/lib/db/queries/workflow-templates";
+import { buildTemplateConfig } from "@/lib/workflows/template-config";
+import { serializeTemplateForUi } from "@/lib/workflows/template-serializer";
+
+const limitsSchema = z.object({
+  maxResults: z.number().int().positive().optional(),
+  maxContacts: z.number().int().positive().optional(),
+  maxEnrichmentScore: z.number().int().optional(),
+  companyName: z.string().optional(),
+  inactivityDays: z.number().int().positive().optional(),
+  topics: z.array(z.string()).optional(),
+  tone: z.string().optional(),
+  maxEngagements: z.number().int().positive().optional(),
+});
 
 const updateTemplateSchema = z.object({
   name: z.string().min(1).optional(),
@@ -16,12 +29,12 @@ const updateTemplateSchema = z.object({
   ]).optional(),
   status: z.enum(["draft", "active", "paused", "completed"]).optional(),
   config: z.string().optional(),
+  limits: limitsSchema.optional(),
   goalMetrics: z.string().optional(),
   startsAt: z.number().int().nullable().optional(),
   endsAt: z.number().int().nullable().optional(),
   systemPrompt: z.string().nullable().optional(),
   targetPersona: z.string().nullable().optional(),
-  estimatedCost: z.number().optional(),
 });
 
 /**
@@ -36,7 +49,7 @@ export async function GET(
   if (!template) {
     return NextResponse.json({ error: "Template not found" }, { status: 404 });
   }
-  return NextResponse.json(template);
+  return NextResponse.json(serializeTemplateForUi(template));
 }
 
 /**
@@ -50,7 +63,22 @@ export async function PATCH(
   try {
     const body = await req.json();
     const data = updateTemplateSchema.parse(body);
-    const template = updateTemplate(id, data);
+    const existing = getTemplate(id);
+    if (!existing) {
+      return NextResponse.json({ error: "Template not found" }, { status: 404 });
+    }
+
+    const { limits, ...rest } = data;
+    const patch = { ...rest } as Parameters<typeof updateTemplate>[1];
+    if (limits !== undefined) {
+      patch.config = buildTemplateConfig(
+        data.templateType ?? existing.templateType,
+        limits,
+        data.config ?? existing.config
+      );
+    }
+
+    const template = updateTemplate(id, patch);
     if (!template) {
       return NextResponse.json({ error: "Template not found" }, { status: 404 });
     }

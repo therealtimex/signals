@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -21,18 +21,26 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Loader2 } from "lucide-react";
+import { extractLimitsFromConfig } from "@/lib/workflows/template-config";
+import { buildAgentWorkflowBrief, getTemplateToolsHint } from "@/lib/workflows/template-brief";
+import type { WorkflowTemplate } from "@/lib/db/types";
 
 interface Template {
   id: string;
   name: string;
   description: string | null;
-  templateType: string;
-  platform: string | null;
+  templateType: WorkflowTemplate["templateType"];
+  platform: WorkflowTemplate["platform"];
   status: string;
   systemPrompt: string | null;
   targetPersona: string | null;
-  estimatedCost: number;
   config: string;
+}
+
+interface SystemTemplateOption {
+  id: string;
+  name: string;
+  templateType: string;
 }
 
 interface TemplateBuilderProps {
@@ -43,11 +51,11 @@ interface TemplateBuilderProps {
 }
 
 const TEMPLATE_TYPES = [
-  { value: "prospecting", label: "Prospecting (Search)" },
-  { value: "enrichment", label: "Enrichment" },
-  { value: "pruning", label: "Pruning" },
+  { value: "prospecting", label: "Search" },
+  { value: "enrichment", label: "Enrich" },
+  { value: "pruning", label: "Prune" },
   { value: "content", label: "Content" },
-  { value: "engagement", label: "Engagement" },
+  { value: "engagement", label: "Engage" },
   { value: "outreach", label: "Outreach" },
   { value: "nurture", label: "Nurture" },
 ];
@@ -58,44 +66,144 @@ const PLATFORMS = [
   { value: "linkedin", label: "LinkedIn" },
 ];
 
-function parseConfig(config: string): Record<string, unknown> {
-  try {
-    return JSON.parse(config);
-  } catch {
-    return {};
-  }
-}
-
 export function TemplateBuilder({ open, onClose, onSaved, editTemplate }: TemplateBuilderProps) {
   const isEdit = !!editTemplate;
   const [saving, setSaving] = useState(false);
+  const [systemTemplates, setSystemTemplates] = useState<SystemTemplateOption[]>([]);
+  const [startFromTemplateId, setStartFromTemplateId] = useState<string>("none");
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
-  // Form state
+  const initialLimits = editTemplate
+    ? extractLimitsFromConfig(editTemplate.templateType, editTemplate.config)
+    : {};
+
   const [name, setName] = useState(editTemplate?.name ?? "");
   const [description, setDescription] = useState(editTemplate?.description ?? "");
-  const [templateType, setTemplateType] = useState(editTemplate?.templateType ?? "prospecting");
-  const [platform, setPlatform] = useState(editTemplate?.platform ?? "none");
+  const [templateType, setTemplateType] = useState<WorkflowTemplate["templateType"]>(
+    editTemplate?.templateType ?? "prospecting"
+  );
+  const [platform, setPlatform] = useState<string>(editTemplate?.platform ?? "none");
   const [systemPrompt, setSystemPrompt] = useState(editTemplate?.systemPrompt ?? "");
   const [targetPersona, setTargetPersona] = useState(editTemplate?.targetPersona ?? "");
-  const [estimatedCost, setEstimatedCost] = useState(String(editTemplate?.estimatedCost ?? "0.20"));
-  const [configJson, setConfigJson] = useState(
-    editTemplate?.config ? JSON.stringify(parseConfig(editTemplate.config), null, 2) : "{}"
+  const [maxResults, setMaxResults] = useState(String(initialLimits.maxResults ?? 20));
+  const [maxContacts, setMaxContacts] = useState(String(initialLimits.maxContacts ?? 10));
+  const [maxEnrichmentScore, setMaxEnrichmentScore] = useState(
+    String(initialLimits.maxEnrichmentScore ?? 50)
   );
+  const [companyName, setCompanyName] = useState(initialLimits.companyName ?? "");
+  const [inactivityDays, setInactivityDays] = useState(String(initialLimits.inactivityDays ?? 365));
+  const [topics, setTopics] = useState((initialLimits.topics ?? []).join(", "));
+  const [tone, setTone] = useState(initialLimits.tone ?? "professional");
+  const [maxEngagements, setMaxEngagements] = useState(String(initialLimits.maxEngagements ?? 10));
+  const [configJson, setConfigJson] = useState(editTemplate?.config ?? "{}");
+
+  useEffect(() => {
+    if (!open || isEdit) return;
+    fetch("/api/workflows/templates?isSystem=true&pageSize=50")
+      .then((r) => r.json())
+      .then((result) => setSystemTemplates(result.data ?? []))
+      .catch(() => setSystemTemplates([]));
+  }, [open, isEdit]);
+
+  useEffect(() => {
+    if (!startFromTemplateId || startFromTemplateId === "none" || isEdit) return;
+    fetch(`/api/workflows/templates/${startFromTemplateId}`)
+      .then((r) => r.json())
+      .then((template: Template) => {
+        setName(template.name);
+        setDescription(template.description ?? "");
+        setTemplateType(template.templateType);
+        setPlatform(template.platform ?? "none");
+        setSystemPrompt(template.systemPrompt ?? "");
+        setTargetPersona(template.targetPersona ?? "");
+        const limits = extractLimitsFromConfig(template.templateType, template.config);
+        if (limits.maxResults !== undefined) setMaxResults(String(limits.maxResults));
+        if (limits.maxContacts !== undefined) setMaxContacts(String(limits.maxContacts));
+        if (limits.maxEnrichmentScore !== undefined) {
+          setMaxEnrichmentScore(String(limits.maxEnrichmentScore));
+        }
+        if (limits.companyName) setCompanyName(limits.companyName);
+        if (limits.inactivityDays !== undefined) setInactivityDays(String(limits.inactivityDays));
+        if (limits.topics) setTopics(limits.topics.join(", "));
+        if (limits.tone) setTone(limits.tone);
+        if (limits.maxEngagements !== undefined) setMaxEngagements(String(limits.maxEngagements));
+        setConfigJson(template.config);
+      })
+      .catch(() => undefined);
+  }, [startFromTemplateId, isEdit]);
+
+  const toolsHint = useMemo(() => getTemplateToolsHint(templateType).join(", "), [templateType]);
+
+  const previewBrief = useMemo(() => {
+    if (!name.trim()) return "";
+    return buildAgentWorkflowBrief({
+      template: {
+        id: editTemplate?.id ?? "preview",
+        name: name.trim(),
+        description: description.trim() || null,
+        templateType,
+        platform: platform !== "none" ? (platform as WorkflowTemplate["platform"]) : null,
+        systemPrompt: systemPrompt.trim() || null,
+        targetPersona: targetPersona.trim() || null,
+      },
+      workflowRunId: "preview",
+      config: {},
+      signalsBaseUrl: "http://127.0.0.1:3010",
+    });
+  }, [name, description, templateType, platform, systemPrompt, targetPersona, editTemplate?.id]);
+
+  const buildLimitsPayload = () => {
+    switch (templateType) {
+      case "prospecting":
+        return { maxResults: parseInt(maxResults, 10) || 20 };
+      case "enrichment":
+        return {
+          maxContacts: parseInt(maxContacts, 10) || 10,
+          maxEnrichmentScore: parseInt(maxEnrichmentScore, 10) || 50,
+        };
+      case "pruning":
+        return {
+          maxContacts: parseInt(maxContacts, 10) || 20,
+          companyName: companyName.trim() || undefined,
+          inactivityDays: parseInt(inactivityDays, 10) || 365,
+        };
+      case "content":
+        return {
+          topics: topics
+            .split(",")
+            .map((t) => t.trim())
+            .filter(Boolean),
+          tone: tone.trim() || undefined,
+        };
+      case "engagement":
+      case "outreach":
+        return { maxEngagements: parseInt(maxEngagements, 10) || 10 };
+      default:
+        return {};
+    }
+  };
 
   const handleSave = async () => {
     if (!name.trim()) return;
     setSaving(true);
 
-    const payload = {
+    const payload: Record<string, unknown> = {
       name: name.trim(),
       description: description.trim() || undefined,
       templateType,
       platform: platform !== "none" ? platform : undefined,
       systemPrompt: systemPrompt.trim() || undefined,
       targetPersona: targetPersona.trim() || undefined,
-      estimatedCost: parseFloat(estimatedCost) || 0,
-      config: configJson.trim() || "{}",
+      limits: buildLimitsPayload(),
     };
+
+    if (showAdvanced && configJson.trim()) {
+      payload.config = configJson.trim();
+    }
+
+    if (!isEdit && startFromTemplateId !== "none") {
+      payload.sourceTemplateId = startFromTemplateId;
+    }
 
     try {
       const url = isEdit
@@ -124,40 +232,50 @@ export function TemplateBuilder({ open, onClose, onSaved, editTemplate }: Templa
           <DialogTitle>{isEdit ? "Edit Agent" : "Create Agent"}</DialogTitle>
           <DialogDescription>
             {isEdit
-              ? "Modify your custom agent configuration."
-              : "Build a custom AI agent for your workflows."}
+              ? "Update the brief your RealTimeX terminal agent will execute."
+              : "Define a task brief for your RealTimeX terminal agent."}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-2">
-          {/* Name */}
+          {!isEdit && systemTemplates.length > 0 && (
+            <div className="space-y-1.5">
+              <Label>Start from template</Label>
+              <Select value={startFromTemplateId} onValueChange={setStartFromTemplateId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Blank agent" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Blank agent</SelectItem>
+                  {systemTemplates.map((template) => (
+                    <SelectItem key={template.id} value={template.id}>
+                      {template.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
           <div className="space-y-1.5">
             <Label htmlFor="name">Name</Label>
             <Input
               id="name"
-              placeholder="My Custom Template"
+              placeholder="Weekly founder search"
               value={name}
               onChange={(e) => setName(e.target.value)}
             />
           </div>
 
-          {/* Description */}
-          <div className="space-y-1.5">
-            <Label htmlFor="description">Description</Label>
-            <Textarea
-              id="description"
-              placeholder="What does this template do?"
-              rows={2}
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-            />
-          </div>
-
-          {/* Type + Platform row */}
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label>Template Type</Label>
-              <Select value={templateType} onValueChange={setTemplateType}>
+              <Label>Category</Label>
+              <Select
+                value={templateType}
+                onValueChange={(value) =>
+                  setTemplateType(value as WorkflowTemplate["templateType"])
+                }
+              >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -187,9 +305,31 @@ export function TemplateBuilder({ open, onClose, onSaved, editTemplate }: Templa
             </div>
           </div>
 
-          {/* Target Persona */}
           <div className="space-y-1.5">
-            <Label htmlFor="targetPersona">Target Persona</Label>
+            <Label htmlFor="description">Goal</Label>
+            <Textarea
+              id="description"
+              placeholder="Short one-liner describing what this agent should accomplish"
+              rows={2}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="systemPrompt">Instructions</Label>
+            <Textarea
+              id="systemPrompt"
+              placeholder="Instructions for your RealTimeX agent (markdown supported)"
+              rows={8}
+              className="font-mono text-xs"
+              value={systemPrompt}
+              onChange={(e) => setSystemPrompt(e.target.value)}
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="targetPersona">Audience / scope</Label>
             <Input
               id="targetPersona"
               placeholder="e.g., Startup founders in AI/ML with 10K+ followers"
@@ -198,46 +338,120 @@ export function TemplateBuilder({ open, onClose, onSaved, editTemplate }: Templa
             />
           </div>
 
-          {/* System Prompt */}
-          <div className="space-y-1.5">
-            <Label htmlFor="systemPrompt">System Prompt</Label>
-            <Textarea
-              id="systemPrompt"
-              placeholder="Instructions for the AI agent..."
-              rows={8}
-              className="font-mono text-xs"
-              value={systemPrompt}
-              onChange={(e) => setSystemPrompt(e.target.value)}
-            />
-          </div>
-
-          {/* Cost + Config row */}
-          <div className="grid grid-cols-2 gap-3">
+          {templateType === "prospecting" && (
             <div className="space-y-1.5">
-              <Label htmlFor="estimatedCost">Estimated Cost (USD)</Label>
+              <Label htmlFor="maxResults">Max results</Label>
               <Input
-                id="estimatedCost"
+                id="maxResults"
                 type="number"
-                step="0.01"
-                min="0"
-                value={estimatedCost}
-                onChange={(e) => setEstimatedCost(e.target.value)}
+                value={maxResults}
+                onChange={(e) => setMaxResults(e.target.value)}
               />
             </div>
+          )}
+
+          {templateType === "enrichment" && (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="maxContacts">Max contacts</Label>
+                <Input
+                  id="maxContacts"
+                  type="number"
+                  value={maxContacts}
+                  onChange={(e) => setMaxContacts(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="maxEnrichmentScore">Max enrichment score</Label>
+                <Input
+                  id="maxEnrichmentScore"
+                  type="number"
+                  value={maxEnrichmentScore}
+                  onChange={(e) => setMaxEnrichmentScore(e.target.value)}
+                />
+              </div>
+            </div>
+          )}
+
+          {templateType === "pruning" && (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="companyName">Company name</Label>
+                <Input
+                  id="companyName"
+                  value={companyName}
+                  onChange={(e) => setCompanyName(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="inactivityDays">Inactivity days</Label>
+                <Input
+                  id="inactivityDays"
+                  type="number"
+                  value={inactivityDays}
+                  onChange={(e) => setInactivityDays(e.target.value)}
+                />
+              </div>
+            </div>
+          )}
+
+          {templateType === "content" && (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="topics">Topics</Label>
+                <Input
+                  id="topics"
+                  placeholder="AI, fintech, developer tools"
+                  value={topics}
+                  onChange={(e) => setTopics(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="tone">Tone</Label>
+                <Input id="tone" value={tone} onChange={(e) => setTone(e.target.value)} />
+              </div>
+            </div>
+          )}
+
+          {(templateType === "engagement" || templateType === "outreach") && (
+            <div className="space-y-1.5">
+              <Label htmlFor="maxEngagements">Max engagements</Label>
+              <Input
+                id="maxEngagements"
+                type="number"
+                value={maxEngagements}
+                onChange={(e) => setMaxEngagements(e.target.value)}
+              />
+            </div>
+          )}
+
+          <div className="rounded-lg border bg-muted/30 p-3 text-xs text-muted-foreground">
+            <p className="font-medium text-foreground mb-1">Tools</p>
+            <p>Your RealTimeX agent should use: {toolsHint}</p>
           </div>
 
-          {/* Config JSON */}
-          <div className="space-y-1.5">
-            <Label htmlFor="config">Config (JSON)</Label>
+          <details className="space-y-2">
+            <summary className="text-sm font-medium cursor-pointer">
+              What the agent will see
+            </summary>
+            <pre className="mt-2 max-h-48 overflow-auto rounded-md bg-muted p-3 text-[11px] whitespace-pre-wrap">
+              {previewBrief || "Enter a name to preview the launch brief."}
+            </pre>
+          </details>
+
+          <details
+            className="space-y-2"
+            open={showAdvanced}
+            onToggle={(e) => setShowAdvanced((e.target as HTMLDetailsElement).open)}
+          >
+            <summary className="text-sm font-medium cursor-pointer">Advanced config (JSON)</summary>
             <Textarea
-              id="config"
               rows={4}
-              className="font-mono text-xs"
+              className="font-mono text-xs mt-2"
               value={configJson}
               onChange={(e) => setConfigJson(e.target.value)}
-              placeholder='{"maxResults": 20, "targetDomains": ["x.com"]}'
             />
-          </div>
+          </details>
         </div>
 
         <DialogFooter>
@@ -246,7 +460,7 @@ export function TemplateBuilder({ open, onClose, onSaved, editTemplate }: Templa
           </Button>
           <Button onClick={handleSave} disabled={saving || !name.trim()}>
             {saving && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
-            {isEdit ? "Save Changes" : "Create Template"}
+            {isEdit ? "Save Changes" : "Create Agent"}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,42 +15,47 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   Search,
   Sparkles,
   Trash2,
   Bot,
   Loader2,
   Play,
-  DollarSign,
   Clock,
   Hash,
-  CalendarClock,
   Copy,
   Pencil,
   Plus,
   Heart,
   UserPlus,
   MessageSquare,
+  MoreHorizontal,
 } from "lucide-react";
 import { ActivateDialog } from "./activate-dialog";
-import { ScheduleDialog } from "./schedule-dialog";
 import { TemplateBuilder } from "./template-builder";
+import type { WorkflowTemplate } from "@/lib/db/types";
 
 interface Template {
   id: string;
   name: string;
   description: string | null;
-  templateType: string;
-  platform: string | null;
+  templateType: WorkflowTemplate["templateType"];
+  platform: WorkflowTemplate["platform"];
   status: string;
   systemPrompt: string | null;
   targetPersona: string | null;
-  estimatedCost: number;
   totalRuns: number;
   lastRunAt: number | null;
   config: string;
   isSystem: number;
   sourceTemplateId: string | null;
+  createdAt: number;
 }
 
 const TYPE_ICONS: Record<string, typeof Search> = {
@@ -81,6 +86,16 @@ const TYPE_COLORS: Record<string, string> = {
   engagement: "bg-pink-100 text-pink-700 dark:bg-pink-900 dark:text-pink-300",
   outreach: "bg-cyan-100 text-cyan-700 dark:bg-cyan-900 dark:text-cyan-300",
 };
+
+const CATEGORY_ORDER = [
+  "prospecting",
+  "enrichment",
+  "pruning",
+  "content",
+  "engagement",
+  "outreach",
+  "nurture",
+];
 
 const FILTER_TABS = [
   { key: "all", label: "All" },
@@ -114,28 +129,34 @@ function filterByType(templates: Template[], filter: string): Template[] {
   return templates.filter((t) => t.templateType === typeMap[filter]);
 }
 
+function sortTemplates(templates: Template[]): Template[] {
+  return [...templates].sort((a, b) => {
+    const aSystem = a.isSystem === 1;
+    const bSystem = b.isSystem === 1;
+    if (aSystem !== bSystem) return aSystem ? -1 : 1;
+    if (aSystem && bSystem) {
+      return CATEGORY_ORDER.indexOf(a.templateType) - CATEGORY_ORDER.indexOf(b.templateType);
+    }
+    return (b.createdAt ?? 0) - (a.createdAt ?? 0);
+  });
+}
+
 export function TemplateGallery() {
-  const [systemTemplates, setSystemTemplates] = useState<Template[]>([]);
-  const [userTemplates, setUserTemplates] = useState<Template[]>([]);
+  const [templates, setTemplates] = useState<Template[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTemplate, setActiveTemplate] = useState<Template | null>(null);
-  const [scheduleTemplate, setScheduleTemplate] = useState<Template | null>(null);
   const [editTemplate, setEditTemplate] = useState<Template | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Template | null>(null);
   const [builderOpen, setBuilderOpen] = useState(false);
-  const [section, setSection] = useState<"system" | "user">("system");
   const [filter, setFilter] = useState<string>("all");
-  const [cloning, setCloning] = useState<string | null>(null);
+  const [duplicating, setDuplicating] = useState<string | null>(null);
 
   const fetchTemplates = useCallback(() => {
     setLoading(true);
-    Promise.all([
-      fetch("/api/workflows/templates?isSystem=true&pageSize=50").then((r) => r.json()),
-      fetch("/api/workflows/templates?isSystem=false&pageSize=50").then((r) => r.json()),
-    ])
-      .then(([sys, usr]) => {
-        setSystemTemplates(sys.data ?? []);
-        setUserTemplates(usr.data ?? []);
+    fetch("/api/workflows/templates?pageSize=100")
+      .then((r) => r.json())
+      .then((result) => {
+        setTemplates(result.data ?? []);
         setLoading(false);
       })
       .catch(() => setLoading(false));
@@ -145,8 +166,8 @@ export function TemplateGallery() {
     fetchTemplates();
   }, [fetchTemplates]);
 
-  const handleClone = async (templateId: string) => {
-    setCloning(templateId);
+  const handleDuplicate = async (templateId: string) => {
+    setDuplicating(templateId);
     try {
       const res = await fetch(`/api/workflows/templates/${templateId}/clone`, {
         method: "POST",
@@ -155,10 +176,9 @@ export function TemplateGallery() {
       });
       if (res.ok) {
         fetchTemplates();
-        setSection("user");
       }
     } finally {
-      setCloning(null);
+      setDuplicating(null);
     }
   };
 
@@ -173,8 +193,10 @@ export function TemplateGallery() {
     setDeleteTarget(null);
   };
 
-  const templates = section === "system" ? systemTemplates : userTemplates;
-  const filtered = filterByType(templates, filter);
+  const filtered = useMemo(
+    () => sortTemplates(filterByType(templates, filter)),
+    [templates, filter]
+  );
 
   if (loading) {
     return (
@@ -186,42 +208,7 @@ export function TemplateGallery() {
 
   return (
     <div className="space-y-4">
-      {/* Section tabs */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1">
-          <Button
-            variant={section === "system" ? "default" : "ghost"}
-            size="sm"
-            className="h-8"
-            onClick={() => { setSection("system"); setFilter("all"); }}
-          >
-            System Agents
-            <Badge variant="secondary" className="ml-1.5 h-4 px-1 text-[10px]">
-              {systemTemplates.length}
-            </Badge>
-          </Button>
-          <Button
-            variant={section === "user" ? "default" : "ghost"}
-            size="sm"
-            className="h-8"
-            onClick={() => { setSection("user"); setFilter("all"); }}
-          >
-            My Agents
-            <Badge variant="secondary" className="ml-1.5 h-4 px-1 text-[10px]">
-              {userTemplates.length}
-            </Badge>
-          </Button>
-        </div>
-        {section === "user" && (
-          <Button size="sm" className="h-8" onClick={() => setBuilderOpen(true)}>
-            <Plus className="mr-1.5 h-3.5 w-3.5" />
-            Create Agent
-          </Button>
-        )}
-      </div>
-
-      {/* Sub-filter tabs */}
-      <div className="flex items-center gap-1">
+      <div className="flex flex-wrap items-center gap-1">
         {FILTER_TABS.map((tab) => (
           <Button
             key={tab.key}
@@ -233,14 +220,20 @@ export function TemplateGallery() {
             {tab.label}
           </Button>
         ))}
+        <Button
+          variant="outline"
+          size="sm"
+          className="ml-auto h-7 text-xs"
+          onClick={() => setBuilderOpen(true)}
+        >
+          <Plus className="mr-1.5 h-3.5 w-3.5" />
+          Create Agent
+        </Button>
       </div>
 
-      {/* Template grid */}
       {filtered.length === 0 ? (
         <div className="py-8 text-center text-sm text-muted-foreground">
-          {section === "user"
-            ? "No custom agents yet. Create one or clone a system agent."
-            : "No agents match the current filter."}
+          No agents match the current filter. Create one to get started.
         </div>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -259,18 +252,25 @@ export function TemplateGallery() {
               >
                 <CardHeader className="pb-3">
                   <div className="flex items-start justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <div className="rounded-md bg-muted p-1.5">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div className="rounded-md bg-muted p-1.5 shrink-0">
                         <Icon className="h-3.5 w-3.5 text-muted-foreground" />
                       </div>
-                      <CardTitle className="text-sm">{template.name}</CardTitle>
+                      <CardTitle className="text-sm truncate">{template.name}</CardTitle>
                     </div>
-                    <Badge
-                      variant="outline"
-                      className={`text-[10px] px-1.5 py-0 shrink-0 ${typeColor}`}
-                    >
-                      {typeLabel}
-                    </Badge>
+                    <div className="flex items-center gap-1 shrink-0">
+                      {isSystem && (
+                        <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                          Built-in
+                        </Badge>
+                      )}
+                      <Badge
+                        variant="outline"
+                        className={`text-[10px] px-1.5 py-0 ${typeColor}`}
+                      >
+                        {typeLabel}
+                      </Badge>
+                    </div>
                   </div>
                   <CardDescription className="text-xs line-clamp-2 mt-1">
                     {template.description}
@@ -278,10 +278,6 @@ export function TemplateGallery() {
                 </CardHeader>
                 <CardContent className="pt-0 space-y-3">
                   <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                    <span className="flex items-center gap-1">
-                      <DollarSign className="h-3 w-3" />
-                      ~${template.estimatedCost.toFixed(2)}
-                    </span>
                     <span className="flex items-center gap-1">
                       <Hash className="h-3 w-3" />
                       {template.totalRuns} run{template.totalRuns !== 1 ? "s" : ""}
@@ -302,30 +298,23 @@ export function TemplateGallery() {
                       <Play className="mr-1.5 h-3 w-3" />
                       Run
                     </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-8 px-2"
-                      onClick={() => setScheduleTemplate(template)}
-                      title="Schedule recurring run"
-                    >
-                      <CalendarClock className="h-3.5 w-3.5" />
-                    </Button>
                     {isSystem ? (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-8 px-2"
-                        onClick={() => handleClone(template.id)}
-                        disabled={cloning === template.id}
-                        title="Clone to My Agents"
-                      >
-                        {cloning === template.id ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <Copy className="h-3.5 w-3.5" />
-                        )}
-                      </Button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button size="sm" variant="outline" className="h-8 px-2">
+                            <MoreHorizontal className="h-3.5 w-3.5" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            onClick={() => handleDuplicate(template.id)}
+                            disabled={duplicating === template.id}
+                          >
+                            <Copy className="mr-2 h-3.5 w-3.5" />
+                            Duplicate
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     ) : (
                       <>
                         <Button
@@ -361,14 +350,6 @@ export function TemplateGallery() {
           template={activeTemplate}
           open={!!activeTemplate}
           onClose={() => setActiveTemplate(null)}
-        />
-      )}
-
-      {scheduleTemplate && (
-        <ScheduleDialog
-          template={scheduleTemplate}
-          open={!!scheduleTemplate}
-          onClose={() => setScheduleTemplate(null)}
         />
       )}
 
