@@ -303,6 +303,7 @@ describe("ExploreMapView", () => {
     });
 
     expect(container.textContent).toContain("No audience connections synced yet");
+    expect(container.textContent).toContain("linked to your audience graph yet");
     expect(container.textContent).toContain("You: Owner");
     expect(container.textContent).toContain("Change");
     expect(container.querySelector('[data-testid="explore-map-canvas"]')).toBeNull();

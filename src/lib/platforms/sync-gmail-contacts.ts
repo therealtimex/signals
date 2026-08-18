@@ -18,6 +18,9 @@ import type { SyncResult } from "@/lib/platforms/adapter";
  * Sync contacts from Google People API into Signals.
  * Uses token-based pagination (pageToken, not offset-based like LinkedIn).
  * 2-tier dedup: gmail identity match → email match → create new.
+ *
+ * Gmail address-book contacts are not projected into the Explore audience graph
+ * (no follow/connection semantics). See `src/lib/graph/relationship-edges.ts`.
  */
 export async function syncContactsFromGmail(
   accountId: string,
