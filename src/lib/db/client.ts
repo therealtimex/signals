@@ -1,24 +1,24 @@
 import { createRequire } from "node:module";
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import Database from "better-sqlite3";
-import { join } from "path";
+import { dirname, join } from "path";
 import { homedir } from "os";
 import { mkdirSync, existsSync } from "fs";
+import { fileURLToPath } from "url";
+import { drizzle } from "drizzle-orm/better-sqlite3";
+import { migrate } from "drizzle-orm/better-sqlite3/migrator";
+import Database from "better-sqlite3";
 import * as schema from "./schema";
 
 const require = createRequire(import.meta.url);
 
+const isStandaloneBuild = process.env.SIGNALS_BOOT_MIGRATIONS_DONE === "1";
 const dataDir = process.env.SIGNALS_DATA_DIR?.replace("~", homedir()) ?? join(homedir(), ".signals");
 
-if (!existsSync(dataDir)) {
+if (!isStandaloneBuild && !existsSync(dataDir)) {
   mkdirSync(dataDir, { recursive: true });
 }
 
-const dbPath = join(dataDir, "data.db");
-const sqlite = new Database(
-  dbPath,
-  process.env.SIGNALS_BOOT_MIGRATIONS_DONE === "1" ? { readonly: true } : undefined,
-);
+const dbPath = isStandaloneBuild ? ":memory:" : join(dataDir, "data.db");
+const sqlite = new Database(dbPath);
 
 sqlite.pragma("journal_mode = WAL");
 sqlite.pragma("foreign_keys = ON");
@@ -29,7 +29,17 @@ function applyMigrationsOnce(): void {
   if (migrationsApplied) return;
   migrationsApplied = true;
   if (process.env.VITEST === "true") return;
-  if (process.env.SIGNALS_BOOT_MIGRATIONS_DONE === "1") return;
+
+  if (isStandaloneBuild) {
+    const migrationsDir =
+      process.env.SIGNALS_MIGRATIONS_DIR?.replace("~", homedir()) ??
+      join(dirname(fileURLToPath(import.meta.url)), "migrations");
+    if (existsSync(migrationsDir)) {
+      migrate(drizzle(sqlite, { schema }), { migrationsFolder: migrationsDir });
+    }
+    return;
+  }
+
   require("./migrate").runMigrations(dataDir);
 }
 
