@@ -2,7 +2,7 @@ import { createWorkflowRun } from "@/lib/db/queries/workflows";
 import type { SyncResult } from "@/lib/platforms/adapter";
 import type { WorkflowRun } from "@/lib/db/types";
 
-export type ImportSource = "csv" | "zip";
+export type ImportSource = "csv" | "zip" | "vcf";
 
 /** Config JSON persisted on import workflow runs. */
 export interface ImportRunConfig {
