@@ -62,9 +62,6 @@ cp "${ROOT}/LICENSE" "$STAGING/"
 mkdir -p "$STAGING/node_modules" "$STAGING/.next"
 cp -R "${STANDALONE}/node_modules/." "$STAGING/node_modules/"
 cp -R "${STANDALONE}/.next/." "$STAGING/.next/"
-# Next's standalone tracer can copy dependency stubs under .next/node_modules;
-# the real runtime deps live in the top-level node_modules directory.
-rm -rf "$STAGING/.next/node_modules"
 
 # Runtime content read directly from process.cwd().
 cp -R "${ROOT}/guide" "$STAGING/guide"
