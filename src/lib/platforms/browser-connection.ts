@@ -33,7 +33,7 @@ import {
   type RtxBrowserSessionEntry,
 } from "@/lib/rtx/browser-sessions";
 
-export type SocialPlatform = "x" | "linkedin";
+export type SocialPlatform = "x" | "linkedin" | "facebook";
 
 export type PlatformSessionStatus = {
   mode: "rtx" | "legacy" | "none";
@@ -56,17 +56,25 @@ const PLATFORM_URLS: Record<SocialPlatform, { setupUrl: string; homeUrl: string;
       homeUrl: "https://www.linkedin.com/feed/",
       host: "linkedin.com",
     },
+    facebook: {
+      setupUrl: "https://www.facebook.com/login",
+      homeUrl: "https://www.facebook.com/",
+      host: "facebook.com",
+    },
   };
 
 const LOGGED_IN_SELECTORS: Record<SocialPlatform, string> = {
   x: X_LOGGED_IN_MARKERS.join(", "),
   linkedin:
     '.global-nav__me, .scaffold-layout, .scaffold-layout__main, [data-finite-scroll-hotkey-context="FEED"], [data-test-icon="nav-home-icon"], nav[aria-label="Primary"]',
+  facebook:
+    'div[role="navigation"], [aria-label="Account"], [aria-label="Your profile"], [data-pagelet="LeftRail"], [data-pagelet="ProfileTilesFeed_0"]',
 };
 
 const LOGGED_OUT_SELECTORS: Record<SocialPlatform, string> = {
   x: '[data-testid="loginButton"]',
   linkedin: ".sign-in-form, #username",
+  facebook: '#loginform, [data-testid="royal_login_form"], form[action*="login"], #email',
 };
 
 function asBrowserPlatform(platform: SocialPlatform): BrowserPlatform {
@@ -158,6 +166,140 @@ export function extractLinkedInVanityFromUrl(rawUrl: string): string | null {
 
 export function formatLinkedInHandle(vanity: string): string {
   return `/in/${vanity}`;
+}
+
+const FACEBOOK_RESERVED_PATHS = new Set([
+  "home",
+  "login",
+  "watch",
+  "marketplace",
+  "gaming",
+  "groups",
+  "events",
+  "pages",
+  "reels",
+  "stories",
+  "photo",
+  "photos",
+  "videos",
+  "people",
+  "search",
+  "settings",
+  "privacy",
+  "help",
+  "recover",
+  "checkpoint",
+  "share",
+  "dialog",
+  "friends",
+  "messages",
+  "notifications",
+  "bookmarks",
+  "saved",
+  "ads",
+  "business",
+  "l.php",
+  "hashtag",
+  "me",
+]);
+
+const FACEBOOK_LOGGED_IN_PREFIXES = [
+  "/home",
+  "/friends",
+  "/messages",
+  "/notifications",
+  "/watch",
+  "/marketplace",
+  "/groups/feed",
+  "/gaming",
+  "/events",
+  "/bookmarks",
+  "/saved",
+  "/settings",
+  "/stories",
+  "/reels/create",
+  "/profile.php",
+] as const;
+
+/**
+ * Extract a vanity profile slug from a Facebook URL.
+ * Used for display-name detection only after logged-in selectors pass — public profile
+ * URLs are viewable while logged out and must not imply connection (#147 lesson).
+ */
+export function extractFacebookProfileSlugFromUrl(rawUrl: string): string | null {
+  try {
+    const url = new URL(rawUrl, "https://www.facebook.com");
+    if (!urlMatchesPlatformHost(url.href, "facebook.com")) return null;
+
+    const path = url.pathname.toLowerCase();
+    const profileIdMatch = path.match(/^\/profile\.php$/i);
+    if (profileIdMatch && url.searchParams.get("id")) {
+      return `id:${url.searchParams.get("id")}`;
+    }
+
+    const segment = path.split("/").filter(Boolean)[0];
+    if (!segment || FACEBOOK_RESERVED_PATHS.has(segment)) return null;
+    if (/^[a-z0-9.]+$/i.test(segment)) return segment;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export function formatFacebookHandle(slug: string): string {
+  return slug;
+}
+
+/** True when a Facebook tab URL indicates an authenticated session. */
+export function isFacebookLoggedInUrl(rawUrl: string): boolean {
+  try {
+    if (!urlMatchesPlatformHost(rawUrl, "facebook.com")) return false;
+    if (isFacebookLoggedOutUrl(rawUrl)) return false;
+    const path = new URL(rawUrl).pathname.toLowerCase();
+    // Public vanity profile URLs are viewable while logged out — never URL-positive alone.
+    if (extractFacebookProfileSlugFromUrl(rawUrl)) return false;
+    return FACEBOOK_LOGGED_IN_PREFIXES.some((prefix) => path.startsWith(prefix));
+  } catch {
+    return false;
+  }
+}
+
+/** True when a Facebook tab URL indicates a logged-out or login-flow page. */
+export function isFacebookLoggedOutUrl(rawUrl: string): boolean {
+  try {
+    if (!urlMatchesPlatformHost(rawUrl, "facebook.com")) return false;
+    const path = new URL(rawUrl).pathname.toLowerCase();
+    if (path === "/" || path === "") return true;
+    return (
+      path.includes("/login") ||
+      path.includes("login.php") ||
+      path.includes("/checkpoint") ||
+      path.includes("/recover") ||
+      path.includes("/authwall")
+    );
+  } catch {
+    return false;
+  }
+}
+
+function platformUrlChecks(
+  platform: SocialPlatform,
+  pageUrl: string
+): { loggedOut: boolean; loggedIn: boolean } {
+  switch (platform) {
+    case "x":
+      return { loggedOut: isXLoggedOutUrl(pageUrl), loggedIn: isXLoggedInUrl(pageUrl) };
+    case "linkedin":
+      return {
+        loggedOut: isLinkedInLoggedOutUrl(pageUrl),
+        loggedIn: isLinkedInLoggedInUrl(pageUrl),
+      };
+    case "facebook":
+      return {
+        loggedOut: isFacebookLoggedOutUrl(pageUrl),
+        loggedIn: isFacebookLoggedInUrl(pageUrl),
+      };
+  }
 }
 
 export function extractXHandleFromProfileHref(href: string | null | undefined): string | null {
@@ -299,14 +441,12 @@ async function detectLoggedInViaCdp(
       return { isLoggedIn: false, detectedHandle: null };
     }
 
-    const urlLoggedOut =
-      platform === "x" ? isXLoggedOutUrl(pageUrl) : isLinkedInLoggedOutUrl(pageUrl);
+    const urlLoggedOut = platformUrlChecks(platform, pageUrl).loggedOut;
     if (urlLoggedOut) {
       return { isLoggedIn: false, detectedHandle: null };
     }
 
-    const urlLoggedIn =
-      platform === "x" ? isXLoggedInUrl(pageUrl) : isLinkedInLoggedInUrl(pageUrl);
+    const urlLoggedIn = platformUrlChecks(platform, pageUrl).loggedIn;
 
     let loggedIn = urlLoggedIn;
     if (!loggedIn) {
@@ -355,6 +495,29 @@ async function detectPlatformHandle(
       })
       .catch(() => null);
     return label;
+  }
+
+  if (platform === "facebook") {
+    // v1: active personal account in the RTX session (not Page admin or public profile URLs).
+    const navSelectors = [
+      'a[aria-label="Your profile"]',
+      'a[aria-label*="profile" i][href*="facebook.com"]',
+      'div[role="navigation"] a[href*="facebook.com/me"]',
+      'a[href*="/me/"]',
+    ];
+
+    for (const selector of navSelectors) {
+      const href = await page
+        .locator(selector)
+        .first()
+        .getAttribute("href")
+        .catch(() => null);
+      const slug = extractFacebookProfileSlugFromUrl(href ?? "");
+      if (slug) return formatFacebookHandle(slug);
+    }
+
+    const pageSlug = extractFacebookProfileSlugFromUrl(pageUrl);
+    return pageSlug ? formatFacebookHandle(pageSlug) : null;
   }
 
   const navSelectors = [

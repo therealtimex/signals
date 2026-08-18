@@ -4,13 +4,15 @@ Signals **does not** publish X content in-process. Compose sends drafts to a **R
 
 LinkedIn is best-effort (beta): the agent may use interactive browser automation until a deterministic script ships.
 
+Facebook browser connect is available in Settings for session validation and future agent-browser enrichment; publish is not yet supported on the agent lane.
+
 ## Prerequisites
 
 1. Signals running as a **RealTimeX Local App** (`RTX_APP_ID` + `SERVER_URL`).
 2. Manifest permission **`desktop.runtime-sessions`** granted (Local Apps consent).
 3. RealTimeX desktop running (relay for terminal agent launch).
 4. Skills installed in the Signals workspace: `realtimex-signals` + `signals-publish`.
-5. One-time login: open the **`signals-publish`** RTX Browser session from **Settings → Platform Connections → X** and sign in to X (and LinkedIn in the same session when needed).
+5. One-time login: open the **`signals-publish`** RTX Browser session from **Settings → Platform Connections** and sign in to X, LinkedIn, and/or Facebook in the same session when needed.
 
 ## User flow
 

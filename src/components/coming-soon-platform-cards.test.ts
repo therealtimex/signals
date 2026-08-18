@@ -4,16 +4,16 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { ComingSoonPlatformCards } from "@/components/coming-soon-platform-cards";
 import { PlatformConnectionCard } from "@/components/platform-connection-card";
 import {
-  getPlatformsWithoutOAuth,
+  getComingSoonPlatforms,
   PLATFORM_DISPLAY_NAMES,
 } from "@/lib/platforms/capabilities";
 
 describe("ComingSoonPlatformCards", () => {
-  it("renders exactly the oauth:false mapped platforms with coming-soon UI", () => {
-    const platforms = getPlatformsWithoutOAuth();
+  it("renders exactly the oauth:false platforms without browser connect", () => {
+    const platforms = getComingSoonPlatforms();
     const html = renderToStaticMarkup(createElement(ComingSoonPlatformCards));
 
-    expect(platforms.sort()).toEqual(["facebook", "instagram", "threads"]);
+    expect(platforms.sort()).toEqual(["instagram", "threads"]);
 
     for (const platform of platforms) {
       expect(html).toContain(PLATFORM_DISPLAY_NAMES[platform]!);

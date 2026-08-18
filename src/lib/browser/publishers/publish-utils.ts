@@ -24,6 +24,7 @@ const STEALTH_ARGS = [
 const PLATFORM_LOGIN_URLS: Record<BrowserPlatform, string> = {
   x: "/login",
   linkedin: "/login",
+  facebook: "/login",
 };
 
 /** Load and validate a browser session, throwing PublishError if missing. */

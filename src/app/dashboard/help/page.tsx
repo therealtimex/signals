@@ -747,6 +747,57 @@ LINKEDIN_CLIENT_SECRET="your-linkedin-client-secret"`}</CodeBlock>
   );
 }
 
+function FacebookSetupTab() {
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Users className="h-5 w-5" />
+            Browser session connect (no Meta OAuth)
+          </CardTitle>
+          <CardDescription>
+            Facebook connect uses the shared RealTimeX Browser <Code>signals-publish</Code>{" "}
+            session. Meta OAuth and Graph API sync are not available in Signals yet.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-2 text-sm text-muted-foreground">
+          <ol className="list-decimal pl-5 space-y-2">
+            <li>
+              Go to{" "}
+              <Link
+                href="/dashboard/settings"
+                className="text-primary underline underline-offset-2"
+              >
+                Settings
+              </Link>{" "}
+              &rarr; Platform Connections &rarr; click{" "}
+              <strong className="text-foreground">Setup session</strong> on Facebook
+            </li>
+            <li>
+              Sign in to your personal Facebook account in the RealTimeX Browser window
+            </li>
+            <li>
+              Return to Settings and click{" "}
+              <strong className="text-foreground">Validate</strong> to persist the session
+              account
+            </li>
+            <li>
+              Use <strong className="text-foreground">Disconnect</strong> to clear the
+              browser connection without deleting the <Code>signals-publish</Code> profile
+            </li>
+          </ol>
+          <div className="rounded-lg border bg-muted/40 p-3 text-xs">
+            <strong className="text-foreground">Validation note:</strong> public profile URLs
+            are viewable while logged out. Validate requires logged-in navigation markers — a
+            tab parked on someone else&apos;s profile will not report Connected.
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 function GmailSetupTab() {
   return (
     <div className="space-y-6">
@@ -1273,7 +1324,7 @@ function FaqTab() {
 
 // ─── Main Content ────────────────────────────────────────────────────────────
 
-const VALID_TABS = ["getting-started", "x-setup", "linkedin-setup", "gmail-setup", "features", "faq"] as const;
+const VALID_TABS = ["getting-started", "x-setup", "linkedin-setup", "facebook-setup", "gmail-setup", "features", "faq"] as const;
 type TabValue = (typeof VALID_TABS)[number];
 
 function HelpContent() {
@@ -1307,6 +1358,10 @@ function HelpContent() {
             <Linkedin className="h-4 w-4" />
             LinkedIn Setup
           </TabsTrigger>
+          <TabsTrigger value="facebook-setup">
+            <Users className="h-4 w-4" />
+            Facebook Setup
+          </TabsTrigger>
           <TabsTrigger value="gmail-setup">
             <Mail className="h-4 w-4" />
             Gmail Setup
@@ -1329,6 +1384,9 @@ function HelpContent() {
         </TabsContent>
         <TabsContent value="linkedin-setup">
           <LinkedInSetupTab />
+        </TabsContent>
+        <TabsContent value="facebook-setup">
+          <FacebookSetupTab />
         </TabsContent>
         <TabsContent value="gmail-setup">
           <GmailSetupTab />
