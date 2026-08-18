@@ -61,6 +61,13 @@ cp "${STANDALONE}/package.json" "$STAGING/"
 cp "${ROOT}/LICENSE" "$STAGING/"
 mkdir -p "$STAGING/node_modules" "$STAGING/.next"
 cp -R "${STANDALONE}/node_modules/." "$STAGING/node_modules/"
+
+# playwright-core metadata is required at runtime but may be omitted by the tracer.
+if [ -f "${ROOT}/node_modules/playwright-core/browsers.json" ]; then
+  mkdir -p "$STAGING/node_modules/playwright-core"
+  cp "${ROOT}/node_modules/playwright-core/browsers.json" "$STAGING/node_modules/playwright-core/"
+fi
+
 cp -R "${STANDALONE}/.next/." "$STAGING/.next/"
 
 # Runtime content read directly from process.cwd().

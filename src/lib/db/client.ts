@@ -1,6 +1,6 @@
 import { createRequire } from "node:module";
 import { dirname, join } from "path";
-import { homedir } from "os";
+import { resolveHomePrefixedPath, resolveSignalsDataDir } from "@/lib/signals-data-dir";
 import { mkdirSync, existsSync } from "fs";
 import { fileURLToPath } from "url";
 import { drizzle } from "drizzle-orm/better-sqlite3";
@@ -11,7 +11,7 @@ import * as schema from "./schema";
 const require = createRequire(import.meta.url);
 
 const isStandaloneBuild = process.env.SIGNALS_BOOT_MIGRATIONS_DONE === "1";
-const dataDir = process.env.SIGNALS_DATA_DIR?.replace("~", homedir()) ?? join(homedir(), ".signals");
+const dataDir = resolveSignalsDataDir();
 
 if (!isStandaloneBuild && !existsSync(dataDir)) {
   mkdirSync(dataDir, { recursive: true });
@@ -32,7 +32,7 @@ function applyMigrationsOnce(): void {
 
   if (isStandaloneBuild) {
     const migrationsDir =
-      process.env.SIGNALS_MIGRATIONS_DIR?.replace("~", homedir()) ??
+      resolveHomePrefixedPath(process.env.SIGNALS_MIGRATIONS_DIR) ??
       join(dirname(fileURLToPath(import.meta.url)), "migrations");
     if (existsSync(migrationsDir)) {
       migrate(drizzle(sqlite, { schema }), { migrationsFolder: migrationsDir });
