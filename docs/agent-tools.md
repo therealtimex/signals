@@ -198,7 +198,7 @@ For `runCommand` nodes or shell scripts, use [`scripts/invoke-agent-tool.sh`](..
 ## Smoke tests
 
 ```bash
-npm run smoke:core
+npm run test:integration
 ```
 
 Includes `e2e/smoke/03-agent-tools.spec.ts` for manifest + create/enrich invoke paths.

@@ -45,6 +45,7 @@ export default defineConfig({
             "src/**/*.latency.test.ts",
             "src/**/*.import-safety.test.ts",
             "src/**/*.embedded.test.ts",
+            "src/**/*.integration.test.ts",
           ],
         },
       },
@@ -89,6 +90,24 @@ export default defineConfig({
               singleFork: true,
             },
           },
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: "integration",
+          include: ["src/**/*.integration.test.ts"],
+          exclude: ["**/node_modules/**"],
+          setupFiles: ["./src/test/integration/setup-env.ts"],
+          globalSetup: ["./scripts/integration-global-setup.mjs"],
+          pool: "forks",
+          poolOptions: {
+            forks: {
+              singleFork: true,
+            },
+          },
+          testTimeout: 30_000,
+          hookTimeout: 120_000,
         },
       },
     ],
