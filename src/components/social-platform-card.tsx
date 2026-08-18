@@ -143,14 +143,14 @@ export function SocialPlatformCard(props: SocialPlatformCardProps) {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {!hasBrowserSession || !browserConnected ? (
+          {!hasBrowserSession ? (
             <Button variant="outline" size="sm" onClick={onOpenSession} disabled={opening}>
               {opening ? (
                 <Loader2 className="mr-1 h-3 w-3 animate-spin" />
               ) : (
                 <Globe className="mr-1 h-3 w-3" />
               )}
-              {opening ? "Opening..." : hasBrowserSession ? "Open session" : "Setup session"}
+              {opening ? "Opening..." : "Setup session"}
             </Button>
           ) : (
             <>
@@ -170,20 +170,22 @@ export function SocialPlatformCard(props: SocialPlatformCardProps) {
                 )}
                 Validate
               </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={onDisconnectBrowser}
-                disabled={disconnectingBrowser}
-                className="text-destructive hover:text-destructive"
-              >
-                {disconnectingBrowser ? (
-                  <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                ) : (
-                  <Unplug className="mr-1 h-3 w-3" />
-                )}
-                Disconnect
-              </Button>
+              {browserConnected ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={onDisconnectBrowser}
+                  disabled={disconnectingBrowser}
+                  className="text-destructive hover:text-destructive"
+                >
+                  {disconnectingBrowser ? (
+                    <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                  ) : (
+                    <Unplug className="mr-1 h-3 w-3" />
+                  )}
+                  Disconnect
+                </Button>
+              ) : null}
             </>
           )}
         </div>
