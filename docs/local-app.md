@@ -112,6 +112,8 @@ node scripts/qa/provision-signals-local-app.mjs
 
 This pre-grants manifest permissions so `/sdk/register` and `/sdk/ping` succeed without an Electron permission prompt.
 
+**Agent Workflow Run QA** (issue #153) uses the same `desktop.runtime-sessions` bridge as publish. If `POST /api/workflows/templates/{id}/run` returns `503` with a plain `Not Found` body, the RealTimeX host at `SERVER_URL` / `RTX_API_BASE_URL` does not expose `/sdk/desktop/runtime-sessions/*` — update or restart the RealTimeX desktop app, confirm `desktop.runtime-sessions` is granted, and re-run `provision-signals-local-app.mjs` if needed.
+
 ### Embedded-host QA (`generate_persona`)
 
 Unit tests mock RTX chat. To verify persisted `provider:model` provenance against a real owned RTX dev host:

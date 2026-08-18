@@ -28,18 +28,59 @@ function buildAppHeaders(appId: string): HeadersInit {
   };
 }
 
+const RTX_RUNTIME_UNAVAILABLE_MESSAGE =
+  "RealTimeX desktop runtime sessions are not available on this host. Ensure the RealTimeX app is running and has granted the desktop.runtime-sessions permission.";
+
+export async function readRtxJsonBody(response: Response): Promise<Record<string, unknown>> {
+  const text = await response.text();
+  if (!text.trim()) return {};
+
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    return typeof parsed === "object" && parsed !== null
+      ? (parsed as Record<string, unknown>)
+      : {};
+  } catch {
+    const trimmed = text.trim();
+    if (!response.ok) {
+      return {
+        error:
+          trimmed && trimmed.length < 200
+            ? trimmed
+            : `RealTimeX API error (${response.status})`,
+        code: response.status === 404 ? "RTX_RUNTIME_SESSIONS_UNAVAILABLE" : undefined,
+      };
+    }
+    return { error: "RealTimeX returned an invalid response" };
+  }
+}
+
 function mapLaunchHttpError(
   status: number,
   body: Record<string, unknown>
 ): LaunchTerminalAgentResult {
   const code = typeof body.code === "string" ? body.code : "";
-  const error = typeof body.error === "string" ? body.error : "Launch failed";
+  const error =
+    typeof body.error === "string"
+      ? body.error
+      : status === 404
+        ? RTX_RUNTIME_UNAVAILABLE_MESSAGE
+        : "Launch failed";
 
   if (status === 403 || code === "PERMISSION_REQUIRED" || code === "PERMISSION_DENIED") {
     return { success: false, error, errorCode: "permission_required", httpStatus: status };
   }
-  if (status === 404 || code === "APP_NOT_FOUND") {
-    return { success: false, error, errorCode: "rtx_unavailable", httpStatus: status };
+  if (
+    status === 404 ||
+    code === "APP_NOT_FOUND" ||
+    code === "RTX_RUNTIME_SESSIONS_UNAVAILABLE"
+  ) {
+    return {
+      success: false,
+      error: error || RTX_RUNTIME_UNAVAILABLE_MESSAGE,
+      errorCode: "rtx_unavailable",
+      httpStatus: status,
+    };
   }
   if (status === 503 || code === "DESKTOP_RUNTIME_SESSION_RELAY_ERROR") {
     return {
@@ -91,7 +132,7 @@ export async function launchTerminalCliAgent(
       }
     );
 
-    const body = (await response.json()) as Record<string, unknown>;
+    const body = await readRtxJsonBody(response);
     if (!response.ok || body.success === false) {
       return mapLaunchHttpError(response.status, body);
     }
@@ -142,7 +183,7 @@ export async function openRtxRuntimeLauncher(
       }
     );
 
-    const body = (await response.json()) as Record<string, unknown>;
+    const body = await readRtxJsonBody(response);
     if (!response.ok || body.success === false) {
       return {
         success: false,

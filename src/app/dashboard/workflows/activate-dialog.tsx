@@ -96,9 +96,21 @@ export function ActivateDialog({ template, open, onClose }: ActivateDialogProps)
         }),
       });
 
-      const data = await res.json();
+      const raw = await res.text();
+      let data: { error?: unknown; threadPath?: string } = {};
+      try {
+        data = raw ? (JSON.parse(raw) as typeof data) : {};
+      } catch {
+        setError(raw.trim() || "Failed to start agent");
+        return;
+      }
+
       if (!res.ok) {
-        setError(data.error?.toString() || "Failed to start agent");
+        setError(
+          typeof data.error === "string"
+            ? data.error
+            : "Failed to start agent"
+        );
         return;
       }
 
