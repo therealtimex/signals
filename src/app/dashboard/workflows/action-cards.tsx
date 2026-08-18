@@ -11,7 +11,6 @@ import {
   Upload,
   RefreshCw,
   Sparkles,
-  Mail,
   Lock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -69,9 +68,7 @@ const ACTIONS: ActionDef[] = [
   // LinkedIn
   { id: "li-sync-connections", label: "Sync Connections", description: "Import connections from LinkedIn.", platform: "linkedin", endpoint: "/api/platforms/linkedin/sync", body: { type: "contacts" }, type: "api", icon: RefreshCw },
   { id: "li-import-csv", label: "Import Connections Export", description: "Upload a LinkedIn connections CSV or Basic Data Export zip.", platform: "linkedin", endpoint: "/api/platforms/linkedin/import", body: {}, type: "upload", icon: Upload },
-  // Gmail
-  { id: "gm-sync-contacts", label: "Sync Contacts", description: "Import contacts from Google Contacts.", platform: "gmail", endpoint: "/api/platforms/gmail/sync", body: { type: "contacts" }, type: "api", icon: Mail },
-  { id: "gm-sync-metadata", label: "Sync Metadata", description: "Enrich contacts with email interaction data.", platform: "gmail", endpoint: "/api/platforms/gmail/sync", body: { type: "metadata" }, type: "api", icon: Mail },
+  // Gmail OAuth sync removed — use Himalaya mail accounts (Settings) or Takeout import (#119)
 ];
 
 const PLATFORM_LABELS: Record<string, string> = {
@@ -91,7 +88,7 @@ const ACTION_STAT_MAP: Record<string, { dataTypes: string[]; label: string }> = 
   "gm-sync-metadata":   { dataTypes: ["gmail_metadata"],         label: "contacts enriched" },
 };
 
-const PLATFORM_GROUPS = ["x", "linkedin", "gmail"] as const;
+const PLATFORM_GROUPS = ["x", "linkedin"] as const;
 
 /** Import modal config per upload action. */
 function getImportDialogConfig(action: ActionDef): ImportDialogConfig {
@@ -250,7 +247,6 @@ export function ActionCards() {
   const [platformStatus, setPlatformStatus] = useState<Record<string, PlatformStatus>>({
     x: { connected: false, loading: true, syncCapable: false, grantedScopes: "", hasBrowserSession: false, contactsWithEmailCount: 999, googleContactCount: null, syncStats: {}, importStats: null },
     linkedin: { connected: false, loading: true, syncCapable: false, grantedScopes: "", hasBrowserSession: false, contactsWithEmailCount: 999, googleContactCount: null, syncStats: {}, importStats: null },
-    gmail: { connected: false, loading: true, syncCapable: false, grantedScopes: "", hasBrowserSession: false, contactsWithEmailCount: 999, googleContactCount: null, syncStats: {}, importStats: null },
   });
 
   useEffect(() => {
@@ -258,12 +254,10 @@ export function ActionCards() {
     Promise.allSettled([
       fetch("/api/platforms/x").then((r) => r.json()),
       fetch("/api/platforms/linkedin").then((r) => r.json()),
-      fetch("/api/platforms/gmail").then((r) => r.json()),
       fetch("/api/platforms/x/enrich").then((r) => r.json()),
-    ]).then(([xRes, liRes, gmRes, xEnrichRes]) => {
+    ]).then(([xRes, liRes, xEnrichRes]) => {
       const xData = xRes.status === "fulfilled" ? xRes.value : {};
       const liData = liRes.status === "fulfilled" ? liRes.value : {};
-      const gmData = gmRes.status === "fulfilled" ? gmRes.value : {};
       const xEnrichData = xEnrichRes.status === "fulfilled" ? xEnrichRes.value : {};
 
       // Merge X enrich data into X sync stats
@@ -297,17 +291,6 @@ export function ActionCards() {
           googleContactCount: null,
           syncStats: liData.syncStats ?? {},
           importStats: liData.importStats ?? null,
-        },
-        gmail: {
-          connected: !!gmData.connected,
-          loading: false,
-          syncCapable: true,
-          grantedScopes: gmData.account?.grantedScopes ?? "",
-          hasBrowserSession: false,
-          contactsWithEmailCount: gmData.contactsWithEmailCount ?? 0,
-          googleContactCount: gmData.googleContactCount ?? null,
-          syncStats: gmData.syncStats ?? {},
-          importStats: null,
         },
       });
     });

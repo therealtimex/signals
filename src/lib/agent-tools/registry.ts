@@ -17,6 +17,7 @@ import {
   upsertPersonaSchema,
   getPersonaEvidenceSchema,
   generatePersonaSchema,
+  listMailAccountsSchema,
 } from "@/lib/agent-tools/schemas";
 import {
   logInteractionSchema,
@@ -88,6 +89,7 @@ import {
   handleGeneratePersona,
   handleUpsertPersona,
 } from "@/lib/agent-tools/handlers";
+import { handleListMailAccounts } from "@/lib/agent-tools/mail-handlers";
 import type { AgentToolDefinition } from "@/lib/agent-tools/types";
 
 export const AGENT_TOOL_VERSION = "1";
@@ -418,6 +420,15 @@ export const AGENT_TOOLS: Record<string, AgentToolDefinition> = {
     schema: completePublishSchema,
     parameters: zodToParameters(completePublishSchema),
     execute: handleCompletePublish,
+  },
+  list_mail_accounts: {
+    name: "list_mail_accounts",
+    description:
+      "List configured Himalaya mail account aliases and emails. Agents send/read mail via Himalaya CLI with optional --account <alias>; default alias when unspecified.",
+    category: "content",
+    schema: listMailAccountsSchema,
+    parameters: zodToParameters(listMailAccountsSchema),
+    execute: handleListMailAccounts,
   },
 };
 

@@ -4,9 +4,9 @@ import { validateGmailOAuthState } from "@/lib/platforms/gmail/oauth-state-store
 import { encrypt } from "@/lib/auth/crypto";
 import {
   createPlatformAccount,
-  getPlatformAccountByPlatform,
   updatePlatformAccount,
 } from "@/lib/db/queries/platform-accounts";
+import { getLegacyGmailOAuthAccount } from "@/lib/db/queries/mail-accounts";
 import type { PlatformCredentials } from "@/lib/platforms/adapter";
 
 /**
@@ -97,7 +97,7 @@ export async function GET(req: NextRequest) {
     const displayName = userinfo.name ?? `${userinfo.given_name ?? ""} ${userinfo.family_name ?? ""}`.trim();
 
     // Upsert platform account
-    const existing = getPlatformAccountByPlatform("gmail");
+    const existing = getLegacyGmailOAuthAccount();
     if (existing) {
       updatePlatformAccount(existing.id, {
         displayName: displayName || userinfo.email || "Gmail User",

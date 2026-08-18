@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getPlatformAccountByPlatform } from "@/lib/db/queries/platform-accounts";
+import { getLegacyGmailOAuthAccount } from "@/lib/db/queries/mail-accounts";
 import { listSyncCursors } from "@/lib/db/queries/sync";
 import { syncContactsFromGmail } from "@/lib/platforms/sync-gmail-contacts";
 import { syncGmailMetadata } from "@/lib/platforms/sync-gmail-metadata";
@@ -12,7 +12,7 @@ import { runSyncWorkflow } from "@/lib/workflows/run-sync-workflow";
  */
 export async function POST(req: NextRequest) {
   try {
-    const account = getPlatformAccountByPlatform("gmail");
+    const account = getLegacyGmailOAuthAccount();
     if (!account) {
       return NextResponse.json(
         { error: "No Gmail account connected" },
@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
  * Get sync status for the Gmail account.
  */
 export async function GET() {
-  const account = getPlatformAccountByPlatform("gmail");
+  const account = getLegacyGmailOAuthAccount();
   if (!account) {
     return NextResponse.json({ synced: false });
   }

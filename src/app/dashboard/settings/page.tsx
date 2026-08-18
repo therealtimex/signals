@@ -11,6 +11,7 @@ import { Separator } from "@/components/ui/separator";
 import { Key, CheckCircle, XCircle, Loader2, Monitor, Globe, Trash2, Search } from "lucide-react";
 import { PlatformConnectionCard } from "@/components/platform-connection-card";
 import { ComingSoonPlatformCards } from "@/components/coming-soon-platform-cards";
+import { HimalayaMailAccountsSection } from "@/components/himalaya-mail-accounts-section";
 
 type AuthSource = "env_var" | "config" | "none";
 
@@ -38,16 +39,6 @@ interface LinkedInConnectionState {
   lastSyncedAt: number | null;
   grantedScopes: string;
 }
-
-interface GmailConnectionState {
-  loading: boolean;
-  connected: boolean;
-  displayName: string | null;
-  status: "active" | "paused" | "needs_reauth" | null;
-  lastSyncedAt: number | null;
-  grantedScopes: string;
-}
-
 
 export default function SettingsPage() {
   return (
@@ -89,18 +80,6 @@ function SettingsContent() {
   });
   const [liConnecting, setLiConnecting] = useState(false);
   const [liDisconnecting, setLiDisconnecting] = useState(false);
-
-  // Gmail connection state
-  const [gmState, setGmState] = useState<GmailConnectionState>({
-    loading: true,
-    connected: false,
-    displayName: null,
-    status: null,
-    lastSyncedAt: null,
-    grantedScopes: "",
-  });
-  const [gmConnecting, setGmConnecting] = useState(false);
-  const [gmDisconnecting, setGmDisconnecting] = useState(false);
 
   // Browser session state
   const [browserSession, setBrowserSession] = useState<{
@@ -289,24 +268,6 @@ function SettingsContent() {
       });
   }
 
-  function fetchGmailStatus() {
-    fetch("/api/platforms/gmail")
-      .then((r) => r.json())
-      .then((data) => {
-        setGmState({
-          loading: false,
-          connected: data.connected,
-          displayName: data.account?.displayName ?? null,
-          status: data.account?.status ?? null,
-          lastSyncedAt: data.account?.lastSyncedAt ?? null,
-          grantedScopes: data.account?.grantedScopes ?? "",
-        });
-      })
-      .catch(() => {
-        setGmState((prev) => ({ ...prev, loading: false }));
-      });
-  }
-
   function fetchBrowserSession() {
     fetch("/api/platforms/x/browser-session")
       .then((r) => r.json())
@@ -470,7 +431,6 @@ function SettingsContent() {
     fetchAuth();
     fetchXStatus();
     fetchLinkedInStatus();
-    fetchGmailStatus();
     fetchBrowserSession();
     fetchLiBrowserSession();
     fetchSearchApiStatus();
@@ -488,10 +448,6 @@ function SettingsContent() {
     } else if (connected === "linkedin") {
       setSuccessMessage("LinkedIn account connected successfully!");
       fetchLinkedInStatus();
-      window.history.replaceState({}, "", "/dashboard/settings");
-    } else if (connected === "gmail") {
-      setSuccessMessage("Gmail account connected successfully!");
-      fetchGmailStatus();
       window.history.replaceState({}, "", "/dashboard/settings");
     } else if (oauthError) {
       setError(`OAuth error: ${oauthError}`);
@@ -630,61 +586,6 @@ function SettingsContent() {
     } finally {
       setLiDisconnecting(false);
     }
-  }
-
-
-  async function handleGmailConnect() {
-    setGmConnecting(true);
-    setError(null);
-
-    try {
-      const res = await fetch("/api/platforms/gmail/auth");
-      const data = await res.json();
-
-      if (!res.ok) {
-        setError(data.error || "Failed to start Google OAuth flow");
-        return;
-      }
-
-      window.location.href = data.authUrl;
-    } catch {
-      setError("Failed to connect to Gmail");
-    } finally {
-      setGmConnecting(false);
-    }
-  }
-
-  async function handleGmailDisconnect() {
-    setGmDisconnecting(true);
-    setError(null);
-
-    try {
-      const res = await fetch("/api/platforms/gmail", { method: "DELETE" });
-      if (!res.ok) {
-        const data = await res.json();
-        setError(data.error || "Failed to disconnect");
-        return;
-      }
-      setGmState({
-        loading: false,
-        connected: false,
-        displayName: null,
-        status: null,
-        lastSyncedAt: null,
-        grantedScopes: "",
-      });
-    } catch {
-      setError("Failed to disconnect");
-    } finally {
-      setGmDisconnecting(false);
-    }
-  }
-
-
-  function getGmailConnectionStatus(): "disconnected" | "connected" | "needs_reauth" {
-    if (!gmState.connected) return "disconnected";
-    if (gmState.status === "needs_reauth") return "needs_reauth";
-    return "connected";
   }
 
 
@@ -1084,29 +985,7 @@ function SettingsContent() {
 
           <Separator />
 
-          {/* Gmail Connection */}
-          {gmState.loading ? (
-            <div className="flex items-center justify-center rounded-lg border p-4">
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              <span className="text-sm text-muted-foreground">Loading Gmail status...</span>
-            </div>
-          ) : (
-            <PlatformConnectionCard
-              platform="gmail"
-              displayName="Gmail / Google"
-              accountHandle={gmState.displayName ?? undefined}
-              lastSyncedAt={gmState.lastSyncedAt}
-              status={getGmailConnectionStatus()}
-              syncCapable={true}
-              grantedScopes={gmState.grantedScopes || undefined}
-              showSync={false}
-              onConnect={handleGmailConnect}
-              onDisconnect={handleGmailDisconnect}
-              onSync={() => {}}
-              connecting={gmConnecting}
-              disconnecting={gmDisconnecting}
-            />
-          )}
+          <HimalayaMailAccountsSection />
 
           <ComingSoonPlatformCards />
 

@@ -227,3 +227,5 @@ export const upsertPersonaSchema = z
       data.workflowRunId !== undefined,
     { message: "At least one persona field is required besides contactId" },
   );
+
+export const listMailAccountsSchema = z.object({});
