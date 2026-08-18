@@ -15,7 +15,10 @@ if (!existsSync(dataDir)) {
 }
 
 const dbPath = join(dataDir, "data.db");
-const sqlite = new Database(dbPath);
+const sqlite = new Database(
+  dbPath,
+  process.env.SIGNALS_BOOT_MIGRATIONS_DONE === "1" ? { readonly: true } : undefined,
+);
 
 sqlite.pragma("journal_mode = WAL");
 sqlite.pragma("foreign_keys = ON");
