@@ -1,16 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
-  hasSession,
-  loadSession,
-  clearSession,
-  setupSession,
-  validateSession,
-} from "@/lib/browser/session";
+  disconnectPlatformBrowserSession,
+  getPlatformSessionStatus,
+  openPlatformBrowserSession,
+  validatePlatformBrowserSession,
+} from "@/lib/platforms/browser-connection";
 
 /**
  * POST /api/platforms/x/browser-session
- * Manage browser session for X.
- * Body: { action: "setup" | "validate" }
+ * Manage RealTimeX Browser session for X (embedded) or legacy Playwright session (standalone).
  */
 export async function POST(req: NextRequest) {
   try {
@@ -19,19 +17,20 @@ export async function POST(req: NextRequest) {
 
     switch (action) {
       case "setup": {
-        // Launch headed browser for manual login
-        const session = await setupSession("x");
+        const result = await openPlatformBrowserSession("x");
         return NextResponse.json({
           status: "session_created",
-          createdAt: session.createdAt,
+          sessionName: result.sessionName,
         });
       }
 
       case "validate": {
-        const isValid = await validateSession("x");
+        const result = await validatePlatformBrowserSession("x");
         return NextResponse.json({
-          status: isValid ? "valid" : "invalid",
-          isValid,
+          status: result.isValid ? "valid" : "invalid",
+          isValid: result.isValid,
+          detectedHandle: result.detectedHandle,
+          lastValidatedAt: result.lastValidatedAt,
         });
       }
 
@@ -50,30 +49,23 @@ export async function POST(req: NextRequest) {
 
 /**
  * GET /api/platforms/x/browser-session
- * Check browser session status.
  */
 export async function GET() {
-  const exists = hasSession("x");
-
-  if (!exists) {
-    return NextResponse.json({
-      hasSession: false,
-    });
-  }
-
-  const session = loadSession("x");
+  const status = await getPlatformSessionStatus("x");
   return NextResponse.json({
-    hasSession: true,
-    lastValidatedAt: session?.lastValidatedAt ?? null,
-    createdAt: session?.createdAt ?? null,
+    hasSession: status.hasSession,
+    sessionRunning: status.sessionRunning,
+    mode: status.mode,
+    sessionName: status.sessionName,
+    lastValidatedAt: status.lastValidatedAt,
+    detectedHandle: status.detectedHandle,
   });
 }
 
 /**
  * DELETE /api/platforms/x/browser-session
- * Clear stored browser session.
  */
 export async function DELETE() {
-  clearSession("x");
+  await disconnectPlatformBrowserSession("x");
   return NextResponse.json({ status: "cleared" });
 }

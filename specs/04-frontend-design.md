@@ -212,13 +212,15 @@ className="animate-fade-slide-in"
 
 ### Settings (`/dashboard/settings`)
 
-1. **API Configuration** — Anthropic API key status (env var / config / not set) for legacy config paths
-2. **Platform Connections** — X, LinkedIn, Gmail via `PlatformConnectionCard` (`showSync={false}`)
-   - Connect / reconnect / disconnect and connection status badges (connected/needs_reauth/disconnected)
-   - Granted permissions (collapsible scope display)
-   - No sync triggers on this page — sync and import run from **Automation → Workflows**
-3. **Browser Sessions** — X and LinkedIn publish/engage sessions (setup, validate, clear). Profile enrichment delegates to RealTimeX Browser + agent-browser (not in-app Playwright scraping).
-4. **Search providers** — Serper and Tavily API key configuration
+1. **Platform Connections** — unified browser-native cards for X and LinkedIn (`SocialPlatformCard`)
+   - Connected = logged-in RealTimeX Browser session (`signals-publish`) + optional `platform_accounts` row with `authType: "session"`
+   - Actions: Setup/Open session, Validate (CDP login check), Disconnect (browser only)
+   - Collapsed **Advanced: OAuth API sync** when running as Local App (`RTX_APP_ID` set); standalone shows OAuth block below card
+   - Himalaya mail accounts section; coming-soon platform cards
+2. **No duplicate Browser Sessions subsection** — merged into each platform card (P6c / #147)
+3. Embedded Local App notice for LLM permissions (no provider key forms)
+
+Removed from Settings (prior releases): API key cards (#143), separate Browser Sessions block (#147).
 
 ### Automation (`/dashboard/workflows`)
 
@@ -254,7 +256,8 @@ className="animate-fade-slide-in"
 | `FunnelStageBadge` | `funnel-stage-badge.tsx` | Colored badge per funnel stage |
 | `PriorityBadge` | `priority-badge.tsx` | Priority level badge (low/medium/high/urgent) |
 | `EnrichmentScoreBadge` | `enrichment-score-badge.tsx` | Score display (Rich/Good/Basic/Sparse/Minimal) |
-| `PlatformConnectionCard` | `platform-connection-card.tsx` | Connection status + sync + scopes UI |
+| `PlatformConnectionCard` | `platform-connection-card.tsx` | OAuth advanced lane status + scopes UI |
+| `SocialPlatformCard` | `social-platform-card.tsx` | Unified browser-native X/LinkedIn connection card |
 | `ContactForm` | `contact-form.tsx` | Contact CRUD form (auto-syncs full name) |
 | `AddTaskDialog` | `add-task-dialog.tsx` | Task creation dialog |
 | `IdentitiesSection` | `identities-section.tsx` | Platform identities table with add/delete |
@@ -357,7 +360,7 @@ The `ComposeDialog` supports X and LinkedIn posts (threads on X only):
 - **Activity grid**: 1 → 2 columns
 - **Contact form**: 1 → 2 column field grid
 - **Sidebar**: Full panel (desktop) → trigger button (mobile)
-- **Settings browser sessions**: Stacked session cards (X, LinkedIn) with inline Setup / Validate / Clear action rows
+- **Settings platform cards**: Unified X/LinkedIn cards with inline Setup / Validate / Disconnect; OAuth collapsed under Advanced
 
 ## 13. State Management Patterns
 

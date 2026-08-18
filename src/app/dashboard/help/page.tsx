@@ -460,21 +460,29 @@ X_CLIENT_SECRET="your-oauth2-client-secret"`}</CodeBlock>
               >
                 Settings
               </Link>{" "}
-              &rarr; Platform Connections &rarr; Click{" "}
-              <strong className="text-foreground">Connect</strong> on X/Twitter
-            </li>
-            <li>Authorize the app on X (works on all tiers, including Free)</li>
-            <li>
-              <strong className="text-foreground">Free tier</strong>: You&apos;re
-              connected and can post. To import contacts, click{" "}
-              <strong className="text-foreground">Enable Contact Sync</strong>{" "}
-              (requires Basic tier)
+              &rarr; Platform Connections &rarr; click{" "}
+              <strong className="text-foreground">Setup session</strong> on X/Twitter,
+              sign in via RealTimeX Browser, then click{" "}
+              <strong className="text-foreground">Validate</strong>
             </li>
             <li>
-              <strong className="text-foreground">Basic tier</strong>: Click{" "}
-              <strong className="text-foreground">Enable Contact Sync</strong>{" "}
-              &rarr; re-authorize with extended permissions &rarr; then click{" "}
-              <strong className="text-foreground">Sync Now</strong>
+              Import followers from an X archive zip under{" "}
+              <Link
+                href="/dashboard/workflows"
+                className="text-primary underline underline-offset-2"
+              >
+                Automation &rarr; Workflows
+              </Link>{" "}
+              (no OAuth required)
+            </li>
+            <li>
+              Publish via the terminal agent lane (
+              <Code>signals-publish</Code> browser session — see{" "}
+              <Code>docs/rtx-browser-publish.md</Code>)
+            </li>
+            <li>
+              Optional: expand <strong className="text-foreground">Advanced: OAuth API sync</strong>{" "}
+              for paid X API contact sync (Basic tier <Code>follows.read</Code>)
             </li>
             <li>
               Contacts appear in{" "}
@@ -644,14 +652,24 @@ LINKEDIN_CLIENT_SECRET="your-linkedin-client-secret"`}</CodeBlock>
               >
                 Settings
               </Link>{" "}
-              &rarr; Platform Connections &rarr; Click{" "}
-              <strong className="text-foreground">Connect</strong> on LinkedIn
+              &rarr; Platform Connections &rarr; click{" "}
+              <strong className="text-foreground">Setup session</strong> on LinkedIn,
+              sign in via RealTimeX Browser, then click{" "}
+              <strong className="text-foreground">Validate</strong>
             </li>
-            <li>Authorize Signals on LinkedIn</li>
             <li>
-              Click{" "}
-              <strong className="text-foreground">Sync Now</strong> to import
-              your LinkedIn connections
+              Import connections from a LinkedIn export zip under{" "}
+              <Link
+                href="/dashboard/workflows"
+                className="text-primary underline underline-offset-2"
+              >
+                Automation &rarr; Workflows
+              </Link>{" "}
+              (no OAuth required)
+            </li>
+            <li>
+              Optional: expand <strong className="text-foreground">Advanced: OAuth API sync</strong>{" "}
+              for LinkedIn API contact sync (<Code>r_connections</Code>)
             </li>
             <li>
               Contacts appear in{" "}
