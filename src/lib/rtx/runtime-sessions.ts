@@ -160,7 +160,7 @@ function parseCliSessionDescriptor(
       : typeof session?.sessionId === "string"
         ? session.sessionId
         : null;
-  if (!id) return null;
+  if (!id || !session) return null;
 
   return {
     id,
