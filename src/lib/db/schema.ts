@@ -23,8 +23,9 @@ export const platformAccounts = sqliteTable("platform_accounts", {
   id: text("id").primaryKey(),
   platform: text("platform", { enum: PLATFORM_ENUM }).notNull(),
   displayName: text("display_name").notNull(),
-  authType: text("auth_type", { enum: ["oauth", "session", "api_key"] }).notNull(),
+  authType: text("auth_type", { enum: ["oauth", "session", "api_key", "himalaya"] }).notNull(),
   credentialsEncrypted: text("credentials_encrypted"), // JSON string, AES-256
+  metadata: text("metadata").default("{}"), // JSON — e.g. himalayaAlias for mail accounts
   rateLimitState: text("rate_limit_state"), // JSON
   status: text("status", { enum: ["active", "paused", "needs_reauth"] })
     .notNull()

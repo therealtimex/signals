@@ -1,0 +1,1 @@
+ALTER TABLE `platform_accounts` ADD `metadata` text DEFAULT '{}';
