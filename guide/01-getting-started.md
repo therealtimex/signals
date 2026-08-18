@@ -14,10 +14,10 @@ Signals takes a page from the indie hacker playbook. Pieter Levels runs [multipl
 
 - **Node.js 20+** — Check with `node --version`
 - **A terminal** — Any terminal works: iTerm, Warp, the VS Code integrated terminal
-- **API keys** (configured after install):
+- **API access** (configured after install):
+  - **RealtimeX Local App** — AI chat, embeddings, and search use the RTX SDK proxy. Approve `llm.chat` and `llm.embed` for Signals in RealtimeX **Settings → Local Apps** (no provider keys in Signals Settings).
+  - **Standalone development** — Set `ANTHROPIC_API_KEY` in `.env.local` (optional `SERPER_API_KEY` / `TAVILY_API_KEY` until search fully migrates off direct keys).
   - **RealTimeX workspace** — Terminal agents run enrichment, search, and workflow orchestration via `/api/agent-tools` (see `docs/rtx-agent-orchestration.md`)
-  - **Serper API Key** — Optional, for RTX agent web search (2,500 free queries). Get one at [serper.dev](https://serper.dev)
-  - **Tavily API Key** — Optional, for RTX agent deep research (1,000 free/month). Get one at [tavily.com](https://tavily.com)
 
 ## Installation
 
@@ -40,32 +40,46 @@ Everything lives in `~/.signals/`:
 ```
 ~/.signals/
   data.db          # SQLite database — your entire CRM
-  config.json      # Encrypted API keys and settings
+  config.json      # Encrypted credentials and settings
   sessions/        # Browser automation sessions
   media/           # Uploaded images and attachments
 ```
 
 This is your data. Back it up, move it between machines, or delete it entirely — you're in control.
 
-## Configuring API Keys
+## AI and search configuration
 
-Navigate to **Settings** in the sidebar. This is where you connect Signals to the services it needs.
+Signals does **not** collect Anthropic, Serper, or Tavily API keys in its Settings UI. Configure LLM and search through one of these paths:
 
-![Settings page — API keys and platform connections](assets/settings-page.png)
-*The Settings page: configure API keys, connect platforms, and manage browser sessions.*
+### RealtimeX Local App (recommended)
 
-### Search API Keys (Optional)
+When Signals runs as a Local App (`RTX_APP_ID` set), all LLM compute goes through the RealtimeX SDK proxy:
 
-RTX terminal agents can use web search when you configure:
+1. Open RealtimeX **Settings → Local Apps** and select the Signals app.
+2. Approve **`llm.chat`** and **`llm.embed`** permissions.
+3. Ensure your RealtimeX LLM provider configuration is healthy (models and spend controls live in RTX, not Signals).
 
-- **Serper** — Google-based broad discovery. Great for prospecting and finding new contacts. 2,500 free queries (one-time).
-- **Tavily** — Deep research engine. Better for enrichment and detailed person lookup. 1,000 free searches per month.
+The Signals **Settings** page shows a short notice when running embedded — it does not expose provider key forms.
 
-Configure keys in **Settings** or environment variables. Agents choose providers in the RealTimeX workspace — Signals stores CRM results via agent-tools, not in-process LLM loops.
+### Standalone development
 
-## Connecting Platforms
+For local dev without the Local App shell, copy `.env.example` to `.env.local` and set:
 
-Below the API key section, you'll find **Platform Connections**. Signals supports three platforms:
+- **`ANTHROPIC_API_KEY`** — Required for Claude-powered chat and agents.
+- **`SERPER_API_KEY`** / **`TAVILY_API_KEY`** — Optional until search routes fully migrate off direct provider keys (ADR-022-9 follow-up).
+
+Restart the dev server after changing environment variables.
+
+## Settings and platform connections
+
+Navigate to **Settings** in the sidebar. This is where you connect platforms and manage browser sessions — not third-party LLM API keys.
+
+![Settings page — platform connections and browser sessions](assets/settings-page.png)
+*Settings: connect platforms, manage browser sessions, and view the Local App LLM notice when embedded.*
+
+## Connecting platforms
+
+In **Settings**, open **Platform Connections**. Signals supports three OAuth platforms:
 
 - **X / Twitter** — OAuth connection for contact sync and engagement tracking
 - **LinkedIn** — OAuth connection for professional network integration
@@ -85,7 +99,7 @@ If you're not sure what to do next, click **Help** in the sidebar.
 *The Help page: a quick setup checklist, environment setup instructions, and platform-specific guides.*
 
 The Help page includes:
-- **Quick Setup Checklist** — Shows completion status for each configuration step (API key, platform connections, first sync)
+- **Quick Setup Checklist** — Shows completion status for each configuration step (LLM access, platform connections, first sync)
 - **Environment Setup** — Instructions for configuring `.env.local` if you prefer environment variables
 - **Platform-specific tabs** — Detailed setup guides for X/Twitter, LinkedIn, and Gmail
 
@@ -107,6 +121,6 @@ The sidebar navigation mirrors the workflow you'll follow through these guides: 
 
 ## What's Next
 
-Your CRM is running. Your keys are configured. Time to get people into the system.
+Your CRM is running. Your platforms and AI access are configured. Time to get people into the system.
 
 **Next: [Contacts and Enrichment](02-contacts-and-enrichment.md)** — Import contacts from X and LinkedIn, understand enrichment scores, and enrich via RTX agents.

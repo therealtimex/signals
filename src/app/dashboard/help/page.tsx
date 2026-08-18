@@ -243,7 +243,6 @@ function GettingStartedTab() {
             }
             done={checklist.rtxEmbedded ? checklist.rtxLlmReady : checklist.anthropicKey}
             loading={checklist.loading}
-            href={checklist.rtxEmbedded ? undefined : "/dashboard/settings"}
           />
           <ChecklistItem
             label="X/Twitter account connected"
