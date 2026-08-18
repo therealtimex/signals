@@ -23,9 +23,21 @@ import {
 
 export const DEFAULT_MAX_ENVELOPES_PER_RUN = 500;
 export const DEFAULT_PAGE_SIZE = 50;
-const SCAN_FOLDERS = ["INBOX", "Sent"] as const;
 
-type ScanCursorPayload = {
+export type ScanFolderKind = "received" | "sent";
+
+export type ScanFolderConfig = {
+  kind: ScanFolderKind;
+  /** Try each folder name until one lists successfully (Gmail IMAP naming varies). */
+  candidates: string[];
+};
+
+export const SCAN_FOLDER_CONFIGS: ScanFolderConfig[] = [
+  { kind: "received", candidates: ["INBOX"] },
+  { kind: "sent", candidates: ["Sent", "[Gmail]/Sent Mail", "INBOX.Sent"] },
+];
+
+export type ScanCursorPayload = {
   folderIndex: number;
   page: number;
 };
@@ -49,6 +61,64 @@ function parseCursorPayload(cursor: string | null | undefined): ScanCursorPayloa
   } catch {
     return { folderIndex: 0, page: 1 };
   }
+}
+
+/** Advance scan cursor after a page fetch. Exported for unit tests. */
+export function computeNextScanCursor(
+  current: ScanCursorPayload,
+  opts: {
+    folderCount: number;
+    scanned: number;
+    maxEnvelopes: number;
+    hasMore: boolean;
+    folderExhausted: boolean;
+  }
+): ScanCursorPayload {
+  if (opts.folderExhausted || !opts.hasMore) {
+    const nextIndex = current.folderIndex + 1;
+    return nextIndex >= opts.folderCount
+      ? { folderIndex: opts.folderCount, page: 1 }
+      : { folderIndex: nextIndex, page: 1 };
+  }
+
+  if (opts.hasMore && opts.scanned < opts.maxEnvelopes) {
+    return { folderIndex: current.folderIndex, page: current.page + 1 };
+  }
+
+  // Cap hit mid-folder — resume this page on the next run (idempotent upserts).
+  return { folderIndex: current.folderIndex, page: current.page };
+}
+
+/** Persisted cursor wraps to the start after a full folder cycle completes. */
+export function normalizePersistedScanCursor(
+  position: ScanCursorPayload,
+  folderCount: number
+): ScanCursorPayload {
+  if (position.folderIndex >= folderCount) {
+    return { folderIndex: 0, page: 1 };
+  }
+  return position;
+}
+
+async function listEnvelopesForFolder(
+  alias: string,
+  folderConfig: ScanFolderConfig,
+  page: number,
+  pageSize: number
+): Promise<{ envelopes: Awaited<ReturnType<typeof listHimalayaEnvelopes>>["envelopes"]; hasMore: boolean; folder: string } | null> {
+  let lastError: Error | null = null;
+
+  for (const folder of folderConfig.candidates) {
+    try {
+      const result = await listHimalayaEnvelopes(alias, folder, { page, pageSize });
+      return { envelopes: result.envelopes, hasMore: result.hasMore, folder };
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+    }
+  }
+
+  if (lastError) throw lastError;
+  return null;
 }
 
 function buildOwnAddressSet(account: MailAccountView, allAccounts: MailAccountView[]): Set<string> {
@@ -223,21 +293,47 @@ export async function syncHimalayaMailScan(
   const activityByEmail = new Map<string, AddressActivity>();
 
   let { folderIndex, page } = parseCursorPayload(cursor.cursor);
+  let cursorPosition: ScanCursorPayload = { folderIndex, page };
 
   try {
-    while (scanned < maxEnvelopes && folderIndex < SCAN_FOLDERS.length) {
-      const folder = SCAN_FOLDERS[folderIndex]!;
-      const { envelopes, hasMore } = await listHimalayaEnvelopes(account.alias, folder, {
-        page,
-        pageSize,
-      });
+    while (scanned < maxEnvelopes && folderIndex < SCAN_FOLDER_CONFIGS.length) {
+      const folderConfig = SCAN_FOLDER_CONFIGS[folderIndex]!;
 
-      if (envelopes.length === 0) {
-        folderIndex++;
-        page = 1;
-        if (folderIndex >= SCAN_FOLDERS.length) break;
+      let listResult: Awaited<ReturnType<typeof listEnvelopesForFolder>> = null;
+      try {
+        listResult = await listEnvelopesForFolder(account.alias, folderConfig, page, pageSize);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        result.errors.push(
+          `Skipped ${folderConfig.kind} folder (${folderConfig.candidates.join(", ")}): ${message}`
+        );
+        cursorPosition = computeNextScanCursor(cursorPosition, {
+          folderCount: SCAN_FOLDER_CONFIGS.length,
+          scanned,
+          maxEnvelopes,
+          hasMore: false,
+          folderExhausted: true,
+        });
+        folderIndex = cursorPosition.folderIndex;
+        page = cursorPosition.page;
         continue;
       }
+
+      if (!listResult || listResult.envelopes.length === 0) {
+        cursorPosition = computeNextScanCursor(cursorPosition, {
+          folderCount: SCAN_FOLDER_CONFIGS.length,
+          scanned,
+          maxEnvelopes,
+          hasMore: false,
+          folderExhausted: true,
+        });
+        folderIndex = cursorPosition.folderIndex;
+        page = cursorPosition.page;
+        continue;
+      }
+
+      const { envelopes, hasMore } = listResult;
+      const direction = folderConfig.kind === "sent" ? "sent" : "received";
 
       for (const envelope of envelopes) {
         if (scanned >= maxEnvelopes) break;
@@ -245,7 +341,6 @@ export async function syncHimalayaMailScan(
 
         const occurredAt = parseEnvelopeTimestamp(envelope);
         const addresses = extractEnvelopeAddresses(envelope);
-        const direction = folder === "Sent" ? "sent" : "received";
 
         for (const addr of addresses) {
           if (ownAddresses.has(addr.email)) continue;
@@ -260,12 +355,15 @@ export async function syncHimalayaMailScan(
         }
       }
 
-      if (hasMore && scanned < maxEnvelopes) {
-        page++;
-      } else {
-        folderIndex++;
-        page = 1;
-      }
+      cursorPosition = computeNextScanCursor(cursorPosition, {
+        folderCount: SCAN_FOLDER_CONFIGS.length,
+        scanned,
+        maxEnvelopes,
+        hasMore,
+        folderExhausted: false,
+      });
+      folderIndex = cursorPosition.folderIndex;
+      page = cursorPosition.page;
     }
 
     if (mode === "mail_activity" || mode === "full") {
@@ -295,8 +393,7 @@ export async function syncHimalayaMailScan(
       }
     }
 
-    const nextCursor: ScanCursorPayload =
-      folderIndex >= SCAN_FOLDERS.length ? { folderIndex: 0, page: 1 } : { folderIndex, page };
+    const nextCursor = normalizePersistedScanCursor(cursorPosition, SCAN_FOLDER_CONFIGS.length);
 
     updateSyncCursor(cursor.id, {
       syncStatus: "completed",

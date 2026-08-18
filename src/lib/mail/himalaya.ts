@@ -169,6 +169,29 @@ export async function checkHimalayaAccount(
   }
 }
 
+/** Build argv for `himalaya envelope list` (exported for tests). */
+export function buildEnvelopeListArgs(
+  alias: string,
+  folder: string,
+  page: number,
+  pageSize: number
+): string[] {
+  return [
+    "envelope",
+    "list",
+    "-a",
+    alias,
+    "-f",
+    folder,
+    "-p",
+    String(page),
+    "-s",
+    String(pageSize),
+    "--output",
+    "json",
+  ];
+}
+
 /** List envelope headers from a Himalaya folder (headers only — no message bodies). */
 export async function listHimalayaEnvelopes(
   alias: string,
@@ -185,20 +208,7 @@ export async function listHimalayaEnvelopes(
   const pageSize = opts?.pageSize ?? 50;
 
   const { stdout } = await execHimalaya(
-    [
-      "-a",
-      alias,
-      "envelope",
-      "list",
-      "-f",
-      folder,
-      "-p",
-      String(page),
-      "-ps",
-      String(pageSize),
-      "--output",
-      "json",
-    ],
+    buildEnvelopeListArgs(alias, folder, page, pageSize),
     configPath,
     opts?.timeoutMs ?? 60_000
   );

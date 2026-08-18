@@ -72,6 +72,17 @@ function collectAddrs(value: unknown, out: ParsedMailAddress[]): void {
         out.push({ email: parsed.email, displayName: name });
       }
     }
+
+    if (typeof record.addr === "string") {
+      const parsed = parseMailAddress(record.addr);
+      if (parsed) {
+        const name =
+          typeof record.name === "string" && record.name.trim()
+            ? record.name.trim()
+            : parsed.displayName;
+        out.push({ email: parsed.email, displayName: name });
+      }
+    }
   }
 }
 

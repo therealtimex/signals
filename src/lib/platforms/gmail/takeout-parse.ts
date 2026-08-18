@@ -105,45 +105,62 @@ export function parseTakeoutVcards(text: string): TakeoutContactRow[] {
   return rows;
 }
 
-function parseCsvLine(line: string): string[] {
-  const fields: string[] = [];
-  let current = "";
+function parseCsvRecords(text: string): string[][] {
+  const cleaned = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+  const records: string[][] = [];
+  let field = "";
+  let row: string[] = [];
   let inQuotes = false;
 
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
+  for (let i = 0; i < cleaned.length; i++) {
+    const ch = cleaned[i];
+
     if (inQuotes) {
       if (ch === '"') {
-        if (i + 1 < line.length && line[i + 1] === '"') {
-          current += '"';
+        if (cleaned[i + 1] === '"') {
+          field += '"';
           i++;
         } else {
           inQuotes = false;
         }
       } else {
-        current += ch;
+        field += ch;
       }
-    } else if (ch === '"') {
+      continue;
+    }
+
+    if (ch === '"') {
       inQuotes = true;
     } else if (ch === ",") {
-      fields.push(current);
-      current = "";
+      row.push(field);
+      field = "";
+    } else if (ch === "\n" || ch === "\r") {
+      if (ch === "\r" && cleaned[i + 1] === "\n") i++;
+      row.push(field);
+      field = "";
+      if (row.some((value) => value.trim().length > 0)) {
+        records.push(row);
+      }
+      row = [];
     } else {
-      current += ch;
+      field += ch;
     }
   }
 
-  fields.push(current);
-  return fields;
+  row.push(field);
+  if (row.some((value) => value.trim().length > 0)) {
+    records.push(row);
+  }
+
+  return records;
 }
 
 /** Parse Google Contacts CSV export (Takeout or direct CSV). */
 export function parseTakeoutContactsCsv(text: string): TakeoutContactRow[] {
-  const cleaned = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
-  const lines = cleaned.split(/\r?\n/).filter((line) => line.trim().length > 0);
-  if (lines.length < 2) return [];
+  const records = parseCsvRecords(text);
+  if (records.length < 2) return [];
 
-  const headerFields = parseCsvLine(lines[0]);
+  const headerFields = records[0]!;
   const colMap = new Map<string, number>();
   for (let i = 0; i < headerFields.length; i++) {
     colMap.set(headerFields[i].trim().toLowerCase(), i);
@@ -168,8 +185,8 @@ export function parseTakeoutContactsCsv(text: string): TakeoutContactRow[] {
 
   const rows: TakeoutContactRow[] = [];
 
-  for (let i = 1; i < lines.length; i++) {
-    const fields = parseCsvLine(lines[i]);
+  for (let i = 1; i < records.length; i++) {
+    const fields = records[i]!;
     const firstName = getGiven(fields);
     const lastName = getFamily(fields);
     const displayName =

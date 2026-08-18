@@ -3,7 +3,7 @@ import { execFile } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseHimalayaConfigAccounts, listHimalayaAccounts, checkHimalayaAccount } from "@/lib/mail/himalaya";
+import { parseHimalayaConfigAccounts, listHimalayaAccounts, checkHimalayaAccount, buildEnvelopeListArgs } from "@/lib/mail/himalaya";
 
 vi.mock("node:child_process", () => ({
   execFile: vi.fn(),
@@ -23,6 +23,26 @@ function runExecFileCallback(
   callback?.(error, stdout, stderr);
   return {} as ReturnType<typeof execFile>;
 }
+
+describe("buildEnvelopeListArgs", () => {
+  it("uses -s for page size (not invalid -ps) and places -a on envelope list", () => {
+    expect(buildEnvelopeListArgs("work", "INBOX", 2, 50)).toEqual([
+      "envelope",
+      "list",
+      "-a",
+      "work",
+      "-f",
+      "INBOX",
+      "-p",
+      "2",
+      "-s",
+      "50",
+      "--output",
+      "json",
+    ]);
+    expect(buildEnvelopeListArgs("work", "INBOX", 2, 50).join(" ")).not.toContain("-ps");
+  });
+});
 
 describe("parseHimalayaConfigAccounts", () => {
   it("parses account aliases and emails from config.toml", () => {

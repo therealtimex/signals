@@ -39,7 +39,7 @@ export async function POST(req: NextRequest) {
           workflowType: "sync",
           syncSubType: "himalaya_correspondents",
           platformAccountId: account.id,
-          syncFunction: () => syncHimalayaCorrespondents(mailAccountId, { maxEnvelopes: body.maxEnvelopes }),
+          syncFunction: () => syncHimalayaCorrespondents(account.id, { maxEnvelopes: body.maxEnvelopes }),
         });
         return NextResponse.json({ success: true, result: syncResult, workflowRunId: workflowRun.id });
       }
@@ -63,7 +63,7 @@ export async function POST(req: NextRequest) {
           workflowType: "enrich",
           syncSubType: "himalaya_mail_activity",
           platformAccountId: account.id,
-          syncFunction: () => syncHimalayaMailActivity(mailAccountId, { maxEnvelopes: body.maxEnvelopes }),
+          syncFunction: () => syncHimalayaMailActivity(account.id, { maxEnvelopes: body.maxEnvelopes }),
         });
         return NextResponse.json({ success: true, result: syncResult, workflowRunId: workflowRun.id });
       }

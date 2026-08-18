@@ -37,6 +37,18 @@ Jane Doe,Jane,Doe,jane@example.com,Acme`;
     expect(rows[0]?.email).toBe("jane@example.com");
     expect(rows[0]?.company).toBe("Acme");
   });
+
+  it("parses quoted multi-line CSV fields from Google Contacts export", () => {
+    const csv = `Name,Given Name,Family Name,E-mail 1 - Value,Address 1 - Formatted
+Jane Doe,Jane,Doe,jane@example.com,"123 Main St
+Suite 4
+San Francisco, CA"`;
+
+    const rows = parseTakeoutContactsCsv(csv);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.email).toBe("jane@example.com");
+    expect(rows[0]?.location).toContain("Suite 4");
+  });
 });
 
 describe("email-domain", () => {
@@ -71,5 +83,21 @@ describe("address-extract", () => {
       "bob@rta.vn",
     ]);
     expect(parseEnvelopeTimestamp({ date: "2026-01-15T10:00:00Z" })).toBeTypeOf("number");
+  });
+
+  it("extracts singular addr fields from Himalaya v1.2 envelope JSON", () => {
+    const addresses = extractEnvelopeAddresses({
+      from: { name: "Brian Kyed", addr: "no-reply@mail.palette.team" },
+      to: { name: null, addr: "trungle@rta.vn" },
+      date: "2026-08-18 04:52+00:00",
+    });
+
+    expect(addresses.map((row) => row.email).sort()).toEqual([
+      "no-reply@mail.palette.team",
+      "trungle@rta.vn",
+    ]);
+    expect(addresses.find((row) => row.email === "no-reply@mail.palette.team")?.displayName).toBe(
+      "Brian Kyed"
+    );
   });
 });
