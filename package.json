@@ -7,7 +7,7 @@
     "signals": "./dist/cli.js"
   },
   "scripts": {
-    "dev": "next dev --turbopack",
+    "dev": "next dev --turbopack -p ${RTX_PORT:-${PORT:-3000}}",
     "build": "next build",
     "start": "next start",
     "build:cli": "tsup",
@@ -26,9 +26,7 @@
     "test:provision-verifier": "node scripts/test-verify-signals-plugin-provision.mjs",
     "verify:marketplace-versions": "node scripts/verify-marketplace-versions.mjs",
     "verify:fresh-import": "vitest run --project import-safety",
-    "test:e2e": "playwright test",
-    "test:e2e:ui": "playwright test --ui",
-    "smoke:core": "playwright test e2e/smoke",
+    "test:integration": "vitest run --project integration",
     "check": "npm run typecheck && npm run lint && npm run test:coverage && npm run test:skill-package && npm run test:provision-verifier && npm run db:migrate && npm run build",
     "package:realtimex-plugin": "bash scripts/package-realtimex-plugin.sh",
     "build:standalone-artifact": "bash scripts/build-standalone-artifact.sh",
@@ -94,7 +92,6 @@
     "zod": "^3.24.0"
   },
   "devDependencies": {
-    "@playwright/test": "^1.58.2",
     "@types/better-sqlite3": "^7.6.0",
     "@types/react-dom": "^19.2.4",
     "@vitest/coverage-v8": "^3.2.4",

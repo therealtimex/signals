@@ -35,7 +35,7 @@ jobs:
           SIGNALS_DATA_DIR: ${{ github.workspace }}/.ci/signals-data
 
   smoke:
-    name: Smoke (E2E)
+    name: Smoke (integration)
     runs-on: ubuntu-latest
     needs: check
     steps:
@@ -49,9 +49,6 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Install Playwright Chromium
-        run: npx playwright install chromium --with-deps
-
       - name: Verify fresh data dir import safety
         run: npm run verify:fresh-import
 
@@ -60,8 +57,8 @@ jobs:
         env:
           SIGNALS_DATA_DIR: ${{ github.workspace }}/.ci/signals-data
 
-      - name: Run smoke tests
-        run: npm run smoke:core
+      - name: Run integration smoke tests
+        run: npm run test:integration
         env:
           SIGNALS_DATA_DIR: ${{ github.workspace }}/.ci/signals-e2e
           E2E_FRESH_DB: "1"
