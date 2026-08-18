@@ -1,14 +1,15 @@
-import { extractTakeoutVcardsFromZip } from "@/lib/platforms/gmail/zip-import";
+import { extractTakeoutContactsFromZip } from "@/lib/platforms/gmail/zip-import";
 import { parseTakeoutContactsText } from "@/lib/platforms/gmail/takeout-parse";
 
 export const MAX_VCF_SIZE = 10 * 1024 * 1024; // 10MB
 export const MAX_ZIP_SIZE = 50 * 1024 * 1024; // 50MB
 
-export type TakeoutImportKind = "vcf" | "zip";
+export type TakeoutImportKind = "vcf" | "csv" | "zip";
 
 export function getTakeoutImportKind(fileName: string): TakeoutImportKind | null {
   const lower = fileName.toLowerCase();
   if (lower.endsWith(".vcf")) return "vcf";
+  if (lower.endsWith(".csv")) return "csv";
   if (lower.endsWith(".zip")) return "zip";
   return null;
 }
@@ -27,12 +28,12 @@ export async function readTakeoutContactsFile(
     throw new Error(`File too large (max ${limitMb}MB)`);
   }
 
-  if (kind === "vcf") {
-    return { text: await file.text(), source: "vcf" };
+  if (kind === "vcf" || kind === "csv") {
+    return { text: await file.text(), source: kind };
   }
 
   const zipBytes = new Uint8Array(await file.arrayBuffer());
-  const text = extractTakeoutVcardsFromZip(zipBytes);
+  const text = extractTakeoutContactsFromZip(zipBytes);
   return { text, source: "zip" };
 }
 
@@ -40,7 +41,7 @@ export async function readTakeoutContactsFile(
 export async function parseTakeoutContactsFile(file: File) {
   const kind = getTakeoutImportKind(file.name);
   if (!kind) {
-    throw new Error("File must be a Google Takeout .zip or .vcf contacts export");
+    throw new Error("File must be a Google Takeout .zip, .csv, or .vcf contacts export");
   }
 
   const { text, source } = await readTakeoutContactsFile(file, kind);
