@@ -1,4 +1,4 @@
-import { eq, and, desc, count, asc, SQL } from "drizzle-orm";
+import { eq, and, desc, count, asc, sql, SQL } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db/client";
 import { workflowRuns, workflowSteps } from "@/lib/db/schema";
@@ -150,7 +150,9 @@ export function getLatestImportRun(platform: string): WorkflowRun | undefined {
     .select()
     .from(workflowRuns)
     .where(eq(workflowRuns.workflowType, "import"))
-    .orderBy(desc(workflowRuns.createdAt), desc(workflowRuns.startedAt))
+    // rowid tiebreak: a combined upload (e.g. X archive contacts + posts)
+    // records runs within the same epoch second — latest inserted wins.
+    .orderBy(desc(workflowRuns.createdAt), desc(workflowRuns.startedAt), desc(sql`rowid`))
     .limit(50)
     .all();
 

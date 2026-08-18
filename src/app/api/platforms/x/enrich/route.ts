@@ -16,7 +16,9 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
     const account = getPlatformAccountByPlatform("x");
-    if (!account) {
+    // Credential-less archive-import placeholders get the migration no-op
+    // instead of recording a junk failed enrich run.
+    if (!account || !account.credentialsEncrypted) {
       return NextResponse.json({
         success: false,
         delegated: true,
