@@ -93,6 +93,88 @@ function mapLaunchHttpError(
   return { success: false, error, errorCode: "launch_failed", httpStatus: status };
 }
 
+function buildLaunchRequestBody(
+  input: LaunchTerminalAgentInput,
+  agentName: string
+): Record<string, unknown> {
+  return {
+    workspaceSlug: input.workspaceSlug,
+    threadSlug: input.threadSlug,
+    agentName,
+    agentType: "terminal-cli",
+    interactionMode: "chat-linked",
+    primarySurface: "chat",
+    firstTurnDelivery: "queued",
+    message: input.message,
+    spawnSource: "signals-publish",
+    requestedBy: "Signals",
+    reason: input.reason,
+  };
+}
+
+function parseCliSessionDescriptor(
+  body: Record<string, unknown>,
+  input: LaunchTerminalAgentInput
+): RuntimeSessionDescriptor | null {
+  const session = body.session as Record<string, unknown> | undefined;
+  const id =
+    typeof session?.id === "string"
+      ? session.id
+      : typeof session?.sessionId === "string"
+        ? session.sessionId
+        : null;
+  if (!id) return null;
+
+  return {
+    id,
+    linkage: {
+      workspaceSlug:
+        typeof session.workspaceSlug === "string"
+          ? session.workspaceSlug
+          : input.workspaceSlug,
+      threadSlug:
+        typeof session.threadSlug === "string" ? session.threadSlug : input.threadSlug,
+    },
+  };
+}
+
+async function launchTerminalCliAgentViaCli(
+  input: LaunchTerminalAgentInput,
+  agentName: string,
+  appId: string,
+  apiBase: string,
+  fetchImpl: typeof fetch
+): Promise<LaunchTerminalAgentResult> {
+  const response = await fetchImpl(`${apiBase}/cli/open-terminal-session`, {
+    method: "POST",
+    headers: buildAppHeaders(appId),
+    body: JSON.stringify(buildLaunchRequestBody(input, agentName)),
+  });
+
+  const body = await readRtxJsonBody(response);
+  if (!response.ok || body.success === false) {
+    return mapLaunchHttpError(response.status, body);
+  }
+
+  const descriptor = parseCliSessionDescriptor(body, input);
+  if (!descriptor) {
+    return {
+      success: false,
+      error: "Launch succeeded but no session descriptor was returned",
+      errorCode: "launch_failed",
+      httpStatus: response.status,
+    };
+  }
+
+  return { success: true, descriptor };
+}
+
+function shouldFallbackToCliLaunch(status: number, body: Record<string, unknown>): boolean {
+  if (status !== 404) return false;
+  const code = typeof body.code === "string" ? body.code : "";
+  return code === "RTX_RUNTIME_SESSIONS_UNAVAILABLE" || code === "" || body.error === "Not Found";
+}
+
 export async function launchTerminalCliAgent(
   input: LaunchTerminalAgentInput,
   env: EnvLike = process.env,
@@ -116,24 +198,15 @@ export async function launchTerminalCliAgent(
       {
         method: "POST",
         headers: buildAppHeaders(appId),
-        body: JSON.stringify({
-          workspaceSlug: input.workspaceSlug,
-          threadSlug: input.threadSlug,
-          agentName,
-          agentType: "terminal-cli",
-          interactionMode: "chat-linked",
-          primarySurface: "chat",
-          firstTurnDelivery: "queued",
-          message: input.message,
-          spawnSource: "signals-publish",
-          requestedBy: "Signals",
-          reason: input.reason,
-        }),
+        body: JSON.stringify(buildLaunchRequestBody(input, agentName)),
       }
     );
 
     const body = await readRtxJsonBody(response);
     if (!response.ok || body.success === false) {
+      if (shouldFallbackToCliLaunch(response.status, body)) {
+        return launchTerminalCliAgentViaCli(input, agentName, appId, apiBase, fetchImpl);
+      }
       return mapLaunchHttpError(response.status, body);
     }
 
