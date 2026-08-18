@@ -4,11 +4,12 @@ import {
   updatePlatformAccount,
 } from "@/lib/db/queries/platform-accounts";
 import type { PlatformAccount } from "@/lib/db/types";
-import type { PublishPlatformTarget } from "@/lib/publish/types";
+import type { Platform } from "@/lib/db/platforms";
 
 const FALLBACK_DISPLAY_NAMES: Record<string, string> = {
   x: "X (RTX Browser)",
   linkedin: "LinkedIn (RTX Browser)",
+  facebook: "Facebook (RTX Browser)",
 };
 
 /**
@@ -16,7 +17,7 @@ const FALLBACK_DISPLAY_NAMES: Record<string, string> = {
  * Reuses OAuth or session row when present; otherwise creates auth_type session.
  */
 export function ensureSessionPlatformAccount(
-  platform: PublishPlatformTarget,
+  platform: Platform,
   detectedHandle?: string | null
 ): PlatformAccount {
   const existing = getPlatformAccountByPlatform(platform);

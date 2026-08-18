@@ -40,6 +40,14 @@ const EMPTY_PLATFORM: PlatformUiState = {
   session: null,
 };
 
+type PlatformKey = "x" | "linkedin" | "facebook";
+
+const PLATFORM_LABELS: Record<PlatformKey, string> = {
+  x: "X",
+  linkedin: "LinkedIn",
+  facebook: "Facebook",
+};
+
 function oauthStatus(payload: PlatformPayload | null): ConnectionStatus {
   if (!payload?.oauthConnected) return "disconnected";
   if (payload.account?.status === "needs_reauth") return "needs_reauth";
@@ -76,6 +84,7 @@ function SettingsContent() {
 
   const [xState, setXState] = useState<PlatformUiState>(EMPTY_PLATFORM);
   const [liState, setLiState] = useState<PlatformUiState>(EMPTY_PLATFORM);
+  const [fbState, setFbState] = useState<PlatformUiState>(EMPTY_PLATFORM);
 
   const [xOpening, setXOpening] = useState(false);
   const [xValidating, setXValidating] = useState(false);
@@ -89,7 +98,11 @@ function SettingsContent() {
   const [liOAuthConnecting, setLiOAuthConnecting] = useState(false);
   const [liOAuthDisconnecting, setLiOAuthDisconnecting] = useState(false);
 
-  const fetchPlatform = useCallback(async (platform: "x" | "linkedin") => {
+  const [fbOpening, setFbOpening] = useState(false);
+  const [fbValidating, setFbValidating] = useState(false);
+  const [fbDisconnecting, setFbDisconnecting] = useState(false);
+
+  const fetchPlatform = useCallback(async (platform: PlatformKey) => {
     const [platformRes, sessionRes] = await Promise.all([
       fetchJson<PlatformPayload>(`/api/platforms/${platform}`),
       fetchJson<SessionPayload>(`/api/platforms/${platform}/browser-session`),
@@ -111,9 +124,14 @@ function SettingsContent() {
     setLiState({ loading: false, ...data });
   }, [fetchPlatform]);
 
+  const refreshFacebook = useCallback(async () => {
+    const data = await fetchPlatform("facebook");
+    setFbState({ loading: false, ...data });
+  }, [fetchPlatform]);
+
   const refreshAll = useCallback(async () => {
-    await Promise.all([refreshX(), refreshLinkedIn()]);
-  }, [refreshX, refreshLinkedIn]);
+    await Promise.all([refreshX(), refreshLinkedIn(), refreshFacebook()]);
+  }, [refreshX, refreshLinkedIn, refreshFacebook]);
 
   useEffect(() => {
     fetchJson<{ rtx?: { mode?: string } }>("/api/health").then((data) => {
@@ -141,14 +159,24 @@ function SettingsContent() {
     }
   }, [searchParams, refreshX, refreshLinkedIn]);
 
-  async function runSessionAction(
-    platform: "x" | "linkedin",
-    action: "setup" | "validate" | "disconnect"
-  ) {
-    const setOpening = platform === "x" ? setXOpening : setLiOpening;
-    const setValidating = platform === "x" ? setXValidating : setLiValidating;
-    const setDisconnecting = platform === "x" ? setXDisconnecting : setLiDisconnecting;
-    const refresh = platform === "x" ? refreshX : refreshLinkedIn;
+  async function runSessionAction(platform: PlatformKey, action: "setup" | "validate" | "disconnect") {
+    const stateSetters = {
+      x: { opening: setXOpening, validating: setXValidating, disconnecting: setXDisconnecting, refresh: refreshX },
+      linkedin: {
+        opening: setLiOpening,
+        validating: setLiValidating,
+        disconnecting: setLiDisconnecting,
+        refresh: refreshLinkedIn,
+      },
+      facebook: {
+        opening: setFbOpening,
+        validating: setFbValidating,
+        disconnecting: setFbDisconnecting,
+        refresh: refreshFacebook,
+      },
+    }[platform];
+    const { opening: setOpening, validating: setValidating, disconnecting: setDisconnecting, refresh } =
+      stateSetters;
 
     setError(null);
     if (action === "setup") setOpening(true);
@@ -163,7 +191,7 @@ function SettingsContent() {
           setError(data.error || "Failed to disconnect browser session");
           return;
         }
-        setSuccessMessage(`${platform === "x" ? "X" : "LinkedIn"} browser session disconnected.`);
+        setSuccessMessage(`${PLATFORM_LABELS[platform]} browser session disconnected.`);
         await refresh();
         return;
       }
@@ -182,7 +210,7 @@ function SettingsContent() {
       if (action === "validate") {
         if (data.isValid) {
           setSuccessMessage(
-            `${platform === "x" ? "X" : "LinkedIn"} session validated${
+            `${PLATFORM_LABELS[platform]} session validated${
               data.detectedHandle ? ` as ${data.detectedHandle}` : ""
             }.`
           );
@@ -191,7 +219,7 @@ function SettingsContent() {
         }
       } else {
         setSuccessMessage(
-          `RealTimeX Browser opened — sign in to ${platform === "x" ? "X" : "LinkedIn"}, then click Validate.`
+          `RealTimeX Browser opened — sign in to ${PLATFORM_LABELS[platform]}, then click Validate.`
         );
       }
       await refresh();
@@ -254,6 +282,7 @@ function SettingsContent() {
 
   const xPayload = xState.payload;
   const liPayload = liState.payload;
+  const fbPayload = fbState.payload;
 
   return (
     <div className="space-y-6">
@@ -356,6 +385,33 @@ function SettingsContent() {
             disconnectingBrowser={liDisconnecting}
             oauthConnecting={liOAuthConnecting}
             oauthDisconnecting={liOAuthDisconnecting}
+          />
+
+          <SocialPlatformCard
+            platform="facebook"
+            displayName="Facebook"
+            loading={fbState.loading}
+            rtxEmbedded={rtxEmbedded}
+            connected={!!fbPayload?.connected}
+            connectionVia={fbPayload?.connectionVia ?? null}
+            accountHandle={
+              fbState.session?.detectedHandle ?? fbPayload?.account?.displayName ?? null
+            }
+            lastValidatedAt={fbState.session?.lastValidatedAt ?? null}
+            hasBrowserSession={!!fbState.session?.hasSession || !!fbPayload?.hasBrowserSession}
+            oauthConnected={false}
+            oauthStatus="disconnected"
+            oauthSupported={false}
+            dataHint="agent-browser enrichment (future)"
+            publishHint="not yet supported"
+            onOpenSession={() => runSessionAction("facebook", "setup")}
+            onValidate={() => runSessionAction("facebook", "validate")}
+            onDisconnectBrowser={() => runSessionAction("facebook", "disconnect")}
+            onOAuthConnect={() => {}}
+            onOAuthDisconnect={() => {}}
+            opening={fbOpening}
+            validating={fbValidating}
+            disconnectingBrowser={fbDisconnecting}
           />
 
           <HimalayaMailAccountsSection />

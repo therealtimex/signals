@@ -72,7 +72,7 @@ Restart the dev server after changing environment variables.
 
 ## Settings and platform connections
 
-Navigate to **Settings** in the sidebar. Connect X and LinkedIn via **RealTimeX Browser** — one unified card per platform with Setup, Validate, and Disconnect. OAuth API sync is optional (collapsed under **Advanced**) and not required for archive import, publish via agent, or Explore.
+Navigate to **Settings** in the sidebar. Connect X, LinkedIn, and Facebook via **RealTimeX Browser** — one unified card per platform with Setup, Validate, and Disconnect. OAuth API sync is optional for X and LinkedIn (collapsed under **Advanced**) and not required for archive import, publish via agent, or Explore.
 
 ![Settings page — platform connections](assets/settings-page.png)
 *Settings: browser-native platform cards, Himalaya mail accounts, and the Local App LLM notice when embedded.*
@@ -83,6 +83,7 @@ In **Settings → Platform Connections**:
 
 - **X / Twitter** — Sign in via the `signals-publish` RealTimeX Browser session. Import followers from an X archive zip (Automation → Workflows). Publish through the terminal agent lane (`docs/rtx-browser-publish.md`).
 - **LinkedIn** — Same browser session model. Import connections from a LinkedIn export zip. Publish is beta via the agent lane.
+- **Facebook** — Browser session connect only (no Meta OAuth). Validates the active personal account in the shared `signals-publish` session for future agent-browser enrichment. Publish is not yet supported.
 - **Google mail** — Himalaya CLI accounts (see Settings mail section and issue #137); no Gmail OAuth in Signals.
 
 Optional **Advanced: OAuth API sync** unlocks paid API contact sync (X Basic `follows.read`, LinkedIn `r_connections`). File-based imports and agent publish do not require OAuth.

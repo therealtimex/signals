@@ -3,6 +3,8 @@ import type { Platform } from "@/lib/db/platforms";
 export interface PlatformCapabilities {
   /** Connect/disconnect via OAuth from settings. */
   oauth: boolean;
+  /** RTX browser session connect in Settings (no OAuth). */
+  browserConnect?: boolean;
   /** Import contacts/connections into the CRM. */
   contactSync: boolean;
   /** Import the user's own posts/content items. */
@@ -45,6 +47,7 @@ export const PLATFORM_CAPABILITIES: Partial<Record<Platform, PlatformCapabilitie
   },
   facebook: {
     oauth: false,
+    browserConnect: true,
     contactSync: false,
     contentSync: false,
     engagementSync: false,
@@ -69,9 +72,16 @@ export const PLATFORM_DISPLAY_NAMES: Partial<Record<Platform, string>> = {
   threads: "Threads",
 };
 
-/** Platforms registered in PLATFORM_CAPABILITIES with oauth disabled (coming soon). */
+/** Platforms registered in PLATFORM_CAPABILITIES with oauth disabled. */
 export function getPlatformsWithoutOAuth(): Platform[] {
   return (Object.entries(PLATFORM_CAPABILITIES) as [Platform, PlatformCapabilities][])
     .filter(([, caps]) => !caps.oauth)
     .map(([platform]) => platform);
+}
+
+/** OAuth-disabled platforms still shown as coming soon (no browser connect yet). */
+export function getComingSoonPlatforms(): Platform[] {
+  return getPlatformsWithoutOAuth().filter(
+    (platform) => !PLATFORM_CAPABILITIES[platform]?.browserConnect
+  );
 }

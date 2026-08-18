@@ -6,9 +6,13 @@ import {
 } from "@/lib/rtx/browser-sessions";
 import {
   buildSocialPlatformConnectionPayload,
+  extractFacebookProfileSlugFromUrl,
   extractLinkedInVanityFromUrl,
   extractXHandleFromProfileHref,
+  formatFacebookHandle,
   formatLinkedInHandle,
+  isFacebookLoggedInUrl,
+  isFacebookLoggedOutUrl,
   isLinkedInLoggedInUrl,
   isLinkedInLoggedOutUrl,
   isOAuthConnected,
@@ -68,6 +72,25 @@ describe("rtx browser session helpers", () => {
     expect(extractXHandleFromProfileHref("/brandhandle")).toBe("@brandhandle");
     expect(extractXHandleFromProfileHref("/home")).toBe(null);
     expect(extractXHandleFromProfileHref("/brand/status/123")).toBe(null);
+    expect(extractFacebookProfileSlugFromUrl("https://www.facebook.com/jane.doe")).toBe(
+      "jane.doe"
+    );
+    expect(extractFacebookProfileSlugFromUrl("https://www.facebook.com/profile.php?id=12345")).toBe(
+      "id:12345"
+    );
+    expect(formatFacebookHandle("jane.doe")).toBe("jane.doe");
+  });
+
+  it("detects authenticated Facebook URLs without vanity profile false positives", () => {
+    expect(isFacebookLoggedInUrl("https://www.facebook.com/home")).toBe(true);
+    expect(isFacebookLoggedInUrl("https://www.facebook.com/messages")).toBe(true);
+    expect(isFacebookLoggedInUrl("https://www.facebook.com/zuck")).toBe(false);
+    expect(isFacebookLoggedInUrl("https://www.facebook.com/")).toBe(false);
+    expect(isFacebookLoggedInUrl("https://www.facebook.com/watch")).toBe(false);
+    expect(isFacebookLoggedOutUrl("https://www.facebook.com/")).toBe(false);
+    expect(isFacebookLoggedOutUrl("https://www.facebook.com/login")).toBe(true);
+    expect(isFacebookLoggedOutUrl("https://www.facebook.com/login/?next=foo")).toBe(true);
+    expect(extractFacebookProfileSlugFromUrl("https://www.facebook.com/profile.php")).toBe(null);
   });
 
   it("finds a session case-insensitively", () => {
@@ -230,6 +253,37 @@ describe("browser connection status", () => {
     expect(payload.connected).toBe(true);
     expect(payload.connectionVia).toBe("browser");
     expect(payload.hasBrowserSession).toBe(true);
+    expect(payload.oauthConnected).toBe(false);
+  });
+
+  it("builds Facebook connected payload with browser semantics only", async () => {
+    createPlatformAccount({
+      platform: "facebook",
+      displayName: "jane.doe",
+      authType: "session",
+      credentialsEncrypted: null,
+      status: "active",
+      lastSyncedAt: 1_700_000_000,
+    });
+
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        success: true,
+        sessions: [{ sessionName: "signals-publish", running: true }],
+      }),
+    });
+
+    const payload = await buildSocialPlatformConnectionPayload(
+      "facebook",
+      { RTX_APP_ID: "app-1", SERVER_URL: "http://127.0.0.1:3001" },
+      fetchImpl as unknown as typeof fetch
+    );
+
+    expect(payload.connected).toBe(true);
+    expect(payload.connectionVia).toBe("browser");
+    expect(payload.oauthConnected).toBe(false);
+    expect(payload.account?.displayName).toBe("jane.doe");
   });
 
   it("labels OAuth accounts separately when RTX session is running", async () => {

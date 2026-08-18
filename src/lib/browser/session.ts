@@ -34,6 +34,13 @@ const PLATFORM_CONFIG: Record<
     loggedInSelector: ".global-nav__me, .scaffold-layout__main, [data-test-icon=\"nav-home-icon\"]",
     loggedOutSelector: ".sign-in-form, #username",
   },
+  facebook: {
+    loginUrl: "https://www.facebook.com/login",
+    homeUrl: "https://www.facebook.com/",
+    loggedInSelector:
+      'div[role="navigation"], [aria-label="Account"], [aria-label="Your profile"], [data-pagelet="LeftRail"]',
+    loggedOutSelector: '#loginform, [data-testid="royal_login_form"], form[action*="login"], #email',
+  },
 };
 
 /** Get the encrypted session file path for a platform. */

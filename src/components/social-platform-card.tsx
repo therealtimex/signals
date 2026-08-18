@@ -20,7 +20,7 @@ import {
 } from "@/components/platform-connection-card";
 
 export type SocialPlatformCardProps = {
-  platform: "x" | "linkedin";
+  platform: "x" | "linkedin" | "facebook";
   displayName: string;
   loading: boolean;
   rtxEmbedded: boolean;
@@ -32,6 +32,7 @@ export type SocialPlatformCardProps = {
   sessionRunning?: boolean;
   oauthConnected: boolean;
   oauthStatus: ConnectionStatus;
+  oauthSupported?: boolean;
   grantedScopes?: string;
   syncCapable?: boolean;
   dataHint: string;
@@ -87,6 +88,7 @@ export function SocialPlatformCard(props: SocialPlatformCardProps) {
     disconnectingBrowser,
     oauthConnecting,
     oauthDisconnecting,
+    oauthSupported = true,
   } = props;
 
   if (loading) {
@@ -191,7 +193,7 @@ export function SocialPlatformCard(props: SocialPlatformCardProps) {
         </div>
       </div>
 
-      {(rtxEmbedded || oauthConnected) && (
+      {oauthSupported && (rtxEmbedded || oauthConnected) && (
         <div className="border-t pt-3">
           <button
             type="button"
@@ -229,7 +231,7 @@ export function SocialPlatformCard(props: SocialPlatformCardProps) {
         </div>
       )}
 
-      {!rtxEmbedded && !oauthConnected && (
+      {oauthSupported && !rtxEmbedded && !oauthConnected && (
         <div className="border-t pt-3">
           <p className="text-xs text-muted-foreground mb-2">
             Standalone mode also supports optional OAuth API sync:

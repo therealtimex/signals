@@ -2,13 +2,13 @@
 
 import { PlatformConnectionCard } from "@/components/platform-connection-card";
 import {
-  getPlatformsWithoutOAuth,
+  getComingSoonPlatforms,
   PLATFORM_DISPLAY_NAMES,
 } from "@/lib/platforms/capabilities";
 
-/** Coming-soon platform cards for settings — oauth-disabled mapped adapters only. */
+/** Coming-soon platform cards for settings — oauth-disabled without browser connect. */
 export function ComingSoonPlatformCards() {
-  return getPlatformsWithoutOAuth().map((platform) => (
+  return getComingSoonPlatforms().map((platform) => (
     <PlatformConnectionCard
       key={platform}
       platform={platform}

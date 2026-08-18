@@ -1,5 +1,5 @@
 /** Platform identifiers for browser sessions. */
-export type BrowserPlatform = "x" | "linkedin";
+export type BrowserPlatform = "x" | "linkedin" | "facebook";
 
 /** Serialized cookie (matches Playwright's Cookie shape). */
 export interface CookieData {

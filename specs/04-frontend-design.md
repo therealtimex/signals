@@ -212,7 +212,7 @@ className="animate-fade-slide-in"
 
 ### Settings (`/dashboard/settings`)
 
-1. **Platform Connections** — unified browser-native cards for X and LinkedIn (`SocialPlatformCard`)
+1. **Platform Connections** — unified browser-native cards for X, LinkedIn, and Facebook (`SocialPlatformCard`)
    - Connected = logged-in RealTimeX Browser session (`signals-publish`) + optional `platform_accounts` row with `authType: "session"`
    - Actions: Setup/Open session, Validate (CDP login check), Disconnect (browser only)
    - Collapsed **Advanced: OAuth API sync** when running as Local App (`RTX_APP_ID` set); standalone shows OAuth block below card

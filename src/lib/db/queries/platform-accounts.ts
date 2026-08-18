@@ -3,15 +3,14 @@ import { nanoid } from "nanoid";
 import { db } from "@/lib/db/client";
 import { platformAccounts } from "@/lib/db/schema";
 import type { PlatformAccount, NewPlatformAccount } from "@/lib/db/types";
+import type { Platform } from "@/lib/db/platforms";
 
 export function getPlatformAccountById(id: string): PlatformAccount | undefined {
   return db.select().from(platformAccounts).where(eq(platformAccounts.id, id)).get();
 }
 
 /** Find the account for a platform (single-user app — one account per platform). */
-export function getPlatformAccountByPlatform(
-  platform: "x" | "linkedin" | "gmail" | "substack"
-): PlatformAccount | undefined {
+export function getPlatformAccountByPlatform(platform: Platform): PlatformAccount | undefined {
   return db
     .select()
     .from(platformAccounts)

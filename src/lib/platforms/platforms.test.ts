@@ -1,7 +1,7 @@
 import { beforeEach, afterEach, describe, it, expect } from "vitest";
 import { getPlatformAdapter } from "@/lib/platforms";
 import { NotImplementedError, type PlatformAdapter } from "@/lib/platforms/adapter";
-import { PLATFORM_CAPABILITIES, getPlatformsWithoutOAuth } from "@/lib/platforms/capabilities";
+import { PLATFORM_CAPABILITIES, getPlatformsWithoutOAuth, getComingSoonPlatforms } from "@/lib/platforms/capabilities";
 import { XPlatformAdapter } from "@/lib/platforms/x/adapter";
 import { LinkedInPlatformAdapter } from "@/lib/platforms/linkedin/adapter";
 import { GmailPlatformAdapter } from "@/lib/platforms/gmail/adapter";
@@ -121,17 +121,19 @@ describe("stub platform adapters", () => {
     resetRealAdapterLoader();
   });
 
-  it("has all capabilities false", () => {
+  it("has all sync capabilities false", () => {
     for (const platform of STUB_PLATFORMS) {
       const caps = PLATFORM_CAPABILITIES[platform]!;
-      expect(caps).toEqual({
-        oauth: false,
-        contactSync: false,
-        contentSync: false,
-        engagementSync: false,
-        statsSync: false,
-      });
+      expect(caps.oauth).toBe(false);
+      expect(caps.contactSync).toBe(false);
+      expect(caps.contentSync).toBe(false);
+      expect(caps.engagementSync).toBe(false);
+      expect(caps.statsSync).toBe(false);
     }
+  });
+
+  it("marks facebook as browser-connectable without OAuth", () => {
+    expect(PLATFORM_CAPABILITIES.facebook?.browserConnect).toBe(true);
   });
 
   it.each(STUB_PLATFORMS)("throws NotImplementedError from every method (%s)", async (platform) => {
@@ -174,7 +176,13 @@ describe("stub platform adapters", () => {
 });
 
 describe("getPlatformsWithoutOAuth", () => {
-  it("lists exactly the stub platforms with oauth disabled", () => {
+  it("lists every oauth-disabled mapped platform", () => {
     expect(getPlatformsWithoutOAuth().sort()).toEqual(["facebook", "instagram", "threads"]);
+  });
+});
+
+describe("getComingSoonPlatforms", () => {
+  it("excludes browser-connect platforms from coming soon", () => {
+    expect(getComingSoonPlatforms().sort()).toEqual(["instagram", "threads"]);
   });
 });
