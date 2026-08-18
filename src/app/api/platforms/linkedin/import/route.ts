@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { nanoid } from "nanoid";
 import { parseLinkedInCsv, importLinkedInCsv } from "@/lib/platforms/linkedin/csv-import";
 import {
   getImportKind,
@@ -39,9 +40,11 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const result = importLinkedInCsv(rows);
+    const runId = nanoid();
+    const result = importLinkedInCsv(rows, runId);
 
     const run = recordImportRun({
+      id: runId,
       platform: "linkedin",
       importSubType: LINKEDIN_IMPORT_SUBTYPE,
       source: kind,

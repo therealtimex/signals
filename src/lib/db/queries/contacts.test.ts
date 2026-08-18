@@ -9,7 +9,9 @@ import {
   restoreContact,
   countContacts,
   countArchivedContacts,
+  countContactsByCreatedWorkflowRun,
 } from "@/lib/db/queries/contacts";
+import { CreatedSourceDetailFilterError } from "@/lib/db/creation-sources";
 import { db } from "@/lib/db/client";
 import { contacts } from "@/lib/db/schema";
 import { resetCoreTables } from "@/test/db";
@@ -135,5 +137,62 @@ describe("contacts queries", () => {
 
     expect(countContacts()).toBe(2);
     expect(countArchivedContacts()).toBe(1);
+  });
+
+  it("stamps birth provenance on createContact", () => {
+    const contact = createContact(
+      { name: "Provenance" },
+      { tag: "import:x_archive", workflowRunId: "run-archive-1" },
+    );
+
+    expect(contact.createdSource).toBe("import");
+    expect(contact.createdSourceDetail).toBe("import:x_archive");
+    expect(contact.createdWorkflowRunId).toBe("run-archive-1");
+    expect(contact.createdTemplateId).toBeNull();
+  });
+
+  it("does not mutate birth provenance on updateContact", () => {
+    const created = createContact(
+      { name: "Immutable Birth" },
+      { tag: "agent:create_contact", workflowRunId: "run-1", templateId: "tmpl-1" },
+    );
+
+    const updated = updateContact(created.id, {
+      name: "Renamed",
+      createdSource: "manual",
+      createdSourceDetail: "manual:create_contact",
+      createdWorkflowRunId: "other-run",
+      createdTemplateId: "other-template",
+    } as Parameters<typeof updateContact>[1]);
+
+    expect(updated?.name).toBe("Renamed");
+    expect(updated?.createdSource).toBe("agent");
+    expect(updated?.createdSourceDetail).toBe("agent:create_contact");
+    expect(updated?.createdWorkflowRunId).toBe("run-1");
+    expect(updated?.createdTemplateId).toBe("tmpl-1");
+  });
+
+  it("filters contacts by createdSourceDetail suffix alias x_archive", () => {
+    const archive = createContact({ name: "Archive" }, "import:x_archive");
+    createContact({ name: "API" }, "api:create_contact");
+
+    const result = listContacts({ createdSourceDetail: "x_archive" });
+    expect(result.total).toBe(1);
+    expect(result.data[0]?.id).toBe(archive.id);
+  });
+
+  it("rejects ambiguous createdSourceDetail suffix filters", () => {
+    expect(() => listContacts({ createdSourceDetail: "create_contact" })).toThrow(
+      CreatedSourceDetailFilterError,
+    );
+  });
+
+  it("counts contacts by created workflow run id", () => {
+    createContact({ name: "Run A" }, { tag: "agent:create_contact", workflowRunId: "run-a" });
+    createContact({ name: "Run B" }, { tag: "agent:create_contact", workflowRunId: "run-b" });
+
+    expect(countContactsByCreatedWorkflowRun("run-a")).toBe(1);
+    expect(countContactsByCreatedWorkflowRun("run-b")).toBe(1);
+    expect(countContactsByCreatedWorkflowRun("missing")).toBe(0);
   });
 });

@@ -2,6 +2,8 @@ import { notFound } from "next/navigation";
 import { getContactById } from "@/lib/db/queries/contacts";
 import { getContactExploreCard } from "@/lib/db/queries/contact-explore";
 import { getTasksByContact } from "@/lib/db/queries/tasks";
+import { getTemplate } from "@/lib/db/queries/workflow-templates";
+import { getWorkflowRun } from "@/lib/db/queries/workflows";
 import { ContactDetailClient } from "./contact-detail-client";
 
 export default async function ContactDetailPage({
@@ -22,5 +24,21 @@ export default async function ContactDetailPage({
     notFound();
   }
 
-  return <ContactDetailClient contact={contact} tasks={tasks} explore={explore} />;
+  const createdTemplateName = contact.createdTemplateId
+    ? getTemplate(contact.createdTemplateId)?.name ?? null
+    : null;
+  const runHref =
+    contact.createdWorkflowRunId && getWorkflowRun(contact.createdWorkflowRunId)
+      ? `/dashboard/workflows/${contact.createdWorkflowRunId}`
+      : null;
+
+  return (
+    <ContactDetailClient
+      contact={contact}
+      tasks={tasks}
+      explore={explore}
+      createdTemplateName={createdTemplateName}
+      createdWorkflowRunHref={runHref}
+    />
+  );
 }

@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
       workflowType: "enrich",
       syncSubType: "x_enrich",
       platformAccountId: account.id,
-      syncFunction: () =>
+      syncFunction: (_workflowRunId) =>
         syncXProfiles(account.id, {
           contactIds: body.contactIds,
           maxProfiles,

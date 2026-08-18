@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { getWorkflowRun } from "@/lib/db/queries/workflows";
+import { countContactsByCreatedWorkflowRun } from "@/lib/db/queries/contacts";
+import { countOrgsByCreatedWorkflowRun } from "@/lib/db/queries/orgs";
 
 /**
  * GET /api/workflows/[id]
@@ -16,5 +18,9 @@ export async function GET(
     return NextResponse.json({ error: "Workflow run not found" }, { status: 404 });
   }
 
-  return NextResponse.json(run);
+  return NextResponse.json({
+    ...run,
+    contactsCreated: countContactsByCreatedWorkflowRun(id),
+    orgsCreated: countOrgsByCreatedWorkflowRun(id),
+  });
 }

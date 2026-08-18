@@ -188,7 +188,7 @@ describe("importXArchiveContacts", () => {
   });
 
   it("projects audience edges for Explore when owner is set", () => {
-    const owner = createContact({ name: "Me" }, "test");
+    const owner = createContact({ name: "Me" }, "api:create_contact");
     updateContact(owner.id, { isSelf: true });
 
     const contents = parseXArchive(makeArchiveZip());
@@ -201,7 +201,7 @@ describe("importXArchiveContacts", () => {
   });
 
   it("merges archive flags into identities that already exist from API sync", () => {
-    const contact = createContact({ name: "Known Person" }, "test");
+    const contact = createContact({ name: "Known Person" }, "api:create_contact");
     createIdentity({
       contactId: contact.id,
       platform: "x",

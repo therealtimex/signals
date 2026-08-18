@@ -14,7 +14,7 @@ interface RunSyncWorkflowOpts {
   syncSubType: SyncSubType;
   platformAccountId: string;
   templateId?: string;
-  syncFunction: () => Promise<SyncResult>;
+  syncFunction: (workflowRunId: string) => Promise<SyncResult>;
 }
 
 /**
@@ -58,7 +58,7 @@ export async function runSyncWorkflow(
 
   try {
     // 3. Execute the actual sync function
-    syncResult = await opts.syncFunction();
+    syncResult = await opts.syncFunction(run.id);
 
     // 4. Map SyncResult to workflow counters
     const successItems = syncResult.added + syncResult.updated;

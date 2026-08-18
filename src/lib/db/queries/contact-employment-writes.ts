@@ -13,6 +13,7 @@ import {
 import { ensureOrgByName, getOrgById } from "@/lib/db/queries/orgs";
 import { contactEmployments } from "@/lib/db/schema";
 import type { ContactEmployment } from "@/lib/db/types";
+import type { CreationProvenance } from "@/lib/db/creation-provenance-input";
 
 export class EmploymentWriteError extends Error {
   constructor(message: string) {
@@ -36,7 +37,11 @@ function activeEmploymentInputs(employments: EmploymentInput[]): EmploymentInput
   return employments.filter((employment) => employment.orgId?.trim() || employment.orgName?.trim());
 }
 
-function resolveOrgId(input: EmploymentInput, source: string): string {
+function resolveOrgId(
+  input: EmploymentInput,
+  source: string,
+  provenance?: CreationProvenance,
+): string {
   if (input.orgId?.trim()) {
     const org = getOrgById(input.orgId.trim());
     if (!org) {
@@ -50,7 +55,7 @@ function resolveOrgId(input: EmploymentInput, source: string): string {
     throw new EmploymentWriteError("orgId or orgName is required for an employment");
   }
 
-  return ensureOrgByName(orgName, source).id;
+  return ensureOrgByName(orgName, source, provenance).id;
 }
 
 /** Validate a full employment sync before any mutation. */
@@ -110,7 +115,12 @@ export function ensureContactEmployment(
   return updateContactEmployment(existing.id, updates) ?? existing;
 }
 
-function updateEmploymentInPlace(contactId: string, employment: EmploymentInput, source: string): void {
+function updateEmploymentInPlace(
+  contactId: string,
+  employment: EmploymentInput,
+  source: string,
+  provenance?: CreationProvenance,
+): void {
   if (!employment.id) {
     throw new EmploymentWriteError("Employment id is required for in-place update");
   }
@@ -125,7 +135,10 @@ function updateEmploymentInPlace(contactId: string, employment: EmploymentInput,
     );
   }
 
-  const orgId = employment.orgId || employment.orgName ? resolveOrgId(employment, source) : existing.orgId;
+  const orgId =
+    employment.orgId || employment.orgName
+      ? resolveOrgId(employment, source, provenance)
+      : existing.orgId;
 
   updateContactEmployment(employment.id, {
     orgId,
@@ -141,16 +154,17 @@ export function applyEmploymentInputs(
   contactId: string,
   employments: EmploymentInput[],
   source: string,
+  provenance?: CreationProvenance,
 ): void {
   for (const employment of employments) {
     if (!employment.orgId?.trim() && !employment.orgName?.trim()) continue;
 
     if (employment.id) {
-      updateEmploymentInPlace(contactId, employment, source);
+      updateEmploymentInPlace(contactId, employment, source, provenance);
       continue;
     }
 
-    const orgId = resolveOrgId(employment, source);
+    const orgId = resolveOrgId(employment, source, provenance);
     ensureContactEmployment({
       contactId,
       orgId,
@@ -169,6 +183,7 @@ export function syncEmploymentInputs(
   contactId: string,
   employments: EmploymentInput[],
   source: string,
+  provenance?: CreationProvenance,
 ): void {
   validateEmploymentSync(contactId, employments);
 
@@ -185,7 +200,7 @@ export function syncEmploymentInputs(
       }
     }
 
-    applyEmploymentInputs(contactId, active, source);
+    applyEmploymentInputs(contactId, active, source, provenance);
   });
 }
 
@@ -235,6 +250,7 @@ export function applyLegacyCompanyTitle(
     title?: string | null;
   },
   source: string,
+  provenance?: CreationProvenance,
 ): void {
   if (fields.company !== undefined || fields.orgId !== undefined) {
     const companyEmpty = fields.company === null || fields.company === "";
@@ -250,7 +266,7 @@ export function applyLegacyCompanyTitle(
     if (!orgId) {
       const company = fields.company?.trim() ?? "";
       if (!company) return;
-      orgId = ensureOrgByName(company, source).id;
+      orgId = ensureOrgByName(company, source, provenance).id;
     } else {
       const org = getOrgById(orgId);
       if (!org) {

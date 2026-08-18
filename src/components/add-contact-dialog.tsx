@@ -86,6 +86,7 @@ export function AddContactDialog({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...data,
+          createdVia: "manual",
           ...payloadExtras,
           ...(identities.length > 0 ? { identities } : {}),
           ...(channels.length > 0 ? { channels } : {}),

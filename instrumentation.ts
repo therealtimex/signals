@@ -111,6 +111,17 @@ export async function register() {
     }
 
     try {
+      const { backfillCreationProvenance } = await import("@/lib/db/backfills/creation-provenance");
+      const provenanceBackfill = backfillCreationProvenance();
+      const tagged = Object.values(provenanceBackfill.byRule).reduce((sum, n) => sum + n, 0);
+      if (tagged > 0) {
+        console.log("[instrumentation] Creation provenance backfill applied:", provenanceBackfill);
+      }
+    } catch (e) {
+      console.warn("[instrumentation] Creation provenance backfill skipped:", (e as Error).message);
+    }
+
+    try {
       const { runGraphIntegrityJob } = await import("@/lib/db/graph-integrity");
       const integrity = runGraphIntegrityJob({ repair: true });
       if (integrity.repairedCount > 0) {

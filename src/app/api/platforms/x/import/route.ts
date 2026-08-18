@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { nanoid } from "nanoid";
 import {
   importXArchiveContacts,
   importXArchiveTweets,
@@ -49,8 +50,10 @@ export async function POST(req: NextRequest) {
     let contactsRunId: string | null = null;
     if (hasContactSlices) {
       const merged = mergeArchiveUsers(contents.followers, contents.following);
-      contactsResult = importXArchiveContacts(merged);
+      const preAllocatedContactsRunId = nanoid();
+      contactsResult = importXArchiveContacts(merged, preAllocatedContactsRunId);
       contactsRunId = recordImportRun({
+        id: preAllocatedContactsRunId,
         platform: "x",
         importSubType: X_ARCHIVE_CONTACTS_SUBTYPE,
         source: "zip",

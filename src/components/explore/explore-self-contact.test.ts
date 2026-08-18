@@ -95,6 +95,10 @@ const contactFixture: ContactWithIdentities = {
   isSelf: false,
   createdAt: 1,
   updatedAt: 1,
+  createdSource: null,
+  createdSourceDetail: null,
+  createdWorkflowRunId: null,
+  createdTemplateId: null,
   identities: [
     {
       id: "id1",

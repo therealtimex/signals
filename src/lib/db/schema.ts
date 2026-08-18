@@ -52,9 +52,18 @@ export const contacts = sqliteTable("contacts", {
   metadata: text("metadata").default("{}"), // JSON
   lastInteractionAt: integer("last_interaction_at"),
   isSelf: integer("is_self", { mode: "boolean" }).notNull().default(false),
+  createdSource: text("created_source", {
+    enum: ["manual", "agent", "import", "sync", "api"],
+  }),
+  createdSourceDetail: text("created_source_detail"),
+  createdWorkflowRunId: text("created_workflow_run_id"),
+  createdTemplateId: text("created_template_id"),
   ...timestamps,
 }, (table) => [
   index("idx_contacts_name").on(table.name),
+  index("idx_contacts_created_source").on(table.createdSource, table.createdSourceDetail),
+  index("idx_contacts_created_run").on(table.createdWorkflowRunId),
+  index("idx_contacts_created_template").on(table.createdTemplateId),
 ]);
 
 // --- Contact Identities (multi-platform golden record) ---
@@ -687,10 +696,19 @@ export const orgs = sqliteTable("orgs", {
     .default("shared"),
   metadata: text("metadata").default("{}"),
   source: text("source"),
+  createdSource: text("created_source", {
+    enum: ["manual", "agent", "import", "sync", "api"],
+  }),
+  createdSourceDetail: text("created_source_detail"),
+  createdWorkflowRunId: text("created_workflow_run_id"),
+  createdTemplateId: text("created_template_id"),
   ...timestamps,
 }, (table) => [
   index("idx_orgs_name").on(table.name),
   uniqueIndex("idx_orgs_domain").on(table.domain),
+  index("idx_orgs_created_source").on(table.createdSource, table.createdSourceDetail),
+  index("idx_orgs_created_run").on(table.createdWorkflowRunId),
+  index("idx_orgs_created_template").on(table.createdTemplateId),
 ]);
 
 // --- Contact Employments (career history — Phase 2) ---

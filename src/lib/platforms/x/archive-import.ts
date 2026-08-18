@@ -189,12 +189,15 @@ export function mergeArchiveUsers(
  * identities get archive relationship flags merged into platformData;
  * identities that already carry them are skipped, so re-import is idempotent.
  */
-export function importXArchiveContacts(users: MergedArchiveUser[]): SyncResult {
+export function importXArchiveContacts(
+  users: MergedArchiveUser[],
+  workflowRunId?: string,
+): SyncResult {
   const result: SyncResult = { added: 0, updated: 0, skipped: 0, errors: [] };
 
   for (const user of users) {
     try {
-      processArchiveUser(user, result);
+      processArchiveUser(user, result, workflowRunId);
     } catch (err) {
       result.errors.push(
         `Failed to process X account ${user.accountId}: ${err instanceof Error ? err.message : String(err)}`
@@ -205,7 +208,11 @@ export function importXArchiveContacts(users: MergedArchiveUser[]): SyncResult {
   return result;
 }
 
-function processArchiveUser(user: MergedArchiveUser, result: SyncResult): void {
+function processArchiveUser(
+  user: MergedArchiveUser,
+  result: SyncResult,
+  workflowRunId?: string,
+): void {
   const existing = db
     .select()
     .from(contactIdentities)
@@ -245,7 +252,10 @@ function processArchiveUser(user: MergedArchiveUser, result: SyncResult): void {
     return;
   }
 
-  const contact = createContact(mapXArchiveUserToContact(user), "import:x_archive");
+  const contact = createContact(mapXArchiveUserToContact(user), {
+    tag: "import:x_archive",
+    workflowRunId: workflowRunId ?? null,
+  });
   createIdentity(
     mapXArchiveUserToIdentity(user, contact.id, {
       follower: user.follower,

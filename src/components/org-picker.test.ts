@@ -19,6 +19,10 @@ const acmeOrg: Org = {
   scope: "shared",
   metadata: "{}",
   source: "test",
+  createdSource: null,
+  createdSourceDetail: null,
+  createdWorkflowRunId: null,
+  createdTemplateId: null,
   createdAt: 0,
   updatedAt: 0,
 };

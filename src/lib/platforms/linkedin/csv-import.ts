@@ -150,12 +150,12 @@ function extractVanityName(url: string): string | null {
  * CSV provides company + position fields that API sync doesn't,
  * so we always update those when merging.
  */
-export function importLinkedInCsv(rows: LinkedInCsvRow[]): SyncResult {
+export function importLinkedInCsv(rows: LinkedInCsvRow[], workflowRunId?: string): SyncResult {
   const result: SyncResult = { added: 0, updated: 0, skipped: 0, errors: [] };
 
   for (const row of rows) {
     try {
-      processRow(row, result);
+      processRow(row, result, workflowRunId);
     } catch (err) {
       const name = `${row.firstName} ${row.lastName}`.trim();
       result.errors.push(
@@ -168,7 +168,7 @@ export function importLinkedInCsv(rows: LinkedInCsvRow[]): SyncResult {
 }
 
 /** Process a single CSV row — create, update, or enrich an existing contact. */
-function processRow(row: LinkedInCsvRow, result: SyncResult): void {
+function processRow(row: LinkedInCsvRow, result: SyncResult, workflowRunId?: string): void {
   const vanityName = extractVanityName(row.url);
   const fullName = [row.firstName, row.lastName].filter(Boolean).join(" ");
 
@@ -260,7 +260,10 @@ function processRow(row: LinkedInCsvRow, result: SyncResult): void {
     company: row.company || undefined,
     title: row.position || undefined,
     profileUrl: row.url || undefined,
-  }, "import:linkedin_csv");
+  }, {
+    tag: "import:linkedin_csv",
+    workflowRunId: workflowRunId ?? null,
+  });
 
   if (vanityName) {
     createIdentity({

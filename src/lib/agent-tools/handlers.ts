@@ -40,8 +40,24 @@ import type { z } from "zod";
 import type { ContactIdentity } from "@/lib/db/types";
 import { assertPlatform } from "@/lib/db/platforms";
 import { validateIdentityAvatarUrl } from "@/lib/contact-avatar-client";
+import { validateWorkflowRunAndTemplateIds } from "@/lib/db/creation-provenance-input";
+import { CreatedSourceDetailFilterError } from "@/lib/db/creation-sources";
 
 const DEFAULT_PAGE_SIZE = 20;
+
+function serializeContactBirthFields(contact: {
+  createdSource: string | null;
+  createdSourceDetail: string | null;
+  createdWorkflowRunId: string | null;
+  createdTemplateId: string | null;
+}) {
+  return {
+    createdSource: contact.createdSource,
+    createdSourceDetail: contact.createdSourceDetail,
+    createdWorkflowRunId: contact.createdWorkflowRunId,
+    createdTemplateId: contact.createdTemplateId,
+  };
+}
 
 function primaryPlatform(
   identities: { platform: string; isPrimary: number | boolean }[],
@@ -71,33 +87,47 @@ function serializeContactIdentity(identity: ContactIdentity) {
 }
 
 export async function handleQueryContacts(input: z.infer<typeof queryContactsSchema>) {
-  const result = listContacts({
-    search: input.search,
-    funnelStage: input.funnelStage,
-    platform: input.platform,
-    page: input.page,
-    pageSize: input.pageSize ?? DEFAULT_PAGE_SIZE,
-    sort: input.sort,
-    order: input.order,
-  });
+  try {
+    const result = listContacts({
+      search: input.search,
+      funnelStage: input.funnelStage,
+      platform: input.platform,
+      page: input.page,
+      pageSize: input.pageSize ?? DEFAULT_PAGE_SIZE,
+      sort: input.sort,
+      order: input.order,
+      createdSource: input.createdSource,
+      createdSourceDetail: input.createdSourceDetail,
+      createdWorkflowRunId: input.createdWorkflowRunId,
+      createdTemplateId: input.createdTemplateId,
+      minEnrichmentScore: input.minEnrichmentScore,
+      maxEnrichmentScore: input.maxEnrichmentScore,
+    });
 
-  return {
-    total: result.total,
-    contacts: result.data.map((c) => ({
-      id: c.id,
-      name: c.name,
-      company: c.company,
-      title: c.title,
-      email: c.email,
-      primaryEmail: c.primaryEmail,
-      channelCount: c.channelCount,
-      score: c.enrichmentScore,
-      stage: c.funnelStage,
-      platform: primaryPlatform(c.identities),
-      identityCount: c.identities.length,
-      resolvedAvatarUrl: c.resolvedAvatarUrl,
-    })),
-  };
+    return {
+      total: result.total,
+      contacts: result.data.map((c) => ({
+        id: c.id,
+        name: c.name,
+        company: c.company,
+        title: c.title,
+        email: c.email,
+        primaryEmail: c.primaryEmail,
+        channelCount: c.channelCount,
+        score: c.enrichmentScore,
+        stage: c.funnelStage,
+        platform: primaryPlatform(c.identities),
+        identityCount: c.identities.length,
+        resolvedAvatarUrl: c.resolvedAvatarUrl,
+        ...serializeContactBirthFields(c),
+      })),
+    };
+  } catch (error) {
+    if (error instanceof CreatedSourceDetailFilterError) {
+      return { error: error.message };
+    }
+    throw error;
+  }
 }
 
 export async function handleGetContact(input: z.infer<typeof getContactSchema>) {
@@ -140,29 +170,42 @@ export async function handleGetContact(input: z.infer<typeof getContactSchema>) 
     enrichmentScore: contact.enrichmentScore,
     tags: contact.tags,
     identities: contact.identities.map(serializeContactIdentity),
+    ...serializeContactBirthFields(contact),
   };
 }
 
 export async function handleCreateContact(input: z.infer<typeof createContactSchema>) {
-  const payload: Parameters<typeof createContact>[0] = {
-    name: input.name,
-    firstName: input.firstName,
-    lastName: input.lastName,
-    funnelStage: input.funnelStage ?? "prospect",
-  };
-
-  if (input.email !== undefined) payload.email = input.email || null;
-  if (input.phone !== undefined) payload.phone = input.phone ?? null;
-  if (input.channels !== undefined) payload.channels = input.channels;
-
-  if (input.employments !== undefined) {
-    payload.employments = input.employments;
-  } else {
-    if (input.company !== undefined) payload.company = input.company ?? null;
-    if (input.title !== undefined) payload.title = input.title ?? null;
+  const { workflowRunId, templateId, ...rest } = input;
+  let resolvedIds: { workflowRunId: string | null; templateId: string | null };
+  try {
+    resolvedIds = validateWorkflowRunAndTemplateIds({ workflowRunId, templateId });
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Invalid workflow context" };
   }
 
-  const contact = createContact(payload, "agent:create_contact");
+  const payload: Parameters<typeof createContact>[0] = {
+    name: rest.name,
+    firstName: rest.firstName,
+    lastName: rest.lastName,
+    funnelStage: rest.funnelStage ?? "prospect",
+  };
+
+  if (rest.email !== undefined) payload.email = rest.email || null;
+  if (rest.phone !== undefined) payload.phone = rest.phone ?? null;
+  if (rest.channels !== undefined) payload.channels = rest.channels;
+
+  if (rest.employments !== undefined) {
+    payload.employments = rest.employments;
+  } else {
+    if (rest.company !== undefined) payload.company = rest.company ?? null;
+    if (rest.title !== undefined) payload.title = rest.title ?? null;
+  }
+
+  const contact = createContact(payload, {
+    tag: "agent:create_contact",
+    workflowRunId: resolvedIds.workflowRunId,
+    templateId: resolvedIds.templateId,
+  });
 
   return {
     id: contact.id,
@@ -172,6 +215,7 @@ export async function handleCreateContact(input: z.infer<typeof createContactSch
     currentEmployment: contact.currentEmployment,
     enrichmentScore: contact.enrichmentScore,
     message: `Contact "${contact.name}" created successfully.`,
+    ...serializeContactBirthFields(contact),
   };
 }
 

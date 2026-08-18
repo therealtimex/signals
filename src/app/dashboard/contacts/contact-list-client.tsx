@@ -57,6 +57,7 @@ interface ContactListClientProps {
   currentSearch?: string;
   currentFunnelStage?: string;
   includeArchived?: boolean;
+  currentWorkflowRunId?: string;
 }
 
 export function ContactListClient({
@@ -68,6 +69,7 @@ export function ContactListClient({
   currentSearch,
   currentFunnelStage,
   includeArchived,
+  currentWorkflowRunId,
 }: ContactListClientProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -105,7 +107,7 @@ export function ContactListClient({
     updateParams("search", search);
   }
 
-  if (contacts.length === 0 && !currentSearch && !currentFunnelStage) {
+  if (contacts.length === 0 && !currentSearch && !currentFunnelStage && !currentWorkflowRunId) {
     return (
       <Card>
         <CardHeader>
@@ -126,6 +128,28 @@ export function ContactListClient({
 
   return (
     <div className="space-y-4">
+      {currentWorkflowRunId ? (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Badge variant="secondary">Workflow run</Badge>
+          <span>
+            Showing contacts created in run{" "}
+            <span className="font-mono text-foreground">{currentWorkflowRunId.slice(0, 8)}</span>
+          </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2"
+            onClick={() => {
+              const params = new URLSearchParams(searchParams.toString());
+              params.delete("createdWorkflowRunId");
+              params.delete("page");
+              router.push(`/dashboard/contacts?${params.toString()}`);
+            }}
+          >
+            Clear
+          </Button>
+        </div>
+      ) : null}
       {selfContact ? (
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Badge variant="secondary">You</Badge>

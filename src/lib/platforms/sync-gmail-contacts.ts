@@ -24,7 +24,8 @@ import type { SyncResult } from "@/lib/platforms/adapter";
  */
 export async function syncContactsFromGmail(
   accountId: string,
-  opts?: { maxPages?: number }
+  opts?: { maxPages?: number },
+  workflowRunId?: string,
 ): Promise<SyncResult> {
   const result: SyncResult = { added: 0, updated: 0, skipped: 0, errors: [] };
   const maxPages = opts?.maxPages ?? 10; // Safety limit: 10 pages * 100 = 1000 contacts max
@@ -48,7 +49,7 @@ export async function syncContactsFromGmail(
       // Process each person
       for (const person of people) {
         try {
-          processGooglePerson(person, result);
+          processGooglePerson(person, result, workflowRunId);
         } catch (err) {
           const name = person.names?.[0]?.displayName ?? person.resourceName;
           result.errors.push(
@@ -96,7 +97,11 @@ export async function syncContactsFromGmail(
 }
 
 /** Process a single Google person — create or update contact + identity with cross-platform dedup. */
-function processGooglePerson(person: GooglePerson, result: SyncResult): void {
+function processGooglePerson(
+  person: GooglePerson,
+  result: SyncResult,
+  workflowRunId?: string,
+): void {
   const resourceId = person.resourceName.replace(/^people\//, "");
 
   // 1. Check for existing identity by (platform="gmail", platformUserId)
@@ -172,7 +177,10 @@ function processGooglePerson(person: GooglePerson, result: SyncResult): void {
   }
 
   // 3. Create new contact
-  const contact = createContact(contactData, "sync:gmail_contacts");
+  const contact = createContact(contactData, {
+    tag: "sync:gmail_contacts",
+    workflowRunId: workflowRunId ?? null,
+  });
   const identityData = mapGooglePersonToIdentity(person, contact.id);
   createIdentity(identityData);
   recalcEnrichment(contact.id);

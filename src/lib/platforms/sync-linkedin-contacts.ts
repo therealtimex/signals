@@ -21,7 +21,8 @@ import { projectOwnerConnectedTo } from "@/lib/graph/relationship-edges";
  */
 export async function syncContactsFromLinkedIn(
   accountId: string,
-  opts?: { maxPages?: number }
+  opts?: { maxPages?: number },
+  workflowRunId?: string,
 ): Promise<SyncResult> {
   const result: SyncResult = { added: 0, updated: 0, skipped: 0, errors: [] };
   const maxPages = opts?.maxPages ?? 10; // Safety limit: 10 pages * 50 = 500 contacts max
@@ -45,7 +46,7 @@ export async function syncContactsFromLinkedIn(
       // Process each connection
       for (const connection of connections) {
         try {
-          processLinkedInConnection(connection, result);
+          processLinkedInConnection(connection, result, workflowRunId);
         } catch (err) {
           const name = `${connection.localizedFirstName ?? ""} ${connection.localizedLastName ?? ""}`.trim();
           result.errors.push(
@@ -94,7 +95,11 @@ export async function syncContactsFromLinkedIn(
 }
 
 /** Process a single LinkedIn connection — create or update contact + identity with cross-platform dedup. */
-function processLinkedInConnection(connection: LinkedInConnection, result: SyncResult): void {
+function processLinkedInConnection(
+  connection: LinkedInConnection,
+  result: SyncResult,
+  workflowRunId?: string,
+): void {
   // 1. Check for existing identity by (platform="linkedin", platformUserId)
   const existingIdentity = db
     .select()
@@ -133,7 +138,10 @@ function processLinkedInConnection(connection: LinkedInConnection, result: SyncR
   const contactData = mapLinkedInConnectionToContact(connection);
 
   // Create new contact
-  const contact = createContact(contactData);
+  const contact = createContact(contactData, {
+    tag: "sync:linkedin_contacts",
+    workflowRunId: workflowRunId ?? null,
+  });
 
   // Create identity linking this contact to the LinkedIn connection
   const identityData = mapLinkedInConnectionToIdentity(connection, contact.id);

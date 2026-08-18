@@ -6,6 +6,11 @@ export const DEPRECATED_PLATFORM_FIELDS_MESSAGE =
 export const UNSUPPORTED_IDENTITY_UPDATE_MESSAGE =
   "Identity fields identity/identities are not accepted on contact update. Use POST /api/contacts/[id]/identities instead.";
 
+export {
+  getImmutableBirthFieldsError,
+  IMMUTABLE_BIRTH_FIELDS_MESSAGE,
+} from "@/lib/db/creation-provenance-input";
+
 export function isJsonObjectBody(body: unknown): body is Record<string, unknown> {
   return typeof body === "object" && body !== null && !Array.isArray(body);
 }

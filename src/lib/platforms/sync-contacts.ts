@@ -16,7 +16,8 @@ import { projectOwnerFollowsContact } from "@/lib/graph/relationship-edges";
  */
 export async function syncContactsFromPlatform(
   accountId: string,
-  opts?: { maxPages?: number }
+  opts?: { maxPages?: number },
+  workflowRunId?: string,
 ): Promise<SyncResult> {
   const result: SyncResult = { added: 0, updated: 0, skipped: 0, errors: [] };
   const maxPages = opts?.maxPages ?? 10; // Safety limit: 10 pages * 100 = 1000 contacts max
@@ -40,7 +41,7 @@ export async function syncContactsFromPlatform(
       // Process each user in the page
       for (const xUser of users) {
         try {
-          processXUser(xUser, result);
+          processXUser(xUser, result, workflowRunId);
         } catch (err) {
           result.errors.push(
             `Failed to process @${xUser.username}: ${err instanceof Error ? err.message : String(err)}`
@@ -68,7 +69,7 @@ export async function syncContactsFromPlatform(
 }
 
 /** Process a single X user — create or update contact + identity. */
-function processXUser(xUser: XUser, result: SyncResult): void {
+function processXUser(xUser: XUser, result: SyncResult, workflowRunId?: string): void {
   // Check for existing identity by (platform, platformUserId)
   const existingIdentity = db
     .select()
@@ -99,7 +100,10 @@ function processXUser(xUser: XUser, result: SyncResult): void {
 
   // Create new contact
   const contactData = mapXUserToContact(xUser);
-  const contact = createContact(contactData);
+  const contact = createContact(contactData, {
+    tag: "sync:x_contacts",
+    workflowRunId: workflowRunId ?? null,
+  });
 
   // Create identity linking this contact to the X user
   const identityData = mapXUserToIdentity(xUser, contact.id);

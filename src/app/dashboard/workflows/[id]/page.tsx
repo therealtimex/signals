@@ -1,5 +1,7 @@
 import { notFound } from "next/navigation";
 import { getWorkflowRun } from "@/lib/db/queries/workflows";
+import { countContactsByCreatedWorkflowRun } from "@/lib/db/queries/contacts";
+import { countOrgsByCreatedWorkflowRun } from "@/lib/db/queries/orgs";
 import {
   RefreshCw,
   Sparkles,
@@ -106,7 +108,11 @@ export default async function WorkflowDetailPage({
       </div>
 
       {/* All dynamic content handled by client component */}
-      <WorkflowRunLive initialRun={run} />
+      <WorkflowRunLive
+        initialRun={run}
+        contactsCreated={countContactsByCreatedWorkflowRun(id)}
+        orgsCreated={countOrgsByCreatedWorkflowRun(id)}
+      />
     </div>
   );
 }

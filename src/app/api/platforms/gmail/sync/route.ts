@@ -39,7 +39,11 @@ export async function POST(req: NextRequest) {
           workflowType: "sync",
           syncSubType: "himalaya_correspondents",
           platformAccountId: account.id,
-          syncFunction: () => syncHimalayaCorrespondents(account.id, { maxEnvelopes: body.maxEnvelopes }),
+          syncFunction: (workflowRunId) =>
+            syncHimalayaCorrespondents(account.id, {
+              maxEnvelopes: body.maxEnvelopes,
+              workflowRunId,
+            }),
         });
         return NextResponse.json({ success: true, result: syncResult, workflowRunId: workflowRun.id });
       }
@@ -63,7 +67,8 @@ export async function POST(req: NextRequest) {
           workflowType: "enrich",
           syncSubType: "himalaya_mail_activity",
           platformAccountId: account.id,
-          syncFunction: () => syncHimalayaMailActivity(account.id, { maxEnvelopes: body.maxEnvelopes }),
+          syncFunction: (_workflowRunId) =>
+            syncHimalayaMailActivity(account.id, { maxEnvelopes: body.maxEnvelopes }),
         });
         return NextResponse.json({ success: true, result: syncResult, workflowRunId: workflowRun.id });
       }
@@ -82,7 +87,7 @@ export async function POST(req: NextRequest) {
           workflowType: "enrich",
           syncSubType: "gmail_metadata",
           platformAccountId: account.id,
-          syncFunction: () => syncGmailMetadata(account.id, { maxContacts }),
+          syncFunction: (_workflowRunId) => syncGmailMetadata(account.id, { maxContacts }),
         });
         return NextResponse.json({ success: true, result: syncResult, workflowRunId: workflowRun.id });
       }
@@ -102,7 +107,8 @@ export async function POST(req: NextRequest) {
           workflowType: "sync",
           syncSubType: "gmail_contacts",
           platformAccountId: account.id,
-          syncFunction: () => syncContactsFromGmail(account.id, { maxPages }),
+          syncFunction: (workflowRunId) =>
+            syncContactsFromGmail(account.id, { maxPages }, workflowRunId),
         });
         return NextResponse.json({ success: true, result: syncResult, workflowRunId: workflowRun.id });
       }
