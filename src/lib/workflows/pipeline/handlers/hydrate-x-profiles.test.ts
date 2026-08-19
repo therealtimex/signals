@@ -186,6 +186,29 @@ describe("hydrateXProfiles", () => {
     expect(report.outcomes.every((outcome) => outcome.status === "updated")).toBe(true);
   });
 
+  it("prefetches the authenticated API batch once for contact-major execution", async () => {
+    seedAccount();
+    const contacts = Array.from({ length: 120 }, (_, index) => seedArchiveContact(String(2000 + index)));
+    const contactIds = contacts.map(({ contact }) => contact.id);
+    const lookup = vi.fn<XUserLookup>(async (_accountId, ids) => ({
+      users: ids.map(xUser),
+      errors: [],
+    }));
+    const runScope = {
+      contactIds,
+      resources: new Map<string, unknown>(),
+      deferCleanup: vi.fn(),
+    };
+
+    const first = await hydrateXProfiles([contactIds[0]!], { ...ctx, runScope }, lookup);
+    const second = await hydrateXProfiles([contactIds[1]!], { ...ctx, runScope }, lookup);
+
+    expect(lookup.mock.calls.map((call) => call[1].length)).toEqual([100, 20]);
+    expect(first.outcomes[0]).toMatchObject({ status: "updated" });
+    expect(second.outcomes[0]).toMatchObject({ status: "updated" });
+    expect(runScope.deferCleanup).not.toHaveBeenCalled();
+  });
+
   it("caches explicit not-found errors and skips both found and missing profiles on a second run", async () => {
     seedAccount();
     const found = seedArchiveContact("1");

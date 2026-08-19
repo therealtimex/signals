@@ -43,6 +43,15 @@ export type PipelineContactStepTiming = {
   completedAtMs?: number;
 };
 
+export type PipelineRunScope = {
+  /** Stable selected-contact order for batch preparation within contact-major execution. */
+  contactIds: readonly string[];
+  /** Handler-owned state that lives for exactly one pipeline run. */
+  resources: Map<string, unknown>;
+  /** Registers best-effort teardown that runs even when execution throws. */
+  deferCleanup: (cleanup: () => void | Promise<void>) => void;
+};
+
 export type PipelineStepContext = {
   workflowRunId: string;
   stepId: string;
@@ -52,6 +61,7 @@ export type PipelineStepContext = {
   fetchImpl: typeof fetch;
   env: EnvLike;
   options?: Record<string, unknown>;
+  runScope?: PipelineRunScope;
   appendThreadMessage: (markdown: string) => Promise<void>;
   /** Records a per-contact pipeline step immediately (for live runs and real timing). */
   recordContactOutcome?: (

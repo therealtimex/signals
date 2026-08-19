@@ -13,6 +13,7 @@ import {
 } from "@/lib/platforms/x/client";
 import { RateLimitError } from "@/lib/platforms/rate-limiter";
 import {
+  createXAnonWebSession,
   hydrateXProfilesViaAnonWeb,
   type XAnonWebOutcome,
   type XAnonWebTransport,
@@ -225,8 +226,8 @@ function optionalNumericOption(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
 }
 
-/** Deterministic API-first, anonymous-web-fallback hydration for numeric X identities. */
-export async function hydrateXProfiles(
+/** Batch-compatible implementation used directly and for run-scoped preparation. */
+async function hydrateXProfilesBatch(
   contactIds: string[],
   ctx: PipelineStepContext,
   lookup: XUserLookup = getUsersByIds,
@@ -510,4 +511,79 @@ export async function hydrateXProfiles(
     })),
     aborted: false,
   };
+}
+
+function reportForContacts(
+  report: PipelineStepReport,
+  contactIds: string[],
+  stepId: string,
+): PipelineStepReport {
+  const requested = new Set(contactIds);
+  return {
+    stepId,
+    outcomes: report.outcomes.filter((outcome) => requested.has(outcome.contactId)),
+    aborted: report.aborted,
+    ...(report.abortReason ? { abortReason: report.abortReason } : {}),
+  };
+}
+
+/** Deterministic API-first, anonymous-web-fallback hydration for numeric X identities. */
+export async function hydrateXProfiles(
+  contactIds: string[],
+  ctx: PipelineStepContext,
+  lookup: XUserLookup = getUsersByIds,
+  webTransport: XAnonWebTransport = hydrateXProfilesViaAnonWeb,
+): Promise<PipelineStepReport> {
+  const scope = ctx.runScope;
+  if (!scope) {
+    return hydrateXProfilesBatch(contactIds, ctx, lookup, webTransport);
+  }
+
+  const account = getPlatformAccountByPlatform("x");
+  if (account?.credentialsEncrypted && account.status !== "needs_reauth") {
+    const resourceKey = `${HYDRATE_X_PROFILES_HANDLER}:${ctx.stepId}:api-report`;
+    let prepared = scope.resources.get(resourceKey) as Promise<PipelineStepReport> | undefined;
+    if (!prepared) {
+      prepared = hydrateXProfilesBatch(
+        [...scope.contactIds],
+        { ...ctx, runScope: undefined, recordContactOutcome: undefined },
+        lookup,
+        webTransport,
+      );
+      scope.resources.set(resourceKey, prepared);
+    }
+    return reportForContacts(await prepared, contactIds, ctx.stepId);
+  }
+
+  if (
+    !account?.credentialsEncrypted &&
+    ctx.options?.webFallback !== false &&
+    webTransport === hydrateXProfilesViaAnonWeb
+  ) {
+    const resourceKey = `${HYDRATE_X_PROFILES_HANDLER}:${ctx.stepId}:anon-session`;
+    let session = scope.resources.get(resourceKey) as ReturnType<typeof createXAnonWebSession> | undefined;
+    if (!session) {
+      session = createXAnonWebSession({
+        fetchImpl: ctx.fetchImpl,
+        env: ctx.env,
+        minRequestGapMs: optionalNumericOption(ctx.options?.minRequestGapMs),
+        maxBrowserResolutions: optionalNumericOption(ctx.options?.maxBrowserResolutions),
+      });
+      scope.resources.set(resourceKey, session);
+      scope.deferCleanup(() => session?.dispose());
+    }
+    return hydrateXProfilesBatch(
+      contactIds,
+      { ...ctx, runScope: undefined },
+      lookup,
+      (requests) => session!.hydrate(requests),
+    );
+  }
+
+  return hydrateXProfilesBatch(
+    contactIds,
+    { ...ctx, runScope: undefined },
+    lookup,
+    webTransport,
+  );
 }

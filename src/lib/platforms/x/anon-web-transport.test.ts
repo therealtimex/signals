@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  createXAnonWebSession,
   hydrateXProfilesViaAnonWeb,
   resetXAnonWebCooldownForTests,
 } from "@/lib/platforms/x/anon-web-transport";
@@ -86,6 +87,39 @@ describe("hydrateXProfilesViaAnonWeb", () => {
     expect(dispose).toHaveBeenCalledOnce();
   });
 
+  it("reuses one resolver across contact-major calls and disposes it exactly once", async () => {
+    const resolve = vi.fn(async () => ({ status: "resolved" as const, handle: "tri_dao" }));
+    const { factory, dispose } = resolverFactory(resolve);
+    const session = createXAnonWebSession(deps(safeFetch(htmlResponse()), factory));
+
+    await session.hydrate([{ userId: "568879807" }]);
+    await session.hydrate([{ userId: "568879807" }]);
+    await session.dispose();
+    await session.dispose();
+
+    expect(factory).toHaveBeenCalledOnce();
+    expect(resolve).toHaveBeenCalledTimes(2);
+    expect(dispose).toHaveBeenCalledOnce();
+  });
+
+  it("shares the browser-resolution budget across contact-major calls", async () => {
+    const resolve = vi.fn(async () => ({ status: "resolved" as const, handle: "tri_dao" }));
+    const { factory } = resolverFactory(resolve);
+    const fetchImpl = safeFetch(htmlResponse());
+    const session = createXAnonWebSession({
+      ...deps(fetchImpl, factory),
+      maxBrowserResolutions: 1,
+    });
+
+    await session.hydrate([{ userId: "568879807" }]);
+    const deferred = await session.hydrate([{ userId: "2" }]);
+    await session.dispose();
+
+    expect(deferred.get("2")).toEqual({ status: "skip", reason: "x_web_deferred" });
+    expect(resolve).toHaveBeenCalledOnce();
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
   it("re-resolves a stale known handle and validates the numeric identifier", async () => {
     const { factory } = resolverFactory(async () => ({ status: "resolved", handle: "tri_dao" }));
     const fetchImpl = safeFetch(htmlResponse());
@@ -146,6 +180,26 @@ describe("hydrateXProfilesViaAnonWeb", () => {
       detail: { retryAfter: 90 },
     });
     expect(outcomes.get("2")).toEqual({ status: "skip", reason: "x_web_rate_limited" });
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it("carries a breaker reason across contact-major calls without more traffic", async () => {
+    const fetchImpl = safeFetch(new Response("", {
+      status: 429,
+      headers: { "content-type": "text/html", "retry-after": "90" },
+    }));
+    const session = createXAnonWebSession(deps(fetchImpl));
+
+    const first = await session.hydrate([{ userId: "568879807", knownHandle: "tri_dao" }]);
+    const second = await session.hydrate([{ userId: "2", knownHandle: "person2" }]);
+    await session.dispose();
+
+    expect(first.get("568879807")).toMatchObject({
+      status: "skip",
+      reason: "x_web_rate_limited",
+      detail: { retryAfter: 90 },
+    });
+    expect(second.get("2")).toEqual({ status: "skip", reason: "x_web_rate_limited" });
     expect(fetchImpl).toHaveBeenCalledOnce();
   });
 

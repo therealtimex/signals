@@ -36,6 +36,7 @@ import type {
   PipelineConfig,
   PipelineContactOutcome,
   PipelineContactStepTiming,
+  PipelineRunScope,
   PipelineRunResult,
   PipelineStepReport,
 } from "@/lib/workflows/pipeline/types";
@@ -624,14 +625,17 @@ export async function executePipelineRun(input: ExecutePipelineRunInput): Promis
 
   await appendThreadMessage(formatKickoffMessage(input.plan));
 
-  const stepReports: PipelineStepReport[] = [];
-
-  for (const stepDecl of input.pipeline.steps) {
+  const cleanupTasks: Array<() => void | Promise<void>> = [];
+  const runScope: PipelineRunScope = {
+    contactIds: input.plan.selectedContactIds,
+    resources: new Map<string, unknown>(),
+    deferCleanup: (cleanup) => cleanupTasks.push(cleanup),
+  };
+  const stepStates = input.pipeline.steps.map((stepDecl) => {
     const handler = PIPELINE_STEP_HANDLERS[stepDecl.handler];
     if (!handler) {
       throw new Error(`Missing pipeline handler: ${stepDecl.handler}`);
     }
-
     const tool = STEP_TOOL_BY_HANDLER[stepDecl.handler] ?? stepDecl.handler;
     const recordedContactIds = new Set<string>();
     const recordContactOutcome = (
@@ -647,38 +651,94 @@ export async function executePipelineRun(input: ExecutePipelineRunInput): Promis
       });
       recordedContactIds.add(outcome.contactId);
     };
-
-    const phaseStartedAtMs = Date.now();
-    const report = await handler(input.plan.selectedContactIds, {
-      workflowRunId: input.workflowRunId,
+    const report: PipelineStepReport = {
       stepId: stepDecl.id,
-      trigger: input.trigger,
-      forcePersona: input.forcePersona,
-      personaStale: input.plan.filters.personaStale ?? false,
-      fetchImpl: input.fetchImpl,
-      env: input.env,
-      options: stepDecl.options,
-      appendThreadMessage,
+      outcomes: [],
+      aborted: false,
+    };
+    return {
+      stepDecl,
+      handler,
+      tool,
+      recordedContactIds,
       recordContactOutcome,
-    });
-    const phaseEndedAtMs = Date.now();
+      report,
+      durationMs: 0,
+      started: false,
+    };
+  });
 
-    stepReports.push(report);
+  try {
+    contactLoop: for (const contactId of input.plan.selectedContactIds) {
+      for (const state of stepStates) {
+        const invocationStartedAtMs = Date.now();
+        state.started = true;
+        const invocationReport = await state.handler([contactId], {
+          workflowRunId: input.workflowRunId,
+          stepId: state.stepDecl.id,
+          trigger: input.trigger,
+          forcePersona: input.forcePersona,
+          personaStale: input.plan.filters.personaStale ?? false,
+          fetchImpl: input.fetchImpl,
+          env: input.env,
+          options: state.stepDecl.options,
+          runScope,
+          appendThreadMessage,
+          recordContactOutcome: state.recordContactOutcome,
+        });
+        const invocationEndedAtMs = Date.now();
+        state.durationMs += Math.max(invocationEndedAtMs - invocationStartedAtMs, 0);
+        state.report.outcomes.push(...invocationReport.outcomes);
 
-    const unrecordedOutcomes = report.outcomes.filter(
-      (outcome) => !recordedContactIds.has(outcome.contactId),
-    );
-    if (unrecordedOutcomes.length > 0) {
-      recordDistributedPipelineContactSteps({
-        workflowRunId: input.workflowRunId,
-        tool,
-        outcomes: unrecordedOutcomes,
-        phaseStartedAtMs,
-        phaseEndedAtMs,
-      });
+        const unrecordedOutcomes = invocationReport.outcomes.filter(
+          (outcome) => !state.recordedContactIds.has(outcome.contactId),
+        );
+        if (unrecordedOutcomes.length > 0) {
+          recordDistributedPipelineContactSteps({
+            workflowRunId: input.workflowRunId,
+            tool: state.tool,
+            outcomes: unrecordedOutcomes,
+            phaseStartedAtMs: invocationStartedAtMs,
+            phaseEndedAtMs: invocationEndedAtMs,
+          });
+        }
+
+        const incrementalReports = stepStates
+          .filter((candidate) => candidate.started)
+          .map((candidate) => candidate.report);
+        updateWorkflowRun(
+          input.workflowRunId,
+          computeRunItemCounts(input.plan.selectedContactIds, incrementalReports),
+        );
+
+        if (invocationReport.aborted) {
+          state.report.aborted = true;
+          state.report.abortReason = invocationReport.abortReason;
+          if (invocationReport.abortReason) {
+            runErrors = [...runErrors, invocationReport.abortReason];
+          }
+          break contactLoop;
+        }
+      }
     }
+  } finally {
+    for (const cleanup of cleanupTasks.reverse()) {
+      try {
+        await cleanup();
+      } catch (error) {
+        runErrors = [
+          ...runErrors,
+          `Pipeline cleanup failed: ${error instanceof Error ? error.message : String(error)}`,
+        ];
+      }
+    }
+  }
 
-    const stepSummary = summarizeStepReport(report);
+  const completedStepStates = stepStates.filter((state) => state.started);
+  const stepReports = completedStepStates.map((state) => state.report);
+  for (const state of completedStepStates) {
+    const stepSummary = summarizeStepReport(state.report);
+    const stepSummaryCompletedAtMs = Date.now();
     createWorkflowStep({
       workflowRunId: input.workflowRunId,
       stepIndex: nextStepIndex(input.workflowRunId),
@@ -686,24 +746,13 @@ export async function executePipelineRun(input: ExecutePipelineRunInput): Promis
       status: "completed",
       tool: "profile_pipeline_step_summary",
       output: JSON.stringify(stepSummary),
-      durationMs: Math.max(phaseEndedAtMs - phaseStartedAtMs, 0),
-      createdAt: Math.floor(phaseEndedAtMs / 1000),
+      durationMs: state.durationMs,
+      createdAt: Math.floor(stepSummaryCompletedAtMs / 1000),
     });
 
-    await appendThreadMessage(formatStepSummaryMessage(stepDecl.id, stepDecl.handler, report));
-
-    const incrementalCounts = computeRunItemCounts(
-      input.plan.selectedContactIds,
-      stepReports,
+    await appendThreadMessage(
+      formatStepSummaryMessage(state.stepDecl.id, state.stepDecl.handler, state.report),
     );
-    updateWorkflowRun(input.workflowRunId, incrementalCounts);
-
-    if (report.aborted) {
-      if (report.abortReason) {
-        runErrors = [...runErrors, report.abortReason];
-      }
-      break;
-    }
   }
 
   const result = aggregateRunResult({
