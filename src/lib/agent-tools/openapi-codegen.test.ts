@@ -17,7 +17,6 @@ describe("agent-tools openapi codegen", () => {
         path.join(process.cwd(), "openapi", "agent-tools.json");
       fs.mkdirSync(path.dirname(outPath), { recursive: true });
       fs.writeFileSync(outPath, `${JSON.stringify(document, null, 2)}\n`);
-      // eslint-disable-next-line no-console -- codegen harness
       console.log(`Wrote ${outPath}`);
     }
   });
