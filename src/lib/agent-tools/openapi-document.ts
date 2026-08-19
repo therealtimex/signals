@@ -190,7 +190,7 @@ export function buildAgentToolsOpenApiDocument(baseUrl = "http://127.0.0.1:3000"
         },
       },
     },
-    security: [{}, { bearerAuth: [] }],
+    security: [{ bearerAuth: [] }],
     "x-signals-agent-tools": {
       manifestVersion: manifest.version,
       toolCount: manifest.tools.length,

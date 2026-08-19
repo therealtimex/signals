@@ -2409,7 +2409,6 @@
     }
   },
   "security": [
-    {},
     {
       "bearerAuth": []
     }
