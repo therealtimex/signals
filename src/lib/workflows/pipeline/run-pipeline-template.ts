@@ -26,7 +26,7 @@ import {
 import { isRtxEmbedded, type EnvLike } from "@/lib/rtx/env";
 import { appendRtxThreadMessage } from "@/lib/rtx/runtime-sessions";
 import { ensureProfilePipelineDrainJob } from "@/lib/db/profile-pipeline-drain";
-import { buildAgentWorkflowThreadName } from "@/lib/workflows/template-brief";
+import { buildPipelineThreadName } from "@/lib/workflows/template-brief";
 import { PIPELINE_STEP_HANDLERS } from "@/lib/workflows/pipeline/handlers";
 import type {
   PipelineConfig,
@@ -408,7 +408,7 @@ export async function runPipelineTemplate(
       );
       threadSlug = await createRtxPublishThread(
         workspaceSlug,
-        buildAgentWorkflowThreadName(template.name),
+        buildPipelineThreadName(template.name),
         env,
         fetchImpl,
       );

@@ -222,6 +222,7 @@ describe("appendRtxThreadMessage", () => {
       const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
       expect(body.message).toBe("Pipeline kickoff");
       expect(body.requireTerminalDispatch).toBe(false);
+      expect(body.skipTerminalDispatch).toBe(true);
       return new Response(JSON.stringify({ success: true }), { status: 200 });
     });
 
