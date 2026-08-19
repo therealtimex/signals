@@ -159,6 +159,23 @@ describe("runPipelineTemplate", () => {
     expect(completed?.steps.some((s) => s.tool === "profile_pipeline_summary")).toBe(true);
   });
 
+  it("uses run input batchSize override instead of template default", async () => {
+    for (let i = 0; i < 6; i += 1) {
+      seedPersonaOnlyBacklogContact(`Backlog ${i}`);
+    }
+
+    const template = createPipelineTemplate();
+    const result = await runPipelineTemplate({
+      templateId: template.id,
+      input: { batchSize: 5 },
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.plan.batchSize).toBe(5);
+    expect(result.plan.selectedContactIds).toHaveLength(5);
+  });
+
   it("refuses concurrent non-explicit runs with PIPELINE_RUN_ACTIVE", async () => {
     const template = createPipelineTemplate();
 

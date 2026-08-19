@@ -5,6 +5,10 @@ import {
 } from "@/lib/db/queries/profile-pipeline-backlog";
 import { getTemplate } from "@/lib/db/queries/workflow-templates";
 import { getValidatedPipelineFromTemplate } from "@/lib/workflows/pipeline/validate-pipeline-config";
+import {
+  PROFILE_PIPELINE_DEFAULT_BATCH,
+  PROFILE_PIPELINE_MAX_BATCH,
+} from "@/lib/workflows/pipeline/types";
 
 /**
  * GET /api/workflows/templates/[id]/backlog
@@ -36,7 +40,8 @@ export async function GET(
 
   return NextResponse.json({
     backlogTotal: countProfilePipelineBacklog(filters),
-    batchSize: pipeline.batchSize ?? 20,
+    batchSize: pipeline.batchSize ?? PROFILE_PIPELINE_DEFAULT_BATCH,
+    maxBatchSize: PROFILE_PIPELINE_MAX_BATCH,
     filters,
   });
 }
