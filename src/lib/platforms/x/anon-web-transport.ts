@@ -100,10 +100,16 @@ export function anonXFetch(
 }
 
 function retryAfter(response: Response, nowMs: number): number | undefined {
-  const direct = Number(response.headers.get("retry-after"));
-  if (Number.isFinite(direct) && direct >= 0) return direct;
-  const reset = Number(response.headers.get("x-rate-limit-reset"));
-  if (Number.isFinite(reset)) return Math.max(0, Math.ceil(reset - nowMs / 1000));
+  const directRaw = response.headers.get("retry-after")?.trim();
+  if (directRaw) {
+    const direct = Number(directRaw);
+    if (Number.isFinite(direct) && direct >= 0) return direct;
+  }
+  const resetRaw = response.headers.get("x-rate-limit-reset")?.trim();
+  if (resetRaw) {
+    const reset = Number(resetRaw);
+    if (Number.isFinite(reset)) return Math.max(0, Math.ceil(reset - nowMs / 1000));
+  }
   return undefined;
 }
 

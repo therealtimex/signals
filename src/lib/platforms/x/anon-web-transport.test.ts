@@ -148,4 +148,35 @@ describe("hydrateXProfilesViaAnonWeb", () => {
     expect(outcomes.get("2")).toEqual({ status: "skip", reason: "x_web_rate_limited" });
     expect(fetchImpl).toHaveBeenCalledOnce();
   });
+
+  it("falls back to x-rate-limit-reset when Retry-After is absent", async () => {
+    const fetchImpl = safeFetch(new Response("", {
+      status: 429,
+      headers: { "content-type": "text/html", "x-rate-limit-reset": "1090" },
+    }));
+    const outcomes = await hydrateXProfilesViaAnonWeb(
+      [{ userId: "568879807", knownHandle: "tri_dao" }],
+      { ...deps(fetchImpl), now: () => 1_000_000 },
+    );
+    expect(outcomes.get("568879807")).toEqual({
+      status: "skip",
+      reason: "x_web_rate_limited",
+      detail: { retryAfter: 90 },
+    });
+  });
+
+  it("omits retry timing when a 429 has neither rate-limit header", async () => {
+    const fetchImpl = safeFetch(new Response("", {
+      status: 429,
+      headers: { "content-type": "text/html" },
+    }));
+    const outcomes = await hydrateXProfilesViaAnonWeb(
+      [{ userId: "568879807", knownHandle: "tri_dao" }],
+      deps(fetchImpl),
+    );
+    expect(outcomes.get("568879807")).toEqual({
+      status: "skip",
+      reason: "x_web_rate_limited",
+    });
+  });
 });
