@@ -5,7 +5,10 @@ import { createContact, getContactById } from "@/lib/db/queries/contacts";
 import { createIdentity, getIdentityById, updateIdentity } from "@/lib/db/queries/identities";
 import { platformAccounts } from "@/lib/db/schema";
 import { TierRestrictedError, type XUser } from "@/lib/platforms/x/client";
-import type { XAnonWebTransport } from "@/lib/platforms/x/anon-web-transport";
+import type {
+  XAnonWebSession,
+  XAnonWebTransport,
+} from "@/lib/platforms/x/anon-web-transport";
 import { RateLimitError } from "@/lib/platforms/rate-limiter";
 import { enrichContactAvatars } from "@/lib/workflows/pipeline/handlers/enrich-contact-avatars";
 import {
@@ -74,6 +77,26 @@ function xUser(id: string): XUser {
     verified: true,
     created_at: "2020-01-02T03:04:05.000Z",
   };
+}
+
+function xProfileHtml(id: string, handle: string): string {
+  return `<!doctype html>
+<html><head>
+  <title>Person ${id} (@${handle}) / X</title>
+  <link rel="canonical" href="https://x.com/${handle}">
+  <script type="application/ld+json">
+  {
+    "@type": "ProfilePage",
+    "mainEntity": {
+      "@type": "Person",
+      "identifier": "${id}",
+      "additionalName": "${handle}",
+      "name": "Person ${id}",
+      "image": {"contentUrl": "https://img.example.com/${id}_normal.jpg"}
+    }
+  }
+  </script>
+</head><body>Public profile</body></html>`;
 }
 
 describe("hydrateXProfiles", () => {
@@ -258,6 +281,58 @@ describe("hydrateXProfiles", () => {
       { ...ctx, stepId: "avatar" },
     );
     expect(avatarReport.outcomes[0]).toMatchObject({ status: "skipped", reason: "avatar_present" });
+  });
+
+  it("reuses and disposes one anonymous web session across contact-major calls", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const contacts = [seedArchiveContact("201"), seedArchiveContact("202")];
+    for (const { identity } of contacts) {
+      updateIdentity(identity.id, { platformHandle: `@person${identity.platformUserId}` });
+    }
+    const contactIds = contacts.map(({ contact }) => contact.id);
+    const profiles = new Map(contacts.map(({ identity }) => [
+      `person${identity.platformUserId}`,
+      xProfileHtml(identity.platformUserId, `person${identity.platformUserId}`),
+    ]));
+    const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+      const handle = new URL(String(input)).pathname.slice(1);
+      const html = profiles.get(handle);
+      return new Response(html ?? "", {
+        status: html ? 200 : 404,
+        headers: { "content-type": "text/html" },
+      });
+    });
+    const runScope = {
+      contactIds,
+      resources: new Map<string, unknown>(),
+      deferCleanup: vi.fn(),
+    };
+    const scopedCtx = {
+      ...ctx,
+      fetchImpl,
+      options: { minRequestGapMs: 0 },
+      runScope,
+    };
+
+    const first = await hydrateXProfiles([contactIds[0]!], scopedCtx);
+    const session = [...runScope.resources.values()][0] as XAnonWebSession;
+    const second = await hydrateXProfiles([contactIds[1]!], scopedCtx);
+
+    expect(first.outcomes[0]).toMatchObject({ status: "updated" });
+    expect(second.outcomes[0]).toMatchObject({ status: "updated" });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(fetchImpl.mock.calls.map(([input]) => String(input))).toEqual([
+      "https://x.com/person201",
+      "https://x.com/person202",
+    ]);
+    expect(runScope.resources.size).toBe(1);
+    expect([...runScope.resources.values()][0]).toBe(session);
+    expect(runScope.deferCleanup).toHaveBeenCalledOnce();
+
+    const cleanup = runScope.deferCleanup.mock.calls[0]![0] as () => Promise<void>;
+    await cleanup();
+    await expect(session.hydrate([{ userId: "203", knownHandle: "person203" }]))
+      .rejects.toThrow("Anonymous X hydration session is disposed");
   });
 
   it("prefers the official API when credentials exist and allows the web fallback to be disabled", async () => {
