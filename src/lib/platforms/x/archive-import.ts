@@ -1,8 +1,8 @@
 import { eq, and } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db/client";
-import { contactIdentities, contentItems, contentPosts, engagementMetrics } from "@/lib/db/schema";
-import { createContact, recalcEnrichment } from "@/lib/db/queries/contacts";
+import { contactIdentities, contacts, contentItems, contentPosts, engagementMetrics } from "@/lib/db/schema";
+import { createContact, recalcEnrichment, updateContact } from "@/lib/db/queries/contacts";
 import { createIdentity, updateIdentity } from "@/lib/db/queries/identities";
 import { getContentPostByPlatformId } from "@/lib/db/queries/content";
 import {
@@ -43,6 +43,8 @@ export interface XArchiveContents {
   following: XArchiveUserRef[];
   tweets: XArchiveTweetRef[];
   account: XArchiveAccountInfo | null;
+  /** accountId → screen_name from tweet mentions/replies (no @ prefix). */
+  handleMap: Map<string, string>;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -99,6 +101,47 @@ function parseArchiveTweets(texts: string[]): XArchiveTweetRef[] {
   return tweets;
 }
 
+function normalizeScreenName(value: string): string {
+  return value.replace(/^@+/, "").trim();
+}
+
+/**
+ * Build accountId → screen_name from tweet entities in the archive. Follower/
+ * following rows carry no handles; mentions and reply targets in tweets.js often do.
+ */
+export function buildArchiveHandleMap(texts: string[]): Map<string, string> {
+  const map = new Map<string, string>();
+
+  for (const text of texts) {
+    for (const entry of parseYtdArray(text)) {
+      const record = asRecord(entry);
+      const row = asRecord(record?.tweet) ?? record;
+      if (!row) continue;
+
+      const replyUserId = asString(row.in_reply_to_user_id_str);
+      const replyScreenName = asString(row.in_reply_to_screen_name);
+      if (replyUserId && replyScreenName) {
+        map.set(replyUserId, normalizeScreenName(replyScreenName));
+      }
+
+      const entities = asRecord(row.entities);
+      const mentions = entities?.user_mentions;
+      if (!Array.isArray(mentions)) continue;
+
+      for (const mention of mentions) {
+        const mentionRow = asRecord(mention);
+        const accountId = asString(mentionRow?.id_str) ?? asString(mentionRow?.id);
+        const screenName = asString(mentionRow?.screen_name);
+        if (accountId && screenName) {
+          map.set(accountId, normalizeScreenName(screenName));
+        }
+      }
+    }
+  }
+
+  return map;
+}
+
 function parseArchiveAccount(texts: string[]): XArchiveAccountInfo | null {
   for (const text of texts) {
     for (const entry of parseYtdArray(text)) {
@@ -136,12 +179,15 @@ export function parseXArchive(zipBytes: Uint8Array): XArchiveContents {
     );
   }
 
+  const tweetTexts = sliceTexts("tweets");
+
   return {
     files: entries,
     followers: parseArchiveUsers(sliceTexts("follower"), "follower"),
     following: parseArchiveUsers(sliceTexts("following"), "following"),
-    tweets: parseArchiveTweets(sliceTexts("tweets")),
+    tweets: parseArchiveTweets(tweetTexts),
     account: parseArchiveAccount(sliceTexts("account")),
+    handleMap: buildArchiveHandleMap(tweetTexts),
   };
 }
 
@@ -258,6 +304,69 @@ function processArchiveUser(user: MergedArchiveUser, result: SyncResult): void {
     following: user.following,
   });
   result.added++;
+}
+
+function isArchivePlaceholderName(name: string, accountId: string): boolean {
+  return name === `X user ${accountId}`;
+}
+
+/**
+ * Backfill @handle names on archive-imported contacts using tweet-entity data.
+ * Only updates contacts that still carry the numeric ID placeholder name.
+ */
+export function backfillXArchiveHandles(handleMap: Map<string, string>): SyncResult {
+  const result: SyncResult = { added: 0, updated: 0, skipped: 0, errors: [] };
+  if (handleMap.size === 0) return result;
+
+  for (const [accountId, screenName] of handleMap) {
+    try {
+      const identity = db
+        .select()
+        .from(contactIdentities)
+        .where(
+          and(
+            eq(contactIdentities.platform, "x"),
+            eq(contactIdentities.platformUserId, accountId)
+          )
+        )
+        .get();
+
+      if (!identity) {
+        result.skipped++;
+        continue;
+      }
+
+      const contact = db
+        .select()
+        .from(contacts)
+        .where(eq(contacts.id, identity.contactId))
+        .get();
+
+      if (!contact || !isArchivePlaceholderName(contact.name, accountId)) {
+        result.skipped++;
+        continue;
+      }
+
+      updateContact(contact.id, { name: `@${screenName}` });
+
+      let platformData: Record<string, unknown> = {};
+      try {
+        platformData = JSON.parse(identity.platformData ?? "{}");
+      } catch {
+        // Rebuild from archiveScreenName only
+      }
+      platformData.archiveScreenName = screenName;
+      updateIdentity(identity.id, { platformData: JSON.stringify(platformData) });
+      recalcEnrichment(contact.id);
+      result.updated++;
+    } catch (err) {
+      result.errors.push(
+        `Failed to backfill handle for X account ${accountId}: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  }
+
+  return result;
 }
 
 /**

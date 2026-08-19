@@ -1,4 +1,8 @@
-import { parseXArchive, type XArchiveContents } from "@/lib/platforms/x/archive-import";
+import {
+  mergeArchiveUsers,
+  parseXArchive,
+  type XArchiveContents,
+} from "@/lib/platforms/x/archive-import";
 import { readXArchiveZip } from "@/lib/platforms/x/import-file";
 
 export interface XArchiveImportPreview {
@@ -10,6 +14,10 @@ export interface XArchiveImportPreview {
   followerCount: number;
   followingCount: number;
   tweetCount: number;
+  /** Unique contacts after merging follower/following lists. */
+  uniqueContactCount: number;
+  /** Handles mappable from tweet entities (may be fewer than unique contacts). */
+  handleCandidateCount: number;
   /** Per-slice breakdown lines rendered on the inspection step. */
   details: string[];
 }
@@ -28,14 +36,29 @@ function sliceDetail(label: string, count: number, files: string[]): string {
 /** Inspection detail lines for the found slices. */
 export function buildArchiveDetails(contents: XArchiveContents): string[] {
   const details: string[] = [];
+  const uniqueContactCount = mergeArchiveUsers(
+    contents.followers,
+    contents.following
+  ).length;
+
   if (contents.files.follower.length > 0) {
     details.push(sliceDetail("Followers", contents.followers.length, contents.files.follower));
   }
   if (contents.files.following.length > 0) {
     details.push(sliceDetail("Following", contents.following.length, contents.files.following));
   }
+  if (uniqueContactCount > 0) {
+    details.push(
+      `Unique contacts: ${uniqueContactCount} (ID-only placeholders — run Contact profile pipeline after import)`
+    );
+  }
   if (contents.files.tweets.length > 0) {
     details.push(sliceDetail("Tweets", contents.tweets.length, contents.files.tweets));
+  }
+  if (contents.handleMap.size > 0) {
+    details.push(
+      `Handle hints from tweets: ${contents.handleMap.size} (applied to matching contacts on import)`
+    );
   }
   return details;
 }
@@ -52,6 +75,7 @@ export async function previewXArchiveImport(file: File): Promise<XArchiveImportP
   const followerCount = contents.followers.length;
   const followingCount = contents.following.length;
   const tweetCount = contents.tweets.length;
+  const uniqueContactCount = mergeArchiveUsers(contents.followers, contents.following).length;
   const totalRows = followerCount + followingCount + tweetCount;
 
   if (totalRows === 0) {
@@ -68,6 +92,8 @@ export async function previewXArchiveImport(file: File): Promise<XArchiveImportP
     followerCount,
     followingCount,
     tweetCount,
+    uniqueContactCount,
+    handleCandidateCount: contents.handleMap.size,
     details: buildArchiveDetails(contents),
   };
 }

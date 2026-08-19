@@ -26,6 +26,8 @@ import {
 } from "@/components/import-dialog";
 import { ActionToast } from "@/components/action-toast";
 
+const CONTACT_PROFILE_PIPELINE_TEMPLATE_NAME = "Contact profile pipeline";
+
 type ActionDef = {
   id: string;
   label: string;
@@ -105,8 +107,10 @@ function getImportDialogConfig(action: ActionDef): ImportDialogConfig {
           On X, go to <strong className="text-foreground">Settings and privacy</strong> →{" "}
           <strong className="text-foreground">Your account</strong> →{" "}
           <strong className="text-foreground">Download an archive of your data</strong>, then
-          upload the zip you receive. Followers and following become contacts; your tweets are
-          imported as content. No connected X account is required.
+          upload the zip you receive. Followers and following become ID-only contact placeholders;
+          your tweets import as content. After import, run{" "}
+          <strong className="text-foreground">Contact profile pipeline</strong> to fill avatars
+          and personas (#172). No connected X account is required.
         </p>
       ),
       previewEndpoint: `${action.endpoint}/preview`,
@@ -260,6 +264,10 @@ export function ActionCards() {
   const [result, setResult] = useState<{ id: string; message: string } | null>(null);
   const [importAction, setImportAction] = useState<ActionDef | null>(null);
   const [toast, setToast] = useState<{ message: string; runId: string | null } | null>(null);
+  const [pipelineFollowUp, setPipelineFollowUp] = useState<{
+    uniqueContactCount: number;
+    running: boolean;
+  } | null>(null);
 
   // Connection status for each platform (expanded with capability data)
   const [platformStatus, setPlatformStatus] = useState<Record<string, PlatformStatus>>({
@@ -388,10 +396,37 @@ export function ActionCards() {
 
   const handleImportSuccess = useCallback((action: ActionDef, result: ImportSuccess) => {
     setImportAction(null);
-    setToast({
-      message: `Imported ${result.fileName}: ${result.added} added, ${result.updated} updated, ${result.skipped} skipped`,
-      runId: result.workflowRunId,
-    });
+
+    if (action.id === "x-import-archive") {
+      const contactParts: string[] = [];
+      if (result.contactsAdded != null) {
+        contactParts.push(`${result.contactsAdded} contacts added`);
+      }
+      if (result.handlesUpdated != null && result.handlesUpdated > 0) {
+        contactParts.push(`${result.handlesUpdated} handles from tweets`);
+      }
+      const postsPart =
+        result.postsAdded != null ? `${result.postsAdded} tweets imported` : null;
+      const summary = [contactParts.join(", "), postsPart].filter(Boolean).join(" · ");
+
+      setToast({
+        message: summary || `Imported ${result.fileName}`,
+        runId: result.workflowRunId,
+      });
+
+      if ((result.uniqueContactCount ?? 0) > 0) {
+        setPipelineFollowUp({
+          uniqueContactCount: result.uniqueContactCount ?? 0,
+          running: false,
+        });
+      }
+    } else {
+      setToast({
+        message: `Imported ${result.fileName}: ${result.added} added, ${result.updated} updated, ${result.skipped} skipped`,
+        runId: result.workflowRunId,
+      });
+    }
+
     // Reflect the new last-run stats on the import card without a refetch
     setPlatformStatus((prev) => ({
       ...prev,
@@ -411,6 +446,46 @@ export function ActionCards() {
     router.refresh();
   }, [router]);
 
+  const runProfilePipelineForX = useCallback(async () => {
+    setPipelineFollowUp((prev) => (prev ? { ...prev, running: true } : prev));
+    try {
+      const templatesRes = await fetch("/api/workflows/templates?isSystem=true&pageSize=50");
+      const templatesPayload = await templatesRes.json();
+      const template = (templatesPayload.data ?? []).find(
+        (row: { name: string }) => row.name === CONTACT_PROFILE_PIPELINE_TEMPLATE_NAME
+      );
+
+      if (!template?.id) {
+        setError("Contact profile pipeline template not found. Open Workflows → Templates.");
+        return;
+      }
+
+      const runRes = await fetch(`/api/workflows/templates/${template.id}/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          config: {
+            filters: { platform: "x", maxEnrichmentScore: 40 },
+          },
+        }),
+      });
+      const runData = await runRes.json();
+      if (!runRes.ok) {
+        setError(runData.error || "Could not start profile pipeline");
+        return;
+      }
+
+      setPipelineFollowUp(null);
+      if (runData.workflowRunId) {
+        router.push(`/dashboard/workflows/${runData.workflowRunId}`);
+      }
+    } catch {
+      setError("Could not start profile pipeline");
+    } finally {
+      setPipelineFollowUp((prev) => (prev ? { ...prev, running: false } : prev));
+    }
+  }, [router]);
+
   return (
     <div className="space-y-6">
       {/* Error / migration / result banners */}
@@ -422,6 +497,27 @@ export function ActionCards() {
       {migrationNotice && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100">
           {migrationNotice}
+        </div>
+      )}
+      {pipelineFollowUp && (
+        <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 text-sm flex flex-wrap items-center justify-between gap-3">
+          <p>
+            <span className="font-medium">{pipelineFollowUp.uniqueContactCount}</span> X archive
+            contacts need profile work (avatars + personas). Run the Contact profile pipeline in
+            batches of 20.
+          </p>
+          <Button
+            size="sm"
+            disabled={pipelineFollowUp.running}
+            onClick={() => void runProfilePipelineForX()}
+          >
+            {pipelineFollowUp.running ? (
+              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Play className="mr-1.5 h-3.5 w-3.5" />
+            )}
+            Run profile pipeline
+          </Button>
         </div>
       )}
       {result && (
