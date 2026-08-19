@@ -60,11 +60,15 @@ When `RTX_APP_ID` is set, health reports embedded mode.
 
 ## CI
 
-The **Smoke (integration)** job in `.github/workflows/ci.yml` runs after the quality gate:
+The **Quality gate** job in `.github/workflows/pr-ci.yml` runs:
 
-1. `npm run verify:fresh-import`
-2. `npm run build`
+1. `npm run check` (including the production build)
+2. `npm run verify:fresh-import`
 3. `npm run test:integration`
+
+Keeping these steps in one job avoids a second dependency install and production
+build. `.github/workflows/release.yml` repeats the same gate before building
+release artifacts.
 
 No Chromium or Playwright Test install step.
 

@@ -18,9 +18,13 @@ The gate runs, in order:
 4. **Migrations** — `drizzle-kit migrate` (ensures schema before production build)
 5. **Production build** — `next build`
 
-CI also runs **`test:integration`** in a separate job after build. See [smoke-tests.md](./smoke-tests.md).
+CI also runs **`verify:fresh-import`** and **`test:integration`** in the same
+quality job, reusing the production build produced by `npm run check`. See
+[smoke-tests.md](./smoke-tests.md).
 
-CI runs `npm run check` on every pull request and push to `main` (see `.github/workflows/ci.yml`).
+Pull requests run the fast quality workflow in `.github/workflows/pr-ci.yml`.
+Publishable versions repeat the full gate before release in
+`.github/workflows/release.yml`.
 
 ## Individual commands
 
