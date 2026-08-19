@@ -1,6 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import ReactMarkdown from "react-markdown";
+import type { WorkflowRunSubject } from "@/lib/workflows/workflow-run-subjects-shared";
 
 /** Fields rendered as markdown when their value is a string longer than 40 chars */
 const MARKDOWN_FIELDS = new Set(["text", "message"]);
@@ -12,9 +14,11 @@ function isMarkdownCandidate(key: string, value: unknown): value is string {
 export function StepOutputRenderer({
   output,
   variant,
+  subjectById = {},
 }: {
   output: Record<string, unknown>;
   variant: "inline" | "block";
+  subjectById?: Record<string, WorkflowRunSubject>;
 }) {
   const markdownEntries: [string, string][] = [];
   const structuredEntries: [string, unknown][] = [];
@@ -29,6 +33,51 @@ export function StepOutputRenderer({
   }
 
   if (markdownEntries.length === 0 && structuredEntries.length === 0) return null;
+
+  function renderStructuredValue(key: string, value: unknown) {
+    if (key === "contactId" && typeof value === "string") {
+      const subject = subjectById[value];
+      if (subject) {
+        return (
+          <Link href={subject.href} className="text-primary hover:underline">
+            {subject.label}
+          </Link>
+        );
+      }
+    }
+
+    if (key === "selectedContactIds" && Array.isArray(value)) {
+      const ids = value.filter((id): id is string => typeof id === "string");
+      if (ids.length > 0) {
+        const named = ids
+          .map((id) => subjectById[id])
+          .filter((subject): subject is WorkflowRunSubject => Boolean(subject));
+        if (named.length > 3) {
+          return (
+            <Link href="#run-subjects" className="text-primary hover:underline">
+              {named.length} contacts
+            </Link>
+          );
+        }
+        if (named.length > 0) {
+          return (
+            <>
+              {named.map((subject, index) => (
+                <span key={subject.id}>
+                  <Link href={subject.href} className="text-primary hover:underline">
+                    {subject.label}
+                  </Link>
+                  {index < named.length - 1 ? ", " : ""}
+                </span>
+              ))}
+            </>
+          );
+        }
+      }
+    }
+
+    return String(value);
+  }
 
   return (
     <>
@@ -49,8 +98,13 @@ export function StepOutputRenderer({
       ))}
       {structuredEntries.length > 0 && (
         variant === "inline" ? (
-          <p className="text-xs text-muted-foreground">
-            {structuredEntries.map(([k, v]) => `${k}: ${v}`).join(", ")}
+          <p className="text-xs text-muted-foreground flex flex-wrap gap-x-2 gap-y-1">
+            {structuredEntries.map(([key, value], index) => (
+              <span key={key}>
+                {key}: {renderStructuredValue(key, value)}
+                {index < structuredEntries.length - 1 ? "," : ""}
+              </span>
+            ))}
           </p>
         ) : (
           <pre className="text-[10px] font-mono bg-muted rounded p-2 overflow-x-auto max-h-[120px]">

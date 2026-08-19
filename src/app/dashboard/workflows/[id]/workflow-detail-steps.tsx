@@ -8,8 +8,17 @@ import { List, GitBranch } from "lucide-react";
 import { WorkflowStepTimeline } from "@/components/workflow-step-timeline";
 import { WorkflowGraphView } from "@/components/workflow-graph-view";
 import type { WorkflowStep } from "@/lib/db/types";
+import type { WorkflowRunSubject } from "@/lib/workflows/workflow-run-subjects-shared";
 
-export function WorkflowDetailSteps({ steps, animate }: { steps: WorkflowStep[]; animate?: boolean }) {
+export function WorkflowDetailSteps({
+  steps,
+  animate,
+  subjectById = {},
+}: {
+  steps: WorkflowStep[];
+  animate?: boolean;
+  subjectById?: Record<string, WorkflowRunSubject>;
+}) {
   const [view, setView] = useState<"timeline" | "graph">("timeline");
 
   return (
@@ -45,7 +54,11 @@ export function WorkflowDetailSteps({ steps, animate }: { steps: WorkflowStep[];
 
       <Card className="p-2">
         {view === "timeline" ? (
-          <WorkflowStepTimeline steps={steps} animate={animate} />
+          <WorkflowStepTimeline
+            steps={steps}
+            animate={animate}
+            subjectById={subjectById}
+          />
         ) : (
           <WorkflowGraphView steps={steps} animate={animate} />
         )}

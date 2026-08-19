@@ -16,9 +16,12 @@ import {
 import { formatWorkflowError } from "@/lib/workflows/format-error";
 import { WorkflowDetailSteps } from "./workflow-detail-steps";
 import { PruneResults } from "./prune-results";
+import { WorkflowRunSubjectsPanel } from "@/components/workflow-run-subjects-panel";
 import { useWorkflowPolling } from "@/hooks/use-workflow-polling";
 import type { WorkflowRunWithSteps } from "@/lib/db/types";
 import type { PipelineRunResult } from "@/lib/workflows/pipeline/types";
+import type { WorkflowRunSubject } from "@/lib/workflows/workflow-run-subjects-shared";
+import { workflowSubjectLookup } from "@/lib/workflows/workflow-run-subjects-shared";
 
 type PipelineRunContext = {
   backlogTotal: number;
@@ -103,12 +106,19 @@ function StatCard({
   );
 }
 
-export function WorkflowRunLive({ initialRun }: { initialRun: WorkflowRunWithSteps }) {
+export function WorkflowRunLive({
+  initialRun,
+  subjects = [],
+}: {
+  initialRun: WorkflowRunWithSteps;
+  subjects?: WorkflowRunSubject[];
+}) {
   const { data, isPolling } = useWorkflowPolling(initialRun.id, initialRun.status);
 
   // Use polled data when available, fall back to server-rendered initial data
   const run = data?.run ?? initialRun;
   const steps = data?.steps ?? initialRun.steps;
+  const subjectById = workflowSubjectLookup(subjects);
 
   const statusConfig = STATUS_CONFIG[run.status] ?? STATUS_CONFIG.pending;
   const StatusIcon = statusConfig.icon;
@@ -224,8 +234,14 @@ export function WorkflowRunLive({ initialRun }: { initialRun: WorkflowRunWithSte
         <PruneResults runId={run.id} resultJson={typeof run.result === "string" ? run.result : "{}"} />
       )}
 
+      <WorkflowRunSubjectsPanel subjects={subjects} />
+
       {/* Step section with Timeline/Graph toggle */}
-      <WorkflowDetailSteps steps={steps} animate={isPolling} />
+      <WorkflowDetailSteps
+        steps={steps}
+        animate={isPolling}
+        subjectById={subjectById}
+      />
 
       {/* Errors (if any) */}
       {run.errorItems > 0 && (

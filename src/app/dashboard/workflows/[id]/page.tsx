@@ -13,6 +13,7 @@ import {
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { WorkflowRunLive } from "./workflow-run-live";
+import { resolveWorkflowRunSubjectsForDetail } from "@/lib/workflows/workflow-run-subjects";
 
 const TYPE_ICONS: Record<string, typeof RefreshCw> = {
   sync: RefreshCw,
@@ -58,6 +59,8 @@ export default async function WorkflowDetailPage({
   const run = getWorkflowRun(id);
 
   if (!run) notFound();
+
+  const subjects = resolveWorkflowRunSubjectsForDetail(run, run.steps);
 
   const Icon = TYPE_ICONS[run.workflowType] ?? RefreshCw;
 
@@ -106,7 +109,7 @@ export default async function WorkflowDetailPage({
       </div>
 
       {/* All dynamic content handled by client component */}
-      <WorkflowRunLive initialRun={run} />
+      <WorkflowRunLive initialRun={run} subjects={subjects} />
     </div>
   );
 }
