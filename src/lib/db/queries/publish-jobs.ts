@@ -58,12 +58,15 @@ export function createPublishJob(input: {
   contentItemId: string;
   payload: PublishJobPayload;
   platforms: PublishPlatformTarget[];
+  targets?: PublishJobTarget[];
 }): PublishJobView {
   const ts = nowSec();
-  const targets: PublishJobTarget[] = input.platforms.map((platform) => ({
-    platform,
-    status: "pending",
-  }));
+  const targets: PublishJobTarget[] =
+    input.targets ??
+    input.platforms.map((platform) => ({
+      platform,
+      status: "pending",
+    }));
 
   const row: typeof publishJobs.$inferInsert = {
     id: `pj_${nanoid()}`,

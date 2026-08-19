@@ -17,6 +17,17 @@ import type { PlatformCredentials } from "@/lib/platforms/adapter";
 import { getPlatformImportStats } from "@/lib/workflows/import-stats";
 import { listSyncCursors } from "@/lib/db/queries/sync";
 import { ensureSessionPlatformAccount } from "@/lib/publish/ensure-platform-account";
+import {
+  ensureBrowserConnection,
+  listPlatformTargets,
+  registerPlatformTarget,
+  toPlatformTargetView,
+} from "@/lib/db/queries/platform-targets";
+import {
+  defaultTargetCapabilities,
+  defaultTargetKind,
+  normalizePlatformTargetIdentity,
+} from "@/lib/platforms/target-identity";
 import { RTX_PUBLISH_SESSION_NAME } from "@/lib/publish/constants";
 import {
   X_LOGGED_IN_MARKERS,
@@ -502,7 +513,7 @@ async function waitForPlatformPage(
  * rather than waiting, and a just-opened tab is usually still loading or
  * redirecting, so a single pass decides before the page can answer (#184).
  */
-async function probePlatformLogin(
+export async function probePlatformLogin(
   platform: SocialPlatform,
   page: Page,
   timeoutMs: number
@@ -562,7 +573,7 @@ async function detectLoggedInViaCdp(
   }
 }
 
-async function detectPlatformHandle(
+export async function detectPlatformHandle(
   platform: SocialPlatform,
   page: Page,
   pageUrl: string
@@ -642,11 +653,12 @@ async function detectPlatformHandle(
  */
 async function ensureRtxPublishSessionRegistered(
   env: EnvLike,
-  fetchImpl: typeof fetch
+  fetchImpl: typeof fetch,
+  sessionName = RTX_PUBLISH_SESSION_NAME
 ): Promise<void> {
   await createRtxBrowserSession(
     {
-      sessionName: RTX_PUBLISH_SESSION_NAME,
+      sessionName,
       guardrails: buildPublishSessionGuardrails(),
     },
     env,
@@ -655,13 +667,13 @@ async function ensureRtxPublishSessionRegistered(
 }
 
 /** Ensure the shared session is running, without opening or focusing a tab. */
-async function ensureRtxSessionRunning(
+export async function ensureRtxSessionRunning(
   env: EnvLike,
-  fetchImpl: typeof fetch
+  fetchImpl: typeof fetch,
+  sessionName = RTX_PUBLISH_SESSION_NAME
 ): Promise<RtxBrowserSessionEntry | undefined> {
-  await ensureRtxPublishSessionRegistered(env, fetchImpl);
+  await ensureRtxPublishSessionRegistered(env, fetchImpl, sessionName);
 
-  const sessionName = RTX_PUBLISH_SESSION_NAME;
   let entry = findRtxBrowserSession(
     await listRtxBrowserSessions(env, fetchImpl),
     sessionName
@@ -687,14 +699,50 @@ async function openRtxPlatformTab(
   platform: SocialPlatform,
   env: EnvLike,
   fetchImpl: typeof fetch,
-  url: string = PLATFORM_URLS[platform].setupUrl
+  url: string = PLATFORM_URLS[platform].setupUrl,
+  sessionName = RTX_PUBLISH_SESSION_NAME
 ): Promise<void> {
-  await ensureRtxPublishSessionRegistered(env, fetchImpl);
+  await ensureRtxPublishSessionRegistered(env, fetchImpl, sessionName);
   await startRtxBrowserSession(
-    { sessionName: RTX_PUBLISH_SESSION_NAME, url },
+    { sessionName, url },
     env,
     fetchImpl
   );
+}
+
+export function getPlatformHomeUrl(platform: SocialPlatform): string {
+  return PLATFORM_URLS[platform].homeUrl;
+}
+
+export async function withPlatformBrowserPage<T>(
+  platform: SocialPlatform,
+  sessionName: string,
+  callback: (page: Page) => Promise<T>,
+  env: EnvLike = process.env,
+  fetchImpl: typeof fetch = fetch
+): Promise<T> {
+  const entry = await ensureRtxSessionRunning(env, fetchImpl, sessionName);
+  const debugPort = resolveRtxDebugPort(entry);
+  if (!debugPort) throw new Error(`No debug port for browser session ${sessionName}`);
+
+  const browser = await chromium.connectOverCDP(`http://127.0.0.1:${debugPort}`);
+  try {
+    let page = findPlatformPage(browser, PLATFORM_URLS[platform].host);
+    if (!page) {
+      await openRtxPlatformTab(
+        platform,
+        env,
+        fetchImpl,
+        PLATFORM_URLS[platform].homeUrl,
+        sessionName
+      );
+      page = await waitForPlatformPage(browser, PLATFORM_URLS[platform].host, PLATFORM_TAB_WAIT_MS);
+    }
+    if (!page) throw new Error(`No ${platform} tab available in ${sessionName}`);
+    return await callback(page);
+  } finally {
+    await browser.close().catch(() => undefined);
+  }
 }
 
 export async function openPlatformBrowserSession(
@@ -732,13 +780,29 @@ export async function validatePlatformBrowserSession(
     const lastValidatedAt = isLoggedIn ? Math.floor(Date.now() / 1000) : null;
 
     if (isLoggedIn) {
-      ensureSessionPlatformAccount(platform, detectedHandle);
-      const account = getPlatformAccountByPlatform(platform);
+      const account = ensureSessionPlatformAccount(platform, detectedHandle);
+      const connection = ensureBrowserConnection({
+        sessionName: RTX_PUBLISH_SESSION_NAME,
+        kind: "shared",
+        source: "browser-session-validation",
+      });
+      const identity = normalizePlatformTargetIdentity(platform, detectedHandle);
+      registerPlatformTarget({
+        connectionId: connection.id,
+        platform,
+        kind: defaultTargetKind(platform),
+        name: detectedHandle ?? account.displayName,
+        handle: identity.handle,
+        externalId: identity.externalId,
+        platformAccountId: account.id,
+        capabilities: defaultTargetCapabilities(platform),
+        source: "browser-session-validation",
+        verifiedAt: lastValidatedAt,
+      });
       if (account) {
         updatePlatformAccount(account.id, {
           status: "active",
           ...(lastValidatedAt ? { lastSyncedAt: lastValidatedAt } : {}),
-          ...(detectedHandle ? { displayName: detectedHandle } : {}),
         });
       }
     }
@@ -787,6 +851,7 @@ export type PlatformConnectionPayload = {
     syncCapable: boolean;
     authType: string | null;
   } | null;
+  targets: ReturnType<typeof toPlatformTargetView>[];
 };
 
 export async function buildSocialPlatformConnectionPayload(
@@ -837,5 +902,6 @@ export async function buildSocialPlatformConnectionPayload(
           authType: account.authType,
         }
       : null,
+    targets: listPlatformTargets({ platform }).map(toPlatformTargetView),
   };
 }

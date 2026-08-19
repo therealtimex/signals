@@ -70,6 +70,10 @@ Then pass `Authorization: Bearer your-secret-token` on each request.
 | `get_publish_job` | content | Load a publish job payload + targets for the agent lane |
 | `update_publish_job` | content | Mark job/target in-flight (`publishing`) |
 | `complete_publish` | content | Record per-platform publish result; creates `content_posts` on success |
+| `list_platform_targets` | platforms | List named acting targets and browser connections |
+| `get_platform_target` | platforms | Get target identity, capabilities, connection, and lease state |
+| `prepare_platform_target` | platforms | Lease the connection, activate the target, and verify the live identity |
+| `release_platform_target` | platforms | Release a target preparation lease |
 
 Simulation run tool responses include additive fields (`populationSpec`, `error`, `workflowRunId`, `createdAt`, `updatedAt`, `transcriptsPrunedAt`) shared with the dashboard REST API (`specs/ui-4.1-rest-api.md`).
 
@@ -79,7 +83,9 @@ Simulation run tool responses include additive fields (`populationSpec`, `error`
 
 `generate_persona` requires the same embedded runtime plus the `llm.chat` permission for structured persona synthesis. Terminal agents can instead call `get_persona_evidence` and write with `upsert_persona` using their own intelligence (no `workflow_runs` row).
 
-**Publish lane** (`get_publish_job`, `update_publish_job`, `complete_publish`) coordinates CRM publish jobs with RTX terminal agents. Browser automation runs in the `signals-publish` skill — not in Signals server code. See `docs/rtx-browser-publish.md` and `.claude/skills/signals-publish/SKILL.md`.
+**Publish lane** (`get_publish_job`, `update_publish_job`, `complete_publish`) coordinates CRM publish jobs with RTX terminal agents. Each job target may snapshot `targetId`, `expectedHandle`, and `sessionName`; callbacks should return `targetId` and the preparation `leaseId`. Browser content manipulation runs in the `signals-publish` skill. Signals owns target activation and live identity verification through `prepare_platform_target`.
+
+Platform target tool errors are returned inside the successful invoke envelope as `{ error, code, details? }`. Codes include `TARGET_NOT_FOUND`, `TARGET_CAPABILITY_UNSUPPORTED`, `SESSION_LEASE_HELD`, `LEASE_LOST`, `LOGIN_REQUIRED`, and `TARGET_NOT_ACTIVE`. A shared connection is serialized for the whole operation; separate dedicated connections have independent leases.
 
 Tools that require browser/LLM for ad-hoc research (web search, scrape, etc.) are **not** exposed here — RTX terminal agents should use platform credentials and their own tools for those operations.
 

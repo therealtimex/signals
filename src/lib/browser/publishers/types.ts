@@ -6,6 +6,7 @@ export type PublishErrorCode =
   | "session_expired"
   | "captcha"
   | "upload_failed"
+  | "wrong_account"
   | "timeout"
   | "unknown";
 

@@ -71,6 +71,22 @@ if (!happyJson.success || happyJson.handle !== "@smokeuser") {
   process.exit(1);
 }
 
+// Target-aware jobs must fail closed before compose when the live account differs.
+const wrongAccount = runXPublish(
+  { text: "must not publish", expectedHandle: "@someoneelse" },
+  {},
+  ["--dry-run"]
+);
+if (wrongAccount.status === 0) {
+  console.error("wrong account should not succeed");
+  process.exit(1);
+}
+const wrongAccountJson = lastJson(wrongAccount.stdout);
+if (wrongAccountJson.success || wrongAccountJson.errorCode !== "wrong_account") {
+  console.error("unexpected wrong-account result:", wrongAccountJson);
+  process.exit(1);
+}
+
 // Thread fill failure must abort before success
 const threadFail = runXPublish(
   { text: "only", threadTexts: ["second"] },

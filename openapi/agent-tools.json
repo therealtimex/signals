@@ -2136,6 +2136,12 @@
                           },
                           "errorCode": {
                             "type": "string"
+                          },
+                          "targetId": {
+                            "type": "string"
+                          },
+                          "leaseId": {
+                            "type": "string"
                           }
                         },
                         "required": [
@@ -2169,6 +2175,12 @@
                               "linkedin"
                             ]
                           },
+                          "targetId": {
+                            "type": "string"
+                          },
+                          "leaseId": {
+                            "type": "string"
+                          },
                           "success": {
                             "type": "boolean"
                           },
@@ -2191,6 +2203,7 @@
                               "captcha",
                               "upload_failed",
                               "timeout",
+                              "wrong_account",
                               "unknown"
                             ]
                           }
@@ -2217,6 +2230,136 @@
                       "input": {
                         "type": "object",
                         "properties": {},
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "list_platform_targets"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "platform": {
+                            "type": "string",
+                            "enum": [
+                              "x",
+                              "linkedin",
+                              "facebook"
+                            ]
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "account",
+                              "profile",
+                              "page",
+                              "organization"
+                            ]
+                          },
+                          "connectionId": {
+                            "type": "string"
+                          },
+                          "includeForgotten": {
+                            "type": "boolean"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "get_platform_target"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "targetId": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "targetId"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "prepare_platform_target"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "targetId": {
+                            "type": "string"
+                          },
+                          "intent": {
+                            "type": "string",
+                            "enum": [
+                              "browse",
+                              "publish"
+                            ]
+                          },
+                          "leaseId": {
+                            "type": "string"
+                          },
+                          "leaseTtlSeconds": {
+                            "type": "number"
+                          },
+                          "holder": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "targetId",
+                          "intent"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "release_platform_target"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "leaseId": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "leaseId"
+                        ],
                         "additionalProperties": false
                       }
                     },
@@ -2268,7 +2411,11 @@
                       "get_publish_job",
                       "update_publish_job",
                       "complete_publish",
-                      "list_mail_accounts"
+                      "list_mail_accounts",
+                      "list_platform_targets",
+                      "get_platform_target",
+                      "prepare_platform_target",
+                      "release_platform_target"
                     ],
                     "description": "Agent tool name from the manifest"
                   },
@@ -2415,6 +2562,6 @@
   ],
   "x-signals-agent-tools": {
     "manifestVersion": "1",
-    "toolCount": 39
+    "toolCount": 43
   }
 }

@@ -18,9 +18,10 @@ Publish content from **Signals** publish jobs through a named RealTimeX Browser 
 
 | Rule | Value |
 |------|-------|
-| Session name | `signals-publish` (canonical) |
+| Default session | `signals-publish` (canonical shared connection) |
 | Lifecycle | **Stop** between runs — never delete the profile |
 | Login | User signs in via RealTimeX Browser when `session_expired` |
+| Concurrency | Hold the target lease for the full prepare → act → callback operation |
 
 Resolve/create/start the session with `realtimex-pp-cli` or the `agent-browser` skill before running publish scripts.
 
@@ -30,9 +31,10 @@ Resolve/create/start the session with `realtimex-pp-cli` or the `agent-browser` 
 
 1. Load `realtimex-signals` and call `get_publish_job` with the job id from the initial message.
 2. For each pending X target:
-   - Call `update_publish_job` with `status: "publishing"` and `platform: "x"`.
-   - Ensure `signals-publish` browser session is running; note the CDP port.
-   - Build `job.json` from the payload (`text`, optional `threadTexts`, resolved `mediaPaths`).
+   - Run `signals-pp-cli targets prepare <targetId> --intent publish`. Use the returned `sessionName`, `expectedHandle`, and `lease.leaseId`. If the job is legacy and has no `targetId`, use its platform/default target fallback.
+   - Call `update_publish_job` with `status: "publishing"`, `targetId`, and `leaseId`.
+   - Resolve the returned browser session and note its CDP port.
+   - Build `job.json` from the payload (`text`, optional `threadTexts`, resolved `mediaPaths`) and include the returned `expectedHandle`.
    - Run:
 
 ```bash
@@ -43,8 +45,9 @@ node .claude/skills/signals-publish/scripts/x-publish.cjs \
 
 For QA without sending a public post, add `--dry-run` (fills compose and thread fields, skips Tweet).
 
-3. Parse the **last stdout line** as JSON. On success call `complete_publish` with `handle`, `platformPostId`, `platformUrl`. On failure pass `error` + `errorCode` (`session_expired`, `captcha`, `upload_failed`, `timeout`, `unknown`).
-4. **LinkedIn (beta):** no deterministic script in v1. Use `agent-browser` interactively or call `complete_publish` with `success: false` and a clear error if unsupported.
+3. Parse the **last stdout line** as JSON. On success call `complete_publish` with `targetId`, `leaseId`, `handle`, `platformPostId`, and `platformUrl`. On failure pass `targetId`, `leaseId`, `error` + `errorCode` (`session_expired`, `captcha`, `upload_failed`, `timeout`, `wrong_account`, `unknown`).
+4. Always run `signals-pp-cli targets release --lease <leaseId>` after the completion callback, including failures.
+5. **LinkedIn (beta):** shared connections are verify-only. Use a dedicated connection for multiple members; use `agent-browser` interactively or report a clear failure if unsupported.
 
 ## Error handling
 
@@ -54,6 +57,7 @@ For QA without sending a public post, add `--dry-run` (fills compose and thread 
 | `captcha` | Report in thread; `complete_publish` failure — do not solve |
 | `upload_failed` | Report media issue; fail target |
 | `timeout` | Retry once or fail with note |
+| `wrong_account` | Do not publish; re-run target preparation or ask the user to activate the expected account |
 
 ## Related
 

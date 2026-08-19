@@ -10,6 +10,14 @@ import {
   handleUpdatePublishJob,
 } from "@/lib/agent-tools/publish-handlers";
 import { resetCoreTables } from "@/test/db";
+import { db } from "@/lib/db/client";
+import { contentPosts } from "@/lib/db/schema";
+import {
+  ensureBrowserConnection,
+  registerPlatformTarget,
+} from "@/lib/db/queries/platform-targets";
+import { ensureSessionPlatformAccount } from "@/lib/publish/ensure-platform-account";
+import { acquireSessionLease, releaseSessionLease } from "@/lib/leases/session-lease";
 
 function seedDraftAndJob() {
   const item = createContentItem({
@@ -162,5 +170,81 @@ describe("publish agent-tool handlers", () => {
     const updated = getPublishJobById(job.id);
     expect(updated?.status).toBe("partial");
     expect(getContentItem(item.id)?.status).toBe("published");
+  });
+
+  it("matches same-platform callbacks by targetId and writes the acting target audit", async () => {
+    const { item } = seedDraftAndJob();
+    const account = ensureSessionPlatformAccount("x", "@first");
+    const connection = ensureBrowserConnection({ sessionName: "signals-publish" });
+    const first = registerPlatformTarget({
+      connectionId: connection.id,
+      platform: "x",
+      kind: "account",
+      name: "First",
+      handle: "@first",
+      platformAccountId: account.id,
+      source: "test",
+    });
+    const second = registerPlatformTarget({
+      connectionId: connection.id,
+      platform: "x",
+      kind: "account",
+      name: "Second",
+      handle: "@second",
+      platformAccountId: account.id,
+      source: "test",
+    });
+    const job = createPublishJob({
+      contentItemId: item.id,
+      payload: {
+        text: "Agent publish body",
+        mediaAssetIds: [],
+        platforms: ["x"],
+        composedAt: Math.floor(Date.now() / 1000),
+      },
+      platforms: ["x"],
+      targets: [
+        { platform: "x", targetId: first.id, expectedHandle: "@first", status: "pending" },
+        { platform: "x", targetId: second.id, expectedHandle: "@second", status: "pending" },
+      ],
+    });
+
+    await handleCompletePublish({
+      jobId: job.id,
+      platform: "x",
+      targetId: second.id,
+      success: true,
+      handle: "@second",
+      platformPostId: "targeted-2",
+    });
+
+    expect(getPublishJobById(job.id)?.targetsParsed).toMatchObject([
+      { targetId: first.id, status: "pending" },
+      { targetId: second.id, status: "published" },
+    ]);
+    expect(db.select().from(contentPosts).all()).toContainEqual(
+      expect.objectContaining({ targetId: second.id, platformPostId: "targeted-2" })
+    );
+  });
+
+  it("records completion after a stale lease and reports the fencing violation", async () => {
+    const { job } = seedDraftAndJob();
+    const connection = ensureBrowserConnection({ sessionName: "signals-publish" });
+    const lease = acquireSessionLease(connection.id, { holder: "publisher" });
+    releaseSessionLease(lease.leaseId);
+
+    const result = await handleCompletePublish({
+      jobId: job.id,
+      platform: "x",
+      leaseId: lease.leaseId,
+      success: false,
+      error: "wrong account",
+      errorCode: "wrong_account",
+    });
+    expect(result).toMatchObject({ leaseStale: true });
+    expect(getPublishJobById(job.id)?.targetsParsed[0]).toMatchObject({
+      status: "failed",
+      errorCode: "wrong_account",
+    });
   });
 });
