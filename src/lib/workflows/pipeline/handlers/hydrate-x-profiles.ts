@@ -12,6 +12,11 @@ import {
   type XUser,
 } from "@/lib/platforms/x/client";
 import { RateLimitError } from "@/lib/platforms/rate-limiter";
+import {
+  hydrateXProfilesViaAnonWeb,
+  type XAnonWebOutcome,
+  type XAnonWebTransport,
+} from "@/lib/platforms/x/anon-web-transport";
 import type {
   PipelineContactOutcome,
   PipelineStepContext,
@@ -25,6 +30,7 @@ export type XUserLookup = typeof getUsersByIds;
 
 type ContactState = {
   contactId: string;
+  source: "x_api" | "x_web_anon";
   updatedIdentityIds: string[];
   handles: string[];
   notFound: number;
@@ -57,7 +63,8 @@ function hasRecentMiss(data: Record<string, unknown>, now: number): boolean {
   const miss = data.profileHydrationMiss;
   if (!miss || typeof miss !== "object" || Array.isArray(miss)) return false;
   const record = miss as Record<string, unknown>;
-  return record.status === "not_found" && isRecentTimestamp(record.at, now);
+  return (record.status === "not_found" || record.status === "suspended") &&
+    isRecentTimestamp(record.at, now);
 }
 
 function isArchivePlaceholderName(
@@ -137,7 +144,12 @@ function skipAll(
   };
 }
 
-function updateIdentityFromUser(identity: ContactIdentity, user: XUser, now: number): void {
+function updateIdentityFromUser(
+  identity: ContactIdentity,
+  user: XUser,
+  now: number,
+  source: "x_api" | "x_web_anon",
+): void {
   const platformData = readPlatformData(identity.platformData);
   delete platformData.profileHydrationMiss;
   Object.assign(platformData, {
@@ -149,6 +161,7 @@ function updateIdentityFromUser(identity: ContactIdentity, user: XUser, now: num
     verified: user.verified ?? false,
     createdAt: user.created_at ?? null,
     profileHydratedAt: now,
+    profileHydratedVia: source,
   });
 
   const avatarUrl = identity.avatarUrl?.trim() || tryAvatarUrl(user.profile_image_url) || null;
@@ -180,21 +193,52 @@ function updateIdentityFromUser(identity: ContactIdentity, user: XUser, now: num
   updateIdentity(identity.id, { avatarUrl });
 }
 
-function markIdentityNotFound(identity: ContactIdentity, now: number): void {
+function markIdentityMiss(
+  identity: ContactIdentity,
+  now: number,
+  status: "not_found" | "suspended" = "not_found",
+): void {
   const platformData = readPlatformData(identity.platformData);
-  platformData.profileHydrationMiss = { at: now, status: "not_found" };
+  platformData.profileHydrationMiss = { at: now, status };
   updateIdentity(identity.id, { platformData: JSON.stringify(platformData) });
 }
 
-/** Deterministic, batched X API hydration for archive-imported numeric identities. */
+function cacheAnonHandleResolution(identity: ContactIdentity, handle: string, now: number): void {
+  const platformData = readPlatformData(identity.platformData);
+  platformData.anonHandleResolution = { handle, at: now };
+  updateIdentity(identity.id, { platformData: JSON.stringify(platformData) });
+}
+
+function readAnonHandle(identity: ContactIdentity, now: number): string | undefined {
+  const direct = identity.platformHandle?.trim().replace(/^@/, "");
+  if (direct && /^[A-Za-z0-9_]{1,15}$/.test(direct)) return direct;
+  const resolution = readPlatformData(identity.platformData).anonHandleResolution;
+  if (!resolution || typeof resolution !== "object" || Array.isArray(resolution)) return undefined;
+  const record = resolution as Record<string, unknown>;
+  return typeof record.handle === "string" && /^[A-Za-z0-9_]{1,15}$/.test(record.handle) &&
+    isRecentTimestamp(record.at, now)
+    ? record.handle
+    : undefined;
+}
+
+function optionalNumericOption(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+/** Deterministic API-first, anonymous-web-fallback hydration for numeric X identities. */
 export async function hydrateXProfiles(
   contactIds: string[],
   ctx: PipelineStepContext,
   lookup: XUserLookup = getUsersByIds,
+  webTransport: XAnonWebTransport = hydrateXProfilesViaAnonWeb,
 ): Promise<PipelineStepReport> {
   const account = getPlatformAccountByPlatform("x");
-  if (!account?.credentialsEncrypted) return skipAll(contactIds, ctx, "x_not_connected");
-  if (account.status === "needs_reauth") return skipAll(contactIds, ctx, "x_reauth_required");
+  if (account?.credentialsEncrypted && account.status === "needs_reauth") {
+    return skipAll(contactIds, ctx, "x_reauth_required");
+  }
+  if (!account?.credentialsEncrypted && ctx.options?.webFallback === false) {
+    return skipAll(contactIds, ctx, "x_not_connected");
+  }
 
   const now = nowUnix();
   const outcomes = new Map<string, PipelineContactOutcome>();
@@ -241,6 +285,7 @@ export async function hydrateXProfiles(
 
     states.set(contactId, {
       contactId,
+      source: account?.credentialsEncrypted ? "x_api" : "x_web_anon",
       updatedIdentityIds: [],
       handles: [],
       notFound: 0,
@@ -254,95 +299,159 @@ export async function hydrateXProfiles(
   }
 
   const userIds = [...identitiesByUserId.keys()];
-  for (let offset = 0; offset < userIds.length; offset += X_USER_LOOKUP_MAX_IDS) {
-    const chunk = userIds.slice(offset, offset + X_USER_LOOKUP_MAX_IDS);
+  if (!account?.credentialsEncrypted) {
+    let webOutcomes: Map<string, XAnonWebOutcome>;
     try {
-      const response = await lookup(account.id, chunk);
-      const foundIds = new Set<string>();
-      const errorIds = new Set(
-        response.errors.map(lookupErrorId).filter((id): id is string => id !== undefined),
+      webOutcomes = await webTransport(
+        userIds.map((userId) => ({
+          userId,
+          knownHandle: (identitiesByUserId.get(userId) ?? [])
+            .map((identity) => readAnonHandle(identity, now))
+            .find((handle): handle is string => !!handle),
+        })),
+        {
+          fetchImpl: ctx.fetchImpl,
+          env: ctx.env,
+          minRequestGapMs: optionalNumericOption(ctx.options?.minRequestGapMs),
+          maxBrowserResolutions: optionalNumericOption(ctx.options?.maxBrowserResolutions),
+        },
       );
+    } catch (error) {
+      webOutcomes = new Map(userIds.map((userId) => [userId, {
+        status: "skip" as const,
+        reason: "x_web_unavailable",
+        detail: { message: error instanceof Error ? error.message : "Anonymous X hydration failed" },
+      }]));
+    }
 
-      for (const user of response.users) {
-        const identities = identitiesByUserId.get(user.id) ?? [];
-        if (identities.length === 0 || foundIds.has(user.id)) continue;
-        foundIds.add(user.id);
-        for (const identity of identities) {
-          const state = states.get(identity.contactId);
-          if (!state || state.failure) continue;
-          try {
-            updateIdentityFromUser(identity, user, now);
+    for (const userId of userIds) {
+      const webOutcome = webOutcomes.get(userId);
+      for (const identity of identitiesByUserId.get(userId) ?? []) {
+        const state = states.get(identity.contactId);
+        if (!state || state.failure) continue;
+        if (!webOutcome) {
+          state.failure = `Anonymous X hydration returned no result for ${userId}`;
+          continue;
+        }
+        try {
+          if (webOutcome.status === "hydrated") {
+            updateIdentityFromUser(identity, webOutcome.user, now, "x_web_anon");
             state.updatedIdentityIds.push(identity.id);
-            state.handles.push(`@${user.username}`);
+            state.handles.push(`@${webOutcome.user.username}`);
 
             const contact = getContactById(identity.contactId);
             const platformData = readPlatformData(identity.platformData);
-            if (contact && isArchivePlaceholderName(contact.name, user.id, platformData)) {
-              updateContact(contact.id, splitName(user.name));
+            if (contact && isArchivePlaceholderName(contact.name, userId, platformData)) {
+              updateContact(contact.id, splitName(webOutcome.user.name));
               state.contactUpdated = true;
             }
-          } catch (error) {
-            state.failure = error instanceof Error ? error.message : "Failed to update X profile";
-          }
-        }
-      }
-
-      for (const userId of errorIds) {
-        if (foundIds.has(userId)) continue;
-        for (const identity of identitiesByUserId.get(userId) ?? []) {
-          const state = states.get(identity.contactId);
-          if (!state || state.failure) continue;
-          try {
-            markIdentityNotFound(identity, now);
+          } else if (webOutcome.status === "miss") {
+            markIdentityMiss(identity, now, webOutcome.missStatus);
             state.notFound++;
-          } catch (error) {
-            state.failure = error instanceof Error ? error.message : "Failed to cache X profile miss";
+            if (webOutcome.missStatus === "suspended") state.skipReason = "x_suspended";
+          } else {
+            if (webOutcome.resolvedHandle) {
+              cacheAnonHandleResolution(identity, webOutcome.resolvedHandle, now);
+            }
+            state.skipReason = webOutcome.reason;
+            state.skipDetail = webOutcome.detail;
+          }
+        } catch (error) {
+          state.failure = error instanceof Error ? error.message : "Failed to update X profile";
+        }
+      }
+    }
+  } else {
+    for (let offset = 0; offset < userIds.length; offset += X_USER_LOOKUP_MAX_IDS) {
+      const chunk = userIds.slice(offset, offset + X_USER_LOOKUP_MAX_IDS);
+      try {
+        const response = await lookup(account.id, chunk);
+        const foundIds = new Set<string>();
+        const errorIds = new Set(
+          response.errors.map(lookupErrorId).filter((id): id is string => id !== undefined),
+        );
+
+        for (const user of response.users) {
+          const identities = identitiesByUserId.get(user.id) ?? [];
+          if (identities.length === 0 || foundIds.has(user.id)) continue;
+          foundIds.add(user.id);
+          for (const identity of identities) {
+            const state = states.get(identity.contactId);
+            if (!state || state.failure) continue;
+            try {
+              updateIdentityFromUser(identity, user, now, "x_api");
+              state.updatedIdentityIds.push(identity.id);
+              state.handles.push(`@${user.username}`);
+
+              const contact = getContactById(identity.contactId);
+              const platformData = readPlatformData(identity.platformData);
+              if (contact && isArchivePlaceholderName(contact.name, user.id, platformData)) {
+                updateContact(contact.id, splitName(user.name));
+                state.contactUpdated = true;
+              }
+            } catch (error) {
+              state.failure = error instanceof Error ? error.message : "Failed to update X profile";
+            }
           }
         }
-      }
 
-      for (const userId of chunk) {
-        if (foundIds.has(userId) || errorIds.has(userId)) continue;
-        for (const identity of identitiesByUserId.get(userId) ?? []) {
-          const state = states.get(identity.contactId);
-          if (state && !state.failure) state.failure = `X lookup returned no result for ${userId}`;
+        for (const userId of errorIds) {
+          if (foundIds.has(userId)) continue;
+          for (const identity of identitiesByUserId.get(userId) ?? []) {
+            const state = states.get(identity.contactId);
+            if (!state || state.failure) continue;
+            try {
+              markIdentityMiss(identity, now);
+              state.notFound++;
+            } catch (error) {
+              state.failure = error instanceof Error ? error.message : "Failed to cache X profile miss";
+            }
+          }
         }
-      }
-    } catch (error) {
-      if (error instanceof RateLimitError || error instanceof TierRestrictedError) {
+
+        for (const userId of chunk) {
+          if (foundIds.has(userId) || errorIds.has(userId)) continue;
+          for (const identity of identitiesByUserId.get(userId) ?? []) {
+            const state = states.get(identity.contactId);
+            if (state && !state.failure) state.failure = `X lookup returned no result for ${userId}`;
+          }
+        }
+      } catch (error) {
+        if (error instanceof RateLimitError || error instanceof TierRestrictedError) {
+          const currentAccount = getPlatformAccountByPlatform("x");
+          const reason = currentAccount?.status === "needs_reauth"
+            ? "x_reauth_required"
+            : error instanceof RateLimitError
+              ? "x_rate_limited"
+              : "x_access_restricted";
+          for (const state of states.values()) {
+            if (state.updatedIdentityIds.length > 0 || state.notFound > 0 || state.failure) continue;
+            state.skipReason = reason;
+            if (error instanceof RateLimitError) {
+              state.skipDetail = { retryAfter: Math.max(0, error.retryAfter) };
+            }
+          }
+          break;
+        }
+
         const currentAccount = getPlatformAccountByPlatform("x");
-        const reason = currentAccount?.status === "needs_reauth"
-          ? "x_reauth_required"
-          : error instanceof RateLimitError
-            ? "x_rate_limited"
-            : "x_access_restricted";
-        for (const state of states.values()) {
-          if (state.updatedIdentityIds.length > 0 || state.notFound > 0 || state.failure) continue;
-          state.skipReason = reason;
-          if (error instanceof RateLimitError) {
-            state.skipDetail = { retryAfter: Math.max(0, error.retryAfter) };
+        if (currentAccount?.status === "needs_reauth") {
+          for (const state of states.values()) {
+            if (state.updatedIdentityIds.length === 0 && state.notFound === 0 && !state.failure) {
+              state.skipReason = "x_reauth_required";
+            }
           }
+          break;
         }
-        break;
-      }
 
-      const currentAccount = getPlatformAccountByPlatform("x");
-      if (currentAccount?.status === "needs_reauth") {
-        for (const state of states.values()) {
-          if (state.updatedIdentityIds.length === 0 && state.notFound === 0 && !state.failure) {
-            state.skipReason = "x_reauth_required";
-          }
+        const message = error instanceof Error ? error.message : "X profile lookup failed";
+        const chunkContacts = new Set(
+          chunk.flatMap((userId) => (identitiesByUserId.get(userId) ?? []).map((identity) => identity.contactId)),
+        );
+        for (const contactId of chunkContacts) {
+          const state = states.get(contactId);
+          if (state) state.failure = message;
         }
-        break;
-      }
-
-      const message = error instanceof Error ? error.message : "X profile lookup failed";
-      const chunkContacts = new Set(
-        chunk.flatMap((userId) => (identitiesByUserId.get(userId) ?? []).map((identity) => identity.contactId)),
-      );
-      for (const contactId of chunkContacts) {
-        const state = states.get(contactId);
-        if (state) state.failure = message;
       }
     }
   }
@@ -362,7 +471,7 @@ export async function hydrateXProfiles(
         contactId: state.contactId,
         status: "updated",
         detail: {
-          source: "x_api",
+          source: state.source,
           identityIds: state.updatedIdentityIds,
           handle: state.handles[0],
         },
@@ -372,13 +481,16 @@ export async function hydrateXProfiles(
         contactId: state.contactId,
         status: "skipped",
         reason: state.skipReason,
-        detail: state.skipDetail,
+        detail: state.source === "x_web_anon"
+          ? { source: "x_web_anon", ...(state.skipDetail ?? {}) }
+          : state.skipDetail,
       });
     } else if (state.notFound > 0) {
       outcomes.set(state.contactId, {
         contactId: state.contactId,
         status: "skipped",
         reason: "not_found",
+        ...(state.source === "x_web_anon" ? { detail: { source: "x_web_anon" } } : {}),
       });
     } else {
       outcomes.set(state.contactId, {

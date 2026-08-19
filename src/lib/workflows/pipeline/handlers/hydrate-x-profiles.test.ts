@@ -5,6 +5,7 @@ import { createContact, getContactById } from "@/lib/db/queries/contacts";
 import { createIdentity, getIdentityById, updateIdentity } from "@/lib/db/queries/identities";
 import { platformAccounts } from "@/lib/db/schema";
 import { TierRestrictedError, type XUser } from "@/lib/platforms/x/client";
+import type { XAnonWebTransport } from "@/lib/platforms/x/anon-web-transport";
 import { RateLimitError } from "@/lib/platforms/rate-limiter";
 import { enrichContactAvatars } from "@/lib/workflows/pipeline/handlers/enrich-contact-avatars";
 import {
@@ -123,6 +124,7 @@ describe("hydrateXProfiles", () => {
       profile_image_url: "https://img.example.com/42_normal.jpg",
       followersCount: 100,
       profileHydratedAt: expect.any(Number),
+      profileHydratedVia: "x_api",
     });
     const avatarReport = await enrichContactAvatars(
       [contact.id],
@@ -207,18 +209,110 @@ describe("hydrateXProfiles", () => {
     expect(second.outcomes.map((outcome) => outcome.reason)).toEqual(["fresh", "not_found_cached"]);
   });
 
-  it("skips without lookup or markers when X is disconnected or needs reauth", async () => {
+  it("uses anonymous web hydration when OAuth credentials are absent", async () => {
     const disconnected = seedArchiveContact("9");
     const lookup = vi.fn<XUserLookup>();
-    const noAccount = await hydrateXProfiles([disconnected.contact.id], ctx, lookup);
-    expect(noAccount.outcomes[0]?.reason).toBe("x_not_connected");
+    const webTransport = vi.fn<XAnonWebTransport>(async () => new Map([
+      ["9", { status: "hydrated", user: xUser("9"), resolvedHandle: "person9" }],
+    ]));
+
+    const report = await hydrateXProfiles([disconnected.contact.id], ctx, lookup, webTransport);
+    expect(report.outcomes[0]).toEqual({
+      contactId: disconnected.contact.id,
+      status: "updated",
+      detail: { source: "x_web_anon", identityIds: [disconnected.identity.id], handle: "@person9" },
+    });
     expect(lookup).not.toHaveBeenCalled();
-    expect(JSON.parse(getIdentityById(disconnected.identity.id)?.platformData ?? "{}")).not.toHaveProperty("profileHydrationMiss");
+    expect(webTransport).toHaveBeenCalledWith(
+      [{ userId: "9", knownHandle: undefined }],
+      expect.objectContaining({ fetchImpl: ctx.fetchImpl, env: ctx.env }),
+    );
+    expect(JSON.parse(getIdentityById(disconnected.identity.id)?.platformData ?? "{}")).toMatchObject({
+      profileHydratedVia: "x_web_anon",
+    });
+    const avatarReport = await enrichContactAvatars(
+      [disconnected.contact.id],
+      { ...ctx, stepId: "avatar" },
+    );
+    expect(avatarReport.outcomes[0]).toMatchObject({ status: "skipped", reason: "avatar_present" });
+  });
+
+  it("prefers the official API when credentials exist and allows the web fallback to be disabled", async () => {
+    const credentialed = seedArchiveContact("8");
+    seedAccount();
+    const lookup = vi.fn<XUserLookup>(async () => ({ users: [xUser("8")], errors: [] }));
+    const webTransport = vi.fn<XAnonWebTransport>();
+    await hydrateXProfiles([credentialed.contact.id], ctx, lookup, webTransport);
+    expect(lookup).toHaveBeenCalledOnce();
+    expect(webTransport).not.toHaveBeenCalled();
+
+    resetCoreTables();
+    db.delete(platformAccounts).run();
+    const disabled = seedArchiveContact("12");
+    const disabledReport = await hydrateXProfiles(
+      [disabled.contact.id],
+      { ...ctx, options: { webFallback: false } },
+      lookup,
+      webTransport,
+    );
+    expect(disabledReport.outcomes[0]?.reason).toBe("x_not_connected");
+    expect(webTransport).not.toHaveBeenCalled();
+  });
+
+  it("keeps credentialed reauth failures on the official API path", async () => {
+    const disconnected = seedArchiveContact("9");
+    const lookup = vi.fn<XUserLookup>();
+    const webTransport = vi.fn<XAnonWebTransport>();
 
     seedAccount({ status: "needs_reauth" });
-    const reauth = await hydrateXProfiles([disconnected.contact.id], ctx, lookup);
+    const reauth = await hydrateXProfiles([disconnected.contact.id], ctx, lookup, webTransport);
     expect(reauth.outcomes[0]?.reason).toBe("x_reauth_required");
     expect(lookup).not.toHaveBeenCalled();
+    expect(webTransport).not.toHaveBeenCalled();
+  });
+
+  it("caches suspended web misses and browser-resolved handles only on retryable skips", async () => {
+    const suspended = seedArchiveContact("10");
+    const retryable = seedArchiveContact("11");
+    const firstTransport = vi.fn<XAnonWebTransport>(async () => new Map([
+      ["10", { status: "miss", missStatus: "suspended", resolvedHandle: "suspended_user" }],
+      ["11", {
+        status: "skip",
+        reason: "x_web_parse_failed",
+        resolvedHandle: "resolved_user",
+      }],
+    ]));
+    const first = await hydrateXProfiles(
+      [suspended.contact.id, retryable.contact.id],
+      ctx,
+      vi.fn<XUserLookup>(),
+      firstTransport,
+    );
+    expect(first.outcomes).toMatchObject([
+      { status: "skipped", reason: "x_suspended", detail: { source: "x_web_anon" } },
+      { status: "skipped", reason: "x_web_parse_failed", detail: { source: "x_web_anon" } },
+    ]);
+    expect(JSON.parse(getIdentityById(suspended.identity.id)?.platformData ?? "{}")).toMatchObject({
+      profileHydrationMiss: { status: "suspended", at: expect.any(Number) },
+    });
+    expect(JSON.parse(getIdentityById(retryable.identity.id)?.platformData ?? "{}")).toMatchObject({
+      anonHandleResolution: { handle: "resolved_user", at: expect.any(Number) },
+    });
+
+    const secondTransport = vi.fn<XAnonWebTransport>(async () => new Map([
+      ["11", { status: "skip", reason: "x_web_deferred" }],
+    ]));
+    const second = await hydrateXProfiles(
+      [suspended.contact.id, retryable.contact.id],
+      ctx,
+      vi.fn<XUserLookup>(),
+      secondTransport,
+    );
+    expect(second.outcomes[0]?.reason).toBe("not_found_cached");
+    expect(secondTransport).toHaveBeenCalledWith(
+      [{ userId: "11", knownHandle: "resolved_user" }],
+      expect.any(Object),
+    );
   });
 
   it.each([

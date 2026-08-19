@@ -249,7 +249,8 @@ describe("runPipelineTemplate", () => {
     expect(combined).not.toContain("Secret Name");
     expect(combined).not.toContain("secret@example.com");
     expect(combined).toContain("Contact profile pipeline");
-    expect(combined).toContain("Connect X to enable profile hydration");
+    expect(combined).toContain("no_x_identity 1");
+    expect(combined).not.toContain("Connect X to enable profile hydration");
     expect(combined).toContain(started.workflowRunId);
   });
 

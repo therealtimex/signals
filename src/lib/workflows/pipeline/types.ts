@@ -51,6 +51,7 @@ export type PipelineStepContext = {
   personaStale: boolean;
   fetchImpl: typeof fetch;
   env: EnvLike;
+  options?: Record<string, unknown>;
   appendThreadMessage: (markdown: string) => Promise<void>;
   /** Records a per-contact pipeline step immediately (for live runs and real timing). */
   recordContactOutcome?: (
