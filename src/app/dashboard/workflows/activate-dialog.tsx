@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Dialog,
   DialogContent,
@@ -15,6 +15,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { Loader2, Play } from "lucide-react";
 import Link from "next/link";
+import {
+  PROFILE_PIPELINE_DEFAULT_BATCH,
+  PROFILE_PIPELINE_MAX_BATCH,
+  clampPipelineBatchSize,
+  readRunLimitFromTemplateConfig,
+} from "@/app/dashboard/workflows/activate-dialog.utils";
 
 interface Template {
   id: string;
@@ -56,42 +62,73 @@ export function ActivateDialog({ template, open, onClose }: ActivateDialogProps)
   const [workflowRunId, setWorkflowRunId] = useState<string | null>(null);
   const [backlog, setBacklog] = useState<PipelineBacklogPreview | null>(null);
   const [backlogLoading, setBacklogLoading] = useState(false);
+  const [pipelineBatchSize, setPipelineBatchSize] = useState(
+    PROFILE_PIPELINE_DEFAULT_BATCH,
+  );
+  const pipelineBatchSizeTouched = useRef(false);
 
   const [systemPrompt, setSystemPrompt] = useState(template.systemPrompt ?? "");
   const templateConfig = parseTemplateConfig(template.config);
   const isPipeline = isPipelineTemplateConfig(template.config);
 
-  const [maxResults, setMaxResults] = useState(String(templateConfig.maxResults ?? 20));
-  const [maxContacts, setMaxContacts] = useState(String(templateConfig.maxContacts ?? 10));
-  const [maxEnrichmentScore, setMaxEnrichmentScore] = useState(
-    String(templateConfig.maxEnrichmentScore ?? 50),
-  );
-  const [companyName, setCompanyName] = useState(String(templateConfig.companyName ?? ""));
-  const [inactivityDays, setInactivityDays] = useState(
-    String(templateConfig.inactivityDays ?? 365),
-  );
-  const [topics, setTopics] = useState((templateConfig.topics as string[] | undefined ?? []).join(", "));
-  const [tone, setTone] = useState(String(templateConfig.tone ?? "professional"));
-  const [maxEngagements, setMaxEngagements] = useState(
-    String(templateConfig.maxEngagements ?? templateConfig.maxReplies ?? 10),
-  );
+  const initialLimits = readRunLimitFromTemplateConfig(templateConfig);
+  const [maxResults, setMaxResults] = useState(initialLimits.maxResults);
+  const [maxContacts, setMaxContacts] = useState(initialLimits.maxContacts);
+  const [maxEnrichmentScore, setMaxEnrichmentScore] = useState(initialLimits.maxEnrichmentScore);
+  const [companyName, setCompanyName] = useState(initialLimits.companyName);
+  const [inactivityDays, setInactivityDays] = useState(initialLimits.inactivityDays);
+  const [topics, setTopics] = useState(initialLimits.topics);
+  const [tone, setTone] = useState(initialLimits.tone);
+  const [maxEngagements, setMaxEngagements] = useState(initialLimits.maxEngagements);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const limits = readRunLimitFromTemplateConfig(
+      parseTemplateConfig(template.config),
+    );
+    setMaxResults(limits.maxResults);
+    setMaxContacts(limits.maxContacts);
+    setMaxEnrichmentScore(limits.maxEnrichmentScore);
+    setCompanyName(limits.companyName);
+    setInactivityDays(limits.inactivityDays);
+    setTopics(limits.topics);
+    setTone(limits.tone);
+    setMaxEngagements(limits.maxEngagements);
+    setSystemPrompt(template.systemPrompt ?? "");
+  }, [open, template.id, template.config, template.systemPrompt, template.templateType]);
 
   useEffect(() => {
     if (!open || !isPipeline) {
       setBacklog(null);
+      setPipelineBatchSize(PROFILE_PIPELINE_DEFAULT_BATCH);
+      pipelineBatchSizeTouched.current = false;
       return;
     }
 
+    const controller = new AbortController();
     setBacklogLoading(true);
-    fetch(`/api/workflows/templates/${template.id}/backlog`)
+    fetch(`/api/workflows/templates/${template.id}/backlog`, {
+      signal: controller.signal,
+    })
       .then((r) => r.json())
       .then((data: PipelineBacklogPreview & { error?: string }) => {
         if (typeof data.backlogTotal === "number" && typeof data.batchSize === "number") {
+          if (!pipelineBatchSizeTouched.current) {
+            setPipelineBatchSize(
+              clampPipelineBatchSize(data.batchSize, data.backlogTotal),
+            );
+          }
           setBacklog({ backlogTotal: data.backlogTotal, batchSize: data.batchSize });
         }
       })
-      .catch(() => setBacklog(null))
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        setBacklog(null);
+      })
       .finally(() => setBacklogLoading(false));
+
+    return () => controller.abort();
   }, [open, isPipeline, template.id]);
 
   async function handleRun() {
@@ -103,7 +140,10 @@ export function ActivateDialog({ template, open, onClose }: ActivateDialogProps)
     try {
       const config: Record<string, unknown> = {};
 
-      if (!isPipeline) {
+      if (isPipeline) {
+        const backlogTotal = backlog?.backlogTotal ?? PROFILE_PIPELINE_MAX_BATCH;
+        config.batchSize = clampPipelineBatchSize(pipelineBatchSize, backlogTotal);
+      } else {
         if (template.templateType === "prospecting") {
           config.maxResults = parseInt(maxResults, 10) || 20;
         }
@@ -169,7 +209,23 @@ export function ActivateDialog({ template, open, onClose }: ActivateDialogProps)
   }
 
   const runLaunched = Boolean(threadPath || workflowRunId);
-  const pipelineRunDisabled = isPipeline && backlog != null && backlog.backlogTotal === 0;
+  const pipelineRunDisabled =
+    isPipeline &&
+    (backlogLoading || backlog == null || backlog.backlogTotal === 0);
+  const pipelineBatchMax = backlog
+    ? Math.min(PROFILE_PIPELINE_MAX_BATCH, Math.max(1, backlog.backlogTotal))
+    : PROFILE_PIPELINE_MAX_BATCH;
+
+  function handlePipelineBatchSizeChange(nextValue: number) {
+    pipelineBatchSizeTouched.current = true;
+    if (backlog) {
+      setPipelineBatchSize(clampPipelineBatchSize(nextValue, backlog.backlogTotal));
+      return;
+    }
+    setPipelineBatchSize(
+      Math.min(Math.max(1, Math.floor(nextValue)), PROFILE_PIPELINE_MAX_BATCH),
+    );
+  }
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
@@ -188,10 +244,37 @@ export function ActivateDialog({ template, open, onClose }: ActivateDialogProps)
                 pipelineRunDisabled ? (
                   <span>All contacts are up to date</span>
                 ) : (
-                  <span>
-                    <strong>{backlog.backlogTotal}</strong> contacts need profile work · this run
-                    will process up to <strong>{backlog.batchSize}</strong> (weakest scores first)
-                  </span>
+                  <div className="space-y-3">
+                    <p>
+                      <strong>{backlog.backlogTotal}</strong> contacts need profile work
+                      · weakest scores first
+                    </p>
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <Label htmlFor="pipeline-batch-size" className="text-xs">
+                          Contacts this run
+                        </Label>
+                        <span className="text-xs font-medium tabular-nums">
+                          {pipelineBatchSize}
+                        </span>
+                      </div>
+                      <input
+                        id="pipeline-batch-size"
+                        type="range"
+                        min={1}
+                        max={pipelineBatchMax}
+                        step={1}
+                        value={pipelineBatchSize}
+                        onChange={(e) =>
+                          handlePipelineBatchSizeChange(Number(e.target.value))
+                        }
+                        className="h-2 w-full cursor-pointer accent-primary"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Up to {pipelineBatchMax} per run
+                      </p>
+                    </div>
+                  </div>
                 )
               ) : (
                 <span className="text-muted-foreground">Could not load backlog preview</span>

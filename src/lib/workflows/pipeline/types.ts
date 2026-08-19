@@ -1,6 +1,11 @@
 import type { EnvLike } from "@/lib/rtx/env";
 import type { ProfilePipelineFilters } from "@/lib/db/queries/profile-pipeline-backlog";
 
+/** Default contacts per manual pipeline run (template config may override). */
+export const PROFILE_PIPELINE_DEFAULT_BATCH = 20;
+/** Hard cap enforced by planner and run input validation. */
+export const PROFILE_PIPELINE_MAX_BATCH = 50;
+
 export type PipelineExecutor = "code" | "llm" | "agent";
 
 export type PipelineStepDecl = {
