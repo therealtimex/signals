@@ -1,7 +1,7 @@
 # Contact Profile Pipeline Workflow (Thread-Attached Pipelines)
 
 **Status:** Approved (System Design, 2026-08-18) — Dev implements exactly this surface.
-**Issue:** [#172](https://github.com/therealtimex/signals/issues/172) · **Related:** [#62](https://github.com/therealtimex/signals/issues/62) persona epic · [#7](https://github.com/therealtimex/signals/issues/7) automation migration
+**Issue:** [#172](https://github.com/therealtimex/signals/issues/172) · **X hydration extension:** [#183](https://github.com/therealtimex/signals/issues/183) · **Related:** [#62](https://github.com/therealtimex/signals/issues/62) persona epic · [#7](https://github.com/therealtimex/signals/issues/7) automation migration
 **Base:** `main` @ `0af7f58`
 **Parents:** [`persona-generation-workflow.md`](./persona-generation-workflow.md) (§4 synthesis, §7.3 boundary, §8 refresh — consumed as shipped, **not** redesigned here), `src/lib/db/contact-profile-embed-sweep.ts` (batch + `remaining` + re-enqueue precedent), `src/lib/agents/run-template-via-rtx.ts` (thread provisioning + run-config RTX refs contract).
 
@@ -15,6 +15,7 @@
 | Thread-attached run lifecycle, `appendRtxThreadMessage` | §3 | `ensureRtxWorkspace`, `createRtxPublishThread`, `openRtxRuntimeLauncher`, `getRtxRefsFromRunConfig`, `POST /api/workflows/runs/[id]/open-thread` |
 | Backlog / plan / batch semantics | §4 | `contact-profile-embed-sweep.ts` shape |
 | Run config/result contract | §5 | `workflow_runs` / `workflow_steps` schema (no columns added) |
+| X profile hydration handler | §5.4 | X OAuth credentials, archive numeric user IDs, X API v2 client/rate limiter |
 | Avatar enrich handler v1 | §6 | `resolveContactAvatar`, `validateIdentityAvatarUrl`, `recalcContactEnrichment`, platform mappers, `backfillIdentityAvatars` |
 | Persona step wiring | §7 | `generatePersona`, `refreshPersonaIfStale`, all persona errors/prompting (`persona-generation-workflow.md` §3–§5 — **frozen**) |
 | Gallery + contact-detail UI contract | §8 | template gallery card layout, run detail page |
@@ -34,12 +35,13 @@ Pipelines are ordinary `workflow_templates` rows. **`templateType` stays within 
 // workflow_templates.config for the seeded "Contact profile pipeline"
 {
   "pipeline": {
-    "version": 1,
+    "version": 2,
     "planner": "contact_profile",          // §4 planner registry key
     "batchSize": 20,                        // default; request may override, hard-capped
     "filters": { "needsAvatar": true, "needsPersona": true, "personaStale": false },
     "scheduleDrain": false,                 // §9 opt-in
     "steps": [
+      { "id": "hydrate", "executor": "code", "handler": "hydrate_x_profiles" },
       { "id": "avatar",  "executor": "code", "handler": "enrich_contact_avatars" },
       { "id": "persona", "executor": "llm",  "handler": "generate_persona" }
     ]
@@ -53,7 +55,7 @@ Seeded via `seed-templates.ts` (`SEED_VERSION` bump, `isSystem: 1`, `templateTyp
 
 | Executor | Meaning | v1 handlers |
 |----------|---------|-------------|
-| `code` | Deterministic in-process handler. No LLM, no terminal agent. May make bounded, non-LLM HTTP calls (e.g. the gravatar probe). | `enrich_contact_avatars` (§6) |
+| `code` | Deterministic in-process handler. No LLM, no terminal agent. May make bounded, non-LLM HTTP calls. | `hydrate_x_profiles` (§5.4), `enrich_contact_avatars` (§6) |
 | `llm` | Structured Signals workflow calling RTX `llm.chat` — always schema-validated, always provenance-tracked on `workflow_runs` (extends the §7.3 boundary statement of the persona spec; ADR-062-1 posture unchanged). | `generate_persona` (§7) |
 | `agent` | Reserved. The existing terminal-agent brief path (`runTemplateViaRtx`) stays a *separate* execution mode for whole templates. A pipeline declaring an `agent` step fails template validation in v1 with `PIPELINE_STEP_UNSUPPORTED`. | — |
 
@@ -100,7 +102,7 @@ export type PipelineStepHandler = (
 export const PIPELINE_STEP_HANDLERS: Record<string, PipelineStepHandler>;
 ```
 
-Execution is **step-major**: step 1 runs over all selected contacts, then step 2 over all selected contacts. Rationale: avatar writes bump `enrichmentScore` before persona evidence snapshots `updatedAt` ordering for the *next* plan; the thread gets one coherent summary message per step; an `llm`-unavailable abort (§7.3) kills only the persona step, never the already-finished avatar work.
+Execution is **step-major**: X hydration runs over all selected contacts, then avatar enrichment, then persona generation. Hydration can supply the identity avatar that makes the avatar step a cheap `avatar_present` skip. The thread gets one coherent summary message per step; an `llm`-unavailable abort (§7.3) kills only the persona step, never the already-finished deterministic work.
 
 ### 2.3 Observability mapping (`workflow_runs` / `workflow_steps` — no schema change)
 
@@ -110,6 +112,7 @@ Existing enums cover everything; **no enum widening** (the persona `workflow_typ
 |--------|--------|
 | Pipeline run | `workflow_runs`: `workflowType` from `TEMPLATE_TO_WORKFLOW_TYPE[templateType]` (`"enrich"` for the seeded template), `trigger: "template"` (manual/gallery/Agent Flow) or `"scheduled"` (drain), `templateId` set |
 | Plan step | `workflow_steps`: `stepType: "decision"`, `tool: "profile_pipeline_planner"`, `output`: the §4.4 plan JSON |
+| Per-contact X hydration step | `stepType: "tool_call"`, `tool: "x_profile_hydrate"`, `contactId` set, `output`: the contact outcome |
 | Per-contact avatar step | `stepType: "tool_call"`, `tool: "avatar_enrich"`, `contactId` set, `input: { contactId }`, `output`: the contact outcome, `status`: `completed` / `skipped` / `failed` |
 | Per-contact persona step | `stepType: "tool_call"`, `tool: "generate_persona"`, `contactId` set, `output` includes `personaWorkflowRunId` when generated |
 | Step summary | `stepType: "decision"`, `tool: "profile_pipeline_step_summary"`, `output`: the step's aggregate counts |
@@ -170,11 +173,11 @@ export async function appendRtxThreadMessage(
 
 Posts a plain chat message to the thread **without** dispatching an agent. The exact moderator-SDK wire endpoint/body is confirmed against the RTX SDK during implementation; **the mapping is owned entirely inside the helper** (same posture as `rtxChat`, persona spec §4.1). Failures are non-fatal: logged into the run's `errors` array, execution continues.
 
-Exactly **3 + N messages per run** (N = step count; never per-contact — per-contact detail belongs in `workflow_steps`):
+Exactly **2 + N messages per run** (N = step count; never per-contact — per-contact detail belongs in `workflow_steps`):
 
 1. **Kickoff:** `**Contact profile pipeline** — backlog **300**, processing **20** this run (weakest scores first).`
-2. **Per step:** `**Avatar enrich** — updated **12**, gravatar verified **2**, skipped **5** (avatar_present 3, no_source 2), failed **1**.`
-3. **Final:** `Processed **20** · avatars **14** · personas **8** · **280** remaining. Run <workflowRunId> completed.`
+2. **Per step:** hydration reports `hydrated`, `not found`, other skips, and failures; avatar/persona retain their existing aggregates. Credential-wide hydration skips add an actionable connect/reconnect/retry hint.
+3. **Final:** `Processed **20** · hydrated **12** · avatars **14** · personas **8** · **280** remaining. Run <workflowRunId> completed.`
 
 ### 3.5 Degradation policy
 
@@ -273,7 +276,7 @@ export type ProfilePipelineRunPlan = {
 {
   "templateName": "Contact profile pipeline",
   "templateCategory": "enrichment",
-  "pipeline": { "planner": "contact_profile", "steps": ["avatar", "persona"] },
+  "pipeline": { "planner": "contact_profile", "steps": ["hydrate", "avatar", "persona"] },
   "backlogTotal": 300,
   "batchSize": 20,
   "selectedContactIds": ["…20 ids…"],
@@ -294,6 +297,7 @@ export type ProfilePipelineRunPlan = {
   "batchSize": 20,
   "selected": 20,
   "processed": 20,                     // contacts actually evaluated (< selected only after an abort)
+  "profilesHydrated": 12,              // contacts with at least one X identity refreshed
   "avatarsUpdated": 14,                // identity avatar writes + gravatar verifications (detail below)
   "personasGenerated": 8,
   "skipped": {                         // per-reason counts, only keys that occurred
@@ -304,6 +308,7 @@ export type ProfilePipelineRunPlan = {
   "failed": 1,                         // contacts with ≥1 failed step
   "aborted": 0,                        // contacts left unprocessed by an llm abort (§7.3)
   "avatarOutcomes": { "updated": 12, "gravatarVerified": 2 },
+  "hydrationOutcomes": { "updated": 12, "notFound": 3 },
   "cleared": 18,                       // selected contacts no longer matching backlog predicates post-run
   "remainingBacklog": 280,             // RE-QUERY after run — never backlogTotal - batchSize
   "complete": false                    // remainingBacklog === 0
@@ -318,11 +323,23 @@ export type ProfilePipelineRunPlan = {
 |---|---|
 | `totalItems` | `selected` |
 | `processedItems` | `processed` |
-| `successItems` | contacts with ≥ 1 successful mutation (avatar updated/verified **or** persona generated) |
+| `successItems` | contacts with ≥ 1 successful mutation (X profile hydrated, avatar updated/verified, **or** persona generated) |
 | `skippedItems` | contacts where every applicable step skipped |
 | `errorItems` | contacts with ≥ 1 failed step |
 | `status` | `failed` only when the run itself could not execute (planner threw, every processed contact failed, or the detached promise threw); per-contact failures with any progress → `completed` with `errors` populated |
 | `errors` | JSON array: per-contact error messages + thread-provisioning/append warnings |
+
+### 5.4 X Profile Hydration (`hydrate_x_profiles`, executor `code`)
+
+This deterministic first step resolves archive-imported X identities by stable numeric `platformUserId` using X API v2 `GET /2/users?ids=…`. IDs are deduplicated across the selected contacts and sent in chunks of at most 100. No browser or terminal agent is involved.
+
+- Only active X identities with numeric IDs and missing profile fields (or an archive-derived placeholder contact name) are candidates.
+- A successful lookup fills identity gaps for name, handle, bio, location, website, avatar, and canonical profile URL; refreshes public metrics and timestamps; deep-merges the raw X fields into `platformData`; and changes only archive-placeholder contact names. User-edited contact and identity fields are preserved.
+- `platformData.profileHydratedAt` and `platformData.profileHydrationMiss = { at, status: "not_found" }` are 30-day success/miss caches. Explicit API not-found errors create the miss marker. Transient, credential, tier, and rate-limit errors do not.
+- No X connection → `x_not_connected`; expired credentials → `x_reauth_required`; rate limit → `x_rate_limited` with `retryAfter`; unavailable API tier → `x_access_restricted`. These are skips so avatar/persona work can continue. Other request/write failures are contact-scoped failures.
+- The handler never writes `contacts.metadata.avatarEnrich`; the existing avatar step remains the sole owner of that retry contract.
+
+The X client stores batch-lookup rate limits under the stable `/users` endpoint key and preserves typed `RateLimitError` / `TierRestrictedError` behavior. Seed migration version 5 replaces pipeline structural fields (`version`, `planner`, `steps`) while preserving customized `batchSize`, `filters`, and `scheduleDrain` values.
 
 ---
 
@@ -422,7 +439,7 @@ At `backlogTotal === 0`: Run disabled, copy "All contacts are up to date". The p
 
 Run detail (and the thread's final message, §3.4) renders from `result`:
 
-> Processed **20** · avatars **14** · personas **8** · **280** remaining
+> Processed **20** · hydrated **12** · avatars **14** · personas **8** · **280** remaining
 
 plus the existing **Open thread** button (works via the unchanged open-thread route when RTX refs exist). While `status: "running"`, run detail shows the plan numbers from `config` ("processing 20 of 300…") — the async contract (§3.2) means the user usually lands here before completion.
 
@@ -480,6 +497,9 @@ Loops `runPipelineTemplate` until `complete`, errors, `cleared === 0`, or `maxBa
 | `agent` step in pipeline declaration | template validation | 400 `PIPELINE_STEP_UNSUPPORTED` |
 | Unknown handler key | template validation | 400 `PIPELINE_STEP_UNSUPPORTED` |
 | Thread provisioning / message append fails | runner | non-fatal, §3.5 |
+| X disconnected / reauth / tier / rate limit | hydration handler | actionable skip; no hydration cache marker (§5.4) |
+| X partial not-found response | hydration handler | cache only the explicit missing IDs for 30 days; hydrate successes (§5.4) |
+| Other X request/write failure | hydration handler | per-contact failure; unresolved profiles retry (§5.4) |
 | Gravatar probe network error | avatar handler | per-contact `failed`, retry next run (§6.1.5) |
 | Persona per-contact errors | persona handler | §7.2 mapping |
 | `PersonaGenerationUnavailableError` | persona handler | step abort, §7.3; no re-enqueue |
@@ -492,7 +512,7 @@ Per-contact failures never fail the run (§5.3): partial progress is progress, a
 
 ## 11. Privacy
 
-No new evidence surface: the persona step consumes the frozen §3 allowlist; the avatar handler writes only `contact_identities.avatar_url` (already public-platform data), `contacts.metadata.avatarEnrich` (metadata is deny-listed from persona evidence), and enrichment scores. Thread messages contain **aggregate counts only — never contact names, emails, or ids** (the thread lives in an RTX workspace outside Signals' scope model; `workflow_steps.contactId` keeps per-contact audit *inside* Signals). The gravatar probe sends only the md5 of an email the read path already sends to gravatar today.
+No new persona evidence surface: the persona step consumes the frozen §3 allowlist. X hydration sends only stable numeric X user IDs to the already-connected X API and stores public profile data on the matching identity; it never includes profile values in thread messages. The avatar handler writes only `contact_identities.avatar_url` (already public-platform data), `contacts.metadata.avatarEnrich` (metadata is deny-listed from persona evidence), and enrichment scores. Thread messages contain **aggregate counts only — never contact names, emails, or ids** (the thread lives in an RTX workspace outside Signals' scope model; `workflow_steps.contactId` keeps per-contact audit *inside* Signals). The gravatar probe sends only the md5 of an email the read path already sends to gravatar today.
 
 ---
 
@@ -505,11 +525,12 @@ Fixture: **700 / 300 / 20** — 700 contacts (universe), 400 fully profiled, 300
 3. **Explicit mode:** `contactIds: [one]` → `backlogTotal: 1`, plan ignores global backlog, per-step eligibility still applied, `remainingBacklog` restricted to that id; unknown id → 400.
 4. **Loop safety:** insufficient-evidence contacts absent from `needsPersona` backlog (SQL approximation); `no_source` contacts excluded for the TTL then re-admitted; a run with `cleared === 0` does not re-enqueue.
 5. **Result contract:** run config stores `backlogTotal`/`batchSize`/`selectedContactIds` at start; result stores §5.2 keys; `remainingBacklog` is a re-query (test seeds a new backlog contact mid-run and asserts it is counted — subtraction would fail this).
-6. **Avatar handler:** each §6.1 source in isolation (platform_data recovery incl. X `_400x400` upscale, legacy metadata → primary identity, gravatar 200/404/network-error via injected `fetchImpl`), each skip reason, `validateIdentityAvatarUrl` rejection path, `recalcContactEnrichment` called on update.
-7. **Persona step:** each §7.2 mapping with a stubbed `generatePersona`/`refreshPersonaIfStale`; child runs carry `parentWorkflowId`; abort leaves remaining contacts `aborted` and blocks re-enqueue; `forcePersona` ignored when `trigger:"scheduled"`.
-8. **Thread lifecycle:** RTX refs stored under the `runTemplateViaRtx` keys and readable by `getRtxRefsFromRunConfig`; open-thread works on a pipeline run; provisioning failure → thread-less completion; exactly 3+N messages with aggregate-only content (privacy scan for fixture contact names/emails in message bodies).
-9. **Drain:** `MAINTENANCE_HANDLERS` entry runs the pipeline from `payload.templateId`; job row has `templateId` column `NULL` (schedule-policy assertion `canReactivateScheduleLocally` = true); re-enqueue only under §9.2; `runUntilCaughtUp` respects `maxBatches` and no-progress stop.
-10. **Concurrency:** second non-explicit run 409s while first is `running`; explicit run allowed.
+6. **X hydration:** batch lookup caps at 100 IDs (including a 120-ID 100+20 fixture), partial successes/errors, fill-gaps-only writes, placeholder rename, archive metadata preservation, success/miss TTL caches, avatar validation, and credential/rate/tier skip mappings.
+7. **Avatar handler:** each §6.1 source in isolation (platform_data recovery incl. X `_400x400` upscale, legacy metadata → primary identity, gravatar 200/404/network-error via injected `fetchImpl`), each skip reason, `validateIdentityAvatarUrl` rejection path, `recalcContactEnrichment` called on update.
+8. **Persona step:** each §7.2 mapping with a stubbed `generatePersona`/`refreshPersonaIfStale`; child runs carry `parentWorkflowId`; abort leaves remaining contacts `aborted` and blocks re-enqueue; `forcePersona` ignored when `trigger:"scheduled"`.
+9. **Thread lifecycle:** RTX refs stored under the `runTemplateViaRtx` keys and readable by `getRtxRefsFromRunConfig`; open-thread works on a pipeline run; provisioning failure → thread-less completion; exactly 2+N messages with aggregate-only content (privacy scan for fixture contact names/emails in message bodies).
+10. **Drain:** `MAINTENANCE_HANDLERS` entry runs the pipeline from `payload.templateId`; job row has `templateId` column `NULL` (schedule-policy assertion `canReactivateScheduleLocally` = true); re-enqueue only under §9.2; `runUntilCaughtUp` respects `maxBatches` and no-progress stop.
+11. **Concurrency:** second non-explicit run 409s while first is `running`; explicit run allowed.
 
 ---
 
@@ -518,13 +539,14 @@ Fixture: **700 / 300 / 20** — 700 contacts (universe), 400 fully profiled, 300
 | Slice | Content | Files |
 |---|---|---|
 | P1 Backlog + planner | §4 predicates, count, plan, filters, explicit mode + tests (fixture builder) | `src/lib/db/queries/profile-pipeline-backlog.ts` |
-| P2 Avatar handler | §6 + `recalcContactEnrichment` wiring + tests | `src/lib/workflows/pipeline/handlers/enrich-contact-avatars.ts` |
-| P3 Pipeline runner + thread | §2 types/registry, §3 lifecycle, `appendRtxThreadMessage`, §5 contract, run-route branch, backlog route, §7 persona handler | `src/lib/workflows/pipeline/{types,run-pipeline-template}.ts`, `handlers/{index,generate-persona-step}.ts`, `src/lib/rtx/runtime-sessions.ts`, `src/app/api/workflows/templates/[id]/{run,backlog}/route.ts` |
-| P4 Gallery + contact UI | §8 preview/summary/badge, contact-detail button, seed template (`SEED_VERSION` bump) | `src/app/dashboard/workflows/template-gallery.tsx`, contact profile header, `src/lib/db/seed-templates.ts` |
-| P5 Drain + CLI | §9 job type, `MAINTENANCE_HANDLERS` entry, `runUntilCaughtUp` | `src/lib/db/profile-pipeline-drain.ts`, `src/lib/scheduler/runner.ts` |
-| P6 Integration tests | §12 items 5, 8, 9, 10 end-to-end | test files alongside |
+| P2 X hydration | §5.4 batch client, handler, seed migration, aggregation + tests | `src/lib/platforms/x/client.ts`, `src/lib/workflows/pipeline/handlers/hydrate-x-profiles.ts`, `src/lib/db/seed-templates.ts` |
+| P3 Avatar handler | §6 + `recalcContactEnrichment` wiring + tests | `src/lib/workflows/pipeline/handlers/enrich-contact-avatars.ts` |
+| P4 Pipeline runner + thread | §2 types/registry, §3 lifecycle, `appendRtxThreadMessage`, §5 contract, run-route branch, backlog route, §7 persona handler | `src/lib/workflows/pipeline/{types,run-pipeline-template}.ts`, `handlers/{index,generate-persona-step}.ts`, `src/lib/rtx/runtime-sessions.ts`, `src/app/api/workflows/templates/[id]/{run,backlog}/route.ts` |
+| P5 Gallery + contact UI | §8 preview/summary/badge, contact-detail button, seed template (`SEED_VERSION` bump) | `src/app/dashboard/workflows/template-gallery.tsx`, contact profile header, `src/lib/db/seed-templates.ts` |
+| P6 Drain + CLI | §9 job type, `MAINTENANCE_HANDLERS` entry, `runUntilCaughtUp` | `src/lib/db/profile-pipeline-drain.ts`, `src/lib/scheduler/runner.ts` |
+| P7 Integration tests | §12 items 5, 9, 10, 11 end-to-end | test files alongside |
 
-Suggested order P1 → P2 → P3 → (P4 ∥ P5) → P6; each slice lands with its unit tests, `npm run check` green.
+Suggested order P1 → P2 → P3 → P4 → (P5 ∥ P6) → P7; each slice lands with its unit tests, `npm run check` green.
 
 ---
 
@@ -537,7 +559,7 @@ Suggested order P1 → P2 → P3 → (P4 ∥ P5) → P6; each slice lands with i
 | Run result stores per-outcome counts + `remainingBacklog` | §5.2 | 5 |
 | Gallery shows backlog total and batch size before Run | §8.1 | 4 (route), UI component test in P4 |
 | Scheduled re-enqueue when `remainingBacklog > 0` (opt-in) | §9.1–9.2 | 9 |
-| Thread-attached pipeline template + avatar + persona steps | §2, §3, §6, §7 | 6, 7, 8 |
+| Thread-attached pipeline template + hydration + avatar + persona steps | §2, §3, §5.4, §6, §7 | 6, 7, 8, 9 |
 | Tests: 300/20 selects 20; cleared excluded on second plan; single-contact mode | §12 fixture | 1, 2, 3 |
 
 ---

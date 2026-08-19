@@ -51,11 +51,13 @@ const TEMPLATE_TO_WORKFLOW_TYPE: Record<string, WorkflowType> = {
 };
 
 const STEP_TOOL_BY_HANDLER: Record<string, string> = {
+  hydrate_x_profiles: "x_profile_hydrate",
   enrich_contact_avatars: "avatar_enrich",
   generate_persona: "generate_persona",
 };
 
 const STEP_LABELS: Record<string, string> = {
+  hydrate: "X profile hydrate",
   avatar: "Avatar enrich",
   persona: "Persona generate",
 };
@@ -141,7 +143,11 @@ function formatKickoffMessage(plan: ProfilePipelineRunPlan): string {
   return `**Contact profile pipeline** — backlog **${plan.backlogTotal}**, processing **${processing}** this run (weakest scores first).`;
 }
 
-function formatStepSummaryMessage(stepId: string, report: PipelineStepReport): string {
+function formatStepSummaryMessage(
+  stepId: string,
+  handler: string,
+  report: PipelineStepReport,
+): string {
   const label = STEP_LABELS[stepId] ?? stepId;
   const updated = report.outcomes.filter((o) => o.status === "updated").length;
   const verified = report.outcomes.filter((o) => o.status === "verified").length;
@@ -160,6 +166,37 @@ function formatStepSummaryMessage(stepId: string, report: PipelineStepReport): s
       ? ` (${[...skipReasons.entries()].map(([reason, count]) => `${reason} ${count}`).join(", ")})`
       : "";
 
+  if (handler === "hydrate_x_profiles") {
+    const notFound = report.outcomes.filter(
+      (outcome) => outcome.status === "skipped" && outcome.reason === "not_found",
+    ).length;
+    const otherSkipped = Math.max(0, skipped - notFound);
+    const hydrationSkipReasons = [...skipReasons.entries()].filter(
+      ([reason]) => reason !== "not_found",
+    );
+    const hydrationSkipDetail = hydrationSkipReasons.length > 0
+      ? ` (${hydrationSkipReasons.map(([reason, count]) => `${reason} ${count}`).join(", ")})`
+      : "";
+    const sharedReason = report.outcomes.length > 0 && report.outcomes.every(
+      (outcome) => outcome.status === "skipped" && outcome.reason === report.outcomes[0]?.reason,
+    )
+      ? report.outcomes[0]?.reason
+      : undefined;
+    let hint = "";
+    if (sharedReason === "x_not_connected") {
+      hint = " Connect X to enable profile hydration.";
+    } else if (sharedReason === "x_reauth_required") {
+      hint = " Reconnect X to resume profile hydration.";
+    } else if (sharedReason === "x_access_restricted") {
+      hint = " The connected X API tier does not allow user lookup.";
+    } else if (sharedReason === "x_rate_limited") {
+      const retryAfter = report.outcomes[0]?.detail?.retryAfter;
+      const minutes = typeof retryAfter === "number" ? Math.max(1, Math.ceil(retryAfter / 60)) : null;
+      hint = minutes ? ` Retry in about ${minutes}m.` : " Retry after the X rate limit resets.";
+    }
+    return `**${label}** — hydrated **${updated}**, not found **${notFound}**, skipped **${otherSkipped}**${hydrationSkipDetail}, failed **${failed}**.${hint}`;
+  }
+
   if (stepId === "persona" || report.outcomes.some((o) => o.status === "generated")) {
     return `**${label}** — generated **${generated}**, skipped **${skipped}**${skipDetail}, failed **${failed}**.`;
   }
@@ -168,24 +205,31 @@ function formatStepSummaryMessage(stepId: string, report: PipelineStepReport): s
 }
 
 function formatFinalMessage(workflowRunId: string, result: PipelineRunResult): string {
-  return `Processed **${result.processed}** · avatars **${result.avatarsUpdated}** · personas **${result.personasGenerated}** · **${result.remainingBacklog}** remaining. Run ${workflowRunId} completed.`;
+  return `Processed **${result.processed}** · hydrated **${result.profilesHydrated}** · avatars **${result.avatarsUpdated}** · personas **${result.personasGenerated}** · **${result.remainingBacklog}** remaining. Run ${workflowRunId} completed.`;
 }
 
 function aggregateRunResult(input: {
   plan: ProfilePipelineRunPlan;
   stepReports: PipelineStepReport[];
+  pipeline: PipelineConfig;
   filters: ReturnType<typeof resolveProfilePipelineFilters>;
 }): PipelineRunResult {
   const selected = input.plan.selectedContactIds.length;
   const skipped: Record<string, number> = {};
   const failedContactIds = new Set<string>();
   let avatarsUpdated = 0;
+  let profilesHydrated = 0;
   let personasGenerated = 0;
   let avatarUpdated = 0;
   let gravatarVerified = 0;
+  let hydrationNotFound = 0;
   let aborted = 0;
+  const handlerByStepId = new Map(
+    input.pipeline.steps.map((step) => [step.id, step.handler]),
+  );
 
   for (const report of input.stepReports) {
+    const handler = handlerByStepId.get(report.stepId);
     for (const outcome of report.outcomes) {
       if (outcome.status === "failed") {
         failedContactIds.add(outcome.contactId);
@@ -193,15 +237,25 @@ function aggregateRunResult(input: {
       if (outcome.status === "skipped" && outcome.reason) {
         skipped[outcome.reason] = (skipped[outcome.reason] ?? 0) + 1;
       }
-      if (outcome.status === "updated") {
+      if (handler === "hydrate_x_profiles" && outcome.status === "updated") {
+        profilesHydrated++;
+      }
+      if (
+        handler === "hydrate_x_profiles" &&
+        outcome.status === "skipped" &&
+        outcome.reason === "not_found"
+      ) {
+        hydrationNotFound++;
+      }
+      if (handler === "enrich_contact_avatars" && outcome.status === "updated") {
         avatarUpdated++;
         avatarsUpdated++;
       }
-      if (outcome.status === "verified") {
+      if (handler === "enrich_contact_avatars" && outcome.status === "verified") {
         gravatarVerified++;
         avatarsUpdated++;
       }
-      if (outcome.status === "generated") {
+      if (handler === "generate_persona" && outcome.status === "generated") {
         personasGenerated++;
       }
     }
@@ -226,12 +280,14 @@ function aggregateRunResult(input: {
     batchSize: input.plan.batchSize,
     selected,
     processed,
+    profilesHydrated,
     avatarsUpdated,
     personasGenerated,
     skipped,
     failed: failedContactIds.size,
     aborted,
     avatarOutcomes: { updated: avatarUpdated, gravatarVerified },
+    hydrationOutcomes: { updated: profilesHydrated, notFound: hydrationNotFound },
     cleared,
     remainingBacklog,
     complete: remainingBacklog === 0,
@@ -617,7 +673,7 @@ export async function executePipelineRun(input: ExecutePipelineRunInput): Promis
       durationMs: 0,
     });
 
-    await appendThreadMessage(formatStepSummaryMessage(stepDecl.id, report));
+    await appendThreadMessage(formatStepSummaryMessage(stepDecl.id, stepDecl.handler, report));
 
     const incrementalCounts = computeRunItemCounts(
       input.plan.selectedContactIds,
@@ -636,6 +692,7 @@ export async function executePipelineRun(input: ExecutePipelineRunInput): Promis
   const result = aggregateRunResult({
     plan: input.plan,
     stepReports,
+    pipeline: input.pipeline,
     filters: resolveProfilePipelineFilters(input.plan.filters),
   });
 

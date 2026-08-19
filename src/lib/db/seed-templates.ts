@@ -4,7 +4,7 @@ import { workflowTemplates } from "@/lib/db/schema";
 import { createTemplate } from "@/lib/db/queries/workflow-templates";
 
 /** Bump this when seed template prompts change to trigger updates on existing installs. */
-const SEED_VERSION = 4;
+const SEED_VERSION = 5;
 
 export const CONTACT_PROFILE_PIPELINE_TEMPLATE_NAME = "Contact profile pipeline";
 
@@ -152,19 +152,20 @@ Find email addresses for contacts that don't have one.
   {
     name: CONTACT_PROFILE_PIPELINE_TEMPLATE_NAME,
     description:
-      "Fill missing avatars and personas in bounded batches. Processes weakest enrichment scores first.",
+      "Hydrate X profiles and fill missing avatars and personas in bounded batches. Processes weakest enrichment scores first.",
     templateType: "enrichment",
-    targetPersona: "Contacts missing avatars or personas",
+    targetPersona: "X contacts missing profile data, or contacts missing avatars or personas",
     estimatedCost: 0,
     systemPrompt: "",
     config: {
       pipeline: {
-        version: 1,
+        version: 2,
         planner: "contact_profile",
         batchSize: 20,
         filters: { needsAvatar: true, needsPersona: true, personaStale: false },
         scheduleDrain: false,
         steps: [
+          { id: "hydrate", executor: "code", handler: "hydrate_x_profiles" },
           { id: "avatar", executor: "code", handler: "enrich_contact_avatars" },
           { id: "persona", executor: "llm", handler: "generate_persona" },
         ],
@@ -354,11 +355,26 @@ export function seedTemplates(): { seeded: number; updated: number; skipped: boo
       const existingVersion = (existingConfig._seedVersion as number) ?? 1;
 
       if (existingVersion < SEED_VERSION) {
-        // Update systemPrompt and bump version — preserve user config overrides
+        // Update structural pipeline fields while preserving user-tuned run controls.
         const updatedConfig = { ...existingConfig, _seedVersion: SEED_VERSION };
+        if (seed.name === CONTACT_PROFILE_PIPELINE_TEMPLATE_NAME) {
+          const existingPipeline = readObject(existingConfig.pipeline);
+          const seededPipeline = readObject(seed.config.pipeline);
+          if (existingPipeline && seededPipeline) {
+            updatedConfig.pipeline = {
+              ...existingPipeline,
+              version: seededPipeline.version,
+              planner: seededPipeline.planner,
+              steps: seededPipeline.steps,
+            };
+          }
+        }
         db.update(workflowTemplates)
           .set({
             systemPrompt: seed.systemPrompt,
+            ...(seed.name === CONTACT_PROFILE_PIPELINE_TEMPLATE_NAME
+              ? { description: seed.description }
+              : {}),
             config: JSON.stringify(updatedConfig),
           })
           .where(eq(workflowTemplates.id, existing.id))
@@ -384,4 +400,10 @@ export function seedTemplates(): { seeded: number; updated: number; skipped: boo
   }
 
   return { seeded, updated, skipped: seeded === 0 && updated === 0 };
+}
+
+function readObject(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
 }

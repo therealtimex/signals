@@ -59,12 +59,14 @@ export type PipelineRunResult = {
   batchSize: number;
   selected: number;
   processed: number;
+  profilesHydrated: number;
   avatarsUpdated: number;
   personasGenerated: number;
   skipped: Record<string, number>;
   failed: number;
   aborted: number;
   avatarOutcomes: { updated: number; gravatarVerified: number };
+  hydrationOutcomes: { updated: number; notFound: number };
   cleared: number;
   remainingBacklog: number;
   complete: boolean;

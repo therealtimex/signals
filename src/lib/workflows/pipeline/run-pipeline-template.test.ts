@@ -69,11 +69,12 @@ function seedPersonaOnlyBacklogContact(name: string) {
 }
 
 const pipelineConfig: PipelineConfig = {
-  version: 1,
+  version: 2,
   planner: "contact_profile",
   batchSize: 20,
   filters: { needsAvatar: true, needsPersona: true, personaStale: false },
   steps: [
+    { id: "hydrate", executor: "code", handler: "hydrate_x_profiles" },
     { id: "avatar", executor: "code", handler: "enrich_contact_avatars" },
     { id: "persona", executor: "llm", handler: "generate_persona" },
   ],
@@ -106,6 +107,7 @@ describe("validatePipelineConfig", () => {
 describe("runPipelineTemplate", () => {
   beforeEach(() => {
     resetCoreTables();
+    db.delete(platformAccounts).run();
     vi.restoreAllMocks();
   });
 
@@ -247,7 +249,91 @@ describe("runPipelineTemplate", () => {
     expect(combined).not.toContain("Secret Name");
     expect(combined).not.toContain("secret@example.com");
     expect(combined).toContain("Contact profile pipeline");
+    expect(combined).toContain("Connect X to enable profile hydration");
     expect(combined).toContain(started.workflowRunId);
+  });
+
+  it("keeps hydration updates separate from avatar and persona totals", async () => {
+    const contact = createContact({ name: "X user 123" });
+    createIdentity({
+      contactId: contact.id,
+      platform: "x",
+      platformUserId: "123",
+      avatarUrl: "https://example.com/avatar.jpg",
+      isActive: 1,
+    });
+    const plan = planProfilePipelineRun({ contactIds: [contact.id] });
+
+    vi.spyOn(PIPELINE_STEP_HANDLERS, "hydrate_x_profiles").mockImplementation(
+      async (ids, stepCtx) => ({
+        stepId: stepCtx.stepId,
+        outcomes: ids.map((contactId) => ({ contactId, status: "updated" as const })),
+        aborted: false,
+      }),
+    );
+    vi.spyOn(PIPELINE_STEP_HANDLERS, "enrich_contact_avatars").mockImplementation(
+      async (ids, stepCtx) => ({
+        stepId: stepCtx.stepId,
+        outcomes: ids.map((contactId) => ({
+          contactId,
+          status: "skipped" as const,
+          reason: "avatar_present",
+        })),
+        aborted: false,
+      }),
+    );
+    vi.spyOn(PIPELINE_STEP_HANDLERS, "generate_persona").mockImplementation(
+      async (ids, stepCtx) => {
+        for (const contactId of ids) {
+          upsertPersona({
+            contactId,
+            archetype: "Builder",
+            tone: "Direct",
+            summary: "Generated",
+            scope: "shared",
+          });
+        }
+        return {
+          stepId: stepCtx.stepId,
+          outcomes: ids.map((contactId) => ({ contactId, status: "generated" as const })),
+          aborted: false,
+        };
+      },
+    );
+
+    const template = createPipelineTemplate();
+    const run = createWorkflowRun({
+      templateId: template.id,
+      workflowType: "enrich",
+      status: "running",
+      trigger: "template",
+      config: "{}",
+      startedAt: Math.floor(Date.now() / 1000),
+      totalItems: 1,
+    });
+
+    await executePipelineRun({
+      workflowRunId: run.id,
+      templateId: template.id,
+      pipeline: pipelineConfig,
+      plan,
+      forcePersona: false,
+      scheduleDrain: false,
+      trigger: "template",
+      workspaceSlug: null,
+      threadSlug: null,
+      fetchImpl: fetch,
+      env: process.env,
+    });
+
+    const result = JSON.parse(getWorkflowRun(run.id)?.result ?? "{}") as Record<string, unknown>;
+    expect(result).toMatchObject({
+      profilesHydrated: 1,
+      avatarsUpdated: 0,
+      personasGenerated: 1,
+      hydrationOutcomes: { updated: 1, notFound: 0 },
+      avatarOutcomes: { updated: 0, gravatarVerified: 0 },
+    });
   });
 
   it("remainingBacklog re-queries and counts contacts entering backlog mid-run", async () => {

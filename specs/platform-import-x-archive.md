@@ -68,8 +68,10 @@ POST /api/platforms/x/import           import + recordImportRun
     idempotent.
   - No identity → thin contact via `mapXArchiveUserToContact`
     (name `X user <accountId>`, profile URL `https://x.com/i/user/<id>`)
-    plus an identity via `mapXArchiveUserToIdentity`. Enrichment (RTX
-    browser flow) can fill in real names later — out of scope here.
+    plus an identity via `mapXArchiveUserToIdentity`. When X is connected,
+    the Contact profile pipeline resolves these stable numeric IDs in batched
+    X API v2 HTTP requests before avatar/persona enrichment; it does not need
+    a browser session.
 - Run recorded with `workflowType: "import"`,
   `importSubType: "x_archive_contacts"`.
 
@@ -106,4 +108,4 @@ user-facing message. Media inside the zip is never extracted.
 
 - DMs, likes, lists, Moments, bookmarks, media extraction.
 - Replacing `POST /api/platforms/x/sync`.
-- RTX browser enrichment of thin archive-only contacts (separate flow).
+- General browser/web research enrichment beyond deterministic X profile lookup.

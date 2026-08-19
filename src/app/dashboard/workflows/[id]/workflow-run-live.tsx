@@ -158,7 +158,8 @@ export function WorkflowRunLive({
             </p>
           ) : (
             <p>
-              Processed <strong>{pipelineCtx.result.processed}</strong> · avatars{" "}
+              Processed <strong>{pipelineCtx.result.processed}</strong> · hydrated{" "}
+              <strong>{pipelineCtx.result.profilesHydrated ?? 0}</strong> · avatars{" "}
               <strong>{pipelineCtx.result.avatarsUpdated}</strong> · personas{" "}
               <strong>{pipelineCtx.result.personasGenerated}</strong> ·{" "}
               <strong>{pipelineCtx.result.remainingBacklog}</strong> remaining
