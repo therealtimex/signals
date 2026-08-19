@@ -1,8 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { nanoid } from "nanoid";
 import { createContact } from "@/lib/db/queries/contacts";
+import { createIdentity } from "@/lib/db/queries/identities";
+import { upsertPersona } from "@/lib/db/queries/personas";
+import {
+  countProfilePipelineBacklog,
+  planProfilePipelineRun,
+} from "@/lib/db/queries/profile-pipeline-backlog";
 import { createTemplate } from "@/lib/db/queries/workflow-templates";
-import { getWorkflowRun } from "@/lib/db/queries/workflows";
+import { createWorkflowRun, getWorkflowRun } from "@/lib/db/queries/workflows";
 import { getRtxRefsFromRunConfig } from "@/lib/agents/run-template-via-rtx";
+import { db } from "@/lib/db/client";
+import { contentItems, contentPosts, platformAccounts } from "@/lib/db/schema";
+import { PIPELINE_STEP_HANDLERS } from "@/lib/workflows/pipeline/handlers";
 import {
   executePipelineRun,
   runPipelineTemplate,
@@ -11,6 +21,52 @@ import { validatePipelineConfig } from "@/lib/workflows/pipeline/validate-pipeli
 import { resetCoreTables } from "@/test/db";
 
 import type { PipelineConfig } from "@/lib/workflows/pipeline/types";
+
+function seedPlatformAccount() {
+  const id = nanoid();
+  db.insert(platformAccounts)
+    .values({ id, platform: "x", displayName: "@brand", authType: "oauth" })
+    .run();
+  return id;
+}
+
+function seedPersonaOnlyBacklogContact(name: string) {
+  const contact = createContact({
+    name,
+    platform: "x",
+    platformUserId: nanoid(),
+  });
+  createIdentity({
+    contactId: contact.id,
+    platform: "x",
+    platformUserId: nanoid(),
+    platformHandle: `handle-${nanoid(6)}`,
+    isActive: 1,
+    avatarUrl: "https://example.com/avatar.jpg",
+  });
+  const now = Math.floor(Date.now() / 1000);
+  const itemId = nanoid();
+  db.insert(contentItems)
+    .values({
+      id: itemId,
+      contactId: contact.id,
+      contentType: "post",
+      title: "Post",
+      body: "Public content",
+      status: "published",
+    })
+    .run();
+  db.insert(contentPosts)
+    .values({
+      id: nanoid(),
+      contentItemId: itemId,
+      platformAccountId: seedPlatformAccount(),
+      publishedAt: now,
+      status: "published",
+    })
+    .run();
+  return contact;
+}
 
 const pipelineConfig: PipelineConfig = {
   version: 1,
@@ -175,5 +231,82 @@ describe("runPipelineTemplate", () => {
     expect(combined).not.toContain("secret@example.com");
     expect(combined).toContain("Contact profile pipeline");
     expect(combined).toContain(started.workflowRunId);
+  });
+
+  it("remainingBacklog re-queries and counts contacts entering backlog mid-run", async () => {
+    seedPersonaOnlyBacklogContact("Original A");
+    seedPersonaOnlyBacklogContact("Original B");
+
+    const plan = planProfilePipelineRun({ batchSize: 1 });
+    expect(plan.backlogTotal).toBe(2);
+    expect(plan.selectedContactIds).toHaveLength(1);
+
+    vi.spyOn(PIPELINE_STEP_HANDLERS, "enrich_contact_avatars").mockImplementation(
+      async (ids, ctx) => ({
+        stepId: ctx.stepId,
+        outcomes: ids.map((contactId) => ({
+          contactId,
+          status: "skipped" as const,
+          reason: "avatar_present",
+        })),
+        aborted: false,
+      }),
+    );
+
+    vi.spyOn(PIPELINE_STEP_HANDLERS, "generate_persona").mockImplementation(
+      async (ids, ctx) => {
+        seedPersonaOnlyBacklogContact("Mid-run newcomer");
+        for (const contactId of ids) {
+          upsertPersona({
+            contactId,
+            archetype: "Founder",
+            tone: "Direct",
+            summary: "Generated in test",
+            scope: "shared",
+          });
+        }
+        return {
+          stepId: ctx.stepId,
+          outcomes: ids.map((contactId) => ({
+            contactId,
+            status: "generated" as const,
+            detail: { personaWorkflowRunId: "child-mid-run" },
+          })),
+          aborted: false,
+        };
+      },
+    );
+
+    const template = createPipelineTemplate();
+    const run = createWorkflowRun({
+      templateId: template.id,
+      workflowType: "enrich",
+      status: "running",
+      trigger: "template",
+      config: JSON.stringify({ backlogTotal: plan.backlogTotal }),
+      startedAt: Math.floor(Date.now() / 1000),
+      totalItems: plan.selectedContactIds.length,
+    });
+
+    await executePipelineRun({
+      workflowRunId: run.id,
+      templateId: template.id,
+      pipeline: pipelineConfig,
+      plan,
+      forcePersona: false,
+      scheduleDrain: false,
+      trigger: "template",
+      workspaceSlug: null,
+      threadSlug: null,
+      fetchImpl: fetch,
+      env: process.env,
+    });
+
+    const completed = getWorkflowRun(run.id);
+    const result = JSON.parse(completed?.result ?? "{}") as { remainingBacklog?: number };
+
+    expect(result.remainingBacklog).toBe(2);
+    expect(result.remainingBacklog).toBe(countProfilePipelineBacklog());
+    expect(result.remainingBacklog).not.toBe(plan.backlogTotal - plan.selectedContactIds.length);
   });
 });

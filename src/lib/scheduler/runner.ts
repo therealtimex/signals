@@ -23,10 +23,7 @@ import {
   ensureContactProfileEmbedSweepJob,
   CONTACT_PROFILE_EMBED_SWEEP_JOB_TYPE,
 } from "@/lib/db/contact-profile-embed-sweep";
-import {
-  PROFILE_PIPELINE_DRAIN_JOB_TYPE,
-  runProfilePipelineUntilCaughtUp,
-} from "@/lib/db/profile-pipeline-drain";
+import { PROFILE_PIPELINE_DRAIN_JOB_TYPE } from "@/lib/db/profile-pipeline-drain";
 import { runPipelineTemplate } from "@/lib/workflows/pipeline/run-pipeline-template";
 import type { WorkflowType } from "@/lib/workflows/types";
 

@@ -1,14 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { createTemplate } from "@/lib/db/queries/workflow-templates";
-import { getWorkflowRun } from "@/lib/db/queries/workflows";
+import { createWorkflowRun, getWorkflowRun } from "@/lib/db/queries/workflows";
 import {
   buildProfilePipelineFixture,
 } from "@/lib/db/queries/profile-pipeline-backlog.test";
 import { planProfilePipelineRun } from "@/lib/db/queries/profile-pipeline-backlog";
 import { db } from "@/lib/db/client";
-import { scheduledJobs, workflowRuns } from "@/lib/db/schema";
+import { contactIdentities, scheduledJobs, workflowRuns } from "@/lib/db/schema";
 import * as drainModule from "@/lib/db/profile-pipeline-drain";
+import { PIPELINE_STEP_HANDLERS } from "@/lib/workflows/pipeline/handlers";
 import {
   ensureProfilePipelineDrainJob,
   getPendingProfilePipelineDrainJobId,
@@ -88,9 +89,18 @@ describe("profile pipeline drain", () => {
     buildProfilePipelineFixture();
     const template = createPipelineTemplate(true);
     const plan = planProfilePipelineRun({ batchSize: 5 });
+    const run = createWorkflowRun({
+      templateId: template.id,
+      workflowType: "enrich",
+      status: "running",
+      trigger: "template",
+      config: "{}",
+      startedAt: Math.floor(Date.now() / 1000),
+      totalItems: plan.selectedContactIds.length,
+    });
 
     await executePipelineRun({
-      workflowRunId: "run-no-drain",
+      workflowRunId: run.id,
       templateId: template.id,
       pipeline: pipelineConfig,
       plan,
@@ -106,15 +116,54 @@ describe("profile pipeline drain", () => {
     expect(ensureSpy).not.toHaveBeenCalled();
   });
 
-  it("schedules drain only when remaining backlog, no errors, and cleared > 0", async () => {
-    vi.spyOn(await import("@/lib/rtx/env"), "isRtxEmbedded").mockReturnValue(false);
+  it("enqueues drain when a run clears contacts and backlog remains", async () => {
     const ensureSpy = vi.spyOn(drainModule, "ensureProfilePipelineDrainJob");
     buildProfilePipelineFixture();
     const template = createPipelineTemplate(true);
     const plan = planProfilePipelineRun({ batchSize: 5 });
 
+    vi.spyOn(PIPELINE_STEP_HANDLERS, "enrich_contact_avatars").mockImplementation(
+      async (ids, ctx) => {
+        const now = Math.floor(Date.now() / 1000);
+        const outcomes = ids.map((contactId) => {
+          db.update(contactIdentities)
+            .set({ avatarUrl: "https://example.com/fixed.jpg", updatedAt: now })
+            .where(eq(contactIdentities.contactId, contactId))
+            .run();
+          return {
+            contactId,
+            status: "updated" as const,
+            detail: { source: "platform_data" },
+          };
+        });
+        return { stepId: ctx.stepId, outcomes, aborted: false };
+      },
+    );
+
+    vi.spyOn(PIPELINE_STEP_HANDLERS, "generate_persona").mockImplementation(
+      async (ids, ctx) => ({
+        stepId: ctx.stepId,
+        outcomes: ids.map((contactId) => ({
+          contactId,
+          status: "skipped" as const,
+          reason: "not_eligible",
+        })),
+        aborted: false,
+      }),
+    );
+
+    const run = createWorkflowRun({
+      templateId: template.id,
+      workflowType: "enrich",
+      status: "running",
+      trigger: "template",
+      config: "{}",
+      startedAt: Math.floor(Date.now() / 1000),
+      totalItems: plan.selectedContactIds.length,
+    });
+
     await executePipelineRun({
-      workflowRunId: "run-drain",
+      workflowRunId: run.id,
       templateId: template.id,
       pipeline: { ...pipelineConfig, scheduleDrain: true },
       plan,
@@ -127,22 +176,76 @@ describe("profile pipeline drain", () => {
       env: process.env,
     });
 
-    const run = getWorkflowRun("run-drain");
-    const result = JSON.parse(run?.result ?? "{}") as {
+    const completed = getWorkflowRun(run.id);
+    const result = JSON.parse(completed?.result ?? "{}") as {
       cleared?: number;
       remainingBacklog?: number;
     };
-    const runErrors = JSON.parse(run?.errors ?? "[]") as string[];
 
-    if (
-      (result.cleared ?? 0) > 0 &&
-      (result.remainingBacklog ?? 0) > 0 &&
-      runErrors.length === 0
-    ) {
-      expect(ensureSpy).toHaveBeenCalledWith(template.id);
-    } else {
-      expect(ensureSpy).not.toHaveBeenCalled();
-    }
+    expect(result.cleared).toBeGreaterThan(0);
+    expect(result.remainingBacklog).toBeGreaterThan(0);
+    expect(ensureSpy).toHaveBeenCalledWith(template.id);
+  });
+
+  it("does not enqueue drain when cleared is zero (skip-only batch)", async () => {
+    const ensureSpy = vi.spyOn(drainModule, "ensureProfilePipelineDrainJob");
+    buildProfilePipelineFixture();
+    const template = createPipelineTemplate(true);
+    const plan = planProfilePipelineRun({ batchSize: 5 });
+
+    vi.spyOn(PIPELINE_STEP_HANDLERS, "enrich_contact_avatars").mockImplementation(
+      async (ids, ctx) => ({
+        stepId: ctx.stepId,
+        outcomes: ids.map((contactId) => ({
+          contactId,
+          status: "skipped" as const,
+          reason: "avatar_present",
+        })),
+        aborted: false,
+      }),
+    );
+
+    vi.spyOn(PIPELINE_STEP_HANDLERS, "generate_persona").mockImplementation(
+      async (ids, ctx) => ({
+        stepId: ctx.stepId,
+        outcomes: ids.map((contactId) => ({
+          contactId,
+          status: "skipped" as const,
+          reason: "not_eligible",
+        })),
+        aborted: false,
+      }),
+    );
+
+    const run = createWorkflowRun({
+      templateId: template.id,
+      workflowType: "enrich",
+      status: "running",
+      trigger: "template",
+      config: "{}",
+      startedAt: Math.floor(Date.now() / 1000),
+      totalItems: plan.selectedContactIds.length,
+    });
+
+    await executePipelineRun({
+      workflowRunId: run.id,
+      templateId: template.id,
+      pipeline: { ...pipelineConfig, scheduleDrain: true },
+      plan,
+      forcePersona: false,
+      scheduleDrain: true,
+      trigger: "template",
+      workspaceSlug: null,
+      threadSlug: null,
+      fetchImpl: fetch,
+      env: process.env,
+    });
+
+    const completed = getWorkflowRun(run.id);
+    const result = JSON.parse(completed?.result ?? "{}") as { cleared?: number };
+
+    expect(result.cleared).toBe(0);
+    expect(ensureSpy).not.toHaveBeenCalled();
   });
 
   it("MAINTENANCE_HANDLERS entry runs pipeline from payload.templateId", async () => {
