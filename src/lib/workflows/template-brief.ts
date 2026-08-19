@@ -30,6 +30,12 @@ export function buildAgentWorkflowThreadName(templateName: string): string {
   return `agent: ${label}`;
 }
 
+/** Audit/status threads for in-process pipelines — not terminal-agent work orders. */
+export function buildPipelineThreadName(templateName: string): string {
+  const label = templateName.trim().slice(0, 60) || "Pipeline";
+  return `pipeline: ${label}`;
+}
+
 export function buildAgentWorkflowBrief(input: {
   template: Pick<
     WorkflowTemplate,

@@ -257,8 +257,13 @@ export async function appendRtxThreadMessage(
         body: JSON.stringify({
           message: input.message,
           requireTerminalDispatch: false,
+          skipTerminalDispatch: true,
           broadcastThreadEvents: true,
           reason: input.reason,
+          externalSource: {
+            type: "signals-pipeline-status",
+            origin: "signals",
+          },
         }),
       },
     );
