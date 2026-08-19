@@ -5,6 +5,8 @@ import {
   listRtxBrowserSessions,
 } from "@/lib/rtx/browser-sessions";
 import {
+  buildPublishSessionAllowedOrigins,
+  buildPublishSessionGuardrails,
   buildSocialPlatformConnectionPayload,
   extractFacebookProfileSlugFromUrl,
   extractLinkedInVanityFromUrl,
@@ -19,7 +21,9 @@ import {
   isSessionAccountConnected,
   isXLoggedInUrl,
   isXLoggedOutUrl,
+  openPlatformBrowserSession,
   urlMatchesPlatformHost,
+  validatePlatformBrowserSession,
 } from "@/lib/platforms/browser-connection";
 import type { PlatformSessionStatus } from "@/lib/platforms/browser-connection";
 import { createPlatformAccount } from "@/lib/db/queries/platform-accounts";
@@ -313,5 +317,117 @@ describe("browser connection status", () => {
     expect(payload.oauthConnected).toBe(true);
     expect(payload.connectionVia).toBe("oauth");
     expect(payload.connected).toBe(true);
+  });
+});
+
+describe("publish session guardrails", () => {
+  const RTX_ENV = { RTX_APP_ID: "app-1", SERVER_URL: "http://127.0.0.1:3001" };
+
+  type CliCall = { url: string; body: Record<string, unknown> | null };
+
+  /** Mock the RTX CLI: list returns `sessions`, every other call succeeds. */
+  function mockRtxCli(sessions: unknown[]) {
+    const calls: CliCall[] = [];
+    const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({
+        url,
+        body: init?.body ? JSON.parse(String(init.body)) : null,
+      });
+      if (url.includes("/cli/list-browser-sessions")) {
+        return { ok: true, json: async () => ({ success: true, sessions }) };
+      }
+      return { ok: true, json: async () => ({ success: true }) };
+    });
+
+    const find = (fragment: string) => calls.find((call) => call.url.includes(fragment));
+    return { fetchImpl, calls, find };
+  }
+
+  it("derives the allowlist from the platform registry", () => {
+    expect(buildPublishSessionAllowedOrigins()).toEqual([
+      "https://x.com",
+      "https://www.linkedin.com",
+      "https://www.facebook.com",
+    ]);
+    expect(buildPublishSessionGuardrails()).toEqual({
+      mode: "unrestricted",
+      allowedOrigins: [
+        "https://x.com",
+        "https://www.linkedin.com",
+        "https://www.facebook.com",
+      ],
+      blockedOrigins: [],
+    });
+  });
+
+  it("opens a focused platform tab even when the session already runs", async () => {
+    const { fetchImpl, find } = mockRtxCli([
+      { sessionName: "signals-publish", running: true, remoteDebugPort: 9223 },
+    ]);
+
+    const result = await openPlatformBrowserSession(
+      "linkedin",
+      RTX_ENV,
+      fetchImpl as unknown as typeof fetch
+    );
+
+    expect(result).toEqual({ sessionName: "signals-publish", opened: true });
+    // Guardrails are re-declared on every connect so an anchored session migrates
+    // in place; no `url` here, or RTX would open a second tab for it.
+    expect(find("/cli/create-browser-session")?.body).toEqual({
+      sessionName: "signals-publish",
+      guardrails: buildPublishSessionGuardrails(),
+    });
+    expect(find("/cli/start-browser-session/signals-publish")?.body).toEqual({
+      url: "https://www.linkedin.com/login",
+    });
+  });
+
+  it("validates without opening an RTX tab", async () => {
+    const { fetchImpl, find } = mockRtxCli([
+      { sessionName: "signals-publish", running: false, remoteDebugPort: 59_999 },
+    ]);
+
+    const result = await validatePlatformBrowserSession(
+      "facebook",
+      RTX_ENV,
+      fetchImpl as unknown as typeof fetch
+    );
+
+    // Nothing is listening on the mocked debug port, so CDP detection fails.
+    expect(result.isValid).toBe(false);
+    expect(find("/cli/create-browser-session")?.body).toEqual({
+      sessionName: "signals-publish",
+      guardrails: buildPublishSessionGuardrails(),
+    });
+    expect(find("/cli/start-browser-session/signals-publish")?.body).toEqual({});
+  });
+
+  it("explains guardrail denials with a recovery step", async () => {
+    const fetchImpl = vi.fn(async (url: string) => {
+      if (url.includes("/cli/list-browser-sessions")) {
+        return { ok: true, json: async () => ({ success: true, sessions: [] }) };
+      }
+      if (url.includes("/cli/start-browser-session/")) {
+        return {
+          ok: false,
+          status: 503,
+          json: async () => ({
+            success: false,
+            reason: "guardrail-origin-mismatch",
+            error: "The RealTimeX Browser session is locked to https://x.com.",
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({ success: true }) };
+    });
+
+    await expect(
+      openPlatformBrowserSession(
+        "linkedin",
+        RTX_ENV,
+        fetchImpl as unknown as typeof fetch
+      )
+    ).rejects.toThrow(/locked to https:\/\/x\.com\..*signals-publish/s);
   });
 });

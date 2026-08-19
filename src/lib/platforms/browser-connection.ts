@@ -31,6 +31,7 @@ import {
   resolveRtxDebugPort,
   startRtxBrowserSession,
   type RtxBrowserSessionEntry,
+  type RtxBrowserSessionGuardrails,
 } from "@/lib/rtx/browser-sessions";
 
 export type SocialPlatform = "x" | "linkedin" | "facebook";
@@ -62,6 +63,34 @@ const PLATFORM_URLS: Record<SocialPlatform, { setupUrl: string; homeUrl: string;
       host: "facebook.com",
     },
   };
+
+/**
+ * Origins Signals asks RTX to open in the shared publish session. Derived from
+ * PLATFORM_URLS so adding a platform extends the allowlist with no other edit.
+ */
+export function buildPublishSessionAllowedOrigins(): string[] {
+  const origins = new Set<string>();
+  for (const { setupUrl, homeUrl } of Object.values(PLATFORM_URLS)) {
+    origins.add(new URL(setupUrl).origin);
+    origins.add(new URL(homeUrl).origin);
+  }
+  return [...origins];
+}
+
+/**
+ * Guardrails for the shared publish session. RTX anchors every named session to
+ * its first URL by default, which locks `signals-publish` to whichever platform
+ * connected first and blocks tab opens for the others; unrestricted mode plus a
+ * multi-origin allowlist keeps all platforms reachable without opening the
+ * session up to arbitrary sites.
+ */
+export function buildPublishSessionGuardrails(): RtxBrowserSessionGuardrails {
+  return {
+    mode: "unrestricted",
+    allowedOrigins: buildPublishSessionAllowedOrigins(),
+    blockedOrigins: [],
+  };
+}
 
 const LOGGED_IN_SELECTORS: Record<SocialPlatform, string> = {
   x: X_LOGGED_IN_MARKERS.join(", "),
@@ -535,29 +564,70 @@ async function detectPlatformHandle(
   return pageVanity ? formatLinkedInHandle(pageVanity) : null;
 }
 
+/**
+ * Register the shared publish session with the current guardrails. Re-sent on
+ * every connect so a session anchored by an earlier build self-heals in place —
+ * RTX merges guardrails into the existing record, keeping the profile and its
+ * logins. Deliberately no `url`: RTX would start the session and open a tab for
+ * it, which is the caller's decision, not this step's.
+ */
+async function ensureRtxPublishSessionRegistered(
+  env: EnvLike,
+  fetchImpl: typeof fetch
+): Promise<void> {
+  await createRtxBrowserSession(
+    {
+      sessionName: RTX_PUBLISH_SESSION_NAME,
+      guardrails: buildPublishSessionGuardrails(),
+    },
+    env,
+    fetchImpl
+  );
+}
+
+/** Ensure the shared session is running, without opening or focusing a tab. */
 async function ensureRtxSessionRunning(
-  platform: SocialPlatform,
   env: EnvLike,
   fetchImpl: typeof fetch
 ): Promise<RtxBrowserSessionEntry | undefined> {
-  const sessionName = RTX_PUBLISH_SESSION_NAME;
-  const urls = PLATFORM_URLS[platform];
-  let sessions = await listRtxBrowserSessions(env, fetchImpl);
-  let entry = findRtxBrowserSession(sessions, sessionName);
+  await ensureRtxPublishSessionRegistered(env, fetchImpl);
 
-  if (!entry) {
-    await createRtxBrowserSession({ sessionName, url: urls.setupUrl }, env, fetchImpl);
-    sessions = await listRtxBrowserSessions(env, fetchImpl);
-    entry = findRtxBrowserSession(sessions, sessionName);
-  }
+  const sessionName = RTX_PUBLISH_SESSION_NAME;
+  let entry = findRtxBrowserSession(
+    await listRtxBrowserSessions(env, fetchImpl),
+    sessionName
+  );
 
   if (!entry?.running && entry?.runtime?.status !== "running") {
-    await startRtxBrowserSession({ sessionName, url: urls.setupUrl }, env, fetchImpl);
-    sessions = await listRtxBrowserSessions(env, fetchImpl);
-    entry = findRtxBrowserSession(sessions, sessionName);
+    await startRtxBrowserSession({ sessionName }, env, fetchImpl);
+    entry = findRtxBrowserSession(
+      await listRtxBrowserSessions(env, fetchImpl),
+      sessionName
+    );
   }
 
   return entry;
+}
+
+/**
+ * Open and focus a tab on the platform's login page. Starting a session with a
+ * URL is start-if-needed plus a focused tab, so this is also the only thing that
+ * opens a tab when the session is already running.
+ */
+async function openRtxPlatformTab(
+  platform: SocialPlatform,
+  env: EnvLike,
+  fetchImpl: typeof fetch
+): Promise<void> {
+  await ensureRtxPublishSessionRegistered(env, fetchImpl);
+  await startRtxBrowserSession(
+    {
+      sessionName: RTX_PUBLISH_SESSION_NAME,
+      url: PLATFORM_URLS[platform].setupUrl,
+    },
+    env,
+    fetchImpl
+  );
 }
 
 export async function openPlatformBrowserSession(
@@ -566,7 +636,7 @@ export async function openPlatformBrowserSession(
   fetchImpl: typeof fetch = fetch
 ): Promise<{ sessionName: string; opened: boolean }> {
   if (isRtxEmbedded(env)) {
-    await ensureRtxSessionRunning(platform, env, fetchImpl);
+    await openRtxPlatformTab(platform, env, fetchImpl);
     return { sessionName: RTX_PUBLISH_SESSION_NAME, opened: true };
   }
 
@@ -580,7 +650,7 @@ export async function validatePlatformBrowserSession(
   fetchImpl: typeof fetch = fetch
 ): Promise<{ isValid: boolean; detectedHandle: string | null; lastValidatedAt: number | null }> {
   if (isRtxEmbedded(env)) {
-    const entry = await ensureRtxSessionRunning(platform, env, fetchImpl);
+    const entry = await ensureRtxSessionRunning(env, fetchImpl);
     const debugPort = resolveRtxDebugPort(entry);
     if (!debugPort) {
       return { isValid: false, detectedHandle: null, lastValidatedAt: null };

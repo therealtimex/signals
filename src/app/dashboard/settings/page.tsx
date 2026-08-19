@@ -321,8 +321,9 @@ function SettingsContent() {
         <CardHeader>
           <CardTitle>Platform Connections</CardTitle>
           <CardDescription>
-            One connection per platform via RealTimeX Browser session. Publish and file-based imports
-            work without OAuth.
+            One connection per platform, all sharing the <code>signals-publish</code> RealTimeX
+            Browser session — sign in to each platform in that window. Publish and file-based
+            imports work without OAuth.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
