@@ -418,50 +418,9 @@ describe("runPipelineTemplate", () => {
     const contactB = createContact({ name: "Contact B" });
     const plan = planProfilePipelineRun({ contactIds: [contactA.id, contactB.id] });
 
-    vi.spyOn(PIPELINE_STEP_HANDLERS, "hydrate_x_profiles").mockImplementation(
-      async (ids, ctx) => {
-        await new Promise((resolve) => setTimeout(resolve, 40));
-        const outcomes = ids.map((contactId) => ({
-          contactId,
-          status: "skipped" as const,
-          reason: "x_not_connected",
-        }));
-        for (const outcome of outcomes) {
-          ctx.recordContactOutcome?.(outcome, { durationMs: 0 });
-        }
-        return { stepId: ctx.stepId, outcomes, aborted: false };
-      },
-    );
-    vi.spyOn(PIPELINE_STEP_HANDLERS, "enrich_contact_avatars").mockImplementation(
-      async (ids, ctx) => {
-        const outcomes = [];
-        for (const contactId of ids) {
-          await new Promise((resolve) => setTimeout(resolve, 30));
-          const outcome = {
-            contactId,
-            status: "skipped" as const,
-            reason: "avatar_present",
-          };
-          outcomes.push(outcome);
-          ctx.recordContactOutcome?.(outcome, { durationMs: 30 });
-        }
-        return { stepId: ctx.stepId, outcomes, aborted: false };
-      },
-    );
-    vi.spyOn(PIPELINE_STEP_HANDLERS, "generate_persona").mockImplementation(
-      async (ids, ctx) => ({
-        stepId: ctx.stepId,
-        outcomes: ids.map((contactId) => ({
-          contactId,
-          status: "skipped" as const,
-          reason: "not_eligible",
-        })),
-        aborted: false,
-      }),
-    );
-
     const template = createPipelineTemplate();
     const startedAt = Math.floor(Date.now() / 1000);
+    const baseMs = startedAt * 1000;
     const run = createWorkflowRun({
       templateId: template.id,
       workflowType: "enrich",
@@ -471,6 +430,57 @@ describe("runPipelineTemplate", () => {
       startedAt,
       totalItems: 2,
     });
+
+    vi.spyOn(PIPELINE_STEP_HANDLERS, "hydrate_x_profiles").mockImplementation(
+      async (ids, ctx) => {
+        const outcomes = ids.map((contactId) => ({
+          contactId,
+          status: "skipped" as const,
+          reason: "x_not_connected",
+        }));
+        for (const [index, outcome] of outcomes.entries()) {
+          ctx.recordContactOutcome?.(outcome, {
+            durationMs: 0,
+            completedAtMs: baseMs + 1_000 + index * 500,
+          });
+        }
+        return { stepId: ctx.stepId, outcomes, aborted: false };
+      },
+    );
+    vi.spyOn(PIPELINE_STEP_HANDLERS, "enrich_contact_avatars").mockImplementation(
+      async (ids, ctx) => {
+        const outcomes = [];
+        for (const [index, contactId] of ids.entries()) {
+          const outcome = {
+            contactId,
+            status: "skipped" as const,
+            reason: "avatar_present",
+          };
+          outcomes.push(outcome);
+          ctx.recordContactOutcome?.(outcome, {
+            durationMs: 30,
+            completedAtMs: baseMs + 5_000 + index * 500,
+          });
+        }
+        return { stepId: ctx.stepId, outcomes, aborted: false };
+      },
+    );
+    vi.spyOn(PIPELINE_STEP_HANDLERS, "generate_persona").mockImplementation(
+      async (ids, ctx) => {
+        const outcomes = ids.map((contactId) => ({
+          contactId,
+          status: "skipped" as const,
+          reason: "not_eligible",
+        }));
+        for (const [index, outcome] of outcomes.entries()) {
+          ctx.recordContactOutcome?.(outcome, {
+            durationMs: 120,
+            completedAtMs: baseMs + 10_000 + index * 500,
+          });
+        }
+        return { stepId: ctx.stepId, outcomes, aborted: false };
+      },
+    );
 
     await executePipelineRun({
       workflowRunId: run.id,
@@ -487,11 +497,17 @@ describe("runPipelineTemplate", () => {
     });
 
     const toolSteps = listWorkflowSteps(run.id).filter((step) => step.stepType === "tool_call");
-    expect(toolSteps.length).toBeGreaterThanOrEqual(4);
+    const summarySteps = listWorkflowSteps(run.id).filter(
+      (step) => step.tool === "profile_pipeline_step_summary",
+    );
+
+    expect(toolSteps).toHaveLength(6);
     expect(new Set(toolSteps.map((step) => step.createdAt)).size).toBeGreaterThan(1);
+    expect(toolSteps.every((step) => (step.durationMs ?? 0) >= 0)).toBe(true);
     expect(toolSteps.some((step) => (step.durationMs ?? 0) > 0)).toBe(true);
-    expect(toolSteps[toolSteps.length - 1]?.createdAt ?? 0).toBeGreaterThanOrEqual(
+    expect(toolSteps[toolSteps.length - 1]?.createdAt ?? 0).toBeGreaterThan(
       toolSteps[0]?.createdAt ?? 0,
     );
+    expect(summarySteps.every((step) => (step.durationMs ?? 0) >= 0)).toBe(true);
   });
 });
