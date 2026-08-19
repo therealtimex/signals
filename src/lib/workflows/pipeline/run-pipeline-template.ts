@@ -28,9 +28,14 @@ import { appendRtxThreadMessage } from "@/lib/rtx/runtime-sessions";
 import { ensureProfilePipelineDrainJob } from "@/lib/db/profile-pipeline-drain";
 import { buildPipelineThreadName } from "@/lib/workflows/template-brief";
 import { PIPELINE_STEP_HANDLERS } from "@/lib/workflows/pipeline/handlers";
+import {
+  recordDistributedPipelineContactSteps,
+  recordPipelineContactStep,
+} from "@/lib/workflows/pipeline/record-pipeline-contact-steps";
 import type {
   PipelineConfig,
   PipelineContactOutcome,
+  PipelineContactStepTiming,
   PipelineRunResult,
   PipelineStepReport,
 } from "@/lib/workflows/pipeline/types";
@@ -128,14 +133,6 @@ function parseRunErrors(raw: string | null | undefined): string[] {
 
 function mergeRunErrors(existing: string | null | undefined, message: string): string {
   return JSON.stringify([...parseRunErrors(existing), message]);
-}
-
-function outcomeToStepStatus(
-  outcome: PipelineContactOutcome,
-): "completed" | "skipped" | "failed" {
-  if (outcome.status === "failed") return "failed";
-  if (outcome.status === "skipped") return "skipped";
-  return "completed";
 }
 
 function formatKickoffMessage(plan: ProfilePipelineRunPlan): string {
@@ -485,6 +482,7 @@ export async function runPipelineTemplate(
     tool: "profile_pipeline_planner",
     output: JSON.stringify(plan),
     durationMs: 0,
+    createdAt: now,
   });
 
   let threadPath: string | undefined;
@@ -634,6 +632,23 @@ export async function executePipelineRun(input: ExecutePipelineRunInput): Promis
       throw new Error(`Missing pipeline handler: ${stepDecl.handler}`);
     }
 
+    const tool = STEP_TOOL_BY_HANDLER[stepDecl.handler] ?? stepDecl.handler;
+    const recordedContactIds = new Set<string>();
+    const recordContactOutcome = (
+      outcome: PipelineContactOutcome,
+      timing: PipelineContactStepTiming,
+    ) => {
+      recordPipelineContactStep({
+        workflowRunId: input.workflowRunId,
+        tool,
+        outcome,
+        durationMs: timing.durationMs,
+        completedAtMs: timing.completedAtMs ?? Date.now(),
+      });
+      recordedContactIds.add(outcome.contactId);
+    };
+
+    const phaseStartedAtMs = Date.now();
     const report = await handler(input.plan.selectedContactIds, {
       workflowRunId: input.workflowRunId,
       stepId: stepDecl.id,
@@ -643,22 +658,22 @@ export async function executePipelineRun(input: ExecutePipelineRunInput): Promis
       fetchImpl: input.fetchImpl,
       env: input.env,
       appendThreadMessage,
+      recordContactOutcome,
     });
+    const phaseEndedAtMs = Date.now();
 
     stepReports.push(report);
 
-    for (const outcome of report.outcomes) {
-      createWorkflowStep({
+    const unrecordedOutcomes = report.outcomes.filter(
+      (outcome) => !recordedContactIds.has(outcome.contactId),
+    );
+    if (unrecordedOutcomes.length > 0) {
+      recordDistributedPipelineContactSteps({
         workflowRunId: input.workflowRunId,
-        stepIndex: nextStepIndex(input.workflowRunId),
-        stepType: "tool_call",
-        status: outcomeToStepStatus(outcome),
-        tool: STEP_TOOL_BY_HANDLER[stepDecl.handler] ?? stepDecl.handler,
-        contactId: outcome.contactId,
-        input: JSON.stringify({ contactId: outcome.contactId }),
-        output: JSON.stringify(outcome),
-        error: outcome.status === "failed" ? outcome.reason : undefined,
-        durationMs: 0,
+        tool,
+        outcomes: unrecordedOutcomes,
+        phaseStartedAtMs,
+        phaseEndedAtMs,
       });
     }
 
@@ -670,7 +685,8 @@ export async function executePipelineRun(input: ExecutePipelineRunInput): Promis
       status: "completed",
       tool: "profile_pipeline_step_summary",
       output: JSON.stringify(stepSummary),
-      durationMs: 0,
+      durationMs: Math.max(phaseEndedAtMs - phaseStartedAtMs, 0),
+      createdAt: Math.floor(phaseEndedAtMs / 1000),
     });
 
     await appendThreadMessage(formatStepSummaryMessage(stepDecl.id, stepDecl.handler, report));
@@ -696,6 +712,7 @@ export async function executePipelineRun(input: ExecutePipelineRunInput): Promis
     filters: resolveProfilePipelineFilters(input.plan.filters),
   });
 
+  const summaryCompletedAtMs = Date.now();
   createWorkflowStep({
     workflowRunId: input.workflowRunId,
     stepIndex: nextStepIndex(input.workflowRunId),
@@ -704,6 +721,7 @@ export async function executePipelineRun(input: ExecutePipelineRunInput): Promis
     tool: "profile_pipeline_summary",
     output: JSON.stringify(result),
     durationMs: 0,
+    createdAt: Math.floor(summaryCompletedAtMs / 1000),
   });
 
   await appendThreadMessage(formatFinalMessage(input.workflowRunId, result));

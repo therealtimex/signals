@@ -14,10 +14,12 @@ export function WorkflowDetailSteps({
   steps,
   animate,
   subjectById = {},
+  runStartedAt = null,
 }: {
   steps: WorkflowStep[];
   animate?: boolean;
   subjectById?: Record<string, WorkflowRunSubject>;
+  runStartedAt?: number | null;
 }) {
   const [view, setView] = useState<"timeline" | "graph">("timeline");
 
@@ -58,6 +60,7 @@ export function WorkflowDetailSteps({
             steps={steps}
             animate={animate}
             subjectById={subjectById}
+            runStartedAt={runStartedAt}
           />
         ) : (
           <WorkflowGraphView steps={steps} animate={animate} />

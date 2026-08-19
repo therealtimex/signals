@@ -29,18 +29,26 @@ export async function generatePersonaStepHandler(
     ctx.forcePersona && ctx.trigger !== "scheduled";
 
   for (const contactId of contactIds) {
+    const startedAtMs = Date.now();
     try {
       const outcome = await runPersonaForContact(contactId, ctx, {
         personaTrigger,
         effectiveForcePersona,
       });
       outcomes.push(outcome);
+      ctx.recordContactOutcome?.(outcome, {
+        durationMs: Date.now() - startedAtMs,
+      });
     } catch (error) {
       if (error instanceof PersonaGenerationUnavailableError) {
-        outcomes.push({
+        const failedOutcome: PipelineContactOutcome = {
           contactId,
           status: "failed",
           reason: error.message,
+        };
+        outcomes.push(failedOutcome);
+        ctx.recordContactOutcome?.(failedOutcome, {
+          durationMs: Date.now() - startedAtMs,
         });
         return {
           stepId: ctx.stepId,
