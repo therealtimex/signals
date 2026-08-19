@@ -4,7 +4,9 @@ import { workflowTemplates } from "@/lib/db/schema";
 import { createTemplate } from "@/lib/db/queries/workflow-templates";
 
 /** Bump this when seed template prompts change to trigger updates on existing installs. */
-const SEED_VERSION = 3;
+const SEED_VERSION = 4;
+
+export const CONTACT_PROFILE_PIPELINE_TEMPLATE_NAME = "Contact profile pipeline";
 
 interface TemplateSeed {
   name: string;
@@ -146,6 +148,28 @@ Find email addresses for contacts that don't have one.
 - Never guess or fabricate email addresses
 - Skip contacts where email can't be reliably determined`,
     config: { maxContacts: 15, maxEnrichmentScore: 100 },
+  },
+  {
+    name: CONTACT_PROFILE_PIPELINE_TEMPLATE_NAME,
+    description:
+      "Fill missing avatars and personas in bounded batches. Processes weakest enrichment scores first.",
+    templateType: "enrichment",
+    targetPersona: "Contacts missing avatars or personas",
+    estimatedCost: 0,
+    systemPrompt: "",
+    config: {
+      pipeline: {
+        version: 1,
+        planner: "contact_profile",
+        batchSize: 20,
+        filters: { needsAvatar: true, needsPersona: true, personaStale: false },
+        scheduleDrain: false,
+        steps: [
+          { id: "avatar", executor: "code", handler: "enrich_contact_avatars" },
+          { id: "persona", executor: "llm", handler: "generate_persona" },
+        ],
+      },
+    },
   },
   {
     name: "Prune Inactive Contacts",

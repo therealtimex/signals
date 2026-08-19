@@ -67,6 +67,14 @@ export type WorkflowTemplateWithSteps = WorkflowTemplate & {
   enrollmentCount: number;
 };
 
+export function getSystemTemplateByName(name: string): WorkflowTemplate | undefined {
+  return db
+    .select()
+    .from(workflowTemplates)
+    .where(and(eq(workflowTemplates.name, name), eq(workflowTemplates.isSystem, 1)))
+    .get();
+}
+
 export function getTemplate(
   id: string
 ): WorkflowTemplateWithSteps | undefined {

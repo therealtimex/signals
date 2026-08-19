@@ -229,6 +229,60 @@ export type DispatchTerminalAgentInput = {
   reason?: string;
 };
 
+export async function appendRtxThreadMessage(
+  input: {
+    workspaceSlug: string;
+    threadSlug: string;
+    message: string;
+    reason?: string;
+  },
+  env: EnvLike = process.env,
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ success: true } | { success: false; error: string }> {
+  const appId = getRtxAppId(env);
+  const apiBase = resolveRtxApiBase(env);
+  if (!appId || !apiBase) {
+    return { success: false, error: "RealTimeX API is not configured" };
+  }
+
+  const workspaceSlug = input.workspaceSlug.trim();
+  const threadSlug = input.threadSlug.trim();
+
+  try {
+    const response = await fetchImpl(
+      `${apiBase}/cli/send-message/${encodeURIComponent(workspaceSlug)}/${encodeURIComponent(threadSlug)}`,
+      {
+        method: "POST",
+        headers: buildAppHeaders(appId),
+        body: JSON.stringify({
+          message: input.message,
+          requireTerminalDispatch: false,
+          broadcastThreadEvents: true,
+          reason: input.reason,
+        }),
+      },
+    );
+
+    const body = await readRtxJsonBody(response);
+    if (!response.ok || body.success === false) {
+      return {
+        success: false,
+        error:
+          typeof body.error === "string"
+            ? body.error
+            : "Failed to append thread message",
+      };
+    }
+
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Append message failed",
+    };
+  }
+}
+
 export async function dispatchTerminalAgentViaSendMessage(
   input: DispatchTerminalAgentInput,
   env: EnvLike = process.env,

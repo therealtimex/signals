@@ -141,6 +141,18 @@ function sortTemplates(templates: Template[]): Template[] {
   });
 }
 
+function parseTemplateConfig(config: string): Record<string, unknown> {
+  try {
+    return JSON.parse(config || "{}") as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
+function isPipelineTemplateConfig(config: string): boolean {
+  return Boolean(parseTemplateConfig(config).pipeline);
+}
+
 export function TemplateGallery() {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [loading, setLoading] = useState(true);
@@ -244,6 +256,7 @@ export function TemplateGallery() {
               TYPE_COLORS[template.templateType] ??
               "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300";
             const isSystem = template.isSystem === 1;
+            const isPipeline = isPipelineTemplateConfig(template.config);
 
             return (
               <Card
@@ -287,6 +300,11 @@ export function TemplateGallery() {
                         <Clock className="h-3 w-3" />
                         {formatRelativeTime(template.lastRunAt)}
                       </span>
+                    )}
+                    {isPipeline && (
+                      <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                        Pipeline
+                      </Badge>
                     )}
                   </div>
                   <div className="flex gap-2">

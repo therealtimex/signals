@@ -18,6 +18,45 @@ import { WorkflowDetailSteps } from "./workflow-detail-steps";
 import { PruneResults } from "./prune-results";
 import { useWorkflowPolling } from "@/hooks/use-workflow-polling";
 import type { WorkflowRunWithSteps } from "@/lib/db/types";
+import type { PipelineRunResult } from "@/lib/workflows/pipeline/types";
+
+type PipelineRunContext = {
+  backlogTotal: number;
+  batchSize: number;
+  selectedCount: number;
+  result: PipelineRunResult | null;
+};
+
+type PipelineRunLike = {
+  config: string | null;
+  result: string | null;
+};
+
+function parsePipelineRunContext(run: PipelineRunLike): PipelineRunContext | null {
+  try {
+    const config = JSON.parse(run.config ?? "{}") as {
+      pipeline?: unknown;
+      backlogTotal?: number;
+      batchSize?: number;
+      selectedContactIds?: string[];
+    };
+    if (!config.pipeline) return null;
+
+    let result: PipelineRunResult | null = null;
+    if (run.result) {
+      result = JSON.parse(run.result) as PipelineRunResult;
+    }
+
+    return {
+      backlogTotal: config.backlogTotal ?? 0,
+      batchSize: config.batchSize ?? 0,
+      selectedCount: config.selectedContactIds?.length ?? config.batchSize ?? 0,
+      result,
+    };
+  } catch {
+    return null;
+  }
+}
 
 const STATUS_CONFIG: Record<
   string,
@@ -75,6 +114,7 @@ export function WorkflowRunLive({ initialRun }: { initialRun: WorkflowRunWithSte
   const StatusIcon = statusConfig.icon;
   const isAgent = run.workflowType === "agent";
   const totalTokens = run.inputTokens + run.outputTokens;
+  const pipelineCtx = parsePipelineRunContext(run);
 
   return (
     <>
@@ -98,6 +138,24 @@ export function WorkflowRunLive({ initialRun }: { initialRun: WorkflowRunWithSte
           {statusConfig.label}
         </Badge>
       </div>
+
+      {pipelineCtx && (
+        <Card className="p-4 text-sm">
+          {run.status === "running" || !pipelineCtx.result ? (
+            <p>
+              Processing <strong>{pipelineCtx.selectedCount}</strong> of{" "}
+              <strong>{pipelineCtx.backlogTotal}</strong>…
+            </p>
+          ) : (
+            <p>
+              Processed <strong>{pipelineCtx.result.processed}</strong> · avatars{" "}
+              <strong>{pipelineCtx.result.avatarsUpdated}</strong> · personas{" "}
+              <strong>{pipelineCtx.result.personasGenerated}</strong> ·{" "}
+              <strong>{pipelineCtx.result.remainingBacklog}</strong> remaining
+            </p>
+          )}
+        </Card>
+      )}
 
       {/* Summary cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">

@@ -23,6 +23,11 @@ import {
   ensureContactProfileEmbedSweepJob,
   CONTACT_PROFILE_EMBED_SWEEP_JOB_TYPE,
 } from "@/lib/db/contact-profile-embed-sweep";
+import {
+  PROFILE_PIPELINE_DRAIN_JOB_TYPE,
+  runProfilePipelineUntilCaughtUp,
+} from "@/lib/db/profile-pipeline-drain";
+import { runPipelineTemplate } from "@/lib/workflows/pipeline/run-pipeline-template";
 import type { WorkflowType } from "@/lib/workflows/types";
 
 const CHECK_INTERVAL_MS = 60_000; // 1 minute
@@ -58,6 +63,21 @@ const MAINTENANCE_HANDLERS: Record<string, MaintenanceHandler> = {
       ensureContactProfileEmbedSweepJob();
     }
     return report;
+  },
+  [PROFILE_PIPELINE_DRAIN_JOB_TYPE]: async (payload) => {
+    const templateId = payload.templateId;
+    if (typeof templateId !== "string" || !templateId.trim()) {
+      throw new Error("profile-pipeline-drain requires payload.templateId");
+    }
+    const result = await runPipelineTemplate({
+      templateId,
+      trigger: "scheduled",
+      waitForCompletion: true,
+    });
+    if (!result.success) {
+      throw new Error(result.error);
+    }
+    return { workflowRunId: result.workflowRunId };
   },
 };
 

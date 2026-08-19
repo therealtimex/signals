@@ -24,7 +24,7 @@ import { PriorityBadge } from "@/components/priority-badge";
 import { EnrichmentScoreBadge } from "@/components/enrichment-score-badge";
 import { IdentitiesSection } from "@/components/identities-section";
 import { EnrichButton } from "@/components/enrich-button";
-import { ArrowLeft, Trash2, Save, CheckCircle2, Circle, Archive, RotateCcw } from "lucide-react";
+import { ArrowLeft, Trash2, Save, CheckCircle2, Circle, Archive, RotateCcw, Play, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -54,17 +54,52 @@ interface ContactDetailClientProps {
   contact: ContactWithIdentities;
   tasks: Task[];
   explore: ContactExploreCard;
+  profilePipelineTemplateId?: string | null;
 }
 
-export function ContactDetailClient({ contact, tasks, explore }: ContactDetailClientProps) {
+export function ContactDetailClient({
+  contact,
+  tasks,
+  explore,
+  profilePipelineTemplateId = null,
+}: ContactDetailClientProps) {
   const router = useRouter();
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [pipelineRunning, setPipelineRunning] = useState(false);
+  const [pipelineError, setPipelineError] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [selfSaving, setSelfSaving] = useState(false);
   const formChanges = useRef<Record<string, string>>({});
   const channelsData = useRef<DraftContactChannel[] | null>(null);
   const employmentsData = useRef<DraftContactEmployment[] | null>(null);
+
+  async function handleRunProfilePipeline() {
+    if (!profilePipelineTemplateId) return;
+    setPipelineRunning(true);
+    setPipelineError(null);
+    try {
+      const res = await fetch(`/api/workflows/templates/${profilePipelineTemplateId}/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ config: { contactIds: [contact.id] } }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setPipelineError(
+          typeof data.error === "string" ? data.error : "Failed to start profile pipeline",
+        );
+        return;
+      }
+      if (data.workflowRunId) {
+        router.push(`/dashboard/workflows/${data.workflowRunId}`);
+      }
+    } catch {
+      setPipelineError("Failed to start profile pipeline");
+    } finally {
+      setPipelineRunning(false);
+    }
+  }
 
   async function handleToggleSelf(nextValue: boolean) {
     setSelfSaving(true);
@@ -245,6 +280,26 @@ export function ContactDetailClient({ contact, tasks, explore }: ContactDetailCl
               contactId={contact.id}
               onComplete={() => router.refresh()}
             />
+          )}
+          {!contactArchived &&
+            !contact.isSelf &&
+            profilePipelineTemplateId && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void handleRunProfilePipeline()}
+                disabled={pipelineRunning}
+              >
+                {pipelineRunning ? (
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Play className="mr-1.5 h-3.5 w-3.5" />
+                )}
+                Run for this contact
+              </Button>
+            )}
+          {pipelineError && (
+            <span className="text-xs text-destructive">{pipelineError}</span>
           )}
           <FunnelStageBadge stage={contact.funnelStage} />
           <EnrichmentScoreBadge score={contact.enrichmentScore} />
