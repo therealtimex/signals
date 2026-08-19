@@ -38,6 +38,11 @@ export type PipelineStepReport = {
   abortReason?: string;
 };
 
+export type PipelineContactStepTiming = {
+  durationMs: number;
+  completedAtMs?: number;
+};
+
 export type PipelineStepContext = {
   workflowRunId: string;
   stepId: string;
@@ -47,6 +52,11 @@ export type PipelineStepContext = {
   fetchImpl: typeof fetch;
   env: EnvLike;
   appendThreadMessage: (markdown: string) => Promise<void>;
+  /** Records a per-contact pipeline step immediately (for live runs and real timing). */
+  recordContactOutcome?: (
+    outcome: PipelineContactOutcome,
+    timing: PipelineContactStepTiming,
+  ) => void;
 };
 
 export type PipelineStepHandler = (

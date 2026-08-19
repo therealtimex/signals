@@ -242,6 +242,7 @@ export function WorkflowRunLive({
         steps={steps}
         animate={isPolling}
         subjectById={subjectById}
+        runStartedAt={run.startedAt}
       />
 
       {/* Errors (if any) */}

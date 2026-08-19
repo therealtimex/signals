@@ -276,7 +276,12 @@ export async function enrichContactAvatars(
 ): Promise<PipelineStepReport> {
   const outcomes: PipelineContactOutcome[] = [];
   for (const contactId of contactIds) {
-    outcomes.push(await enrichOneContact(contactId, ctx));
+    const startedAtMs = Date.now();
+    const outcome = await enrichOneContact(contactId, ctx);
+    outcomes.push(outcome);
+    ctx.recordContactOutcome?.(outcome, {
+      durationMs: Date.now() - startedAtMs,
+    });
   }
 
   return {

@@ -122,9 +122,17 @@ function skipAll(
   ctx: PipelineStepContext,
   reason: string,
 ): PipelineStepReport {
+  const outcomes = contactIds.map((contactId) => ({
+    contactId,
+    status: "skipped" as const,
+    reason,
+  }));
+  for (const outcome of outcomes) {
+    ctx.recordContactOutcome?.(outcome, { durationMs: 0 });
+  }
   return {
     stepId: ctx.stepId,
-    outcomes: contactIds.map((contactId) => ({ contactId, status: "skipped", reason })),
+    outcomes,
     aborted: false,
   };
 }

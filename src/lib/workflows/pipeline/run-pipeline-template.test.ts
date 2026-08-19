@@ -8,7 +8,7 @@ import {
   planProfilePipelineRun,
 } from "@/lib/db/queries/profile-pipeline-backlog";
 import { createTemplate } from "@/lib/db/queries/workflow-templates";
-import { createWorkflowRun, getWorkflowRun } from "@/lib/db/queries/workflows";
+import { createWorkflowRun, getWorkflowRun, listWorkflowSteps } from "@/lib/db/queries/workflows";
 import { getRtxRefsFromRunConfig } from "@/lib/agents/run-template-via-rtx";
 import { db } from "@/lib/db/client";
 import { contentItems, contentPosts, platformAccounts } from "@/lib/db/schema";
@@ -411,5 +411,87 @@ describe("runPipelineTemplate", () => {
     expect(result.remainingBacklog).toBe(2);
     expect(result.remainingBacklog).toBe(countProfilePipelineBacklog());
     expect(result.remainingBacklog).not.toBe(plan.backlogTotal - plan.selectedContactIds.length);
+  });
+
+  it("records pipeline contact steps with spread timestamps and durations", async () => {
+    const contactA = createContact({ name: "Contact A" });
+    const contactB = createContact({ name: "Contact B" });
+    const plan = planProfilePipelineRun({ contactIds: [contactA.id, contactB.id] });
+
+    vi.spyOn(PIPELINE_STEP_HANDLERS, "hydrate_x_profiles").mockImplementation(
+      async (ids, ctx) => {
+        await new Promise((resolve) => setTimeout(resolve, 40));
+        const outcomes = ids.map((contactId) => ({
+          contactId,
+          status: "skipped" as const,
+          reason: "x_not_connected",
+        }));
+        for (const outcome of outcomes) {
+          ctx.recordContactOutcome?.(outcome, { durationMs: 0 });
+        }
+        return { stepId: ctx.stepId, outcomes, aborted: false };
+      },
+    );
+    vi.spyOn(PIPELINE_STEP_HANDLERS, "enrich_contact_avatars").mockImplementation(
+      async (ids, ctx) => {
+        const outcomes = [];
+        for (const contactId of ids) {
+          await new Promise((resolve) => setTimeout(resolve, 30));
+          const outcome = {
+            contactId,
+            status: "skipped" as const,
+            reason: "avatar_present",
+          };
+          outcomes.push(outcome);
+          ctx.recordContactOutcome?.(outcome, { durationMs: 30 });
+        }
+        return { stepId: ctx.stepId, outcomes, aborted: false };
+      },
+    );
+    vi.spyOn(PIPELINE_STEP_HANDLERS, "generate_persona").mockImplementation(
+      async (ids, ctx) => ({
+        stepId: ctx.stepId,
+        outcomes: ids.map((contactId) => ({
+          contactId,
+          status: "skipped" as const,
+          reason: "not_eligible",
+        })),
+        aborted: false,
+      }),
+    );
+
+    const template = createPipelineTemplate();
+    const startedAt = Math.floor(Date.now() / 1000);
+    const run = createWorkflowRun({
+      templateId: template.id,
+      workflowType: "enrich",
+      status: "running",
+      trigger: "template",
+      config: "{}",
+      startedAt,
+      totalItems: 2,
+    });
+
+    await executePipelineRun({
+      workflowRunId: run.id,
+      templateId: template.id,
+      pipeline: pipelineConfig,
+      plan,
+      forcePersona: false,
+      scheduleDrain: false,
+      trigger: "template",
+      workspaceSlug: null,
+      threadSlug: null,
+      fetchImpl: fetch,
+      env: process.env,
+    });
+
+    const toolSteps = listWorkflowSteps(run.id).filter((step) => step.stepType === "tool_call");
+    expect(toolSteps.length).toBeGreaterThanOrEqual(4);
+    expect(new Set(toolSteps.map((step) => step.createdAt)).size).toBeGreaterThan(1);
+    expect(toolSteps.some((step) => (step.durationMs ?? 0) > 0)).toBe(true);
+    expect(toolSteps[toolSteps.length - 1]?.createdAt ?? 0).toBeGreaterThanOrEqual(
+      toolSteps[0]?.createdAt ?? 0,
+    );
   });
 });
