@@ -1,5 +1,5 @@
 import { listContacts, getContactById, createContact, updateContact, recalcEnrichment } from "@/lib/db/queries/contacts";
-import { createIdentity, getIdentityById, updateIdentity } from "@/lib/db/queries/identities";
+import { createIdentity, getIdentityById, getIdentityByPlatformUser, updateIdentity } from "@/lib/db/queries/identities";
 import { getDashboardMetrics } from "@/lib/db/queries/dashboard";
 import { listWorkflowRuns } from "@/lib/db/queries/workflows";
 import { listTemplates } from "@/lib/db/queries/workflow-templates";
@@ -264,12 +264,28 @@ export async function handleUpsertContactIdentity(
       ...(input.platformUserId ? { platformUserId: input.platformUserId } : {}),
     });
   } else {
-    identity = createIdentity({
-      contactId: input.contactId,
-      platform: assertPlatform(input.platform!),
-      platformUserId: input.platformUserId!,
-      ...sharedFields,
-    });
+    const platform = assertPlatform(input.platform!);
+    const platformUserId = input.platformUserId!;
+    const existingByPlatform = getIdentityByPlatformUser(platform, platformUserId);
+    if (existingByPlatform) {
+      if (existingByPlatform.contactId !== input.contactId) {
+        return {
+          error: `Platform identity already linked to contact ${existingByPlatform.contactId}`,
+        };
+      }
+      identity = updateIdentity(existingByPlatform.id, {
+        ...sharedFields,
+        platform,
+        platformUserId,
+      });
+    } else {
+      identity = createIdentity({
+        contactId: input.contactId,
+        platform,
+        platformUserId,
+        ...sharedFields,
+      });
+    }
   }
 
   if (!identity) {
