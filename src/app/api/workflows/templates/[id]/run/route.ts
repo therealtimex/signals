@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { getTemplate } from "@/lib/db/queries/workflow-templates";
 import { runTemplateViaRtx } from "@/lib/agents/run-template-via-rtx";
 import { resolveSignalsBaseUrlFromRequest } from "@/lib/rtx/resolve-signals-base-url";
+import { parseTemplateConfig } from "@/lib/workflows/template-config";
+import { runPipelineTemplate } from "@/lib/workflows/pipeline/run-pipeline-template";
 
 const runSchema = z.object({
   config: z.record(z.unknown()).optional(),
@@ -10,17 +13,56 @@ const runSchema = z.object({
 
 /**
  * POST /api/workflows/templates/[id]/run
- * Provision an RTX workspace thread and launch a terminal agent with the template brief.
+ * Agent templates launch via RTX; pipeline templates run in-process with thread attachment.
  */
 export async function POST(
   req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
 
   try {
     const body = await req.json().catch(() => ({}));
     const data = runSchema.parse(body);
+
+    const template = getTemplate(id);
+    if (!template) {
+      return NextResponse.json(
+        { error: "Template not found", errorCode: "not_found" },
+        { status: 404 },
+      );
+    }
+
+    const templateConfig = parseTemplateConfig(template.config);
+    if (templateConfig.pipeline) {
+      const result = await runPipelineTemplate({
+        templateId: id,
+        input: data.config,
+        trigger: "template",
+      });
+
+      if (!result.success) {
+        return NextResponse.json(
+          {
+            error: result.error,
+            errorCode: result.errorCode,
+            details: result.details,
+          },
+          { status: result.httpStatus },
+        );
+      }
+
+      return NextResponse.json(
+        {
+          workflowRunId: result.workflowRunId,
+          workflowRun: result.workflowRun,
+          plan: result.plan,
+          threadPath: result.threadPath,
+        },
+        { status: 201 },
+      );
+    }
+
     const result = await runTemplateViaRtx({
       templateId: id,
       config: data.config,
@@ -35,7 +77,7 @@ export async function POST(
           errorCode: result.errorCode,
           workflowRunId: result.workflowRunId,
         },
-        { status: result.httpStatus }
+        { status: result.httpStatus },
       );
     }
 
@@ -47,11 +89,14 @@ export async function POST(
         threadSlug: result.threadSlug,
         threadPath: result.threadPath,
       },
-      { status: 201 }
+      { status: 201 },
     );
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return NextResponse.json({ error: error.errors }, { status: 400 });
+      return NextResponse.json(
+        { error: "Validation failed", errorCode: "VALIDATION_ERROR", details: error.flatten() },
+        { status: 400 },
+      );
     }
     const message = error instanceof Error ? error.message : "Internal server error";
     return NextResponse.json({ error: message }, { status: 500 });

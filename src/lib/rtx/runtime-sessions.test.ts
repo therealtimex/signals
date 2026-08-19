@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  appendRtxThreadMessage,
   dispatchTerminalAgentViaSendMessage,
   launchTerminalCliAgent,
   readRtxJsonBody,
@@ -210,5 +211,34 @@ describe("dispatchTerminalAgentViaSendMessage", () => {
       errorCode: "terminal_dispatch_required",
       httpStatus: 409,
     });
+  });
+});
+
+describe("appendRtxThreadMessage", () => {
+  it("posts a message without terminal dispatch", async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      expect(url).toContain("/cli/send-message/signals/thread-1");
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      expect(body.message).toBe("Pipeline kickoff");
+      expect(body.requireTerminalDispatch).toBe(false);
+      return new Response(JSON.stringify({ success: true }), { status: 200 });
+    });
+
+    const result = await appendRtxThreadMessage(
+      {
+        workspaceSlug: "signals",
+        threadSlug: "thread-1",
+        message: "Pipeline kickoff",
+      },
+      {
+        RTX_APP_ID: "app-1",
+        RTX_API_BASE_URL: "http://127.0.0.1:3001",
+      },
+      fetchImpl as typeof fetch,
+    );
+
+    expect(result).toEqual({ success: true });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 });
