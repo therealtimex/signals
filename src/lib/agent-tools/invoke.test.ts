@@ -180,6 +180,31 @@ describe("invokeAgentTool", () => {
     });
   });
 
+  it("re-upserts the same platform identity idempotently", async () => {
+    const created = await invokeAgentTool("create_contact", { name: "Dup Identity" });
+    const contactId = (created as { id: string }).id;
+
+    await invokeAgentTool("upsert_contact_identity", {
+      contactId,
+      platform: "linkedin",
+      platformUserId: "dup-id",
+      platformHandle: "dup-handle",
+    });
+
+    const second = await invokeAgentTool("upsert_contact_identity", {
+      contactId,
+      platform: "linkedin",
+      platformUserId: "dup-id",
+      platformHandle: "dup-handle",
+    });
+
+    expect(second).toMatchObject({
+      platform: "linkedin",
+      platformUserId: "dup-id",
+      message: "Contact identity upserted.",
+    });
+  });
+
   it("rejects local file avatarUrl on upsert_contact_identity", async () => {
     const created = await invokeAgentTool("create_contact", { name: "Avatar Guard" });
     const contactId = (created as { id: string }).id;

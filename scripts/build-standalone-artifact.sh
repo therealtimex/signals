@@ -79,6 +79,14 @@ cp -R "${ROOT}/src/lib/db/migrations/meta" "$STAGING/resources/migrations/meta"
 cp -R "${ROOT}/.next/static" "$STAGING/.next/static"
 cp -R "${ROOT}/public" "$STAGING/public"
 
+if [[ -d "${ROOT}/tools/signals-pp-cli/bin" ]]; then
+  echo "==> Staging signals-pp-cli binaries..."
+  mkdir -p "$STAGING/tools/signals-pp-cli"
+  cp -R "${ROOT}/tools/signals-pp-cli/bin" "$STAGING/tools/signals-pp-cli/"
+  chmod +x "$STAGING/tools/signals-pp-cli/bin/"*.js 2>/dev/null || true
+  find "$STAGING/tools/signals-pp-cli/bin" -type f -name 'signals-pp-cli' -exec chmod +x {} \; 2>/dev/null || true
+fi
+
 find "$STAGING" -type f -name '*.map' -delete
 rm -f "${DIST}/${ARTIFACT_NAME}"
 (

@@ -40,6 +40,7 @@ const required = [
   "skills/realtimex-signals/scripts/resolve-base-url.sh",
   "skills/signals-publish/SKILL.md",
   "skills/signals-publish/scripts/x-publish.cjs",
+  "tools/signals-pp-cli/bin/signals-pp-cli.js",
   "flows/signals-crm-agent-task.agent-flow.json",
   "flows/signals-create-enrich-contact.agent-flow.json",
   "marketplace/local-app.manifest.json",

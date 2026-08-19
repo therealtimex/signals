@@ -90,6 +90,36 @@ export function getRtxRefsFromRunConfig(config: string | null | undefined): {
   }
 }
 
+async function verifySignalsHealth(
+  signalsBaseUrl: string,
+  fetchImpl: typeof fetch
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const url = `${signalsBaseUrl.replace(/\/+$/, "")}/api/health`;
+  try {
+    const response = await fetchImpl(url, { method: "GET" });
+    if (!response.ok) {
+      return {
+        ok: false,
+        error: `Signals health check failed (${response.status}) at ${url}`,
+      };
+    }
+    const body = (await response.json()) as { app?: string; status?: string };
+    if (body.app !== "signals" || body.status !== "ok") {
+      return {
+        ok: false,
+        error: `Signals health check returned unexpected payload at ${url}`,
+      };
+    }
+    return { ok: true };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Health check failed";
+    return {
+      ok: false,
+      error: `Signals health check failed at ${url}: ${message}`,
+    };
+  }
+}
+
 export async function runTemplateViaRtx(
   input: RunTemplateViaRtxInput,
   env: NodeJS.ProcessEnv = process.env,
@@ -131,6 +161,33 @@ export async function runTemplateViaRtx(
     startedAt: now,
   });
 
+  const signalsBaseUrl = input.signalsBaseUrl ?? resolveSignalsBaseUrlFromEnv(env);
+  const health = await verifySignalsHealth(signalsBaseUrl, fetchImpl);
+  if (!health.ok) {
+    updateWorkflowRun(run.id, {
+      status: "failed",
+      completedAt: now,
+      errors: JSON.stringify([health.error]),
+      errorItems: 1,
+    });
+    createWorkflowStep({
+      workflowRunId: run.id,
+      stepIndex: nextStepIndex(run.id),
+      stepType: "error",
+      status: "failed",
+      tool: "signals_health_preflight",
+      error: health.error,
+      durationMs: 0,
+    });
+    return {
+      success: false,
+      error: health.error,
+      errorCode: "signals_not_running",
+      httpStatus: 503,
+      workflowRunId: run.id,
+    };
+  }
+
   try {
     const workspaceSlug = await ensureRtxWorkspace(
       getSignalsRtxWorkspaceSlug(env),
@@ -144,8 +201,6 @@ export async function runTemplateViaRtx(
       env,
       fetchImpl
     );
-
-    const signalsBaseUrl = input.signalsBaseUrl ?? resolveSignalsBaseUrlFromEnv(env);
 
     const brief = buildAgentWorkflowBrief({
       template,

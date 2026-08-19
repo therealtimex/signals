@@ -19,29 +19,37 @@ Operate **Signals** (local-first social GTM CRM) via its stable REST API. Intell
 
 Every session:
 
-1. **Resolve base URL** (must succeed before any CRM call):
+1. **Prefer the bundled CLI** when `tools/signals-pp-cli/bin/signals-pp-cli.js` exists (marketplace plugin) or `signals-pp-cli` is on `PATH`:
+
+```bash
+signals-pp-cli health
+signals-pp-cli import contacts --file workflow-runs/<runId>/contacts.csv --dedupe
+```
+
+Use `signals-pp-cli reconcile --file …` to preview dedupe without mutating. For `--dedupe --dry-run` imports, reconcile is the accurate preview (dry-run skips dedupe queries).
+
+2. **Resolve base URL** (fallback when CLI is unavailable):
 
 ```bash
 .claude/skills/realtimex-signals/scripts/resolve-base-url.sh
 ```
 
-Export for subsequent commands:
+Export for subsequent shell helpers:
 
 ```bash
 export SIGNALS_BASE_URL="$(.claude/skills/realtimex-signals/scripts/resolve-base-url.sh)"
 ```
 
-2. **Load tool manifest** (schemas change — always refresh at session start):
+3. **Load tool manifest** (schemas change — refresh at session start when not using CLI):
 
 ```bash
 .claude/skills/realtimex-signals/scripts/list-tools.sh | jq '.tools[] | {name, description, category}'
 ```
 
-3. **Invoke tools** via the helper (preferred over hand-written curl):
+4. **Invoke tools** via the helper only when the bundled CLI cannot cover the operation:
 
 ```bash
 .claude/skills/realtimex-signals/scripts/invoke-tool.sh query_contacts '{"search":"acme"}'
-.claude/skills/realtimex-signals/scripts/invoke-tool.sh create_contact '{"name":"Alex Rivera","company":"Northwind","channels":[{"channelType":"email","value":"alex@northwind.example","isPrimary":true}]}'
 ```
 
 From repo root you can also use `scripts/invoke-agent-tool.sh` with `SIGNALS_BASE_URL` set.
