@@ -1,6 +1,6 @@
 # signals-pp-cli — Agent-Native CRM CLI (Printing Press)
 
-**Status:** Proposed (System Design deliverable for [#174](https://github.com/therealtimex/signals/issues/174))
+**Status:** Approved (System Design, 2026-08-19) — Dev implements exactly this surface; contract changes go back through design.
 **Issue:** [#174](https://github.com/therealtimex/signals/issues/174) · **Related:** [#21](https://github.com/therealtimex/signals/issues/21) `realtimex-signals` skill · [#172](https://github.com/therealtimex/signals/issues/172) thread-attached pipelines · [#118](https://github.com/therealtimex/signals/issues/118) publish lane
 **Generator:** [CLI Printing Press](https://github.com/mvanhorn/cli-printing-press)
 **Parents:** [`docs/agent-tools.md`](../docs/agent-tools.md), [`src/lib/workflows/template-brief.ts`](../src/lib/workflows/template-brief.ts), `.claude/skills/realtimex-signals/`
@@ -116,9 +116,33 @@ Examples: `query-contacts`, `create-contact`, `enrich-contact`, `get-publish-job
 }
 ```
 
-**Exit codes:** `0` all succeeded or skipped cleanly · `5` partial failure (some rows failed) · `4` auth · `3` file not found · `5` + `SIGNALS_NOT_RUNNING` when health check fails.
+**Exit codes:** `0` all succeeded or skipped cleanly · `3` file not found · `4` auth / `SIGNALS_NOT_RUNNING` · `5` partial row failure · `7` rate limited.
 
 **Idempotency:** re-running import with same file should skip existing contacts (dedupe), not duplicate.
+
+**Batching (v1):** process rows in chunks of **50** (`--batch-size`, default 50, max 50). Hard cap **500 rows** per invocation (`--limit`, default unlimited up to 500); refuse above 500 with exit `2` and actionable message.
+
+#### Staged file schema (v1)
+
+Agents stage `contacts.csv` or `contacts.json` under `workflow-runs/<runId>/`. Both encode an array of contact records.
+
+**CSV columns** (header row required; unknown columns ignored):
+
+| Column | Required | Maps to |
+|--------|----------|---------|
+| `name` | yes | `create_contact.name` |
+| `company` | no | `create_contact.company` |
+| `title` | no | `enrich_contact.title` (fill-gaps) |
+| `email` | no | primary `channels[]` entry (`channelType: email`) |
+| `platform` | no | `upsert_contact_identity.platform` |
+| `platform_user_id` | no | `upsert_contact_identity.platformUserId` |
+| `platform_handle` | no | `upsert_contact_identity.platformHandle` |
+| `profile_url` | no | `upsert_contact_identity.avatarUrl` when `https://` |
+| `notes` | no | `enrich_contact.notes` (fill-gaps) |
+
+**JSON:** array of objects with the same keys (camelCase aliases accepted: `platformUserId`, `platformHandle`, `profileUrl`).
+
+Dedupe before create: match on normalized primary `email`, else `(platform, platformUserId)`.
 
 ### 4.3 Layer 3 — local mirror (v1.1, optional)
 
@@ -218,7 +242,20 @@ Artifact shipping avoids version skew between the running Local App and a global
 
 **Pin** `cli-printing-press` to a specific version in CI (same discipline as RTX `dev-sdk-build.mjs` — unpinned upgrades can break `patchSignalsCliSource()` regexes).
 
-**Prerequisite:** Signals does not have `yarn swagger` today. Step 1 must export OpenAPI from the agent-tools routes or convert the live manifest JSON Schema into OpenAPI 3.1. The generated spec is checked in or emitted as a CI artifact; Printing Press consumes it.
+**Prerequisite:** Signals has no `yarn swagger`. Step 1 emits OpenAPI 3.1 from the **agent-tools registry** (Zod schemas in `src/lib/agent-tools/registry.ts` — same source as `GET /api/agent-tools`). See ADR-174-1.
+
+**Source layout after print (ADR-174-5):**
+
+```
+tools/signals-pp-cli/
+  source/              # Printing Press output (regenerated; do not hand-edit)
+  transcendence/       # hand-maintained: import, reconcile, doctor, health
+  patch/               # patchSignalsCliSource.mjs
+  bin/<os>-<arch>/     # cross-compiled binaries
+  bin/signals-pp-cli.js
+```
+
+Regenerating Printing Press output must not clobber `transcendence/`.
 
 ### 6.3 What to copy from realtimex-sdk
 
@@ -286,7 +323,7 @@ Add to `.github/workflows/plugin-release.yml` (after `build:standalone-artifact`
 - Replacing `signals-publish` browser workflow
 - `signals-pp-mcp` (follow-up; Printing Press emits alongside CLI)
 - Public npm distribution of `signals-pp-cli`
-- Server-side `import_contacts_batch` agent-tool (acceptable fallback if client-side batch is too slow — decision at implementation)
+- Server-side `import_contacts_batch` agent-tool (deferred v1.1 per ADR-174-2)
 - pp-cli inside Signals server processes (P6a v1.1 lesson: terminal auth unavailable in Local App executor)
 
 ---
@@ -310,25 +347,30 @@ Add to `.github/workflows/plugin-release.yml` (after `build:standalone-artifact`
 
 | Slice | Deliverable |
 |-------|-------------|
-| 1 | This spec approved; NOI + command contracts frozen |
-| 2 | `generate-agent-tools-openapi` script + checked-in or CI-emitted `openapi/agent-tools.json` |
-| 3 | `build:signals-pp-cli` — Printing Press generate, `patchSignalsCliSource`, cross-compile, verify |
-| 4 | `import contacts` + `doctor` + `reconcile` transcendence commands |
+| 1 | ~~This spec approved~~ ✓ |
+| 2 | `generate-agent-tools-openapi` + `check:agent-tools-openapi` drift gate |
+| 3 | `build:signals-pp-cli` — print → `source/`, compose `transcendence/`, patch, cross-compile, verify |
+| 4 | `import contacts` + `doctor` + `reconcile` in `transcendence/` |
 | 5 | `package-realtimex-plugin.sh` + `build:standalone-artifact` stage `tools/signals-pp-cli/` |
-| 6 | Brief + provisioner PATH wiring + optional dispatch preflight |
+| 6 | Brief + provisioner PATH wiring + **required** dispatch preflight (ADR-174-6) |
 | 7 | Skill slim-down; docs update in `docs/agent-tools.md` |
 | 8 | Golden tests: import fixture, doctor error codes, brief snippet test; CI plugin-release workflow |
 
 ---
 
-## 10. Open questions (System Design)
+## 10. Design decisions (System Design, 2026-08-19)
 
-1. ~~**Binary distribution:** npm vs artifact?~~ **Resolved:** artifact-only (§6). No public npm package.
-2. **OpenAPI source:** generate from Next.js route handlers vs maintain hand-authored spec that tracks `docs/agent-tools.md`?
-3. **Batch size / rate limits:** client-side chunking for large CSVs (e.g. 500+ rows)?
-4. **CSV schema:** canonical column names for staged `contacts.csv` from agent workflows?
-5. **Server tool fallback:** add `import_contacts_batch` to agent-tools if CLI-only batch is insufficient?
-6. **Transcendence maintenance:** regen-merge Printing Press output without clobbering hand-written `import` / `reconcile` commands?
+**ADR-174-1: OpenAPI is codegen from the agent-tools registry, not hand-authored.** — Accepted. `scripts/generate-agent-tools-openapi.mjs` imports `listAgentToolsManifest()` (or equivalent build-time export) and emits `openapi/agent-tools.json` wrapping `GET /api/agent-tools` + `POST /api/agent-tools/invoke` with per-tool `input` schemas. Checked in; CI fails on drift (`npm run check:agent-tools-openapi`). Rationale: registry + Zod is already the manifest source of truth; duplicating OpenAPI by hand will rot.
+
+**ADR-174-2: Client-side batch only in v1; no `import_contacts_batch` agent-tool.** — Accepted. `import contacts` loops `query_contacts` + `create_contact` / `enrich_contact` / `upsert_contact_identity` in chunks of 50, hard cap 500 rows/run. Rationale: ships faster, no server API change; revisit v1.1 only if dogfood shows >30s p95 for 100 rows or repeated `5` errors from overload.
+
+**ADR-174-3: Canonical staged CSV schema is frozen in §4.2.** — Accepted. Agents writing `workflow-runs/<runId>/contacts.csv` must use the column table above; JSON uses the same field names. Briefs should reference this section, not invent per-template columns.
+
+**ADR-174-4: Artifact-only distribution; version locked to Signals release.** — Accepted (§6). No npm publish. CLI version = `package.json` version = plugin `realtimex.plugin.json` version for a given release artifact.
+
+**ADR-174-5: Split generated vs hand-maintained CLI source.** — Accepted. Printing Press writes `tools/signals-pp-cli/source/`; transcendence commands live in `tools/signals-pp-cli/transcendence/` and link against the generated client package. `build:signals-pp-cli` composes both before `go build`. No regen-merge into a single tree.
+
+**ADR-174-6: Dispatch preflight is required for new agent workflow runs.** — Accepted. `runTemplateViaRtx` (and equivalents) must verify `GET {signalsBaseUrl}/api/health` returns `{ app: "signals", status: "ok" }` before creating the thread; fail the run with a user-visible error instead of dispatching an agent into a dead commit path.
 
 ---
 
