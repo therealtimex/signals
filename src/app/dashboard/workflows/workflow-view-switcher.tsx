@@ -7,9 +7,16 @@ import { List, Columns3, Rows3 } from "lucide-react";
 import { WorkflowListView } from "@/components/workflow-list-view";
 import { WorkflowKanbanView } from "@/components/workflow-kanban-view";
 import { WorkflowSwimlaneView } from "@/components/workflow-swimlane-view";
+import type { WorkflowRunSubject } from "@/lib/workflows/workflow-run-subjects-shared";
 import type { WorkflowRun } from "@/lib/db/types";
 
-function ViewSwitcherInner({ runs }: { runs: WorkflowRun[] }) {
+function ViewSwitcherInner({
+  runs,
+  subjectsByRunId,
+}: {
+  runs: WorkflowRun[];
+  subjectsByRunId: Record<string, WorkflowRunSubject[]>;
+}) {
   const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
@@ -39,24 +46,30 @@ function ViewSwitcherInner({ runs }: { runs: WorkflowRun[] }) {
       </TabsList>
 
       <TabsContent value="list" className="mt-4">
-        <WorkflowListView runs={runs} />
+        <WorkflowListView runs={runs} subjectsByRunId={subjectsByRunId} />
       </TabsContent>
 
       <TabsContent value="kanban" className="mt-4">
-        <WorkflowKanbanView runs={runs} />
+        <WorkflowKanbanView runs={runs} subjectsByRunId={subjectsByRunId} />
       </TabsContent>
 
       <TabsContent value="swimlane" className="mt-4">
-        <WorkflowSwimlaneView runs={runs} />
+        <WorkflowSwimlaneView runs={runs} subjectsByRunId={subjectsByRunId} />
       </TabsContent>
     </Tabs>
   );
 }
 
-export function WorkflowViewSwitcher({ runs }: { runs: WorkflowRun[] }) {
+export function WorkflowViewSwitcher({
+  runs,
+  subjectsByRunId,
+}: {
+  runs: WorkflowRun[];
+  subjectsByRunId: Record<string, WorkflowRunSubject[]>;
+}) {
   return (
-    <Suspense fallback={<WorkflowListView runs={runs} />}>
-      <ViewSwitcherInner runs={runs} />
+    <Suspense fallback={<WorkflowListView runs={runs} subjectsByRunId={subjectsByRunId} />}>
+      <ViewSwitcherInner runs={runs} subjectsByRunId={subjectsByRunId} />
     </Suspense>
   );
 }

@@ -1,5 +1,6 @@
 import { listWorkflowRuns } from "@/lib/db/queries/workflows";
 import { getTemplate } from "@/lib/db/queries/workflow-templates";
+import { resolveWorkflowRunSubjects } from "@/lib/workflows/workflow-run-subjects";
 import { AutomationTabs } from "./automation-tabs";
 import type { WorkflowRun } from "@/lib/db/types";
 
@@ -42,8 +43,9 @@ function enrichRunsWithTemplateData(runs: WorkflowRun[]): WorkflowRun[] {
 }
 
 export default function WorkflowsPage() {
-  const result = listWorkflowRuns({ pageSize: 100 });
+  const result = listWorkflowRuns({ pageSize: 100, topLevelOnly: true });
   const enrichedRuns = enrichRunsWithTemplateData(result.data);
+  const subjectsByRunId = resolveWorkflowRunSubjects(enrichedRuns);
 
   return (
     <div className="space-y-6">
@@ -54,7 +56,11 @@ export default function WorkflowsPage() {
         </p>
       </div>
 
-      <AutomationTabs runs={enrichedRuns} totalRuns={result.total} />
+      <AutomationTabs
+        runs={enrichedRuns}
+        totalRuns={result.total}
+        subjectsByRunId={subjectsByRunId}
+      />
     </div>
   );
 }

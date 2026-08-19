@@ -251,6 +251,44 @@ function computeRunStatus(
   return "completed";
 }
 
+function computeRunItemCounts(
+  selectedContactIds: string[],
+  stepReports: PipelineStepReport[],
+): {
+  processedItems: number;
+  successItems: number;
+  skippedItems: number;
+  errorItems: number;
+} {
+  const successItems = new Set<string>();
+  const failedContactIds = new Set<string>();
+  for (const report of stepReports) {
+    for (const outcome of report.outcomes) {
+      if (
+        outcome.status === "updated" ||
+        outcome.status === "verified" ||
+        outcome.status === "generated"
+      ) {
+        successItems.add(outcome.contactId);
+      }
+      if (outcome.status === "failed") {
+        failedContactIds.add(outcome.contactId);
+      }
+    }
+  }
+
+  const touchedContacts = new Set(
+    stepReports.flatMap((report) => report.outcomes.map((outcome) => outcome.contactId)),
+  );
+
+  return {
+    processedItems: touchedContacts.size,
+    successItems: successItems.size,
+    skippedItems: countSkippedOnlyContacts(selectedContactIds, stepReports),
+    errorItems: failedContactIds.size,
+  };
+}
+
 function countSkippedOnlyContacts(
   contactIds: string[],
   stepReports: PipelineStepReport[],
@@ -581,6 +619,12 @@ export async function executePipelineRun(input: ExecutePipelineRunInput): Promis
 
     await appendThreadMessage(formatStepSummaryMessage(stepDecl.id, report));
 
+    const incrementalCounts = computeRunItemCounts(
+      input.plan.selectedContactIds,
+      stepReports,
+    );
+    updateWorkflowRun(input.workflowRunId, incrementalCounts);
+
     if (report.aborted) {
       if (report.abortReason) {
         runErrors = [...runErrors, report.abortReason];
@@ -607,26 +651,18 @@ export async function executePipelineRun(input: ExecutePipelineRunInput): Promis
 
   await appendThreadMessage(formatFinalMessage(input.workflowRunId, result));
 
-  const successItems = new Set<string>();
-  for (const report of stepReports) {
-    for (const outcome of report.outcomes) {
-      if (
-        outcome.status === "updated" ||
-        outcome.status === "verified" ||
-        outcome.status === "generated"
-      ) {
-        successItems.add(outcome.contactId);
-      }
-    }
-  }
+  const finalCounts = computeRunItemCounts(
+    input.plan.selectedContactIds,
+    stepReports,
+  );
 
   const finalStatus = computeRunStatus(result, runErrors);
 
   updateWorkflowRun(input.workflowRunId, {
     status: finalStatus,
     processedItems: result.processed,
-    successItems: successItems.size,
-    skippedItems: countSkippedOnlyContacts(input.plan.selectedContactIds, stepReports),
+    successItems: finalCounts.successItems,
+    skippedItems: finalCounts.skippedItems,
     errorItems: result.failed,
     result: JSON.stringify(result),
     errors: runErrors.length > 0 ? JSON.stringify(runErrors) : "[]",

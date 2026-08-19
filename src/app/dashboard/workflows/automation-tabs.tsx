@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import { Button } from "@/components/ui/button";
@@ -11,6 +12,7 @@ import { WorkflowViewSwitcher } from "./workflow-view-switcher";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/empty-state";
 import { Zap, Info } from "lucide-react";
+import type { WorkflowRunSubject } from "@/lib/workflows/workflow-run-subjects-shared";
 import type { WorkflowRun } from "@/lib/db/types";
 
 const TABS = [
@@ -29,12 +31,22 @@ function resolveTab(param: string | null): TabKey {
 interface AutomationTabsProps {
   runs: WorkflowRun[];
   totalRuns: number;
+  subjectsByRunId: Record<string, WorkflowRunSubject[]>;
 }
 
-function AutomationTabsInner({ runs, totalRuns }: AutomationTabsProps) {
+function AutomationTabsInner({ runs, totalRuns, subjectsByRunId }: AutomationTabsProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const activeTab = resolveTab(searchParams.get("tab"));
+  const hasRunningRuns = runs.some((run) => run.status === "running");
+
+  useEffect(() => {
+    if (activeTab !== "runs" || !hasRunningRuns) return;
+    const intervalId = window.setInterval(() => {
+      router.refresh();
+    }, 5000);
+    return () => window.clearInterval(intervalId);
+  }, [activeTab, hasRunningRuns, router]);
 
   function setTab(tab: TabKey) {
     const params = new URLSearchParams(searchParams.toString());
@@ -117,7 +129,7 @@ function AutomationTabsInner({ runs, totalRuns }: AutomationTabsProps) {
               />
             </Card>
           ) : (
-            <WorkflowViewSwitcher runs={runs} />
+            <WorkflowViewSwitcher runs={runs} subjectsByRunId={subjectsByRunId} />
           )}
         </>
       )}

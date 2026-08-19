@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import {
   Table,
   TableBody,
@@ -26,6 +27,8 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import type { WorkflowRun } from "@/lib/db/types";
+import type { WorkflowRunSubject } from "@/lib/workflows/workflow-run-subjects-shared";
+import { WorkflowRunSubjectLinks } from "@/components/workflow-run-subject-links";
 
 const TYPE_ICONS: Record<string, typeof RefreshCw> = {
   sync: RefreshCw,
@@ -148,7 +151,77 @@ function formatRelativeTime(unixSeconds: number): string {
   return `${Math.floor(diff / 86400)}d ago`;
 }
 
-export function WorkflowListView({ runs }: { runs: WorkflowRun[] }) {
+function parsePipelineBatch(run: WorkflowRun): {
+  batchSize: number;
+  backlogTotal: number;
+} | null {
+  try {
+    const config = JSON.parse(run.config ?? "{}");
+    if (!config.pipeline) return null;
+    return {
+      batchSize: config.batchSize ?? 0,
+      backlogTotal: config.backlogTotal ?? 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function formatMetricValue(
+  value: number,
+  run: WorkflowRun,
+  tone: "success" | "skip" | "error" = "skip",
+): ReactNode {
+  const hasBatch = (run.totalItems ?? 0) > 0;
+  const showZero =
+    run.status === "completed" ||
+    run.status === "failed" ||
+    run.status === "cancelled" ||
+    (hasBatch && run.status === "running");
+
+  if (value > 0) {
+    if (tone === "success") {
+      return <span className="text-green-600">{value}</span>;
+    }
+    if (tone === "error") {
+      return <span className="text-destructive">{value}</span>;
+    }
+    return value;
+  }
+
+  if (showZero) {
+    return <span className="text-muted-foreground">0</span>;
+  }
+
+  return <span className="text-muted-foreground">-</span>;
+}
+
+function formatRunProgressSubtitle(run: WorkflowRun): string | null {
+  const totalItems = run.totalItems ?? 0;
+  const pipeline = parsePipelineBatch(run);
+  if (pipeline && run.status === "running") {
+    if (totalItems > 0) {
+      const processed = Math.min(run.processedItems, totalItems);
+      return `Processing ${processed}/${totalItems} contacts · ${pipeline.backlogTotal} in backlog`;
+    }
+    return `Batch ${pipeline.batchSize} · ${pipeline.backlogTotal} in backlog`;
+  }
+
+  if (run.status === "running" && totalItems > 0) {
+    const processed = Math.min(run.processedItems, totalItems);
+    return `${processed}/${totalItems} processed`;
+  }
+
+  return null;
+}
+
+export function WorkflowListView({
+  runs,
+  subjectsByRunId = {},
+}: {
+  runs: WorkflowRun[];
+  subjectsByRunId?: Record<string, WorkflowRunSubject[]>;
+}) {
   if (runs.length === 0) {
     return (
       <p className="text-sm text-muted-foreground py-8 text-center">
@@ -164,6 +237,7 @@ export function WorkflowListView({ runs }: { runs: WorkflowRun[] }) {
           <TableRow>
             <TableHead className="w-[40px]" />
             <TableHead>Workflow</TableHead>
+            <TableHead className="w-[190px] text-right">Subject</TableHead>
             <TableHead className="w-[100px]">Status</TableHead>
             <TableHead className="w-[80px] text-right">Success</TableHead>
             <TableHead className="w-[70px] text-right">Skip</TableHead>
@@ -180,12 +254,16 @@ export function WorkflowListView({ runs }: { runs: WorkflowRun[] }) {
             const templateName = parseTemplateName(run);
             const templateCategory = parseTemplateCategory(run);
             const importInfo = parseImportInfo(run);
+            const pipelineBatch = parsePipelineBatch(run);
+            const progressSubtitle = formatRunProgressSubtitle(run);
             const displayName = importInfo?.label ?? subLabel ?? templateName ?? (TYPE_LABELS[run.workflowType] ?? run.workflowType);
             // Use templateCategory for the type badge (e.g. "Content" instead of "Agent")
             const typeLabel = (templateCategory ? CATEGORY_LABELS[templateCategory] : null)
               ?? TYPE_LABELS[run.workflowType] ?? run.workflowType;
             const statusConfig = STATUS_CONFIG[run.status] ?? STATUS_CONFIG.pending;
             const StatusIcon = statusConfig.icon;
+            const subjects = subjectsByRunId[run.id] ?? [];
+            const workflowRunHref = `/dashboard/workflows/${run.id}`;
 
             return (
               <TableRow key={run.id} className="cursor-pointer hover:bg-muted/50">
@@ -209,7 +287,23 @@ export function WorkflowListView({ runs }: { runs: WorkflowRun[] }) {
                         {importInfo.fileName}
                       </span>
                     )}
+                    {progressSubtitle && (
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {progressSubtitle}
+                      </p>
+                    )}
+                    {!progressSubtitle && pipelineBatch && run.status !== "running" && (
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Batch {pipelineBatch.batchSize} · {pipelineBatch.backlogTotal} in backlog
+                      </p>
+                    )}
                   </Link>
+                </TableCell>
+                <TableCell className="text-right align-top">
+                  <WorkflowRunSubjectLinks
+                    subjects={subjects}
+                    workflowRunHref={workflowRunHref}
+                  />
                 </TableCell>
                 <TableCell>
                   <Link href={`/dashboard/workflows/${run.id}`} className="block">
@@ -225,25 +319,17 @@ export function WorkflowListView({ runs }: { runs: WorkflowRun[] }) {
                 </TableCell>
                 <TableCell className="text-right tabular-nums text-sm">
                   <Link href={`/dashboard/workflows/${run.id}`} className="block">
-                    {run.successItems > 0 ? (
-                      <span className="text-green-600">{run.successItems}</span>
-                    ) : (
-                      <span className="text-muted-foreground">-</span>
-                    )}
+                    {formatMetricValue(run.successItems, run, "success")}
                   </Link>
                 </TableCell>
                 <TableCell className="text-right tabular-nums text-sm">
                   <Link href={`/dashboard/workflows/${run.id}`} className="block">
-                    {run.skippedItems > 0 ? run.skippedItems : <span className="text-muted-foreground">-</span>}
+                    {formatMetricValue(run.skippedItems, run, "skip")}
                   </Link>
                 </TableCell>
                 <TableCell className="text-right tabular-nums text-sm">
                   <Link href={`/dashboard/workflows/${run.id}`} className="block">
-                    {run.errorItems > 0 ? (
-                      <span className="text-destructive">{run.errorItems}</span>
-                    ) : (
-                      <span className="text-muted-foreground">-</span>
-                    )}
+                    {formatMetricValue(run.errorItems, run, "error")}
                   </Link>
                 </TableCell>
                 <TableCell className="text-right font-mono text-xs">

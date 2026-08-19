@@ -16,6 +16,8 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import type { WorkflowRun } from "@/lib/db/types";
+import type { WorkflowRunSubject } from "@/lib/workflows/workflow-run-subjects-shared";
+import { WorkflowRunSubjectLinks } from "@/components/workflow-run-subject-links";
 
 const TYPE_ICONS: Record<string, typeof RefreshCw> = {
   sync: RefreshCw,
@@ -112,9 +114,11 @@ function formatDuration(startedAt: number | null, completedAt: number | null): s
 export function WorkflowRunCard({
   run,
   variant = "kanban",
+  subjects = [],
 }: {
   run: WorkflowRun;
   variant?: "kanban" | "swimlane";
+  subjects?: WorkflowRunSubject[];
 }) {
   const Icon = TYPE_ICONS[run.workflowType] ?? RefreshCw;
   const subType = parseSyncSubType(run);
@@ -126,6 +130,7 @@ export function WorkflowRunCard({
     run.totalItems && run.totalItems > 0
       ? Math.round((run.processedItems / run.totalItems) * 100)
       : null;
+  const workflowRunHref = `/dashboard/workflows/${run.id}`;
 
   if (variant === "swimlane") {
     return (
@@ -139,6 +144,15 @@ export function WorkflowRunCard({
             <span>{run.successItems > 0 ? `${run.successItems} ok` : run.status}</span>
             <span>{formatRelativeTime(run.createdAt)}</span>
           </div>
+          {subjects.length > 0 && (
+            <div className="mt-1">
+              <WorkflowRunSubjectLinks
+                subjects={subjects}
+                workflowRunHref={workflowRunHref}
+                maxVisible={1}
+              />
+            </div>
+          )}
         </Card>
       </Link>
     );
@@ -160,6 +174,14 @@ export function WorkflowRunCard({
 
         {run.status === "running" && progressPercent !== null && (
           <Progress value={progressPercent} className="h-1" />
+        )}
+
+        {subjects.length > 0 && (
+          <WorkflowRunSubjectLinks
+            subjects={subjects}
+            workflowRunHref={workflowRunHref}
+            maxVisible={1}
+          />
         )}
 
         <div className="flex items-center justify-between text-[10px] text-muted-foreground">

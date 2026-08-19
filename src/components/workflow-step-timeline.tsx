@@ -27,6 +27,7 @@ import {
   SkipForward,
 } from "lucide-react";
 import type { WorkflowStep } from "@/lib/db/types";
+import type { WorkflowRunSubject } from "@/lib/workflows/workflow-run-subjects-shared";
 import { formatWorkflowError } from "@/lib/workflows/format-error";
 
 const STEP_TYPE_CONFIG: Record<
@@ -89,7 +90,15 @@ function parseJson(str: string | null): Record<string, unknown> | null {
   }
 }
 
-export function WorkflowStepTimeline({ steps, animate }: { steps: WorkflowStep[]; animate?: boolean }) {
+export function WorkflowStepTimeline({
+  steps,
+  animate,
+  subjectById = {},
+}: {
+  steps: WorkflowStep[];
+  animate?: boolean;
+  subjectById?: Record<string, WorkflowRunSubject>;
+}) {
   if (steps.length === 0) {
     return animate ? (
       <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
@@ -148,7 +157,11 @@ export function WorkflowStepTimeline({ steps, animate }: { steps: WorkflowStep[]
                 );
               })()}
               {output && Object.keys(output).length > 0 && !step.error && (
-                <StepOutputRenderer output={output} variant="inline" />
+                <StepOutputRenderer
+                  output={output}
+                  variant="inline"
+                  subjectById={subjectById}
+                />
               )}
             </div>
 

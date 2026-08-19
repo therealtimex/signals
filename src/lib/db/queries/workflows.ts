@@ -1,4 +1,4 @@
-import { eq, and, desc, count, asc, sql, SQL } from "drizzle-orm";
+import { eq, and, desc, count, asc, sql, SQL, isNull } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db/client";
 import { workflowRuns, workflowSteps } from "@/lib/db/schema";
@@ -83,10 +83,16 @@ export function listWorkflowRuns(opts?: {
   status?: WorkflowRun["status"];
   workflowType?: WorkflowRun["workflowType"];
   templateId?: string;
+  /** When true, omit child runs (e.g. per-contact persona steps spawned by a pipeline). */
+  topLevelOnly?: boolean;
   page?: number;
   pageSize?: number;
 }): PaginatedResult<WorkflowRun> {
   const conditions: SQL[] = [];
+
+  if (opts?.topLevelOnly) {
+    conditions.push(isNull(workflowRuns.parentWorkflowId));
+  }
 
   if (opts?.status) {
     conditions.push(
