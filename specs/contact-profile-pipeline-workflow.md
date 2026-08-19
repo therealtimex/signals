@@ -90,6 +90,11 @@ export type PipelineStepContext = {
   forcePersona: boolean;
   fetchImpl: typeof fetch;
   env: EnvLike;
+  runScope?: {
+    contactIds: readonly string[];
+    resources: Map<string, unknown>;
+    deferCleanup(cleanup: () => void | Promise<void>): void;
+  };
   appendThreadMessage: (markdown: string) => Promise<void>;  // no-op when thread absent (§3.4)
 };
 
@@ -102,7 +107,7 @@ export type PipelineStepHandler = (
 export const PIPELINE_STEP_HANDLERS: Record<string, PipelineStepHandler>;
 ```
 
-Execution is **step-major**: X hydration runs over all selected contacts, then avatar enrichment, then persona generation. Hydration can supply the identity avatar that makes the avatar step a cheap `avatar_present` skip. The thread gets one coherent summary message per step; an `llm`-unavailable abort (§7.3) kills only the persona step, never the already-finished deterministic work.
+Execution is **contact-major**: each selected contact runs through X hydration, avatar enrichment, and persona generation before the next contact starts. Hydration can therefore supply identity data immediately to the same contact's avatar and persona steps, while persona work naturally spaces anonymous X traffic between contacts. The run scope preserves operations that must span the batch: authenticated X lookup is prepared in chunks of up to 100, while anonymous hydration lazily reuses one resolver, pacer, breaker, cooldown, and request budget until final cleanup. The thread still gets one coherent aggregate message per configured step; an `llm`-unavailable abort (§7.3) stops remaining contacts without discarding already-recorded deterministic work.
 
 ### 2.3 Observability mapping (`workflow_runs` / `workflow_steps` — no schema change)
 

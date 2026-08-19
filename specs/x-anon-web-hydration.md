@@ -114,9 +114,11 @@ export type XAnonHandleResolverFactory = (
 
 - `X_ANON_SESSION_NAME = "signals-x-anon"` — distinct from `RTX_PUBLISH_SESSION_NAME`
   (`signals-publish`). The resolver throws if asked to use the publish session name.
-- The session is **owned by the hydration step**: acquired lazily (only when the fallback is
-  engaged *and* at least one candidate needs browser resolution), disposed in a `finally` at step
-  end (`stopRtxBrowserSession` best-effort + CDP client `browser.close()`).
+- The session is **owned by the pipeline run scope**: acquired lazily (only when the fallback is
+  engaged *and* at least one candidate needs browser resolution), reused as contact-major
+  execution interleaves hydration with avatar/persona work, and disposed by deferred cleanup in a
+  `finally` at run end (`stopRtxBrowserSession` best-effort + CDP client `browser.close()`). Direct
+  batch callers use the same session abstraction and dispose it when their batch returns.
 - A module-level in-process mutex serializes acquisition: concurrent pipeline runs (different
   templates) queue rather than sharing a live resolver. Only one tab, only sequential
   navigation.
@@ -341,7 +343,8 @@ before giving up for the run.
 ## 9. Concurrency, Pacing, Circuit Breaker
 
 - **Concurrency = 1.** One resolver tab, sequential navigations; HTTP fetches also sequential in
-  v1 (`X_ANON_CONCURRENCY = 1`). Simplest, most conservative; the batch is ≤ 50 contacts.
+  v1 (`X_ANON_CONCURRENCY = 1`). Contact-major execution places downstream avatar/persona work
+  between contacts without permitting concurrent X traffic; the batch is ≤ 50 contacts.
 - **Pacing:** `X_ANON_MIN_REQUEST_GAP_MS = 1_000` plus 0–500 ms jitter between successive
   anonymous requests (browser navigations and HTTP fetches share the pacer). Injectable clock/
   sleep so tests run instantly.
@@ -352,7 +355,8 @@ before giving up for the run.
   - trip after `X_ANON_PARSE_FAILURE_BREAK_THRESHOLD = 3` consecutive
     `parse_failed`/`shell`/`x_web_http_*`/`x_web_id_mismatch` outcomes;
   - once tripped, all unprocessed candidates skip with the tripping reason (so run totals show
-    what actually happened), the resolver is disposed, and no further anonymous traffic is sent.
+    what actually happened), no further anonymous traffic is sent, and the resolver is disposed
+    by the run's guaranteed cleanup.
 - **Cross-run cooldown:** module-level in-memory `{ until }` set on breaker trip
   (`X_ANON_COOLDOWN_MS = 15 min`); while active, the transport short-circuits to the tripping
   skip reason without any network. Deliberately not persisted (D5): a process restart clearing

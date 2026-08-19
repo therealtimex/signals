@@ -49,6 +49,11 @@ export type XAnonWebTransport = (
   deps: XAnonWebTransportDeps,
 ) => Promise<Map<string, XAnonWebOutcome>>;
 
+export type XAnonWebSession = {
+  hydrate: (requests: XAnonWebRequest[]) => Promise<Map<string, XAnonWebOutcome>>;
+  dispose: () => Promise<void>;
+};
+
 type FetchOutcome =
   | { status: "hydrated"; user: XUser }
   | { status: "miss"; missStatus: "not_found" | "suspended" }
@@ -237,21 +242,8 @@ function withResolvedHandle(outcome: FetchOutcome, handle: string): XAnonWebOutc
   return { ...outcome, resolvedHandle: handle } as XAnonWebOutcome;
 }
 
-export const hydrateXProfilesViaAnonWeb: XAnonWebTransport = async (requests, deps) => {
-  const outcomes = new Map<string, XAnonWebOutcome>();
+export function createXAnonWebSession(deps: XAnonWebTransportDeps): XAnonWebSession {
   const now = deps.now ?? Date.now;
-  if (cooldown && cooldown.until > now()) {
-    for (const request of requests) {
-      outcomes.set(request.userId, {
-        status: "skip",
-        reason: "x_web_deferred",
-        detail: { cooldownReason: cooldown.reason },
-      });
-    }
-    return outcomes;
-  }
-  cooldown = null;
-
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const random = deps.random ?? Math.random;
   const minGap = Math.max(0, deps.minRequestGapMs ?? X_ANON_MIN_REQUEST_GAP_MS);
@@ -273,13 +265,34 @@ export const hydrateXProfilesViaAnonWeb: XAnonWebTransport = async (requests, de
   let browserResolutions = 0;
   let consecutiveParseFailures = 0;
   let breakerReason: string | null = null;
+  let disposed = false;
 
   const trip = (reason: string) => {
     breakerReason = reason;
     cooldown = { until: now() + X_ANON_COOLDOWN_MS, reason };
   };
 
-  try {
+  const hydrate = async (requests: XAnonWebRequest[]) => {
+    const outcomes = new Map<string, XAnonWebOutcome>();
+    if (disposed) throw new Error("Anonymous X hydration session is disposed");
+    if (breakerReason) {
+      for (const request of requests) {
+        outcomes.set(request.userId, { status: "skip", reason: breakerReason });
+      }
+      return outcomes;
+    }
+    if (cooldown && cooldown.until > now()) {
+      for (const request of requests) {
+        outcomes.set(request.userId, {
+          status: "skip",
+          reason: "x_web_deferred",
+          detail: { cooldownReason: cooldown.reason },
+        });
+      }
+      return outcomes;
+    }
+    cooldown = null;
+
     for (const request of requests) {
       if (breakerReason) {
         outcomes.set(request.userId, { status: "skip", reason: breakerReason });
@@ -363,9 +376,27 @@ export const hydrateXProfilesViaAnonWeb: XAnonWebTransport = async (requests, de
         consecutiveParseFailures = 0;
       }
     }
-  } finally {
-    await resolver?.dispose().catch(() => undefined);
-  }
 
-  return outcomes;
+    return outcomes;
+  };
+
+  return {
+    hydrate,
+    dispose: async () => {
+      if (disposed) return;
+      disposed = true;
+      const activeResolver = resolver;
+      resolver = null;
+      await activeResolver?.dispose().catch(() => undefined);
+    },
+  };
+}
+
+export const hydrateXProfilesViaAnonWeb: XAnonWebTransport = async (requests, deps) => {
+  const session = createXAnonWebSession(deps);
+  try {
+    return await session.hydrate(requests);
+  } finally {
+    await session.dispose();
+  }
 };

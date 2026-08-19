@@ -511,4 +511,219 @@ describe("runPipelineTemplate", () => {
     );
     expect(summarySteps.every((step) => (step.durationMs ?? 0) >= 0)).toBe(true);
   });
+
+  it("executes configured steps contact-by-contact with same-contact handoff", async () => {
+    const contactA = createContact({ name: "Contact-major A" });
+    const contactB = createContact({ name: "Contact-major B" });
+    const contactIds = [contactA.id, contactB.id];
+    const plan = planProfilePipelineRun({ contactIds });
+    const order: string[] = [];
+    const hydrated = new Set<string>();
+
+    vi.spyOn(PIPELINE_STEP_HANDLERS, "hydrate_x_profiles").mockImplementation(
+      async (ids, ctx) => {
+        expect(ids).toHaveLength(1);
+        const contactId = ids[0]!;
+        order.push(`hydrate:${contactId}`);
+        hydrated.add(contactId);
+        return {
+          stepId: ctx.stepId,
+          outcomes: [{ contactId, status: "updated" }],
+          aborted: false,
+        };
+      },
+    );
+    vi.spyOn(PIPELINE_STEP_HANDLERS, "enrich_contact_avatars").mockImplementation(
+      async (ids, ctx) => {
+        const contactId = ids[0]!;
+        expect(hydrated.has(contactId)).toBe(true);
+        order.push(`avatar:${contactId}`);
+        return {
+          stepId: ctx.stepId,
+          outcomes: [{ contactId, status: "skipped", reason: "avatar_present" }],
+          aborted: false,
+        };
+      },
+    );
+    vi.spyOn(PIPELINE_STEP_HANDLERS, "generate_persona").mockImplementation(
+      async (ids, ctx) => {
+        const contactId = ids[0]!;
+        expect(hydrated.has(contactId)).toBe(true);
+        order.push(`persona:${contactId}`);
+        return {
+          stepId: ctx.stepId,
+          outcomes: [{ contactId, status: "skipped", reason: "not_eligible" }],
+          aborted: false,
+        };
+      },
+    );
+
+    const template = createPipelineTemplate();
+    const run = createWorkflowRun({
+      templateId: template.id,
+      workflowType: "enrich",
+      status: "running",
+      trigger: "template",
+      config: "{}",
+      startedAt: Math.floor(Date.now() / 1000),
+      totalItems: contactIds.length,
+    });
+
+    await executePipelineRun({
+      workflowRunId: run.id,
+      templateId: template.id,
+      pipeline: pipelineConfig,
+      plan,
+      forcePersona: false,
+      scheduleDrain: false,
+      trigger: "template",
+      workspaceSlug: null,
+      threadSlug: null,
+      fetchImpl: fetch,
+      env: process.env,
+    });
+
+    expect(order).toEqual([
+      `hydrate:${contactA.id}`,
+      `avatar:${contactA.id}`,
+      `persona:${contactA.id}`,
+      `hydrate:${contactB.id}`,
+      `avatar:${contactB.id}`,
+      `persona:${contactB.id}`,
+    ]);
+    expect(
+      listWorkflowSteps(run.id)
+        .filter((step) => step.stepType === "tool_call")
+        .map((step) => `${step.tool}:${step.contactId}`),
+    ).toEqual([
+      `x_profile_hydrate:${contactA.id}`,
+      `avatar_enrich:${contactA.id}`,
+      `generate_persona:${contactA.id}`,
+      `x_profile_hydrate:${contactB.id}`,
+      `avatar_enrich:${contactB.id}`,
+      `generate_persona:${contactB.id}`,
+    ]);
+  });
+
+  it("stops after a global handler abort and preserves completed contact counts", async () => {
+    const contacts = ["Abort A", "Abort B", "Abort C"].map((name) => createContact({ name }));
+    const contactIds = contacts.map((contact) => contact.id);
+    const plan = planProfilePipelineRun({ contactIds });
+    const visited: string[] = [];
+
+    vi.spyOn(PIPELINE_STEP_HANDLERS, "hydrate_x_profiles").mockImplementation(
+      async (ids, ctx) => ({
+        stepId: ctx.stepId,
+        outcomes: ids.map((contactId) => ({ contactId, status: "updated" as const })),
+        aborted: false,
+      }),
+    );
+    vi.spyOn(PIPELINE_STEP_HANDLERS, "enrich_contact_avatars").mockImplementation(
+      async (ids, ctx) => ({
+        stepId: ctx.stepId,
+        outcomes: ids.map((contactId) => ({
+          contactId,
+          status: "skipped" as const,
+          reason: "avatar_present",
+        })),
+        aborted: false,
+      }),
+    );
+    vi.spyOn(PIPELINE_STEP_HANDLERS, "generate_persona").mockImplementation(
+      async (ids, ctx) => {
+        const contactId = ids[0]!;
+        visited.push(contactId);
+        const aborted = contactId === contactIds[1];
+        return {
+          stepId: ctx.stepId,
+          outcomes: [{
+            contactId,
+            status: aborted ? "failed" : "skipped",
+            reason: aborted ? "LLM provider unavailable" : "not_eligible",
+          }],
+          aborted,
+          ...(aborted ? { abortReason: "LLM provider unavailable" } : {}),
+        };
+      },
+    );
+
+    const template = createPipelineTemplate();
+    const run = createWorkflowRun({
+      templateId: template.id,
+      workflowType: "enrich",
+      status: "running",
+      trigger: "template",
+      config: "{}",
+      startedAt: Math.floor(Date.now() / 1000),
+      totalItems: contactIds.length,
+    });
+
+    await executePipelineRun({
+      workflowRunId: run.id,
+      templateId: template.id,
+      pipeline: pipelineConfig,
+      plan,
+      forcePersona: false,
+      scheduleDrain: false,
+      trigger: "template",
+      workspaceSlug: null,
+      threadSlug: null,
+      fetchImpl: fetch,
+      env: process.env,
+    });
+
+    expect(visited).toEqual(contactIds.slice(0, 2));
+    expect(JSON.parse(getWorkflowRun(run.id)?.result ?? "{}")).toMatchObject({
+      selected: 3,
+      processed: 2,
+      aborted: 1,
+      failed: 1,
+    });
+  });
+
+  it("runs deferred cleanup when contact-major execution throws", async () => {
+    const contact = createContact({ name: "Cleanup contact" });
+    const plan = planProfilePipelineRun({ contactIds: [contact.id] });
+    const cleanup = vi.fn(async () => undefined);
+
+    vi.spyOn(PIPELINE_STEP_HANDLERS, "hydrate_x_profiles").mockImplementation(
+      async (ids, ctx) => {
+        ctx.runScope?.deferCleanup(cleanup);
+        return {
+          stepId: ctx.stepId,
+          outcomes: [{ contactId: ids[0]!, status: "skipped", reason: "no_x_identity" }],
+          aborted: false,
+        };
+      },
+    );
+    vi.spyOn(PIPELINE_STEP_HANDLERS, "enrich_contact_avatars").mockRejectedValue(
+      new Error("avatar handler failed"),
+    );
+
+    const template = createPipelineTemplate();
+    const run = createWorkflowRun({
+      templateId: template.id,
+      workflowType: "enrich",
+      status: "running",
+      trigger: "template",
+      config: "{}",
+      startedAt: Math.floor(Date.now() / 1000),
+      totalItems: 1,
+    });
+
+    await expect(executePipelineRun({
+      workflowRunId: run.id,
+      templateId: template.id,
+      pipeline: pipelineConfig,
+      plan,
+      forcePersona: false,
+      scheduleDrain: false,
+      trigger: "template",
+      workspaceSlug: null,
+      threadSlug: null,
+      fetchImpl: fetch,
+      env: process.env,
+    })).rejects.toThrow("avatar handler failed");
+    expect(cleanup).toHaveBeenCalledOnce();
+  });
 });
