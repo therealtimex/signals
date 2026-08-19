@@ -34,14 +34,14 @@ npm run test:plugin-package
 
 | Workflow | When | What |
 |----------|------|------|
-| `.github/workflows/ci.yml` | PR + `main` + tag `v*` | React Doctor, app quality gate, integration smoke, and marketplace bundle validation |
-| `.github/workflows/ci.yml` (`release`) | Push to `main` or tag `v*` | After every gate passes, publish the verified artifacts when `package.json` version is new |
+| `.github/workflows/pr-ci.yml` | Pull request | React Doctor, app quality gate, fresh-import verification, and integration smoke |
+| `.github/workflows/release.yml` | Push to `main` or tag `v*` | For a new version, repeat every gate, build all native targets, sign and package the Marketplace bundle, then publish |
 
-**Release on merge (recommended):** bump `package.json` and `realtimex-plugin/realtimex.plugin.json` to the same version in your PR. After merge to `main`, the `release` job waits for React Doctor, the quality gate, integration smoke tests, and marketplace package validation. If the version is newer and no `vX.Y.Z` release exists yet, it publishes the artifacts produced by the verified marketplace-bundle job (tag `vX.Y.Z` is created automatically). Docs-only or CI-only merges without a version bump do not publish.
+**Release on merge (recommended):** bump `package.json` and `realtimex-plugin/realtimex.plugin.json` to the same version in your PR. After merge to `main`, the release plan checks whether that version already exists. New versions repeat React Doctor, the consolidated quality and integration gate, all native runtime tests, and Marketplace package validation before publishing. Existing versions stop after the release plan, so docs-only or CI-only merges do not spend time rebuilding artifacts.
 
 Each target archive is a production-runtime allowlist: compiled Next.js output, traced runtime dependencies, public and guide assets, and database migration data. CI rejects raw application source, tests, coverage reports, build scripts, source maps, and nested archives, then boots the extracted artifact against a fresh database on the same operating system and architecture.
 
-Pull requests build only `linux-x64` to keep feedback efficient. Gated `main` and tag releases build and smoke-test `darwin-arm64`, `darwin-x64`, `win32-x64`, and `linux-x64`, then merge their target manifests. The marketplace selects exactly one artifact using `${process.platform}-${process.arch}`.
+Pull requests do not build Marketplace artifacts. Publishable `main` and tag releases build and smoke-test `darwin-x64`, `darwin-arm64`, `linux-x64`, `linux-arm64`, `win32-x64`, and `win32-arm64`, then merge their target manifests. This target set maps 1:1 to the host packages published by `realtimex-sdk`. The marketplace selects exactly one artifact using `${process.platform}-${process.arch}`.
 
 Release pushes require these repository settings:
 
@@ -98,9 +98,9 @@ Plugin validation uses `scripts/vendor/validate-plugin.cjs` (override with `REAL
 
 1. Bump `package.json` version (plugin `realtimex.plugin.json` version should match).
 2. Let gated release CI build and boot every supported target.
-3. Confirm CI merged `marketplace/release-manifest.json` with all four target keys.
+3. Confirm CI merged `marketplace/release-manifest.json` with all six target keys.
 4. Confirm `marketplace/release-manifest.sig.json` verifies with the pinned publisher key.
-5. Upload the plugin zip, four target archives, release manifest, and signature envelope.
+5. Upload the plugin zip, six target archives, release manifest, and signature envelope.
 6. Confirm the marketplace downloads only the artifact matching the installing host.
 
 ## Permissions
