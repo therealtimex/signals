@@ -1,4 +1,4 @@
-import { chromium, type Page } from "playwright";
+import { chromium, type Browser, type Page } from "playwright";
 import {
   clearSession,
   hasSession,
@@ -31,6 +31,7 @@ import {
   resolveRtxDebugPort,
   startRtxBrowserSession,
   type RtxBrowserSessionEntry,
+  type RtxBrowserSessionGuardrails,
 } from "@/lib/rtx/browser-sessions";
 
 export type SocialPlatform = "x" | "linkedin" | "facebook";
@@ -63,18 +64,68 @@ const PLATFORM_URLS: Record<SocialPlatform, { setupUrl: string; homeUrl: string;
     },
   };
 
-const LOGGED_IN_SELECTORS: Record<SocialPlatform, string> = {
-  x: X_LOGGED_IN_MARKERS.join(", "),
-  linkedin:
-    '.global-nav__me, .scaffold-layout, .scaffold-layout__main, [data-finite-scroll-hotkey-context="FEED"], [data-test-icon="nav-home-icon"], nav[aria-label="Primary"]',
-  facebook:
-    'div[role="navigation"], [aria-label="Account"], [aria-label="Your profile"], [data-pagelet="LeftRail"], [data-pagelet="ProfileTilesFeed_0"]',
+/**
+ * Origins Signals asks RTX to open in the shared publish session. Derived from
+ * PLATFORM_URLS so adding a platform extends the allowlist with no other edit.
+ */
+export function buildPublishSessionAllowedOrigins(): string[] {
+  const origins = new Set<string>();
+  for (const { setupUrl, homeUrl } of Object.values(PLATFORM_URLS)) {
+    origins.add(new URL(setupUrl).origin);
+    origins.add(new URL(homeUrl).origin);
+  }
+  return [...origins];
+}
+
+/**
+ * Guardrails for the shared publish session. RTX anchors every named session to
+ * its first URL by default, which locks `signals-publish` to whichever platform
+ * connected first and blocks tab opens for the others; unrestricted mode plus a
+ * multi-origin allowlist keeps all platforms reachable without opening the
+ * session up to arbitrary sites.
+ */
+export function buildPublishSessionGuardrails(): RtxBrowserSessionGuardrails {
+  return {
+    mode: "unrestricted",
+    allowedOrigins: buildPublishSessionAllowedOrigins(),
+    blockedOrigins: [],
+  };
+}
+
+/**
+ * Login markers, one selector per entry. A comma-joined union resolves through
+ * `.first()` to the first match in DOM order, so a single hidden early match
+ * (Facebook renders offscreen `div[role="navigation"]` blocks) hides every later
+ * selector; probing them one at a time cannot be masked that way (#184).
+ */
+const LOGGED_IN_SELECTORS: Record<SocialPlatform, string[]> = {
+  x: [...X_LOGGED_IN_MARKERS],
+  linkedin: [
+    ".global-nav__me",
+    ".scaffold-layout",
+    ".scaffold-layout__main",
+    '[data-finite-scroll-hotkey-context="FEED"]',
+    '[data-test-icon="nav-home-icon"]',
+    'nav[aria-label="Primary"]',
+  ],
+  facebook: [
+    '[aria-label="Your profile"]',
+    '[aria-label="Account"]',
+    '[data-pagelet="LeftRail"]',
+    '[data-pagelet="ProfileTilesFeed_0"]',
+    'div[role="navigation"]',
+  ],
 };
 
-const LOGGED_OUT_SELECTORS: Record<SocialPlatform, string> = {
-  x: '[data-testid="loginButton"]',
-  linkedin: ".sign-in-form, #username",
-  facebook: '#loginform, [data-testid="royal_login_form"], form[action*="login"], #email',
+const LOGGED_OUT_SELECTORS: Record<SocialPlatform, string[]> = {
+  x: ['[data-testid="loginButton"]'],
+  linkedin: [".sign-in-form", "#username"],
+  facebook: [
+    "#loginform",
+    '[data-testid="royal_login_form"]',
+    'form[action*="login"]',
+    "#email",
+  ],
 };
 
 function asBrowserPlatform(platform: SocialPlatform): BrowserPlatform {
@@ -232,6 +283,10 @@ export function extractFacebookProfileSlugFromUrl(rawUrl: string): string | null
 
     const segment = path.split("/").filter(Boolean)[0];
     if (!segment || FACEBOOK_RESERVED_PATHS.has(segment)) return null;
+    // `home.php`, `index.php`, … are app endpoints, never people. Without this,
+    // the logged-in feed at /home.php reads as a public profile URL and suppresses
+    // the logged-in verdict (#184).
+    if (segment.endsWith(".php")) return null;
     if (/^[a-z0-9.]+$/i.test(segment)) return segment;
     return null;
   } catch {
@@ -396,67 +451,110 @@ export async function getPlatformSessionStatus(
   };
 }
 
+const PLATFORM_TAB_WAIT_MS = 15_000;
+const LOGIN_PROBE_TIMEOUT_MS = 10_000;
+const PROBE_POLL_MS = 250;
+/** A freshly opened tab may still be redirecting; do not trust a login URL yet. */
+const PROBE_REDIRECT_GRACE_MS = 1_500;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** True when any one of the selectors is visible. */
+async function isAnySelectorVisible(page: Page, selectors: string[]): Promise<boolean> {
+  for (const selector of selectors) {
+    const visible = await page
+      .locator(selector)
+      .first()
+      .isVisible()
+      .catch(() => false);
+    if (visible) return true;
+  }
+  return false;
+}
+
+function findPlatformPage(browser: Browser, host: string): Page | null {
+  for (const context of browser.contexts()) {
+    for (const candidate of context.pages()) {
+      if (urlMatchesPlatformHost(candidate.url(), host)) return candidate;
+    }
+  }
+  return null;
+}
+
+async function waitForPlatformPage(
+  browser: Browser,
+  host: string,
+  timeoutMs: number
+): Promise<Page | null> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const page = findPlatformPage(browser, host);
+    if (page) return page;
+    if (Date.now() >= deadline) return null;
+    await sleep(PROBE_POLL_MS);
+  }
+}
+
+/**
+ * Poll the page for login markers. `locator.isVisible()` returns immediately
+ * rather than waiting, and a just-opened tab is usually still loading or
+ * redirecting, so a single pass decides before the page can answer (#184).
+ */
+async function probePlatformLogin(
+  platform: SocialPlatform,
+  page: Page,
+  timeoutMs: number
+): Promise<boolean> {
+  const start = Date.now();
+  const deadline = start + timeoutMs;
+
+  for (;;) {
+    if (await isAnySelectorVisible(page, LOGGED_OUT_SELECTORS[platform])) return false;
+
+    const { loggedIn, loggedOut } = platformUrlChecks(platform, page.url());
+    if (loggedIn) return true;
+    if (await isAnySelectorVisible(page, LOGGED_IN_SELECTORS[platform])) return true;
+    if (loggedOut && Date.now() - start >= PROBE_REDIRECT_GRACE_MS) return false;
+    if (Date.now() >= deadline) return false;
+
+    await sleep(PROBE_POLL_MS);
+  }
+}
+
 async function detectLoggedInViaCdp(
   platform: SocialPlatform,
-  debugPort: number
+  debugPort: number,
+  requestPlatformTab?: () => Promise<void>
 ): Promise<{ isLoggedIn: boolean; detectedHandle: string | null }> {
   const urls = PLATFORM_URLS[platform];
-  let browser = null;
+  let browser: Browser | null = null;
 
   try {
     browser = await chromium.connectOverCDP(`http://127.0.0.1:${debugPort}`);
-    const contexts = browser.contexts();
-    let page: Page | null = null;
+    let page = findPlatformPage(browser, urls.host);
 
-    for (const context of contexts) {
-      for (const candidate of context.pages()) {
-        if (urlMatchesPlatformHost(candidate.url(), urls.host)) {
-          page = candidate;
-          break;
-        }
-      }
-      if (page) break;
+    if (!page && requestPlatformTab) {
+      // The RealTimeX Browser hosts its tabs itself, so a CDP client cannot open
+      // one; the tab has to be requested through the RTX API and waited for.
+      await requestPlatformTab();
+      page = await waitForPlatformPage(browser, urls.host, PLATFORM_TAB_WAIT_MS);
     }
 
     if (!page) {
-      const context = contexts[0] ?? (await browser.newContext());
+      // Standalone Chromium: no RTX to ask, so drive the page directly.
+      const context = browser.contexts()[0] ?? (await browser.newContext());
       page = await context.newPage();
       await page.goto(urls.homeUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
     }
 
-    const pageUrl = page.url();
+    const isLoggedIn = await probePlatformLogin(platform, page, LOGIN_PROBE_TIMEOUT_MS);
+    const detectedHandle = isLoggedIn
+      ? await detectPlatformHandle(platform, page, page.url())
+      : null;
 
-    const loggedOut = await page
-      .locator(LOGGED_OUT_SELECTORS[platform])
-      .first()
-      .isVisible({ timeout: 2_000 })
-      .catch(() => false);
-    if (loggedOut) {
-      return { isLoggedIn: false, detectedHandle: null };
-    }
-
-    const urlLoggedOut = platformUrlChecks(platform, pageUrl).loggedOut;
-    if (urlLoggedOut) {
-      return { isLoggedIn: false, detectedHandle: null };
-    }
-
-    const urlLoggedIn = platformUrlChecks(platform, pageUrl).loggedIn;
-
-    let loggedIn = urlLoggedIn;
-    if (!loggedIn) {
-      loggedIn = await page
-        .locator(LOGGED_IN_SELECTORS[platform])
-        .first()
-        .isVisible({ timeout: 8_000 })
-        .catch(() => false);
-    }
-
-    let detectedHandle: string | null = null;
-    if (loggedIn) {
-      detectedHandle = await detectPlatformHandle(platform, page, pageUrl);
-    }
-
-    return { isLoggedIn: loggedIn, detectedHandle };
+    return { isLoggedIn, detectedHandle };
   } catch {
     return { isLoggedIn: false, detectedHandle: null };
   } finally {
@@ -535,29 +633,68 @@ async function detectPlatformHandle(
   return pageVanity ? formatLinkedInHandle(pageVanity) : null;
 }
 
+/**
+ * Register the shared publish session with the current guardrails. Re-sent on
+ * every connect so a session anchored by an earlier build self-heals in place —
+ * RTX merges guardrails into the existing record, keeping the profile and its
+ * logins. Deliberately no `url`: RTX would start the session and open a tab for
+ * it, which is the caller's decision, not this step's.
+ */
+async function ensureRtxPublishSessionRegistered(
+  env: EnvLike,
+  fetchImpl: typeof fetch
+): Promise<void> {
+  await createRtxBrowserSession(
+    {
+      sessionName: RTX_PUBLISH_SESSION_NAME,
+      guardrails: buildPublishSessionGuardrails(),
+    },
+    env,
+    fetchImpl
+  );
+}
+
+/** Ensure the shared session is running, without opening or focusing a tab. */
 async function ensureRtxSessionRunning(
-  platform: SocialPlatform,
   env: EnvLike,
   fetchImpl: typeof fetch
 ): Promise<RtxBrowserSessionEntry | undefined> {
-  const sessionName = RTX_PUBLISH_SESSION_NAME;
-  const urls = PLATFORM_URLS[platform];
-  let sessions = await listRtxBrowserSessions(env, fetchImpl);
-  let entry = findRtxBrowserSession(sessions, sessionName);
+  await ensureRtxPublishSessionRegistered(env, fetchImpl);
 
-  if (!entry) {
-    await createRtxBrowserSession({ sessionName, url: urls.setupUrl }, env, fetchImpl);
-    sessions = await listRtxBrowserSessions(env, fetchImpl);
-    entry = findRtxBrowserSession(sessions, sessionName);
-  }
+  const sessionName = RTX_PUBLISH_SESSION_NAME;
+  let entry = findRtxBrowserSession(
+    await listRtxBrowserSessions(env, fetchImpl),
+    sessionName
+  );
 
   if (!entry?.running && entry?.runtime?.status !== "running") {
-    await startRtxBrowserSession({ sessionName, url: urls.setupUrl }, env, fetchImpl);
-    sessions = await listRtxBrowserSessions(env, fetchImpl);
-    entry = findRtxBrowserSession(sessions, sessionName);
+    await startRtxBrowserSession({ sessionName }, env, fetchImpl);
+    entry = findRtxBrowserSession(
+      await listRtxBrowserSessions(env, fetchImpl),
+      sessionName
+    );
   }
 
   return entry;
+}
+
+/**
+ * Open and focus a tab on the platform's login page. Starting a session with a
+ * URL is start-if-needed plus a focused tab, so this is also the only thing that
+ * opens a tab when the session is already running.
+ */
+async function openRtxPlatformTab(
+  platform: SocialPlatform,
+  env: EnvLike,
+  fetchImpl: typeof fetch,
+  url: string = PLATFORM_URLS[platform].setupUrl
+): Promise<void> {
+  await ensureRtxPublishSessionRegistered(env, fetchImpl);
+  await startRtxBrowserSession(
+    { sessionName: RTX_PUBLISH_SESSION_NAME, url },
+    env,
+    fetchImpl
+  );
 }
 
 export async function openPlatformBrowserSession(
@@ -566,7 +703,7 @@ export async function openPlatformBrowserSession(
   fetchImpl: typeof fetch = fetch
 ): Promise<{ sessionName: string; opened: boolean }> {
   if (isRtxEmbedded(env)) {
-    await ensureRtxSessionRunning(platform, env, fetchImpl);
+    await openRtxPlatformTab(platform, env, fetchImpl);
     return { sessionName: RTX_PUBLISH_SESSION_NAME, opened: true };
   }
 
@@ -580,13 +717,18 @@ export async function validatePlatformBrowserSession(
   fetchImpl: typeof fetch = fetch
 ): Promise<{ isValid: boolean; detectedHandle: string | null; lastValidatedAt: number | null }> {
   if (isRtxEmbedded(env)) {
-    const entry = await ensureRtxSessionRunning(platform, env, fetchImpl);
+    const entry = await ensureRtxSessionRunning(env, fetchImpl);
     const debugPort = resolveRtxDebugPort(entry);
     if (!debugPort) {
       return { isValid: false, detectedHandle: null, lastValidatedAt: null };
     }
 
-    const { isLoggedIn, detectedHandle } = await detectLoggedInViaCdp(platform, debugPort);
+    const { isLoggedIn, detectedHandle } = await detectLoggedInViaCdp(
+      platform,
+      debugPort,
+      // Only reached when the session has no tab for this platform.
+      () => openRtxPlatformTab(platform, env, fetchImpl, PLATFORM_URLS[platform].homeUrl)
+    );
     const lastValidatedAt = isLoggedIn ? Math.floor(Date.now() / 1000) : null;
 
     if (isLoggedIn) {

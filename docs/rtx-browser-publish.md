@@ -27,9 +27,51 @@ Facebook browser connect is available in Settings for session validation and fut
 
 | Rule | Value |
 |------|-------|
-| Session name | `signals-publish` |
+| Session name | `signals-publish` (one session shared by **all** platforms) |
 | Lifecycle | Stop between runs — **never delete** the profile |
 | Login recovery | Agent asks in-thread; user signs in via RealTimeX Browser |
+
+### Guardrails
+
+RealTimeX anchors every **named** browser session to the first URL opened in it, so a
+shared session would lock itself to whichever platform connected first and reject tab
+opens for the others (`The RealTimeX Browser session is locked to https://x.com.`).
+
+Signals therefore declares guardrails itself, on **every** connect — `POST
+/cli/create-browser-session` merges them into an existing record, so a session anchored
+by an earlier build migrates in place with its profile and logins intact:
+
+| Field | Value |
+|-------|-------|
+| `mode` | `unrestricted` — no single-origin anchor |
+| `allowedOrigins` | Derived from `PLATFORM_URLS` (`x.com`, `www.linkedin.com`, `www.facebook.com`); adding a platform extends it automatically |
+| `blockedOrigins` | Empty |
+
+Two properties worth knowing:
+
+- The guardrail check only covers **RTX-routed** tab opens and navigations. In-page
+  navigation and redirects are never checked, and CDP clients bypass guardrails entirely
+  — which is how session validation and the publish scripts drive the browser. The
+  allowlist is blast-radius control on a session holding live logins, not a boundary.
+- The registration call carries **no** `url`. A `url` makes RealTimeX start the session
+  and open a tab; opening tabs is the caller's job (see below).
+
+### Open vs validate
+
+| Action | Call | Effect |
+|--------|------|--------|
+| **Open session** (Settings) | `start-browser-session` **with** the platform login URL | Starts the session if stopped, then opens and focuses a tab — including when the session is already running |
+| **Validate** | `start-browser-session` **without** a URL | Ensures the session runs, then detects login over CDP in the platform's existing tab |
+
+RealTimeX hosts its own tabs, so a CDP client cannot create one — `newPage()` fails
+against the RealTimeX Browser. When validation finds no tab for the platform it therefore
+asks RealTimeX to open one at the platform **home** URL (not the login URL, which reads as
+logged out until it redirects) and waits for that tab to appear. Validation on a platform
+that already has a tab still opens nothing.
+
+Login detection polls: `locator.isVisible()` returns immediately rather than waiting, and
+markers are probed one selector at a time — a comma-joined union resolves through
+`.first()` to the first match in DOM order, so one hidden early match hides the rest.
 
 ## APIs
 

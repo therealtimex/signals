@@ -3,6 +3,17 @@ import { RTX_PUBLISH_SESSION_NAME } from "@/lib/publish/constants";
 
 export type RtxCliBody = Record<string, unknown>;
 
+/**
+ * Navigation guardrails Signals declares for the shared publish session.
+ * `unrestricted` mode keeps RTX from anchoring the session to a single origin;
+ * `allowedOrigins` still fences it to the platforms Signals opens.
+ */
+export type RtxBrowserSessionGuardrails = {
+  mode: "unrestricted";
+  allowedOrigins: string[];
+  blockedOrigins: string[];
+};
+
 export type RtxBrowserSessionEntry = {
   sessionName: string;
   running?: boolean;
@@ -51,6 +62,20 @@ async function rtxCliRequest(
   return { response, body };
 }
 
+/**
+ * RTX guardrail denials name the origin lock but not the way out, and Signals is
+ * the only side that can clear it (by re-declaring guardrails on connect), so add
+ * the recovery step when the CLI reports one.
+ */
+function describeRtxCliFailure(body: RtxCliBody, fallback: string): string {
+  const base =
+    typeof body.error === "string" && body.error.trim() ? body.error.trim() : fallback;
+  const reason = typeof body.reason === "string" ? body.reason : "";
+  if (!reason.startsWith("guardrail-")) return base;
+
+  return `${base} Signals could not clear the session origin lock — update RealTimeX, or delete the ${RTX_PUBLISH_SESSION_NAME} session in Settings → Browser and sign in again.`;
+}
+
 export async function listRtxBrowserSessions(
   env: EnvLike = process.env,
   fetchImpl: typeof fetch = fetch
@@ -63,11 +88,9 @@ export async function listRtxBrowserSessions(
   );
 
   if (!response.ok || body.success === false) {
-    const message =
-      typeof body.error === "string"
-        ? body.error
-        : `Failed to list RTX browser sessions (${response.status})`;
-    throw new Error(message);
+    throw new Error(
+      describeRtxCliFailure(body, `Failed to list RTX browser sessions (${response.status})`)
+    );
   }
 
   const sessions = body.sessions;
@@ -99,7 +122,11 @@ export function resolveRtxDebugPort(entry: RtxBrowserSessionEntry | undefined): 
 }
 
 export async function createRtxBrowserSession(
-  input: { sessionName?: string; url?: string },
+  input: {
+    sessionName?: string;
+    url?: string;
+    guardrails?: RtxBrowserSessionGuardrails;
+  },
   env: EnvLike = process.env,
   fetchImpl: typeof fetch = fetch
 ): Promise<RtxCliBody> {
@@ -111,6 +138,7 @@ export async function createRtxBrowserSession(
       body: JSON.stringify({
         sessionName,
         ...(input.url ? { url: input.url } : {}),
+        ...(input.guardrails ? { guardrails: input.guardrails } : {}),
       }),
     },
     env,
@@ -118,11 +146,9 @@ export async function createRtxBrowserSession(
   );
 
   if (!response.ok || body.success === false) {
-    const message =
-      typeof body.error === "string"
-        ? body.error
-        : `Failed to create RTX browser session (${response.status})`;
-    throw new Error(message);
+    throw new Error(
+      describeRtxCliFailure(body, `Failed to create RTX browser session (${response.status})`)
+    );
   }
 
   return body;
@@ -145,11 +171,9 @@ export async function startRtxBrowserSession(
   );
 
   if (!response.ok || body.success === false) {
-    const message =
-      typeof body.error === "string"
-        ? body.error
-        : `Failed to start RTX browser session (${response.status})`;
-    throw new Error(message);
+    throw new Error(
+      describeRtxCliFailure(body, `Failed to start RTX browser session (${response.status})`)
+    );
   }
 
   return body;
@@ -168,11 +192,9 @@ export async function stopRtxBrowserSession(
   );
 
   if (!response.ok || body.success === false) {
-    const message =
-      typeof body.error === "string"
-        ? body.error
-        : `Failed to stop RTX browser session (${response.status})`;
-    throw new Error(message);
+    throw new Error(
+      describeRtxCliFailure(body, `Failed to stop RTX browser session (${response.status})`)
+    );
   }
 
   return body;

@@ -18,6 +18,15 @@ describe("formatWorkflowError", () => {
     expect(result.title).toBe("Agent orchestration moved to RealTimeX");
   });
 
+  it("formats RTX Browser guardrail denials", () => {
+    const result = formatWorkflowError(
+      "The RealTimeX Browser session is locked to https://x.com."
+    );
+    expect(result.category).toBe("session");
+    expect(result.title).toBe("RealTimeX Browser session is origin-locked");
+    expect(result.detail).toContain("Platform Connections");
+  });
+
   it("formats rate limit with seconds→minutes conversion", () => {
     const raw =
       'Rate limited on /users/123/tweets?tweet.fields=created_at%2Cpublic_metrics&max_results=10&pagination_token=7140dibdnow9c7btw4. Retry after 899s';
