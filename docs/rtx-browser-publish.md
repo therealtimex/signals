@@ -61,7 +61,17 @@ Two properties worth knowing:
 | Action | Call | Effect |
 |--------|------|--------|
 | **Open session** (Settings) | `start-browser-session` **with** the platform login URL | Starts the session if stopped, then opens and focuses a tab — including when the session is already running |
-| **Validate** | `start-browser-session` **without** a URL | Ensures the session runs, opens no tab, then detects login over CDP |
+| **Validate** | `start-browser-session` **without** a URL | Ensures the session runs, then detects login over CDP in the platform's existing tab |
+
+RealTimeX hosts its own tabs, so a CDP client cannot create one — `newPage()` fails
+against the RealTimeX Browser. When validation finds no tab for the platform it therefore
+asks RealTimeX to open one at the platform **home** URL (not the login URL, which reads as
+logged out until it redirects) and waits for that tab to appear. Validation on a platform
+that already has a tab still opens nothing.
+
+Login detection polls: `locator.isVisible()` returns immediately rather than waiting, and
+markers are probed one selector at a time — a comma-joined union resolves through
+`.first()` to the first match in DOM order, so one hidden early match hides the rest.
 
 ## APIs
 

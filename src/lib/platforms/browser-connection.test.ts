@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { chromium } from "playwright";
 import {
   findRtxBrowserSession,
   resolveRtxDebugPort,
@@ -30,6 +31,10 @@ import { createPlatformAccount } from "@/lib/db/queries/platform-accounts";
 import { db } from "@/lib/db/client";
 import { platformAccounts } from "@/lib/db/schema";
 import { resetCoreTables } from "@/test/db";
+
+vi.mock("playwright", () => ({
+  chromium: { connectOverCDP: vi.fn() },
+}));
 
 describe("rtx browser session helpers", () => {
   it("matches platform hostnames without substring false positives", () => {
@@ -95,6 +100,18 @@ describe("rtx browser session helpers", () => {
     expect(isFacebookLoggedOutUrl("https://www.facebook.com/login")).toBe(true);
     expect(isFacebookLoggedOutUrl("https://www.facebook.com/login/?next=foo")).toBe(true);
     expect(extractFacebookProfileSlugFromUrl("https://www.facebook.com/profile.php")).toBe(null);
+  });
+
+  it("treats Facebook .php endpoints as app pages, not profiles", () => {
+    // The logged-in feed is served at /home.php; reading it as a vanity profile
+    // suppressed the logged-in verdict and leaked "home.php" as a handle (#184).
+    expect(extractFacebookProfileSlugFromUrl("https://www.facebook.com/home.php")).toBe(null);
+    expect(extractFacebookProfileSlugFromUrl("https://www.facebook.com/index.php")).toBe(null);
+    expect(isFacebookLoggedInUrl("https://www.facebook.com/home.php")).toBe(true);
+    expect(isFacebookLoggedOutUrl("https://www.facebook.com/home.php")).toBe(false);
+    expect(extractFacebookProfileSlugFromUrl("https://www.facebook.com/jane.doe")).toBe(
+      "jane.doe"
+    );
   });
 
   it("finds a session case-insensitively", () => {
@@ -325,6 +342,55 @@ describe("publish session guardrails", () => {
 
   type CliCall = { url: string; body: Record<string, unknown> | null };
 
+  beforeEach(() => {
+    resetCoreTables();
+    db.delete(platformAccounts).run();
+    vi.mocked(chromium.connectOverCDP).mockReset();
+  });
+
+  /** Minimal stand-in for a CDP page: URL, selector visibility, and hrefs. */
+  function fakePage(
+    url: string,
+    { visible = [] as string[], hrefs = {} as Record<string, string> } = {}
+  ) {
+    return {
+      url: () => url,
+      locator: (selector: string) => ({
+        first: () => ({
+          isVisible: async () => visible.includes(selector),
+          getAttribute: async () => hrefs[selector] ?? null,
+        }),
+      }),
+    };
+  }
+
+  /**
+   * Stand-in for the RealTimeX Browser over CDP: tabs it already owns are
+   * visible, but a client cannot create one — the case that broke cold validate.
+   */
+  function fakeBrowser(pages: ReturnType<typeof fakePage>[]) {
+    const open = [...pages];
+    const browser = {
+      contexts: () => [
+        {
+          pages: () => open,
+          newPage: async () => {
+            throw new Error("RealTimeX Browser does not allow CDP page creation");
+          },
+        },
+      ],
+      newContext: async () => {
+        throw new Error("RealTimeX Browser does not allow CDP context creation");
+      },
+      close: async () => undefined,
+    };
+
+    vi.mocked(chromium.connectOverCDP).mockResolvedValue(
+      browser as unknown as Awaited<ReturnType<typeof chromium.connectOverCDP>>
+    );
+    return { open };
+  }
+
   /** Mock the RTX CLI: list returns `sessions`, every other call succeeds. */
   function mockRtxCli(sessions: unknown[]) {
     const calls: CliCall[] = [];
@@ -383,9 +449,40 @@ describe("publish session guardrails", () => {
     });
   });
 
-  it("validates without opening an RTX tab", async () => {
-    const { fetchImpl, find } = mockRtxCli([
-      { sessionName: "signals-publish", running: false, remoteDebugPort: 59_999 },
+  it("validates a warm Facebook tab without requesting another", async () => {
+    const { fetchImpl, calls, find } = mockRtxCli([
+      { sessionName: "signals-publish", running: true, remoteDebugPort: 9223 },
+    ]);
+    // The logged-in feed is served at /home.php — QA saw this read as logged out.
+    fakeBrowser([fakePage("https://www.facebook.com/home.php")]);
+
+    const result = await validatePlatformBrowserSession(
+      "facebook",
+      RTX_ENV,
+      fetchImpl as unknown as typeof fetch
+    );
+
+    expect(result.isValid).toBe(true);
+    expect(find("/cli/create-browser-session")?.body).toEqual({
+      sessionName: "signals-publish",
+      guardrails: buildPublishSessionGuardrails(),
+    });
+    // A tab already exists, so validate must not open one.
+    expect(
+      calls.filter((call) => call.url.includes("/cli/start-browser-session/"))
+    ).toEqual([]);
+  });
+
+  it("detects login from a later marker when an earlier one is not visible", async () => {
+    const { fetchImpl } = mockRtxCli([
+      { sessionName: "signals-publish", running: true, remoteDebugPort: 9223 },
+    ]);
+    // Root URL gives no verdict, so the DOM markers decide. Probing selectors one
+    // at a time is what makes the later match reachable.
+    fakeBrowser([
+      fakePage("https://www.facebook.com/", {
+        visible: ['[aria-label="Your profile"]'],
+      }),
     ]);
 
     const result = await validatePlatformBrowserSession(
@@ -394,13 +491,58 @@ describe("publish session guardrails", () => {
       fetchImpl as unknown as typeof fetch
     );
 
-    // Nothing is listening on the mocked debug port, so CDP detection fails.
-    expect(result.isValid).toBe(false);
+    expect(result.isValid).toBe(true);
+  });
+
+  it("requests a platform tab when the session has none, then validates", async () => {
+    const { fetchImpl, calls, find } = mockRtxCli([
+      { sessionName: "signals-publish", running: true, remoteDebugPort: 9223 },
+    ]);
+    const { open } = fakeBrowser([]);
+
+    // RTX opens the tab; a CDP client cannot, which is why cold validate failed.
+    fetchImpl.mockImplementation(async (url: string, init?: RequestInit) => {
+      const body = init?.body ? JSON.parse(String(init.body)) : null;
+      calls.push({ url, body });
+      if (url.includes("/cli/list-browser-sessions")) {
+        return {
+          ok: true,
+          json: async () => ({
+            success: true,
+            sessions: [
+              { sessionName: "signals-publish", running: true, remoteDebugPort: 9223 },
+            ],
+          }),
+        };
+      }
+      if (url.includes("/cli/start-browser-session/") && body?.url) {
+        open.push(
+          fakePage("https://www.linkedin.com/feed/", {
+            hrefs: { 'a.global-nav__primary-link[href*="/in/"]': "/in/jane-doe" },
+          })
+        );
+      }
+      return { ok: true, json: async () => ({ success: true }) };
+    });
+
+    const result = await validatePlatformBrowserSession(
+      "linkedin",
+      RTX_ENV,
+      fetchImpl as unknown as typeof fetch
+    );
+
+    expect(result.isValid).toBe(true);
+    expect(result.detectedHandle).toBe("/in/jane-doe");
     expect(find("/cli/create-browser-session")?.body).toEqual({
       sessionName: "signals-publish",
       guardrails: buildPublishSessionGuardrails(),
     });
-    expect(find("/cli/start-browser-session/signals-publish")?.body).toEqual({});
+    // Home page, not the login page: a login URL would read as logged out.
+    expect(
+      calls
+        .filter((call) => call.url.includes("/cli/start-browser-session/"))
+        .map((call) => call.body)
+    ).toEqual([{ url: "https://www.linkedin.com/feed/" }]);
   });
 
   it("explains guardrail denials with a recovery step", async () => {
