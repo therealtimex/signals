@@ -52,9 +52,14 @@ const requiredEntries = [
   "guide/index.md",
   "resources/migrations/0000_tired_thanos.sql",
   "resources/migrations/meta/_journal.json",
+  "tools/signals-pp-cli/bin/signals-pp-cli.js",
 ];
 for (const entry of requiredEntries) {
   if (!entries.includes(entry)) errors.push(`Missing runtime entry: ${entry}`);
+}
+const hostCliBinary = `tools/signals-pp-cli/bin/${hostTarget}/signals-pp-cli`;
+if (!entries.includes(hostCliBinary)) {
+  errors.push(`Missing runtime entry: ${hostCliBinary}`);
 }
 for (const [prefix, label] of [
   [".next/server/", "compiled Next.js server"],
@@ -79,6 +84,7 @@ const allowedRootDirectories = new Set([
   "node_modules",
   "public",
   "resources",
+  "tools",
 ]);
 for (const entry of entries) {
   const [rootSegment] = entry.split("/");
@@ -93,6 +99,14 @@ for (const entry of entries) {
     !/^resources\/migrations\/(?:[^/]+\.sql|meta\/[^/]+\.json)$/.test(entry)
   ) {
     errors.push(`Unexpected runtime resource: ${entry}`);
+  }
+  if (
+    entry.startsWith("tools/") &&
+    !/^tools\/signals-pp-cli\/bin\/(?:signals-pp-cli\.js|[a-z0-9]+-[a-z0-9]+\/signals-pp-cli)$/.test(
+      entry,
+    )
+  ) {
+    errors.push(`Unexpected tools entry: ${entry}`);
   }
   if (entry.endsWith(".map")) errors.push(`Source map: ${entry}`);
   if (/\.(?:zip|tgz|tar|tar\.gz)$/.test(entry)) errors.push(`Nested archive: ${entry}`);
