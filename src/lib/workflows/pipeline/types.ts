@@ -46,6 +46,7 @@ export type PipelineStepContext = {
   personaStale: boolean;
   fetchImpl: typeof fetch;
   env: EnvLike;
+  options?: Record<string, unknown>;
   appendThreadMessage: (markdown: string) => Promise<void>;
 };
 

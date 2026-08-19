@@ -238,7 +238,9 @@ export type XWebParseResult =
 
 Sources, in priority order:
 
-1. **JSON-LD** `<script type="application/ld+json">` ProfilePage: the Person node
+1. **Schema.org ProfilePage metadata** — current anonymous responses use HTML microdata
+   (`itemType="https://schema.org/ProfilePage"`); JSON-LD
+   `<script type="application/ld+json">` is also accepted. The Person node
    (`mainEntity`/`author`) supplies `identifier` (numeric id), `additionalName` (handle),
    `name`, `description`, `image.contentUrl`/`thumbnailUrl` (avatar), `url` in `sameAs`/related
    links (website), `homeLocation.name`, `dateCreated`, and `interactionStatistic`

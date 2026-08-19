@@ -642,6 +642,7 @@ export async function executePipelineRun(input: ExecutePipelineRunInput): Promis
       personaStale: input.plan.filters.personaStale ?? false,
       fetchImpl: input.fetchImpl,
       env: input.env,
+      options: stepDecl.options,
       appendThreadMessage,
     });
 
