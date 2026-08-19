@@ -41,7 +41,7 @@ npm run test:plugin-package
 
 Each target archive is a production-runtime allowlist: compiled Next.js output, traced runtime dependencies, public and guide assets, and database migration data. CI rejects raw application source, tests, coverage reports, build scripts, source maps, and nested archives, then boots the extracted artifact against a fresh database on the same operating system and architecture.
 
-Pull requests do not build Marketplace artifacts. Publishable `main` and tag releases build and smoke-test `darwin-arm64`, `darwin-x64`, `win32-x64`, and `linux-x64`, then merge their target manifests. The marketplace selects exactly one artifact using `${process.platform}-${process.arch}`.
+Pull requests do not build Marketplace artifacts. Publishable `main` and tag releases build and smoke-test `darwin-x64`, `darwin-arm64`, `linux-x64`, `linux-arm64`, `win32-x64`, and `win32-arm64`, then merge their target manifests. This target set maps 1:1 to the host packages published by `realtimex-sdk`. The marketplace selects exactly one artifact using `${process.platform}-${process.arch}`.
 
 Release pushes require these repository settings:
 
@@ -98,9 +98,9 @@ Plugin validation uses `scripts/vendor/validate-plugin.cjs` (override with `REAL
 
 1. Bump `package.json` version (plugin `realtimex.plugin.json` version should match).
 2. Let gated release CI build and boot every supported target.
-3. Confirm CI merged `marketplace/release-manifest.json` with all four target keys.
+3. Confirm CI merged `marketplace/release-manifest.json` with all six target keys.
 4. Confirm `marketplace/release-manifest.sig.json` verifies with the pinned publisher key.
-5. Upload the plugin zip, four target archives, release manifest, and signature envelope.
+5. Upload the plugin zip, six target archives, release manifest, and signature envelope.
 6. Confirm the marketplace downloads only the artifact matching the installing host.
 
 ## Permissions

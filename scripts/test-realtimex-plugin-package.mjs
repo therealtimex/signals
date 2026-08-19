@@ -67,6 +67,14 @@ const localAppManifest = JSON.parse(localAppManifestRaw);
 const errors = [];
 const canonicalVersion = packageJson.version;
 const localAppId = "47e45f71-3279-42f5-8e95-731de01b6eae";
+const requiredTargets = [
+  "darwin-x64",
+  "darwin-arm64",
+  "linux-x64",
+  "linux-arm64",
+  "win32-x64",
+  "win32-arm64",
+];
 
 for (const rel of required) {
   if (!entries.includes(rel)) {
@@ -165,6 +173,16 @@ if (localAppManifest.artifactContract?.schemaVersion !== 2) {
   errors.push("Local app is missing artifact contract v2");
 }
 const supportedTargets = localAppManifest.artifactContract?.supportedTargets ?? [];
+const uniqueSupportedTargets = [...new Set(supportedTargets)];
+if (
+  uniqueSupportedTargets.length !== supportedTargets.length ||
+  [...uniqueSupportedTargets].sort().join(",") !==
+    [...requiredTargets].sort().join(",")
+) {
+  errors.push(
+    `Local app supported targets must exactly match RealtimeX SDK targets: ${requiredTargets.join(", ")}`
+  );
+}
 for (const [target] of releaseArtifacts) {
   if (!supportedTargets.includes(target)) {
     errors.push(`Release artifact target is not supported by local app: ${target}`);
