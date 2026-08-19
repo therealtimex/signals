@@ -41,6 +41,9 @@ export interface ImportPreview {
   totalRows: number;
   /** Optional per-slice breakdown lines (e.g. X archive follower/following/tweet counts). */
   details?: string[];
+  /** X archive: merged follower/following contact count. */
+  uniqueContactCount?: number;
+  tweetCount?: number;
 }
 
 export interface ImportSuccess {
@@ -50,6 +53,12 @@ export interface ImportSuccess {
   source: "csv" | "zip" | null;
   fileName: string;
   workflowRunId: string | null;
+  /** X archive: per-phase breakdown from the import route. */
+  contactsAdded?: number;
+  contactsUpdated?: number;
+  postsAdded?: number;
+  uniqueContactCount?: number;
+  handlesUpdated?: number;
 }
 
 type Phase = "pick" | "previewing" | "ready" | "importing";
@@ -108,7 +117,11 @@ export function ImportDialog({ config, open, onClose, onSuccess }: ImportDialogP
           return;
         }
 
-        setPreview(data.preview);
+        setPreview({
+          ...data.preview,
+          tweetCount: data.preview.tweetCount,
+          uniqueContactCount: data.preview.uniqueContactCount,
+        });
         setPhase("ready");
       } catch {
         setError("Could not inspect file");
@@ -142,6 +155,11 @@ export function ImportDialog({ config, open, onClose, onSuccess }: ImportDialogP
         source: data.source ?? null,
         fileName: file.name,
         workflowRunId: data.workflowRunId ?? null,
+        contactsAdded: data.contacts?.added,
+        contactsUpdated: data.contacts?.updated,
+        postsAdded: data.posts?.added,
+        uniqueContactCount: data.uniqueContactCount,
+        handlesUpdated: data.handleBackfill?.updated,
       };
       reset();
       onSuccess(result);
@@ -242,8 +260,19 @@ export function ImportDialog({ config, open, onClose, onSuccess }: ImportDialogP
                   </p>
                 ) : null}
                 <p>
-                  <span className="font-medium text-foreground">{preview.totalRows}</span>{" "}
-                  {preview.totalRows === 1 ? "row" : "rows"} ready to import
+                  {preview.uniqueContactCount != null && preview.tweetCount != null ? (
+                    <>
+                      <span className="font-medium text-foreground">{preview.uniqueContactCount}</span>{" "}
+                      {preview.uniqueContactCount === 1 ? "contact" : "contacts"} ·{" "}
+                      <span className="font-medium text-foreground">{preview.tweetCount}</span>{" "}
+                      {preview.tweetCount === 1 ? "tweet" : "tweets"} ready to import
+                    </>
+                  ) : (
+                    <>
+                      <span className="font-medium text-foreground">{preview.totalRows}</span>{" "}
+                      {preview.totalRows === 1 ? "row" : "rows"} ready to import
+                    </>
+                  )}
                 </p>
               </div>
             </div>
