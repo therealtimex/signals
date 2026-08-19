@@ -1,0 +1,64 @@
+# Fast pull-request feedback. Release packaging is intentionally isolated in
+# release.yml so ordinary development never waits on native artifact builds.
+
+name: PR quality
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-quality-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  react-doctor:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      statuses: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # React Doctor needs the merge base to report only PR-introduced issues.
+          fetch-depth: 0
+
+      - uses: millionco/react-doctor@v2
+        with:
+          blocking: error
+          version: "0.9.12"
+
+  check:
+    name: Quality gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run quality gate
+        run: npm run check
+        env:
+          # Boot/migrate touches ~/.signals — keep CI hermetic under the workspace.
+          SIGNALS_DATA_DIR: ${{ github.workspace }}/.ci/signals-data
+
+      - name: Verify fresh data dir import safety
+        run: npm run verify:fresh-import
+
+      - name: Run integration smoke tests
+        run: npm run test:integration
+        env:
+          SIGNALS_DATA_DIR: ${{ github.workspace }}/.ci/signals-e2e
+          E2E_FRESH_DB: "1"
+          CI: "true"

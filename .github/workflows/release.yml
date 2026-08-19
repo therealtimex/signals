@@ -1,11 +1,9 @@
-# Pull-request quality checks, marketplace packaging, and gated releases.
-# See: https://github.com/therealtimex/signals/issues/15
+# Gated native artifacts, Marketplace packaging, and GitHub publication.
+# This workflow never runs for pull requests.
 
-name: CI and release
+name: Release
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: ["main"]
     tags: ["v*"]
@@ -14,10 +12,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-release-${{ github.event.pull_request.number || github.ref }}
-  # Replace stale PR runs, but serialize main/tag runs so an active publish is
-  # never cancelled halfway through by a newer push.
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: release-${{ github.ref }}
+  # Never cancel a release while it may be signing or publishing artifacts.
+  cancel-in-progress: false
 
 jobs:
   release_plan:
@@ -25,31 +22,24 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       action: ${{ steps.plan.outputs.action }}
-      matrix: ${{ steps.plan.outputs.matrix }}
     steps:
       - uses: actions/checkout@v5
 
-      - name: Select validation targets
+      - name: Decide whether to publish
         id: plan
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            ACTION="validate"
-          elif [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
             ACTION="$(node scripts/ci/should-publish-marketplace-release.mjs --tag="${{ github.ref_name }}")"
           else
             ACTION="$(node scripts/ci/should-publish-marketplace-release.mjs --main)"
           fi
-
           echo "action=${ACTION}" >> "$GITHUB_OUTPUT"
-          if [[ "$ACTION" == "publish" ]]; then
-            echo 'matrix={"include":[{"target":"darwin-arm64","runner":"macos-15"},{"target":"darwin-x64","runner":"macos-15-intel"},{"target":"win32-x64","runner":"windows-2025"},{"target":"linux-x64","runner":"ubuntu-24.04"}]}' >> "$GITHUB_OUTPUT"
-          else
-            echo 'matrix={"include":[{"target":"linux-x64","runner":"ubuntu-24.04"}]}' >> "$GITHUB_OUTPUT"
-          fi
 
   react-doctor:
+    needs: release_plan
+    if: needs.release_plan.outputs.action == 'publish'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -59,18 +49,17 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          # React Doctor needs the merge base to report only PR-introduced issues.
           fetch-depth: 0
 
       - uses: millionco/react-doctor@v2
         with:
-          # Error-severity findings must block a release. Pin the scanner so the
-          # release gate cannot change underneath an otherwise identical commit.
           blocking: error
           version: "0.9.12"
 
   check:
     name: Quality gate
+    needs: release_plan
+    if: needs.release_plan.outputs.action == 'publish'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -86,33 +75,10 @@ jobs:
       - name: Run quality gate
         run: npm run check
         env:
-          # Boot/migrate touches ~/.signals — keep CI hermetic under the workspace.
           SIGNALS_DATA_DIR: ${{ github.workspace }}/.ci/signals-data
-
-  smoke:
-    name: Smoke (integration)
-    runs-on: ubuntu-latest
-    needs: check
-    steps:
-      - uses: actions/checkout@v5
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: "npm"
-
-      - name: Install dependencies
-        run: npm ci
 
       - name: Verify fresh data dir import safety
         run: npm run verify:fresh-import
-
-      - name: Build production app
-        run: |
-          npm run db:migrate
-          SIGNALS_BOOT_MIGRATIONS_DONE=1 npm run build
-        env:
-          SIGNALS_DATA_DIR: ${{ github.workspace }}/.ci/signals-data
 
       - name: Run integration smoke tests
         run: npm run test:integration
@@ -123,11 +89,27 @@ jobs:
 
   standalone-artifacts:
     name: Runtime (${{ matrix.target }})
+    needs: [release_plan, check]
+    if: needs.release_plan.outputs.action == 'publish'
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON(needs.release_plan.outputs.matrix) }}
+      matrix:
+        # Keep this in 1:1 parity with the host targets published by
+        # realtimex-sdk/scripts/build-pp-cli-packages.mjs.
+        include:
+          - target: darwin-x64
+            runner: macos-15-intel
+          - target: darwin-arm64
+            runner: macos-15
+          - target: linux-x64
+            runner: ubuntu-24.04
+          - target: linux-arm64
+            runner: ubuntu-24.04-arm
+          - target: win32-x64
+            runner: windows-2025
+          - target: win32-arm64
+            runner: windows-11-arm
     runs-on: ${{ matrix.runner }}
-    needs: [check, release_plan]
     steps:
       - uses: actions/checkout@v5
 
@@ -171,8 +153,9 @@ jobs:
 
   plugin-package:
     name: Marketplace bundle
+    needs: [release_plan, standalone-artifacts]
+    if: needs.release_plan.outputs.action == 'publish'
     runs-on: ubuntu-24.04
-    needs: [standalone-artifacts, release_plan]
     steps:
       - uses: actions/checkout@v5
 
@@ -211,10 +194,9 @@ jobs:
       - name: Merge platform release manifests
         run: npm run merge:release-manifests
         env:
-          SIGNALS_REQUIRED_ARTIFACT_TARGETS: ${{ needs.release_plan.outputs.action == 'publish' && 'darwin-arm64,darwin-x64,win32-x64,linux-x64' || 'linux-x64' }}
+          SIGNALS_REQUIRED_ARTIFACT_TARGETS: darwin-x64,darwin-arm64,linux-x64,linux-arm64,win32-x64,win32-arm64
 
       - name: Sign release manifest
-        if: needs.release_plan.outputs.action == 'publish'
         run: npm run sign:release-manifest
         env:
           SIGNALS_RELEASE_SIGNING_PRIVATE_KEY_B64: ${{ secrets.SIGNALS_RELEASE_SIGNING_PRIVATE_KEY_B64 }}
@@ -223,15 +205,14 @@ jobs:
       - name: Package RealtimeX plugin zip
         run: npm run package:realtimex-plugin
         env:
-          SIGNALS_REQUIRE_RELEASE_SIGNATURE: ${{ needs.release_plan.outputs.action == 'publish' && '1' || '0' }}
+          SIGNALS_REQUIRE_RELEASE_SIGNATURE: "1"
 
       - name: Test plugin package structure and adapter
         run: npm run test:plugin-package
         env:
-          SIGNALS_REQUIRE_RELEASE_SIGNATURE: ${{ needs.release_plan.outputs.action == 'publish' && '1' || '0' }}
+          SIGNALS_REQUIRE_RELEASE_SIGNATURE: "1"
 
       - name: Stage verified release artifacts
-        if: needs.release_plan.outputs.action == 'publish'
         run: |
           VERSION="$(node -p "require('./package.json').version")"
           mkdir -p release-upload
@@ -241,7 +222,6 @@ jobs:
           cp marketplace/release-manifest.sig.json release-upload/
 
       - name: Upload verified release artifacts
-        if: needs.release_plan.outputs.action == 'publish'
         uses: actions/upload-artifact@v4
         with:
           name: release-artifacts-${{ github.sha }}
@@ -251,9 +231,14 @@ jobs:
 
   release:
     name: Publish GitHub Release
+    needs: [release_plan, react-doctor, check, plugin-package]
+    if: >-
+      always() &&
+      needs.release_plan.outputs.action == 'publish' &&
+      needs.react-doctor.result == 'success' &&
+      needs.check.result == 'success' &&
+      needs.plugin-package.result == 'success'
     runs-on: ubuntu-latest
-    needs: [release_plan, react-doctor, check, smoke, plugin-package]
-    if: needs.release_plan.outputs.action == 'publish'
     permissions:
       contents: write
     steps:

@@ -50,12 +50,25 @@ if (
 if (localApp.configuration?.command !== "{runtime.executable}") {
   errors.push("local-app.manifest.json must launch the managed runtime executable");
 }
-const requiredTargets = ["darwin-arm64", "darwin-x64", "win32-x64", "linux-x64"];
+// Match the host packages published by realtimex-sdk exactly.
+const requiredTargets = [
+  "darwin-x64",
+  "darwin-arm64",
+  "linux-x64",
+  "linux-arm64",
+  "win32-x64",
+  "win32-arm64",
+];
 const supportedTargets = localApp.artifactContract?.supportedTargets ?? [];
-for (const target of requiredTargets) {
-  if (!supportedTargets.includes(target)) {
-    errors.push(`local-app.manifest.json missing supported target ${target}`);
-  }
+const uniqueSupportedTargets = [...new Set(supportedTargets)];
+const hasExactTargetSet =
+  uniqueSupportedTargets.length === supportedTargets.length &&
+  [...uniqueSupportedTargets].sort().join(",") ===
+    [...requiredTargets].sort().join(",");
+if (!hasExactTargetSet) {
+  errors.push(
+    `local-app.manifest.json supported targets must exactly match RealtimeX SDK targets (${requiredTargets.join(", ")}); received: ${supportedTargets.join(", ") || "none"}`
+  );
 }
 
 if (tagArg.startsWith("v")) {
