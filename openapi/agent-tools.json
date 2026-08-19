@@ -1,0 +1,2421 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Signals Agent Tools",
+    "version": "1",
+    "description": "Local Signals CRM agent-tools API. Generated from src/lib/agent-tools/registry.ts."
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:3000"
+    }
+  ],
+  "paths": {
+    "/api/health": {
+      "get": {
+        "operationId": "getHealth",
+        "summary": "Signals health probe",
+        "responses": {
+          "200": {
+            "description": "Signals is running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "ok"
+                      ]
+                    },
+                    "app": {
+                      "type": "string",
+                      "enum": [
+                        "signals"
+                      ]
+                    },
+                    "rtx": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "app"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agent-tools": {
+      "get": {
+        "operationId": "listAgentTools",
+        "summary": "List agent tool manifest",
+        "responses": {
+          "200": {
+            "description": "Tool manifest",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "version": {
+                      "type": "string"
+                    },
+                    "tools": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": "string"
+                          },
+                          "category": {
+                            "type": "string"
+                          },
+                          "parameters": {
+                            "type": "object",
+                            "additionalProperties": true
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "description",
+                          "category",
+                          "parameters"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "tools"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agent-tools/invoke": {
+      "post": {
+        "operationId": "invokeAgentTool",
+        "summary": "Invoke an agent tool",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "query_contacts"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "search": {
+                            "type": "string"
+                          },
+                          "funnelStage": {
+                            "type": "string",
+                            "enum": [
+                              "prospect",
+                              "engaged",
+                              "qualified",
+                              "opportunity",
+                              "customer",
+                              "advocate"
+                            ]
+                          },
+                          "platform": {
+                            "type": "string",
+                            "enum": [
+                              "x",
+                              "linkedin",
+                              "gmail",
+                              "substack",
+                              "instagram",
+                              "facebook",
+                              "threads",
+                              "tiktok",
+                              "youtube",
+                              "bluesky",
+                              "telegram",
+                              "whatsapp"
+                            ]
+                          },
+                          "page": {
+                            "type": "number"
+                          },
+                          "pageSize": {
+                            "type": "number"
+                          },
+                          "sort": {
+                            "type": "string",
+                            "enum": [
+                              "createdAt",
+                              "enrichmentScore"
+                            ]
+                          },
+                          "order": {
+                            "type": "string",
+                            "enum": [
+                              "asc",
+                              "desc"
+                            ]
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "get_contact"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "contactId": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "contactId"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "create_contact"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string"
+                          },
+                          "email": {
+                            "description": "union"
+                          },
+                          "phone": {
+                            "type": "string"
+                          },
+                          "channels": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "channelType": {
+                                  "type": "string"
+                                },
+                                "value": {
+                                  "type": "string"
+                                },
+                                "label": {
+                                  "type": "string"
+                                },
+                                "isPrimary": {
+                                  "type": "boolean"
+                                },
+                                "isVerified": {
+                                  "type": "boolean"
+                                }
+                              },
+                              "required": [
+                                "channelType",
+                                "value"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "employments": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "orgId": {
+                                  "type": "string"
+                                },
+                                "orgName": {
+                                  "type": "string"
+                                },
+                                "title": {
+                                  "type": "string"
+                                },
+                                "startedAt": {
+                                  "type": "number"
+                                },
+                                "endedAt": {
+                                  "type": "number"
+                                },
+                                "isCurrent": {
+                                  "type": "boolean"
+                                }
+                              },
+                              "additionalProperties": false
+                            }
+                          },
+                          "company": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "funnelStage": {
+                            "type": "string",
+                            "enum": [
+                              "prospect",
+                              "engaged",
+                              "qualified",
+                              "opportunity",
+                              "customer",
+                              "advocate"
+                            ]
+                          },
+                          "firstName": {
+                            "type": "string"
+                          },
+                          "lastName": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "name"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "update_contact"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "contactId": {
+                            "type": "string"
+                          },
+                          "email": {
+                            "description": "union"
+                          },
+                          "phone": {
+                            "type": "string"
+                          },
+                          "channels": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "channelType": {
+                                  "type": "string"
+                                },
+                                "value": {
+                                  "type": "string"
+                                },
+                                "label": {
+                                  "type": "string"
+                                },
+                                "isPrimary": {
+                                  "type": "boolean"
+                                },
+                                "isVerified": {
+                                  "type": "boolean"
+                                }
+                              },
+                              "required": [
+                                "channelType",
+                                "value"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "employments": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "orgId": {
+                                  "type": "string"
+                                },
+                                "orgName": {
+                                  "type": "string"
+                                },
+                                "title": {
+                                  "type": "string"
+                                },
+                                "startedAt": {
+                                  "type": "number"
+                                },
+                                "endedAt": {
+                                  "type": "number"
+                                },
+                                "isCurrent": {
+                                  "type": "boolean"
+                                }
+                              },
+                              "additionalProperties": false
+                            }
+                          },
+                          "company": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "headline": {
+                            "type": "string"
+                          },
+                          "bio": {
+                            "type": "string"
+                          },
+                          "location": {
+                            "type": "string"
+                          },
+                          "website": {
+                            "type": "string"
+                          },
+                          "funnelStage": {
+                            "type": "string",
+                            "enum": [
+                              "prospect",
+                              "engaged",
+                              "qualified",
+                              "opportunity",
+                              "customer",
+                              "advocate"
+                            ]
+                          },
+                          "tags": {
+                            "type": "string"
+                          },
+                          "is_self": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "contactId"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "enrich_contact"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "contactId": {
+                            "type": "string"
+                          },
+                          "company": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "headline": {
+                            "type": "string"
+                          },
+                          "email": {
+                            "type": "string"
+                          },
+                          "phone": {
+                            "type": "string"
+                          },
+                          "location": {
+                            "type": "string"
+                          },
+                          "website": {
+                            "type": "string"
+                          },
+                          "bio": {
+                            "type": "string"
+                          },
+                          "tags": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "metadata": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "object"
+                            }
+                          }
+                        },
+                        "required": [
+                          "contactId"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "upsert_contact_identity"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "contactId": {
+                            "type": "string"
+                          },
+                          "platform": {
+                            "type": "string",
+                            "enum": [
+                              "x",
+                              "linkedin",
+                              "gmail",
+                              "substack",
+                              "instagram",
+                              "facebook",
+                              "threads",
+                              "tiktok",
+                              "youtube",
+                              "bluesky",
+                              "telegram",
+                              "whatsapp"
+                            ]
+                          },
+                          "platformUserId": {
+                            "type": "string"
+                          },
+                          "platformHandle": {
+                            "type": "string"
+                          },
+                          "platformUrl": {
+                            "type": "string"
+                          },
+                          "platformData": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "object"
+                            }
+                          },
+                          "displayName": {
+                            "type": "string"
+                          },
+                          "headline": {
+                            "type": "string"
+                          },
+                          "bio": {
+                            "type": "string"
+                          },
+                          "avatarUrl": {
+                            "type": "string"
+                          },
+                          "location": {
+                            "type": "string"
+                          },
+                          "websiteUrl": {
+                            "type": "string"
+                          },
+                          "isVerified": {
+                            "type": "boolean"
+                          },
+                          "followersCount": {
+                            "type": "number"
+                          },
+                          "followingCount": {
+                            "type": "number"
+                          },
+                          "postsCount": {
+                            "type": "number"
+                          },
+                          "listedCount": {
+                            "type": "number"
+                          },
+                          "platformCreatedAt": {
+                            "type": "number"
+                          },
+                          "isPrimary": {
+                            "type": "boolean"
+                          },
+                          "isActive": {
+                            "type": "boolean"
+                          },
+                          "lastSyncedAt": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "contactId"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "archive_contact"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "contactId": {
+                            "type": "string"
+                          },
+                          "reason": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "contactId",
+                          "reason"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "query_analytics"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {},
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "query_workflows"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "workflowType": {
+                            "type": "string",
+                            "enum": [
+                              "sync",
+                              "import",
+                              "enrich",
+                              "search",
+                              "prune",
+                              "sequence",
+                              "agent",
+                              "simulate",
+                              "calibrate"
+                            ]
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "pending",
+                              "running",
+                              "paused",
+                              "completed",
+                              "failed",
+                              "cancelled"
+                            ]
+                          },
+                          "page": {
+                            "type": "number"
+                          },
+                          "pageSize": {
+                            "type": "number"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "list_workflow_templates"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "active",
+                              "paused",
+                              "draft",
+                              "completed"
+                            ]
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "start_workflow"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "templateId": {
+                            "type": "string"
+                          },
+                          "workflowType": {
+                            "type": "string",
+                            "enum": [
+                              "search",
+                              "enrich",
+                              "prune",
+                              "agent"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "templateId"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "query_content"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "contentType": {
+                            "type": "string",
+                            "enum": [
+                              "post",
+                              "thread",
+                              "article",
+                              "newsletter",
+                              "dm",
+                              "reply"
+                            ]
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "draft",
+                              "review",
+                              "approved",
+                              "scheduled",
+                              "published",
+                              "imported",
+                              "queued",
+                              "publishing",
+                              "failed"
+                            ]
+                          },
+                          "page": {
+                            "type": "number"
+                          },
+                          "pageSize": {
+                            "type": "number"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "query_goals"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "active",
+                              "achieved",
+                              "missed",
+                              "paused"
+                            ]
+                          },
+                          "goalType": {
+                            "type": "string",
+                            "enum": [
+                              "audience_growth",
+                              "lead_generation",
+                              "content_engagement",
+                              "pipeline_progression"
+                            ]
+                          },
+                          "page": {
+                            "type": "number"
+                          },
+                          "pageSize": {
+                            "type": "number"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "create_task"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "title": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": "string"
+                          },
+                          "priority": {
+                            "type": "string",
+                            "enum": [
+                              "low",
+                              "medium",
+                              "high",
+                              "urgent"
+                            ]
+                          },
+                          "dueDate": {
+                            "type": "number"
+                          },
+                          "relatedContactId": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "title"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "get_persona"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "contactId": {
+                            "type": "string"
+                          },
+                          "includeLocalOnly": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "contactId"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "upsert_persona"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "contactId": {
+                            "type": "string"
+                          },
+                          "archetype": {
+                            "type": "string"
+                          },
+                          "tone": {
+                            "type": "string"
+                          },
+                          "summary": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": "string"
+                          },
+                          "interests": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "conversionTriggers": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "engagementFormats": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "confidence": {
+                            "type": "number"
+                          },
+                          "scope": {
+                            "type": "string",
+                            "enum": [
+                              "shared",
+                              "local_only"
+                            ]
+                          },
+                          "model": {
+                            "type": "string"
+                          },
+                          "sourceWindow": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "object"
+                            }
+                          },
+                          "workflowRunId": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "contactId"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "get_persona_evidence"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "contactId": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "contactId"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "generate_persona"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "contactId": {
+                            "type": "string"
+                          },
+                          "force": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "contactId"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "query_orgs"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "search": {
+                            "type": "string"
+                          },
+                          "page": {
+                            "type": "number"
+                          },
+                          "pageSize": {
+                            "type": "number"
+                          },
+                          "includeLocalOnly": {
+                            "type": "boolean"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "query_org_identities"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "orgId": {
+                            "type": "string"
+                          },
+                          "platform": {
+                            "type": "string"
+                          },
+                          "page": {
+                            "type": "number"
+                          },
+                          "pageSize": {
+                            "type": "number"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "upsert_org_identity"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "orgId": {
+                            "type": "string"
+                          },
+                          "platform": {
+                            "type": "string"
+                          },
+                          "platformUserId": {
+                            "type": "string"
+                          },
+                          "platformHandle": {
+                            "type": "string"
+                          },
+                          "platformUrl": {
+                            "type": "string"
+                          },
+                          "platformData": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "object"
+                            }
+                          },
+                          "displayName": {
+                            "type": "string"
+                          },
+                          "bio": {
+                            "type": "string"
+                          },
+                          "avatarUrl": {
+                            "type": "string"
+                          },
+                          "location": {
+                            "type": "string"
+                          },
+                          "websiteUrl": {
+                            "type": "string"
+                          },
+                          "isVerified": {
+                            "type": "boolean"
+                          },
+                          "followersCount": {
+                            "type": "number"
+                          },
+                          "followingCount": {
+                            "type": "number"
+                          },
+                          "postsCount": {
+                            "type": "number"
+                          },
+                          "listedCount": {
+                            "type": "number"
+                          },
+                          "platformCreatedAt": {
+                            "type": "number"
+                          },
+                          "isPrimary": {
+                            "type": "boolean"
+                          },
+                          "isActive": {
+                            "type": "boolean"
+                          },
+                          "lastSyncedAt": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "orgId",
+                          "platform",
+                          "platformUserId"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "query_graph"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "nodeType": {
+                            "type": "string",
+                            "enum": [
+                              "contact",
+                              "org",
+                              "content",
+                              "goal",
+                              "niche",
+                              "launch",
+                              "variant",
+                              "interaction",
+                              "workflow_run",
+                              "platform_identity",
+                              "org_identity"
+                            ]
+                          },
+                          "nodeId": {
+                            "type": "string"
+                          },
+                          "edgeTypes": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "direction": {
+                            "type": "string",
+                            "enum": [
+                              "outgoing",
+                              "incoming",
+                              "both"
+                            ]
+                          },
+                          "includeLocalOnly": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "nodeType",
+                          "nodeId"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "upsert_edge"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "srcType": {
+                            "type": "string",
+                            "enum": [
+                              "contact",
+                              "org",
+                              "content",
+                              "goal",
+                              "niche",
+                              "launch",
+                              "variant",
+                              "interaction",
+                              "workflow_run",
+                              "platform_identity",
+                              "org_identity"
+                            ]
+                          },
+                          "srcId": {
+                            "type": "string"
+                          },
+                          "dstType": {
+                            "type": "string",
+                            "enum": [
+                              "contact",
+                              "org",
+                              "content",
+                              "goal",
+                              "niche",
+                              "launch",
+                              "variant",
+                              "interaction",
+                              "workflow_run",
+                              "platform_identity",
+                              "org_identity"
+                            ]
+                          },
+                          "dstId": {
+                            "type": "string"
+                          },
+                          "edgeType": {
+                            "type": "string"
+                          },
+                          "weight": {
+                            "type": "number"
+                          },
+                          "properties": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "object"
+                            }
+                          },
+                          "propertiesPrivate": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "object"
+                            }
+                          },
+                          "scope": {
+                            "type": "string",
+                            "enum": [
+                              "shared",
+                              "local_only"
+                            ]
+                          },
+                          "source": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "srcType",
+                          "srcId",
+                          "dstType",
+                          "dstId",
+                          "edgeType"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "log_interaction"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "contactId": {
+                            "type": "string"
+                          },
+                          "interactionType": {
+                            "type": "string"
+                          },
+                          "occurredAt": {
+                            "type": "number"
+                          },
+                          "orgId": {
+                            "type": "string"
+                          },
+                          "direction": {
+                            "type": "string",
+                            "enum": [
+                              "inbound",
+                              "outbound",
+                              "mutual"
+                            ]
+                          },
+                          "summary": {
+                            "type": "string"
+                          },
+                          "isMeaningful": {
+                            "type": "boolean"
+                          },
+                          "scope": {
+                            "type": "string",
+                            "enum": [
+                              "shared",
+                              "local_only"
+                            ]
+                          },
+                          "contentItemId": {
+                            "type": "string"
+                          },
+                          "attachmentIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "metadata": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "object"
+                            }
+                          }
+                        },
+                        "required": [
+                          "contactId",
+                          "interactionType"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "query_niches"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "search": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "candidate",
+                              "active",
+                              "merged",
+                              "archived"
+                            ]
+                          },
+                          "page": {
+                            "type": "number"
+                          },
+                          "pageSize": {
+                            "type": "number"
+                          },
+                          "includeLocalOnly": {
+                            "type": "boolean"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "upsert_niche"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": "string"
+                          },
+                          "nicheType": {
+                            "type": "string",
+                            "enum": [
+                              "interest",
+                              "firmographic",
+                              "behavioral",
+                              "custom"
+                            ]
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "candidate",
+                              "active",
+                              "merged",
+                              "archived"
+                            ]
+                          },
+                          "scope": {
+                            "type": "string",
+                            "enum": [
+                              "shared",
+                              "local_only"
+                            ]
+                          },
+                          "metadata": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "object"
+                            }
+                          }
+                        },
+                        "required": [
+                          "name"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "query_launches"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "search": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "draft",
+                              "generating",
+                              "simulating",
+                              "ready",
+                              "live",
+                              "completed",
+                              "archived"
+                            ]
+                          },
+                          "page": {
+                            "type": "number"
+                          },
+                          "pageSize": {
+                            "type": "number"
+                          },
+                          "includeLocalOnly": {
+                            "type": "boolean"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "upsert_launch"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "brief": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "draft",
+                              "generating",
+                              "simulating",
+                              "ready",
+                              "live",
+                              "completed",
+                              "archived"
+                            ]
+                          },
+                          "primaryPlatform": {
+                            "type": "string"
+                          },
+                          "audienceSpec": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "object"
+                            }
+                          },
+                          "workflowTemplateId": {
+                            "type": "string"
+                          },
+                          "scope": {
+                            "type": "string",
+                            "enum": [
+                              "shared",
+                              "local_only"
+                            ]
+                          },
+                          "metadata": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "object"
+                            }
+                          },
+                          "launchedAt": {
+                            "type": "number"
+                          },
+                          "completedAt": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "name"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "upsert_variant"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "launchId": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "variantType": {
+                            "type": "string"
+                          },
+                          "body": {
+                            "type": "string"
+                          },
+                          "contentItemId": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "draft",
+                              "simulated",
+                              "selected",
+                              "published",
+                              "rejected"
+                            ]
+                          },
+                          "predictedScore": {
+                            "type": "number"
+                          },
+                          "predictionConfidence": {
+                            "type": "number"
+                          },
+                          "predictedMetrics": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "object"
+                            }
+                          },
+                          "predictionModel": {
+                            "type": "string"
+                          },
+                          "simulatedAt": {
+                            "type": "number"
+                          },
+                          "generationModel": {
+                            "type": "string"
+                          },
+                          "generationMetadata": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "object"
+                            }
+                          },
+                          "metadata": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "object"
+                            }
+                          },
+                          "platform": {
+                            "type": "string"
+                          },
+                          "publishedAt": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "launchId"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "semantic_search"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "query": {
+                            "type": "string"
+                          },
+                          "nodeTypes": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "enum": [
+                                "contact",
+                                "org",
+                                "content",
+                                "goal",
+                                "niche",
+                                "launch",
+                                "variant",
+                                "interaction",
+                                "workflow_run",
+                                "platform_identity",
+                                "org_identity"
+                              ]
+                            }
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "profile",
+                              "description",
+                              "body",
+                              "persona"
+                            ]
+                          },
+                          "k": {
+                            "type": "number"
+                          },
+                          "includeLocalOnly": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "query"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "create_simulation_run"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "variantId": {
+                            "type": "string"
+                          },
+                          "populationSpec": {
+                            "type": "object",
+                            "properties": {
+                              "contactIds": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "nicheIds": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "orgIds": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "sampleSize": {
+                                "type": "number"
+                              },
+                              "seed": {
+                                "type": "number"
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          "batchId": {
+                            "type": "string"
+                          },
+                          "predictionModel": {
+                            "type": "string"
+                          },
+                          "config": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "object"
+                            }
+                          }
+                        },
+                        "required": [
+                          "variantId"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "query_simulations"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "variantId": {
+                            "type": "string"
+                          },
+                          "launchId": {
+                            "type": "string"
+                          },
+                          "batchId": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "pending",
+                              "running",
+                              "completed",
+                              "failed",
+                              "cancelled"
+                            ]
+                          },
+                          "includeAgents": {
+                            "type": "boolean"
+                          },
+                          "includeTranscripts": {
+                            "type": "boolean"
+                          },
+                          "includeCalibrations": {
+                            "type": "boolean"
+                          },
+                          "page": {
+                            "type": "number"
+                          },
+                          "pageSize": {
+                            "type": "number"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "record_simulation_results"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "runId": {
+                            "type": "string"
+                          },
+                          "results": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "agentId": {
+                                  "type": "string"
+                                },
+                                "engagementScore": {
+                                  "type": "number"
+                                },
+                                "outcome": {
+                                  "type": "string"
+                                },
+                                "predictedActions": {
+                                  "description": "union"
+                                },
+                                "transcript": {
+                                  "type": "object"
+                                }
+                              },
+                              "required": [
+                                "agentId"
+                              ],
+                              "additionalProperties": false
+                            }
+                          }
+                        },
+                        "required": [
+                          "runId",
+                          "results"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "complete_simulation_run"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "runId": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "completed",
+                              "failed",
+                              "cancelled"
+                            ]
+                          },
+                          "predictedScore": {
+                            "type": "number"
+                          },
+                          "predictionConfidence": {
+                            "type": "number"
+                          },
+                          "predictedMetrics": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "number"
+                            }
+                          },
+                          "error": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "runId"
+                        ],
+                        "additionalProperties": false,
+                        "allOf": [
+                          {
+                            "if": {
+                              "anyOf": [
+                                {
+                                  "not": {
+                                    "required": [
+                                      "status"
+                                    ]
+                                  }
+                                },
+                                {
+                                  "properties": {
+                                    "status": {
+                                      "const": "completed"
+                                    }
+                                  },
+                                  "required": [
+                                    "status"
+                                  ]
+                                }
+                              ]
+                            },
+                            "then": {
+                              "required": [
+                                "predictedScore",
+                                "predictionConfidence",
+                                "predictedMetrics"
+                              ]
+                            }
+                          },
+                          {
+                            "if": {
+                              "properties": {
+                                "status": {
+                                  "const": "failed"
+                                }
+                              },
+                              "required": [
+                                "status"
+                              ]
+                            },
+                            "then": {
+                              "required": [
+                                "error"
+                              ]
+                            }
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "calibrate_simulation_run"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "runId": {
+                            "type": "string"
+                          },
+                          "observedUntil": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "runId"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "get_publish_job"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "jobId": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "jobId"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "update_publish_job"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "jobId": {
+                            "type": "string"
+                          },
+                          "platform": {
+                            "type": "string",
+                            "enum": [
+                              "x",
+                              "linkedin"
+                            ]
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "publishing",
+                              "failed"
+                            ]
+                          },
+                          "note": {
+                            "type": "string"
+                          },
+                          "error": {
+                            "type": "string"
+                          },
+                          "errorCode": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "jobId",
+                          "status"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "complete_publish"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "jobId": {
+                            "type": "string"
+                          },
+                          "platform": {
+                            "type": "string",
+                            "enum": [
+                              "x",
+                              "linkedin"
+                            ]
+                          },
+                          "success": {
+                            "type": "boolean"
+                          },
+                          "handle": {
+                            "type": "string"
+                          },
+                          "platformPostId": {
+                            "type": "string"
+                          },
+                          "platformUrl": {
+                            "type": "string"
+                          },
+                          "error": {
+                            "type": "string"
+                          },
+                          "errorCode": {
+                            "type": "string",
+                            "enum": [
+                              "session_expired",
+                              "captcha",
+                              "upload_failed",
+                              "timeout",
+                              "unknown"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "jobId",
+                          "platform",
+                          "success"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "list_mail_accounts"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {},
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  }
+                ],
+                "properties": {
+                  "tool": {
+                    "type": "string",
+                    "enum": [
+                      "query_contacts",
+                      "get_contact",
+                      "create_contact",
+                      "update_contact",
+                      "enrich_contact",
+                      "upsert_contact_identity",
+                      "archive_contact",
+                      "query_analytics",
+                      "query_workflows",
+                      "list_workflow_templates",
+                      "start_workflow",
+                      "query_content",
+                      "query_goals",
+                      "create_task",
+                      "get_persona",
+                      "upsert_persona",
+                      "get_persona_evidence",
+                      "generate_persona",
+                      "query_orgs",
+                      "query_org_identities",
+                      "upsert_org_identity",
+                      "query_graph",
+                      "upsert_edge",
+                      "log_interaction",
+                      "query_niches",
+                      "upsert_niche",
+                      "query_launches",
+                      "upsert_launch",
+                      "upsert_variant",
+                      "semantic_search",
+                      "create_simulation_run",
+                      "query_simulations",
+                      "record_simulation_results",
+                      "complete_simulation_run",
+                      "calibrate_simulation_run",
+                      "get_publish_job",
+                      "update_publish_job",
+                      "complete_publish",
+                      "list_mail_accounts"
+                    ],
+                    "description": "Agent tool name from the manifest"
+                  },
+                  "input": {
+                    "type": "object",
+                    "description": "Tool-specific input payload",
+                    "additionalProperties": true
+                  }
+                },
+                "required": [
+                  "tool"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Tool result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "tool": {
+                      "type": "string"
+                    },
+                    "result": {}
+                  },
+                  "required": [
+                    "success",
+                    "tool",
+                    "result"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "const": false
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  },
+                  "required": [
+                    "success",
+                    "error",
+                    "code"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Tool not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "const": false
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  },
+                  "required": [
+                    "success",
+                    "error",
+                    "code"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Execution error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "const": false
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  },
+                  "required": [
+                    "success",
+                    "error",
+                    "code"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Optional SIGNALS_AGENT_TOOL_TOKEN for non-localhost access"
+      }
+    }
+  },
+  "security": [
+    {},
+    {
+      "bearerAuth": []
+    }
+  ],
+  "x-signals-agent-tools": {
+    "manifestVersion": "1",
+    "toolCount": 39
+  }
+}

@@ -139,6 +139,17 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+          check-latest: true
+
+      - name: Build native signals-pp-cli
+        run: npm run build:signals-pp-cli
+
+      - name: Test signals-pp-cli import golden
+        run: npm run test:signals-pp-cli
+
       - name: Build native standalone artifact
         run: npm run build:standalone-artifact
         env:
@@ -168,6 +179,17 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+          check-latest: true
+
+      - name: Build cross-platform signals-pp-cli
+        run: SIGNALS_PP_CLI_CROSS_COMPILE=1 npm run build:signals-pp-cli
 
       - name: Download target artifacts
         uses: actions/download-artifact@v4
