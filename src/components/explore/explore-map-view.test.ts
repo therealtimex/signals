@@ -9,6 +9,7 @@ import { ExploreMapView } from "@/components/explore/explore-map-view";
 import { formatExploreMapBadge } from "@/components/explore/explore-map-utils";
 import { AppSidebar } from "@/components/app-sidebar";
 import type { ContactExploreCard } from "@/lib/db/queries/contact-explore";
+import packageMetadata from "../../../package.json";
 
 vi.mock("next/navigation", () => ({
   usePathname: () => "/dashboard/explore",
@@ -33,10 +34,15 @@ vi.mock("next/link", () => ({
 
 vi.mock("@/components/ui/sidebar", () => ({
   Sidebar: ({ children }: { children: React.ReactNode }) => createElement("aside", null, children),
-  SidebarHeader: ({ children }: { children: React.ReactNode }) => createElement("div", null, children),
+  SidebarHeader: ({
+    children,
+    className,
+  }: {
+    children: React.ReactNode;
+    className?: string;
+  }) => createElement("div", { className, "data-testid": "app-sidebar-header" }, children),
   SidebarContent: ({ children }: { children: React.ReactNode }) => createElement("div", null, children),
   SidebarGroup: ({ children }: { children: React.ReactNode }) => createElement("div", null, children),
-  SidebarGroupLabel: ({ children }: { children: React.ReactNode }) => createElement("div", null, children),
   SidebarGroupContent: ({ children }: { children: React.ReactNode }) =>
     createElement("div", null, children),
   SidebarMenu: ({ children }: { children: React.ReactNode }) => createElement("ul", null, children),
@@ -49,6 +55,7 @@ vi.mock("@/components/ui/sidebar", () => ({
     asChild?: boolean;
   }) => (asChild ? children : createElement("button", null, children)),
   SidebarFooter: ({ children }: { children: React.ReactNode }) => createElement("div", null, children),
+  SidebarTrigger: () => createElement("button", null, "Toggle Sidebar"),
 }));
 
 const exploreFixture: ContactExploreCard = {
@@ -101,10 +108,18 @@ describe("formatExploreMapBadge", () => {
 });
 
 describe("AppSidebar explore entry", () => {
-  it("includes Explore nav link", () => {
+  it("renders the Explore link and sidebar chrome", () => {
     const html = renderToStaticMarkup(createElement(AppSidebar));
+    const container = document.createElement("div");
+    container.innerHTML = html;
+    const header = container.querySelector('[data-testid="app-sidebar-header"]');
+
     expect(html).toContain("Explore");
     expect(html).toContain("/dashboard/explore");
+    expect(html).not.toContain("Navigation");
+    expect(header?.classList.contains("h-14")).toBe(true);
+    expect(header?.querySelector("button")?.textContent).toBe("Toggle Sidebar");
+    expect(html).toContain(`Signals version ${packageMetadata.version}`);
   });
 });
 

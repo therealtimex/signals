@@ -3,7 +3,7 @@
 import { usePathname } from "next/navigation";
 import { useTheme } from "next-themes";
 import { Sun, Moon } from "lucide-react";
-import { SidebarTrigger } from "@/components/ui/sidebar";
+import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
@@ -72,10 +72,17 @@ function ThemeToggle() {
 }
 
 export function DashboardHeader() {
+  const { isMobile, state } = useSidebar();
+  const showSidebarOpener = isMobile || state === "collapsed";
+
   return (
     <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-2 border-b border-border/50 bg-background/80 backdrop-blur-sm px-4">
-      <SidebarTrigger className="-ml-1" />
-      <Separator orientation="vertical" className="mr-2 h-4" />
+      {showSidebarOpener && (
+        <>
+          <SidebarTrigger className="-ml-1" />
+          <Separator orientation="vertical" className="mr-2 h-4" />
+        </>
+      )}
       <Breadcrumb />
       <div className="ml-auto flex items-center gap-1">
         <ThemeToggle />
