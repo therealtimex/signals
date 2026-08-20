@@ -31,10 +31,10 @@ Resolve/create/start the session with `realtimex-pp-cli` or the `agent-browser` 
 
 1. Load `realtimex-signals` and call `get_publish_job` with the job id from the initial message.
 2. For each pending X target:
-   - Run `signals-pp-cli targets prepare <targetId> --intent publish`. Use the returned `sessionName`, `expectedHandle`, and `lease.leaseId`. If the job is legacy and has no `targetId`, use its platform/default target fallback.
-   - Call `update_publish_job` with `status: "publishing"`, `targetId`, and `leaseId`.
+   - Run `signals-pp-cli targets prepare <targetId> --intent publish`. Use the returned `sessionName`, `expectedHandle`, and `lease.leaseId`. If the job is legacy and has no `targetId`, prepare the platform's default target but remember that the job snapshot remains platform-only.
+   - Call `update_publish_job` with `status: "publishing"` and `leaseId`. Include `targetId` only when the job target snapshot contains that ID; omit it for a legacy platform-only target.
    - Resolve the returned browser session and note its CDP port.
-   - Build `job.json` from the payload (`text`, optional `threadTexts`, resolved `mediaPaths`) and include the returned `expectedHandle`.
+   - Build `job.json` from the payload (`text`, optional `threadTexts`, resolved `mediaPaths`) and include the returned `expectedHandle` only when it is a non-null string.
    - Run:
 
 ```bash
@@ -45,7 +45,7 @@ node .claude/skills/signals-publish/scripts/x-publish.cjs \
 
 For QA without sending a public post, add `--dry-run` (fills compose and thread fields, skips Tweet).
 
-3. Parse the **last stdout line** as JSON. On success call `complete_publish` with `targetId`, `leaseId`, `handle`, `platformPostId`, and `platformUrl`. On failure pass `targetId`, `leaseId`, `error` + `errorCode` (`session_expired`, `captcha`, `upload_failed`, `timeout`, `wrong_account`, `unknown`).
+3. Parse the **last stdout line** as JSON. On success call `complete_publish` with `leaseId`, `handle`, `platformPostId`, and `platformUrl`. Include `targetId` only when the job target snapshot contains it; omit `targetId` from both success and failure callbacks for legacy platform-only jobs. On failure pass `leaseId`, optional snapshotted `targetId`, and `error` + `errorCode` (`session_expired`, `captcha`, `upload_failed`, `timeout`, `wrong_account`, `unknown`).
 4. Always run `signals-pp-cli targets release --lease <leaseId>` after the completion callback, including failures.
 5. **LinkedIn (beta):** shared connections are verify-only. Use a dedicated connection for multiple members; use `agent-browser` interactively or report a clear failure if unsupported.
 

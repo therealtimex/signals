@@ -63,6 +63,20 @@ describe("browser session leases", () => {
     expect(() => releaseSessionLease(first.leaseId)).toThrowError(PlatformTargetError);
   });
 
+  it("preserves the acquired TTL when renewal does not override it", () => {
+    const connection = ensureBrowserConnection({ sessionName: "long-running" });
+    const lease = acquireSessionLease(connection.id, {
+      holder: "agent-a",
+      ttlSeconds: 1_800,
+    });
+
+    vi.advanceTimersByTime(60_000);
+    const renewed = renewSessionLease(lease.leaseId);
+
+    expect(renewed.expiresAt - renewed.renewedAt).toBe(1_800);
+    expect(renewed.expiresAt).toBe(lease.expiresAt + 60);
+  });
+
   it("allows concurrent leases on independent dedicated connections", () => {
     const first = ensureBrowserConnection({ sessionName: "dedicated-a", kind: "dedicated" });
     const second = ensureBrowserConnection({ sessionName: "dedicated-b", kind: "dedicated" });

@@ -17,7 +17,11 @@ import {
   registerPlatformTarget,
 } from "@/lib/db/queries/platform-targets";
 import { ensureSessionPlatformAccount } from "@/lib/publish/ensure-platform-account";
-import { acquireSessionLease, releaseSessionLease } from "@/lib/leases/session-lease";
+import {
+  acquireSessionLease,
+  getSessionLease,
+  releaseSessionLease,
+} from "@/lib/leases/session-lease";
 
 function seedDraftAndJob() {
   const item = createContentItem({
@@ -246,5 +250,38 @@ describe("publish agent-tool handlers", () => {
       status: "failed",
       errorCode: "wrong_account",
     });
+  });
+
+  it("does not shorten a long lease during status callbacks", async () => {
+    const { job } = seedDraftAndJob();
+    const connection = ensureBrowserConnection({ sessionName: "signals-publish" });
+    const lease = acquireSessionLease(connection.id, {
+      holder: "publisher",
+      ttlSeconds: 1_800,
+    });
+
+    await handleUpdatePublishJob({
+      jobId: job.id,
+      platform: "x",
+      leaseId: lease.leaseId,
+      status: "publishing",
+    });
+    expect(getSessionLease(connection.id)).toMatchObject({
+      leaseId: lease.leaseId,
+      expiresAt: expect.any(Number),
+      renewedAt: expect.any(Number),
+    });
+    const afterUpdate = getSessionLease(connection.id)!;
+    expect(afterUpdate.expiresAt - afterUpdate.renewedAt).toBe(1_800);
+
+    await handleCompletePublish({
+      jobId: job.id,
+      platform: "x",
+      leaseId: lease.leaseId,
+      success: false,
+      error: "stopped",
+    });
+    const afterComplete = getSessionLease(connection.id)!;
+    expect(afterComplete.expiresAt - afterComplete.renewedAt).toBe(1_800);
   });
 });

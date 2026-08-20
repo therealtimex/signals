@@ -13,12 +13,15 @@ func printTargetResult(result map[string]any) error {
 		return err
 	}
 	fmt.Println(string(payload))
+	message, _ := result["error"].(string)
 	if code, _ := result["code"].(string); code != "" {
-		message, _ := result["error"].(string)
 		if code == "TARGET_NOT_FOUND" || code == "TARGET_FORGOTTEN" {
 			return notFoundErr(fmt.Errorf("%s: %s", code, message))
 		}
 		return apiErr(fmt.Errorf("%s: %s", code, message))
+	}
+	if message != "" {
+		return apiErr(fmt.Errorf("%s", message))
 	}
 	return nil
 }

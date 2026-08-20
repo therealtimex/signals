@@ -135,9 +135,8 @@ export function acquireSessionLease(
 
 export function renewSessionLease(
   leaseId: string,
-  ttlSeconds = DEFAULT_SESSION_LEASE_TTL_SECONDS
+  ttlSeconds?: number
 ): BrowserSessionLease {
-  const ttl = boundedTtl(ttlSeconds);
   return db.transaction((tx) => {
     const current = tx
       .select()
@@ -146,6 +145,7 @@ export function renewSessionLease(
       .get();
     const now = nowSec();
     if (!current || current.expiresAt < now) throw leaseLost(leaseId);
+    const ttl = boundedTtl(ttlSeconds ?? current.expiresAt - current.renewedAt);
 
     tx.update(browserSessionLeases)
       .set({ renewedAt: now, expiresAt: now + ttl })

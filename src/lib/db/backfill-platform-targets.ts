@@ -5,6 +5,7 @@ import {
   ensureBrowserConnection,
   getBrowserConnectionBySessionName,
   registerPlatformTarget,
+  resolveDefaultTarget,
   setDefaultTarget,
 } from "@/lib/db/queries/platform-targets";
 import {
@@ -37,6 +38,7 @@ export function backfillPlatformTargets(): { connectionsCreated: number; targets
   const connectionsCreated = connectionBefore ? 0 : 1;
 
   for (const platform of PLATFORMS) {
+    let hasDefaultTarget = !!resolveDefaultTarget(platform);
     const accounts = db
       .select()
       .from(platformAccounts)
@@ -45,6 +47,13 @@ export function backfillPlatformTargets(): { connectionsCreated: number; targets
       .all();
 
     for (const account of accounts) {
+      const existingTarget = db
+        .select({ id: platformTargets.id })
+        .from(platformTargets)
+        .where(eq(platformTargets.platformAccountId, account.id))
+        .get();
+      if (existingTarget) continue;
+
       const handle = candidateHandle(platform, account.displayName);
       const normalized = normalizePlatformTargetIdentity(platform, handle);
       const target = registerPlatformTarget({
@@ -59,7 +68,10 @@ export function backfillPlatformTargets(): { connectionsCreated: number; targets
         source: SOURCE,
         verifiedAt: account.lastSyncedAt,
       });
-      if (accounts[0]?.id === account.id) setDefaultTarget(target.id);
+      if (!hasDefaultTarget) {
+        setDefaultTarget(target.id);
+        hasDefaultTarget = true;
+      }
     }
   }
 

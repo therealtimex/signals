@@ -92,7 +92,7 @@ markers are probed one selector at a time — a comma-joined union resolves thro
 - `complete_publish` — record success/failure and acting `targetId`; creates `content_posts`
 - `release_platform_target` — release the lease in a finally/cleanup step
 
-X shared sessions support best-effort account switching. LinkedIn shared sessions are verify-only; use a dedicated connection for multiple members. Facebook profile/Page targets are browse-only in v1. Every mutating X action receives `expectedHandle` and fails closed with `wrong_account` if the browser identity differs.
+X shared sessions support best-effort account switching. LinkedIn shared sessions are verify-only; use a dedicated connection for multiple members. Facebook profile/Page targets are browse-only in v1. When target preparation returns a non-null `expectedHandle`, mutating X actions include it and fail closed with `wrong_account` if the browser identity differs.
 
 See `docs/agent-tools.md` and `.claude/skills/signals-publish/SKILL.md`.
 

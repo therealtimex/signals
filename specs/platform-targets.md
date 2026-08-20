@@ -364,7 +364,7 @@ handle (or externalId when known) against the target; mismatch ⇒ `TARGET_NOT_A
 | | X | LinkedIn | Facebook |
 |---|---|---|---|
 | Register current | ✅ detected handle → target `kind: account` | ✅ detected `/in/` vanity → `kind: profile` | ✅ detected slug/`id:` → `kind: profile` |
-| Discover | Best-effort: open account switcher (`X_SELECTORS.accountSwitcher`), enumerate signed-in accounts | ❌ v1 (no in-page multi-account enumeration) | Best-effort: profile-switcher dialog enumerates Pages → `kind: page`, `authPrincipalTargetId` = profile |
+| Discover | Best-effort: open account switcher (`X_SELECTORS.accountSwitcher`), enumerate signed-in accounts | ✅ current member only (no in-page multi-account enumeration) | Best-effort: profile-switcher dialog enumerates Pages → `kind: page`, `authPrincipalTargetId` = profile |
 | Activate (shared session) | ✅ switcher click flow to the requested account | ❌ `TARGET_ACTIVATION_UNSUPPORTED` unless already active (guidance: manual re-login or dedicated connection) | ✅ switch-profile flow into Page / back to profile (best-effort) |
 | Verify | handle match | vanity match | profile slug / Page identity match |
 | Capabilities | `["browse","publish"]` | `["browse","publish"]` (publish stays beta/interactive) | profile `["browse"]`, page `["browse"]` — publish intent ⇒ `TARGET_CAPABILITY_UNSUPPORTED` |

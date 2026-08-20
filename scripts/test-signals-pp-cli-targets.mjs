@@ -8,7 +8,8 @@ import { fileURLToPath } from "node:url";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const platform = process.platform === "win32" ? "win32" : process.platform;
 const arch = process.arch === "x64" ? "x64" : process.arch;
-const binary = path.join(root, "tools/signals-pp-cli/bin", `${platform}-${arch}`, "signals-pp-cli");
+const binaryName = process.platform === "win32" ? "signals-pp-cli.exe" : "signals-pp-cli";
+const binary = path.join(root, "tools/signals-pp-cli/bin", `${platform}-${arch}`, binaryName);
 
 if (!fs.existsSync(binary)) {
   console.log(`skip: signals-pp-cli binary missing at ${binary}`);

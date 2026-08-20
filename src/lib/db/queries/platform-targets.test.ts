@@ -134,7 +134,7 @@ describe("platform target identity and registry", () => {
   });
 
   it("resolves a deterministic default and backfills idempotently", () => {
-    createPlatformAccount({
+    const account = createPlatformAccount({
       platform: "x",
       displayName: "@backfill",
       authType: "session",
@@ -146,7 +146,18 @@ describe("platform target identity and registry", () => {
     expect(backfillPlatformTargets()).toEqual({ connectionsCreated: 0, targetsCreated: 0 });
     expect(db.select().from(platformTargets).all()).toEqual(firstRows);
 
-    const connection = ensureBrowserConnection({ sessionName: "other" });
+    const connection = ensureBrowserConnection({ sessionName: "dedicated", kind: "dedicated" });
+    const adopted = registerPlatformTarget({
+      connectionId: connection.id,
+      platform: "x",
+      kind: "account",
+      externalId: "42",
+      name: "Backfill renamed",
+      handle: "@backfill",
+      platformAccountId: account.id,
+      source: "user",
+      verifiedAt: 123,
+    });
     const second = registerPlatformTarget({
       connectionId: connection.id,
       platform: "x",
@@ -157,6 +168,17 @@ describe("platform target identity and registry", () => {
     });
     setDefaultTarget(second.id);
     expect(resolveDefaultTarget("x")?.id).toBe(second.id);
+
+    const customizedRows = db.select().from(platformTargets).all();
+    expect(backfillPlatformTargets()).toEqual({ connectionsCreated: 0, targetsCreated: 0 });
+    expect(db.select().from(platformTargets).all()).toEqual(customizedRows);
+    expect(resolveTargetById(adopted.id)).toMatchObject({
+      connectionId: connection.id,
+      externalId: "42",
+      lastVerifiedAt: 123,
+    });
+    expect(resolveDefaultTarget("x")?.id).toBe(second.id);
+
     forgetPlatformTarget(second.id);
     expect(resolveDefaultTarget("x")?.id).toBe(firstRows[0]?.id);
   });
