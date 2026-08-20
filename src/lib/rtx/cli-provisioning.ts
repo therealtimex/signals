@@ -282,6 +282,38 @@ export async function createRtxPublishThread(
   return threadSlug;
 }
 
+/**
+ * Whether a thread slug still resolves in the workspace.
+ *
+ * `"unknown"` means RealTimeX could not answer (transient/unconfigured), which is
+ * deliberately distinct from `"missing"`: callers must not re-create a thread just
+ * because the check failed.
+ */
+export type RtxThreadPresence = "exists" | "missing" | "unknown";
+
+export async function getRtxThreadPresence(
+  workspaceSlug: string,
+  threadSlug: string,
+  env: EnvLike = process.env,
+  fetchImpl: typeof fetch = fetch
+): Promise<RtxThreadPresence> {
+  if (!workspaceSlug.trim() || !threadSlug.trim()) return "missing";
+
+  try {
+    const { response } = await rtxCliRequest(
+      `/cli/get-thread/${encodeURIComponent(workspaceSlug)}/${encodeURIComponent(threadSlug)}`,
+      { method: "GET" },
+      env,
+      fetchImpl
+    );
+    if (response.ok) return "exists";
+    if (response.status === 404) return "missing";
+    return "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
 export function buildPublishThreadName(title: string | null | undefined): string {
   const label = (title?.trim() || "Untitled").slice(0, 40);
   const stamp = new Date().toISOString().slice(0, 16).replace("T", " ");

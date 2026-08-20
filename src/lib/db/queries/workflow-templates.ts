@@ -40,6 +40,7 @@ export function updateTemplate(
       | "name" | "description" | "platform" | "templateType" | "status"
       | "config" | "goalMetrics" | "startsAt" | "endsAt"
       | "systemPrompt" | "targetPersona" | "estimatedCost" | "totalRuns" | "lastRunAt"
+      | "rtxThreadSlug"
     >
   >
 ): WorkflowTemplate | undefined {

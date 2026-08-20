@@ -7,7 +7,7 @@ import {
   countProfilePipelineBacklog,
   planProfilePipelineRun,
 } from "@/lib/db/queries/profile-pipeline-backlog";
-import { createTemplate } from "@/lib/db/queries/workflow-templates";
+import { createTemplate, getTemplate } from "@/lib/db/queries/workflow-templates";
 import { createWorkflowRun, getWorkflowRun, listWorkflowSteps } from "@/lib/db/queries/workflows";
 import { getRtxRefsFromRunConfig } from "@/lib/agents/run-template-via-rtx";
 import { db } from "@/lib/db/client";
@@ -160,6 +160,67 @@ describe("runPipelineTemplate", () => {
     const completed = getWorkflowRun(result.workflowRunId);
     expect(completed?.status).toBe("completed");
     expect(completed?.steps.some((s) => s.tool === "profile_pipeline_summary")).toBe(true);
+  });
+
+  it("reuses the template's dedicated thread across runs", async () => {
+    vi.spyOn(await import("@/lib/rtx/env"), "isRtxEmbedded").mockReturnValue(true);
+    vi.spyOn(await import("@/lib/rtx/cli-provisioning"), "ensureRtxWorkspace").mockResolvedValue(
+      "signals",
+    );
+    const createThread = vi
+      .spyOn(await import("@/lib/rtx/cli-provisioning"), "createRtxPublishThread")
+      .mockResolvedValue("pipeline-thread");
+    vi.spyOn(await import("@/lib/rtx/cli-provisioning"), "getRtxThreadPresence").mockResolvedValue(
+      "exists",
+    );
+
+    const template = createPipelineTemplate();
+    const contact = createContact({ name: "Pipeline Subject", platform: "x", platformUserId: "u1" });
+    const runOptions = {
+      templateId: template.id,
+      input: { contactIds: [contact.id] },
+      env: { RTX_APP_ID: "app-1", RTX_API_BASE_URL: "http://127.0.0.1:3001" },
+      fetchImpl: vi.fn(async () => new Response(JSON.stringify({ success: true }), { status: 200 })) as typeof fetch,
+    };
+
+    const first = await runPipelineTemplate(runOptions);
+    const second = await runPipelineTemplate(runOptions);
+
+    expect(first.success && second.success).toBe(true);
+    expect(createThread).toHaveBeenCalledTimes(1);
+    expect(getTemplate(template.id)?.rtxThreadSlug).toBe("pipeline-thread");
+    if (!first.success || !second.success) return;
+    expect(second.threadPath).toBe(first.threadPath);
+  });
+
+  it("opens a throwaway thread when freshThread is set, leaving the pointer intact", async () => {
+    vi.spyOn(await import("@/lib/rtx/env"), "isRtxEmbedded").mockReturnValue(true);
+    vi.spyOn(await import("@/lib/rtx/cli-provisioning"), "ensureRtxWorkspace").mockResolvedValue(
+      "signals",
+    );
+    const createThread = vi
+      .spyOn(await import("@/lib/rtx/cli-provisioning"), "createRtxPublishThread")
+      .mockResolvedValueOnce("pipeline-thread")
+      .mockResolvedValueOnce("one-off-thread");
+    vi.spyOn(await import("@/lib/rtx/cli-provisioning"), "getRtxThreadPresence").mockResolvedValue(
+      "exists",
+    );
+
+    const template = createPipelineTemplate();
+    const contact = createContact({ name: "Pipeline Subject", platform: "x", platformUserId: "u1" });
+    const runOptions = {
+      templateId: template.id,
+      input: { contactIds: [contact.id] },
+      env: { RTX_APP_ID: "app-1", RTX_API_BASE_URL: "http://127.0.0.1:3001" },
+      fetchImpl: vi.fn(async () => new Response(JSON.stringify({ success: true }), { status: 200 })) as typeof fetch,
+    };
+
+    await runPipelineTemplate(runOptions);
+    const isolated = await runPipelineTemplate({ ...runOptions, freshThread: true });
+
+    expect(createThread).toHaveBeenCalledTimes(2);
+    expect(isolated.success && isolated.threadPath).toBe("/workspace/signals/t/one-off-thread");
+    expect(getTemplate(template.id)?.rtxThreadSlug).toBe("pipeline-thread");
   });
 
   it("uses run input batchSize override instead of template default", async () => {

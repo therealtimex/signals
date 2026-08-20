@@ -25,15 +25,14 @@ export function getTemplateToolsHint(templateType: string): string[] {
   return TOOLS_BY_TYPE[templateType] ?? ["query_contacts", "create_task"];
 }
 
-export function buildAgentWorkflowThreadName(templateName: string): string {
-  const label = templateName.trim().slice(0, 60) || "Agent";
-  return `agent: ${label}`;
-}
-
-/** Audit/status threads for in-process pipelines — not terminal-agent work orders. */
-export function buildPipelineThreadName(templateName: string): string {
-  const label = templateName.trim().slice(0, 60) || "Pipeline";
-  return `pipeline: ${label}`;
+/**
+ * Name of a template's dedicated RealTimeX thread.
+ *
+ * One thread per template, so the sidebar reads as the template list — no `agent:` /
+ * `pipeline:` prefix and no `(2)`, `(3)` run suffixes to disambiguate.
+ */
+export function buildTemplateThreadName(templateName: string): string {
+  return templateName.trim().slice(0, 60) || "Workflow";
 }
 
 export function buildAgentWorkflowBrief(input: {

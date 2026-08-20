@@ -9,6 +9,8 @@ import { runPipelineTemplate } from "@/lib/workflows/pipeline/run-pipeline-templ
 const runSchema = z.object({
   config: z.record(z.unknown()).optional(),
   systemPrompt: z.string().optional(),
+  /** Opt out of the template's dedicated thread for this run only. */
+  freshThread: z.boolean().optional(),
 });
 
 /**
@@ -39,6 +41,7 @@ export async function POST(
         templateId: id,
         input: data.config,
         trigger: "template",
+        freshThread: data.freshThread,
       });
 
       if (!result.success) {
@@ -67,6 +70,7 @@ export async function POST(
       templateId: id,
       config: data.config,
       systemPrompt: data.systemPrompt,
+      freshThread: data.freshThread,
       signalsBaseUrl: resolveSignalsBaseUrlFromRequest(req),
     });
 
@@ -88,6 +92,7 @@ export async function POST(
         workspaceSlug: result.workspaceSlug,
         threadSlug: result.threadSlug,
         threadPath: result.threadPath,
+        threadResolution: result.threadResolution,
       },
       { status: 201 },
     );

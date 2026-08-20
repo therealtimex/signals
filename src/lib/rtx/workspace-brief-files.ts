@@ -11,8 +11,16 @@ export function publishJobBriefRelativePath(jobId: string): string {
   return `publish-jobs/${jobId}/brief.md`;
 }
 
-export function buildWorkflowRunBriefRoutingMessage(runId: string): string {
-  return `Execute the Signals workflow brief at \`workflow-runs/${runId}/brief.md\`. Report a concise summary in this thread when finished.`;
+/**
+ * Runs of one template share a thread, so the message leads with the run ordinal to
+ * keep the continuous timeline readable.
+ */
+export function buildWorkflowRunBriefRoutingMessage(
+  runId: string,
+  runNumber?: number
+): string {
+  const prefix = runNumber && runNumber > 0 ? `Run #${runNumber} — ` : "";
+  return `${prefix}Execute the Signals workflow brief at \`workflow-runs/${runId}/brief.md\`. Report a concise summary in this thread when finished.`;
 }
 
 export function buildPublishJobBriefRoutingMessage(jobId: string): string {

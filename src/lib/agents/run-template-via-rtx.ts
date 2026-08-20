@@ -3,14 +3,14 @@ import { getTemplate, updateTemplate } from "@/lib/db/queries/workflow-templates
 import type { WorkflowRun, WorkflowTemplate } from "@/lib/db/types";
 import {
   buildAgentWorkflowBrief,
-  buildAgentWorkflowThreadName,
+  buildTemplateThreadName,
   mergeRunConfig,
 } from "@/lib/workflows/template-brief";
 import {
-  createRtxPublishThread,
   ensureRtxWorkspace,
   getSignalsRtxWorkspaceSlug,
 } from "@/lib/rtx/cli-provisioning";
+import { getOrCreateTemplateThread } from "@/lib/rtx/template-thread";
 import { isRtxEmbedded } from "@/lib/rtx/env";
 import { resolveSignalsBaseUrlFromEnv } from "@/lib/rtx/resolve-signals-base-url";
 import {
@@ -22,6 +22,7 @@ import {
   workflowRunBriefRelativePath,
   writeRtxWorkspaceBriefFile,
 } from "@/lib/rtx/workspace-brief-files";
+import type { TemplateThreadResolution } from "@/lib/rtx/template-thread";
 import type { WorkflowType } from "@/lib/workflows/types";
 
 const TEMPLATE_TO_WORKFLOW_TYPE: Record<string, WorkflowType> = {
@@ -40,6 +41,8 @@ export type RunTemplateViaRtxInput = {
   systemPrompt?: string;
   /** Base URL of the running Signals instance (derive from the incoming HTTP request). */
   signalsBaseUrl?: string;
+  /** Run in a throwaway thread instead of the template's dedicated one. */
+  freshThread?: boolean;
 };
 
 export type RunTemplateViaRtxResult =
@@ -49,6 +52,7 @@ export type RunTemplateViaRtxResult =
       workspaceSlug: string;
       threadSlug: string;
       threadPath: string;
+      threadResolution: TemplateThreadResolution;
       workflowRun: WorkflowRun;
     }
   | {
@@ -195,12 +199,17 @@ export async function runTemplateViaRtx(
       env,
       fetchImpl
     );
-    const threadSlug = await createRtxPublishThread(
-      workspaceSlug,
-      buildAgentWorkflowThreadName(template.name),
-      env,
-      fetchImpl
-    );
+    const { threadSlug, resolution: threadResolution } =
+      await getOrCreateTemplateThread(
+        {
+          template,
+          workspaceSlug,
+          threadName: buildTemplateThreadName(template.name),
+          freshThread: input.freshThread,
+        },
+        env,
+        fetchImpl
+      );
 
     const brief = buildAgentWorkflowBrief({
       template,
@@ -225,7 +234,7 @@ export async function runTemplateViaRtx(
       {
         workspaceSlug,
         threadSlug,
-        message: buildWorkflowRunBriefRoutingMessage(run.id),
+        message: buildWorkflowRunBriefRoutingMessage(run.id, template.totalRuns + 1),
         reason: `Run agent workflow template ${template.name} (${template.id})`,
       },
       env,
@@ -288,7 +297,10 @@ export async function runTemplateViaRtx(
       status: "completed",
       tool: "rtx_terminal_agent",
       input: JSON.stringify({ templateId: template.id, threadSlug: resolvedThread }),
-      output: JSON.stringify({ runtimeSessionId: launch.descriptor.id }),
+      output: JSON.stringify({
+        runtimeSessionId: launch.descriptor.id,
+        threadResolution,
+      }),
       durationMs: 0,
     });
 
@@ -313,6 +325,7 @@ export async function runTemplateViaRtx(
       workspaceSlug: resolvedWorkspace,
       threadSlug: resolvedThread,
       threadPath: `/workspace/${resolvedWorkspace}/t/${resolvedThread}`,
+      threadResolution,
       workflowRun: updatedRun ?? run,
     };
   } catch (error) {
