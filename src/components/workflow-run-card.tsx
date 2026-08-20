@@ -134,8 +134,11 @@ export function WorkflowRunCard({
 
   if (variant === "swimlane") {
     return (
-      <Link href={`/dashboard/workflows/${run.id}`} className="block shrink-0">
-        <Card className="p-3 w-[220px] hover:bg-muted/50 transition-colors cursor-pointer">
+      <Card className="p-3 w-[220px] shrink-0 hover:bg-muted/50 transition-colors">
+        <Link
+          href={workflowRunHref}
+          className="block cursor-pointer"
+        >
           <div className="flex items-center gap-2 mb-1.5">
             <span className={`h-2 w-2 rounded-full shrink-0 ${statusColor}`} />
             <span className="text-xs font-medium truncate">{label}</span>
@@ -144,24 +147,24 @@ export function WorkflowRunCard({
             <span>{run.successItems > 0 ? `${run.successItems} ok` : run.status}</span>
             <span>{formatRelativeTime(run.createdAt)}</span>
           </div>
-          {subjects.length > 0 && (
-            <div className="mt-1">
-              <WorkflowRunSubjectLinks
-                subjects={subjects}
-                workflowRunHref={workflowRunHref}
-                maxVisible={1}
-              />
-            </div>
-          )}
-        </Card>
-      </Link>
+        </Link>
+        {subjects.length > 0 && (
+          <div className="mt-1">
+            <WorkflowRunSubjectLinks
+              subjects={subjects}
+              workflowRunHref={workflowRunHref}
+              maxVisible={1}
+            />
+          </div>
+        )}
+      </Card>
     );
   }
 
   // kanban variant (default)
   return (
-    <Link href={`/dashboard/workflows/${run.id}`} className="block">
-      <Card className="p-3 hover:bg-muted/50 transition-colors cursor-pointer space-y-2">
+    <Card className="p-3 hover:bg-muted/50 transition-colors space-y-2">
+      <Link href={workflowRunHref} className="block cursor-pointer space-y-2">
         <div className="flex items-center gap-2">
           <div className="rounded bg-muted p-1.5 shrink-0">
             <Icon className="h-3.5 w-3.5 text-muted-foreground" />
@@ -174,14 +177,6 @@ export function WorkflowRunCard({
 
         {run.status === "running" && progressPercent !== null && (
           <Progress value={progressPercent} className="h-1" />
-        )}
-
-        {subjects.length > 0 && (
-          <WorkflowRunSubjectLinks
-            subjects={subjects}
-            workflowRunHref={workflowRunHref}
-            maxVisible={1}
-          />
         )}
 
         <div className="flex items-center justify-between text-[10px] text-muted-foreground">
@@ -201,7 +196,15 @@ export function WorkflowRunCard({
           </div>
           <span>{formatDuration(run.startedAt, run.completedAt)}</span>
         </div>
-      </Card>
-    </Link>
+      </Link>
+
+      {subjects.length > 0 && (
+        <WorkflowRunSubjectLinks
+          subjects={subjects}
+          workflowRunHref={workflowRunHref}
+          maxVisible={1}
+        />
+      )}
+    </Card>
   );
 }
