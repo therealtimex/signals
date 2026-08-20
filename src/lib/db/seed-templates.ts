@@ -231,7 +231,8 @@ those that should be removed from the active list.
     description: "Find contacts that are the same person across X, LinkedIn, Gmail, and agent research runs, then consolidate their identities, notes, and activity into one record.",
     templateType: "pruning",
     targetPersona: "Contacts duplicated across multi-source syncs (same email, handle, or name + company)",
-    estimatedCost: 0.10,
+    // Runs in-app against the merge engine — no agent, no model spend.
+    estimatedCost: 0,
     systemPrompt: `You are a data quality agent consolidating duplicate contacts.
 
 ## Objective

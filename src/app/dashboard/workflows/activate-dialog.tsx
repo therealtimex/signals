@@ -28,23 +28,6 @@ import {
   isSocialPatrolTemplateConfig,
   readSocialPatrolConfig,
 } from "@/lib/workflows/social-patrol";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  DEDUPE_TIER_PRESETS,
-  buildDedupeRunConfig,
-  clampConfidence,
-  clampLimit,
-  isDedupeTemplateConfig,
-  readDedupeRunControls,
-  tierPresetFromTiers,
-  tiersFromPreset,
-} from "@/lib/workflows/dedupe-template";
 
 interface Template {
   id: string;
@@ -96,11 +79,8 @@ export function ActivateDialog({ template, open, onClose }: ActivateDialogProps)
   const templateConfig = parseTemplateConfig(template.config);
   const isPipeline = isPipelineTemplateConfig(template.config);
   const isPatrol = isSocialPatrolTemplateConfig(templateConfig);
-  const isDedupe =
-    template.templateType === "pruning" && isDedupeTemplateConfig(templateConfig);
 
   const [patrol, setPatrol] = useState(() => readSocialPatrolConfig(templateConfig));
-  const [dedupe, setDedupe] = useState(() => readDedupeRunControls(templateConfig));
 
   const initialLimits = readRunLimitFromTemplateConfig(templateConfig);
   const [maxResults, setMaxResults] = useState(initialLimits.maxResults);
@@ -118,7 +98,6 @@ export function ActivateDialog({ template, open, onClose }: ActivateDialogProps)
     const config = parseTemplateConfig(template.config);
     const limits = readRunLimitFromTemplateConfig(config);
     setPatrol(readSocialPatrolConfig(config));
-    setDedupe(readDedupeRunControls(config));
     setMaxResults(limits.maxResults);
     setMaxContacts(limits.maxContacts);
     setMaxEnrichmentScore(limits.maxEnrichmentScore);
@@ -187,15 +166,9 @@ export function ActivateDialog({ template, open, onClose }: ActivateDialogProps)
           config.maxEnrichmentScore = parseInt(maxEnrichmentScore, 10) || 50;
         }
         if (template.templateType === "pruning") {
-          // Dedupe has its own knobs; the inactivity/company ones mean nothing to it and
-          // used to ride along into the brief.
-          if (isDedupe) {
-            Object.assign(config, buildDedupeRunConfig(dedupe));
-          } else {
-            config.maxContacts = parseInt(maxContacts, 10) || 20;
-            config.companyName = companyName || undefined;
-            config.inactivityDays = parseInt(inactivityDays, 10) || 365;
-          }
+          config.maxContacts = parseInt(maxContacts, 10) || 20;
+          config.companyName = companyName || undefined;
+          config.inactivityDays = parseInt(inactivityDays, 10) || 365;
         }
         if (template.templateType === "content") {
           const topicsList = topics.split(",").map((t) => t.trim()).filter(Boolean);
@@ -391,65 +364,7 @@ export function ActivateDialog({ template, open, onClose }: ActivateDialogProps)
                 </>
               )}
 
-              {isDedupe && (
-                <>
-                  <div className="space-y-2">
-                    <Label htmlFor="dedupe-tiers">Detection Tiers</Label>
-                    <Select
-                      value={tierPresetFromTiers(dedupe.tiers)}
-                      onValueChange={(value) =>
-                        setDedupe((prev) => ({ ...prev, tiers: tiersFromPreset(value) }))
-                      }
-                    >
-                      <SelectTrigger id="dedupe-tiers">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {DEDUPE_TIER_PRESETS.map((option) => (
-                          <SelectItem key={option.value} value={option.value}>
-                            {option.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="dedupe-min-confidence">Minimum Confidence</Label>
-                    <Input
-                      id="dedupe-min-confidence"
-                      type="number"
-                      min={0}
-                      max={1}
-                      step={0.05}
-                      value={dedupe.minConfidence}
-                      onChange={(e) =>
-                        setDedupe((prev) => ({
-                          ...prev,
-                          minConfidence: clampConfidence(Number(e.target.value)),
-                        }))
-                      }
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="dedupe-limit">Max Groups</Label>
-                    <Input
-                      id="dedupe-limit"
-                      type="number"
-                      min={1}
-                      max={200}
-                      value={dedupe.limit}
-                      onChange={(e) =>
-                        setDedupe((prev) => ({
-                          ...prev,
-                          limit: clampLimit(Number(e.target.value)),
-                        }))
-                      }
-                    />
-                  </div>
-                </>
-              )}
-
-              {template.templateType === "pruning" && !isDedupe && (
+              {template.templateType === "pruning" && (
                 <>
                   <div className="space-y-2">
                     <Label htmlFor="company-name">Company Name</Label>

@@ -323,22 +323,17 @@ export function TemplateGallery() {
                     <Button
                       size="sm"
                       className="flex-1 h-8"
-                      onClick={() => setActiveTemplate(template)}
+                      onClick={() =>
+                        isDedupe ? setReviewTemplate(template) : setActiveTemplate(template)
+                      }
                     >
-                      <Play className="mr-1.5 h-3 w-3" />
+                      {isDedupe ? (
+                        <Users className="mr-1.5 h-3 w-3" />
+                      ) : (
+                        <Play className="mr-1.5 h-3 w-3" />
+                      )}
                       Run
                     </Button>
-                    {isDedupe && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-8 px-2"
-                        onClick={() => setReviewTemplate(template)}
-                        title="Review duplicates without an agent"
-                      >
-                        <Users className="h-3.5 w-3.5" />
-                      </Button>
-                    )}
                     {isSystem ? (
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
