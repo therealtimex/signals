@@ -72,14 +72,24 @@ export const PLATFORM_DISPLAY_NAMES: Partial<Record<Platform, string>> = {
   threads: "Threads",
 };
 
-/** Compact labels for dense product surfaces such as tables and status chips. */
-export const PLATFORM_SHORT_LABELS: Partial<Record<Platform, string>> = {
+/**
+ * Compact labels for dense product surfaces such as tables and status chips.
+ * Total over the registry on purpose — a new platform must be named here or this fails to compile,
+ * so no surface ever falls back to rendering a raw lowercase id.
+ */
+export const PLATFORM_SHORT_LABELS: Record<Platform, string> = {
   x: "X",
   linkedin: "LinkedIn",
   gmail: "Gmail",
+  substack: "Substack",
   instagram: "Instagram",
   facebook: "Facebook",
   threads: "Threads",
+  tiktok: "TikTok",
+  youtube: "YouTube",
+  bluesky: "Bluesky",
+  telegram: "Telegram",
+  whatsapp: "WhatsApp",
 };
 
 /** Platforms registered in PLATFORM_CAPABILITIES with oauth disabled. */
