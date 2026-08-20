@@ -6,6 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Heart, Repeat2, MessageCircle, Loader2, Send } from "lucide-react";
+import { FeedbackBanner } from "@/components/feedback-banner";
 import type { Engagement } from "@/lib/db/types";
 
 interface EngagementActionsProps {
@@ -157,9 +158,7 @@ export function EngagementActions({
 
         {/* Error */}
         {error && (
-          <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200">
-            {error}
-          </div>
+          <FeedbackBanner tone="danger">{error}</FeedbackBanner>
         )}
       </CardContent>
     </Card>

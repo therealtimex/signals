@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
@@ -10,9 +11,10 @@ interface EmptyStateProps {
     label: string;
     href: string;
   };
+  action?: ReactNode;
 }
 
-export function EmptyState({ icon: Icon, title, description, cta }: EmptyStateProps) {
+export function EmptyState({ icon: Icon, title, description, cta, action }: EmptyStateProps) {
   return (
     <div className="flex flex-col items-center justify-center py-16 animate-fade-slide-in">
       <div className="gradient-brand rounded-full p-4 mb-4">
@@ -27,6 +29,7 @@ export function EmptyState({ icon: Icon, title, description, cta }: EmptyStatePr
           <Link href={cta.href}>{cta.label}</Link>
         </Button>
       )}
+      {action}
     </div>
   );
 }

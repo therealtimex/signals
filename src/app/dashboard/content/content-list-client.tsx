@@ -1,11 +1,47 @@
 "use client";
 
+import {
+  useState,
+  useCallback,
+  Suspense,
+  useMemo,
+  useEffect,
+  type KeyboardEvent,
+} from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useState, useCallback, Suspense, useMemo, useEffect, type ReactNode } from "react";
-import { Card } from "@/components/ui/card";
+import {
+  AlertCircle,
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp,
+  Clock,
+  ExternalLink,
+  FileText,
+  Heart,
+  Loader2,
+  MessageCircle,
+  MessageSquare,
+  Pencil,
+  PenSquare,
+  Quote,
+  Repeat2,
+  RotateCcw,
+  Share2,
+  ThumbsUp,
+  X,
+} from "lucide-react";
+import { ComposeDialog } from "@/components/compose-dialog";
+import { ContentStatusBadge } from "@/components/content-status-badge";
+import { EmptyState } from "@/components/empty-state";
+import { FeedbackBanner } from "@/components/feedback-banner";
+import { PageHeader } from "@/components/page-header";
+import { PaginationControls } from "@/components/pagination-controls";
+import { PlatformBadge } from "@/components/platform-badge";
+import { RowActionsMenu, type RowAction } from "@/components/row-actions-menu";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Card } from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Table,
   TableBody,
@@ -14,33 +50,23 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  FileText,
-  Heart,
-  MessageCircle,
-  Repeat2,
-  Quote,
-  ExternalLink,
-  ChevronDown,
-  ChevronUp,
-  PenSquare,
-  Pencil,
-  Share2,
-  ThumbsUp,
-  Clock,
-  Loader2,
-  AlertCircle,
-  MessageSquare,
-  RotateCcw,
-  X,
-} from "lucide-react";
-import { EmptyState } from "@/components/empty-state";
-import { ComposeDialog } from "@/components/compose-dialog";
-import { PaginationControls } from "@/components/pagination-controls";
 import { usePublishJobs } from "@/hooks/use-publish-jobs";
 import type { ContentItemWithPost } from "@/lib/db/types";
+import { PLATFORM_SHORT_LABELS } from "@/lib/platforms/capabilities";
 import type { PublishJobTarget } from "@/lib/publish/types";
 import { cn } from "@/lib/utils";
+import {
+  getContentOriginView,
+  hasNonDefaultContentFilters,
+  resetContentListParams,
+  shouldActivateContentRow,
+  updateContentListParams,
+} from "./content-list-utils";
+import {
+  getContentRowActionKinds,
+  getOpenPlatformLabel,
+  type ContentRowActionKind,
+} from "./content-row-actions";
 
 const originFilters = [
   { value: "all", label: "All" },
@@ -68,43 +94,6 @@ const contentTypeLabels: Record<string, string> = {
   newsletter: "Newsletter",
 };
 
-const STATUS_BADGE: Record<
-  string,
-  { label: string; className: string; icon?: ReactNode }
-> = {
-  draft: {
-    label: "draft",
-    className: "border-yellow-500 text-yellow-600",
-  },
-  queued: {
-    label: "queued",
-    className: "border-muted-foreground/40 text-muted-foreground",
-    icon: <Clock className="h-3 w-3" />,
-  },
-  publishing: {
-    label: "publishing",
-    className: "border-blue-500 text-blue-600",
-    icon: <Loader2 className="h-3 w-3 animate-spin" />,
-  },
-  published: {
-    label: "published",
-    className: "border-green-600 text-green-700",
-  },
-  failed: {
-    label: "failed",
-    className: "border-red-500 text-red-600",
-    icon: <AlertCircle className="h-3 w-3" />,
-  },
-};
-
-const TARGET_STATUS_COLOR: Record<string, string> = {
-  pending: "text-muted-foreground",
-  publishing: "text-blue-500",
-  published: "text-green-600",
-  failed: "text-red-500",
-  skipped: "text-muted-foreground",
-};
-
 interface ContentListClientProps {
   content: ContentItemWithPost[];
   total: number;
@@ -122,25 +111,58 @@ type SentBanner = {
 };
 
 function getItemPlatform(item: ContentItemWithPost): string | null {
-  if (item.platformTarget) return item.platformTarget.split(",")[0]?.trim() ?? null;
+  const target = item.platformTarget?.split(",")[0]?.trim();
+  if (target) return target;
+
+  const url = item.post?.platformUrl?.toLowerCase();
+  if (url?.includes("x.com") || url?.includes("twitter.com")) return "x";
+  if (url?.includes("linkedin.com")) return "linkedin";
+  if (url?.includes("mail.google.com")) return "gmail";
   return null;
 }
 
-function PlatformGlyphs({ targets }: { targets: PublishJobTarget[] }) {
-  if (targets.length === 0) return null;
-  return (
-    <div className="flex items-center gap-1">
-      {targets.map((t) => (
-        <span
-          key={t.platform}
-          title={t.error || t.platformUrl || t.status}
-          className={cn("text-[10px] font-semibold uppercase", TARGET_STATUS_COLOR[t.status])}
-        >
-          {t.platform === "linkedin" ? "in" : "𝕏"}
-        </span>
-      ))}
-    </div>
-  );
+function toContentUrl(params: URLSearchParams): string {
+  const query = params.toString();
+  return query ? `/dashboard/content?${query}` : "/dashboard/content";
+}
+
+function formatDate(unix: number | null | undefined): string {
+  if (!unix) return "—";
+  return new Date(unix * 1000).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function truncate(text: string | null | undefined, length: number): string {
+  if (!text) return "—";
+  return text.length > length ? `${text.slice(0, length)}...` : text;
+}
+
+function parseEngagementSnapshot(value: string | null | undefined): Record<string, number> | null {
+  if (!value) return null;
+  try {
+    return JSON.parse(value) as Record<string, number>;
+  } catch {
+    return null;
+  }
+}
+
+function TargetStatusBadge({ target }: { target: PublishJobTarget }) {
+  const label = PLATFORM_SHORT_LABELS[target.platform] ?? target.platform;
+  const detail = target.error || target.platformUrl || target.status;
+  if (target.status === "publishing") {
+    return <Badge variant="info" title={detail} aria-label={`${label}: ${detail}`}><Loader2 className="animate-spin motion-reduce:animate-none" />{label}</Badge>;
+  }
+  if (target.status === "published") {
+    return <Badge variant="success" title={detail} aria-label={`${label}: ${detail}`}><CheckCircle2 />{label}</Badge>;
+  }
+  if (target.status === "failed") {
+    return <Badge variant="danger" title={detail} aria-label={`${label}: ${detail}`}><AlertCircle />{label}</Badge>;
+  }
+  return <Badge variant="neutral" title={detail} aria-label={`${label}: ${detail}`}><Clock />{label}</Badge>;
 }
 
 function ContentListInner({
@@ -162,6 +184,8 @@ function ContentListInner({
 
   const contentIds = useMemo(() => content.map((item) => item.id), [content]);
   const { jobsByItemId, fetchJobs, checkTerminalTransitions } = usePublishJobs(contentIds);
+  const activeOrigin = getContentOriginView(currentOrigin, currentStatus);
+  const filtersActive = hasNonDefaultContentFilters(currentOrigin, currentStatus, currentPlatform);
 
   useEffect(() => {
     checkTerminalTransitions(() => router.refresh());
@@ -170,50 +194,28 @@ function ContentListInner({
   const threadCounts = useMemo(() => {
     const counts = new Map<string, number>();
     for (const item of content) {
-      if (item.threadId) {
-        counts.set(item.threadId, (counts.get(item.threadId) ?? 0) + 1);
-      }
+      if (item.threadId) counts.set(item.threadId, (counts.get(item.threadId) ?? 0) + 1);
     }
     return counts;
   }, [content]);
 
   const updateParams = useCallback(
-    (key: string, value: string) => {
-      const params = new URLSearchParams(searchParams.toString());
-      if (key === "origin") {
-        if (value === "drafts") {
-          params.delete("origin");
-          params.set("status", "draft");
-        } else {
-          params.delete("status");
-          if (value && value !== "all") {
-            params.set(key, value);
-          } else {
-            params.delete(key);
-          }
-        }
-      } else if (key === "platform") {
-        if (value && value !== "all") {
-          params.set("platform", value);
-        } else {
-          params.delete("platform");
-        }
-      }
-      params.delete("page");
-      router.push(`/dashboard/content?${params.toString()}`);
+    (key: "origin" | "platform", value: string) => {
+      router.push(toContentUrl(updateContentListParams(searchParams, key, value)));
     },
     [router, searchParams]
   );
 
+  const resetFilters = useCallback(() => {
+    router.push(toContentUrl(resetContentListParams(searchParams)));
+  }, [router, searchParams]);
+
   const createPageUrl = useCallback(
-    (p: number) => {
+    (nextPage: number) => {
       const params = new URLSearchParams(searchParams.toString());
-      if (p > 1) {
-        params.set("page", String(p));
-      } else {
-        params.delete("page");
-      }
-      return `/dashboard/content?${params.toString()}`;
+      if (nextPage > 1) params.set("page", String(nextPage));
+      else params.delete("page");
+      return toContentUrl(params);
     },
     [searchParams]
   );
@@ -221,13 +223,11 @@ function ContentListInner({
   async function openThread(jobId: string) {
     setActionLoading(`open-${jobId}`);
     try {
-      const res = await fetch(`/api/content/publish-jobs/${jobId}/open-thread`, {
+      const response = await fetch(`/api/content/publish-jobs/${jobId}/open-thread`, {
         method: "POST",
       });
-      const data = await res.json();
-      if (data.threadPath) {
-        setSentBanner({ jobId, threadPath: data.threadPath });
-      }
+      const data = await response.json();
+      if (data.threadPath) setSentBanner({ jobId, threadPath: data.threadPath });
     } finally {
       setActionLoading(null);
     }
@@ -238,7 +238,7 @@ function ContentListInner({
     if (!job?.payload) return;
     setActionLoading(`retry-${itemId}`);
     try {
-      const res = await fetch("/api/content/send-to-agent", {
+      const response = await fetch("/api/content/send-to-agent", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -248,17 +248,14 @@ function ContentListInner({
             .filter((target) => target.targetId)
             .map((target) => ({ targetId: target.targetId })),
           text: job.payload.text,
-          mediaAssetIds: job.payload.mediaAssetIds?.length
-            ? job.payload.mediaAssetIds
-            : undefined,
+          mediaAssetIds: job.payload.mediaAssetIds?.length ? job.payload.mediaAssetIds : undefined,
         }),
       });
-      const data = await res.json();
+      const data = await response.json();
       if (data.success) {
-        const threadPath =
-          data.rtxWorkspaceSlug && data.rtxThreadSlug
-            ? `/workspace/${data.rtxWorkspaceSlug}/t/${data.rtxThreadSlug}`
-            : null;
+        const threadPath = data.rtxWorkspaceSlug && data.rtxThreadSlug
+          ? `/workspace/${data.rtxWorkspaceSlug}/t/${data.rtxThreadSlug}`
+          : null;
         setSentBanner({ jobId: data.jobId, threadPath });
         await fetchJobs();
         router.refresh();
@@ -279,251 +276,173 @@ function ContentListInner({
     }
   }
 
-  function formatDate(unix: number | null | undefined): string {
-    if (!unix) return "—";
-    return new Date(unix * 1000).toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-    });
-  }
-
-  function truncate(text: string | null | undefined, len: number): string {
-    if (!text) return "—";
-    return text.length > len ? text.slice(0, len) + "..." : text;
-  }
-
-  function renderStatusBadges(item: ContentItemWithPost) {
-    const status = item.status ?? "draft";
-    const badge = STATUS_BADGE[status];
+  function rowActions(item: ContentItemWithPost): RowAction[] {
     const job = jobsByItemId[item.id];
-
-    return (
-      <div className="flex flex-col gap-1">
-        {badge && (
-          <Badge
-            variant="outline"
-            className={cn("text-xs w-fit gap-1", badge.className, job?.stale && "border-amber-500")}
-          >
-            {badge.icon}
-            {badge.label}
-          </Badge>
-        )}
-        {job?.targets && job.targets.length > 1 && <PlatformGlyphs targets={job.targets} />}
-        {job?.stale && (
-          <span className="text-[10px] text-amber-600">
-            Check the thread — the agent may need input
-          </span>
-        )}
-      </div>
+    const loading = Boolean(
+      actionLoading?.includes(item.id) || (job?.id && actionLoading?.includes(job.id))
     );
-  }
+    const platform = getItemPlatform(item);
+    const platformLabel = platform
+      ? PLATFORM_SHORT_LABELS[platform as keyof typeof PLATFORM_SHORT_LABELS] ?? platform
+      : null;
+    const actionDefinitions: Record<ContentRowActionKind, RowAction> = {
+      edit: {
+        label: "Edit",
+        icon: Pencil,
+        disabled: loading,
+        onSelect: () => {
+          setComposeDraftId(item.id);
+          setComposeOpen(true);
+        },
+      },
+      retry: {
+        label: "Retry",
+        icon: RotateCcw,
+        disabled: loading,
+        onSelect: () => void retryPublish(item.id),
+      },
+      "open-thread": {
+        label: "Open thread",
+        icon: MessageSquare,
+        disabled: loading,
+        onSelect: () => {
+          if (job?.id) void openThread(job.id);
+        },
+      },
+      "open-platform": {
+        label: getOpenPlatformLabel(platformLabel),
+        icon: ExternalLink,
+        onSelect: () => {
+          if (item.post?.platformUrl) {
+            window.open(item.post.platformUrl, "_blank", "noopener,noreferrer");
+          }
+        },
+      },
+      "mark-failed": {
+        label: "Mark failed",
+        icon: AlertCircle,
+        destructive: true,
+        disabled: loading,
+        onSelect: () => {
+          if (job?.id) void markJobFailed(job.id);
+        },
+      },
+    };
 
-  function renderRowActions(item: ContentItemWithPost) {
-    const job = jobsByItemId[item.id];
-    const loading = actionLoading?.includes(item.id) || actionLoading?.includes(job?.id ?? "");
-
-    if (item.status === "draft") {
-      return (
-        <Button
-          variant="outline"
-          size="sm"
-          className="text-xs"
-          onClick={(e) => {
-            e.stopPropagation();
-            setComposeDraftId(item.id);
-            setComposeOpen(true);
-          }}
-        >
-          <Pencil className="mr-1.5 h-3 w-3" />
-          Edit
-        </Button>
-      );
-    }
-
-    return (
-      <div className="flex flex-wrap items-center gap-1.5">
-        {job?.rtxThreadSlug && job.id && (
-          <Button
-            variant="outline"
-            size="sm"
-            className="text-xs h-7"
-            disabled={loading}
-            onClick={(e) => {
-              e.stopPropagation();
-              void openThread(job.id);
-            }}
-          >
-            <MessageSquare className="mr-1 h-3 w-3" />
-            Open thread
-          </Button>
-        )}
-        {item.status === "failed" && job?.payload && (
-          <Button
-            variant="outline"
-            size="sm"
-            className="text-xs h-7"
-            disabled={loading}
-            onClick={(e) => {
-              e.stopPropagation();
-              void retryPublish(item.id);
-            }}
-          >
-            <RotateCcw className="mr-1 h-3 w-3" />
-            Retry
-          </Button>
-        )}
-        {job?.stale && job.id && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="text-xs h-7 text-amber-700"
-            disabled={loading}
-            onClick={(e) => {
-              e.stopPropagation();
-              void markJobFailed(job.id);
-            }}
-          >
-            Mark failed
-          </Button>
-        )}
-      </div>
-    );
+    return getContentRowActionKinds({
+      status: item.status,
+      hasRetryPayload: Boolean(job?.payload),
+      hasThread: Boolean(job?.rtxThreadSlug && job.id),
+      hasPlatformUrl: Boolean(item.post?.platformUrl),
+      stale: Boolean(job?.stale),
+      hasJob: Boolean(job?.id),
+    }).map((kind) => actionDefinitions[kind]);
   }
 
   function renderEngagement(item: ContentItemWithPost) {
-    if (item.status === "draft" || item.status === "queued" || item.status === "publishing") {
-      return renderRowActions(item);
-    }
-
-    if (item.status === "failed") {
-      return renderRowActions(item);
-    }
-
-    const snapshot = item.post?.engagementSnapshot
-      ? JSON.parse(item.post.engagementSnapshot)
-      : null;
-
-    const actions = renderRowActions(item);
-
-    if (!snapshot) {
-      return actions ?? <span className="text-muted-foreground text-xs">—</span>;
-    }
+    const snapshot = parseEngagementSnapshot(item.post?.engagementSnapshot);
+    if (!snapshot) return <span className="text-xs text-muted-foreground">—</span>;
 
     const platform = getItemPlatform(item);
+    if (platform === "gmail") return <span className="text-xs text-muted-foreground">—</span>;
 
-    const metrics =
-      platform === "linkedin" ? (
+    if (platform === "linkedin") {
+      return (
         <div className="flex items-center gap-3 text-xs text-muted-foreground">
-          <span className="flex items-center gap-1" title="Likes">
-            <ThumbsUp className="h-3 w-3" />
-            {snapshot.likes ?? 0}
-          </span>
-          <span className="flex items-center gap-1" title="Comments">
-            <MessageCircle className="h-3 w-3" />
-            {snapshot.comments ?? 0}
-          </span>
-          <span className="flex items-center gap-1" title="Shares">
-            <Share2 className="h-3 w-3" />
-            {snapshot.shares ?? 0}
-          </span>
-        </div>
-      ) : platform === "gmail" ? null : (
-        <div className="flex items-center gap-3 text-xs text-muted-foreground">
-          <span className="flex items-center gap-1" title="Likes">
-            <Heart className="h-3 w-3" />
-            {snapshot.likes ?? 0}
-          </span>
-          <span className="flex items-center gap-1" title="Replies">
-            <MessageCircle className="h-3 w-3" />
-            {snapshot.replies ?? 0}
-          </span>
-          <span className="flex items-center gap-1" title="Retweets">
-            <Repeat2 className="h-3 w-3" />
-            {snapshot.retweets ?? 0}
-          </span>
-          <span className="flex items-center gap-1" title="Quotes">
-            <Quote className="h-3 w-3" />
-            {snapshot.quotes ?? 0}
-          </span>
+          <span className="flex items-center gap-1" title="Likes"><ThumbsUp className="size-3" />{snapshot.likes ?? 0}</span>
+          <span className="flex items-center gap-1" title="Comments"><MessageCircle className="size-3" />{snapshot.comments ?? 0}</span>
+          <span className="flex items-center gap-1" title="Shares"><Share2 className="size-3" />{snapshot.shares ?? 0}</span>
         </div>
       );
+    }
 
     return (
-      <div className="flex flex-col gap-2">
-        {metrics}
-        {actions}
+      <div className="flex items-center gap-3 text-xs text-muted-foreground">
+        <span className="flex items-center gap-1" title="Likes"><Heart className="size-3" />{snapshot.likes ?? 0}</span>
+        <span className="flex items-center gap-1" title="Replies"><MessageCircle className="size-3" />{snapshot.replies ?? 0}</span>
+        <span className="flex items-center gap-1" title="Retweets"><Repeat2 className="size-3" />{snapshot.retweets ?? 0}</span>
+        <span className="flex items-center gap-1" title="Quotes"><Quote className="size-3" />{snapshot.quotes ?? 0}</span>
       </div>
     );
   }
 
+  function navigateToItem(itemId: string) {
+    router.push(`/dashboard/content/${itemId}`);
+  }
+
+  function handleRowKeyDown(event: KeyboardEvent<HTMLTableRowElement>, itemId: string) {
+    if (shouldActivateContentRow(event.key, event.target === event.currentTarget)) {
+      event.preventDefault();
+      navigateToItem(itemId);
+    }
+  }
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
+      <PageHeader
+        title="Content"
+        description="Browse and manage content across platforms."
+        actions={(
+          <Button
+            size="sm"
+            onClick={() => {
+              setComposeDraftId(null);
+              setComposeOpen(true);
+            }}
+          >
+            <PenSquare />
+            Compose
+          </Button>
+        )}
+      />
+
       {sentBanner && (
-        <div className="flex items-center justify-between gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-100">
-          <span>Sent to agent — open the thread to follow progress.</span>
-          <div className="flex items-center gap-2 shrink-0">
-            {sentBanner.threadPath && (
-              <Button
-                size="sm"
-                variant="secondary"
-                className="h-7 text-xs"
-                onClick={() => void openThread(sentBanner.jobId)}
-              >
-                Open thread
-              </Button>
-            )}
-            <Button
-              size="icon"
-              variant="ghost"
-              className="h-7 w-7"
-              onClick={() => setSentBanner(null)}
-            >
-              <X className="h-3.5 w-3.5" />
+        <FeedbackBanner
+          tone="info"
+          onDismiss={() => setSentBanner(null)}
+          action={sentBanner.threadPath ? (
+            <Button size="xs" variant="secondary" onClick={() => void openThread(sentBanner.jobId)}>
+              Open thread
             </Button>
-          </div>
-        </div>
+          ) : undefined}
+        >
+          Sent to agent — open the thread to follow progress.
+        </FeedbackBanner>
       )}
 
-      <div className="flex items-center justify-between gap-4">
-        <Tabs
-          defaultValue={currentStatus === "draft" ? "drafts" : (currentOrigin ?? "all")}
-          onValueChange={(v) => updateParams("origin", v)}
-        >
+      <div className="flex flex-wrap items-center gap-2">
+        <Tabs value={activeOrigin} onValueChange={(value) => updateParams("origin", value)}>
           <TabsList>
-            {originFilters.map((f) => (
-              <TabsTrigger key={f.value} value={f.value}>
-                {f.label}
-              </TabsTrigger>
+            {originFilters.map((filter) => (
+              <TabsTrigger key={filter.value} value={filter.value}>{filter.label}</TabsTrigger>
             ))}
           </TabsList>
+          {originFilters.map((filter) => (
+            <TabsContent key={filter.value} value={filter.value} forceMount className="sr-only">
+              {filter.label} content view
+            </TabsContent>
+          ))}
         </Tabs>
 
-        <Button
-          size="sm"
-          onClick={() => {
-            setComposeDraftId(null);
-            setComposeOpen(true);
-          }}
-        >
-          <PenSquare className="mr-2 h-4 w-4" />
-          Compose
-        </Button>
-      </div>
+        <Tabs value={currentPlatform ?? "all"} onValueChange={(value) => updateParams("platform", value)}>
+          <TabsList>
+            {platformFilters.map((filter) => (
+              <TabsTrigger key={filter.value} value={filter.value}>{filter.label}</TabsTrigger>
+            ))}
+          </TabsList>
+          {platformFilters.map((filter) => (
+            <TabsContent key={filter.value} value={filter.value} forceMount className="sr-only">
+              {filter.label} filter applied
+            </TabsContent>
+          ))}
+        </Tabs>
 
-      <div className="flex items-center gap-1">
-        {platformFilters.map((f) => (
-          <Button
-            key={f.value}
-            variant={(currentPlatform ?? "all") === f.value ? "default" : "ghost"}
-            size="sm"
-            className="h-7 text-xs"
-            onClick={() => updateParams("platform", f.value)}
-          >
-            {f.label}
+        {filtersActive && (
+          <Button variant="ghost" size="xs" onClick={resetFilters}>
+            <X />
+            Reset
           </Button>
-        ))}
+        )}
       </div>
 
       {content.length === 0 ? (
@@ -531,114 +450,107 @@ function ContentListInner({
           <EmptyState
             icon={FileText}
             title="No content yet"
-            description="Create new content with the Compose button, or sync posts from the Automation tab."
+            description="Create new content with Compose, or sync posts from Automation."
+            action={(
+              <Button
+                size="sm"
+                onClick={() => {
+                  setComposeDraftId(null);
+                  setComposeOpen(true);
+                }}
+              >
+                <PenSquare />
+                Compose
+              </Button>
+            )}
           />
         </Card>
       ) : (
-        <div className="rounded-md border overflow-hidden">
+        <div className="overflow-hidden rounded-lg border">
           <Table className="table-fixed">
             <TableHeader>
               <TableRow>
-                <TableHead className="max-w-0 overflow-hidden">Content</TableHead>
-                <TableHead className="w-28">Type</TableHead>
-                <TableHead className="w-40">Status</TableHead>
-                <TableHead className="w-36">Engagement</TableHead>
-                <TableHead className="w-32">Date</TableHead>
+                <TableHead>Content</TableHead>
+                <TableHead className="w-20 sm:w-32">Status</TableHead>
+                <TableHead className="hidden w-40 md:table-cell">Engagement</TableHead>
+                <TableHead className="hidden w-28 sm:table-cell">Date</TableHead>
+                <TableHead className="w-16"><span className="sr-only">Actions</span></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {content.map((item) => (
-                <TableRow
-                  key={item.id}
-                  className={cn(
-                    "hover:bg-accent/30 transition-colors cursor-pointer",
-                    jobsByItemId[item.id]?.stale && "bg-amber-50/50 dark:bg-amber-950/20"
-                  )}
-                  onClick={() => router.push(`/dashboard/content/${item.id}`)}
-                >
-                  <TableCell className="max-w-0 overflow-hidden">
-                    <div className="space-y-1">
-                      {item.title && (
-                        <p className="font-medium text-sm">{truncate(item.title, 60)}</p>
-                      )}
-                      <div className="text-sm text-muted-foreground break-words">
-                        {expandedItems.has(item.id) ? (
-                          <p className="whitespace-pre-wrap">{item.body ?? "—"}</p>
-                        ) : (
-                          <p>{truncate(item.body, 120)}</p>
-                        )}
-                        <div className="flex items-center gap-2 mt-1">
+              {content.map((item) => {
+                const job = jobsByItemId[item.id];
+                const threadCount = item.threadId ? threadCounts.get(item.threadId) ?? 0 : 0;
+                return (
+                  <TableRow
+                    key={item.id}
+                    role="link"
+                    tabIndex={0}
+                    className={cn(
+                      "cursor-pointer hover:bg-accent/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+                      job?.stale && "bg-warning/5"
+                    )}
+                    onClick={() => navigateToItem(item.id)}
+                    onKeyDown={(event) => handleRowKeyDown(event, item.id)}
+                  >
+                    <TableCell className="max-w-0 overflow-hidden py-3 align-top whitespace-normal">
+                      <div className="space-y-1.5">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <PlatformBadge platform={getItemPlatform(item)} />
+                          <span className="text-xs text-muted-foreground">
+                            {contentTypeLabels[item.contentType] ?? item.contentType}
+                          </span>
+                          {activeOrigin === "all" && item.origin && (
+                            <Badge variant="neutral" className="capitalize">{item.origin}</Badge>
+                          )}
+                          {threadCount > 1 && <Badge variant="neutral">Thread ({threadCount})</Badge>}
+                        </div>
+                        {item.title && <p className="truncate text-sm font-medium">{item.title}</p>}
+                        <div className="text-sm text-muted-foreground break-words">
+                          <p className={expandedItems.has(item.id) ? "whitespace-pre-wrap" : undefined}>
+                            {expandedItems.has(item.id) ? (item.body ?? "—") : truncate(item.body, 120)}
+                          </p>
                           {item.body && item.body.length > 120 && (
                             <button
                               type="button"
-                              className="inline-flex items-center gap-0.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setExpandedItems((prev) => {
-                                  const next = new Set(prev);
-                                  if (next.has(item.id)) {
-                                    next.delete(item.id);
-                                  } else {
-                                    next.add(item.id);
-                                  }
+                              className="mt-1 inline-flex items-center gap-0.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setExpandedItems((previous) => {
+                                  const next = new Set(previous);
+                                  if (next.has(item.id)) next.delete(item.id);
+                                  else next.add(item.id);
                                   return next;
                                 });
                               }}
                             >
-                              {expandedItems.has(item.id) ? (
-                                <>
-                                  <ChevronUp className="h-3 w-3" />
-                                  Show less
-                                </>
-                              ) : (
-                                <>
-                                  <ChevronDown className="h-3 w-3" />
-                                  Show more
-                                </>
-                              )}
+                              {expandedItems.has(item.id) ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
+                              {expandedItems.has(item.id) ? "Show less" : "Show more"}
                             </button>
-                          )}
-                          {item.post?.platformUrl && (
-                            <Button variant="ghost" size="icon" className="h-6 w-6" asChild>
-                              <a
-                                href={item.post.platformUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                title="View on platform"
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                <ExternalLink className="h-3 w-3" />
-                              </a>
-                            </Button>
                           )}
                         </div>
                       </div>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex flex-col gap-1">
-                      <Badge variant="secondary" className="text-xs w-fit">
-                        {contentTypeLabels[item.contentType] ?? item.contentType}
-                      </Badge>
-                      {item.origin && (
-                        <Badge variant="outline" className="text-xs w-fit">
-                          {item.origin}
-                        </Badge>
-                      )}
-                      {item.threadId && threadCounts.get(item.threadId)! > 1 && (
-                        <Badge variant="outline" className="text-xs w-fit">
-                          Thread ({threadCounts.get(item.threadId)})
-                        </Badge>
-                      )}
-                    </div>
-                  </TableCell>
-                  <TableCell>{renderStatusBadges(item)}</TableCell>
-                  <TableCell>{renderEngagement(item)}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
-                    {formatDate(item.post?.publishedAt ?? item.createdAt)}
-                  </TableCell>
-                </TableRow>
-              ))}
+                    </TableCell>
+                    <TableCell className="align-top whitespace-normal">
+                      <div className="space-y-1.5">
+                        <ContentStatusBadge status={item.status} activeView={activeOrigin} stale={job?.stale} />
+                        {job?.targets && job.targets.length > 1 ? (
+                          <div className="flex flex-wrap gap-1">
+                            {job.targets.map((target) => <TargetStatusBadge key={`${target.platform}-${target.targetId ?? "default"}`} target={target} />)}
+                          </div>
+                        ) : null}
+                      </div>
+                    </TableCell>
+                    <TableCell className="hidden align-top md:table-cell">{renderEngagement(item)}</TableCell>
+                    <TableCell className="hidden align-top text-xs text-muted-foreground sm:table-cell">
+                      {formatDate(item.post?.publishedAt ?? item.createdAt)}
+                    </TableCell>
+                    <TableCell className="align-top text-right">
+                      <RowActionsMenu actions={rowActions(item)} />
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         </div>

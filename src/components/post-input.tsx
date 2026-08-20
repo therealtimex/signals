@@ -66,9 +66,9 @@ export function PostInput({
   const warnThreshold = Math.floor(maxChars * 0.93);
   const counterColor =
     length > maxChars
-      ? "text-red-500"
+      ? "text-danger"
       : length >= warnThreshold
-        ? "text-yellow-500"
+        ? "text-warning"
         : "text-muted-foreground";
 
   const defaultPlaceholder = showNumber

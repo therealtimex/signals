@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, ExternalLink, Heart, MessageCircle, Repeat2, Quote } from "lucide-react";
 import { EngagementActions } from "./engagement-actions";
+import { ContentStatusBadge } from "@/components/content-status-badge";
 
 const contentTypeLabels: Record<string, string> = {
   post: "Post",
@@ -93,9 +94,7 @@ export default async function ContentDetailPage({
                 <Badge variant="outline">{item.direction}</Badge>
               )}
               {item.status === "draft" && (
-                <Badge variant="outline" className="border-yellow-500 text-yellow-600">
-                  draft
-                </Badge>
+                <ContentStatusBadge status={item.status} />
               )}
               {isThread && (
                 <Badge variant="outline">
