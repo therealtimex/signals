@@ -444,6 +444,65 @@ describe("mergeContacts", () => {
     ).toHaveLength(2);
   });
 
+  it("keeps the survivor's current employer when the incoming stint cannot prove it is newer", () => {
+    // The same two employers, named differently by each source, so they are two org rows and
+    // the fold above cannot catch them.
+    const primary = createContact({ name: "Fei-Fei Li" });
+    const secondary = createContact({ name: "Fei-Fei Li" });
+    const richOrg = createOrg({ name: "World Labs / Stanford University", source: "test" });
+    const thinOrg = createOrg({ name: "Stanford University / World Labs", source: "test" });
+    createContactEmployment({
+      contactId: primary.id,
+      orgId: richOrg.id,
+      title: "Co-Founder & CEO of World Labs, Professor at Stanford",
+      source: "test",
+    });
+    createContactEmployment({
+      contactId: secondary.id,
+      orgId: thinOrg.id,
+      title: "Co-founder & Professor",
+      source: "test",
+    });
+
+    mergeContacts({ primaryContactId: primary.id, secondaryContactIds: [secondary.id] });
+
+    expect(resolveCurrentEmployment(primary.id)?.title).toBe(
+      "Co-Founder & CEO of World Labs, Professor at Stanford",
+    );
+    // The duplicate's stint is kept as history, not dropped.
+    const stints = db
+      .select()
+      .from(contactEmployments)
+      .where(eq(contactEmployments.contactId, primary.id))
+      .all();
+    expect(stints).toHaveLength(2);
+    expect(stints.find((row) => row.orgId === thinOrg.id)?.isCurrent).toBe(false);
+  });
+
+  it("lets a dated stint take over as the current employer", () => {
+    const primary = createContact({ name: "Sam Altman" });
+    const secondary = createContact({ name: "Sam Altman" });
+    const oldOrg = createOrg({ name: "Loopt", source: "test" });
+    const newOrg = createOrg({ name: "OpenAI", source: "test" });
+    createContactEmployment({
+      contactId: primary.id,
+      orgId: oldOrg.id,
+      title: "Founder",
+      source: "test",
+    });
+    createContactEmployment({
+      contactId: secondary.id,
+      orgId: newOrg.id,
+      title: "CEO",
+      startedAt: 1_700_000_000,
+      source: "test",
+    });
+
+    mergeContacts({ primaryContactId: primary.id, secondaryContactIds: [secondary.id] });
+
+    expect(resolveCurrentEmployment(primary.id)?.title).toBe("CEO");
+  });
+
   it("never lowers the primary enrichment score", () => {
     // Regression: re-pointing the secondary's thinner same-org stint used to win
     // resolveCurrentEmployment's createdAt tiebreak and cost the survivor its title.

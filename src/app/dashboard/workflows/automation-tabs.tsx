@@ -86,10 +86,13 @@ function AutomationTabsInner({ runs, totalRuns, subjectsByRunId }: AutomationTab
             <div className="flex gap-3">
               <Info className="mt-0.5 h-4 w-4 shrink-0" />
               <p>
-                Agent Workflows launch a RealTimeX terminal agent on a workspace thread. The agent
-                executes the template brief using <code className="text-xs">realtimex-signals</code>{" "}
-                and <code className="text-xs">POST /api/agent-tools/invoke</code>. Recurring
-                schedules belong in RealTimeX Agent Flows.
+                Most Agent Workflows launch a RealTimeX terminal agent on a workspace thread, where
+                the agent executes the template brief using{" "}
+                <code className="text-xs">realtimex-signals</code> and{" "}
+                <code className="text-xs">POST /api/agent-tools/invoke</code>; recurring schedules
+                for those belong in RealTimeX Agent Flows. Deduplicate &amp; Merge Contacts is the
+                exception — detection and merging are deterministic, so Run opens a review panel
+                and no model is involved.
               </p>
             </div>
           </Card>

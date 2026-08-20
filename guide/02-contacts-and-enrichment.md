@@ -110,10 +110,37 @@ consolidates them. It matches on three levels:
 Merging is lossless. Identities, email and phone channels, employment history, interactions,
 tasks, and content all move to the surviving record, and anything the survivor was missing gets
 filled in from the duplicate. Nothing is deleted: the duplicate is archived and stamped with the
-id of the record it was merged into, so you can always see where it went.
+id of the record it was merged into, so you can always see where it went. A merge never changes
+who the survivor currently works for unless the incoming record carries a start date proving it
+is the more recent job — the duplicate's employment is kept as history instead.
 
-Run it with a preview first if you want to see the plan before anything changes, and re-run it as
-often as you like — merging the same group twice does nothing the second time.
+### Running it
+
+**Run** opens a review panel rather than launching an agent. Detection and merging are both
+deterministic, so there is nothing for a model to decide — the panel runs the same engine
+directly, with no model cost and no terminal session to wait on. It lists each group with both
+records side by side, marks the one it suggests keeping, and merges only when you press **Merge**
+(or **Merge all**). Nothing is archived until you do.
+
+The panel opens on **Tier 1 only**, where a shared email address or platform handle is the
+evidence and no judgment is needed. Widen it to tier 2 or 3 when you want the fuzzier candidates,
+but read those groups before merging — two people at the same company with similar names are
+exactly what tier 2 is designed to surface, and occasionally they really are two people.
+
+Merges are recorded the way agent runs are: they appear in **Runs** as a prune run with one step
+per group, and they post a summary into the agent's thread alongside its agent runs.
+
+### Keeping it clean automatically
+
+Deduplication works best as two habits rather than one big cleanup:
+
+1. **Dedupe at the source.** Imports already resolve platform claims before inserting, so a
+   contact you have seen before is updated rather than duplicated. `signals-pp-cli import
+   contacts --file … --dedupe` does the same for CSV and JSON batches.
+2. **Sweep once in a while.** Schedule the agent and it runs as an unattended cleanup pass on
+   your cron — **tier 1 only**, whatever the schedule asks for. A shared email or platform handle
+   is the one signal strong enough to act on with nobody watching; tier 2 and 3 stay in the panel
+   where you confirm each group, because merging cannot be undone.
 
 ## Multi-Platform Golden Record
 

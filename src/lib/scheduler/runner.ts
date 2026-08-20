@@ -24,6 +24,10 @@ import {
   CONTACT_PROFILE_EMBED_SWEEP_JOB_TYPE,
 } from "@/lib/db/contact-profile-embed-sweep";
 import { PROFILE_PIPELINE_DRAIN_JOB_TYPE } from "@/lib/db/profile-pipeline-drain";
+import {
+  DEDUPE_MERGE_JOB_TYPE,
+  runScheduledDedupeMerge,
+} from "@/lib/contacts/dedupe/scheduled-merge";
 import { runPipelineTemplate } from "@/lib/workflows/pipeline/run-pipeline-template";
 import type { WorkflowType } from "@/lib/workflows/types";
 
@@ -54,6 +58,7 @@ const MAINTENANCE_HANDLERS: Record<string, MaintenanceHandler> = {
         typeof payload.observedUntil === "number" ? payload.observedUntil : undefined,
     }),
   [PERSONA_REFRESH_JOB_TYPE]: () => runPersonaRefreshSweep(),
+  [DEDUPE_MERGE_JOB_TYPE]: (payload) => runScheduledDedupeMerge(payload),
   [CONTACT_PROFILE_EMBED_SWEEP_JOB_TYPE]: async () => {
     const report = await runContactProfileEmbedSweep();
     if (!report.complete && report.remaining > 0 && report.errors.length === 0) {

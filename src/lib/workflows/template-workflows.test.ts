@@ -64,6 +64,26 @@ describe("template-brief", () => {
     expect(brief).not.toContain("Social Intent Patrol execution contract");
   });
 
+  it("keeps seed bookkeeping out of the agent's runtime config", () => {
+    const brief = buildAgentWorkflowBrief({
+      template: {
+        id: "tpl_dedupe",
+        name: "Deduplicate & Merge Contacts",
+        description: "Consolidate duplicate records",
+        templateType: "pruning",
+        platform: null,
+        systemPrompt: "Merge duplicates.",
+        targetPersona: null,
+      },
+      workflowRunId: "run_dedupe",
+      config: { tiers: [1, 2], minConfidence: 0.8, limit: 25, _seedVersion: 5 },
+      signalsBaseUrl: "http://localhost:3010",
+    });
+
+    expect(brief).toContain('"minConfidence": 0.8');
+    expect(brief).not.toContain("_seedVersion");
+  });
+
   it("appends the patrol contract only for social patrol configs", () => {
     const brief = buildAgentWorkflowBrief({
       template: {
