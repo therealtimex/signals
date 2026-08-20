@@ -64,7 +64,9 @@ const requiredEntries = [
 for (const entry of requiredEntries) {
   if (!entries.includes(entry)) errors.push(`Missing runtime entry: ${entry}`);
 }
-const hostCliBinary = `tools/signals-pp-cli/bin/${hostTarget}/signals-pp-cli`;
+const hostCliExecutable =
+  process.platform === "win32" ? "signals-pp-cli.exe" : "signals-pp-cli";
+const hostCliBinary = `tools/signals-pp-cli/bin/${hostTarget}/${hostCliExecutable}`;
 if (!entries.includes(hostCliBinary)) {
   errors.push(`Missing runtime entry: ${hostCliBinary}`);
 }
@@ -110,7 +112,7 @@ for (const entry of entries) {
   }
   if (
     entry.startsWith("tools/") &&
-    !/^tools\/signals-pp-cli\/bin\/(?:signals-pp-cli\.js|[a-z0-9]+-[a-z0-9]+\/signals-pp-cli)$/.test(
+    !/^tools\/signals-pp-cli\/bin\/(?:signals-pp-cli\.js|(?:darwin|linux)-[a-z0-9]+\/signals-pp-cli|win32-[a-z0-9]+\/signals-pp-cli\.exe)$/.test(
       entry,
     )
   ) {
