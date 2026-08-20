@@ -235,7 +235,7 @@ Artifact shipping avoids version skew between the running Local App and a global
 ├─────────────────────────────────────────────────────────────────┤
 │ 4. Cross-compile binaries                                        │
 │    go build per target → tools/signals-pp-cli/bin/<os>-<arch>/   │
-│    + optional Node shim: tools/signals-pp-cli/bin/signals-pp-cli.js │
+│    + optional Node shim: tools/signals-pp-cli/bin/signals-pp-cli.cjs │
 ├─────────────────────────────────────────────────────────────────┤
 │ 5. Verify                                                        │
 │    cli-printing-press scorecard + dogfood on generated source    │
@@ -260,7 +260,7 @@ tools/signals-pp-cli/
   transcendence/       # hand-maintained: import, reconcile, doctor, health
   patch/               # patchSignalsCliSource.mjs
   bin/<os>-<arch>/     # cross-compiled binaries
-  bin/signals-pp-cli.js
+  bin/signals-pp-cli.cjs
 ```
 
 Regenerating Printing Press output must not clobber `transcendence/`.
@@ -288,7 +288,7 @@ dist/standalone/…/
       darwin-x64/signals-pp-cli
       linux-arm64/signals-pp-cli
       linux-x64/signals-pp-cli
-      signals-pp-cli.js          # platform-selecting shim (optional)
+      signals-pp-cli.cjs          # platform-selecting shim (optional)
 ```
 
 **Marketplace plugin zip** (`package-realtimex-plugin.sh`):
@@ -302,7 +302,7 @@ com.realtimex.signals-plugin.zip
   marketplace/release-manifest.json
 ```
 
-On workspace provision, the plugin installer places the platform-matching binary on the workspace `PATH` (or the skill scripts invoke `tools/signals-pp-cli/bin/signals-pp-cli.js` relative to the workspace root).
+On workspace provision, the plugin installer places the platform-matching binary on the workspace `PATH` (or the skill scripts invoke `tools/signals-pp-cli/bin/signals-pp-cli.cjs` relative to the workspace root).
 
 ### 6.5 CI integration
 

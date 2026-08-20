@@ -86,7 +86,7 @@ if [[ -d "${ROOT}/tools/signals-pp-cli/bin" ]]; then
   echo "==> Staging signals-pp-cli binaries..."
   mkdir -p "$STAGING/tools/signals-pp-cli"
   cp -R "${ROOT}/tools/signals-pp-cli/bin" "$STAGING/tools/signals-pp-cli/"
-  chmod +x "$STAGING/tools/signals-pp-cli/bin/"*.js 2>/dev/null || true
+  chmod +x "$STAGING/tools/signals-pp-cli/bin/"*.cjs 2>/dev/null || true
   find "$STAGING/tools/signals-pp-cli/bin" -type f -name 'signals-pp-cli' -exec chmod +x {} \; 2>/dev/null || true
 fi
 
