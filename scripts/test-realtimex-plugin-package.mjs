@@ -8,6 +8,7 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { SIGNALS_NODE_VERSION } from "./node-runtime-contract.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "..");
@@ -130,7 +131,7 @@ if (releaseManifest.proprietary !== true) {
 }
 if (
   releaseManifest.runtime?.kind !== "node" ||
-  releaseManifest.runtime?.version !== "20.x" ||
+  releaseManifest.runtime?.version !== SIGNALS_NODE_VERSION ||
   releaseManifest.runtime?.managedBy !== "realtimex"
 ) {
   errors.push("Release manifest has an invalid managed Node runtime contract");
@@ -168,6 +169,15 @@ if (localAppManifest.id !== localAppId) {
 }
 if (localAppManifest.configuration?.command !== "{runtime.executable}") {
   errors.push("Local app must use the RealtimeX-managed runtime executable");
+}
+if (
+  localAppManifest.runtime?.kind !== "node" ||
+  localAppManifest.runtime?.version !== SIGNALS_NODE_VERSION ||
+  localAppManifest.runtime?.managedBy !== "realtimex"
+) {
+  errors.push(
+    `Local app must require RealtimeX-managed Node ${SIGNALS_NODE_VERSION}`,
+  );
 }
 if (localAppManifest.artifactContract?.schemaVersion !== 2) {
   errors.push("Local app is missing artifact contract v2");

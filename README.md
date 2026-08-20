@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="License: Proprietary" src="https://img.shields.io/badge/License-Proprietary-red.svg" /></a>
-  <img alt="Node 20+" src="https://img.shields.io/badge/Node-20%2B-green.svg" />
+  <img alt="Node 22.16.0" src="https://img.shields.io/badge/Node-22.16.0-green.svg" />
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5.8-blue.svg" />
   <img alt="Next.js 16" src="https://img.shields.io/badge/Next.js-16.1-black.svg" />
 </p>
@@ -76,9 +76,12 @@ AES-256 encrypted credential storage. CRM graph, credentials, and embeddings are
 Install Signals from the RealTimeX Marketplace. For source-checkout development, run:
 
 ```bash
+nvm use
 npm ci
 npm run dev
 ```
+
+Signals uses the same exact Node `22.16.0` runtime (module ABI `127`) as the RealtimeX host so native dependencies such as `better-sqlite3` are built and loaded compatibly.
 
 On first run, Signals creates `~/.signals/` for your database and config, runs schema migrations, and starts the dashboard at `http://localhost:3000`.
 

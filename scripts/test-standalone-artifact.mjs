@@ -17,6 +17,12 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  SIGNALS_NODE_VERSION,
+  assertSignalsNodeRuntime,
+} from "./node-runtime-contract.mjs";
+
+assertSignalsNodeRuntime({ label: "Standalone artifact smoke test" });
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const packageJson = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
@@ -46,6 +52,7 @@ const requiredEntries = [
   "next-server.js",
   "package.json",
   "LICENSE",
+  "node-runtime-contract.mjs",
   ".next/BUILD_ID",
   ".next/required-server-files.json",
   "public/favicon.ico",
@@ -76,6 +83,7 @@ const allowedRootFiles = new Set([
   "LICENSE",
   "next-server.js",
   "package.json",
+  "node-runtime-contract.mjs",
   "server.js",
 ]);
 const allowedRootDirectories = new Set([
@@ -131,10 +139,12 @@ if (!existsSync(releaseManifestPath)) {
   }
   if (
     releaseManifest.runtime?.kind !== "node" ||
-    releaseManifest.runtime?.version !== "20.x" ||
+    releaseManifest.runtime?.version !== SIGNALS_NODE_VERSION ||
     releaseManifest.runtime?.managedBy !== "realtimex"
   ) {
-    errors.push("Release manifest does not require the managed Node 20.x runtime");
+    errors.push(
+      `Release manifest does not require managed Node ${SIGNALS_NODE_VERSION}`,
+    );
   }
   const artifact = Object.values(releaseManifest.artifacts ?? {}).find(
     (candidate) => candidate.artifactName === path.basename(archivePath),

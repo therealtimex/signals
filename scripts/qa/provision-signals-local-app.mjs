@@ -15,8 +15,12 @@
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  SIGNALS_NODE_MODULE_ABI,
+  SIGNALS_NODE_VERSION_WITH_PREFIX,
+} from "../node-runtime-contract.mjs";
 
 const SIGNALS_APP_ID = "47e45f71-3279-42f5-8e95-731de01b6eae";
 const SIGNALS_PERMISSIONS = [
@@ -29,6 +33,79 @@ const SIGNALS_PERMISSIONS = [
   "desktop.runtime-sessions",
 ];
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+const configuredNodeVersion =
+  process.env.REALTIMEX_NPX_NODE_VERSION?.trim() ||
+  SIGNALS_NODE_VERSION_WITH_PREFIX;
+const MANAGED_NODE_VERSION = configuredNodeVersion.startsWith("v")
+  ? configuredNodeVersion
+  : `v${configuredNodeVersion}`;
+
+function inspectNodeExecutable(executable) {
+  const result = spawnSync(
+    executable,
+    [
+      "-p",
+      "JSON.stringify({ version: process.version, moduleAbi: process.versions.modules })",
+    ],
+    { encoding: "utf8" },
+  );
+  if (result.status !== 0) {
+    return {
+      error:
+        result.stderr?.trim() ||
+        result.error?.message ||
+        `exited with ${result.status}`,
+    };
+  }
+  try {
+    return JSON.parse(result.stdout);
+  } catch {
+    return { error: `returned invalid runtime metadata: ${result.stdout.trim()}` };
+  }
+}
+
+function resolveManagedNodeExecutable() {
+  if (MANAGED_NODE_VERSION !== SIGNALS_NODE_VERSION_WITH_PREFIX) {
+    throw new Error(
+      `Signals requires managed Node ${SIGNALS_NODE_VERSION_WITH_PREFIX}; received ${MANAGED_NODE_VERSION}.`,
+    );
+  }
+
+  const candidates = [
+    process.env.REALTIMEX_NODE_PATH?.trim(),
+    join(homedir(), ".nvm", "versions", "node", MANAGED_NODE_VERSION, "bin", "node"),
+    join(
+      homedir(),
+      ".realtimex.ai",
+      ".nvm",
+      "versions",
+      "node",
+      MANAGED_NODE_VERSION,
+      "bin",
+      "node",
+    ),
+    process.execPath,
+  ].filter(Boolean);
+  const mismatches = [];
+
+  for (const candidate of [...new Set(candidates)]) {
+    if (!existsSync(candidate)) continue;
+    const runtime = inspectNodeExecutable(candidate);
+    if (
+      runtime.version === SIGNALS_NODE_VERSION_WITH_PREFIX &&
+      runtime.moduleAbi === SIGNALS_NODE_MODULE_ABI
+    ) {
+      return candidate;
+    }
+    mismatches.push(
+      `${candidate} (${runtime.error || `${runtime.version}, ABI ${runtime.moduleAbi}`})`,
+    );
+  }
+
+  throw new Error(
+    `Managed Node ${SIGNALS_NODE_VERSION_WITH_PREFIX} with module ABI ${SIGNALS_NODE_MODULE_ABI} was not found. Install it via nvm or set REALTIMEX_NODE_PATH.${mismatches.length ? ` Checked: ${mismatches.join("; ")}` : ""}`,
+  );
+}
 
 function parseDbArg() {
   const idx = process.argv.indexOf("--db");
@@ -42,7 +119,10 @@ function parseDbArg() {
     process.env.REALTIMEX_USER_DATA?.trim() ||
     join(homedir(), ".realtimex.ai", "desktop-user-data");
   const userSegment = process.env.REALTIMEX_USER?.trim() || "trungle_rta_vn";
-  return join(userData, "app", "users", userSegment, "storage", "realtimex.db");
+  const storageRoot =
+    process.env.REALTIMEX_STORAGE_ROOT?.trim() ||
+    (process.env.REALTIMEX_RUNTIME === "dev" ? "dev" : "app");
+  return join(userData, storageRoot, "users", userSegment, "storage", "realtimex.db");
 }
 
 function sqlQuote(value) {
@@ -63,8 +143,11 @@ if (process.argv.includes("--deploy-instructions")) {
   process.exit(0);
 }
 
+const nodeExecutable = resolveManagedNodeExecutable();
+const nodeBinDir = dirname(nodeExecutable);
+
 const config = JSON.stringify({
-  command: process.execPath,
+  command: nodeExecutable,
   args: [
     join(REPO_ROOT, "node_modules/next/dist/bin/next"),
     "dev",
@@ -73,6 +156,12 @@ const config = JSON.stringify({
   ],
   working_dir: REPO_ROOT,
   home_url: "http://localhost:{port}/dashboard",
+  env: {
+    HOSTNAME: "127.0.0.1",
+    SIGNALS_DATA_DIR: "~/.signals",
+    // Keep Turbopack and child processes on the same ABI as better-sqlite3.
+    PATH: `${nodeBinDir}${delimiter}${process.env.PATH || ""}`,
+  },
 });
 
 const metadata = JSON.stringify({

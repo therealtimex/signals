@@ -110,6 +110,7 @@ const merged = {
 };
 const outputPath = path.join(root, "marketplace", "release-manifest.json");
 const signaturePath = path.join(root, "marketplace", "release-manifest.sig.json");
+fs.mkdirSync(path.dirname(outputPath), { recursive: true });
 fs.writeFileSync(outputPath, `${JSON.stringify(merged, null, 2)}\n`);
 fs.rmSync(signaturePath, { force: true });
 

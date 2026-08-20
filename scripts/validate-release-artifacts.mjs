@@ -3,16 +3,31 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { SIGNALS_NODE_VERSION } from "./node-runtime-contract.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const manifestPath = path.resolve(
   process.argv[2] ?? path.join(root, "marketplace", "release-manifest.json"),
 );
+if (!fs.existsSync(manifestPath)) {
+  console.error(`Release manifest not found: ${manifestPath}`);
+  console.error("Run: npm run build:standalone-artifact");
+  process.exit(1);
+}
 const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
 const errors = [];
 
 if (manifest.schemaVersion !== 2 || manifest.proprietary !== true) {
   errors.push("Release manifest must use proprietary artifact contract v2");
+}
+if (
+  manifest.runtime?.kind !== "node" ||
+  manifest.runtime?.version !== SIGNALS_NODE_VERSION ||
+  manifest.runtime?.managedBy !== "realtimex"
+) {
+  errors.push(
+    `Release manifest must require RealtimeX-managed Node ${SIGNALS_NODE_VERSION}`,
+  );
 }
 
 const artifacts = Object.entries(manifest.artifacts ?? {});

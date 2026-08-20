@@ -41,5 +41,6 @@ coverage/
 test-results/
 playwright-report/
 
-# generated marketplace signatures
+# generated marketplace release metadata
+marketplace/release-manifest.json
 marketplace/release-manifest.sig.json
