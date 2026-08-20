@@ -11,6 +11,7 @@ import {
   countArchivedContacts,
   countContactsByCreatedWorkflowRun,
 } from "@/lib/db/queries/contacts";
+import { createIdentity } from "@/lib/db/queries/identities";
 import { CreatedSourceDetailFilterError } from "@/lib/db/creation-sources";
 import { db } from "@/lib/db/client";
 import { contacts } from "@/lib/db/schema";
@@ -41,6 +42,33 @@ describe("contacts queries", () => {
     const result = listContacts({ search: "alp" });
     expect(result.total).toBe(1);
     expect(result.data[0]?.name).toBe("Alpha");
+  });
+
+  it("resolves a contact by its exact platform identity claim", () => {
+    const target = createContact({ name: "Sam Altman" });
+    createIdentity({ contactId: target.id, platform: "x", platformUserId: "sama" });
+    const decoy = createContact({ name: "Sam Decoy" });
+    createIdentity({ contactId: decoy.id, platform: "x", platformUserId: "sama-decoy" });
+
+    const result = listContacts({ platform: "x", platformUserId: "sama" });
+
+    expect(result.total).toBe(1);
+    expect(result.data[0]?.id).toBe(target.id);
+  });
+
+  it("requires platform and platformUserId to match the same identity row", () => {
+    const contact = createContact({ name: "Cross Claim" });
+    createIdentity({ contactId: contact.id, platform: "linkedin", platformUserId: "sama" });
+
+    expect(listContacts({ platform: "x", platformUserId: "sama" }).total).toBe(0);
+    expect(listContacts({ platform: "linkedin", platformUserId: "sama" }).total).toBe(1);
+  });
+
+  it("matches platformUserId exactly rather than by substring", () => {
+    const contact = createContact({ name: "Prefix Owner" });
+    createIdentity({ contactId: contact.id, platform: "x", platformUserId: "samantha" });
+
+    expect(listContacts({ platform: "x", platformUserId: "sama" }).total).toBe(0);
   });
 
   it("sorts contacts by enrichment score ascending", () => {

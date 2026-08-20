@@ -158,6 +158,9 @@
                               "whatsapp"
                             ]
                           },
+                          "platformUserId": {
+                            "type": "string"
+                          },
                           "page": {
                             "type": "number"
                           },

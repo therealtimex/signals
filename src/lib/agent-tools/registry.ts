@@ -108,7 +108,9 @@ export const AGENT_TOOLS: Record<string, AgentToolDefinition> = {
   query_contacts: {
     name: "query_contacts",
     description:
-      "Search and filter contacts by name, email, company, funnel stage, or platform.",
+      "Search and filter contacts by name, email, company, funnel stage, or platform. " +
+      "Pass platformUserId (optionally with platform) for an exact platform-identity lookup; " +
+      "each result lists its platform identities.",
     category: "contacts",
     schema: queryContactsSchema,
     parameters: zodToParameters(queryContactsSchema),

@@ -6,6 +6,7 @@ import { listAgentToolsManifest } from "@/lib/agent-tools/registry";
 import { AgentToolError } from "@/lib/agent-tools/types";
 import { db } from "@/lib/db/client";
 import { contacts } from "@/lib/db/schema";
+import { createIdentity } from "@/lib/db/queries/identities";
 import { createOrg } from "@/lib/db/queries/orgs";
 import { listContactEmployments } from "@/lib/db/queries/contact-employments";
 import { resetCoreTables } from "@/test/db";
@@ -140,6 +141,34 @@ describe("invokeAgentTool", () => {
     expect(rows[0]?.id).toBe(low.id);
     expect(rows[0]?.score).toBe(5);
     expect(rows[1]?.id).toBe(high.id);
+  });
+
+  it("resolves an existing contact by platform identity claim", async () => {
+    const target = createContact({ name: "Sam Altman" });
+    createIdentity({ contactId: target.id, platform: "x", platformUserId: "sama" });
+    const decoy = createContact({ name: "Sam Decoy" });
+    createIdentity({ contactId: decoy.id, platform: "x", platformUserId: "sama-decoy" });
+
+    const result = await invokeAgentTool("query_contacts", {
+      platform: "x",
+      platformUserId: "sama",
+      pageSize: 50,
+    });
+
+    const rows = (
+      result as {
+        contacts: Array<{
+          id: string;
+          identities: Array<{ platform: string; platformUserId: string }>;
+        }>;
+      }
+    ).contacts;
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.id).toBe(target.id);
+    expect(rows[0]?.identities).toContainEqual(
+      expect.objectContaining({ platform: "x", platformUserId: "sama" }),
+    );
   });
 
   it("filters query_contacts by createdSourceDetail suffix x_archive", async () => {

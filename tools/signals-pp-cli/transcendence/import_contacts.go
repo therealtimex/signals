@@ -360,10 +360,14 @@ func findExistingContact(cmd *cobra.Command, c *client.Client, flags *rootFlags,
 		}
 	}
 	if row.Platform != "" && row.PlatformUserID != "" {
+		// platformUserId is an exact identity-claim filter. Free-text search does
+		// not cover contact_identities, so searching the handle never matched and
+		// the import created a duplicate that upsert_contact_identity then
+		// rejected as an already-claimed platform account (#202).
 		result, err := invokeAgentTool(cmd, c, flags, "query_contacts", map[string]any{
-			"search":   row.PlatformUserID,
-			"platform": row.Platform,
-			"pageSize": 50,
+			"platformUserId": row.PlatformUserID,
+			"platform":       row.Platform,
+			"pageSize":       50,
 		})
 		if err != nil {
 			return "", err
