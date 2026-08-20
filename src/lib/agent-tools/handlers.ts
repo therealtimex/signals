@@ -16,9 +16,13 @@ import {
 } from "@/lib/agents/run-agent-workflow";
 import { enrichContact } from "@/lib/agents/tools/enrich-contact";
 import { archiveContactTool } from "@/lib/agents/tools/archive-contact";
+import { findDuplicateContacts } from "@/lib/contacts/dedupe/detect";
+import { MergeContactsError, mergeContacts } from "@/lib/contacts/dedupe/merge";
 import type { WorkflowType } from "@/lib/workflows/types";
 import type {
   archiveContactSchema,
+  findDuplicateContactsSchema,
+  mergeContactsSchema,
   createContactSchema,
   createTaskSchema,
   enrichContactSchema,
@@ -388,6 +392,44 @@ export async function handleUpsertContactIdentity(
 
 export async function handleArchiveContact(input: z.infer<typeof archiveContactSchema>) {
   return archiveContactTool(input.contactId, input.reason);
+}
+
+export async function handleFindDuplicateContacts(
+  input: z.infer<typeof findDuplicateContactsSchema>,
+) {
+  const candidates = findDuplicateContacts(input);
+  return {
+    candidates: candidates.map((candidate) => ({
+      primaryContactId: candidate.primaryContactId,
+      secondaryContactIds: candidate.secondaryContactIds,
+      tier: candidate.tier,
+      confidence: candidate.confidence,
+      reason: candidate.reason,
+      contacts: candidate.members.map((member) => ({
+        id: member.contactId,
+        name: member.name,
+        enrichmentScore: member.enrichmentScore,
+        identityCount: member.identityCount,
+        // Surfaced so an agent overriding the suggested primary can see which
+        // member is the workspace owner — merge_contacts refuses to archive it.
+        isSelf: member.isSelf,
+      })),
+    })),
+    total: candidates.length,
+  };
+}
+
+export async function handleMergeContacts(input: z.infer<typeof mergeContactsSchema>) {
+  try {
+    return mergeContacts(input);
+  } catch (error) {
+    if (error instanceof MergeContactsError) {
+      // invoke() turns a thrown Error into a 4xx/5xx envelope; keep the code
+      // visible so the CLI can tell "bad id" from "server broke".
+      throw new Error(`${error.code}: ${error.message}`);
+    }
+    throw error;
+  }
 }
 
 export async function handleQueryAnalytics(_input: z.infer<typeof queryAnalyticsSchema>) {

@@ -549,6 +549,12 @@ export function restoreContact(id: string): ContactDTO | undefined {
   delete existing.archivedAt;
   delete existing.archiveReason;
   delete existing.archiveWorkflowRunId;
+  // A merge tombstone also carries these. Leaving them behind would resurrect the
+  // row as a live contact that `mergeContacts` still short-circuits on, so
+  // detection would keep proposing a duplicate that can never be merged again.
+  delete existing.mergedIntoContactId;
+  delete existing.mergedAt;
+  delete existing.mergeWorkflowRunId;
   const metadata = JSON.stringify(existing);
 
   return updateContact(id, { metadata });

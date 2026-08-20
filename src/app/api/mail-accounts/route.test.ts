@@ -6,10 +6,15 @@ import { db } from "@/lib/db/client";
 import { platformAccounts } from "@/lib/db/schema";
 import { syncMailAccountsFromHimalaya } from "@/lib/db/queries/mail-accounts";
 import * as himalaya from "@/lib/mail/himalaya";
+import { setDefaultMailAccountAlias } from "@/lib/mail/settings";
+import { resetCoreTables } from "@/test/db";
 
 describe("/api/mail-accounts", () => {
   beforeEach(() => {
+    resetCoreTables();
     db.delete(platformAccounts).run();
+    // The default alias lives in config.json, which survives every DB reset.
+    setDefaultMailAccountAlias(null);
   });
 
   it("GET lists registered accounts", async () => {

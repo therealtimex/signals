@@ -1,8 +1,9 @@
-import { Heart, MessageCircle, Quote, Repeat2, Share2, ThumbsUp, type LucideIcon } from "lucide-react";
+import { Heart, MessageCircle, Quote, Repeat2, Share2, type LucideIcon } from "lucide-react";
 import {
   getEngagementMetrics,
   type EngagementMetricKey,
 } from "@/lib/platforms/content-platform";
+import { likeIcon } from "@/lib/platforms/platform-icons";
 import { cn } from "@/lib/utils";
 
 const METRIC_ICONS: Record<EngagementMetricKey, LucideIcon> = {
@@ -14,11 +15,8 @@ const METRIC_ICONS: Record<EngagementMetricKey, LucideIcon> = {
   shares: Share2,
 };
 
-/** Platforms whose "like" is a thumbs-up rather than a heart. */
-const THUMBS_UP_LIKE_PLATFORMS = new Set(["linkedin", "facebook"]);
-
 function metricIcon(key: EngagementMetricKey, platform: string | null | undefined): LucideIcon {
-  if (key === "likes" && platform && THUMBS_UP_LIKE_PLATFORMS.has(platform)) return ThumbsUp;
+  if (key === "likes") return likeIcon(platform);
   return METRIC_ICONS[key];
 }
 

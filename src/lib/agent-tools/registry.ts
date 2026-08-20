@@ -1,6 +1,8 @@
 import {
   archiveContactSchema,
   createContactSchema,
+  findDuplicateContactsSchema,
+  mergeContactsSchema,
   createTaskSchema,
   enrichContactSchema,
   getContactSchema,
@@ -73,6 +75,8 @@ import {
 import {
   handleArchiveContact,
   handleCreateContact,
+  handleFindDuplicateContacts,
+  handleMergeContacts,
   handleCreateTask,
   handleEnrichContact,
   handleGetContact,
@@ -183,6 +187,24 @@ export const AGENT_TOOLS: Record<string, AgentToolDefinition> = {
     schema: archiveContactSchema,
     parameters: zodToParameters(archiveContactSchema),
     execute: handleArchiveContact,
+  },
+  find_duplicate_contacts: {
+    name: "find_duplicate_contacts",
+    description:
+      "Scan the contact graph for duplicate records. Tier 1 is an exact email or platform-handle match, tier 2 is a matching name at the same organization, tier 3 is a shared employment node plus overlapping interaction threads. Read-only — feed the result to merge_contacts.",
+    category: "contacts",
+    schema: findDuplicateContactsSchema,
+    parameters: zodToParameters(findDuplicateContactsSchema),
+    execute: handleFindDuplicateContacts,
+  },
+  merge_contacts: {
+    name: "merge_contacts",
+    description:
+      "Merge duplicate contacts into a surviving primary: re-link identities, channels, employments, interactions, tasks, and content, then archive each secondary with merged_into_contact_id set. Idempotent — replaying a merge reports already_merged. Pass options.dryRun to preview.",
+    category: "contacts",
+    schema: mergeContactsSchema,
+    parameters: zodToParameters(mergeContactsSchema),
+    execute: handleMergeContacts,
   },
   query_analytics: {
     name: "query_analytics",

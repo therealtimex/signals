@@ -1,0 +1,1 @@
+ALTER TABLE `workflow_templates` ADD `rtx_thread_slug` text;

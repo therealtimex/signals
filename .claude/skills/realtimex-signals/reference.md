@@ -23,6 +23,8 @@ Invoke body: `{ "tool": "<name>", "input": { ... } }`
 | `upsert_contact_identity` | Create or update a platform identity for a contact |
 | `enrich_contact` | Fill gaps only; needs `contactId` |
 | `archive_contact` | Archive with `reason` |
+| `find_duplicate_contacts` | Find duplicate contact groups (tiers 1-3) with a suggested primary |
+| `merge_contacts` | Merge duplicates into `primaryContactId`; idempotent, `options.dryRun` previews |
 | `query_analytics` | Dashboard metrics |
 | `query_workflows` | List workflow runs |
 | `list_workflow_templates` | Templates available to start |

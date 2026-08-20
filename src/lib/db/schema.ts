@@ -248,6 +248,7 @@ export const workflowTemplates = sqliteTable("workflow_templates", {
   estimatedCost: real("estimated_cost").notNull().default(0), // Estimated cost per run in USD
   totalRuns: integer("total_runs").notNull().default(0), // Lifetime run count
   lastRunAt: integer("last_run_at"), // Timestamp of most recent run
+  rtxThreadSlug: text("rtx_thread_slug"), // Dedicated RealTimeX thread reused across runs
   // User template columns
   isSystem: integer("is_system").notNull().default(0), // 1 = system-seeded, 0 = user
   sourceTemplateId: text("source_template_id"), // FK to workflowTemplates.id (self-ref, managed via migration SQL)

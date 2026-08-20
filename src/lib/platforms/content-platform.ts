@@ -97,7 +97,11 @@ const METRIC_ORDER: readonly EngagementMetricKey[] = [
 ];
 
 const X_METRICS: readonly EngagementMetricKey[] = ["likes", "replies", "retweets", "quotes"];
-const SOCIAL_METRICS: readonly EngagementMetricKey[] = ["likes", "comments", "shares"];
+
+/** Counters a platform reports when it declares nothing more specific. */
+export const SOCIAL_METRIC_KEYS: readonly EngagementMetricKey[] = ["likes", "comments", "shares"];
+
+const SOCIAL_METRICS = SOCIAL_METRIC_KEYS;
 
 /** Metrics each platform reports. Platforms without post engagement map to an empty set. */
 const PLATFORM_METRICS: Partial<Record<Platform, readonly EngagementMetricKey[]>> = {
@@ -109,6 +113,26 @@ const PLATFORM_METRICS: Partial<Record<Platform, readonly EngagementMetricKey[]>
   bluesky: SOCIAL_METRICS,
   gmail: [],
 };
+
+/**
+ * The counters a platform declares, with their labels, independent of any snapshot.
+ *
+ * Returns `undefined` for a platform with no declared set, so callers pick their own fallback:
+ * the content views fall back to whatever the snapshot carries, analytics to the social set.
+ * This is the single owner of the platform -> counter mapping; other surfaces derive from it.
+ */
+export function getEngagementMetricSpecs(
+  platform: string | null | undefined
+): { key: EngagementMetricKey; label: string }[] | undefined {
+  const declared = platform && isPlatform(platform) ? PLATFORM_METRICS[platform] : undefined;
+  if (!declared) return undefined;
+  return declared.map((key) => ({ key, label: METRIC_LABELS[key] }));
+}
+
+/** Label for a counter key, so derived registries do not restate them. */
+export function getEngagementMetricLabel(key: EngagementMetricKey): string {
+  return METRIC_LABELS[key];
+}
 
 /** Engagement snapshot JSON as stored on a content post; null when absent or malformed. */
 export function parseEngagementSnapshot(
