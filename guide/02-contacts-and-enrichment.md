@@ -91,6 +91,30 @@ You can restore archived contacts individually from their detail page or in bulk
 
 This is the AI equivalent of regularly cleaning your Rolodex, except the AI does the evaluation and you keep veto power.
 
+## Deduplicating Contacts
+
+Importing from several sources — an X archive, a LinkedIn CSV, a Gmail takeout, an agent research
+run — tends to create more than one record for the same person. Worse, only the first record can
+claim a given platform account, so the later ones are left with no identities at all and never
+enrich properly.
+
+The **Deduplicate & Merge Contacts** agent in **Automation → Prune** finds those records and
+consolidates them. It matches on three levels:
+
+- **Exact** — the same email address, or the same handle on the same platform.
+- **Name + company** — the same or a near-identical name at the same organization, which catches
+  "Jim Fan" and "Jim Linxi Fan" at NVIDIA.
+- **Graph overlap** — the same employer plus overlapping conversation threads, for cases where the
+  names alone are not close enough to trust.
+
+Merging is lossless. Identities, email and phone channels, employment history, interactions,
+tasks, and content all move to the surviving record, and anything the survivor was missing gets
+filled in from the duplicate. Nothing is deleted: the duplicate is archived and stamped with the
+id of the record it was merged into, so you can always see where it went.
+
+Run it with a preview first if you want to see the plan before anything changes, and re-run it as
+often as you like — merging the same group twice does nothing the second time.
+
 ## Multi-Platform Golden Record
 
 The real power of Signals's contact system is the unified view. A founder you follow on X, connected with on LinkedIn, and emailed through Gmail shows up as **one contact** with three identities. Agents can enrich from any platform and the score reflects the combined data.

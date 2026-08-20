@@ -156,6 +156,36 @@ describe("contacts queries", () => {
     expect(listContacts().total).toBe(1);
   });
 
+  it("clears merge-tombstone keys on restore", () => {
+    const created = createContact({ name: "Merged Away" });
+    // Shape written by mergeContacts (src/lib/contacts/dedupe/merge.ts).
+    db.update(contacts)
+      .set({
+        metadata: JSON.stringify({
+          archived: 1,
+          archivedAt: 1_700_000_000,
+          archiveReason: "Merged into contact other",
+          mergedIntoContactId: "other",
+          mergedAt: 1_700_000_000,
+          mergeWorkflowRunId: "run-9",
+          keepMe: true,
+        }),
+      })
+      .where(eq(contacts.id, created.id))
+      .run();
+
+    const restored = restoreContact(created.id);
+    const metadata = JSON.parse(restored?.metadata ?? "{}");
+
+    // Leaving these behind resurrects the row as a live contact that
+    // mergeContacts still short-circuits on, so it could never be re-merged.
+    expect(metadata.mergedIntoContactId).toBeUndefined();
+    expect(metadata.mergedAt).toBeUndefined();
+    expect(metadata.mergeWorkflowRunId).toBeUndefined();
+    expect(metadata.archived).toBeUndefined();
+    expect(metadata.keepMe).toBe(true);
+  });
+
   it("deletes a contact", () => {
     const created = createContact({
       name: "Delete Me",

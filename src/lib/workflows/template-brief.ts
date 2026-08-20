@@ -14,7 +14,7 @@ const CATEGORY_LABELS: Record<string, string> = {
 const TOOLS_BY_TYPE: Record<string, string[]> = {
   prospecting: ["query_contacts", "enrich_contact", "create_task"],
   enrichment: ["query_contacts", "enrich_contact"],
-  pruning: ["query_contacts", "create_task"],
+  pruning: ["query_contacts", "find_duplicate_contacts", "merge_contacts", "create_task"],
   content: ["query_content", "create_task"],
   engagement: ["query_contacts", "create_task"],
   outreach: ["query_contacts", "create_task"],
