@@ -39,6 +39,16 @@ const HANDLE_REQUEST_PREFIX = "handle:";
 
 type HandleGroup = { handle: string; identities: ContactIdentity[] };
 
+/** One chunked X API lookup, keyed by numeric ID or by lowercased handle. */
+type LookupBatch = {
+  keys: string[];
+  run: () => Promise<{ users: XUser[]; errors: XLookupError[] }>;
+  keyForUser: (user: XUser) => string;
+  keyForError: (error: XLookupError) => string | undefined;
+  identitiesFor: (key: string) => ContactIdentity[];
+  describe: (key: string) => string;
+};
+
 type ContactState = {
   contactId: string;
   source: "x_api" | "x_web_anon";
@@ -531,21 +541,49 @@ async function hydrateXProfilesBatch(
       }
     }
   } else {
-    // A credential-class failure ends the whole API path, not just the chunk loop that hit it.
-    let lookupStopped = false;
+    const accountId = account.id;
+    // ID and handle lookups differ only in how a chunk is sent and how a returned user or
+    // error maps back to its key, so both run through one chunk loop. Chunks stay sequential:
+    // they share a rate limiter, and a credential-class failure has to stop the ones behind it.
+    const batches: LookupBatch[] = [];
     for (let offset = 0; offset < userIds.length; offset += X_USER_LOOKUP_MAX_IDS) {
-      const chunk = userIds.slice(offset, offset + X_USER_LOOKUP_MAX_IDS);
+      const keys = userIds.slice(offset, offset + X_USER_LOOKUP_MAX_IDS);
+      batches.push({
+        keys,
+        run: () => lookup(accountId, keys),
+        keyForUser: (user) => user.id,
+        keyForError: lookupErrorId,
+        identitiesFor: (key) => identitiesByUserId.get(key) ?? [],
+        describe: (key) => key,
+      });
+    }
+    for (let offset = 0; offset < handleKeys.length; offset += X_USER_LOOKUP_MAX_USERNAMES) {
+      const keys = handleKeys.slice(offset, offset + X_USER_LOOKUP_MAX_USERNAMES);
+      batches.push({
+        keys,
+        run: () => handleLookup(accountId, keys.map((key) => identitiesByHandle.get(key)!.handle)),
+        keyForUser: (user) => user.username.toLowerCase(),
+        keyForError: (error) => lookupErrorUsername(error)?.toLowerCase(),
+        identitiesFor: (key) => identitiesByHandle.get(key)?.identities ?? [],
+        describe: (key) => `@${identitiesByHandle.get(key)?.handle ?? key}`,
+      });
+    }
+
+    for (const batch of batches) {
       try {
-        const response = await lookup(account.id, chunk);
-        const foundIds = new Set<string>();
-        const errorIds = new Set(
-          response.errors.map(lookupErrorId).filter((id): id is string => id !== undefined),
+        const response = await batch.run();
+        const found = new Set<string>();
+        const errored = new Set(
+          response.errors
+            .map(batch.keyForError)
+            .filter((key): key is string => key !== undefined),
         );
 
         for (const user of response.users) {
-          const identities = identitiesByUserId.get(user.id) ?? [];
-          if (identities.length === 0 || foundIds.has(user.id)) continue;
-          foundIds.add(user.id);
+          const key = batch.keyForUser(user);
+          const identities = batch.identitiesFor(key);
+          if (identities.length === 0 || found.has(key)) continue;
+          found.add(key);
           for (const identity of identities) {
             const state = states.get(identity.contactId);
             if (!state || state.failure) continue;
@@ -557,9 +595,9 @@ async function hydrateXProfilesBatch(
           }
         }
 
-        for (const userId of errorIds) {
-          if (foundIds.has(userId)) continue;
-          for (const identity of identitiesByUserId.get(userId) ?? []) {
+        for (const key of errored) {
+          if (found.has(key)) continue;
+          for (const identity of batch.identitiesFor(key)) {
             const state = states.get(identity.contactId);
             if (!state || state.failure) continue;
             try {
@@ -571,85 +609,19 @@ async function hydrateXProfilesBatch(
           }
         }
 
-        for (const userId of chunk) {
-          if (foundIds.has(userId) || errorIds.has(userId)) continue;
-          for (const identity of identitiesByUserId.get(userId) ?? []) {
-            const state = states.get(identity.contactId);
-            if (state && !state.failure) state.failure = `X lookup returned no result for ${userId}`;
-          }
-        }
-      } catch (error) {
-        const chunkContacts = new Set(
-          chunk.flatMap((userId) =>
-            (identitiesByUserId.get(userId) ?? []).map((identity) => identity.contactId),
-          ),
-        );
-        if (applyLookupFailure(error, chunkContacts, states)) {
-          lookupStopped = true;
-          break;
-        }
-      }
-    }
-
-    for (let offset = 0; !lookupStopped && offset < handleKeys.length; offset += X_USER_LOOKUP_MAX_USERNAMES) {
-      const chunk = handleKeys.slice(offset, offset + X_USER_LOOKUP_MAX_USERNAMES);
-      try {
-        const response = await handleLookup(
-          account.id,
-          chunk.map((key) => identitiesByHandle.get(key)!.handle),
-        );
-        const foundKeys = new Set<string>();
-        const errorKeys = new Set(
-          response.errors
-            .map(lookupErrorUsername)
-            .filter((handle): handle is string => handle !== undefined)
-            .map((handle) => handle.toLowerCase()),
-        );
-
-        for (const user of response.users) {
-          const key = user.username.toLowerCase();
-          const group = identitiesByHandle.get(key);
-          if (!group || foundKeys.has(key)) continue;
-          foundKeys.add(key);
-          for (const identity of group.identities) {
-            const state = states.get(identity.contactId);
-            if (!state || state.failure) continue;
-            try {
-              hydrateIdentity(identity, user, now, "x_api", state);
-            } catch (error) {
-              state.failure = error instanceof Error ? error.message : "Failed to update X profile";
-            }
-          }
-        }
-
-        for (const key of errorKeys) {
-          if (foundKeys.has(key)) continue;
-          for (const identity of identitiesByHandle.get(key)?.identities ?? []) {
-            const state = states.get(identity.contactId);
-            if (!state || state.failure) continue;
-            try {
-              markIdentityMiss(identity, now);
-              state.notFound++;
-            } catch (error) {
-              state.failure = error instanceof Error ? error.message : "Failed to cache X profile miss";
-            }
-          }
-        }
-
-        for (const key of chunk) {
-          if (foundKeys.has(key) || errorKeys.has(key)) continue;
-          const group = identitiesByHandle.get(key)!;
-          for (const identity of group.identities) {
+        for (const key of batch.keys) {
+          if (found.has(key) || errored.has(key)) continue;
+          for (const identity of batch.identitiesFor(key)) {
             const state = states.get(identity.contactId);
             if (state && !state.failure) {
-              state.failure = `X lookup returned no result for @${group.handle}`;
+              state.failure = `X lookup returned no result for ${batch.describe(key)}`;
             }
           }
         }
       } catch (error) {
         const chunkContacts = new Set(
-          chunk.flatMap((key) =>
-            (identitiesByHandle.get(key)?.identities ?? []).map((identity) => identity.contactId),
+          batch.keys.flatMap((key) =>
+            batch.identitiesFor(key).map((identity) => identity.contactId),
           ),
         );
         if (applyLookupFailure(error, chunkContacts, states)) break;

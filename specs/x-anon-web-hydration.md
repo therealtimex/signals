@@ -12,7 +12,9 @@ Verified runtime evidence (2026-08-19, account `568879807`):
 - Anonymous `curl https://x.com/tri_dao` returns HTML metadata with name, handle, bio, avatar,
   numeric identifier, canonical URL, and public counts.
 - Anonymous `curl https://x.com/i/user/<id>` returns only the generic logged-out shell — the
-  browser stage is required for numeric-only identities.
+  browser stage is required for numeric-only identities. An identity that already knows its
+  handle has what that stage would produce, so it skips the browser and fetches
+  `https://x.com/<handle>` directly.
 
 ## 1. Scope & Hard Constraints
 
@@ -57,10 +59,12 @@ row at all, or a browser-connect row (`authType: "session"`, `credentialsEncrypt
 existing skips so credential problems stay visible instead of being silently rerouted. Trade-off:
 a tier-restricted API install does not get web hydration in v1; acceptable, revisit if real.
 
-Candidate selection (numeric-ID active X identities, `identityNeedsHydration`, 30-day
-success/miss caches, per-user-ID dedup) is **shared** between both paths — refactor the existing
-selection block in `hydrateXProfiles` into a helper both transports consume, so eligibility and
-cache semantics cannot diverge.
+Candidate selection (active X identities keyed by a numeric ID **or** by a resolvable handle,
+`identityNeedsHydration`, 30-day success/miss caches, per-user-ID and per-handle dedup) is
+**shared** between both paths — refactor the existing selection block in `hydrateXProfiles` into
+a helper both transports consume, so eligibility and cache semantics cannot diverge. Handle-keyed
+identities are grouped under a lowercased handle key and dispatched as `handleOnly` requests
+(§4.5, §6.5, §11).
 
 ## 3. Module Map
 
@@ -161,6 +165,9 @@ human logged into it; surface guidance to sign out / delete `signals-x-anon` in 
 Browser). Nothing is fetched from a contaminated session.
 
 ### 4.5 Resolution & classification per numeric ID
+
+Only numeric-ID requests reach the resolver. A `handleOnly` request already carries its handle,
+so the session never opens the browser for it (§11).
 
 Navigate to `https://x.com/i/user/<id>`, wait up to `X_ANON_NAV_TIMEOUT_MS = 20_000` for the URL
 to leave `/i/user/…` (poll, reusing the redirect-grace pattern), then classify:
@@ -285,6 +292,15 @@ the HTTP redirect validator.
 - if the fetch used a freshly browser-resolved handle: skip `x_web_id_mismatch` (retryable,
   counts toward breaker) — something is wrong, don't write.
 
+A `handleOnly` request has no numeric ID to verify against, so `fetchProfile` takes `userId:
+null` and the mismatch guard is bypassed — the ID the page reports *is* the answer. That is safe
+because the parser only ever yields a numeric identifier (`status: "ok"` requires a truthy `id`
+matching `/^\d+$/`), so nothing non-numeric can reach `platformUserId`. The handle is still
+verified twice — the final canonical URL (§6.4) and the parsed `profile.handle` must both match
+the requested handle — so a redirect cannot bind the wrong account. A renamed handle therefore
+resolves to `x_web_unexpected_redirect` rather than following the rename: with no ID to check
+against, following it is exactly how handle recycling would silently bind the wrong person.
+
 ## 7. Projection, Provenance, Avatar Handoff
 
 **Decision D2:** the web profile is adapted to the existing `XUser` shape and written through the
@@ -406,12 +422,25 @@ the `skipped` reason map and thread summaries (aggregate counts only — privacy
 | browser/RTX unavailable | `skipped` | `x_web_unavailable` | no | retryable |
 | logged-in session detected | `skipped` | `x_anon_session_contaminated` | no | aborts run's web work |
 | active anonymous-session cooldown | `skipped` | `x_web_deferred` | no | retryable |
+| unusable handle (handle-only) | `skipped` | `x_handle_invalid` | no | malformed or reserved handle; no network call |
 | DB write error | `failed` | message | no | same as API path |
 
 Protected profiles: X serves name/bio/avatar metadata for protected accounts anonymously — they
 hydrate as `updated`; only their posts are private. No special reason needed.
 Renamed profiles: resolved by numeric ID to the new handle; missing fields fill; an existing
-stale `platformHandle` is preserved by the fill-gaps contract (same as API path).
+stale `platformHandle` is preserved by the fill-gaps contract (same as API path). A `handleOnly`
+request has no ID to resolve from, so a rename is reported as `x_web_unexpected_redirect` instead
+(§6.5).
+
+Handle-only requests: `XAnonWebRequest.handleOnly` marks a request whose `userId` is an opaque
+caller-supplied key, not a numeric X ID — the caller has no ID yet. The session fetches
+`https://x.com/<knownHandle>` directly, never opens the resolver, and returns the outcome under
+that key. `normalizeKnownHandle` rejects malformed and reserved handles up front (via
+`parseCanonicalXProfileUrl` → `validHandle`, which filters `X_RESERVED_HANDLES`), so garbage
+cannot reach the network, trip the login wall, or break the circuit for the rest of the batch. A
+hydrated result promotes the identity to the numeric ID the page reported — see
+[`contact-profile-pipeline-workflow.md`](./contact-profile-pipeline-workflow.md) §5.4 for the
+promotion and unique-index conflict contract.
 
 ## 12. Security & Safety Tests (prove the invariants)
 
