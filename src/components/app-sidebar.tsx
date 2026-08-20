@@ -17,17 +17,18 @@ import {
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
+import packageMetadata from "../../package.json";
 import {
   Sidebar,
   SidebarContent,
   SidebarGroup,
   SidebarGroupContent,
-  SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarFooter,
+  SidebarTrigger,
 } from "@/components/ui/sidebar";
 import { cn } from "@/lib/utils";
 
@@ -48,8 +49,8 @@ export function AppSidebar() {
 
   return (
     <Sidebar className="border-r border-sidebar-border">
-      <SidebarHeader className="border-b border-sidebar-border px-6 py-4">
-        <Link href="/dashboard" className="flex items-center gap-3">
+      <SidebarHeader className="h-14 flex-row items-center border-b border-sidebar-border px-6 py-0">
+        <Link href="/dashboard" className="flex min-w-0 flex-1 items-center gap-3">
           <Image
             src="/favicon-32x32.png"
             alt="Signals"
@@ -61,12 +62,10 @@ export function AppSidebar() {
             Signals
           </span>
         </Link>
+        <SidebarTrigger className="-mr-1 shrink-0" />
       </SidebarHeader>
       <SidebarContent className="bg-sidebar/30 backdrop-blur-sm">
         <SidebarGroup>
-          <SidebarGroupLabel className="text-label text-muted-foreground px-4">
-            Navigation
-          </SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               {navItems.map((item) => {
@@ -149,6 +148,12 @@ export function AppSidebar() {
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
+        <div
+          aria-label={`Signals version ${packageMetadata.version}`}
+          className="px-2 pt-1 text-center text-xs text-muted-foreground/70"
+        >
+          v{packageMetadata.version}
+        </div>
       </SidebarFooter>
     </Sidebar>
   );

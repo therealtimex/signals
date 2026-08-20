@@ -22,11 +22,9 @@ import {
   Users,
   Sparkles,
   ListChecks,
-  Link as LinkIcon,
   Database,
   Shield,
   RefreshCw,
-  UserPlus,
   Key,
   Mail,
   FileDown,
@@ -48,11 +46,11 @@ interface ChecklistState {
   loading: boolean;
   rtxEmbedded: boolean;
   rtxLlmReady: boolean;
-  anthropicKey: boolean;
+  standaloneLlmReady: boolean;
   xConnected: boolean;
-  xSynced: boolean;
   linkedinConnected: boolean;
-  gmailConnected: boolean;
+  facebookConnected: boolean;
+  mailConnected: boolean;
 }
 
 function useSetupChecklist(): ChecklistState {
@@ -60,11 +58,11 @@ function useSetupChecklist(): ChecklistState {
     loading: true,
     rtxEmbedded: false,
     rtxLlmReady: false,
-    anthropicKey: false,
+    standaloneLlmReady: false,
     xConnected: false,
-    xSynced: false,
     linkedinConnected: false,
-    gmailConnected: false,
+    facebookConnected: false,
+    mailConnected: false,
   });
 
   useEffect(() => {
@@ -81,20 +79,23 @@ function useSetupChecklist(): ChecklistState {
       fetch("/api/platforms/linkedin")
         .then((r) => r.json())
         .catch(() => ({ connected: false })),
-      fetch("/api/platforms/gmail")
+      fetch("/api/platforms/facebook")
         .then((r) => r.json())
         .catch(() => ({ connected: false })),
-    ]).then(([health, settings, xStatus, linkedinStatus, gmailStatus]) => {
+      fetch("/api/mail-accounts")
+        .then((r) => r.json())
+        .catch(() => ({ accounts: [] })),
+    ]).then(([health, settings, xStatus, linkedinStatus, facebookStatus, mailStatus]) => {
       const rtxEmbedded = health?.rtx?.mode === "embedded";
       setState({
         loading: false,
         rtxEmbedded,
         rtxLlmReady: rtxEmbedded && health?.rtx?.pingOk === true,
-        anthropicKey: settings.source !== "none",
+        standaloneLlmReady: settings.source !== "none",
         xConnected: xStatus.connected === true,
-        xSynced: xStatus.account?.lastSyncedAt != null,
         linkedinConnected: linkedinStatus.connected === true,
-        gmailConnected: gmailStatus.connected === true,
+        facebookConnected: facebookStatus.connected === true,
+        mailConnected: Array.isArray(mailStatus.accounts) && mailStatus.accounts.length > 0,
       });
     });
   }, []);
@@ -109,14 +110,6 @@ function Code({ children }: { children: React.ReactNode }) {
     <code className="rounded bg-muted px-1.5 py-0.5 text-xs font-mono">
       {children}
     </code>
-  );
-}
-
-function CodeBlock({ children }: { children: string }) {
-  return (
-    <pre className="rounded-lg bg-muted px-4 py-3 text-xs font-mono overflow-x-auto">
-      {children}
-    </pre>
   );
 }
 
@@ -183,7 +176,7 @@ function GettingStartedTab() {
               >
                 Read the User Guide
               </Link>{" "}
-              for in-depth tutorials covering every feature.
+              for deeper concepts and workflow examples.
             </p>
           </div>
         </CardContent>
@@ -202,23 +195,23 @@ function GettingStartedTab() {
         </CardHeader>
         <CardContent className="space-y-3 text-sm text-muted-foreground">
           <p>
-            Signals helps you manage contacts from social platforms, track
-            engagement, build living knowledge graphs, and leverage AI-powered agents. Everything
-            runs locally on your machine with SQLite — your data never leaves
-            your computer.
+            Signals keeps your CRM graph, credentials, and media on your machine while
+            RealTimeX agents handle research, enrichment, and publishing when you ask them to.
+            AI calls and browser actions may send bounded data to your configured model provider
+            or the platform being used.
           </p>
           <div className="grid gap-2 sm:grid-cols-3">
             <div className="flex items-start gap-2">
               <Users className="h-4 w-4 mt-0.5 text-primary shrink-0" />
-              <span>Import and manage contacts from X/Twitter</span>
+              <span>Unify contacts, organizations, identities, and audience relationships</span>
             </div>
             <div className="flex items-start gap-2">
               <Sparkles className="h-4 w-4 mt-0.5 text-primary shrink-0" />
-              <span>Track enrichment scores across platforms</span>
+              <span>Draft, simulate, launch, and publish content through RealTimeX agents</span>
             </div>
             <div className="flex items-start gap-2">
               <ListChecks className="h-4 w-4 mt-0.5 text-primary shrink-0" />
-              <span>Create tasks and track engagement workflows</span>
+              <span>Run observable workflows and measure progress with analytics and goals</span>
             </div>
           </div>
         </CardContent>
@@ -232,79 +225,84 @@ function GettingStartedTab() {
             Quick Setup Checklist
           </CardTitle>
           <CardDescription>
-            Complete these steps to get the most out of Signals.
+            Connect only the services you use. Social and mail connections are optional.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <ChecklistItem
             label={
               checklist.rtxEmbedded
-                ? "RealtimeX LLM connected (llm.chat / llm.embed)"
-                : "Anthropic API key configured (.env.local)"
+                ? "RealTimeX LLM access ready (llm.chat / llm.embed)"
+                : "Standalone LLM access configured"
             }
-            done={checklist.rtxEmbedded ? checklist.rtxLlmReady : checklist.anthropicKey}
+            done={checklist.rtxEmbedded ? checklist.rtxLlmReady : checklist.standaloneLlmReady}
             loading={checklist.loading}
+            href="/dashboard/settings"
           />
           <ChecklistItem
-            label="X/Twitter account connected"
+            label="X browser session connected"
             done={checklist.xConnected}
             loading={checklist.loading}
             href="/dashboard/settings"
           />
           <ChecklistItem
-            label="LinkedIn account connected"
+            label="LinkedIn browser session connected"
             done={checklist.linkedinConnected}
             loading={checklist.loading}
             href="/dashboard/settings"
           />
           <ChecklistItem
-            label="Gmail / Google account connected"
-            done={checklist.gmailConnected}
+            label="Facebook browser session connected"
+            done={checklist.facebookConnected}
             loading={checklist.loading}
             href="/dashboard/settings"
           />
           <ChecklistItem
-            label="First contact sync completed"
-            done={checklist.xSynced}
+            label="Himalaya mail account registered"
+            done={checklist.mailConnected}
             loading={checklist.loading}
             href="/dashboard/settings"
           />
         </CardContent>
       </Card>
 
-      {/* Environment Setup */}
+      {/* Connection model */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Key className="h-5 w-5" />
-            Environment Setup
+            How Signals Connects
           </CardTitle>
           <CardDescription>
-            Configure environment variables for API access.
+            Current setup paths for AI, social platforms, imports, and mail.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3 text-sm">
-          <p className="text-muted-foreground">
-            Copy <Code>.env.example</Code> to <Code>.env.local</Code> and fill
-            in your credentials:
-          </p>
-          <CodeBlock>{`ANTHROPIC_API_KEY="sk-ant-..."   # standalone dev only; Local App uses RealtimeX LLM proxy
-SERPER_API_KEY="..."             # optional; search migration in progress
-TAVILY_API_KEY="..."             # optional; search migration in progress
-X_CLIENT_ID="your-oauth2-client-id"
-X_CLIENT_SECRET="your-oauth2-client-secret"
-LINKEDIN_CLIENT_ID="your-linkedin-client-id"
-LINKEDIN_CLIENT_SECRET="your-linkedin-client-secret"
-GOOGLE_CLIENT_ID="your-google-client-id"
-GOOGLE_CLIENT_SECRET="your-google-client-secret"`}</CodeBlock>
-          <p className="text-xs text-muted-foreground">
-            When Signals runs as a RealtimeX Local App, configure LLM models and approve{" "}
-            <code className="rounded bg-muted px-1 py-0.5 text-xs">llm.chat</code> /{" "}
-            <code className="rounded bg-muted px-1 py-0.5 text-xs">llm.embed</code> in
-            RealtimeX <strong className="font-medium text-foreground">Settings → Local Apps</strong>
-            — not in Signals Settings. For standalone development, set provider keys in{" "}
-            <Code>.env.local</Code> and restart the server. X, LinkedIn, and Google credentials
-            must be set as environment variables.
+          <ul className="list-disc space-y-2 pl-5 text-muted-foreground">
+            <li>
+              <strong className="text-foreground">AI:</strong> approve <Code>llm.chat</Code> and{" "}
+              <Code>llm.embed</Code> for Signals in RealTimeX Settings → Local Apps.
+            </li>
+            <li>
+              <strong className="text-foreground">Social:</strong> connect X, LinkedIn, and
+              Facebook through the shared RealTimeX Browser session in Signals Settings. Add
+              acting targets there when agents need to use more than one identity.
+            </li>
+            <li>
+              <strong className="text-foreground">Imports:</strong> upload X archives, LinkedIn
+              exports, and Google Takeout files from Automation → Workflows. These do not require
+              developer OAuth credentials.
+            </li>
+            <li>
+              <strong className="text-foreground">Mail:</strong> configure accounts with Himalaya,
+              then register and check them in Signals Settings. Gmail OAuth is a legacy path.
+            </li>
+          </ul>
+          <p className="rounded-lg border bg-muted/40 p-3 text-xs text-muted-foreground">
+            Source-checkout development can still use provider keys from <Code>.env.local</Code>.
+            Optional X and LinkedIn OAuth API sync lives under{" "}
+            <strong className="font-medium text-foreground">Advanced</strong> in Settings; it is
+            not required for browser publishing or file imports.
           </p>
         </CardContent>
       </Card>
@@ -315,186 +313,120 @@ GOOGLE_CLIENT_SECRET="your-google-client-secret"`}</CodeBlock>
 function XSetupTab() {
   return (
     <div className="space-y-6">
-      {/* Prerequisites */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Twitter className="h-5 w-5" />
-            Prerequisites
+            Recommended X Setup
           </CardTitle>
+          <CardDescription>
+            Browser connection and archive import are the default paths. A developer app is optional.
+          </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-2 text-sm text-muted-foreground">
-          <ul className="list-disc pl-5 space-y-1">
-            <li>
-              An X Developer account at{" "}
-              <span className="text-primary font-medium">developer.x.com</span>
-            </li>
-            <li>A project and app created in the X Developer Portal</li>
-            <li>Free tier: account connection + posting (500 posts/month)</li>
-            <li>Basic tier ($200/mo): also enables contact sync (importing following list)</li>
+        <CardContent className="text-sm text-muted-foreground">
+          <ul className="list-disc space-y-2 pl-5">
+            <li>Use RealTimeX Browser to sign in, validate the active identity, and publish.</li>
+            <li>Import an X archive to add contacts and follower/following graph edges.</li>
+            <li>Send drafts from Content to a RealTimeX agent for target-aware publishing.</li>
+            <li>Enable OAuth API sync only if your X developer plan includes the scopes you need.</li>
           </ul>
         </CardContent>
       </Card>
 
-      {/* Step 1 */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <StepNumber n={1} />
-            Create X Developer App
+            Connect the Browser Session
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-2 text-sm text-muted-foreground">
-          <ol className="list-decimal pl-5 space-y-1">
+        <CardContent className="space-y-3 text-sm text-muted-foreground">
+          <ol className="list-decimal space-y-2 pl-5">
             <li>
-              Go to{" "}
-              <span className="text-primary font-medium">developer.x.com</span>{" "}
-              and sign in
+              Open{" "}
+              <Link href="/dashboard/settings" className="text-primary underline underline-offset-2">
+                Settings
+              </Link>{" "}
+              → Platform Connections and choose <strong className="text-foreground">Setup session</strong>.
             </li>
-            <li>Navigate to the Dashboard and create a new Project/App</li>
+            <li>Sign in to X in the RealTimeX Browser window.</li>
             <li>
-              Note the API Key and API Secret shown on the{" "}
-              <strong className="text-foreground">Keys and tokens</strong> tab
-              (these are OAuth 1.0a credentials — for reference only)
+              Return to Settings and choose <strong className="text-foreground">Validate</strong>.
             </li>
+            <li>Add or discover acting targets, then choose a default identity for agents.</li>
           </ol>
+          <p className="rounded-lg border bg-muted/40 p-3 text-xs">
+            The shared session is named <Code>signals-publish</Code>. Validation fails closed when
+            the browser is logged out or the active identity does not match the requested target.
+          </p>
         </CardContent>
       </Card>
 
-      {/* Step 2 */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <StepNumber n={2} />
-            Configure User Authentication
+            Import Your X Network
           </CardTitle>
           <CardDescription>
-            This generates the OAuth 2.0 credentials that Signals uses.
+            File import is the reliable, no-OAuth path for audience data.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3 text-sm text-muted-foreground">
-          <ol className="list-decimal pl-5 space-y-2">
+          <ol className="list-decimal space-y-2 pl-5">
             <li>
-              In your app, go to{" "}
-              <strong className="text-foreground">Settings</strong> &rarr;{" "}
-              <strong className="text-foreground">
-                User authentication settings
-              </strong>{" "}
-              &rarr;{" "}
-              <strong className="text-foreground">Set up</strong>
+              Request and download your X data archive from X account settings.
             </li>
             <li>
-              <strong className="text-foreground">App permissions</strong>:
-              Select <Code>Read and write</Code>
+              Open{" "}
+              <Link href="/dashboard/workflows" className="text-primary underline underline-offset-2">
+                Automation → Workflows
+              </Link>{" "}
+              and run the X archive import action.
             </li>
             <li>
-              <strong className="text-foreground">Type of App</strong>: Select{" "}
-              <Code>Web App, Automated App or Bot</Code> (Confidential client)
-            </li>
-            <li>
-              <strong className="text-foreground">
-                Callback URI / Redirect URL
-              </strong>
-              :
-              <CodeBlock>http://localhost:3000/api/platforms/x/callback</CodeBlock>
-            </li>
-            <li>
-              <strong className="text-foreground">Website URL</strong>: Your
-              domain (e.g., <Code>https://yourdomain.com</Code>)
-            </li>
-            <li>
-              Click <strong className="text-foreground">Save</strong> — X
-              generates a new{" "}
-              <strong className="text-foreground">OAuth 2.0 Client ID</strong>{" "}
-              and{" "}
-              <strong className="text-foreground">Client Secret</strong>
+              Review imported contacts in Contacts and relationship edges in Explore.
             </li>
           </ol>
-          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
-            Save these immediately — the Client Secret is shown only once.
-          </div>
         </CardContent>
       </Card>
 
-      {/* Step 3 */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <StepNumber n={3} />
-            Configure Signals
+            Draft and Publish
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3 text-sm text-muted-foreground">
           <p>
-            Add the OAuth 2.0 credentials to your <Code>.env.local</Code>:
+            Create or edit a draft in{" "}
+            <Link href="/dashboard/content" className="text-primary underline underline-offset-2">
+              Content
+            </Link>
+            , choose the X target, and select <strong className="text-foreground">Send to agent</strong>.
+            The RealTimeX agent receives a publish job, uses the verified browser target, and reports
+            the result back to Signals.
           </p>
-          <CodeBlock>{`X_CLIENT_ID="your-oauth2-client-id"
-X_CLIENT_SECRET="your-oauth2-client-secret"`}</CodeBlock>
-          <p>
-            Restart the dev server (<Code>npm run dev</Code>) to pick up the new
-            variables.
-          </p>
-          <div className="rounded-lg border bg-muted/50 p-3 text-xs">
-            <strong className="text-foreground">Note:</strong> The OAuth 2.0
-            Client ID/Secret (from User Authentication setup) are different from
-            the API Key/Secret shown on the Keys tab. Signals uses OAuth 2.0.
-          </div>
         </CardContent>
       </Card>
 
-      {/* Step 4 */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <StepNumber n={4} />
-            Connect & Sync
+            Optional: OAuth API Sync
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-2 text-sm text-muted-foreground">
-          <ol className="list-decimal pl-5 space-y-2">
-            <li>
-              Go to{" "}
-              <Link
-                href="/dashboard/settings"
-                className="text-primary underline underline-offset-2"
-              >
-                Settings
-              </Link>{" "}
-              &rarr; Platform Connections &rarr; click{" "}
-              <strong className="text-foreground">Setup session</strong> on X/Twitter,
-              sign in via RealTimeX Browser, then click{" "}
-              <strong className="text-foreground">Validate</strong>
-            </li>
-            <li>
-              Import followers from an X archive zip under{" "}
-              <Link
-                href="/dashboard/workflows"
-                className="text-primary underline underline-offset-2"
-              >
-                Automation &rarr; Workflows
-              </Link>{" "}
-              (no OAuth required)
-            </li>
-            <li>
-              Publish via the terminal agent lane (
-              <Code>signals-publish</Code> browser session — see{" "}
-              <Code>docs/rtx-browser-publish.md</Code>)
-            </li>
-            <li>
-              Optional: expand <strong className="text-foreground">Advanced: OAuth API sync</strong>{" "}
-              for paid X API contact sync (Basic tier <Code>follows.read</Code>)
-            </li>
-            <li>
-              Contacts appear in{" "}
-              <Link
-                href="/dashboard/contacts"
-                className="text-primary underline underline-offset-2"
-              >
-                Contacts
-              </Link>{" "}
-              with X identity badges and enrichment scores
-            </li>
-          </ol>
+        <CardContent className="space-y-3 text-sm text-muted-foreground">
+          <p>
+            Expand <strong className="text-foreground">Advanced: OAuth API sync</strong> on the X
+            card in Settings only when you need API-based contact sync. Your X developer app must
+            grant <Code>follows.read</Code>; plan availability and pricing are controlled by X.
+          </p>
+          <p className="text-xs">
+            For source checkout, configure <Code>X_CLIENT_ID</Code> and <Code>X_CLIENT_SECRET</Code>,
+            and register <Code>/api/platforms/x/callback</Code> on the Signals base URL.
+          </p>
         </CardContent>
       </Card>
     </div>
@@ -504,193 +436,127 @@ X_CLIENT_SECRET="your-oauth2-client-secret"`}</CodeBlock>
 function LinkedInSetupTab() {
   return (
     <div className="space-y-6">
-      {/* Prerequisites */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Linkedin className="h-5 w-5" />
-            Prerequisites
+            Recommended LinkedIn Setup
           </CardTitle>
+          <CardDescription>
+            Use the browser session for identity and publishing, and a LinkedIn export for contacts.
+          </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-2 text-sm text-muted-foreground">
-          <ul className="list-disc pl-5 space-y-1">
-            <li>
-              A LinkedIn Developer account at{" "}
-              <span className="text-primary font-medium">
-                linkedin.com/developers
-              </span>
-            </li>
-            <li>
-              An app with the{" "}
-              <strong className="text-foreground">
-                Sign In with LinkedIn using OpenID Connect
-              </strong>{" "}
-              product enabled
-            </li>
-            <li>No paid tier required — the free API product is sufficient</li>
+        <CardContent className="text-sm text-muted-foreground">
+          <ul className="list-disc space-y-2 pl-5">
+            <li>No LinkedIn developer app is required for browser connection or export import.</li>
+            <li>Importing a Connections export creates CRM contacts and audience graph edges.</li>
+            <li>Publishing through the RealTimeX agent lane is available as a beta workflow.</li>
+            <li>OAuth API sync is advanced and requires LinkedIn-granted connection scopes.</li>
           </ul>
         </CardContent>
       </Card>
 
-      {/* Step 1 */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <StepNumber n={1} />
-            Create LinkedIn App
+            Connect the Browser Session
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-2 text-sm text-muted-foreground">
-          <ol className="list-decimal pl-5 space-y-2">
+        <CardContent className="space-y-3 text-sm text-muted-foreground">
+          <ol className="list-decimal space-y-2 pl-5">
             <li>
-              Go to{" "}
-              <span className="text-primary font-medium">
-                linkedin.com/developers
-              </span>{" "}
-              and sign in with your LinkedIn account
+              Open{" "}
+              <Link href="/dashboard/settings" className="text-primary underline underline-offset-2">
+                Settings
+              </Link>{" "}
+              → Platform Connections and choose <strong className="text-foreground">Setup session</strong>.
             </li>
+            <li>Sign in to LinkedIn in the RealTimeX Browser window.</li>
             <li>
-              Click{" "}
-              <strong className="text-foreground">Create app</strong> — you will
-              need to associate it with a LinkedIn Company Page (a personal page
-              works fine)
+              Return to Settings and choose <strong className="text-foreground">Validate</strong>.
             </li>
-            <li>
-              Under the{" "}
-              <strong className="text-foreground">Products</strong> tab, request{" "}
-              <strong className="text-foreground">
-                Sign In with LinkedIn using OpenID Connect
-              </strong>
-            </li>
-            <li>Approval is usually instant</li>
+            <li>Add the current acting target and make it the default when appropriate.</li>
           </ol>
+          <p className="rounded-lg border bg-muted/40 p-3 text-xs">
+            LinkedIn target switching is verify-first. Confirm the requested identity before an
+            agent performs any mutating action.
+          </p>
         </CardContent>
       </Card>
 
-      {/* Step 2 */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <StepNumber n={2} />
-            Configure OAuth 2.0
+            Import Connections
           </CardTitle>
           <CardDescription>
-            Set up the redirect URL and copy your credentials.
+            Use LinkedIn&apos;s Basic Data Export; OAuth is not needed.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3 text-sm text-muted-foreground">
-          <ol className="list-decimal pl-5 space-y-2">
+          <ol className="list-decimal space-y-2 pl-5">
             <li>
-              In your LinkedIn app, go to the{" "}
-              <strong className="text-foreground">Auth</strong> tab
+              Request your Connections archive from LinkedIn Settings &amp; Privacy → Data Privacy.
             </li>
             <li>
-              Under{" "}
-              <strong className="text-foreground">
-                OAuth 2.0 settings
-              </strong>
-              , add this redirect URL:
-              <CodeBlock>
-                http://localhost:3000/api/platforms/linkedin/callback
-              </CodeBlock>
+              Open{" "}
+              <Link href="/dashboard/workflows" className="text-primary underline underline-offset-2">
+                Automation → Workflows
+              </Link>{" "}
+              and run <strong className="text-foreground">Import Connections Export</strong>.
             </li>
-            <li>
-              Copy the{" "}
-              <strong className="text-foreground">Client ID</strong> and{" "}
-              <strong className="text-foreground">Client Secret</strong> from
-              the top of the Auth tab
-            </li>
+            <li>Upload the complete zip or the extracted <Code>Connections.csv</Code>.</li>
           </ol>
-          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
-            Save the Client Secret immediately — you may not be able to view it
-            again without regenerating.
-          </div>
         </CardContent>
       </Card>
 
-      {/* Step 3 */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <StepNumber n={3} />
-            Configure Signals
+            Draft and Publish (Beta)
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3 text-sm text-muted-foreground">
           <p>
-            Add the LinkedIn credentials to your <Code>.env.local</Code>:
+            Draft in{" "}
+            <Link href="/dashboard/content" className="text-primary underline underline-offset-2">
+              Content
+            </Link>
+            , select LinkedIn and an acting target, then send the publish job to a RealTimeX agent.
+            The job remains visible in Signals while the agent publishes and reports completion.
           </p>
-          <CodeBlock>{`LINKEDIN_CLIENT_ID="your-linkedin-client-id"
-LINKEDIN_CLIENT_SECRET="your-linkedin-client-secret"`}</CodeBlock>
-          <p>
-            Restart the dev server (<Code>npm run dev</Code>) to pick up the new
-            variables.
-          </p>
-          <div className="rounded-lg border bg-muted/50 p-3 text-xs">
-            <strong className="text-foreground">Note:</strong> LinkedIn uses
-            standard OAuth 2.0 (no PKCE). The client secret is sent as a POST
-            body parameter during token exchange, not via Basic auth headers.
-          </div>
         </CardContent>
       </Card>
 
-      {/* Step 4 */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <StepNumber n={4} />
-            Connect & Sync
+            Optional: OAuth API Sync
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-2 text-sm text-muted-foreground">
-          <ol className="list-decimal pl-5 space-y-2">
-            <li>
-              Go to{" "}
-              <Link
-                href="/dashboard/settings"
-                className="text-primary underline underline-offset-2"
-              >
-                Settings
-              </Link>{" "}
-              &rarr; Platform Connections &rarr; click{" "}
-              <strong className="text-foreground">Setup session</strong> on LinkedIn,
-              sign in via RealTimeX Browser, then click{" "}
-              <strong className="text-foreground">Validate</strong>
-            </li>
-            <li>
-              Import connections from a LinkedIn export zip under{" "}
-              <Link
-                href="/dashboard/workflows"
-                className="text-primary underline underline-offset-2"
-              >
-                Automation &rarr; Workflows
-              </Link>{" "}
-              (no OAuth required)
-            </li>
-            <li>
-              Optional: expand <strong className="text-foreground">Advanced: OAuth API sync</strong>{" "}
-              for LinkedIn API contact sync (<Code>r_connections</Code>)
-            </li>
-            <li>
-              Contacts appear in{" "}
-              <Link
-                href="/dashboard/contacts"
-                className="text-primary underline underline-offset-2"
-              >
-                Contacts
-              </Link>{" "}
-              with LinkedIn identity badges and enrichment scores
-            </li>
-          </ol>
+        <CardContent className="space-y-3 text-sm text-muted-foreground">
+          <p>
+            Expand <strong className="text-foreground">Advanced: OAuth API sync</strong> only when
+            your LinkedIn app has the connection scopes required for API sync. OpenID Connect sign-in
+            alone does not grant access to a member&apos;s connection list.
+          </p>
+          <p className="text-xs">
+            For source checkout, configure <Code>LINKEDIN_CLIENT_ID</Code> and{" "}
+            <Code>LINKEDIN_CLIENT_SECRET</Code>, and register{" "}
+            <Code>/api/platforms/linkedin/callback</Code> on the Signals base URL.
+          </p>
         </CardContent>
       </Card>
 
-      {/* CSV Import Alternative */}
+      {/* Export details */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <FileDown className="h-5 w-5" />
-            Alternative: Import from Data Export (No API Required)
+            What the Connections Export Includes
           </CardTitle>
           <CardDescription>
             Import LinkedIn connections from a Basic Data Export zip or
@@ -783,14 +649,17 @@ function FacebookSetupTab() {
               account
             </li>
             <li>
+              Add the current personal profile or Page as an acting target for future agent use
+            </li>
+            <li>
               Use <strong className="text-foreground">Disconnect</strong> to clear the
               browser connection without deleting the <Code>signals-publish</Code> profile
             </li>
           </ol>
           <div className="rounded-lg border bg-muted/40 p-3 text-xs">
-            <strong className="text-foreground">Validation note:</strong> public profile URLs
-            are viewable while logged out. Validate requires logged-in navigation markers — a
-            tab parked on someone else&apos;s profile will not report Connected.
+            <strong className="text-foreground">Current limitation:</strong> Facebook targets are
+            browse-only. Publishing and Meta Graph API sync are not supported. Public profile URLs
+            can also load while logged out, so validation requires authenticated navigation markers.
           </div>
         </CardContent>
       </Card>
@@ -798,234 +667,129 @@ function FacebookSetupTab() {
   );
 }
 
-function GmailSetupTab() {
+function MailSetupTab() {
   return (
     <div className="space-y-6">
-      {/* Prerequisites */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Mail className="h-5 w-5" />
-            Prerequisites
+            Mail and Google Contacts
           </CardTitle>
+          <CardDescription>
+            Mail now uses Himalaya CLI. Google contact import uses Takeout files.
+          </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-2 text-sm text-muted-foreground">
-          <ul className="list-disc pl-5 space-y-1">
-            <li>
-              A Google Cloud Console account at{" "}
-              <span className="text-primary font-medium">
-                console.cloud.google.com
-              </span>
-            </li>
-            <li>
-              OAuth consent screen configured (can be in &ldquo;Testing&rdquo;
-              mode)
-            </li>
-            <li>
-              <strong className="text-foreground">Google Takeout</strong> for
-              bulk contact import (Automation → Import Google Contacts), or a
-              registered <strong className="text-foreground">Himalaya</strong>{" "}
-              mail account in Settings for correspondent and activity workflows
-            </li>
+        <CardContent className="text-sm text-muted-foreground">
+          <ul className="list-disc space-y-2 pl-5">
+            <li>Use Google Takeout zip or vCard exports for bulk contact import.</li>
+            <li>Use Himalaya accounts for correspondent discovery and mail activity metadata.</li>
+            <li>No Google Cloud project, Gmail OAuth client, or Google API scopes are required.</li>
+            <li>Signals stores aggregate mail metadata, not message bodies.</li>
           </ul>
         </CardContent>
       </Card>
 
-      {/* Step 1 */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <StepNumber n={1} />
-            Create Google Cloud Project
+            Configure a Himalaya Account
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-2 text-sm text-muted-foreground">
-          <ol className="list-decimal pl-5 space-y-2">
-            <li>
-              Go to{" "}
-              <span className="text-primary font-medium">
-                console.cloud.google.com
-              </span>{" "}
-              and sign in
-            </li>
-            <li>Create a new project (or select an existing one)</li>
-            <li>
-              Navigate to{" "}
-              <strong className="text-foreground">
-                APIs &amp; Services
-              </strong>{" "}
-              &rarr;{" "}
-              <strong className="text-foreground">Library</strong>
-            </li>
-            <li>
-              For legacy OAuth only: enable{" "}
-              <strong className="text-foreground">People API</strong> and{" "}
-              <strong className="text-foreground">Gmail API</strong> if you still
-              use the deprecated OAuth sync path
-            </li>
+        <CardContent className="space-y-3 text-sm text-muted-foreground">
+          <ol className="list-decimal space-y-2 pl-5">
+            <li>Open a RealTimeX terminal agent or a local shell on the Signals machine.</li>
+            <li>Run <Code>himalaya account configure</Code> and complete the provider prompts.</li>
+            <li>Confirm the account works with <Code>himalaya account list</Code>.</li>
           </ol>
-          <div className="rounded-lg border bg-muted/50 p-3 text-xs">
-            <strong className="text-foreground">Note:</strong> Recommended path is
-            Google Takeout contact import plus Himalaya mail workflows — no Google
-            Cloud OAuth project required for day-to-day use.
-          </div>
+          <p className="rounded-lg border bg-muted/40 p-3 text-xs">
+            Signals reads the Himalaya config path shown in Settings. A plugin installation can
+            override it with <Code>EMAIL_CONFIG_FILE</Code>.
+          </p>
         </CardContent>
       </Card>
 
-      {/* Step 2 */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <StepNumber n={2} />
-            Configure OAuth Consent Screen
+            Register and Check Accounts
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3 text-sm text-muted-foreground">
-          <ol className="list-decimal pl-5 space-y-2">
+          <ol className="list-decimal space-y-2 pl-5">
             <li>
-              Go to{" "}
-              <strong className="text-foreground">
-                APIs &amp; Services
-              </strong>{" "}
-              &rarr;{" "}
-              <strong className="text-foreground">
-                OAuth consent screen
-              </strong>
+              Open{" "}
+              <Link href="/dashboard/settings" className="text-primary underline underline-offset-2">
+                Settings
+              </Link>{" "}
+              and find <strong className="text-foreground">Mail Accounts</strong>.
             </li>
-            <li>
-              Choose <Code>External</Code> user type (or Internal for Workspace
-              accounts)
-            </li>
-            <li>Set app name, user support email, and developer email</li>
-            <li>
-              Add scopes:{" "}
-              <Code>contacts.readonly</Code> and{" "}
-              <Code>gmail.readonly</Code>
-            </li>
-            <li>
-              If in <strong className="text-foreground">Testing</strong> mode,
-              add your Google account as a test user
-            </li>
+            <li>Choose <strong className="text-foreground">Refresh</strong> to import Himalaya aliases.</li>
+            <li>Run <strong className="text-foreground">Check</strong> for each account and select a default.</li>
           </ol>
         </CardContent>
       </Card>
 
-      {/* Step 3 */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <StepNumber n={3} />
-            Create OAuth Credentials
+            Import Google Contacts
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3 text-sm text-muted-foreground">
-          <ol className="list-decimal pl-5 space-y-2">
+          <ol className="list-decimal space-y-2 pl-5">
+            <li>Export Contacts from Google Takeout as a zip or vCard file.</li>
             <li>
-              Go to{" "}
-              <strong className="text-foreground">
-                APIs &amp; Services
-              </strong>{" "}
-              &rarr;{" "}
-              <strong className="text-foreground">Credentials</strong>
+              Open{" "}
+              <Link href="/dashboard/workflows" className="text-primary underline underline-offset-2">
+                Automation → Workflows
+              </Link>{" "}
+              and run <strong className="text-foreground">Import Google Contacts (Takeout)</strong>.
             </li>
-            <li>
-              Click{" "}
-              <strong className="text-foreground">
-                Create Credentials
-              </strong>{" "}
-              &rarr;{" "}
-              <strong className="text-foreground">OAuth client ID</strong>
-            </li>
-            <li>
-              Application type:{" "}
-              <Code>Web application</Code>
-            </li>
-            <li>
-              Add authorized redirect URI:
-              <CodeBlock>
-                http://localhost:3000/api/platforms/gmail/callback
-              </CodeBlock>
-            </li>
-            <li>
-              Copy the{" "}
-              <strong className="text-foreground">Client ID</strong> and{" "}
-              <strong className="text-foreground">Client Secret</strong>
-            </li>
+            <li>Upload the export and review the recorded import run.</li>
           </ol>
         </CardContent>
       </Card>
 
-      {/* Step 4 */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <StepNumber n={4} />
-            Configure Signals
+            Run Mail Workflows
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3 text-sm text-muted-foreground">
           <p>
-            Add the Google credentials to your <Code>.env.local</Code>:
+            From Automation, run <strong className="text-foreground">Import Correspondents</strong>{" "}
+            to discover people from message headers, then{" "}
+            <strong className="text-foreground">Enrich Mail Activity</strong> to update sent/received
+            counts and last-interaction dates.
           </p>
-          <CodeBlock>{`GOOGLE_CLIENT_ID="your-google-client-id"
-GOOGLE_CLIENT_SECRET="your-google-client-secret"`}</CodeBlock>
-          <p>
-            Restart the dev server (<Code>npm run dev</Code>) to pick up the new
-            variables.
+          <p className="text-xs">
+            Agents can list configured aliases through Signals and use Himalaya directly to read or
+            send mail when their task and permissions allow it.
           </p>
         </CardContent>
       </Card>
 
-      {/* Step 5 */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <StepNumber n={5} />
-            Connect &amp; Sync
+            Privacy and Legacy Gmail OAuth
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-2 text-sm text-muted-foreground">
-          <ol className="list-decimal pl-5 space-y-2">
-            <li>
-              Go to{" "}
-              <Link
-                href="/dashboard/workflows"
-                className="text-primary underline underline-offset-2"
-              >
-                Automation
-              </Link>{" "}
-              → <strong className="text-foreground">Import Google Contacts (Takeout)</strong>{" "}
-              to upload a Takeout zip or vCard (no OAuth required)
-            </li>
-            <li>
-              Register a Himalaya mail account in{" "}
-              <Link
-                href="/dashboard/settings"
-                className="text-primary underline underline-offset-2"
-              >
-                Settings
-              </Link>{" "}
-              , then run <strong className="text-foreground">Import Correspondents</strong>{" "}
-              and <strong className="text-foreground">Enrich Mail Activity</strong> from
-              Automation
-            </li>
-            <li>
-              Contacts appear in{" "}
-              <Link
-                href="/dashboard/contacts"
-                className="text-primary underline underline-offset-2"
-              >
-                Contacts
-              </Link>{" "}
-              with Gmail identity badges and enrichment scores
-            </li>
-          </ol>
-          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
-            If your app is in &ldquo;Testing&rdquo; mode, you will see an
-            &ldquo;unverified app&rdquo; warning. Click{" "}
-            <strong>Advanced</strong> &rarr;{" "}
-            <strong>Go to Signals (unsafe)</strong> to proceed.
-          </div>
+        <CardContent className="space-y-3 text-sm text-muted-foreground">
+          <p>
+            Signals stores email addresses, aggregate message counts, and interaction dates used for
+            CRM context. It does not persist message bodies during correspondent or activity imports.
+          </p>
+          <p className="rounded-lg border bg-muted/40 p-3 text-xs">
+            Existing Gmail OAuth connections are shown only for migration. Configure Himalaya first,
+            then disconnect the legacy OAuth account from Settings.
+          </p>
         </CardContent>
       </Card>
     </div>
@@ -1039,15 +803,15 @@ function FeaturesTab() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Users className="h-5 w-5" />
-            Contacts
+            People, Organizations &amp; Relationship Graph
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-2 text-sm text-muted-foreground">
-          <ul className="list-disc pl-5 space-y-1">
-            <li>Create, edit, and delete contacts</li>
-            <li>Search across name and email fields</li>
-            <li>Filter by funnel stage and platform</li>
-            <li>Each contact tracks an enrichment score (0 &ndash; 100)</li>
+          <ul className="list-disc space-y-1 pl-5">
+            <li>Unified contacts with multiple social and email identities</li>
+            <li>Organizations, employment history, niches, and relationship edges</li>
+            <li>Search, funnel stages, archival, provenance, and enrichment scores</li>
+            <li>Agent-assisted enrichment through RealTimeX Browser and agent-tools</li>
           </ul>
         </CardContent>
       </Card>
@@ -1084,8 +848,8 @@ function FeaturesTab() {
               connection edges
             </li>
             <li>
-              Gmail address-book sync imports contacts but does not add audience
-              graph edges (no follow/connection semantics)
+              Google Takeout and mail imports add contacts but not audience graph
+              edges because email has no follow/connection semantics
             </li>
           </ul>
         </CardContent>
@@ -1094,22 +858,16 @@ function FeaturesTab() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <LinkIcon className="h-5 w-5" />
-            Contact Identities & Enrichment
+            <Rocket className="h-5 w-5" />
+            Content, Launches &amp; Wind Tunnel
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-2 text-sm text-muted-foreground">
-          <ul className="list-disc pl-5 space-y-1">
-            <li>
-              Contacts can have multiple platform identities (X, LinkedIn, etc.)
-            </li>
-            <li>
-              Enrichment score computed from profile completeness: name, email,
-              phone, bio, location, photo, and platform data
-            </li>
-            <li>
-              Scores update automatically on every contact or identity change
-            </li>
+          <ul className="list-disc space-y-1 pl-5">
+            <li>One content library for drafts, inbound posts, and published content</li>
+            <li>Agent-mediated publishing to verified X and LinkedIn acting targets</li>
+            <li>Launches group campaign variants, evidence, and publish state</li>
+            <li>Wind Tunnel audience simulations with prediction and calibration history</li>
           </ul>
         </CardContent>
       </Card>
@@ -1118,23 +876,15 @@ function FeaturesTab() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <RefreshCw className="h-5 w-5" />
-            X/Twitter Sync
+            Automation and RealTimeX Agents
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-2 text-sm text-muted-foreground">
-          <ul className="list-disc pl-5 space-y-1">
-            <li>
-              Imports your &ldquo;following&rdquo; list as CRM contacts
-            </li>
-            <li>
-              Deduplicates by platform user ID — re-syncing updates existing
-              contacts
-            </li>
-            <li>
-              Pulls: name, bio, location, profile photo, follower/following
-              counts
-            </li>
-            <li>Rate limiting tracked from X API response headers</li>
+          <ul className="list-disc space-y-1 pl-5">
+            <li>Workflows define repeatable search, import, enrich, prune, and publishing jobs</li>
+            <li>Runs and steps stay visible in Signals for observability</li>
+            <li>RealTimeX terminal agents execute AI work through the Agent Tools API</li>
+            <li>Recurring AI schedules belong in RealTimeX Agent Flows</li>
           </ul>
         </CardContent>
       </Card>
@@ -1143,23 +893,15 @@ function FeaturesTab() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Linkedin className="h-5 w-5" />
-            LinkedIn Sync
+            Analytics and Goals
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-2 text-sm text-muted-foreground">
-          <ul className="list-disc pl-5 space-y-1">
-            <li>Imports your LinkedIn connections as CRM contacts</li>
-            <li>
-              Deduplicates by LinkedIn platform user ID — re-syncing updates
-              existing contacts
-            </li>
-            <li>
-              Pulls: name, headline, vanity URL, profile photo
-            </li>
-            <li>
-              Cross-platform enrichment: contacts with both X and LinkedIn
-              identities get bonus enrichment score
-            </li>
+          <ul className="list-disc space-y-1 pl-5">
+            <li>Overview, agent, engagement, content, and sync-health analytics</li>
+            <li>Date-range filters for recent and long-term performance</li>
+            <li>Demand-generation goals with targets, deadlines, and progress history</li>
+            <li>Workflow-linked progress plus manual adjustments when needed</li>
           </ul>
         </CardContent>
       </Card>
@@ -1168,44 +910,15 @@ function FeaturesTab() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Mail className="h-5 w-5" />
-            Gmail / Google
+            Connections, Imports and Mail
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-2 text-sm text-muted-foreground">
-          <ul className="list-disc pl-5 space-y-1">
-            <li>Import contacts from Google Takeout (zip/vcf upload)</li>
-            <li>
-              Himalaya mail workflows: import correspondents from Sent/INBOX headers
-            </li>
-            <li>
-              Mail activity enrichment: sent/received counts in last 30 days,
-              last interaction date, and work-email org links
-            </li>
-            <li>
-              Cross-platform dedup with X and LinkedIn contacts
-            </li>
-            <li>
-              No email content is stored — only metadata (message counts and
-              dates)
-            </li>
-          </ul>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <ListChecks className="h-5 w-5" />
-            Tasks
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2 text-sm text-muted-foreground">
-          <ul className="list-disc pl-5 space-y-1">
-            <li>Create manual tasks linked to contacts</li>
-            <li>
-              Track status: todo &rarr; in_progress &rarr; blocked &rarr; done
-            </li>
-            <li>Priority levels: low, medium, high, urgent</li>
+          <ul className="list-disc space-y-1 pl-5">
+            <li>RealTimeX Browser connections and stable acting targets for social platforms</li>
+            <li>X archive, LinkedIn export, and Google Takeout import workflows</li>
+            <li>Himalaya correspondent and aggregate mail-activity enrichment</li>
+            <li>Optional advanced OAuth API sync for supported X and LinkedIn accounts</li>
           </ul>
         </CardContent>
       </Card>
@@ -1220,8 +933,10 @@ function FaqTab() {
       q: "Where is my data stored?",
       a: (
         <>
-          SQLite at <Code>~/.signals/data.db</Code>. All data stays on your
-          machine — nothing is sent to external servers.
+          The CRM graph lives in SQLite at <Code>~/.signals/data.db</Code>; encrypted
+          configuration and media also stay under <Code>~/.signals/</Code>. AI requests,
+          terminal agents, web research, and platform actions may send the bounded data needed
+          for the task to your configured provider or target service.
         </>
       ),
     },
@@ -1237,69 +952,49 @@ function FaqTab() {
     },
     {
       icon: Twitter,
-      q: "What X API plan do I need?",
-      a: "Free tier supports account connection and posting (500 posts/month). To import your following list via Contact Sync, you need the Basic tier ($200/mo) which includes follows.read access.",
-    },
-    {
-      icon: Key,
-      q: "Why do I need two sets of X credentials?",
-      a: (
-        <>
-          The API Key/Secret (Keys tab) are OAuth 1.0a credentials. The Client
-          ID/Secret (from User Authentication setup) are OAuth 2.0 credentials.
-          Signals uses OAuth 2.0.
-        </>
-      ),
+      q: "Do I need social-platform developer API keys?",
+      a: "No for the normal workflow. Browser connection, file imports, and agent publishing do not require developer OAuth credentials. Optional API contact sync under Advanced requires platform-approved scopes; availability and pricing are controlled by each platform.",
     },
     {
       icon: RefreshCw,
-      q: "What happens when I click Sync?",
-      a: "Fetches up to 1,000 accounts you follow, creates or updates contacts with X profile data, and computes enrichment scores. Requires the X API Basic tier ($200/mo) for follows.read access.",
-    },
-    {
-      icon: RefreshCw,
-      q: "Why can't I sync contacts?",
-      a: "Contact sync uses the follows.read endpoint which X removed from the Free tier in August 2025. You need the X API Basic tier ($200/mo). After upgrading your X Developer plan, click \"Enable Contact Sync\" in Settings to re-authorize with the required permissions.",
+      q: "How do I import my X network?",
+      a: "Download your X data archive, then run the X archive import from Automation → Workflows. It creates or updates contacts and writes follower/following edges used by Explore. API sync is an optional advanced path.",
     },
     {
       icon: Linkedin,
-      q: "What LinkedIn API product do I need?",
-      a: "\"Sign In with LinkedIn using OpenID Connect\" — it's free and gives access to profile and email data. No paid LinkedIn Developer tier required.",
+      q: "How do I import LinkedIn connections?",
+      a: "Request a Basic Data Export from LinkedIn, then upload the zip or Connections.csv through Automation → Workflows. OpenID Connect sign-in alone does not grant access to a member's connection list.",
     },
     {
       icon: Sparkles,
-      q: "How does cross-platform enrichment work?",
-      a: "Contacts matched across X, LinkedIn, and Gmail get a +10 enrichment score bonus for having multiple platform identities. LinkedIn also contributes up to +15 points from professional fields like headline, company, and title.",
+      q: "How does publishing work now?",
+      a: "Compose or edit a draft in Signals, select platform targets, and send the job to a RealTimeX agent. The agent verifies the acting target, publishes through RealTimeX Browser, and reports per-platform results back to the visible job in Signals.",
+    },
+    {
+      icon: ListChecks,
+      q: "Where do AI workflows run?",
+      a: "RealTimeX terminal agents execute AI work and call the Signals Agent Tools API. Signals records templates, runs, steps, and results for observability. Use RealTimeX Agent Flows for recurring AI schedules; legacy in-process agent loops are no longer available.",
     },
     {
       icon: Mail,
-      q: "How do I import Google contacts?",
-      a: "Use Automation → Import Google Contacts (Takeout) with a Google Takeout contacts export. For ongoing mail-based enrichment, register a Himalaya mail account in Settings and run Import Correspondents / Enrich Mail Activity.",
+      q: "How do Google contacts and mail work?",
+      a: "Import Google contacts from a Takeout zip or vCard. Configure mail accounts with Himalaya, register them in Settings, then run correspondent and activity workflows. The import stores addresses, aggregate counts, and dates—not message bodies.",
     },
     {
-      icon: Mail,
-      q: "What Google APIs do I need?",
-      a: "None for the recommended Takeout + Himalaya workflows. Legacy OAuth sync (deprecated) required People API and Gmail API in Google Cloud Console.",
-    },
-    {
-      icon: Mail,
-      q: "What does mail activity enrichment do?",
-      a: "Enriches contacts with email frequency data — sent and received message counts in the last 30 days, plus the last message date. No email content is read or stored, only aggregate metadata.",
-    },
-    {
-      icon: UserPlus,
-      q: "Can I connect multiple X accounts?",
-      a: "Currently one account per platform. The schema supports multiple but the UI assumes single-user.",
+      icon: Users,
+      q: "Can agents use more than one social identity?",
+      a: "Yes. In an embedded RealTimeX install, use Acting targets on the platform card to add or discover identities, choose a default, and switch-and-verify before an agent acts. Platform-specific switching limitations still apply.",
     },
     {
       icon: Key,
-      q: "How do I update my API keys?",
+      q: "Where do I configure AI models and keys?",
       a: (
         <>
-          When running as a RealtimeX Local App, configure LLM and search through
-          RealtimeX <strong className="font-medium text-foreground">Settings → Local Apps</strong>
-          (approve <Code>llm.chat</Code> and <Code>llm.embed</Code> for Signals). For
-          standalone development, edit <Code>.env.local</Code> and restart the dev server.
+          For the Local App, configure providers and approve <Code>llm.chat</Code> and{" "}
+          <Code>llm.embed</Code> in RealTimeX{" "}
+          <strong className="font-medium text-foreground">Settings → Local Apps</strong>.
+          Standalone source development can use <Code>.env.local</Code> and requires a restart
+          after environment changes.
         </>
       ),
     },
@@ -1364,7 +1059,7 @@ function HelpContent() {
           </TabsTrigger>
           <TabsTrigger value="gmail-setup">
             <Mail className="h-4 w-4" />
-            Gmail Setup
+            Mail Setup
           </TabsTrigger>
           <TabsTrigger value="features">
             <LayoutList className="h-4 w-4" />
@@ -1389,7 +1084,7 @@ function HelpContent() {
           <FacebookSetupTab />
         </TabsContent>
         <TabsContent value="gmail-setup">
-          <GmailSetupTab />
+          <MailSetupTab />
         </TabsContent>
         <TabsContent value="features">
           <FeaturesTab />
