@@ -4,11 +4,20 @@ import { getContentItem, getThreadItems } from "@/lib/db/queries/content";
 import { getContentGtmContext } from "@/lib/db/queries/content-gtm-context";
 import { WindTunnelSection } from "@/components/wind-tunnel-section";
 import { listEngagementsByContentPost } from "@/lib/db/queries/engagements";
-import { getPlatformAccountByPlatform } from "@/lib/db/queries/platform-accounts";
+import {
+  getPlatformAccountById,
+  getPlatformAccountByPlatform,
+} from "@/lib/db/queries/platform-accounts";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, ExternalLink, Heart, MessageCircle, Repeat2, Quote } from "lucide-react";
+import { ArrowLeft, ExternalLink } from "lucide-react";
+import { EngagementMetrics } from "@/components/engagement-metrics";
+import {
+  getPlatformLabel,
+  parseEngagementSnapshot,
+  resolveContentPlatform,
+} from "@/lib/platforms/content-platform";
 import { EngagementActions } from "./engagement-actions";
 import { ContentStatusBadge } from "@/components/content-status-badge";
 
@@ -48,12 +57,16 @@ export default async function ContentDetailPage({
     notFound();
   }
 
-  const snapshot = item.post?.engagementSnapshot
-    ? JSON.parse(item.post.engagementSnapshot)
-    : null;
+  const snapshot = parseEngagementSnapshot(item.post?.engagementSnapshot);
 
-  // Check if X account is connected (for engagement actions)
-  const xAccount = getPlatformAccountByPlatform("x");
+  // Which platform this content actually lives on — drives labels, metrics and actions
+  const postAccount = item.post ? getPlatformAccountById(item.post.platformAccountId) : undefined;
+  const platform = resolveContentPlatform(item, postAccount?.platform);
+  const isX = platform === "x";
+  const threadUnit = isX ? "tweets" : "posts";
+
+  // Engagement actions are X-only for now (see /api/platforms/x/engage)
+  const xAccount = isX ? getPlatformAccountByPlatform("x") : undefined;
   const canEngage = !!xAccount && xAccount.status === "active" && !!item.post?.platformPostId;
 
   // Get engagement history for this post
@@ -81,9 +94,9 @@ export default async function ContentDetailPage({
       {/* Main content card */}
       <Card>
         <CardContent className="pt-6 space-y-4">
-          {/* Header: type badges + date */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
+          {/* Header: type badges + platform link (wraps on narrow viewports) */}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Badge variant="secondary">
                 {contentTypeLabels[item.contentType] ?? item.contentType}
               </Badge>
@@ -98,19 +111,19 @@ export default async function ContentDetailPage({
               )}
               {isThread && (
                 <Badge variant="outline">
-                  Thread ({threadItems.length} tweets)
+                  Thread ({threadItems.length} {threadUnit})
                 </Badge>
               )}
             </div>
             {item.post?.platformUrl && (
-              <Button variant="ghost" size="sm" asChild>
+              <Button variant="ghost" size="sm" className="shrink-0" asChild>
                 <a
                   href={item.post.platformUrl}
                   target="_blank"
                   rel="noopener noreferrer"
                 >
                   <ExternalLink className="mr-1 h-4 w-4" />
-                  View on X
+                  View on {getPlatformLabel(platform)}
                 </a>
               </Button>
             )}
@@ -121,7 +134,7 @@ export default async function ContentDetailPage({
             <h2 className="text-lg font-semibold">{item.title}</h2>
           )}
 
-          {/* Tweet body */}
+          {/* Body */}
           <div className="whitespace-pre-wrap text-sm leading-relaxed">
             {item.body ?? "No content"}
           </div>
@@ -132,26 +145,12 @@ export default async function ContentDetailPage({
           </p>
 
           {/* Engagement metrics */}
-          {snapshot && (
-            <div className="flex items-center gap-6 pt-2 border-t text-sm text-muted-foreground">
-              <span className="flex items-center gap-1.5" title="Likes">
-                <Heart className="h-4 w-4" />
-                {snapshot.likes ?? 0}
-              </span>
-              <span className="flex items-center gap-1.5" title="Replies">
-                <MessageCircle className="h-4 w-4" />
-                {snapshot.replies ?? 0}
-              </span>
-              <span className="flex items-center gap-1.5" title="Retweets">
-                <Repeat2 className="h-4 w-4" />
-                {snapshot.retweets ?? 0}
-              </span>
-              <span className="flex items-center gap-1.5" title="Quotes">
-                <Quote className="h-4 w-4" />
-                {snapshot.quotes ?? 0}
-              </span>
-            </div>
-          )}
+          <EngagementMetrics
+            snapshot={snapshot}
+            platform={platform}
+            size="md"
+            className="pt-2 border-t"
+          />
         </CardContent>
       </Card>
 
@@ -159,7 +158,7 @@ export default async function ContentDetailPage({
       {isThread && (
         <Card>
           <CardContent className="pt-6">
-            <h3 className="text-sm font-medium mb-3">Thread ({threadItems.length} tweets)</h3>
+            <h3 className="text-sm font-medium mb-3">Thread ({threadItems.length} {threadUnit})</h3>
             <div className="space-y-0">
               {threadItems.map((ti, idx) => {
                 const isCurrent = ti.id === item.id;
@@ -177,7 +176,7 @@ export default async function ContentDetailPage({
                       )}
                     </div>
 
-                    {/* Tweet content */}
+                    {/* Item content */}
                     {isCurrent ? (
                       <div className="pb-3 flex-1">
                         <p className="text-sm font-medium text-foreground">
