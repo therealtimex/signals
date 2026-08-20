@@ -406,7 +406,15 @@ describe("hydrateXProfiles", () => {
       vi.fn<XUserLookup>(),
       secondTransport,
     );
-    expect(second.outcomes[0]?.reason).toBe("not_found_cached");
+    expect(second.outcomes).toMatchObject([
+      { contactId: suspended.contact.id, status: "skipped", reason: "not_found_cached" },
+      {
+        contactId: retryable.contact.id,
+        status: "skipped",
+        reason: "x_web_deferred",
+        detail: { source: "x_web_anon" },
+      },
+    ]);
     expect(secondTransport).toHaveBeenCalledWith(
       [{ userId: "11", knownHandle: "resolved_user" }],
       expect.any(Object),

@@ -1,6 +1,7 @@
 import type { XUser } from "@/lib/platforms/x/client";
 import {
   X_ANON_COOLDOWN_MS,
+  X_ANON_DEFERRED_REASON,
   X_ANON_HTTP_MAX_BYTES,
   X_ANON_HTTP_TIMEOUT_MS,
   X_ANON_MAX_REDIRECTS,
@@ -278,7 +279,7 @@ export function createXAnonWebSession(deps: XAnonWebTransportDeps): XAnonWebSess
       for (const request of requests) {
         outcomes.set(request.userId, {
           status: "skip",
-          reason: "x_web_deferred",
+          reason: X_ANON_DEFERRED_REASON,
           detail: { cooldownReason: cooldown.reason },
         });
       }

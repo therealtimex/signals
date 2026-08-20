@@ -12,6 +12,7 @@ import { createWorkflowRun, getWorkflowRun, listWorkflowSteps } from "@/lib/db/q
 import { getRtxRefsFromRunConfig } from "@/lib/agents/run-template-via-rtx";
 import { db } from "@/lib/db/client";
 import { contentItems, contentPosts, platformAccounts } from "@/lib/db/schema";
+import { X_ANON_DEFERRED_REASON } from "@/lib/platforms/x/anon-web-constants";
 import { PIPELINE_STEP_HANDLERS } from "@/lib/workflows/pipeline/handlers";
 import {
   executePipelineRun,
@@ -621,7 +622,7 @@ describe("runPipelineTemplate", () => {
         outcomes: ids.map((contactId) => ({
           contactId,
           status: "skipped" as const,
-          reason: "x_web_deferred",
+          reason: X_ANON_DEFERRED_REASON,
         })),
         aborted: false,
       }),
@@ -669,7 +670,7 @@ describe("runPipelineTemplate", () => {
     });
   });
 
-  it("stops after a global handler abort and preserves completed contact counts", async () => {
+  it("counts deferred contacts as processed before a global handler abort", async () => {
     const contacts = ["Abort A", "Abort B", "Abort C"].map((name) => createContact({ name }));
     const contactIds = contacts.map((contact) => contact.id);
     const plan = planProfilePipelineRun({ contactIds });
@@ -678,7 +679,13 @@ describe("runPipelineTemplate", () => {
     vi.spyOn(PIPELINE_STEP_HANDLERS, "hydrate_x_profiles").mockImplementation(
       async (ids, ctx) => ({
         stepId: ctx.stepId,
-        outcomes: ids.map((contactId) => ({ contactId, status: "updated" as const })),
+        outcomes: ids.map((contactId) => contactId === contactIds[0]
+          ? {
+              contactId,
+              status: "skipped" as const,
+              reason: X_ANON_DEFERRED_REASON,
+            }
+          : { contactId, status: "updated" as const }),
         aborted: false,
       }),
     );
@@ -736,8 +743,10 @@ describe("runPipelineTemplate", () => {
       env: process.env,
     });
 
-    expect(visited).toEqual(contactIds.slice(0, 2));
-    expect(JSON.parse(getWorkflowRun(run.id)?.result ?? "{}")).toMatchObject({
+    expect(visited).toEqual([contactIds[1]]);
+    const completed = getWorkflowRun(run.id);
+    expect(completed?.processedItems).toBe(2);
+    expect(JSON.parse(completed?.result ?? "{}")).toMatchObject({
       selected: 3,
       processed: 2,
       aborted: 1,

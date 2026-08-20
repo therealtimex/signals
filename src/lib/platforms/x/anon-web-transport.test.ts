@@ -133,6 +133,30 @@ describe("hydrateXProfilesViaAnonWeb", () => {
     expect(dispose).toHaveBeenCalledOnce();
   });
 
+  it("defers a later session while a breaker cooldown is active", async () => {
+    const now = () => 1_000;
+    const firstFetch = safeFetch(new Response("", {
+      status: 429,
+      headers: { "content-type": "text/html" },
+    }));
+    const firstSession = createXAnonWebSession({ ...deps(firstFetch), now });
+
+    await firstSession.hydrate([{ userId: "1", knownHandle: "person1" }]);
+    await firstSession.dispose();
+
+    const secondFetch = safeFetch(htmlResponse());
+    const secondSession = createXAnonWebSession({ ...deps(secondFetch), now });
+    const deferred = await secondSession.hydrate([{ userId: "2" }]);
+    await secondSession.dispose();
+
+    expect(deferred.get("2")).toEqual({
+      status: "skip",
+      reason: "x_web_deferred",
+      detail: { cooldownReason: "x_web_rate_limited" },
+    });
+    expect(secondFetch).not.toHaveBeenCalled();
+  });
+
   it("re-resolves a stale known handle and validates the numeric identifier", async () => {
     const { factory } = resolverFactory(async () => ({ status: "resolved", handle: "tri_dao" }));
     const fetchImpl = safeFetch(htmlResponse());

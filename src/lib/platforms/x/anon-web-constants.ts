@@ -20,6 +20,7 @@ export const X_ANON_MAX_REDIRECTS = 3;
 export const X_ANON_MIN_REQUEST_GAP_MS = 1_000;
 export const X_ANON_PARSE_FAILURE_BREAK_THRESHOLD = 3;
 export const X_ANON_COOLDOWN_MS = 15 * 60 * 1000;
+export const X_ANON_DEFERRED_REASON = "x_web_deferred" as const;
 
 export function isAllowedXNavigationOrigin(rawUrl: string): boolean {
   try {
