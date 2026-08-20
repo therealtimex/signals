@@ -41,5 +41,6 @@ export function StatCardsRow({ items, className }: StatCardsRowProps) {
 function getGridCols(count: number): string {
   if (count <= 2) return "grid-cols-1 sm:grid-cols-2";
   if (count === 3) return "grid-cols-1 sm:grid-cols-3";
+  if (count === 5) return "grid-cols-2 sm:grid-cols-3 lg:grid-cols-5";
   return "grid-cols-2 sm:grid-cols-4";
 }
