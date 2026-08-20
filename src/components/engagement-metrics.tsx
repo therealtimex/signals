@@ -1,8 +1,9 @@
-import { Heart, MessageCircle, Quote, Repeat2, Share2, ThumbsUp, type LucideIcon } from "lucide-react";
+import { Heart, MessageCircle, Quote, Repeat2, Share2, type LucideIcon } from "lucide-react";
 import {
   getEngagementMetrics,
   type EngagementMetricKey,
 } from "@/lib/platforms/content-platform";
+import { likeIcon } from "@/lib/platforms/platform-icons";
 import { cn } from "@/lib/utils";
 
 const METRIC_ICONS: Record<EngagementMetricKey, LucideIcon> = {
@@ -13,14 +14,6 @@ const METRIC_ICONS: Record<EngagementMetricKey, LucideIcon> = {
   quotes: Quote,
   shares: Share2,
 };
-
-/** Platforms whose "like" is a thumbs-up rather than a heart. */
-const THUMBS_UP_LIKE_PLATFORMS = new Set(["linkedin", "facebook"]);
-
-/** Shared so the analytics tab shows the same like icon as the content views. */
-export function likeIcon(platform: string | null | undefined): LucideIcon {
-  return platform && THUMBS_UP_LIKE_PLATFORMS.has(platform) ? ThumbsUp : Heart;
-}
 
 function metricIcon(key: EngagementMetricKey, platform: string | null | undefined): LucideIcon {
   if (key === "likes") return likeIcon(platform);

@@ -30,7 +30,7 @@ import {
   Share2,
   type LucideIcon,
 } from "lucide-react";
-import { likeIcon } from "@/components/engagement-metrics";
+import { likeIcon } from "@/lib/platforms/platform-icons";
 import {
   getAnalyticsSectionLabel,
   type AnalyticsMetricKey,
