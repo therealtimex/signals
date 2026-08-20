@@ -42,6 +42,12 @@ type MergeOutcome = {
   detail: string;
 };
 
+/** The server's error message when it sent one, without a non-JSON body masking it. */
+async function readError(res: Response, fallback: string): Promise<Error> {
+  const body = (await res.json().catch(() => null)) as { error?: string } | null;
+  return new Error(body?.error || `${fallback} (${res.status})`);
+}
+
 /** Groups keep their identity across a merge by primary id — one merge per group. */
 function groupKey(group: DedupeReviewGroup): string {
   return `${group.primaryContactId}:${group.secondaryContactIds.join(",")}`;
@@ -117,8 +123,8 @@ export function DedupeReviewDialog({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tiers: tiersFromPreset(preset) }),
       });
-      const data = (await res.json()) as { groups?: DedupeReviewGroup[]; error?: string };
-      if (!res.ok) throw new Error(data.error || "Scan failed");
+      if (!res.ok) throw await readError(res, "Scan failed");
+      const data = (await res.json()) as { groups?: DedupeReviewGroup[] };
       setGroups(data.groups ?? []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Scan failed");
@@ -146,8 +152,8 @@ export function DedupeReviewDialog({
             })),
           }),
         });
-        const data = (await res.json()) as RunDedupeMergeResult & { error?: string };
-        if (!res.ok) throw new Error(data.error || "Merge failed");
+        if (!res.ok) throw await readError(res, "Merge failed");
+        const data = (await res.json()) as RunDedupeMergeResult;
 
         // The server merges in request order, so results line up with the batch.
         setOutcomes((prev) => {
