@@ -37,4 +37,21 @@ export function readRunLimitFromTemplateConfig(
   };
 }
 
+const PLATFORM_LABELS: Record<string, string> = {
+  x: "X",
+  linkedin: "LinkedIn",
+  facebook: "Facebook",
+};
+
+/** Render a platform target as `Facebook: Le Dang Trung (ledangtrung)` for the acting-profile picker. */
+export function actingTargetLabel(target: {
+  platform: string;
+  name: string;
+  handle?: string | null;
+}): string {
+  const platform = PLATFORM_LABELS[target.platform] ?? target.platform;
+  const handle = target.handle?.trim();
+  return handle ? `${platform}: ${target.name} (${handle})` : `${platform}: ${target.name}`;
+}
+
 export { PROFILE_PIPELINE_DEFAULT_BATCH, PROFILE_PIPELINE_MAX_BATCH };

@@ -2,6 +2,10 @@ import { eq, and } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { workflowTemplates } from "@/lib/db/schema";
 import { createTemplate } from "@/lib/db/queries/workflow-templates";
+import {
+  SOCIAL_INTENT_PATROL_TEMPLATE_NAME,
+  buildSocialPatrolTemplateConfig,
+} from "@/lib/workflows/social-patrol";
 
 /** Bump this when seed template prompts change to trigger updates on existing installs. */
 const SEED_VERSION = 5;
@@ -366,6 +370,48 @@ Do NOT ask questions — you are autonomous. Make reasonable assumptions and pro
 - Limit to 5 contacts per run to avoid looking like a bot
 - Report progress after engaging with each contact`,
     config: { maxEngagements: 5, platforms: ["x"] },
+  },
+  {
+    name: SOCIAL_INTENT_PATROL_TEMPLATE_NAME,
+    description:
+      "Run a time-boxed patrol shift on an acting profile: scan monitored communities for high-intent pain posts, reply with technical value, and capture the engagers into the CRM.",
+    templateType: "engagement",
+    targetPersona:
+      "People publicly declaring intent in monitored communities — asking for tool recommendations, alternatives, or help with setup and token errors — plus everyone who reacts to those posts",
+    estimatedCost: 0.25,
+    systemPrompt: `You are a social patrol agent working one time-boxed shift on a real acting profile.
+
+## Objective
+High-intent buyers declare pain in public. Establish presence in the monitored communities,
+answer the pain posts with genuine technical value, and capture the people who engage with
+those posts as Signals contacts — all inside the shift budget in the runtime config.
+
+## Execution lane
+Run in RealTimeX Browser under the acting target from the runtime config. The numbered
+"Social Intent Patrol execution contract" below this section is the operational sequence —
+lease, connect, patrol, approve, mine, write back, release. Follow it in order.
+
+## Process
+1. Prepare the acting target's lease before touching the browser.
+2. Read the monitored communities and score posts against the intent keywords. Prefer recent
+   posts with unanswered questions over popular posts that already have good answers.
+3. Draft replies that solve the poster's actual problem: name the specific cause, give the
+   concrete fix, and keep it short. Never pitch.
+4. Mine the likers and repliers of the pain posts you engaged with — they share the poster's
+   intent — and stage them for import.
+5. Stop when any budget in the runtime config is exhausted, then release the lease.
+
+Do NOT ask questions about scope — the runtime config is the scope. Do pause for the approval
+checkpoint when it is enabled.
+
+## Rules
+- Never exceed maxPosts, maxComments, maxScrapedContacts, or durationMinutes. They exist to
+  keep the acting profile below platform rate limits, not as soft targets to hit.
+- One comment per post, and never comment twice in the same thread.
+- Skip posts that are already well answered, off-topic, or hostile.
+- Never fabricate a technical claim to look helpful. If you are unsure, do not reply.
+- Attribute every contact and content item you create to this workflow run.`,
+    config: buildSocialPatrolTemplateConfig(),
   },
 ];
 

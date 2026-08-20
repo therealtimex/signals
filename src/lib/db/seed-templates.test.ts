@@ -7,6 +7,12 @@ import {
   seedTemplates,
 } from "@/lib/db/seed-templates";
 import { workflowTemplates } from "@/lib/db/schema";
+import {
+  DEFAULT_INTENT_KEYWORDS,
+  SOCIAL_INTENT_PATROL_TEMPLATE_NAME,
+  isSocialPatrolTemplateConfig,
+  readSocialPatrolConfig,
+} from "@/lib/workflows/social-patrol";
 import { resetCoreTables } from "@/test/db";
 
 describe("Contact profile pipeline seed", () => {
@@ -120,5 +126,38 @@ describe("Deduplicate & Merge Contacts seed", () => {
       .where(eq(workflowTemplates.name, "Deduplicate & Merge Contacts"))
       .all();
     expect(rows).toHaveLength(1);
+  });
+});
+
+describe("Social Intent Patrol seed", () => {
+  beforeEach(() => {
+    resetCoreTables();
+  });
+
+  it("seeds an Engage template carrying the patrol slider defaults", () => {
+    seedTemplates();
+    const template = getSystemTemplateByName(SOCIAL_INTENT_PATROL_TEMPLATE_NAME)!;
+
+    expect(template.templateType).toBe("engagement");
+    // Cross-platform: the acting target chosen at run time decides the platform.
+    expect(template.platform).toBeNull();
+
+    const config = JSON.parse(template.config ?? "{}") as Record<string, unknown>;
+    expect(isSocialPatrolTemplateConfig(config)).toBe(true);
+    expect(readSocialPatrolConfig(config)).toEqual({
+      targetId: null,
+      durationMinutes: 15,
+      maxPosts: 1,
+      maxComments: 2,
+      maxScrapedContacts: 20,
+      communities: [],
+      intentKeywords: DEFAULT_INTENT_KEYWORDS,
+      requireApproval: true,
+    });
+  });
+
+  it("is idempotent across repeated seeding", () => {
+    seedTemplates();
+    expect(seedTemplates()).toEqual({ seeded: 0, updated: 0, skipped: true });
   });
 });
