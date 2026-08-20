@@ -22,7 +22,19 @@ import {
 } from "@/lib/platforms/x/web-profile-parser";
 import type { EnvLike } from "@/lib/rtx/env";
 
-export type XAnonWebRequest = { userId: string; knownHandle?: string };
+export type XAnonWebRequest = {
+  /**
+   * Key the outcome is returned under. Normally the numeric X user ID; for `handleOnly`
+   * requests the caller supplies its own opaque key because no numeric ID is known yet.
+   */
+  userId: string;
+  knownHandle?: string;
+  /**
+   * The identity only knows a handle. Fetch `knownHandle` directly and accept whichever
+   * numeric ID the profile page reports instead of verifying it against `userId`.
+   */
+  handleOnly?: boolean;
+};
 export type XAnonWebOutcome =
   | { status: "hydrated"; user: XUser; resolvedHandle?: string }
   | { status: "miss"; missStatus: "not_found" | "suspended"; resolvedHandle?: string }
@@ -145,7 +157,7 @@ async function readCappedHtml(response: Response): Promise<string | null> {
 }
 
 async function fetchProfile(
-  userId: string,
+  userId: string | null,
   handle: string,
   fetchImpl: typeof fetch,
   nowMs: number,
@@ -203,7 +215,9 @@ async function fetchProfile(
       if (parsed.status === "parse_failed") {
         return { status: "skip", reason: "x_web_parse_failed", detail: { parserReason: parsed.reason } };
       }
-      if (parsed.profile.id !== userId) return { status: "skip", reason: "x_web_id_mismatch" };
+      if (userId !== null && parsed.profile.id !== userId) {
+        return { status: "skip", reason: "x_web_id_mismatch" };
+      }
       if (parsed.profile.handle.toLowerCase() !== handle.toLowerCase()) {
         return { status: "skip", reason: "x_web_unexpected_redirect" };
       }
@@ -290,6 +304,28 @@ export function createXAnonWebSession(deps: XAnonWebTransportDeps): XAnonWebSess
     for (const request of requests) {
       if (breakerReason) {
         outcomes.set(request.userId, { status: "skip", reason: breakerReason });
+        continue;
+      }
+
+      if (request.handleOnly) {
+        const handle = normalizeKnownHandle(request.knownHandle);
+        if (!handle) {
+          outcomes.set(request.userId, { status: "skip", reason: "x_handle_invalid" });
+          continue;
+        }
+        await pace();
+        const fetched = await fetchProfile(null, handle, deps.fetchImpl, now());
+        outcomes.set(request.userId, withResolvedHandle(fetched, handle));
+        if (fetched.status === "hydrated" || fetched.status === "miss") {
+          consecutiveParseFailures = 0;
+        } else if (isImmediateBreaker(fetched.reason)) {
+          trip(fetched.reason);
+        } else if (isParseFailure(fetched.reason)) {
+          consecutiveParseFailures++;
+          if (consecutiveParseFailures >= X_ANON_PARSE_FAILURE_BREAK_THRESHOLD) trip(fetched.reason);
+        } else {
+          consecutiveParseFailures = 0;
+        }
         continue;
       }
 

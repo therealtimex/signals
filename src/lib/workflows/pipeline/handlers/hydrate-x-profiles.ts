@@ -1,13 +1,15 @@
 import { validateIdentityAvatarUrl } from "@/lib/contact-avatar-client";
 import { recalcContactEnrichment } from "@/lib/db/contact-enrichment-recalc";
 import { getContactById, updateContact } from "@/lib/db/queries/contacts";
-import { listIdentitiesByContact, updateIdentity } from "@/lib/db/queries/identities";
+import { getIdentityById, listIdentitiesByContact, updateIdentity } from "@/lib/db/queries/identities";
 import { getPlatformAccountByPlatform } from "@/lib/db/queries/platform-accounts";
 import type { ContactIdentity } from "@/lib/db/types";
 import {
   getUsersByIds,
+  getUsersByUsernames,
   TierRestrictedError,
   X_USER_LOOKUP_MAX_IDS,
+  X_USER_LOOKUP_MAX_USERNAMES,
   type XLookupError,
   type XUser,
 } from "@/lib/platforms/x/client";
@@ -16,6 +18,7 @@ import {
   createXAnonWebSession,
   hydrateXProfilesViaAnonWeb,
   type XAnonWebOutcome,
+  type XAnonWebRequest,
   type XAnonWebTransport,
 } from "@/lib/platforms/x/anon-web-transport";
 import type {
@@ -28,6 +31,23 @@ export const HYDRATE_X_PROFILES_HANDLER = "hydrate_x_profiles";
 export const X_PROFILE_HYDRATE_RETRY_SECONDS = 30 * 24 * 60 * 60;
 
 export type XUserLookup = typeof getUsersByIds;
+export type XUsernameLookup = typeof getUsersByUsernames;
+
+const X_HANDLE_PATTERN = /^[A-Za-z0-9_]{1,15}$/;
+/** Keeps handle request keys from colliding with the numeric IDs in the same outcome map. */
+const HANDLE_REQUEST_PREFIX = "handle:";
+
+type HandleGroup = { handle: string; identities: ContactIdentity[] };
+
+/** One chunked X API lookup, keyed by numeric ID or by lowercased handle. */
+type LookupBatch = {
+  keys: string[];
+  run: () => Promise<{ users: XUser[]; errors: XLookupError[] }>;
+  keyForUser: (user: XUser) => string;
+  keyForError: (error: XLookupError) => string | undefined;
+  identitiesFor: (key: string) => ContactIdentity[];
+  describe: (key: string) => string;
+};
 
 type ContactState = {
   contactId: string;
@@ -36,10 +56,24 @@ type ContactState = {
   handles: string[];
   notFound: number;
   contactUpdated: boolean;
+  idConflicts: string[];
   failure?: string;
   skipReason?: string;
   skipDetail?: Record<string, unknown>;
 };
+
+function isNumericUserId(value: string): boolean {
+  return /^\d+$/.test(value);
+}
+
+/** The handle an identity without a numeric ID can still be looked up by, without the leading @. */
+function resolvableHandle(identity: ContactIdentity): string | undefined {
+  for (const candidate of [identity.platformHandle, identity.platformUserId]) {
+    const handle = candidate?.trim().replace(/^@/, "");
+    if (handle && X_HANDLE_PATTERN.test(handle)) return handle;
+  }
+  return undefined;
+}
 
 function nowUnix(): number {
   return Math.floor(Date.now() / 1000);
@@ -84,6 +118,8 @@ function identityNeedsHydration(
   platformData: Record<string, unknown>,
 ): boolean {
   return (
+    // An identity still keyed by a handle has no stable platform ID yet, which is itself a gap.
+    !isNumericUserId(identity.platformUserId) ||
     !identity.displayName?.trim() ||
     !identity.platformHandle?.trim() ||
     !identity.avatarUrl?.trim() ||
@@ -122,7 +158,12 @@ function tryAvatarUrl(raw: string | undefined): string | undefined {
 
 function lookupErrorId(error: XLookupError): string | undefined {
   const value = error.value ?? error.resource_id;
-  return typeof value === "string" && /^\d+$/.test(value) ? value : undefined;
+  return typeof value === "string" && isNumericUserId(value) ? value : undefined;
+}
+
+function lookupErrorUsername(error: XLookupError): string | undefined {
+  const value = (error.value ?? error.resource_id)?.trim().replace(/^@/, "");
+  return value && X_HANDLE_PATTERN.test(value) ? value : undefined;
 }
 
 function skipAll(
@@ -222,6 +263,133 @@ function readAnonHandle(identity: ContactIdentity, now: number): string | undefi
     : undefined;
 }
 
+/**
+ * Move an identity from its handle to the resolved numeric X ID so later runs take the
+ * indexed numeric path. Returns a reason when the ID could not move.
+ */
+function promoteIdentityUserId(
+  identity: ContactIdentity,
+  resolvedUserId: string,
+  now: number,
+): string | undefined {
+  try {
+    updateIdentity(identity.id, { platformUserId: resolvedUserId });
+    return undefined;
+  } catch (error) {
+    // (platform, platform_user_id) is globally unique and the owner's own account is reserved,
+    // so the resolved ID can already belong to another row. Keep the hydrated profile fields
+    // and record why the ID stayed on the handle.
+    const reason = error instanceof Error ? error.message : "Failed to persist resolved X user ID";
+    const current = getIdentityById(identity.id) ?? identity;
+    const platformData = readPlatformData(current.platformData);
+    platformData.userIdPromotion = { status: "conflict", resolvedUserId, at: now, reason };
+    try {
+      updateIdentity(identity.id, { platformData: JSON.stringify(platformData) });
+    } catch {
+      // The conflict note is best-effort; the hydrated profile fields already landed.
+    }
+    return reason;
+  }
+}
+
+/** Apply one resolved profile to an identity, promoting handle-keyed identities to their ID. */
+function hydrateIdentity(
+  identity: ContactIdentity,
+  user: XUser,
+  now: number,
+  source: "x_api" | "x_web_anon",
+  state: ContactState,
+): void {
+  const priorUserId = identity.platformUserId;
+  updateIdentityFromUser(identity, user, now, source);
+  state.updatedIdentityIds.push(identity.id);
+  state.handles.push(`@${user.username}`);
+
+  if (!isNumericUserId(priorUserId)) {
+    const conflict = promoteIdentityUserId(identity, user.id, now);
+    if (conflict) state.idConflicts.push(conflict);
+  }
+
+  const contact = getContactById(identity.contactId);
+  const platformData = readPlatformData(identity.platformData);
+  if (contact && isArchivePlaceholderName(contact.name, priorUserId, platformData)) {
+    updateContact(contact.id, splitName(user.name));
+    state.contactUpdated = true;
+  }
+}
+
+/** Fold one anonymous-web outcome into the contact state. */
+function applyWebOutcome(
+  identity: ContactIdentity,
+  webOutcome: XAnonWebOutcome | undefined,
+  state: ContactState,
+  now: number,
+  requestLabel: string,
+): void {
+  if (!webOutcome) {
+    state.failure = `Anonymous X hydration returned no result for ${requestLabel}`;
+    return;
+  }
+  try {
+    if (webOutcome.status === "hydrated") {
+      hydrateIdentity(identity, webOutcome.user, now, "x_web_anon", state);
+    } else if (webOutcome.status === "miss") {
+      markIdentityMiss(identity, now, webOutcome.missStatus);
+      state.notFound++;
+      if (webOutcome.missStatus === "suspended") state.skipReason = "x_suspended";
+    } else {
+      if (webOutcome.resolvedHandle) {
+        cacheAnonHandleResolution(identity, webOutcome.resolvedHandle, now);
+      }
+      state.skipReason = webOutcome.reason;
+      state.skipDetail = webOutcome.detail;
+    }
+  } catch (error) {
+    state.failure = error instanceof Error ? error.message : "Failed to update X profile";
+  }
+}
+
+/** Shared X API failure mapping for one lookup chunk. Returns true when hydration must stop. */
+function applyLookupFailure(
+  error: unknown,
+  chunkContactIds: Set<string>,
+  states: Map<string, ContactState>,
+): boolean {
+  if (error instanceof RateLimitError || error instanceof TierRestrictedError) {
+    const currentAccount = getPlatformAccountByPlatform("x");
+    const reason = currentAccount?.status === "needs_reauth"
+      ? "x_reauth_required"
+      : error instanceof RateLimitError
+        ? "x_rate_limited"
+        : "x_access_restricted";
+    for (const state of states.values()) {
+      if (state.updatedIdentityIds.length > 0 || state.notFound > 0 || state.failure) continue;
+      state.skipReason = reason;
+      if (error instanceof RateLimitError) {
+        state.skipDetail = { retryAfter: Math.max(0, error.retryAfter) };
+      }
+    }
+    return true;
+  }
+
+  const currentAccount = getPlatformAccountByPlatform("x");
+  if (currentAccount?.status === "needs_reauth") {
+    for (const state of states.values()) {
+      if (state.updatedIdentityIds.length === 0 && state.notFound === 0 && !state.failure) {
+        state.skipReason = "x_reauth_required";
+      }
+    }
+    return true;
+  }
+
+  const message = error instanceof Error ? error.message : "X profile lookup failed";
+  for (const contactId of chunkContactIds) {
+    const state = states.get(contactId);
+    if (state) state.failure = message;
+  }
+  return false;
+}
+
 function optionalNumericOption(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
 }
@@ -232,6 +400,7 @@ async function hydrateXProfilesBatch(
   ctx: PipelineStepContext,
   lookup: XUserLookup = getUsersByIds,
   webTransport: XAnonWebTransport = hydrateXProfilesViaAnonWeb,
+  handleLookup: XUsernameLookup = getUsersByUsernames,
 ): Promise<PipelineStepReport> {
   const account = getPlatformAccountByPlatform("x");
   if (account?.credentialsEncrypted && account.status === "needs_reauth") {
@@ -245,6 +414,7 @@ async function hydrateXProfilesBatch(
   const outcomes = new Map<string, PipelineContactOutcome>();
   const states = new Map<string, ContactState>();
   const identitiesByUserId = new Map<string, ContactIdentity[]>();
+  const identitiesByHandle = new Map<string, HandleGroup>();
 
   for (const contactId of contactIds) {
     const contact = getContactById(contactId);
@@ -253,11 +423,23 @@ async function hydrateXProfilesBatch(
       continue;
     }
 
-    const identities = listIdentitiesByContact(contactId).filter(
-      (identity) => identity.isActive && identity.platform === "x" && /^\d+$/.test(identity.platformUserId),
+    const xIdentities = listIdentitiesByContact(contactId).filter(
+      (identity) => identity.isActive && identity.platform === "x",
+    );
+    if (xIdentities.length === 0) {
+      outcomes.set(contactId, { contactId, status: "skipped", reason: "no_x_identity" });
+      continue;
+    }
+
+    // Agent research, CSV import and manual entry all produce identities keyed by a handle
+    // rather than a numeric ID. Those are hydratable by username, so only identities with
+    // neither a numeric ID nor a usable handle are genuinely unresolvable.
+    const identities = xIdentities.filter(
+      (identity) =>
+        isNumericUserId(identity.platformUserId) || resolvableHandle(identity) !== undefined,
     );
     if (identities.length === 0) {
-      outcomes.set(contactId, { contactId, status: "skipped", reason: "no_x_identity" });
+      outcomes.set(contactId, { contactId, status: "skipped", reason: "x_identity_unresolved" });
       continue;
     }
 
@@ -291,33 +473,49 @@ async function hydrateXProfilesBatch(
       handles: [],
       notFound: 0,
       contactUpdated: false,
+      idConflicts: [],
     });
     for (const identity of lookupIdentities) {
-      const matches = identitiesByUserId.get(identity.platformUserId) ?? [];
-      matches.push(identity);
-      identitiesByUserId.set(identity.platformUserId, matches);
+      if (isNumericUserId(identity.platformUserId)) {
+        const matches = identitiesByUserId.get(identity.platformUserId) ?? [];
+        matches.push(identity);
+        identitiesByUserId.set(identity.platformUserId, matches);
+        continue;
+      }
+      const handle = resolvableHandle(identity)!;
+      const key = handle.toLowerCase();
+      const group = identitiesByHandle.get(key) ?? { handle, identities: [] };
+      group.identities.push(identity);
+      identitiesByHandle.set(key, group);
     }
   }
 
   const userIds = [...identitiesByUserId.keys()];
+  const handleKeys = [...identitiesByHandle.keys()];
   if (!account?.credentialsEncrypted) {
+    const requests: XAnonWebRequest[] = [
+      ...userIds.map((userId) => ({
+        userId,
+        knownHandle: (identitiesByUserId.get(userId) ?? [])
+          .map((identity) => readAnonHandle(identity, now))
+          .find((handle): handle is string => !!handle),
+      })),
+      ...handleKeys.map((key) => ({
+        userId: `${HANDLE_REQUEST_PREFIX}${key}`,
+        knownHandle: identitiesByHandle.get(key)!.handle,
+        handleOnly: true,
+      })),
+    ];
+
     let webOutcomes: Map<string, XAnonWebOutcome>;
     try {
-      webOutcomes = await webTransport(
-        userIds.map((userId) => ({
-          userId,
-          knownHandle: (identitiesByUserId.get(userId) ?? [])
-            .map((identity) => readAnonHandle(identity, now))
-            .find((handle): handle is string => !!handle),
-        })),
-        {
-          fetchImpl: ctx.fetchImpl,
-          env: ctx.env,
-          minRequestGapMs: optionalNumericOption(ctx.options?.minRequestGapMs),
-        },
-      );
+      webOutcomes = await webTransport(requests, {
+        fetchImpl: ctx.fetchImpl,
+        env: ctx.env,
+        minRequestGapMs: optionalNumericOption(ctx.options?.minRequestGapMs),
+      });
     } catch (error) {
-      webOutcomes = new Map(userIds.map((userId) => [userId, {
+      webOutcomes = new Map(requests.map((request) => [request.userId, {
         status: "skip" as const,
         reason: "x_web_unavailable",
         detail: { message: error instanceof Error ? error.message : "Anonymous X hydration failed" },
@@ -329,75 +527,77 @@ async function hydrateXProfilesBatch(
       for (const identity of identitiesByUserId.get(userId) ?? []) {
         const state = states.get(identity.contactId);
         if (!state || state.failure) continue;
-        if (!webOutcome) {
-          state.failure = `Anonymous X hydration returned no result for ${userId}`;
-          continue;
-        }
-        try {
-          if (webOutcome.status === "hydrated") {
-            updateIdentityFromUser(identity, webOutcome.user, now, "x_web_anon");
-            state.updatedIdentityIds.push(identity.id);
-            state.handles.push(`@${webOutcome.user.username}`);
+        applyWebOutcome(identity, webOutcome, state, now, userId);
+      }
+    }
 
-            const contact = getContactById(identity.contactId);
-            const platformData = readPlatformData(identity.platformData);
-            if (contact && isArchivePlaceholderName(contact.name, userId, platformData)) {
-              updateContact(contact.id, splitName(webOutcome.user.name));
-              state.contactUpdated = true;
-            }
-          } else if (webOutcome.status === "miss") {
-            markIdentityMiss(identity, now, webOutcome.missStatus);
-            state.notFound++;
-            if (webOutcome.missStatus === "suspended") state.skipReason = "x_suspended";
-          } else {
-            if (webOutcome.resolvedHandle) {
-              cacheAnonHandleResolution(identity, webOutcome.resolvedHandle, now);
-            }
-            state.skipReason = webOutcome.reason;
-            state.skipDetail = webOutcome.detail;
-          }
-        } catch (error) {
-          state.failure = error instanceof Error ? error.message : "Failed to update X profile";
-        }
+    for (const key of handleKeys) {
+      const group = identitiesByHandle.get(key)!;
+      const webOutcome = webOutcomes.get(`${HANDLE_REQUEST_PREFIX}${key}`);
+      for (const identity of group.identities) {
+        const state = states.get(identity.contactId);
+        if (!state || state.failure) continue;
+        applyWebOutcome(identity, webOutcome, state, now, `@${group.handle}`);
       }
     }
   } else {
+    const accountId = account.id;
+    // ID and handle lookups differ only in how a chunk is sent and how a returned user or
+    // error maps back to its key, so both run through one chunk loop. Chunks stay sequential:
+    // they share a rate limiter, and a credential-class failure has to stop the ones behind it.
+    const batches: LookupBatch[] = [];
     for (let offset = 0; offset < userIds.length; offset += X_USER_LOOKUP_MAX_IDS) {
-      const chunk = userIds.slice(offset, offset + X_USER_LOOKUP_MAX_IDS);
+      const keys = userIds.slice(offset, offset + X_USER_LOOKUP_MAX_IDS);
+      batches.push({
+        keys,
+        run: () => lookup(accountId, keys),
+        keyForUser: (user) => user.id,
+        keyForError: lookupErrorId,
+        identitiesFor: (key) => identitiesByUserId.get(key) ?? [],
+        describe: (key) => key,
+      });
+    }
+    for (let offset = 0; offset < handleKeys.length; offset += X_USER_LOOKUP_MAX_USERNAMES) {
+      const keys = handleKeys.slice(offset, offset + X_USER_LOOKUP_MAX_USERNAMES);
+      batches.push({
+        keys,
+        run: () => handleLookup(accountId, keys.map((key) => identitiesByHandle.get(key)!.handle)),
+        keyForUser: (user) => user.username.toLowerCase(),
+        keyForError: (error) => lookupErrorUsername(error)?.toLowerCase(),
+        identitiesFor: (key) => identitiesByHandle.get(key)?.identities ?? [],
+        describe: (key) => `@${identitiesByHandle.get(key)?.handle ?? key}`,
+      });
+    }
+
+    for (const batch of batches) {
       try {
-        const response = await lookup(account.id, chunk);
-        const foundIds = new Set<string>();
-        const errorIds = new Set(
-          response.errors.map(lookupErrorId).filter((id): id is string => id !== undefined),
+        const response = await batch.run();
+        const found = new Set<string>();
+        const errored = new Set(
+          response.errors
+            .map(batch.keyForError)
+            .filter((key): key is string => key !== undefined),
         );
 
         for (const user of response.users) {
-          const identities = identitiesByUserId.get(user.id) ?? [];
-          if (identities.length === 0 || foundIds.has(user.id)) continue;
-          foundIds.add(user.id);
+          const key = batch.keyForUser(user);
+          const identities = batch.identitiesFor(key);
+          if (identities.length === 0 || found.has(key)) continue;
+          found.add(key);
           for (const identity of identities) {
             const state = states.get(identity.contactId);
             if (!state || state.failure) continue;
             try {
-              updateIdentityFromUser(identity, user, now, "x_api");
-              state.updatedIdentityIds.push(identity.id);
-              state.handles.push(`@${user.username}`);
-
-              const contact = getContactById(identity.contactId);
-              const platformData = readPlatformData(identity.platformData);
-              if (contact && isArchivePlaceholderName(contact.name, user.id, platformData)) {
-                updateContact(contact.id, splitName(user.name));
-                state.contactUpdated = true;
-              }
+              hydrateIdentity(identity, user, now, "x_api", state);
             } catch (error) {
               state.failure = error instanceof Error ? error.message : "Failed to update X profile";
             }
           }
         }
 
-        for (const userId of errorIds) {
-          if (foundIds.has(userId)) continue;
-          for (const identity of identitiesByUserId.get(userId) ?? []) {
+        for (const key of errored) {
+          if (found.has(key)) continue;
+          for (const identity of batch.identitiesFor(key)) {
             const state = states.get(identity.contactId);
             if (!state || state.failure) continue;
             try {
@@ -409,49 +609,22 @@ async function hydrateXProfilesBatch(
           }
         }
 
-        for (const userId of chunk) {
-          if (foundIds.has(userId) || errorIds.has(userId)) continue;
-          for (const identity of identitiesByUserId.get(userId) ?? []) {
+        for (const key of batch.keys) {
+          if (found.has(key) || errored.has(key)) continue;
+          for (const identity of batch.identitiesFor(key)) {
             const state = states.get(identity.contactId);
-            if (state && !state.failure) state.failure = `X lookup returned no result for ${userId}`;
+            if (state && !state.failure) {
+              state.failure = `X lookup returned no result for ${batch.describe(key)}`;
+            }
           }
         }
       } catch (error) {
-        if (error instanceof RateLimitError || error instanceof TierRestrictedError) {
-          const currentAccount = getPlatformAccountByPlatform("x");
-          const reason = currentAccount?.status === "needs_reauth"
-            ? "x_reauth_required"
-            : error instanceof RateLimitError
-              ? "x_rate_limited"
-              : "x_access_restricted";
-          for (const state of states.values()) {
-            if (state.updatedIdentityIds.length > 0 || state.notFound > 0 || state.failure) continue;
-            state.skipReason = reason;
-            if (error instanceof RateLimitError) {
-              state.skipDetail = { retryAfter: Math.max(0, error.retryAfter) };
-            }
-          }
-          break;
-        }
-
-        const currentAccount = getPlatformAccountByPlatform("x");
-        if (currentAccount?.status === "needs_reauth") {
-          for (const state of states.values()) {
-            if (state.updatedIdentityIds.length === 0 && state.notFound === 0 && !state.failure) {
-              state.skipReason = "x_reauth_required";
-            }
-          }
-          break;
-        }
-
-        const message = error instanceof Error ? error.message : "X profile lookup failed";
         const chunkContacts = new Set(
-          chunk.flatMap((userId) => (identitiesByUserId.get(userId) ?? []).map((identity) => identity.contactId)),
+          batch.keys.flatMap((key) =>
+            batch.identitiesFor(key).map((identity) => identity.contactId),
+          ),
         );
-        for (const contactId of chunkContacts) {
-          const state = states.get(contactId);
-          if (state) state.failure = message;
-        }
+        if (applyLookupFailure(error, chunkContacts, states)) break;
       }
     }
   }
@@ -474,6 +647,7 @@ async function hydrateXProfilesBatch(
           source: state.source,
           identityIds: state.updatedIdentityIds,
           handle: state.handles[0],
+          ...(state.idConflicts.length > 0 ? { userIdConflicts: state.idConflicts } : {}),
         },
       });
     } else if (state.skipReason) {
@@ -526,16 +700,17 @@ function reportForContacts(
   };
 }
 
-/** Deterministic API-first, anonymous-web-fallback hydration for numeric X identities. */
+/** Deterministic API-first, anonymous-web-fallback hydration for numeric and handle X identities. */
 export async function hydrateXProfiles(
   contactIds: string[],
   ctx: PipelineStepContext,
   lookup: XUserLookup = getUsersByIds,
   webTransport: XAnonWebTransport = hydrateXProfilesViaAnonWeb,
+  handleLookup: XUsernameLookup = getUsersByUsernames,
 ): Promise<PipelineStepReport> {
   const scope = ctx.runScope;
   if (!scope) {
-    return hydrateXProfilesBatch(contactIds, ctx, lookup, webTransport);
+    return hydrateXProfilesBatch(contactIds, ctx, lookup, webTransport, handleLookup);
   }
 
   const account = getPlatformAccountByPlatform("x");
@@ -548,6 +723,7 @@ export async function hydrateXProfiles(
         { ...ctx, runScope: undefined, recordContactOutcome: undefined },
         lookup,
         webTransport,
+        handleLookup,
       );
       scope.resources.set(resourceKey, prepared);
     }
@@ -575,6 +751,7 @@ export async function hydrateXProfiles(
       { ...ctx, runScope: undefined },
       lookup,
       (requests) => session!.hydrate(requests),
+      handleLookup,
     );
   }
 
@@ -583,5 +760,6 @@ export async function hydrateXProfiles(
     { ...ctx, runScope: undefined },
     lookup,
     webTransport,
+    handleLookup,
   );
 }

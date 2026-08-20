@@ -70,6 +70,7 @@ export interface XApiError {
 const X_API_BASE = "https://api.x.com/2";
 
 export const X_USER_LOOKUP_MAX_IDS = 100;
+export const X_USER_LOOKUP_MAX_USERNAMES = 100;
 
 const DEFAULT_USER_FIELDS = [
   "name",
@@ -252,6 +253,27 @@ export async function getUsersByIds(
     "user.fields": DEFAULT_USER_FIELDS,
   });
   const res = await xApiFetch<XUser[]>(accountId, `/users?${params.toString()}`);
+  return {
+    users: Array.isArray(res.data) ? res.data : [],
+    errors: res.errors ?? [],
+  };
+}
+
+/** Fetch up to 100 users by handle in one request, for identities that never got a numeric ID. */
+export async function getUsersByUsernames(
+  accountId: string,
+  usernames: string[],
+): Promise<{ users: XUser[]; errors: XLookupError[] }> {
+  if (usernames.length === 0) return { users: [], errors: [] };
+  if (usernames.length > X_USER_LOOKUP_MAX_USERNAMES) {
+    throw new Error(`X user lookup accepts at most ${X_USER_LOOKUP_MAX_USERNAMES} usernames`);
+  }
+
+  const params = new URLSearchParams({
+    usernames: usernames.join(","),
+    "user.fields": DEFAULT_USER_FIELDS,
+  });
+  const res = await xApiFetch<XUser[]>(accountId, `/users/by?${params.toString()}`);
   return {
     users: Array.isArray(res.data) ? res.data : [],
     errors: res.errors ?? [],
