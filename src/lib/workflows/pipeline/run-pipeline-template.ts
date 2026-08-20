@@ -18,6 +18,7 @@ import {
 } from "@/lib/db/queries/workflows";
 import { workflowRuns } from "@/lib/db/schema";
 import type { WorkflowRun } from "@/lib/db/types";
+import { X_ANON_DEFERRED_REASON } from "@/lib/platforms/x/anon-web-constants";
 import {
   createRtxPublishThread,
   ensureRtxWorkspace,
@@ -221,7 +222,8 @@ function aggregateRunResult(input: {
   let avatarUpdated = 0;
   let gravatarVerified = 0;
   let hydrationNotFound = 0;
-  let aborted = 0;
+  let runAborted = false;
+  const touchedContactIds = new Set<string>();
   const handlerByStepId = new Map(
     input.pipeline.steps.map((step) => [step.id, step.handler]),
   );
@@ -229,6 +231,7 @@ function aggregateRunResult(input: {
   for (const report of input.stepReports) {
     const handler = handlerByStepId.get(report.stepId);
     for (const outcome of report.outcomes) {
+      touchedContactIds.add(outcome.contactId);
       if (outcome.status === "failed") {
         failedContactIds.add(outcome.contactId);
       }
@@ -259,10 +262,13 @@ function aggregateRunResult(input: {
     }
 
     if (report.aborted) {
-      aborted += Math.max(0, selected - report.outcomes.length);
+      runAborted = true;
     }
   }
 
+  const aborted = runAborted
+    ? input.plan.selectedContactIds.filter((contactId) => !touchedContactIds.has(contactId)).length
+    : 0;
   const processed = Math.max(0, selected - aborted);
   const remainingBacklog = input.plan.explicit
     ? countProfilePipelineBacklogAmong(input.plan.selectedContactIds, input.filters)
@@ -718,6 +724,18 @@ export async function executePipelineRun(input: ExecutePipelineRunInput): Promis
             runErrors = [...runErrors, invocationReport.abortReason];
           }
           break contactLoop;
+        }
+
+        if (
+          state.stepDecl.handler === "hydrate_x_profiles" &&
+          invocationReport.outcomes.some(
+            (outcome) =>
+              outcome.contactId === contactId &&
+              outcome.status === "skipped" &&
+              outcome.reason === X_ANON_DEFERRED_REASON,
+          )
+        ) {
+          continue contactLoop;
         }
       }
     }

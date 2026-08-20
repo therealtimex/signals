@@ -348,8 +348,8 @@ before giving up for the run.
 - **Pacing:** `X_ANON_MIN_REQUEST_GAP_MS = 1_000` plus 0–500 ms jitter between successive
   anonymous requests (browser navigations and HTTP fetches share the pacer). Injectable clock/
   sleep so tests run instantly.
-- **Per-run browser budget:** `X_ANON_MAX_BROWSER_RESOLUTIONS_PER_RUN = 10`. Candidates beyond
-  the budget skip `x_web_deferred` (retryable; next run picks them up — batch order is stable).
+- **Run volume bound:** the profile pipeline's existing `PROFILE_PIPELINE_MAX_BATCH = 50` cap is
+  the only per-run contact limit. Anonymous resolutions are not truncated below that visible cap.
 - **Circuit breaker (per run, in the transport):**
   - trip immediately on `login_wall`, `contaminated`, `x_web_challenged`, `x_web_rate_limited`;
   - trip after `X_ANON_PARSE_FAILURE_BREAK_THRESHOLD = 3` consecutive
@@ -378,13 +378,12 @@ export const X_ANON_HTTP_TIMEOUT_MS = 15_000;
 export const X_ANON_HTTP_MAX_BYTES = 3_000_000;
 export const X_ANON_MAX_REDIRECTS = 3;
 export const X_ANON_MIN_REQUEST_GAP_MS = 1_000;
-export const X_ANON_MAX_BROWSER_RESOLUTIONS_PER_RUN = 10;
 export const X_ANON_PARSE_FAILURE_BREAK_THRESHOLD = 3;
 export const X_ANON_COOLDOWN_MS = 15 * 60 * 1000;
 ```
 
 Overridable per step via existing `PipelineStepDecl.options`
-(`{ webFallback?: boolean /* default true */, maxBrowserResolutions?, minRequestGapMs? }`) —
+(`{ webFallback?: boolean /* default true */, minRequestGapMs? }`) —
 defaults live in code, so no seed-template migration is needed.
 
 ## 11. Outcome Taxonomy & Run Reporting
@@ -406,7 +405,7 @@ the `skipped` reason map and thread summaries (aggregate counts only — privacy
 | resolve timeout / unclassified | `skipped` | `x_web_resolve_failed` | no | retryable |
 | browser/RTX unavailable | `skipped` | `x_web_unavailable` | no | retryable |
 | logged-in session detected | `skipped` | `x_anon_session_contaminated` | no | aborts run's web work |
-| over browser budget / cooldown | `skipped` | `x_web_deferred` | no | retryable |
+| active anonymous-session cooldown | `skipped` | `x_web_deferred` | no | retryable |
 | DB write error | `failed` | message | no | same as API path |
 
 Protected profiles: X serves name/bio/avatar metadata for protected accounts anonymously — they

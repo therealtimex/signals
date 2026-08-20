@@ -23,6 +23,12 @@ function htmlResponse(html = fullProfile, init: ResponseInit = {}): Response {
   });
 }
 
+function profileHtml(userId: string, handle: string): string {
+  return fullProfile
+    .replaceAll("568879807", userId)
+    .replaceAll("tri_dao", handle);
+}
+
 function safeFetch(response: Response | ((url: string) => Response)) {
   return vi.fn<typeof fetch>(async (input, init) => {
     const url = String(input);
@@ -102,22 +108,53 @@ describe("hydrateXProfilesViaAnonWeb", () => {
     expect(dispose).toHaveBeenCalledOnce();
   });
 
-  it("shares the browser-resolution budget across contact-major calls", async () => {
-    const resolve = vi.fn(async () => ({ status: "resolved" as const, handle: "tri_dao" }));
-    const { factory } = resolverFactory(resolve);
-    const fetchImpl = safeFetch(htmlResponse());
-    const session = createXAnonWebSession({
-      ...deps(fetchImpl, factory),
-      maxBrowserResolutions: 1,
+  it("does not cap browser resolutions below the pipeline batch limit", async () => {
+    const resolve = vi.fn(async (userId: string) => ({
+      status: "resolved" as const,
+      handle: `person${userId}`,
+    }));
+    const { factory, dispose } = resolverFactory(resolve);
+    const fetchImpl = safeFetch((url) => {
+      const handle = new URL(url).pathname.slice(1);
+      return htmlResponse(profileHtml(handle.slice("person".length), handle));
     });
+    const session = createXAnonWebSession(deps(fetchImpl, factory));
+    const userIds = Array.from({ length: 12 }, (_, index) => String(1_000 + index));
+    const outcomes = [];
 
-    await session.hydrate([{ userId: "568879807" }]);
-    const deferred = await session.hydrate([{ userId: "2" }]);
+    for (const userId of userIds) {
+      outcomes.push((await session.hydrate([{ userId }])).get(userId));
+    }
     await session.dispose();
 
-    expect(deferred.get("2")).toEqual({ status: "skip", reason: "x_web_deferred" });
-    expect(resolve).toHaveBeenCalledOnce();
-    expect(fetchImpl).toHaveBeenCalledOnce();
+    expect(outcomes.every((outcome) => outcome?.status === "hydrated")).toBe(true);
+    expect(resolve).toHaveBeenCalledTimes(12);
+    expect(fetchImpl).toHaveBeenCalledTimes(12);
+    expect(dispose).toHaveBeenCalledOnce();
+  });
+
+  it("defers a later session while a breaker cooldown is active", async () => {
+    const now = () => 1_000;
+    const firstFetch = safeFetch(new Response("", {
+      status: 429,
+      headers: { "content-type": "text/html" },
+    }));
+    const firstSession = createXAnonWebSession({ ...deps(firstFetch), now });
+
+    await firstSession.hydrate([{ userId: "1", knownHandle: "person1" }]);
+    await firstSession.dispose();
+
+    const secondFetch = safeFetch(htmlResponse());
+    const secondSession = createXAnonWebSession({ ...deps(secondFetch), now });
+    const deferred = await secondSession.hydrate([{ userId: "2" }]);
+    await secondSession.dispose();
+
+    expect(deferred.get("2")).toEqual({
+      status: "skip",
+      reason: "x_web_deferred",
+      detail: { cooldownReason: "x_web_rate_limited" },
+    });
+    expect(secondFetch).not.toHaveBeenCalled();
   });
 
   it("re-resolves a stale known handle and validates the numeric identifier", async () => {
