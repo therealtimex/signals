@@ -64,6 +64,25 @@ describe("contacts queries", () => {
     expect(listContacts({ platform: "linkedin", platformUserId: "sama" }).total).toBe(1);
   });
 
+  it("hides an archived claim holder by default but returns it with includeArchived", () => {
+    // Regression for #202 finding 1: getIdentityByPlatformUser has no archived
+    // filter, so a claim lookup that hides archived contacts disagrees with the
+    // guard that later rejects the identity attach.
+    const owner = createContact({ name: "Archived Owner" });
+    createIdentity({ contactId: owner.id, platform: "x", platformUserId: "sama" });
+    archiveContact(owner.id, "test");
+
+    expect(listContacts({ platform: "x", platformUserId: "sama" }).total).toBe(0);
+
+    const withArchived = listContacts({
+      platform: "x",
+      platformUserId: "sama",
+      includeArchived: true,
+    });
+    expect(withArchived.total).toBe(1);
+    expect(withArchived.data[0]?.id).toBe(owner.id);
+  });
+
   it("matches platformUserId exactly rather than by substring", () => {
     const contact = createContact({ name: "Prefix Owner" });
     createIdentity({ contactId: contact.id, platform: "x", platformUserId: "samantha" });

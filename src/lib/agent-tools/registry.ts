@@ -110,7 +110,10 @@ export const AGENT_TOOLS: Record<string, AgentToolDefinition> = {
     description:
       "Search and filter contacts by name, email, company, funnel stage, or platform. " +
       "Pass platformUserId (optionally with platform) for an exact platform-identity lookup; " +
-      "each result lists its platform identities.",
+      "each result lists its platform identities and whether it is archived. " +
+      "Archived contacts are excluded unless includeArchived is true — set it when " +
+      "resolving whether a platform account is already claimed, because the claim " +
+      "guard on upsert_contact_identity ignores archived status.",
     category: "contacts",
     schema: queryContactsSchema,
     parameters: zodToParameters(queryContactsSchema),

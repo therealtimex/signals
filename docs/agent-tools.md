@@ -33,7 +33,7 @@ Then pass `Authorization: Bearer your-secret-token` on each request.
 
 | Tool | Category | Description |
 |------|----------|-------------|
-| `query_contacts` | contacts | Search/filter contacts; `platformUserId` (+ `platform`) is an exact identity-claim lookup, results list their identities |
+| `query_contacts` | contacts | Search/filter contacts; `platformUserId` (+ `platform`) is an exact identity-claim lookup, results list their identities and `archived`. Archived contacts are hidden unless `includeArchived: true` — set it for claim lookups, since the `upsert_contact_identity` guard ignores archived status |
 | `get_contact` | contacts | Full contact by ID |
 | `create_contact` | contacts | Create a contact (`channels[]`, `employments[]` supported) |
 | `update_contact` | contacts | Update contact fields |

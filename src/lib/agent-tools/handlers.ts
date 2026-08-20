@@ -1,4 +1,4 @@
-import { listContacts, getContactById, createContact, updateContact, recalcEnrichment } from "@/lib/db/queries/contacts";
+import { listContacts, getContactById, createContact, updateContact, recalcEnrichment, isContactArchived } from "@/lib/db/queries/contacts";
 import { createIdentity, getIdentityById, getIdentityByPlatformUser, updateIdentity } from "@/lib/db/queries/identities";
 import { getDashboardMetrics } from "@/lib/db/queries/dashboard";
 import { listWorkflowRuns } from "@/lib/db/queries/workflows";
@@ -108,6 +108,7 @@ export async function handleQueryContacts(input: z.infer<typeof queryContactsSch
       funnelStage: input.funnelStage,
       platform: input.platform,
       platformUserId: input.platformUserId,
+      includeArchived: input.includeArchived,
       page: input.page,
       pageSize: input.pageSize ?? DEFAULT_PAGE_SIZE,
       sort: input.sort,
@@ -135,6 +136,7 @@ export async function handleQueryContacts(input: z.infer<typeof queryContactsSch
         platform: primaryPlatform(c.identities),
         identityCount: c.identities.length,
         identities: c.identities.map(serializeContactIdentityRef),
+        archived: isContactArchived(c.metadata),
         resolvedAvatarUrl: c.resolvedAvatarUrl,
         ...serializeContactBirthFields(c),
       })),

@@ -213,6 +213,19 @@ function recalcEnrichment(contactId: string): void {
   recalcContactEnrichment(contactId);
 }
 
+/**
+ * Canonical "is this contact archived" test. `archived: 1` lives in the contact
+ * metadata blob (see `archiveContact`), so every reader has to parse it the same way.
+ */
+export function isContactArchived(metadata: string | null | undefined): boolean {
+  if (!metadata) return false;
+  try {
+    return (JSON.parse(metadata) as { archived?: number }).archived === 1;
+  } catch {
+    return false;
+  }
+}
+
 export function listContacts(opts?: {
   search?: string;
   funnelStage?: string;
