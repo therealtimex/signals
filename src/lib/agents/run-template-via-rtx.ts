@@ -13,7 +13,15 @@ import {
 } from "@/lib/rtx/cli-provisioning";
 import { isRtxEmbedded } from "@/lib/rtx/env";
 import { resolveSignalsBaseUrlFromEnv } from "@/lib/rtx/resolve-signals-base-url";
-import { launchTerminalCliAgent, openRtxRuntimeLauncher } from "@/lib/rtx/runtime-sessions";
+import {
+  dispatchTerminalAgentViaSendMessage,
+  openRtxRuntimeLauncher,
+} from "@/lib/rtx/runtime-sessions";
+import {
+  buildWorkflowRunBriefRoutingMessage,
+  workflowRunBriefRelativePath,
+  writeRtxWorkspaceBriefFile,
+} from "@/lib/rtx/workspace-brief-files";
 import type { WorkflowType } from "@/lib/workflows/types";
 
 const TEMPLATE_TO_WORKFLOW_TYPE: Record<string, WorkflowType> = {
@@ -82,6 +90,36 @@ export function getRtxRefsFromRunConfig(config: string | null | undefined): {
   }
 }
 
+async function verifySignalsHealth(
+  signalsBaseUrl: string,
+  fetchImpl: typeof fetch
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const url = `${signalsBaseUrl.replace(/\/+$/, "")}/api/health`;
+  try {
+    const response = await fetchImpl(url, { method: "GET" });
+    if (!response.ok) {
+      return {
+        ok: false,
+        error: `Signals health check failed (${response.status}) at ${url}`,
+      };
+    }
+    const body = (await response.json()) as { app?: string; status?: string };
+    if (body.app !== "signals" || body.status !== "ok") {
+      return {
+        ok: false,
+        error: `Signals health check returned unexpected payload at ${url}`,
+      };
+    }
+    return { ok: true };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Health check failed";
+    return {
+      ok: false,
+      error: `Signals health check failed at ${url}: ${message}`,
+    };
+  }
+}
+
 export async function runTemplateViaRtx(
   input: RunTemplateViaRtxInput,
   env: NodeJS.ProcessEnv = process.env,
@@ -123,6 +161,33 @@ export async function runTemplateViaRtx(
     startedAt: now,
   });
 
+  const signalsBaseUrl = input.signalsBaseUrl ?? resolveSignalsBaseUrlFromEnv(env);
+  const health = await verifySignalsHealth(signalsBaseUrl, fetchImpl);
+  if (!health.ok) {
+    updateWorkflowRun(run.id, {
+      status: "failed",
+      completedAt: now,
+      errors: JSON.stringify([health.error]),
+      errorItems: 1,
+    });
+    createWorkflowStep({
+      workflowRunId: run.id,
+      stepIndex: nextStepIndex(run.id),
+      stepType: "error",
+      status: "failed",
+      tool: "signals_health_preflight",
+      error: health.error,
+      durationMs: 0,
+    });
+    return {
+      success: false,
+      error: health.error,
+      errorCode: "signals_not_running",
+      httpStatus: 503,
+      workflowRunId: run.id,
+    };
+  }
+
   try {
     const workspaceSlug = await ensureRtxWorkspace(
       getSignalsRtxWorkspaceSlug(env),
@@ -137,9 +202,7 @@ export async function runTemplateViaRtx(
       fetchImpl
     );
 
-    const signalsBaseUrl = input.signalsBaseUrl ?? resolveSignalsBaseUrlFromEnv(env);
-
-    const message = buildAgentWorkflowBrief({
+    const brief = buildAgentWorkflowBrief({
       template,
       workflowRunId: run.id,
       config: mergedConfig,
@@ -147,11 +210,22 @@ export async function runTemplateViaRtx(
       systemPromptOverride: input.systemPrompt,
     });
 
-    const launch = await launchTerminalCliAgent(
+    const briefPath = workflowRunBriefRelativePath(run.id);
+    const briefWrite = await writeRtxWorkspaceBriefFile(
+      workspaceSlug,
+      briefPath,
+      brief,
+      env
+    );
+    if (!briefWrite.success) {
+      throw new Error(briefWrite.error);
+    }
+
+    const launch = await dispatchTerminalAgentViaSendMessage(
       {
         workspaceSlug,
         threadSlug,
-        message,
+        message: buildWorkflowRunBriefRoutingMessage(run.id),
         reason: `Run agent workflow template ${template.name} (${template.id})`,
       },
       env,
@@ -181,6 +255,8 @@ export async function runTemplateViaRtx(
           ? 403
           : launch.errorCode === "standalone"
             ? 400
+            : launch.errorCode === "terminal_dispatch_required"
+              ? 409
             : launch.errorCode === "launch_failed"
               ? 502
               : 503;

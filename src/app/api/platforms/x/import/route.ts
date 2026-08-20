@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { nanoid } from "nanoid";
 import {
+  backfillXArchiveHandles,
   importXArchiveContacts,
   importXArchiveTweets,
   mergeArchiveUsers,
@@ -48,10 +49,12 @@ export async function POST(req: NextRequest) {
 
     let contactsResult: SyncResult | null = null;
     let contactsRunId: string | null = null;
+    let handleBackfillResult: SyncResult | null = null;
     if (hasContactSlices) {
       const merged = mergeArchiveUsers(contents.followers, contents.following);
       const preAllocatedContactsRunId = nanoid();
       contactsResult = importXArchiveContacts(merged, preAllocatedContactsRunId);
+      handleBackfillResult = backfillXArchiveHandles(contents.handleMap);
       contactsRunId = recordImportRun({
         id: preAllocatedContactsRunId,
         platform: "x",
@@ -86,16 +89,32 @@ export async function POST(req: NextRequest) {
 
     const combined: SyncResult = {
       added: (contactsResult?.added ?? 0) + (postsResult?.added ?? 0),
-      updated: (contactsResult?.updated ?? 0) + (postsResult?.updated ?? 0),
-      skipped: (contactsResult?.skipped ?? 0) + (postsResult?.skipped ?? 0),
-      errors: [...(contactsResult?.errors ?? []), ...(postsResult?.errors ?? [])],
+      updated:
+        (contactsResult?.updated ?? 0) +
+        (postsResult?.updated ?? 0) +
+        (handleBackfillResult?.updated ?? 0),
+      skipped:
+        (contactsResult?.skipped ?? 0) +
+        (postsResult?.skipped ?? 0) +
+        (handleBackfillResult?.skipped ?? 0),
+      errors: [
+        ...(contactsResult?.errors ?? []),
+        ...(postsResult?.errors ?? []),
+        ...(handleBackfillResult?.errors ?? []),
+      ],
     };
+
+    const mergedContacts = hasContactSlices
+      ? mergeArchiveUsers(contents.followers, contents.following)
+      : [];
 
     return NextResponse.json({
       success: true,
       result: combined,
       contacts: contactsResult,
       posts: postsResult,
+      handleBackfill: handleBackfillResult,
+      uniqueContactCount: mergedContacts.length,
       totalRows:
         contents.followers.length + contents.following.length + contents.tweets.length,
       source: "zip",

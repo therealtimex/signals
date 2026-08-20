@@ -34,6 +34,77 @@ export const platformAccounts = sqliteTable("platform_accounts", {
   ...timestamps,
 });
 
+// --- Browser Connections & Acting Targets ---
+
+export const browserConnections = sqliteTable(
+  "browser_connections",
+  {
+    id: text("id").primaryKey(),
+    sessionName: text("session_name").notNull(),
+    kind: text("kind", { enum: ["shared", "dedicated"] })
+      .notNull()
+      .default("shared"),
+    status: text("status", { enum: ["active", "archived"] })
+      .notNull()
+      .default("active"),
+    metadata: text("metadata").default("{}"),
+    ...timestamps,
+  },
+  (table) => [uniqueIndex("idx_browser_connections_session").on(table.sessionName)]
+);
+
+export const platformTargets = sqliteTable(
+  "platform_targets",
+  {
+    id: text("id").primaryKey(),
+    connectionId: text("connection_id")
+      .notNull()
+      .references(() => browserConnections.id),
+    platform: text("platform", { enum: PLATFORM_ENUM }).notNull(),
+    kind: text("kind", { enum: ["account", "profile", "page", "organization"] }).notNull(),
+    externalId: text("external_id"),
+    name: text("name").notNull(),
+    handle: text("handle"),
+    handleNormalized: text("handle_normalized"),
+    canonicalUrl: text("canonical_url"),
+    authPrincipalTargetId: text("auth_principal_target_id"),
+    platformAccountId: text("platform_account_id").references(() => platformAccounts.id),
+    capabilities: text("capabilities").notNull().default("[]"),
+    isDefault: integer("is_default", { mode: "boolean" }).notNull().default(false),
+    status: text("status", { enum: ["active", "forgotten", "merged"] })
+      .notNull()
+      .default("active"),
+    mergedIntoTargetId: text("merged_into_target_id"),
+    lastVerifiedAt: integer("last_verified_at"),
+    metadata: text("metadata").default("{}"),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("idx_platform_targets_identity")
+      .on(table.platform, table.kind, table.externalId)
+      .where(sql`${table.externalId} IS NOT NULL`),
+    index("idx_platform_targets_handle").on(
+      table.platform,
+      table.kind,
+      table.handleNormalized
+    ),
+    index("idx_platform_targets_connection").on(table.connectionId),
+  ]
+);
+
+export const browserSessionLeases = sqliteTable("browser_session_leases", {
+  connectionId: text("connection_id")
+    .primaryKey()
+    .references(() => browserConnections.id, { onDelete: "cascade" }),
+  leaseId: text("lease_id").notNull(),
+  holder: text("holder").notNull(),
+  targetId: text("target_id").references(() => platformTargets.id),
+  intent: text("intent", { enum: ["browse", "publish", "discover", "verify"] }),
+  acquiredAt: integer("acquired_at").notNull(),
+  renewedAt: integer("renewed_at").notNull(),
+  expiresAt: integer("expires_at").notNull(),
+});
+
 // --- Contacts ---
 
 export const contacts = sqliteTable("contacts", {
@@ -355,6 +426,7 @@ export const contentPosts = sqliteTable("content_posts", {
   platformAccountId: text("platform_account_id")
     .notNull()
     .references(() => platformAccounts.id, { onDelete: "cascade" }),
+  targetId: text("target_id").references(() => platformTargets.id),
   platformPostId: text("platform_post_id"),
   platformUrl: text("platform_url"),
   publishedAt: integer("published_at"),
@@ -366,6 +438,7 @@ export const contentPosts = sqliteTable("content_posts", {
   engagementSnapshot: text("engagement_snapshot").default("{}"), // JSON
 }, (table) => [
   uniqueIndex("idx_content_posts_platform_id").on(table.platformPostId, table.platformAccountId),
+  index("idx_content_posts_target").on(table.targetId),
 ]);
 
 // --- Engagements ---

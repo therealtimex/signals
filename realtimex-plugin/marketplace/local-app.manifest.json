@@ -4,6 +4,25 @@
   "display_name": "Signals",
   "description": "Local-first social GTM and relationship knowledge graph",
   "app_type": "node",
+  "runtime": {
+    "kind": "node",
+    "version": "20.x",
+    "managedBy": "realtimex"
+  },
+  "artifactContract": {
+    "schemaVersion": 2,
+    "releaseManifest": "release-manifest.json",
+    "signature": "release-manifest.sig.json",
+    "selector": "platform-arch",
+    "supportedTargets": [
+      "darwin-x64",
+      "darwin-arm64",
+      "linux-x64",
+      "linux-arm64",
+      "win32-x64",
+      "win32-arm64"
+    ]
+  },
   "healthPath": "/api/health",
   "homePath": "/dashboard",
   "permissions": [
@@ -16,7 +35,7 @@
     "desktop.runtime-sessions"
   ],
   "configuration": {
-    "command": "node",
+    "command": "{runtime.executable}",
     "args": ["server.js"],
     "working_dir": "{artifact_dir}",
     "home_url": "http://localhost:{port}/dashboard",
@@ -25,5 +44,5 @@
       "PORT": "{port}"
     }
   },
-  "notes": "Consumed by RealtimeX marketplace install (#1614). Replace {artifact_dir} and {port} at install time. Production does not use npx."
+  "notes": "Consumed by the RealtimeX marketplace v2 local-app contract. Select and verify one platform-architecture artifact, then resolve {runtime.executable}, {artifact_dir}, and {port} at install/start time. Production does not use npx."
 }

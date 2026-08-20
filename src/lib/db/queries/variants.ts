@@ -166,6 +166,7 @@ export function publishVariant(
   opts?: {
     platform?: string;
     publishedAt?: number;
+    targetId?: string;
     materializeAsPublished?: boolean;
   },
 ): Variant {
@@ -207,7 +208,11 @@ export function publishVariant(
     dstType: "content",
     dstId: contentItemId,
     edgeType: "published_as",
-    properties: JSON.stringify({ platform, published_at: publishedAt }),
+    properties: JSON.stringify({
+      platform,
+      published_at: publishedAt,
+      ...(opts?.targetId ? { targetId: opts.targetId } : {}),
+    }),
     scope: launch.scope,
     source: "agent",
   });
@@ -223,7 +228,7 @@ export function publishVariant(
 /** Hook for `/api/content/publish` — link an already-published content item back to its variant. */
 export function publishVariantForContentItem(
   contentItemId: string,
-  opts: { platform: string; publishedAt?: number },
+  opts: { platform: string; publishedAt?: number; targetId?: string },
 ): Variant | null {
   const variant = getVariantByContentItemId(contentItemId);
   if (!variant) return null;
@@ -231,6 +236,7 @@ export function publishVariantForContentItem(
   return publishVariant(variant.id, {
     platform: opts.platform,
     publishedAt: opts.publishedAt,
+    targetId: opts.targetId,
     materializeAsPublished: false,
   });
 }

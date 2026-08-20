@@ -17,8 +17,50 @@ import Link from "next/link";
 import { formatWorkflowError } from "@/lib/workflows/format-error";
 import { WorkflowDetailSteps } from "./workflow-detail-steps";
 import { PruneResults } from "./prune-results";
+import { WorkflowRunSubjectsPanel } from "@/components/workflow-run-subjects-panel";
 import { useWorkflowPolling } from "@/hooks/use-workflow-polling";
 import type { WorkflowRunWithSteps } from "@/lib/db/types";
+import type { PipelineRunResult } from "@/lib/workflows/pipeline/types";
+import type { WorkflowRunSubject } from "@/lib/workflows/workflow-run-subjects-shared";
+import { workflowSubjectLookup } from "@/lib/workflows/workflow-run-subjects-shared";
+
+type PipelineRunContext = {
+  backlogTotal: number;
+  batchSize: number;
+  selectedCount: number;
+  result: PipelineRunResult | null;
+};
+
+type PipelineRunLike = {
+  config: string | null;
+  result: string | null;
+};
+
+function parsePipelineRunContext(run: PipelineRunLike): PipelineRunContext | null {
+  try {
+    const config = JSON.parse(run.config ?? "{}") as {
+      pipeline?: unknown;
+      backlogTotal?: number;
+      batchSize?: number;
+      selectedContactIds?: string[];
+    };
+    if (!config.pipeline) return null;
+
+    let result: PipelineRunResult | null = null;
+    if (run.result) {
+      result = JSON.parse(run.result) as PipelineRunResult;
+    }
+
+    return {
+      backlogTotal: config.backlogTotal ?? 0,
+      batchSize: config.batchSize ?? 0,
+      selectedCount: config.selectedContactIds?.length ?? config.batchSize ?? 0,
+      result,
+    };
+  } catch {
+    return null;
+  }
+}
 
 const STATUS_CONFIG: Record<
   string,
@@ -67,10 +109,12 @@ function StatCard({
 
 export function WorkflowRunLive({
   initialRun,
+  subjects = [],
   contactsCreated = 0,
   orgsCreated = 0,
 }: {
   initialRun: WorkflowRunWithSteps;
+  subjects?: WorkflowRunSubject[];
   contactsCreated?: number;
   orgsCreated?: number;
 }) {
@@ -79,11 +123,13 @@ export function WorkflowRunLive({
   // Use polled data when available, fall back to server-rendered initial data
   const run = data?.run ?? initialRun;
   const steps = data?.steps ?? initialRun.steps;
+  const subjectById = workflowSubjectLookup(subjects);
 
   const statusConfig = STATUS_CONFIG[run.status] ?? STATUS_CONFIG.pending;
   const StatusIcon = statusConfig.icon;
   const isAgent = run.workflowType === "agent";
   const totalTokens = run.inputTokens + run.outputTokens;
+  const pipelineCtx = parsePipelineRunContext(run);
 
   return (
     <>
@@ -107,6 +153,25 @@ export function WorkflowRunLive({
           {statusConfig.label}
         </Badge>
       </div>
+
+      {pipelineCtx && (
+        <Card className="p-4 text-sm">
+          {run.status === "running" || !pipelineCtx.result ? (
+            <p>
+              Processing <strong>{pipelineCtx.selectedCount}</strong> of{" "}
+              <strong>{pipelineCtx.backlogTotal}</strong>…
+            </p>
+          ) : (
+            <p>
+              Processed <strong>{pipelineCtx.result.processed}</strong> · hydrated{" "}
+              <strong>{pipelineCtx.result.profilesHydrated ?? 0}</strong> · avatars{" "}
+              <strong>{pipelineCtx.result.avatarsUpdated}</strong> · personas{" "}
+              <strong>{pipelineCtx.result.personasGenerated}</strong> ·{" "}
+              <strong>{pipelineCtx.result.remainingBacklog}</strong> remaining
+            </p>
+          )}
+        </Card>
+      )}
 
       {/* Summary cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -197,8 +262,15 @@ export function WorkflowRunLive({
         <PruneResults runId={run.id} resultJson={typeof run.result === "string" ? run.result : "{}"} />
       )}
 
+      <WorkflowRunSubjectsPanel subjects={subjects} />
+
       {/* Step section with Timeline/Graph toggle */}
-      <WorkflowDetailSteps steps={steps} animate={isPolling} />
+      <WorkflowDetailSteps
+        steps={steps}
+        animate={isPolling}
+        subjectById={subjectById}
+        runStartedAt={run.startedAt}
+      />
 
       {/* Errors (if any) */}
       {run.errorItems > 0 && (

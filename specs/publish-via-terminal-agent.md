@@ -140,11 +140,18 @@ This also **repairs the P6a status overload**: `/api/content/publish` currently 
 
 Fix the pre-existing drift while touching this: `query_content` agent-tool schema (`schemas.ts:148-153`) declares `["draft","scheduled","published","archived"]` — `archived` doesn't exist in the DB and `review/approved/imported` are missing. Align it with the DB enum + new values.
 
-### 3.3 `content_posts` — unchanged
+### 3.3 `content_posts` — target audit extension (#191)
+
+Issue #191 adds nullable `target_id → platform_targets.id`. `platform_account_id` remains required
+as the credentials/sync bridge. New target-aware completions write both; legacy callbacks resolve
+the deterministic platform default before falling back to detected-handle registration.
 
 Per-platform published results remain `content_posts` rows (one per platform account), created **only at completion** by `complete_publish`, because `platformAccountId` is NOT NULL and the account row (auth_type `"session"`) can only be resolved once the agent has detected the logged-in handle. The P6a `ensureXPlatformAccount` helper is reused verbatim, generalized to `ensureSessionPlatformAccount(platform, handle)`.
 
 ### 3.4 Status derivation rules
+
+For multiple same-platform entries, status transitions match `targetId` first and use platform only
+for legacy job JSON. Job targets snapshot `targetId`, `expectedHandle`, and `sessionName`.
 
 Item status is **owned by the job state machine** while a job is active:
 
@@ -183,9 +190,33 @@ The SDK launch route **targets** a workspace/thread but creates neither. Provisi
 1. **Workspace** (once, get-or-create): slug from `SIGNALS_RTX_WORKSPACE_SLUG`, default `"signals"`. `POST /cli/create-workspace`; treat "already exists" as success.
 2. **Thread** (one per job, never reused — mirrors the Personal Notes pattern of a fresh thread per editor session): `POST /cli/create-thread/:workspaceSlug` with name `Publish: <item title or first 40 chars> — <YYYY-MM-DD HH:mm>`. Store the returned slug on the job.
 
-ADR-118-1 (§11) records why launch stays on `/sdk` while provisioning uses `/cli`, and flags the RTX-side enforcement gap (the `/cli` surface honors `x-app-id` without any permission check) as an upstream issue to file — Signals must not silently rely on that gap for *launching* sessions.
+ADR-118-1 (§11) records the dispatch split: provisioning stays on `/cli`; **new** workflow/publish launches use `/cli/send-message` with `requireTerminalDispatch: true` so RTX resolves the workspace or per-thread default terminal agent server-side (#159). `launchTerminalCliAgent` remains for resume/write paths that still need the SDK launch contract.
 
-### 4.3 Launch contract
+### 4.3 Dispatch contract (workflow runs + publish jobs)
+
+1. Write the durable brief to the RTX workspace working directory before dispatch:
+   - Workflow: `workflow-runs/<runId>/brief.md`
+   - Publish: `publish-jobs/<jobId>/brief.md`
+   Path resolution uses `STORAGE_DIR` when injected, otherwise derives from `REALTIMEX_USER_DATA_PATH` + `state/current-user.json` (same layout as desktop Local Apps).
+2. Dispatch via the canonical thread route (no Signals-side `defaultAgent` parsing):
+
+```
+POST {rtxApiBase}/cli/send-message/{workspaceSlug}/{threadSlug}
+x-app-id: {RTX_APP_ID}
+```
+
+```jsonc
+{
+  "message": "Execute the Signals publish brief at `publish-jobs/<jobId>/brief.md`. Report a concise summary in this thread when finished.",
+  "requireTerminalDispatch": true
+}
+```
+
+Success → `{ success: true, terminalDispatchAccepted: true, descriptor, workspaceSlug, threadSlug }`; persist `descriptor.id` → `rtxRuntimeSessionId`.
+
+When no terminal agent can handle the turn, RTX returns `409` with `code: "TERMINAL_DISPATCH_REQUIRED"` → Signals maps to `errorCode: "terminal_dispatch_required"` (clear user-facing error; no LLM chat fallback).
+
+### 4.3.1 Legacy SDK launch contract (resume paths only)
 
 ```
 POST {rtxApiBase}/sdk/desktop/runtime-sessions/launch-terminal-cli-agent
@@ -227,6 +258,7 @@ Known SDK-boundary limitations (verified against `desktopRuntimeSessions.js`) an
 | 403 permission | `permission_required` | Toast: "Grant 'Desktop Runtime Sessions' to Signals in RealTimeX → Local Apps" |
 | 404 APP_NOT_FOUND | `rtx_unavailable` | Toast: re-register hint |
 | 503 relay | `rtx_unavailable` | Toast: "RealTimeX desktop isn't running" |
+| 409 `TERMINAL_DISPATCH_REQUIRED` | `terminal_dispatch_required` | Toast: configure a workspace default terminal agent in RealTimeX |
 | thread/workspace provisioning failure | `launch_failed` | Toast with error detail |
 
 ---
@@ -397,6 +429,11 @@ The job model, tools, and UI are platform-generic. v1 acceptance covers X only. 
 
 ### 7.5 Failure & edge modes (agent lane)
 
+Target-aware agents must hold a connection-scoped lease for the full operation and pass its
+`leaseId` to update/completion callbacks. Update renews the lease. Completion is always recorded
+even if the lease is stale, returning `leaseStale: true`; mutating browser work still fails closed
+when live identity verification differs from `expectedHandle` (`wrong_account`).
+
 | Mode | Handling |
 |---|---|
 | Browser session missing/logged out | Script exits `session_expired`; agent messages the thread asking the user to sign in, retries; if abandoned, job goes stale (§6.4) |
@@ -451,9 +488,9 @@ Suggested story split for dev: P1 is 3 stories (schema+jobs, bridge+send-to-agen
 
 ## 11. ADRs
 
-### ADR-118-1: Launch via `/sdk/desktop/runtime-sessions`, provision via `/cli`
+### ADR-118-1: Provision via `/cli`; dispatch new launches via `/cli/send-message`
 
-**Accepted.** Context: Origin fixed the SDK launch route + `desktop.runtime-sessions` permission (user-visible consent is the point). But the SDK route cannot create workspaces/threads, and only `/cli` (which honors `x-app-id` with *no permission check*) can. Decision: launch — the privileged operation — goes through the permission-gated SDK route; provisioning uses `/cli` get-or-create. Consequences: (+) user consent gates agent spawning; (+) zero RTX-side changes required to ship; (−) two surfaces in one flow; (−) we knowingly use an unpermissioned surface for provisioning — filed upstream as an RTX hardening issue rather than blocked on here. Rejected alternative: `/cli/open-terminal-session` for everything (richer contract, but bypasses the consent model entirely).
+**Superseded (2026-08).** Original decision launched via `/sdk/desktop/runtime-sessions/launch-terminal-cli-agent` so `desktop.runtime-sessions` consent gated spawning, while provisioning used `/cli`. **#159** migrates **new** workflow/publish thread dispatch to `POST /cli/send-message` with `requireTerminalDispatch: true`, letting RTX resolve `thread.terminalAgent` → `workspace_configs.defaultAgent` (same path as channels and PromptInput). Brief instructions live in workspace markdown files (`workflow-runs/<runId>/brief.md`, `publish-jobs/<jobId>/brief.md`); the thread message is a short pointer. Consequences: (+) single source of truth for agent resolution; (+) per-thread agent overrides work without Signals changes; (+) cleaner thread UX; (−) dispatch uses the `/cli` auth surface (`x-app-id`) rather than the SDK launch route — acceptable for Local App flows that already provision via `/cli`. `launchTerminalCliAgent` remains for resume/write paths that still require the SDK launch contract.
 
 ### ADR-118-2: First-class `publish_jobs` table
 

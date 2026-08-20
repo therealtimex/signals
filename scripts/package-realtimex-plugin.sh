@@ -7,6 +7,7 @@ PLUGIN_SRC="${ROOT}/realtimex-plugin"
 STAGING="${ROOT}/dist/realtimex-plugin-staging"
 OUT="${1:-${ROOT}/dist/com.realtimex.signals-plugin.zip}"
 RELEASE_MANIFEST="${ROOT}/marketplace/release-manifest.json"
+RELEASE_SIGNATURE="${ROOT}/marketplace/release-manifest.sig.json"
 
 resolve_validator() {
   if [[ -n "${REALTIMEX_PLUGIN_VALIDATOR:-}" && -f "${REALTIMEX_PLUGIN_VALIDATOR}" ]]; then
@@ -46,9 +47,16 @@ if [[ ! -f "$RELEASE_MANIFEST" ]]; then
   exit 1
 fi
 
-CHECKSUM="$(node -p "JSON.parse(require('fs').readFileSync('${RELEASE_MANIFEST}','utf8')).checksumSha256 || ''")"
-if [[ -z "$CHECKSUM" ]]; then
-  echo "release-manifest.json missing checksumSha256. Run: npm run build:standalone-artifact" >&2
+node "${ROOT}/scripts/validate-release-artifacts.mjs" "$RELEASE_MANIFEST"
+
+ARTIFACT_COUNT="$(node -e "process.stdout.write(String(Object.keys(JSON.parse(require('fs').readFileSync('${RELEASE_MANIFEST}','utf8')).artifacts || {}).length))")"
+if [[ "$ARTIFACT_COUNT" -lt 1 ]]; then
+  echo "release-manifest.json has no platform artifacts. Run: npm run build:standalone-artifact" >&2
+  exit 1
+fi
+
+if [[ "${SIGNALS_REQUIRE_RELEASE_SIGNATURE:-0}" == "1" && ! -f "$RELEASE_SIGNATURE" ]]; then
+  echo "Missing signed release envelope: ${RELEASE_SIGNATURE}" >&2
   exit 1
 fi
 
@@ -81,6 +89,14 @@ rsync -a --exclude node_modules --exclude 'package-lock.json' --exclude '*.mjs' 
 chmod +x "$STAGING/skills/realtimex-signals/scripts/"*.sh 2>/dev/null || true
 chmod +x "$STAGING/skills/signals-publish/scripts/"*.cjs 2>/dev/null || true
 
+if [[ -d "${ROOT}/tools/signals-pp-cli/bin" ]]; then
+  echo "==> Copying signals-pp-cli binaries..."
+  mkdir -p "$STAGING/tools/signals-pp-cli"
+  cp -R "${ROOT}/tools/signals-pp-cli/bin" "$STAGING/tools/signals-pp-cli/"
+  chmod +x "$STAGING/tools/signals-pp-cli/bin/"*.js 2>/dev/null || true
+  find "$STAGING/tools/signals-pp-cli/bin" -type f -name 'signals-pp-cli' -exec chmod +x {} \; 2>/dev/null || true
+fi
+
 if [[ -f "$STAGING/skills/realtimex-signals/SKILL.md" ]]; then
   perl -pi -e 's|\.claude/skills/realtimex-signals|skills/realtimex-signals|g' \
     "$STAGING/skills/realtimex-signals/SKILL.md"
@@ -92,6 +108,9 @@ if [[ -f "$STAGING/skills/signals-publish/SKILL.md" ]]; then
 fi
 
 cp "$RELEASE_MANIFEST" "$STAGING/marketplace/release-manifest.json"
+if [[ -f "$RELEASE_SIGNATURE" ]]; then
+  cp "$RELEASE_SIGNATURE" "$STAGING/marketplace/release-manifest.sig.json"
+fi
 
 echo "==> Running RealtimeX plugin validator on staging directory..."
 node "$REALTIMEX_PLUGIN_VALIDATOR" "$STAGING"

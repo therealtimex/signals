@@ -9,6 +9,20 @@ import {
 } from "@/lib/db/queries/publish-jobs";
 import { resolveMediaPaths } from "@/lib/browser/publishers/publish-utils";
 import { ensureSessionPlatformAccount } from "@/lib/publish/ensure-platform-account";
+import { getPlatformAccountById } from "@/lib/db/queries/platform-accounts";
+import {
+  ensureBrowserConnection,
+  registerPlatformTarget,
+  resolveDefaultTarget,
+  resolveTargetById,
+} from "@/lib/db/queries/platform-targets";
+import { renewSessionLease } from "@/lib/leases/session-lease";
+import {
+  defaultTargetCapabilities,
+  defaultTargetKind,
+  normalizePlatformTargetIdentity,
+} from "@/lib/platforms/target-identity";
+import { PlatformTargetError } from "@/lib/platforms/target-errors";
 import { RTX_PUBLISH_SESSION_NAME } from "@/lib/publish/constants";
 import type { PublishJobTarget, PublishPlatformTarget } from "@/lib/publish/types";
 import type { PublishErrorCode } from "@/lib/browser/publishers/types";
@@ -24,18 +38,29 @@ export const updatePublishJobSchema = z.object({
   note: z.string().optional(),
   error: z.string().optional(),
   errorCode: z.string().optional(),
+  targetId: z.string().min(1).optional(),
+  leaseId: z.string().min(1).optional(),
 });
 
 export const completePublishSchema = z.object({
   jobId: z.string().min(1),
   platform: z.enum(["x", "linkedin"]),
+  targetId: z.string().min(1).optional(),
+  leaseId: z.string().min(1).optional(),
   success: z.boolean(),
   handle: z.string().optional(),
   platformPostId: z.string().optional(),
   platformUrl: z.string().optional(),
   error: z.string().optional(),
   errorCode: z
-    .enum(["session_expired", "captcha", "upload_failed", "timeout", "unknown"])
+    .enum([
+      "session_expired",
+      "captcha",
+      "upload_failed",
+      "timeout",
+      "wrong_account",
+      "unknown",
+    ])
     .optional(),
 });
 
@@ -60,6 +85,7 @@ function targetMatchesResult(
 ): boolean {
   const normalized = normalizeCompletePublishInput(input);
   if (target.platform !== normalized.platform) return false;
+  if (normalized.targetId && target.targetId !== normalized.targetId) return false;
   if (!normalized.success) {
     return target.error === normalized.error && target.errorCode === normalized.errorCode;
   }
@@ -113,6 +139,7 @@ export async function handleGetPublishJob(input: z.infer<typeof getPublishJobSch
       media,
     },
     targets: job.targetsParsed,
+    prepareRequired: true,
     browserSessionName: RTX_PUBLISH_SESSION_NAME,
     rtxWorkspaceSlug: job.rtxWorkspaceSlug,
     rtxThreadSlug: job.rtxThreadSlug,
@@ -125,10 +152,22 @@ export async function handleUpdatePublishJob(input: z.infer<typeof updatePublish
     return { error: `Publish job not found: ${input.jobId}` };
   }
 
+  if (input.leaseId) {
+    try {
+      renewSessionLease(input.leaseId);
+    } catch (error) {
+      if (error instanceof PlatformTargetError) {
+        return { error: error.message, code: error.code, details: error.details };
+      }
+      throw error;
+    }
+  }
+
   const recordOnly = job.status === "superseded";
   const now = Math.floor(Date.now() / 1000);
   const targets = job.targetsParsed.map((target) => {
-    if (input.platform && target.platform !== input.platform) return target;
+    if (input.targetId && target.targetId !== input.targetId) return target;
+    if (!input.targetId && input.platform && target.platform !== input.platform) return target;
     if (isTerminalTarget(target.status)) return target;
 
     if (input.status === "publishing") {
@@ -167,9 +206,31 @@ export async function handleCompletePublish(input: z.infer<typeof completePublis
   }
 
   const recordOnly = job.status === "superseded";
-  const existingTarget = job.targetsParsed.find((t) => t.platform === normalized.platform);
+  let leaseStale = false;
+  if (normalized.leaseId) {
+    try {
+      renewSessionLease(normalized.leaseId);
+    } catch {
+      leaseStale = true;
+    }
+  }
+
+  const existingTarget = normalized.targetId
+    ? job.targetsParsed.find((target) => target.targetId === normalized.targetId)
+    : job.targetsParsed.find((target) => target.platform === normalized.platform);
   if (!existingTarget) {
-    return { error: `Platform ${normalized.platform} is not a target for this job` };
+    return {
+      error: normalized.targetId
+        ? `Target ${normalized.targetId} is not a target for this job`
+        : `Platform ${normalized.platform} is not a target for this job`,
+      ...(leaseStale ? { leaseStale: true } : {}),
+    };
+  }
+  if (existingTarget.platform !== normalized.platform) {
+    return {
+      error: `Target ${existingTarget.targetId ?? normalized.targetId} belongs to ${existingTarget.platform}, not ${normalized.platform}`,
+      ...(leaseStale ? { leaseStale: true } : {}),
+    };
   }
 
   if (isTerminalTarget(existingTarget.status)) {
@@ -180,10 +241,12 @@ export async function handleCompletePublish(input: z.infer<typeof completePublis
         targets: job.targetsParsed,
         idempotent: true,
         ...(recordOnly ? { superseded: true } : {}),
+        ...(leaseStale ? { leaseStale: true } : {}),
       };
     }
     return {
       error: `Target for ${normalized.platform} is already terminal with a different result`,
+      ...(leaseStale ? { leaseStale: true } : {}),
     };
   }
 
@@ -196,14 +259,49 @@ export async function handleCompletePublish(input: z.infer<typeof completePublis
     }
 
     if (!recordOnly) {
-      const account = ensureSessionPlatformAccount(
-        normalized.platform as PublishPlatformTarget,
-        normalized.handle
+      let actingTarget = resolveTargetById(
+        normalized.targetId ?? existingTarget.targetId ?? ""
       );
+      if (!actingTarget) actingTarget = resolveDefaultTarget(normalized.platform);
+      if (!actingTarget) {
+        const account = ensureSessionPlatformAccount(
+          normalized.platform as PublishPlatformTarget,
+          normalized.handle
+        );
+        const connection = ensureBrowserConnection({
+          sessionName: existingTarget.sessionName ?? RTX_PUBLISH_SESSION_NAME,
+          kind: "shared",
+          source: "complete-publish-fallback",
+        });
+        const identity = normalizePlatformTargetIdentity(
+          normalized.platform,
+          normalized.handle
+        );
+        actingTarget = registerPlatformTarget({
+          connectionId: connection.id,
+          platform: normalized.platform,
+          kind: defaultTargetKind(normalized.platform),
+          externalId: identity.externalId,
+          name: normalized.handle,
+          handle: identity.handle,
+          platformAccountId: account.id,
+          capabilities: defaultTargetCapabilities(normalized.platform),
+          source: "complete-publish-fallback",
+        });
+      }
+      const account =
+        (actingTarget.platformAccountId
+          ? getPlatformAccountById(actingTarget.platformAccountId)
+          : undefined) ??
+        ensureSessionPlatformAccount(
+          normalized.platform as PublishPlatformTarget,
+          normalized.handle
+        );
 
       createContentPost({
         contentItemId: job.contentItemId,
         platformAccountId: account.id,
+        targetId: actingTarget.id,
         platformPostId: normalized.platformPostId,
         platformUrl: normalized.platformUrl ?? null,
         publishedAt: now,
@@ -213,15 +311,17 @@ export async function handleCompletePublish(input: z.infer<typeof completePublis
       publishVariantForContentItem(job.contentItemId, {
         platform: normalized.platform,
         publishedAt: now,
+        targetId: actingTarget.id,
       });
     }
 
     targets = job.targetsParsed.map((target) =>
-      target.platform === normalized.platform
+      target === existingTarget
         ? {
             ...target,
             status: "published" as const,
             handle: normalized.handle,
+            targetId: normalized.targetId ?? target.targetId,
             platformPostId: normalized.platformPostId,
             platformUrl: normalized.platformUrl,
             completedAt: now,
@@ -230,7 +330,7 @@ export async function handleCompletePublish(input: z.infer<typeof completePublis
     );
   } else {
     targets = job.targetsParsed.map((target) =>
-      target.platform === normalized.platform
+      target === existingTarget
         ? {
             ...target,
             status: "failed" as const,
@@ -250,6 +350,7 @@ export async function handleCompletePublish(input: z.infer<typeof completePublis
         status: updated.status,
         targets: updated.targetsParsed,
         ...(recordOnly ? { superseded: true, recorded: true } : {}),
+        ...(leaseStale ? { leaseStale: true } : {}),
       }
     : { error: "Failed to complete publish" };
 }

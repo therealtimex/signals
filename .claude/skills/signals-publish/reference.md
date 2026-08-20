@@ -15,7 +15,7 @@ node scripts/x-publish.cjs --port <cdpPort> --payload <job.json> [--dry-run]
   "text": "Main post body",
   "threadTexts": ["optional tweet 2", "tweet 3"],
   "mediaPaths": ["/abs/path/img.png"],
-  "expectedHandle": "@handle"   // optional; detected when omitted
+  "expectedHandle": "@handle"   // required for target-aware jobs
 }
 ```
 
@@ -32,7 +32,7 @@ Success:
 Failure:
 
 ```json
-{"success":false,"error":"…","errorCode":"session_expired|captcha|upload_failed|timeout|unknown"}
+{"success":false,"error":"…","errorCode":"session_expired|captcha|upload_failed|timeout|wrong_account|unknown"}
 ```
 
 ## X selectors (fragility surface)

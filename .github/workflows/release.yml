@@ -1,0 +1,262 @@
+# Gated native artifacts, Marketplace packaging, and GitHub publication.
+# This workflow never runs for pull requests.
+
+name: Release
+
+on:
+  push:
+    branches: ["main"]
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  # Never cancel a release while it may be signing or publishing artifacts.
+  cancel-in-progress: false
+
+jobs:
+  release_plan:
+    name: Release plan
+    runs-on: ubuntu-24.04
+    outputs:
+      action: ${{ steps.plan.outputs.action }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Decide whether to publish
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            ACTION="$(node scripts/ci/should-publish-marketplace-release.mjs --tag="${{ github.ref_name }}")"
+          else
+            ACTION="$(node scripts/ci/should-publish-marketplace-release.mjs --main)"
+          fi
+          echo "action=${ACTION}" >> "$GITHUB_OUTPUT"
+
+  react-doctor:
+    needs: release_plan
+    if: needs.release_plan.outputs.action == 'publish'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      statuses: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: millionco/react-doctor@v2
+        with:
+          blocking: error
+          version: "0.9.12"
+
+  check:
+    name: Quality gate
+    needs: release_plan
+    if: needs.release_plan.outputs.action == 'publish'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run quality gate
+        run: npm run check
+        env:
+          SIGNALS_DATA_DIR: ${{ github.workspace }}/.ci/signals-data
+
+      - name: Verify fresh data dir import safety
+        run: npm run verify:fresh-import
+
+      - name: Run integration smoke tests
+        run: npm run test:integration
+        env:
+          SIGNALS_DATA_DIR: ${{ github.workspace }}/.ci/signals-e2e
+          E2E_FRESH_DB: "1"
+          CI: "true"
+
+  standalone-artifacts:
+    name: Runtime (${{ matrix.target }})
+    needs: [release_plan, check]
+    if: needs.release_plan.outputs.action == 'publish'
+    strategy:
+      fail-fast: false
+      matrix:
+        # Keep this in 1:1 parity with the host targets published by
+        # realtimex-sdk/scripts/build-pp-cli-packages.mjs.
+        include:
+          - target: darwin-x64
+            runner: macos-15-intel
+          - target: darwin-arm64
+            runner: macos-15
+          - target: linux-x64
+            runner: ubuntu-24.04
+          - target: linux-arm64
+            runner: ubuntu-24.04-arm
+          - target: win32-x64
+            runner: windows-2025
+          - target: win32-arm64
+            runner: windows-11-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+          check-latest: true
+
+      - name: Build native signals-pp-cli
+        run: npm run build:signals-pp-cli
+
+      - name: Test signals-pp-cli import golden
+        run: npm run test:signals-pp-cli
+
+      - name: Build native standalone artifact
+        run: npm run build:standalone-artifact
+        env:
+          SIGNALS_DATA_DIR: ${{ github.workspace }}/.ci/signals-data
+          SIGNALS_ARTIFACT_TARGET: ${{ matrix.target }}
+
+      - name: Test standalone runtime artifact
+        run: npm run test:standalone-artifact
+
+      - name: Upload target artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: standalone-${{ matrix.target }}-${{ github.sha }}
+          path: |
+            dist/signals-*-${{ matrix.target }}.tar.gz
+            dist/release-target-${{ matrix.target }}.json
+          if-no-files-found: error
+          retention-days: 2
+
+  plugin-package:
+    name: Marketplace bundle
+    needs: [release_plan, standalone-artifacts]
+    if: needs.release_plan.outputs.action == 'publish'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+          check-latest: true
+
+      - name: Build cross-platform signals-pp-cli
+        run: SIGNALS_PP_CLI_CROSS_COMPILE=1 npm run build:signals-pp-cli
+
+      - name: Download target artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: standalone-*-${{ github.sha }}
+          path: dist
+          merge-multiple: true
+
+      - name: Verify marketplace version alignment
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            npm run verify:marketplace-versions -- --tag="${GITHUB_REF_NAME}"
+          else
+            npm run verify:marketplace-versions
+          fi
+        env:
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+
+      - name: Merge platform release manifests
+        run: npm run merge:release-manifests
+        env:
+          SIGNALS_REQUIRED_ARTIFACT_TARGETS: darwin-x64,darwin-arm64,linux-x64,linux-arm64,win32-x64,win32-arm64
+
+      - name: Sign release manifest
+        run: npm run sign:release-manifest
+        env:
+          SIGNALS_RELEASE_SIGNING_PRIVATE_KEY_B64: ${{ secrets.SIGNALS_RELEASE_SIGNING_PRIVATE_KEY_B64 }}
+          SIGNALS_RELEASE_SIGNING_KEY_ID: ${{ vars.SIGNALS_RELEASE_SIGNING_KEY_ID }}
+
+      - name: Package RealtimeX plugin zip
+        run: npm run package:realtimex-plugin
+        env:
+          SIGNALS_REQUIRE_RELEASE_SIGNATURE: "1"
+
+      - name: Test plugin package structure and adapter
+        run: npm run test:plugin-package
+        env:
+          SIGNALS_REQUIRE_RELEASE_SIGNATURE: "1"
+
+      - name: Stage verified release artifacts
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          mkdir -p release-upload
+          cp "dist/com.realtimex.signals-plugin.zip" release-upload/
+          cp dist/signals-${VERSION}-*.tar.gz release-upload/
+          cp marketplace/release-manifest.json release-upload/
+          cp marketplace/release-manifest.sig.json release-upload/
+
+      - name: Upload verified release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-artifacts-${{ github.sha }}
+          path: release-upload/*
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Publish GitHub Release
+    needs: [release_plan, react-doctor, check, plugin-package]
+    if: >-
+      always() &&
+      needs.release_plan.outputs.action == 'publish' &&
+      needs.react-doctor.result == 'success' &&
+      needs.check.result == 'success' &&
+      needs.plugin-package.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Download verified release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-artifacts-${{ github.sha }}
+          path: release-upload
+
+      - name: Read release version
+        id: release-version
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.release-version.outputs.version }}
+          files: release-upload/*
+          generate_release_notes: true

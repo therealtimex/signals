@@ -5,6 +5,16 @@ export async function register() {
     // Keep this hook for backfills that must run after migrate on server boot.
 
     try {
+      const { backfillPlatformTargets } = await import("@/lib/db/backfill-platform-targets");
+      const targetBackfill = backfillPlatformTargets();
+      if (targetBackfill.targetsCreated > 0) {
+        console.log("[instrumentation] Platform target backfill applied:", targetBackfill);
+      }
+    } catch (e) {
+      console.warn("[instrumentation] Platform target backfill skipped:", (e as Error).message);
+    }
+
+    try {
       const { ensureContactScalarColumns } = await import("@/lib/db/migrate-contact-scalars");
       const scalarRestore = ensureContactScalarColumns();
       if (scalarRestore.restored.length > 0) {

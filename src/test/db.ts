@@ -32,10 +32,14 @@ import {
   simulationTranscripts,
   scheduledJobs,
   simulationCalibrations,
+  browserConnections,
+  browserSessionLeases,
+  platformTargets,
 } from "@/lib/db/schema";
 
 /** Clear core tables used by unit tests (child rows first). */
 export function resetCoreTables(): void {
+  db.delete(browserSessionLeases).run();
   db.delete(workflowSteps).run();
   db.delete(scheduledJobs).run();
   db.delete(simulationCalibrations).run();
@@ -58,6 +62,8 @@ export function resetCoreTables(): void {
   db.delete(mediaAssets).run();
   db.delete(variants).run();
   db.delete(contentPosts).run();
+  db.delete(platformTargets).run();
+  db.delete(browserConnections).run();
   db.delete(contentItems).run();
   db.delete(launches).run();
   db.delete(niches).run();

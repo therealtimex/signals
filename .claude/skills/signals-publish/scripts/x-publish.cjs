@@ -58,6 +58,15 @@ function validatePayload(payload) {
       errorCode: "unknown",
     };
   }
+  if (
+    Object.prototype.hasOwnProperty.call(payload ?? {}, "expectedHandle") &&
+    !String(payload.expectedHandle ?? "").trim()
+  ) {
+    throw {
+      message: "payload.expectedHandle must be non-empty when supplied",
+      errorCode: "wrong_account",
+    };
+  }
   if (payload?.threadText != null && payload.threadTexts == null) {
     throw {
       message:
@@ -1115,8 +1124,8 @@ function main() {
     sleep(1000);
     assertXLoggedIn();
 
-    const handle = payload.expectedHandle ?? detectXDisplayHandle();
-    if (!handle) {
+    const detectedHandle = detectXDisplayHandle();
+    if (!detectedHandle) {
       emit({
         success: false,
         error: "Could not detect the logged-in X handle.",
@@ -1124,6 +1133,22 @@ function main() {
       });
       return;
     }
+    const expectedHandle = payload.expectedHandle;
+    if (
+      expectedHandle &&
+      String(expectedHandle).replace(/^@/, "").toLowerCase() !==
+        String(detectedHandle).replace(/^@/, "").toLowerCase()
+    ) {
+      emit({
+        success: false,
+        error: `Wrong X account active: expected ${expectedHandle}, detected ${detectedHandle}`,
+        errorCode: "wrong_account",
+        expectedHandle,
+        detectedHandle,
+      });
+      return;
+    }
+    const handle = expectedHandle ?? detectedHandle;
 
     const baseline = dryRun ? null : captureProfileStatusBaseline(handle);
     fillCompose(payload);

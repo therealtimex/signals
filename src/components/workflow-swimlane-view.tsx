@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { WorkflowRunCard } from "@/components/workflow-run-card";
 import type { WorkflowRun } from "@/lib/db/types";
+import type { WorkflowRunSubject } from "@/lib/workflows/workflow-run-subjects-shared";
 
 /** All possible lanes — ordered by display priority. */
 const LANES = [
@@ -48,7 +49,13 @@ function getLaneKey(run: WorkflowRun): string {
   return run.workflowType;
 }
 
-export function WorkflowSwimlaneView({ runs }: { runs: WorkflowRun[] }) {
+export function WorkflowSwimlaneView({
+  runs,
+  subjectsByRunId = {},
+}: {
+  runs: WorkflowRun[];
+  subjectsByRunId?: Record<string, WorkflowRunSubject[]>;
+}) {
   const grouped: Record<string, WorkflowRun[]> = {};
   for (const lane of LANES) {
     grouped[lane.key] = [];
@@ -100,7 +107,12 @@ export function WorkflowSwimlaneView({ runs }: { runs: WorkflowRun[] }) {
               <ScrollArea className="w-full">
                 <div className="flex gap-2 pb-2">
                   {items.map((run) => (
-                    <WorkflowRunCard key={run.id} run={run} variant="swimlane" />
+                    <WorkflowRunCard
+                      key={run.id}
+                      run={run}
+                      variant="swimlane"
+                      subjects={subjectsByRunId[run.id] ?? []}
+                    />
                   ))}
                 </div>
                 <ScrollBar orientation="horizontal" />

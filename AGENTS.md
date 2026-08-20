@@ -247,6 +247,33 @@ State:
 - **Config:** `package-lock.json`, `package.json`
 <!-- AGENTSGEN:END section=structure -->
 
+## RealtimeX integration QA
+
+Use this workflow when validating Signals changes against the RealTimeX desktop app:
+
+1. Start the RealTimeX dev host from the main checkout, not from the Signals worktree:
+
+   ```bash
+   cd /Users/realtimex/rtgit/realtimex-ai-app
+   yarn dev:all
+   ```
+
+   The expected dev surfaces are the RealTimeX Electron renderer (`realtimex-app-dev://app`), frontend `3100`, server `3101`, and Electron CDP `9888`. Never use the production RealTimeX app for this testing.
+
+2. In the running RealTimeX dev app, add the Signals worktree under test as a Local App. Use `npm run dev`, the worktree as the working directory, and an isolated data directory such as `SIGNALS_DATA_DIR=/private/tmp/signals-qa-<run-id>-data`. Set the Local App home URL to `http://localhost:3010/dashboard`.
+
+3. Start the Local App from the RealTimeX UI and grant only the manifest permissions required by the test. Verify that Signals is reachable on port `3010` before exercising the scenario.
+
+4. The bundled `rtxtest` launcher may lack its executable bit in the QA workspace. If direct invocation fails with `Permission denied`, invoke the same script through Node instead:
+
+   ```bash
+   node /Users/realtimex/.realtimex.ai/desktop-user-data/app/users/trungle_rta_vn/storage/working-data/realtimex-qa/.agents/skills/rtx-test-runner/scripts/bin/rtxtest <verb>
+   ```
+
+   Do not point `rtxtest dev up` at the Signals repository; it is a Local App, not the RealTimeX app repo.
+
+5. After QA, stop the Signals Local App from the UI, stop the `yarn dev:all` host, and confirm ports `3010`, `3100`, `3101`, and `9888` are clear. Keep the Local App configuration unless deletion is explicitly requested.
+
 ## Output Protocol
 
 <!-- AGENTSGEN:START section=output_protocol -->

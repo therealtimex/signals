@@ -188,7 +188,18 @@ const PATTERNS: PatternMatcher[] = [
     }),
   },
 
-  // 12. No credentials
+  // 12. RTX Browser session guardrail block
+  {
+    pattern: /RealTimeX Browser session (?:is locked to|blocks|does not allow|only allows)/,
+    category: "session",
+    format: () => ({
+      title: "RealTimeX Browser session is origin-locked",
+      detail: "Reconnect the platform in Settings → Platform Connections to clear the lock.",
+      category: "session",
+    }),
+  },
+
+  // 13. No credentials
   {
     pattern: /No credentials found/,
     category: "credentials",
@@ -198,7 +209,7 @@ const PATTERNS: PatternMatcher[] = [
     }),
   },
 
-  // 13. Network errors
+  // 14. Network errors
   {
     pattern: /fetch failed|ECONNREFUSED|ETIMEDOUT|timeout/i,
     category: "network",

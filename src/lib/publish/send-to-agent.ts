@@ -7,6 +7,12 @@ import {
   updatePublishJobRtxRefs,
 } from "@/lib/db/queries/publish-jobs";
 import type { PublishJobPayload, PublishPlatformTarget } from "@/lib/publish/types";
+import type { PublishJobTarget } from "@/lib/publish/types";
+import {
+  getBrowserConnectionById,
+  resolveDefaultTarget,
+  resolveTargetById,
+} from "@/lib/db/queries/platform-targets";
 import {
   buildPublishThreadName,
   createRtxPublishThread,
@@ -17,14 +23,20 @@ import { isRtxEmbedded } from "@/lib/rtx/env";
 import { resolveSignalsBaseUrlFromEnv } from "@/lib/rtx/resolve-signals-base-url";
 import {
   buildPublishAgentInitialMessage,
-  launchTerminalCliAgent,
+  dispatchTerminalAgentViaSendMessage,
 } from "@/lib/rtx/runtime-sessions";
+import {
+  buildPublishJobBriefRoutingMessage,
+  publishJobBriefRelativePath,
+  writeRtxWorkspaceBriefFile,
+} from "@/lib/rtx/workspace-brief-files";
 
 const SENDABLE_ITEM_STATUSES = new Set(["draft", "approved", "failed"]);
 
 export type SendToAgentInput = {
   contentItemId: string;
   platforms: PublishPlatformTarget[];
+  targets?: Array<{ targetId: string }>;
   text: string;
   mediaAssetIds?: string[];
   /** Base URL of the running Signals instance (derive from the incoming HTTP request). */
@@ -79,10 +91,61 @@ export async function sendContentToAgent(
     };
   }
 
+  const targetSnapshots: PublishJobTarget[] = [];
+  for (const requested of input.targets ?? []) {
+    const target = resolveTargetById(requested.targetId);
+    if (
+      !target ||
+      target.status !== "active" ||
+      (target.platform !== "x" && target.platform !== "linkedin")
+    ) {
+      return {
+        success: false,
+        error: `Publish target not found or unsupported: ${requested.targetId}`,
+        errorCode: "invalid_target",
+        httpStatus: 400,
+      };
+    }
+    const connection = getBrowserConnectionById(target.connectionId);
+    if (!connection || connection.status !== "active") {
+      return {
+        success: false,
+        error: `Browser connection unavailable for target: ${requested.targetId}`,
+        errorCode: "connection_unavailable",
+        httpStatus: 409,
+      };
+    }
+    targetSnapshots.push({
+      platform: target.platform,
+      targetId: target.id,
+      expectedHandle: target.handle,
+      sessionName: connection.sessionName,
+      status: "pending",
+    });
+  }
+
+  for (const platform of input.platforms) {
+    if (targetSnapshots.some((target) => target.platform === platform)) continue;
+    const target = resolveDefaultTarget(platform);
+    const connection = target ? getBrowserConnectionById(target.connectionId) : undefined;
+    targetSnapshots.push({
+      platform,
+      status: "pending",
+      ...(target && connection
+        ? {
+            targetId: target.id,
+            expectedHandle: target.handle,
+            sessionName: connection.sessionName,
+          }
+        : {}),
+    });
+  }
+
+  const platforms = [...new Set(targetSnapshots.map((target) => target.platform))];
   const payload: PublishJobPayload = {
     text: input.text,
     mediaAssetIds: input.mediaAssetIds ?? [],
-    platforms: input.platforms,
+    platforms,
     title: item.title ?? undefined,
     composedAt: Math.floor(Date.now() / 1000),
   };
@@ -91,7 +154,8 @@ export async function sendContentToAgent(
   const job = createPublishJob({
     contentItemId: input.contentItemId,
     payload,
-    platforms: input.platforms,
+    platforms,
+    targets: targetSnapshots,
   });
 
   updateContentItem(input.contentItemId, { status: "queued" });
@@ -112,20 +176,31 @@ export async function sendContentToAgent(
 
     const signalsBaseUrl = input.signalsBaseUrl ?? resolveSignalsBaseUrlFromEnv(env);
 
-    const message = buildPublishAgentInitialMessage({
+    const brief = buildPublishAgentInitialMessage({
       jobId: job.id,
       contentItemId: input.contentItemId,
       title: item.title,
-      platforms: input.platforms,
+      platforms,
       signalsBaseUrl,
     });
 
-    const launch = await launchTerminalCliAgent(
+    const briefPath = publishJobBriefRelativePath(job.id);
+    const briefWrite = await writeRtxWorkspaceBriefFile(
+      workspaceSlug,
+      briefPath,
+      brief,
+      env
+    );
+    if (!briefWrite.success) {
+      throw new Error(briefWrite.error);
+    }
+
+    const launch = await dispatchTerminalAgentViaSendMessage(
       {
         workspaceSlug,
         threadSlug,
-        message,
-        reason: `Publish content item ${input.contentItemId} to ${input.platforms.join(", ")}`,
+        message: buildPublishJobBriefRoutingMessage(job.id),
+        reason: `Publish content item ${input.contentItemId} to ${platforms.join(", ")}`,
       },
       env,
       fetchImpl
@@ -139,6 +214,8 @@ export async function sendContentToAgent(
           ? 403
           : launch.errorCode === "standalone"
             ? 400
+            : launch.errorCode === "terminal_dispatch_required"
+              ? 409
             : launch.errorCode === "launch_failed"
               ? 502
               : 503;

@@ -2,8 +2,9 @@ import { notFound } from "next/navigation";
 import { getContactById } from "@/lib/db/queries/contacts";
 import { getContactExploreCard } from "@/lib/db/queries/contact-explore";
 import { getTasksByContact } from "@/lib/db/queries/tasks";
-import { getTemplate } from "@/lib/db/queries/workflow-templates";
+import { getSystemTemplateByName, getTemplate } from "@/lib/db/queries/workflow-templates";
 import { getWorkflowRun } from "@/lib/db/queries/workflows";
+import { CONTACT_PROFILE_PIPELINE_TEMPLATE_NAME } from "@/lib/db/seed-templates";
 import { ContactDetailClient } from "./contact-detail-client";
 
 export default async function ContactDetailPage({
@@ -31,6 +32,7 @@ export default async function ContactDetailPage({
     contact.createdWorkflowRunId && getWorkflowRun(contact.createdWorkflowRunId)
       ? `/dashboard/workflows/${contact.createdWorkflowRunId}`
       : null;
+  const profilePipelineTemplate = getSystemTemplateByName(CONTACT_PROFILE_PIPELINE_TEMPLATE_NAME);
 
   return (
     <ContactDetailClient
@@ -39,6 +41,7 @@ export default async function ContactDetailPage({
       explore={explore}
       createdTemplateName={createdTemplateName}
       createdWorkflowRunHref={runHref}
+      profilePipelineTemplateId={profilePipelineTemplate?.id ?? null}
     />
   );
 }

@@ -16,6 +16,8 @@ import { createPlatformAccount } from "@/lib/db/queries/platform-accounts";
 import { updateContact } from "@/lib/db/queries/contacts";
 import { getExploreMap } from "@/lib/db/queries/explore-map";
 import {
+  backfillXArchiveHandles,
+  buildArchiveHandleMap,
   importXArchiveContacts,
   importXArchiveTweets,
   mergeArchiveUsers,
@@ -57,6 +59,31 @@ const TWEETS_JS = ytd("tweets", [
       favorite_count: "0",
       retweet_count: "0",
       in_reply_to_status_id_str: "9000",
+    },
+  },
+]);
+
+const TWEETS_WITH_HANDLES_JS = ytd("tweets", [
+  {
+    tweet: {
+      id_str: "9003",
+      full_text: "Hey @alice and @bob",
+      created_at: "Wed Oct 10 20:19:24 +0000 2018",
+      entities: {
+        user_mentions: [
+          { id_str: "111", screen_name: "alice", indices: ["4", "10"] },
+          { id_str: "333", screen_name: "bob", indices: ["15", "19"] },
+        ],
+      },
+    },
+  },
+  {
+    tweet: {
+      id_str: "9004",
+      full_text: "@carol reply",
+      created_at: "Thu Oct 11 08:00:00 +0000 2018",
+      in_reply_to_user_id_str: "222",
+      in_reply_to_screen_name: "carol",
     },
   },
 ]);
@@ -307,10 +334,13 @@ describe("previewXArchiveImport", () => {
       followerCount: 2,
       followingCount: 2,
       tweetCount: 2,
+      uniqueContactCount: 3,
+      handleCandidateCount: 0,
     });
     expect(preview.details).toEqual([
       "Followers: 2 (follower.js)",
       "Following: 2 (following.js)",
+      "Unique contacts: 3 (ID-only placeholders — run Contact profile pipeline after import)",
       "Tweets: 2 (tweets.js)",
     ]);
 
@@ -330,5 +360,66 @@ describe("previewXArchiveImport", () => {
     await expect(previewXArchiveImport(file)).rejects.toThrow(
       /No follower, following, or tweets data/
     );
+  });
+});
+
+describe("buildArchiveHandleMap", () => {
+  it("extracts screen names from mentions and reply targets", () => {
+    const map = buildArchiveHandleMap([TWEETS_WITH_HANDLES_JS]);
+    expect(Object.fromEntries(map)).toEqual({
+      "111": "alice",
+      "222": "carol",
+      "333": "bob",
+    });
+  });
+});
+
+describe("backfillXArchiveHandles", () => {
+  it("updates placeholder contacts with @handle names from tweet entities", () => {
+    const zip = makeArchiveZip({
+      "data/follower.js": FOLLOWER_JS,
+      "data/following.js": FOLLOWING_JS,
+      "data/tweets.js": TWEETS_WITH_HANDLES_JS,
+    });
+    const contents = parseXArchive(zip);
+    const merged = mergeArchiveUsers(contents.followers, contents.following);
+    importXArchiveContacts(merged);
+
+    const result = backfillXArchiveHandles(contents.handleMap);
+    expect(result).toMatchObject({ updated: 3, skipped: 0, errors: [] });
+
+    const alice = db
+      .select()
+      .from(contacts)
+      .where(eq(contacts.name, "@alice"))
+      .get();
+    expect(alice).toBeDefined();
+
+    const carolIdentity = db
+      .select()
+      .from(contactIdentities)
+      .where(eq(contactIdentities.platformUserId, "222"))
+      .get();
+    expect(JSON.parse(carolIdentity!.platformData!)).toMatchObject({
+      archiveScreenName: "carol",
+    });
+  });
+
+  it("skips contacts that already have real names", () => {
+    const contact = createContact({ name: "Known Person" }, "api:create_contact");
+    createIdentity({
+      contactId: contact.id,
+      platform: "x",
+      platformUserId: "111",
+      platformHandle: "@known",
+      isPrimary: 1,
+      isActive: 1,
+    });
+
+    const result = backfillXArchiveHandles(new Map([["111", "alice"]]));
+    expect(result).toMatchObject({ updated: 0, skipped: 1 });
+
+    const unchanged = db.select().from(contacts).where(eq(contacts.id, contact.id)).get();
+    expect(unchanged!.name).toBe("Known Person");
   });
 });

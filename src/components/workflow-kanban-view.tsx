@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { WorkflowRunCard } from "@/components/workflow-run-card";
 import type { WorkflowRun } from "@/lib/db/types";
+import type { WorkflowRunSubject } from "@/lib/workflows/workflow-run-subjects-shared";
 
 const COLUMNS = [
   { key: "pending", label: "Pending", color: "bg-muted-foreground" },
@@ -12,7 +13,13 @@ const COLUMNS = [
   { key: "failed", label: "Failed", color: "bg-destructive" },
 ] as const;
 
-export function WorkflowKanbanView({ runs }: { runs: WorkflowRun[] }) {
+export function WorkflowKanbanView({
+  runs,
+  subjectsByRunId = {},
+}: {
+  runs: WorkflowRun[];
+  subjectsByRunId?: Record<string, WorkflowRunSubject[]>;
+}) {
   const grouped: Record<string, WorkflowRun[]> = {
     pending: [],
     running: [],
@@ -56,7 +63,12 @@ export function WorkflowKanbanView({ runs }: { runs: WorkflowRun[] }) {
                   </p>
                 ) : (
                   items.map((run) => (
-                    <WorkflowRunCard key={run.id} run={run} variant="kanban" />
+                    <WorkflowRunCard
+                      key={run.id}
+                      run={run}
+                      variant="kanban"
+                      subjects={subjectsByRunId[run.id] ?? []}
+                    />
                   ))
                 )}
               </div>

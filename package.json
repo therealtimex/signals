@@ -1,6 +1,7 @@
 {
   "name": "@realtimex/signals",
-  "version": "0.1.12",
+  "version": "0.1.14",
+  "private": true,
   "description": "Signals — Local-first Social GTM & Relationship Knowledge Graph",
   "type": "module",
   "bin": {
@@ -22,14 +23,22 @@
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage --project unit && vitest run --project latency",
     "test:skill-package": "node scripts/test-signals-publish-skill-package.mjs",
-    "test:plugin-package": "node scripts/test-verify-signals-plugin-provision.mjs && node scripts/test-realtimex-plugin-package.mjs && node scripts/test-x-publish-agent-browser.mjs",
+    "test:signals-pp-cli": "node scripts/test-signals-pp-cli-import.mjs && node scripts/test-signals-pp-cli-targets.mjs",
+    "test:standalone-artifact": "node scripts/test-standalone-artifact.mjs",
+    "test:plugin-package": "node scripts/test-verify-signals-plugin-provision.mjs && node scripts/test-release-signature.mjs && node scripts/test-realtimex-plugin-package.mjs && node scripts/test-x-publish-agent-browser.mjs",
     "test:provision-verifier": "node scripts/test-verify-signals-plugin-provision.mjs",
     "verify:marketplace-versions": "node scripts/verify-marketplace-versions.mjs",
+    "merge:release-manifests": "node scripts/merge-release-manifests.mjs",
+    "validate:release-artifacts": "node scripts/validate-release-artifacts.mjs",
+    "sign:release-manifest": "node scripts/sign-release-manifest.mjs",
     "verify:fresh-import": "vitest run --project import-safety",
     "test:integration": "vitest run --project integration",
-    "check": "npm run typecheck && npm run lint && npm run test:coverage && npm run test:skill-package && npm run test:provision-verifier && npm run db:migrate && npm run build",
+    "check": "npm run typecheck && npm run lint && npm run check:agent-tools-openapi && npm run test:coverage && npm run test:skill-package && npm run test:provision-verifier && npm run db:migrate && npm run build",
     "package:realtimex-plugin": "bash scripts/package-realtimex-plugin.sh",
     "build:standalone-artifact": "bash scripts/build-standalone-artifact.sh",
+    "generate:agent-tools-openapi": "node scripts/generate-agent-tools-openapi.mjs",
+    "check:agent-tools-openapi": "node scripts/check-agent-tools-openapi.mjs",
+    "build:signals-pp-cli": "node scripts/build-signals-pp-cli.mjs",
     "gate": "npm run check",
     "prepublishOnly": "npm run build:cli",
     "doctor": "npx react-doctor@latest"
@@ -117,7 +126,7 @@
     "linkedin",
     "automation"
   ],
-  "license": "Apache-2.0",
+  "license": "UNLICENSED",
   "repository": {
     "type": "git",
     "url": "https://github.com/therealtimex/signals.git"

@@ -30,6 +30,12 @@ export function buildAgentWorkflowThreadName(templateName: string): string {
   return `agent: ${label}`;
 }
 
+/** Audit/status threads for in-process pipelines — not terminal-agent work orders. */
+export function buildPipelineThreadName(templateName: string): string {
+  const label = templateName.trim().slice(0, 60) || "Pipeline";
+  return `pipeline: ${label}`;
+}
+
 export function buildAgentWorkflowBrief(input: {
   template: Pick<
     WorkflowTemplate,
@@ -67,14 +73,16 @@ export function buildAgentWorkflowBrief(input: {
     "",
     "Execution requirements:",
     "1. Signals is already running — do not start or manage Local Apps via pp-cli.",
-    `2. Verify the base URL: curl -s ${input.signalsBaseUrl}/api/health (expect app=signals).`,
-    "3. If workspace skill scripts exist, you may run `.claude/skills/realtimex-signals/scripts/resolve-base-url.sh` to double-check the base URL; otherwise use the URL above directly.",
-    "4. When you create contacts or orgs via agent-tools, pass `workflowRunId` and `templateId` from this brief so Signals can attribute them to this run.",
-    `5. Discover tools: GET ${input.signalsBaseUrl}/api/agent-tools`,
-    `6. Invoke tools (${tools}) via POST ${input.signalsBaseUrl}/api/agent-tools/invoke with JSON { "tool": "...", "input": { ... } }.`,
-    "7. Perform web search and browser work in RealTimeX (not via agent-tools).",
-    "8. Write structured results back to Signals through agent-tools.",
-    "9. Report a concise summary in this thread when finished.",
+    `2. Verify health before bulk write-back: signals-pp-cli health (or curl -s ${input.signalsBaseUrl}/api/health — expect app=signals, status=ok).`,
+    "3. After staging workflow-runs/<runId>/contacts.csv (or contacts.json), commit CRM rows with:",
+    `   signals-pp-cli import contacts --file workflow-runs/${input.workflowRunId}/contacts.csv --dedupe`,
+    "4. Do not loop create_contact manually for bulk imports.",
+    "5. Prefer signals-pp-cli over bash invoke-tool.sh wrappers when the bundled CLI is on PATH.",
+    "6. When you create contacts or orgs via agent-tools, pass `workflowRunId` and `templateId` from this brief so Signals can attribute them to this run.",
+    `7. Discover tools: GET ${input.signalsBaseUrl}/api/agent-tools`,
+    `8. For single-record edits, invoke tools (${tools}) via POST ${input.signalsBaseUrl}/api/agent-tools/invoke with JSON { \"tool\": \"...\", \"input\": { ... } }.`,
+    "9. Perform web search and browser work in RealTimeX (not via agent-tools).",
+    "10. Report a concise summary in this thread when finished (import JSON summary is suitable).",
     "",
     "Do not call legacy in-process workflow runners. This thread is the execution lane.",
   ];

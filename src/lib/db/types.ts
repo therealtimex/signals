@@ -13,6 +13,9 @@ import {
   contentPosts,
   engagements,
   platformAccounts,
+  browserConnections,
+  platformTargets,
+  browserSessionLeases,
   syncCursors,
   engagementMetrics,
   workflowRuns,
@@ -71,6 +74,13 @@ export type NewChatConversation = InferInsertModel<typeof chatConversations>;
 // Platform account types
 export type PlatformAccount = InferSelectModel<typeof platformAccounts>;
 export type NewPlatformAccount = InferInsertModel<typeof platformAccounts>;
+
+export type BrowserConnection = InferSelectModel<typeof browserConnections>;
+export type NewBrowserConnection = InferInsertModel<typeof browserConnections>;
+export type PlatformTarget = InferSelectModel<typeof platformTargets>;
+export type NewPlatformTarget = InferInsertModel<typeof platformTargets>;
+export type BrowserSessionLease = InferSelectModel<typeof browserSessionLeases>;
+export type NewBrowserSessionLease = InferInsertModel<typeof browserSessionLeases>;
 
 // Content types
 export type ContentItem = InferSelectModel<typeof contentItems>;

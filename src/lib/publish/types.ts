@@ -25,6 +25,9 @@ export interface PublishJobPayload {
 
 export interface PublishJobTarget {
   platform: PublishPlatformTarget;
+  targetId?: string;
+  expectedHandle?: string | null;
+  sessionName?: string;
   status: PublishTargetStatus;
   platformPostId?: string;
   platformUrl?: string;
@@ -39,6 +42,7 @@ export type PublishLaunchErrorCode =
   | "standalone"
   | "permission_required"
   | "rtx_unavailable"
-  | "launch_failed";
+  | "launch_failed"
+  | "terminal_dispatch_required";
 
 export const PUBLISH_JOB_STALE_MS = 30 * 60 * 1000;

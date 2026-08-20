@@ -19,7 +19,7 @@ Goals are first-class nodes that convert activity into measurable outcomes. Anal
 Activity is not outcome. Measure what matters.  
 The same graph that powers audience simulation also powers deep human relationship tracking — professional and personal.
 
-Signals will be developed privately first and open-sourced later under a permissive license (Apache-2.0 or MIT style).
+Signals is proprietary software distributed through the RealTimeX Marketplace. No public source release is planned under this specification.
 
 ### 2. Core Principles
 - Graph-first: Everything is nodes + typed edges.
@@ -103,7 +103,7 @@ Auto-progress via contribution edges. Manual override available. Goals organize 
 - SQLite + Drizzle ORM + local vector support
 - Local data under `~/.signals/` (override with `SIGNALS_DATA_DIR`)
 - Tailwind CSS + shadcn/ui
-- CLI bootstrap: `npx @realtimex/signals`
+- Marketplace bootstrap: signed, target-specific Local App runtime managed by RealTimeX
 - AES-256 encrypted credentials
 - Strong isolation of private relationship data
 
@@ -139,7 +139,7 @@ Variant generation, Contact+Org-aware simulation, publish, real metrics, core GT
 Relationship edges, stages, strength scoring, Dashboard & Timeline, interaction logging, AI suggestions, Relationship Goal types, expanded Analytics.
 
 **Phase 4** — Scale, Calibration & Open Source Prep  
-Large-account handling, continuous improvement of simulations, advanced suggestions, richer scoring, exports, privacy hardening, clean open-source release preparation.
+Large-account handling, continuous improvement of simulations, advanced suggestions, richer scoring, exports, privacy hardening, and hardened proprietary marketplace distribution.
 
 ### 8. Key Design Decisions
 - Product name is **Signals**.
@@ -147,7 +147,7 @@ Large-account handling, continuous improvement of simulations, advanced suggesti
 - Same graph powers both GTM audience simulation and personal/professional relationship tracking.
 - X is the highest-priority signal for the classic launch experience; the graph underneath is fully multi-source.
 - Users can stay in pure GTM mode, pure Relationship mode, or move fluidly between them.
-- Developed privately first; open-sourced later.
+- Developed and distributed as proprietary software through the RealTimeX Marketplace.
 
 ### 9. Example Flows
 **GTM Launch**: Sync → cluster niches → brief → generate variants → Wind Tunnel → ship → outcomes advance Goals.

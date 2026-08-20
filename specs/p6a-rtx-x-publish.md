@@ -34,7 +34,7 @@ Migrate **X (Twitter) content publishing** from Signals in-process Playwright (`
 4. **Review mode does not close the browser.** Match current behavior: leave RTX session/tab open after fill; poll for compose modal close up to 5 minutes.
 5. **Media upload path unchanged at CRM layer.** Publish request still carries `mediaAssetIds` / `threadMediaIds`; executor resolves filesystem paths via existing `resolveMediaPaths` logic before `setInputFiles` equivalent on CDP.
 6. **Session validation moves to RTX.** Pre-flight: RTX Browser session exists, X content tab reachable, logged-in selectors present (`[data-testid="primaryColumn"]`). Failure ⇒ `session_expired` with message pointing to RTX Browser login (not Signals Settings browser session).
-7. **Embedded Local App only for v1 executor.** Standalone `npx @realtimex/signals` returns explicit “publish requires RealTimeX Local App” until a standalone fallback is designed.
+7. **Embedded Local App only for v1 executor.** Source-checkout standalone mode returns explicit “publish requires RealTimeX Local App” until a standalone fallback is designed.
 
 ## 3. Architecture
 

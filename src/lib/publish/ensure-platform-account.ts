@@ -1,7 +1,6 @@
 import {
   createPlatformAccount,
   getPlatformAccountByPlatform,
-  updatePlatformAccount,
 } from "@/lib/db/queries/platform-accounts";
 import type { PlatformAccount } from "@/lib/db/types";
 import type { Platform } from "@/lib/db/platforms";
@@ -24,12 +23,7 @@ export function ensureSessionPlatformAccount(
   const fallback = FALLBACK_DISPLAY_NAMES[platform] ?? `${platform} (RTX Browser)`;
   const displayName = detectedHandle?.trim() || fallback;
 
-  if (existing) {
-    if (detectedHandle && existing.displayName !== displayName) {
-      return updatePlatformAccount(existing.id, { displayName }) ?? existing;
-    }
-    return existing;
-  }
+  if (existing) return existing;
 
   return createPlatformAccount({
     platform,

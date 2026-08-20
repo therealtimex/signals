@@ -27,7 +27,9 @@ import {
   SkipForward,
 } from "lucide-react";
 import type { WorkflowStep } from "@/lib/db/types";
+import type { WorkflowRunSubject } from "@/lib/workflows/workflow-run-subjects-shared";
 import { formatWorkflowError } from "@/lib/workflows/format-error";
+import { formatStepOffsetFromRunStart } from "@/lib/workflows/workflow-step-timing";
 
 const STEP_TYPE_CONFIG: Record<
   string,
@@ -89,7 +91,17 @@ function parseJson(str: string | null): Record<string, unknown> | null {
   }
 }
 
-export function WorkflowStepTimeline({ steps, animate }: { steps: WorkflowStep[]; animate?: boolean }) {
+export function WorkflowStepTimeline({
+  steps,
+  animate,
+  subjectById = {},
+  runStartedAt = null,
+}: {
+  steps: WorkflowStep[];
+  animate?: boolean;
+  subjectById?: Record<string, WorkflowRunSubject>;
+  runStartedAt?: number | null;
+}) {
   if (steps.length === 0) {
     return animate ? (
       <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
@@ -110,6 +122,7 @@ export function WorkflowStepTimeline({ steps, animate }: { steps: WorkflowStep[]
         const StepIcon = config.icon;
         const StatusIcon = STATUS_ICONS[step.status] ?? Clock;
         const output = parseJson(step.output);
+        const offsetLabel = formatStepOffsetFromRunStart(step.createdAt, runStartedAt);
 
         return (
           <div
@@ -117,8 +130,11 @@ export function WorkflowStepTimeline({ steps, animate }: { steps: WorkflowStep[]
             className={`flex items-start gap-3 py-2 px-3 rounded-md hover:bg-muted/50 text-sm${animate ? " animate-step-slide-in" : ""}`}
           >
             {/* Timestamp */}
-            <span className="text-xs font-mono text-muted-foreground w-[70px] shrink-0 pt-0.5">
-              {formatTime(step.createdAt)}
+            <span className="text-xs font-mono text-muted-foreground w-[84px] shrink-0 pt-0.5">
+              {offsetLabel && (
+                <span className="block text-[10px] text-foreground/70">{offsetLabel}</span>
+              )}
+              <span>{formatTime(step.createdAt)}</span>
             </span>
 
             {/* Step type badge */}
@@ -148,7 +164,11 @@ export function WorkflowStepTimeline({ steps, animate }: { steps: WorkflowStep[]
                 );
               })()}
               {output && Object.keys(output).length > 0 && !step.error && (
-                <StepOutputRenderer output={output} variant="inline" />
+                <StepOutputRenderer
+                  output={output}
+                  variant="inline"
+                  subjectById={subjectById}
+                />
               )}
             </div>
 

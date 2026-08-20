@@ -3,7 +3,7 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
-import { homedir } from "os";
+import { resolveHomePrefixedPath, resolveSignalsDataDir } from "@/lib/signals-data-dir";
 import { mkdirSync, existsSync } from "fs";
 import { ensureEmploymentBackfillBeforeCompanyDrop } from "@/lib/db/migrate-employment-pre-drop";
 import { ensureChannelBackfillBeforeDrop } from "@/lib/db/migrate-channel-pre-drop";
@@ -13,7 +13,7 @@ import { ensureAvatarBackfillBeforeDrop } from "@/lib/db/migrate-avatar-pre-drop
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export function runMigrations(dataDir?: string) {
-  const dir = dataDir ?? process.env.SIGNALS_DATA_DIR?.replace("~", homedir()) ?? join(homedir(), ".signals");
+  const dir = dataDir ?? resolveSignalsDataDir();
 
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
@@ -31,7 +31,9 @@ export function runMigrations(dataDir?: string) {
 
   const db = drizzle(sqlite);
 
-  const migrationsDir = join(__dirname, "migrations");
+  const migrationsDir =
+    resolveHomePrefixedPath(process.env.SIGNALS_MIGRATIONS_DIR) ??
+    join(__dirname, "migrations");
   if (existsSync(migrationsDir)) {
     migrate(db, { migrationsFolder: migrationsDir });
   }

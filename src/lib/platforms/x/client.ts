@@ -42,11 +42,20 @@ export interface XTweet {
 
 export interface XApiResponse<T> {
   data: T;
+  errors?: XLookupError[];
   meta?: {
     result_count: number;
     next_token?: string;
     previous_token?: string;
   };
+}
+
+export interface XLookupError {
+  value?: string;
+  resource_id?: string;
+  title?: string;
+  detail?: string;
+  type?: string;
 }
 
 export interface XApiError {
@@ -59,6 +68,8 @@ export interface XApiError {
 // --- Constants ---
 
 const X_API_BASE = "https://api.x.com/2";
+
+export const X_USER_LOOKUP_MAX_IDS = 100;
 
 const DEFAULT_USER_FIELDS = [
   "name",
@@ -93,7 +104,10 @@ export async function xApiFetch<T>(
   options: RequestInit = {}
 ): Promise<XApiResponse<T>> {
   // Derive endpoint pattern for rate limiting (e.g., "/2/users/:id/following")
-  const endpointPattern = endpoint.replace(/\/\d+/g, "/:id");
+  const endpointPath = endpoint.startsWith("http")
+    ? new URL(endpoint).pathname
+    : endpoint.split("?")[0];
+  const endpointPattern = endpointPath.replace(/\/\d+/g, "/:id");
 
   // Check rate limit before making the request
   const rateCheck = checkRateLimit(accountId, endpointPattern);
@@ -221,6 +235,27 @@ export async function getUserByUsername(accountId: string, username: string): Pr
     `/users/by/username/${username}?user.fields=${DEFAULT_USER_FIELDS}`
   );
   return res.data;
+}
+
+/** Fetch up to 100 users by stable X account ID in one request. */
+export async function getUsersByIds(
+  accountId: string,
+  userIds: string[],
+): Promise<{ users: XUser[]; errors: XLookupError[] }> {
+  if (userIds.length === 0) return { users: [], errors: [] };
+  if (userIds.length > X_USER_LOOKUP_MAX_IDS) {
+    throw new Error(`X user lookup accepts at most ${X_USER_LOOKUP_MAX_IDS} IDs`);
+  }
+
+  const params = new URLSearchParams({
+    ids: userIds.join(","),
+    "user.fields": DEFAULT_USER_FIELDS,
+  });
+  const res = await xApiFetch<XUser[]>(accountId, `/users?${params.toString()}`);
+  return {
+    users: Array.isArray(res.data) ? res.data : [],
+    errors: res.errors ?? [],
+  };
 }
 
 /** Fetch followers of a user (paginated). */

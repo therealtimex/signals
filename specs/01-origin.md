@@ -695,7 +695,7 @@ RSC enabled.
 - **type:** `module` (ESM)
 - **bin:** `openvolo` → `./dist/bin/cli.js`
 - **engines:** `node >= 18.0.0`
-- **license:** MIT
+- **license:** Proprietary (`UNLICENSED` package metadata)
 
 **Scripts:**
 

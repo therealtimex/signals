@@ -3,12 +3,17 @@ import { z } from "zod";
 import { sendContentToAgent } from "@/lib/publish/send-to-agent";
 import { resolveSignalsBaseUrlFromRequest } from "@/lib/rtx/resolve-signals-base-url";
 
-const sendToAgentSchema = z.object({
-  contentItemId: z.string(),
-  platforms: z.array(z.enum(["x", "linkedin"])).min(1),
-  text: z.string().min(1),
-  mediaAssetIds: z.array(z.string()).optional(),
-});
+const sendToAgentSchema = z
+  .object({
+    contentItemId: z.string(),
+    platforms: z.array(z.enum(["x", "linkedin"])).default([]),
+    targets: z.array(z.object({ targetId: z.string().min(1) })).optional(),
+    text: z.string().min(1),
+    mediaAssetIds: z.array(z.string()).optional(),
+  })
+  .refine((input) => input.platforms.length > 0 || (input.targets?.length ?? 0) > 0, {
+    message: "At least one platform or target is required",
+  });
 
 export async function POST(req: Request) {
   try {

@@ -94,6 +94,16 @@ function mapLaunchHttpError(
       httpStatus: status,
     };
   }
+  if (code === "TERMINAL_DISPATCH_REQUIRED") {
+    return {
+      success: false,
+      error:
+        error ||
+        "No terminal agent is configured for this workspace. Set a workspace default terminal agent in RealTimeX.",
+      errorCode: "terminal_dispatch_required",
+      httpStatus: status,
+    };
+  }
   return { success: false, error, errorCode: "launch_failed", httpStatus: status };
 }
 
@@ -210,6 +220,145 @@ function shouldFallbackToCliLaunch(status: number, body: Record<string, unknown>
   if (status !== 404) return false;
   const code = typeof body.code === "string" ? body.code : "";
   return code === "RTX_RUNTIME_SESSIONS_UNAVAILABLE" || code === "" || body.error === "Not Found";
+}
+
+export type DispatchTerminalAgentInput = {
+  workspaceSlug: string;
+  threadSlug: string;
+  message: string;
+  reason?: string;
+};
+
+export async function appendRtxThreadMessage(
+  input: {
+    workspaceSlug: string;
+    threadSlug: string;
+    message: string;
+    reason?: string;
+  },
+  env: EnvLike = process.env,
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ success: true } | { success: false; error: string }> {
+  const appId = getRtxAppId(env);
+  const apiBase = resolveRtxApiBase(env);
+  if (!appId || !apiBase) {
+    return { success: false, error: "RealTimeX API is not configured" };
+  }
+
+  const workspaceSlug = input.workspaceSlug.trim();
+  const threadSlug = input.threadSlug.trim();
+
+  try {
+    const response = await fetchImpl(
+      `${apiBase}/cli/send-message/${encodeURIComponent(workspaceSlug)}/${encodeURIComponent(threadSlug)}`,
+      {
+        method: "POST",
+        headers: buildAppHeaders(appId),
+        body: JSON.stringify({
+          message: input.message,
+          requireTerminalDispatch: false,
+          skipTerminalDispatch: true,
+          broadcastThreadEvents: true,
+          reason: input.reason,
+          externalSource: {
+            type: "signals-pipeline-status",
+            origin: "signals",
+          },
+        }),
+      },
+    );
+
+    const body = await readRtxJsonBody(response);
+    if (!response.ok || body.success === false) {
+      return {
+        success: false,
+        error:
+          typeof body.error === "string"
+            ? body.error
+            : "Failed to append thread message",
+      };
+    }
+
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Append message failed",
+    };
+  }
+}
+
+export async function dispatchTerminalAgentViaSendMessage(
+  input: DispatchTerminalAgentInput,
+  env: EnvLike = process.env,
+  fetchImpl: typeof fetch = fetch
+): Promise<LaunchTerminalAgentResult> {
+  const appId = getRtxAppId(env);
+  const apiBase = resolveRtxApiBase(env);
+  if (!appId || !apiBase) {
+    return {
+      success: false,
+      error: "Publishing requires the RealTimeX Local App",
+      errorCode: "standalone",
+    };
+  }
+
+  const workspaceSlug = input.workspaceSlug.trim();
+  const threadSlug = input.threadSlug.trim();
+
+  try {
+    const response = await fetchImpl(
+      `${apiBase}/cli/send-message/${encodeURIComponent(workspaceSlug)}/${encodeURIComponent(threadSlug)}`,
+      {
+        method: "POST",
+        headers: buildAppHeaders(appId),
+        body: JSON.stringify({
+          message: input.message,
+          requireTerminalDispatch: true,
+        }),
+      }
+    );
+
+    const body = await readRtxJsonBody(response);
+    const terminalDispatchAccepted = body.terminalDispatchAccepted === true;
+
+    if (!response.ok || body.success === false || !terminalDispatchAccepted) {
+      return mapLaunchHttpError(response.status, body);
+    }
+
+    const descriptor = body.descriptor as { id?: string } | undefined;
+    const descriptorId = typeof descriptor?.id === "string" ? descriptor.id : null;
+    if (!descriptorId) {
+      return {
+        success: false,
+        error: "Dispatch succeeded but no session descriptor was returned",
+        errorCode: "launch_failed",
+        httpStatus: response.status,
+      };
+    }
+
+    const resolvedWorkspace =
+      typeof body.workspaceSlug === "string" ? body.workspaceSlug : workspaceSlug;
+    const resolvedThread =
+      typeof body.threadSlug === "string" ? body.threadSlug : threadSlug;
+
+    return {
+      success: true,
+      descriptor: {
+        id: descriptorId,
+        linkage: {
+          workspaceSlug: resolvedWorkspace,
+          threadSlug: resolvedThread,
+        },
+      },
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Dispatch request failed",
+      errorCode: "rtx_unavailable",
+    };
+  }
 }
 
 export async function launchTerminalCliAgent(
