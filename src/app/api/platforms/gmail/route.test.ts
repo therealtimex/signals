@@ -5,6 +5,7 @@ import { db } from "@/lib/db/client";
 import { platformAccounts } from "@/lib/db/schema";
 import { listHimalayaMailAccounts, syncMailAccountsFromHimalaya } from "@/lib/db/queries/mail-accounts";
 import { disconnectGmailAccount } from "@/lib/platforms/gmail/auth";
+import { resetCoreTables } from "@/test/db";
 
 vi.mock("@/lib/platforms/gmail/auth", () => ({
   disconnectGmailAccount: vi.fn(),
@@ -16,6 +17,7 @@ vi.mock("@/lib/platforms/gmail/client", () => ({
 
 describe("/api/platforms/gmail legacy OAuth scoping", () => {
   beforeEach(() => {
+    resetCoreTables();
     db.delete(platformAccounts).run();
     vi.clearAllMocks();
   });

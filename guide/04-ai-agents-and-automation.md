@@ -36,6 +36,7 @@ Data completion — filling in missing information on existing contacts.
 List hygiene — keeping your CRM focused on active, relevant contacts.
 
 - **Prune Inactive Contacts** — Identifies contacts that appear inactive (no social activity, invalid profiles) and recommends them for archival. (~$0.35/run)
+- **Deduplicate & Merge Contacts** — Finds records that are the same person across X, LinkedIn, Gmail, and agent research runs, then consolidates their identities, channels, employment, and activity into one surviving record. (~$0.10/run)
 
 ### Content Agents
 Content creation — generating and publishing posts.

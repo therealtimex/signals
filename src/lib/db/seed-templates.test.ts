@@ -82,6 +82,53 @@ describe("Contact profile pipeline seed", () => {
   });
 });
 
+describe("Deduplicate & Merge Contacts seed", () => {
+  beforeEach(() => {
+    resetCoreTables();
+  });
+
+  it("seeds the dedupe template into the Prune category", () => {
+    seedTemplates();
+    const template = getSystemTemplateByName("Deduplicate & Merge Contacts")!;
+
+    // The Prune tab in the template gallery filters on templateType === "pruning".
+    expect(template.templateType).toBe("pruning");
+    expect(template.isSystem).toBe(1);
+    expect(template.status).toBe("active");
+  });
+
+  it("points the prompt at the tools that back it", () => {
+    seedTemplates();
+    const template = getSystemTemplateByName("Deduplicate & Merge Contacts")!;
+
+    expect(template.systemPrompt).toContain("find_duplicate_contacts");
+    expect(template.systemPrompt).toContain("merge_contacts");
+    expect(template.systemPrompt).toContain("dryRun");
+
+    const config = JSON.parse(template.config ?? "{}") as {
+      tiers?: number[];
+      minConfidence?: number;
+      limit?: number;
+    };
+    // Key names match find_duplicate_contacts' arguments so the prompt can tell
+    // the agent to pass them straight through.
+    expect(config.tiers).toEqual([1, 2]);
+    expect(config.minConfidence).toBe(0.8);
+    expect(config.limit).toBe(25);
+  });
+
+  it("is idempotent across repeated seeding", () => {
+    seedTemplates();
+    seedTemplates();
+    const rows = db
+      .select()
+      .from(workflowTemplates)
+      .where(eq(workflowTemplates.name, "Deduplicate & Merge Contacts"))
+      .all();
+    expect(rows).toHaveLength(1);
+  });
+});
+
 describe("Social Intent Patrol seed", () => {
   beforeEach(() => {
     resetCoreTables();

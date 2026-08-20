@@ -37,6 +37,8 @@ export const queryContactsSchema = z.object({
   search: z.string().optional(),
   funnelStage: funnelStage.optional(),
   platform: platform.optional(),
+  platformUserId: z.string().min(1).optional(),
+  includeArchived: z.boolean().optional(),
   page: z.number().int().positive().optional(),
   pageSize: z.number().int().positive().max(100).optional(),
   sort: z.enum(["createdAt", "enrichmentScore"]).optional(),
@@ -102,6 +104,26 @@ export const enrichContactSchema = z.object({
 export const archiveContactSchema = z.object({
   contactId: z.string().min(1),
   reason: z.string().min(1),
+});
+
+export const findDuplicateContactsSchema = z.object({
+  tiers: z.array(z.union([z.literal(1), z.literal(2), z.literal(3)])).optional(),
+  minConfidence: z.number().min(0).max(1).optional(),
+  limit: z.number().int().positive().max(200).optional(),
+  contactIds: z.array(z.string().min(1)).optional(),
+});
+
+export const mergeContactsSchema = z.object({
+  primaryContactId: z.string().min(1),
+  secondaryContactIds: z.array(z.string().min(1)).min(1),
+  options: z
+    .object({
+      autoRecalculateScore: z.boolean().optional(),
+      dryRun: z.boolean().optional(),
+      reason: z.string().optional(),
+      workflowRunId: z.string().optional(),
+    })
+    .optional(),
 });
 
 export const upsertContactIdentitySchema = z

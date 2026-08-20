@@ -7,6 +7,8 @@ import { resolveSignalsBaseUrlFromRequest } from "@/lib/rtx/resolve-signals-base
 const activateSchema = z.object({
   config: z.record(z.unknown()).optional(),
   systemPrompt: z.string().optional(),
+  /** Opt out of the template's dedicated thread for this run only. */
+  freshThread: z.boolean().optional(),
 });
 
 /**
@@ -32,6 +34,7 @@ export async function POST(
       templateId: id,
       config: data.config,
       systemPrompt: data.systemPrompt,
+      freshThread: data.freshThread,
       signalsBaseUrl: resolveSignalsBaseUrlFromRequest(req),
     });
 
@@ -53,6 +56,7 @@ export async function POST(
         workspaceSlug: result.workspaceSlug,
         threadSlug: result.threadSlug,
         threadPath: result.threadPath,
+        threadResolution: result.threadResolution,
       },
       { status: 201 }
     );

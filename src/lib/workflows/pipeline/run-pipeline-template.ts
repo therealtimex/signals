@@ -20,14 +20,17 @@ import { workflowRuns } from "@/lib/db/schema";
 import type { WorkflowRun } from "@/lib/db/types";
 import { X_ANON_DEFERRED_REASON } from "@/lib/platforms/x/anon-web-constants";
 import {
-  createRtxPublishThread,
   ensureRtxWorkspace,
   getSignalsRtxWorkspaceSlug,
 } from "@/lib/rtx/cli-provisioning";
+import { getOrCreateTemplateThread } from "@/lib/rtx/template-thread";
 import { isRtxEmbedded, type EnvLike } from "@/lib/rtx/env";
 import { appendRtxThreadMessage } from "@/lib/rtx/runtime-sessions";
 import { ensureProfilePipelineDrainJob } from "@/lib/db/profile-pipeline-drain";
-import { buildPipelineThreadName } from "@/lib/workflows/template-brief";
+import {
+  buildTemplateThreadName,
+  formatRunLabelPrefix,
+} from "@/lib/workflows/template-brief";
 import { PIPELINE_STEP_HANDLERS } from "@/lib/workflows/pipeline/handlers";
 import {
   recordDistributedPipelineContactSteps,
@@ -77,6 +80,8 @@ export type RunPipelineTemplateInput = {
   env?: EnvLike;
   /** When true, await step execution (scheduled drain / CLI). Default: detached promise. */
   waitForCompletion?: boolean;
+  /** Run in a throwaway thread instead of the template's dedicated one. */
+  freshThread?: boolean;
 };
 
 export type RunPipelineTemplateResult =
@@ -505,12 +510,18 @@ export async function runPipelineTemplate(
         env,
         fetchImpl,
       );
-      threadSlug = await createRtxPublishThread(
-        workspaceSlug,
-        buildPipelineThreadName(template.name),
-        env,
-        fetchImpl,
-      );
+      threadSlug = (
+        await getOrCreateTemplateThread(
+          {
+            template,
+            workspaceSlug,
+            threadName: buildTemplateThreadName(template.name),
+            freshThread: input.freshThread,
+          },
+          env,
+          fetchImpl,
+        )
+      ).threadSlug;
       threadPath = `/workspace/${workspaceSlug}/t/${threadSlug}`;
 
       updateWorkflowRun(run.id, {
@@ -531,8 +542,9 @@ export async function runPipelineTemplate(
     }
   }
 
+  const runNumber = template.totalRuns + 1;
   updateTemplate(template.id, {
-    totalRuns: template.totalRuns + 1,
+    totalRuns: runNumber,
     lastRunAt: now,
   });
 
@@ -551,6 +563,7 @@ export async function runPipelineTemplate(
     trigger,
     workspaceSlug,
     threadSlug,
+    runNumber,
     fetchImpl,
     env,
   });
@@ -596,6 +609,8 @@ type ExecutePipelineRunInput = {
   trigger: "template" | "scheduled";
   workspaceSlug: string | null;
   threadSlug: string | null;
+  /** Ordinal of this run for the template, used to label messages in the shared thread. */
+  runNumber?: number;
   fetchImpl: typeof fetch;
   env: EnvLike;
 };
@@ -609,13 +624,15 @@ export async function executePipelineRun(input: ExecutePipelineRunInput): Promis
   if (!run) return;
 
   let runErrors = parseRunErrors(run.errors);
+  // Runs of one template share a thread, so every message is labelled with its ordinal.
+  const runLabel = formatRunLabelPrefix(input.runNumber);
   const appendThreadMessage = async (markdown: string) => {
     if (!input.workspaceSlug || !input.threadSlug) return;
     const result = await appendRtxThreadMessage(
       {
         workspaceSlug: input.workspaceSlug,
         threadSlug: input.threadSlug,
-        message: markdown,
+        message: `${runLabel}${markdown}`,
         reason: `Profile pipeline run ${input.workflowRunId}`,
       },
       input.env,

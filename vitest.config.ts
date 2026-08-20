@@ -38,6 +38,9 @@ export default defineConfig({
         extends: true,
         test: {
           name: "unit",
+          // Fixture-heavy suites (300-contact profile-pipeline builds) run 1-2s uninstrumented and
+          // several times that under coverage, which trips Vitest's 5s default on slower runners.
+          testTimeout: 20_000,
           include: ["src/**/*.test.ts"],
           exclude: [
             "**/node_modules/**",

@@ -11,6 +11,7 @@ import {
   countArchivedContacts,
   countContactsByCreatedWorkflowRun,
 } from "@/lib/db/queries/contacts";
+import { createIdentity } from "@/lib/db/queries/identities";
 import { CreatedSourceDetailFilterError } from "@/lib/db/creation-sources";
 import { db } from "@/lib/db/client";
 import { contacts } from "@/lib/db/schema";
@@ -41,6 +42,52 @@ describe("contacts queries", () => {
     const result = listContacts({ search: "alp" });
     expect(result.total).toBe(1);
     expect(result.data[0]?.name).toBe("Alpha");
+  });
+
+  it("resolves a contact by its exact platform identity claim", () => {
+    const target = createContact({ name: "Sam Altman" });
+    createIdentity({ contactId: target.id, platform: "x", platformUserId: "sama" });
+    const decoy = createContact({ name: "Sam Decoy" });
+    createIdentity({ contactId: decoy.id, platform: "x", platformUserId: "sama-decoy" });
+
+    const result = listContacts({ platform: "x", platformUserId: "sama" });
+
+    expect(result.total).toBe(1);
+    expect(result.data[0]?.id).toBe(target.id);
+  });
+
+  it("requires platform and platformUserId to match the same identity row", () => {
+    const contact = createContact({ name: "Cross Claim" });
+    createIdentity({ contactId: contact.id, platform: "linkedin", platformUserId: "sama" });
+
+    expect(listContacts({ platform: "x", platformUserId: "sama" }).total).toBe(0);
+    expect(listContacts({ platform: "linkedin", platformUserId: "sama" }).total).toBe(1);
+  });
+
+  it("hides an archived claim holder by default but returns it with includeArchived", () => {
+    // Regression for #202 finding 1: getIdentityByPlatformUser has no archived
+    // filter, so a claim lookup that hides archived contacts disagrees with the
+    // guard that later rejects the identity attach.
+    const owner = createContact({ name: "Archived Owner" });
+    createIdentity({ contactId: owner.id, platform: "x", platformUserId: "sama" });
+    archiveContact(owner.id, "test");
+
+    expect(listContacts({ platform: "x", platformUserId: "sama" }).total).toBe(0);
+
+    const withArchived = listContacts({
+      platform: "x",
+      platformUserId: "sama",
+      includeArchived: true,
+    });
+    expect(withArchived.total).toBe(1);
+    expect(withArchived.data[0]?.id).toBe(owner.id);
+  });
+
+  it("matches platformUserId exactly rather than by substring", () => {
+    const contact = createContact({ name: "Prefix Owner" });
+    createIdentity({ contactId: contact.id, platform: "x", platformUserId: "samantha" });
+
+    expect(listContacts({ platform: "x", platformUserId: "sama" }).total).toBe(0);
   });
 
   it("sorts contacts by enrichment score ascending", () => {
@@ -107,6 +154,36 @@ describe("contacts queries", () => {
     const restored = restoreContact(created.id);
     expect(JSON.parse(restored!.metadata ?? "{}").archived).toBeUndefined();
     expect(listContacts().total).toBe(1);
+  });
+
+  it("clears merge-tombstone keys on restore", () => {
+    const created = createContact({ name: "Merged Away" });
+    // Shape written by mergeContacts (src/lib/contacts/dedupe/merge.ts).
+    db.update(contacts)
+      .set({
+        metadata: JSON.stringify({
+          archived: 1,
+          archivedAt: 1_700_000_000,
+          archiveReason: "Merged into contact other",
+          mergedIntoContactId: "other",
+          mergedAt: 1_700_000_000,
+          mergeWorkflowRunId: "run-9",
+          keepMe: true,
+        }),
+      })
+      .where(eq(contacts.id, created.id))
+      .run();
+
+    const restored = restoreContact(created.id);
+    const metadata = JSON.parse(restored?.metadata ?? "{}");
+
+    // Leaving these behind resurrects the row as a live contact that
+    // mergeContacts still short-circuits on, so it could never be re-merged.
+    expect(metadata.mergedIntoContactId).toBeUndefined();
+    expect(metadata.mergedAt).toBeUndefined();
+    expect(metadata.mergeWorkflowRunId).toBeUndefined();
+    expect(metadata.archived).toBeUndefined();
+    expect(metadata.keepMe).toBe(true);
   });
 
   it("deletes a contact", () => {

@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
+import { Switch } from "@/components/ui/switch";
 import { Loader2, Play } from "lucide-react";
 import Link from "next/link";
 import {
@@ -68,6 +69,7 @@ export function ActivateDialog({ template, open, onClose }: ActivateDialogProps)
   const [workflowRunId, setWorkflowRunId] = useState<string | null>(null);
   const [backlog, setBacklog] = useState<PipelineBacklogPreview | null>(null);
   const [backlogLoading, setBacklogLoading] = useState(false);
+  const [freshThread, setFreshThread] = useState(false);
   const [pipelineBatchSize, setPipelineBatchSize] = useState(
     PROFILE_PIPELINE_DEFAULT_BATCH,
   );
@@ -105,6 +107,7 @@ export function ActivateDialog({ template, open, onClose }: ActivateDialogProps)
     setTone(limits.tone);
     setMaxEngagements(limits.maxEngagements);
     setSystemPrompt(template.systemPrompt ?? "");
+    setFreshThread(false);
   }, [open, template.id, template.config, template.systemPrompt, template.templateType]);
 
   useEffect(() => {
@@ -187,6 +190,7 @@ export function ActivateDialog({ template, open, onClose }: ActivateDialogProps)
         body: JSON.stringify({
           config,
           systemPrompt: systemPrompt !== template.systemPrompt ? systemPrompt : undefined,
+          freshThread: freshThread || undefined,
         }),
       });
 
@@ -444,6 +448,27 @@ export function ActivateDialog({ template, open, onClose }: ActivateDialogProps)
                 </div>
               </details>
             </>
+          )}
+
+          {!runLaunched && (
+            <div className="flex items-start justify-between gap-4 rounded-lg border p-3">
+              <div className="space-y-0.5">
+                <Label htmlFor="fresh-thread" className="text-sm font-medium">
+                  Start fresh thread for this run
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  Runs land in this template&apos;s dedicated RealTimeX thread so the
+                  agent keeps prior context. Turn this on for an isolated one-off
+                  session.
+                </p>
+              </div>
+              <Switch
+                id="fresh-thread"
+                checked={freshThread}
+                onCheckedChange={setFreshThread}
+                disabled={running}
+              />
+            </div>
           )}
 
           {error && (

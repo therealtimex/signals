@@ -105,6 +105,7 @@ describe("template-serializer", () => {
       estimatedCost: 0.5,
       totalRuns: 0,
       lastRunAt: null,
+      rtxThreadSlug: null,
       isSystem: 1,
       sourceTemplateId: null,
       createdAt: 1,

@@ -33,13 +33,15 @@ Then pass `Authorization: Bearer your-secret-token` on each request.
 
 | Tool | Category | Description |
 |------|----------|-------------|
-| `query_contacts` | contacts | Search/filter contacts |
+| `query_contacts` | contacts | Search/filter contacts; `platformUserId` (+ `platform`) is an exact identity-claim lookup, results list their identities and `archived`. Archived contacts are hidden unless `includeArchived: true` — set it for claim lookups, since the `upsert_contact_identity` guard ignores archived status |
 | `get_contact` | contacts | Full contact by ID |
 | `create_contact` | contacts | Create a contact (`channels[]`, `employments[]` supported) |
 | `update_contact` | contacts | Update contact fields |
 | `upsert_contact_identity` | contacts | Create or update a platform identity for a contact |
 | `enrich_contact` | contacts | Fill gaps without overwriting |
 | `archive_contact` | contacts | Archive with reason |
+| `find_duplicate_contacts` | contacts | Scan for duplicate contacts. Tier 1 = shared email or platform handle, tier 2 = matching name at the same org, tier 3 = shared employment node plus overlapping interaction threads. Read-only |
+| `merge_contacts` | contacts | Merge duplicates into a surviving primary and archive each secondary with `mergedIntoContactId`. Idempotent; supports `options.dryRun` |
 | `query_analytics` | analytics | Dashboard metrics |
 | `query_workflows` | workflows | List workflow runs |
 | `list_workflow_templates` | workflows | List startable templates |

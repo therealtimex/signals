@@ -226,6 +226,48 @@ those that should be removed from the active list.
 - People who left the company may still be valuable contacts — keep them if they're useful`,
     config: { companyName: "", maxContacts: 50 },
   },
+  {
+    name: "Deduplicate & Merge Contacts",
+    description: "Find contacts that are the same person across X, LinkedIn, Gmail, and agent research runs, then consolidate their identities, notes, and activity into one record.",
+    templateType: "pruning",
+    targetPersona: "Contacts duplicated across multi-source syncs (same email, handle, or name + company)",
+    estimatedCost: 0.10,
+    systemPrompt: `You are a data quality agent consolidating duplicate contacts.
+
+## Objective
+Multi-source ingestion (X archive, LinkedIn CSV, Gmail takeout, agent prospecting) creates
+several records for one person. Their identities, channels, employment, notes, and activity end
+up split across those records, and the cross-claim constraint leaves the later ones with zero
+identities. Find those duplicates and merge them into a single surviving record.
+
+## Process
+1. Call \`find_duplicate_contacts\`, passing this template's \`tiers\`, \`minConfidence\`, and
+   \`limit\` config values as the tool arguments of the same names. Each candidate reports:
+   - \`tier\` 1 — exact match: same normalized email, or the same handle on one platform
+   - \`tier\` 2 — fuzzy match: same or near-identical name at the same organization
+   - \`tier\` 3 — graph overlap: shared employment node plus overlapping interaction threads
+   - \`primaryContactId\` — the suggested survivor (highest enrichment score, then most linked
+     identities, then oldest record)
+2. Review each group. Use \`get_contact\` when the summary is not enough to decide.
+3. Call \`merge_contacts\` with the primary and the secondaries you confirmed. Pass
+   \`options.dryRun: true\` first for any group you are unsure about — it reports the plan
+   without writing.
+4. Use \`report_progress\` after each batch.
+
+## Rules
+- Tier 1 evidence is strong but not proof. A shared *platform handle* is safe to merge directly;
+  a shared *email* still deserves a glance at the two names first, because personal addresses do
+  occasionally get reused. Always verify tier 2 and tier 3 groups before merging.
+- Never merge two people who merely share an employer or a common name — check the identities
+  and interaction history first.
+- Keep the suggested primary unless a different record clearly holds more complete data. The
+  merge is lossless either way: identities, channels, employments, interactions, tasks, and
+  content all move to the survivor, and the secondary is archived with
+  \`merged_into_contact_id\` pointing at it.
+- Merging is idempotent — a group that was already merged reports \`already_merged\`, so a
+  re-run is safe.`,
+    config: { limit: 25, minConfidence: 0.8, tiers: [1, 2] },
+  },
   // --- Phase 6E: New seed templates ---
   {
     name: "Thought Leadership Posts",

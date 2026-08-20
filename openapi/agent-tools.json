@@ -158,6 +158,12 @@
                               "whatsapp"
                             ]
                           },
+                          "platformUserId": {
+                            "type": "string"
+                          },
+                          "includeArchived": {
+                            "type": "boolean"
+                          },
                           "page": {
                             "type": "number"
                           },
@@ -665,6 +671,96 @@
                         "required": [
                           "contactId",
                           "reason"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "find_duplicate_contacts"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "tiers": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "enum": [
+                                1,
+                                2,
+                                3
+                              ]
+                            }
+                          },
+                          "minConfidence": {
+                            "type": "number"
+                          },
+                          "limit": {
+                            "type": "number"
+                          },
+                          "contactIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "merge_contacts"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "primaryContactId": {
+                            "type": "string"
+                          },
+                          "secondaryContactIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "options": {
+                            "type": "object",
+                            "properties": {
+                              "autoRecalculateScore": {
+                                "type": "boolean"
+                              },
+                              "dryRun": {
+                                "type": "boolean"
+                              },
+                              "reason": {
+                                "type": "string"
+                              },
+                              "workflowRunId": {
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "primaryContactId",
+                          "secondaryContactIds"
                         ],
                         "additionalProperties": false
                       }
@@ -2411,6 +2507,8 @@
                       "enrich_contact",
                       "upsert_contact_identity",
                       "archive_contact",
+                      "find_duplicate_contacts",
+                      "merge_contacts",
                       "query_analytics",
                       "query_workflows",
                       "list_workflow_templates",
@@ -2593,6 +2691,6 @@
   ],
   "x-signals-agent-tools": {
     "manifestVersion": "1",
-    "toolCount": 43
+    "toolCount": 45
   }
 }

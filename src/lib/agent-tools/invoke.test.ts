@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
-import { createContact, getContactById } from "@/lib/db/queries/contacts";
+import { archiveContact, createContact, getContactById } from "@/lib/db/queries/contacts";
 import { invokeAgentTool } from "@/lib/agent-tools/invoke";
 import { listAgentToolsManifest } from "@/lib/agent-tools/registry";
 import { AgentToolError } from "@/lib/agent-tools/types";
 import { db } from "@/lib/db/client";
 import { contacts } from "@/lib/db/schema";
+import { createIdentity } from "@/lib/db/queries/identities";
 import { createOrg } from "@/lib/db/queries/orgs";
 import { listContactEmployments } from "@/lib/db/queries/contact-employments";
 import { resetCoreTables } from "@/test/db";
@@ -140,6 +141,73 @@ describe("invokeAgentTool", () => {
     expect(rows[0]?.id).toBe(low.id);
     expect(rows[0]?.score).toBe(5);
     expect(rows[1]?.id).toBe(high.id);
+  });
+
+  it("resolves an existing contact by platform identity claim", async () => {
+    const target = createContact({ name: "Sam Altman" });
+    createIdentity({ contactId: target.id, platform: "x", platformUserId: "sama" });
+    const decoy = createContact({ name: "Sam Decoy" });
+    createIdentity({ contactId: decoy.id, platform: "x", platformUserId: "sama-decoy" });
+
+    const result = await invokeAgentTool("query_contacts", {
+      platform: "x",
+      platformUserId: "sama",
+      pageSize: 50,
+    });
+
+    const rows = (
+      result as {
+        contacts: Array<{
+          id: string;
+          identities: Array<{ platform: string; platformUserId: string }>;
+        }>;
+      }
+    ).contacts;
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.id).toBe(target.id);
+    expect(rows[0]?.identities).toContainEqual(
+      expect.objectContaining({ platform: "x", platformUserId: "sama" }),
+    );
+  });
+
+  it("surfaces an archived claim holder to query_contacts via includeArchived", async () => {
+    // Fails before the #202 archived fix: includeArchived did not exist, so the
+    // CLI could not see the archived owner, created a duplicate, and
+    // upsert_contact_identity then rejected the already-claimed account.
+    const owner = createContact({ name: "Archived Owner" });
+    createIdentity({ contactId: owner.id, platform: "x", platformUserId: "sama" });
+    archiveContact(owner.id, "test");
+
+    const hidden = (await invokeAgentTool("query_contacts", {
+      platform: "x",
+      platformUserId: "sama",
+    })) as { contacts: unknown[] };
+    expect(hidden.contacts).toHaveLength(0);
+
+    const visible = (await invokeAgentTool("query_contacts", {
+      platform: "x",
+      platformUserId: "sama",
+      includeArchived: true,
+      pageSize: 50,
+    })) as { contacts: Array<{ id: string; archived: boolean }> };
+
+    expect(visible.contacts).toHaveLength(1);
+    expect(visible.contacts[0]?.id).toBe(owner.id);
+    expect(visible.contacts[0]?.archived).toBe(true);
+  });
+
+  it("reports archived: false for a live contact", async () => {
+    const live = createContact({ name: "Live Contact" });
+    createIdentity({ contactId: live.id, platform: "x", platformUserId: "live-1" });
+
+    const result = (await invokeAgentTool("query_contacts", {
+      platform: "x",
+      platformUserId: "live-1",
+    })) as { contacts: Array<{ id: string; archived: boolean }> };
+
+    expect(result.contacts[0]?.id).toBe(live.id);
+    expect(result.contacts[0]?.archived).toBe(false);
   });
 
   it("filters query_contacts by createdSourceDetail suffix x_archive", async () => {

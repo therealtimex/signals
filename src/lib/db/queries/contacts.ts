@@ -213,10 +213,24 @@ function recalcEnrichment(contactId: string): void {
   recalcContactEnrichment(contactId);
 }
 
+/**
+ * Canonical "is this contact archived" test. `archived: 1` lives in the contact
+ * metadata blob (see `archiveContact`), so every reader has to parse it the same way.
+ */
+export function isContactArchived(metadata: string | null | undefined): boolean {
+  if (!metadata) return false;
+  try {
+    return (JSON.parse(metadata) as { archived?: number }).archived === 1;
+  } catch {
+    return false;
+  }
+}
+
 export function listContacts(opts?: {
   search?: string;
   funnelStage?: string;
   platform?: string;
+  platformUserId?: string;
   page?: number;
   pageSize?: number;
   includeArchived?: boolean;
@@ -261,18 +275,25 @@ export function listContacts(opts?: {
   if (opts?.funnelStage) {
     conditions.push(eq(contacts.funnelStage, opts.funnelStage as Contact["funnelStage"]));
   }
-  if (opts?.platform) {
+  if (opts?.platform || opts?.platformUserId) {
+    // Both filters resolve against the same identity row so a
+    // (platform, platformUserId) pair is a deterministic claim lookup rather
+    // than two independent "has some identity" checks.
+    const identityConditions: SQL[] = [eq(contactIdentities.contactId, contacts.id)];
+    if (opts.platform) {
+      identityConditions.push(
+        eq(contactIdentities.platform, opts.platform as ContactIdentity["platform"]),
+      );
+    }
+    if (opts.platformUserId) {
+      identityConditions.push(eq(contactIdentities.platformUserId, opts.platformUserId));
+    }
     conditions.push(
       exists(
         db
           .select({ id: contactIdentities.id })
           .from(contactIdentities)
-          .where(
-            and(
-              eq(contactIdentities.contactId, contacts.id),
-              eq(contactIdentities.platform, opts.platform as ContactIdentity["platform"]),
-            ),
-          ),
+          .where(and(...identityConditions)),
       ),
     );
   }
@@ -518,6 +539,12 @@ export function restoreContact(id: string): ContactDTO | undefined {
   delete existing.archivedAt;
   delete existing.archiveReason;
   delete existing.archiveWorkflowRunId;
+  // A merge tombstone also carries these. Leaving them behind would resurrect the
+  // row as a live contact that `mergeContacts` still short-circuits on, so
+  // detection would keep proposing a duplicate that can never be merged again.
+  delete existing.mergedIntoContactId;
+  delete existing.mergedAt;
+  delete existing.mergeWorkflowRunId;
   const metadata = JSON.stringify(existing);
 
   return updateContact(id, { metadata });
