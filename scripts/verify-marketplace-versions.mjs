@@ -9,6 +9,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { SIGNALS_NODE_VERSION } from "./node-runtime-contract.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "..");
@@ -20,6 +21,7 @@ function readJson(rel) {
 const pkg = readJson("package.json");
 const plugin = readJson("realtimex-plugin/realtimex.plugin.json");
 const localApp = readJson("realtimex-plugin/marketplace/local-app.manifest.json");
+const nvmNodeVersion = fs.readFileSync(path.join(root, ".nvmrc"), "utf8").trim();
 
 const tagArg =
   process.argv.find((arg) => arg.startsWith("--tag="))?.slice("--tag=".length) ||
@@ -34,6 +36,15 @@ if (plugin.version !== pkg.version) {
   );
 }
 
+if (nvmNodeVersion !== SIGNALS_NODE_VERSION) {
+  errors.push(`.nvmrc version ${nvmNodeVersion} != ${SIGNALS_NODE_VERSION}`);
+}
+if (pkg.engines?.node !== SIGNALS_NODE_VERSION) {
+  errors.push(
+    `package.json engines.node ${pkg.engines?.node ?? "missing"} != ${SIGNALS_NODE_VERSION}`,
+  );
+}
+
 if (pkg.private !== true || pkg.license !== "UNLICENSED") {
   errors.push("package.json must be private and UNLICENSED for proprietary distribution");
 }
@@ -42,10 +53,12 @@ if (plugin.license !== "UNLICENSED") {
 }
 if (
   localApp.runtime?.kind !== "node" ||
-  localApp.runtime?.version !== "20.x" ||
+  localApp.runtime?.version !== SIGNALS_NODE_VERSION ||
   localApp.runtime?.managedBy !== "realtimex"
 ) {
-  errors.push("local-app.manifest.json must require the RealtimeX-managed Node 20.x runtime");
+  errors.push(
+    `local-app.manifest.json must require RealtimeX-managed Node ${SIGNALS_NODE_VERSION}`,
+  );
 }
 if (localApp.configuration?.command !== "{runtime.executable}") {
   errors.push("local-app.manifest.json must launch the managed runtime executable");

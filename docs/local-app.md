@@ -6,7 +6,7 @@ Signals is distributed as a **RealTimeX Local App**. Developers can also run it 
 
 | Item | Value |
 |------|-------|
-| **Runtime** | RealtimeX-managed Node 20.x |
+| **Runtime** | RealtimeX-managed Node 22.16.0 (module ABI 127) |
 | **Command** | `{runtime.executable}` |
 | **Args** | `["server.js"]` |
 | **Health check** | `GET /api/health` → `{ status: "ok", app: "signals", rtx: { ... } }` |
@@ -91,8 +91,11 @@ Publish and engage browser flows still use Signals-managed sessions. See `docs/r
 
 ## Local development
 
+Use `nvm use` from the repository root before installing dependencies. The checked-in `.nvmrc`, release builders, and runtime startup guard all require Node `22.16.0` / ABI `127`, matching the RealtimeX host and preventing native `better-sqlite3` ABI mismatches.
+
 ```bash
 # Standalone (default)
+nvm use
 npm run dev
 
 # Simulate embedded mode against a local RTX server

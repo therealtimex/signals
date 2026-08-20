@@ -6,7 +6,7 @@
   "app_type": "node",
   "runtime": {
     "kind": "node",
-    "version": "20.x",
+    "version": "22.16.0",
     "managedBy": "realtimex"
   },
   "artifactContract": {
