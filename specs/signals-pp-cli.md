@@ -124,11 +124,20 @@ Examples: `query-contacts`, `create-contact`, `enrich-contact`, `get-publish-job
 }
 ```
 
-`notes` carries non-failure explanations. It never affects `success` or the exit code.
-Emitted when a row is skipped because its `(platform, platformUserId)` is already claimed by
-an **archived contact** (restore it to import the row) or by an **org identity** (reassign
-the account first). In both cases no contact is created, because `upsert_contact_identity`
-would reject the attach.
+`notes` carries non-failure explanations. A note itself never affects `success` or the exit
+code. One is emitted when a row is skipped because its `(platform, platformUserId)` is
+already claimed by an **archived contact** (restore it to import the row) or by an **org
+identity** (reassign the account first). In both cases no contact is created, because
+`upsert_contact_identity` would reject the attach.
+
+A note is not the only way a blocked claim surfaces, because dedupe is **email-first**. If
+the row's email matches an existing contact, the platform claim is never resolved, the
+import attempts the identity attach on that contact, and the server rejects it. That row is
+counted in `failed` with a message in `errors[]` and the run exits `5`.
+
+So the same org-held platform account is a **skip with a note** when the row is matched by
+handle, and a **failure with exit 5** when the row is matched by email. Neither creates a
+duplicate contact.
 
 **Exit codes:** `0` all succeeded or skipped cleanly · `3` file not found · `4` auth / `SIGNALS_NOT_RUNNING` · `5` partial row failure · `7` rate limited.
 
