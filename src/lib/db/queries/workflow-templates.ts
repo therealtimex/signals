@@ -1,4 +1,4 @@
-import { eq, and, desc, count, asc, SQL } from "drizzle-orm";
+import { eq, and, asc, count, desc, isNull, SQL } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db/client";
 import {
@@ -40,7 +40,6 @@ export function updateTemplate(
       | "name" | "description" | "platform" | "templateType" | "status"
       | "config" | "goalMetrics" | "startsAt" | "endsAt"
       | "systemPrompt" | "targetPersona" | "estimatedCost" | "totalRuns" | "lastRunAt"
-      | "rtxThreadSlug"
     >
   >
 ): WorkflowTemplate | undefined {
@@ -61,6 +60,40 @@ export function updateTemplate(
     .from(workflowTemplates)
     .where(eq(workflowTemplates.id, id))
     .get();
+}
+
+/**
+ * Compare-and-swap the template's dedicated RTX thread pointer.
+ *
+ * Two runs of one template can race to provision the first thread (a scheduled drain
+ * overlapping a manual run). The conditional write makes one of them the winner and
+ * returns the pointer that actually stuck, so the loser dispatches into the same
+ * thread instead of forking the timeline.
+ */
+export function claimTemplateThreadSlug(
+  id: string,
+  expected: string | null,
+  next: string
+): string {
+  db.update(workflowTemplates)
+    .set({ rtxThreadSlug: next, updatedAt: Math.floor(Date.now() / 1000) })
+    .where(
+      and(
+        eq(workflowTemplates.id, id),
+        expected === null
+          ? isNull(workflowTemplates.rtxThreadSlug)
+          : eq(workflowTemplates.rtxThreadSlug, expected)
+      )
+    )
+    .run();
+
+  const current = db
+    .select({ rtxThreadSlug: workflowTemplates.rtxThreadSlug })
+    .from(workflowTemplates)
+    .where(eq(workflowTemplates.id, id))
+    .get();
+
+  return current?.rtxThreadSlug ?? next;
 }
 
 export type WorkflowTemplateWithSteps = WorkflowTemplate & {

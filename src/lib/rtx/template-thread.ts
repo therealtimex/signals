@@ -1,4 +1,4 @@
-import { updateTemplate } from "@/lib/db/queries/workflow-templates";
+import { claimTemplateThreadSlug } from "@/lib/db/queries/workflow-templates";
 import type { WorkflowTemplate } from "@/lib/db/types";
 import {
   createRtxPublishThread,
@@ -45,9 +45,11 @@ export async function getOrCreateTemplateThread(
   const { template, workspaceSlug, threadName } = input;
 
   if (input.freshThread) {
+    // Marked so a one-off is not mistaken for the dedicated thread, which RTX would
+    // otherwise disambiguate only with a `(2)` suffix.
     const threadSlug = await createRtxPublishThread(
       workspaceSlug,
-      threadName,
+      `${threadName} — one-off`,
       env,
       fetchImpl
     );
@@ -74,7 +76,13 @@ export async function getOrCreateTemplateThread(
     env,
     fetchImpl
   );
-  updateTemplate(template.id, { rtxThreadSlug: threadSlug });
+
+  // A concurrent run may have pointed the template somewhere else while we were
+  // provisioning; whoever won the swap owns the timeline and we join it.
+  const claimed = claimTemplateThreadSlug(template.id, storedSlug, threadSlug);
+  if (claimed !== threadSlug) {
+    return { threadSlug: claimed, resolution: "reused" };
+  }
 
   return { threadSlug, resolution: storedSlug ? "recreated" : "created" };
 }

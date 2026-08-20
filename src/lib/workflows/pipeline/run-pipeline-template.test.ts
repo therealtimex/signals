@@ -193,6 +193,51 @@ describe("runPipelineTemplate", () => {
     expect(second.threadPath).toBe(first.threadPath);
   });
 
+  it("labels each run's thread messages with its ordinal", async () => {
+    vi.spyOn(await import("@/lib/rtx/env"), "isRtxEmbedded").mockReturnValue(true);
+    vi.spyOn(await import("@/lib/rtx/cli-provisioning"), "ensureRtxWorkspace").mockResolvedValue(
+      "signals",
+    );
+    vi.spyOn(await import("@/lib/rtx/cli-provisioning"), "createRtxPublishThread").mockResolvedValue(
+      "pipeline-thread",
+    );
+    vi.spyOn(await import("@/lib/rtx/cli-provisioning"), "getRtxThreadPresence").mockResolvedValue(
+      "exists",
+    );
+    const appended: string[] = [];
+    vi.spyOn(await import("@/lib/rtx/runtime-sessions"), "appendRtxThreadMessage").mockImplementation(
+      async ({ message }) => {
+        appended.push(message);
+        return { success: true };
+      },
+    );
+
+    const template = createPipelineTemplate();
+    const contact = createContact({ name: "Pipeline Subject", platform: "x", platformUserId: "u1" });
+    const runOptions = {
+      templateId: template.id,
+      input: { contactIds: [contact.id] },
+      waitForCompletion: true,
+      env: { RTX_APP_ID: "app-1", RTX_API_BASE_URL: "http://127.0.0.1:3001" },
+      fetchImpl: vi.fn(async () => new Response(JSON.stringify({ success: true }), { status: 200 })) as typeof fetch,
+    };
+
+    await runPipelineTemplate(runOptions);
+    await runPipelineTemplate(runOptions);
+
+    const kickoffs = appended.filter((message) =>
+      message.includes("Contact profile pipeline"),
+    );
+    expect(kickoffs).toHaveLength(2);
+    expect(kickoffs[0]).toMatch(/^Run #1 — /);
+    expect(kickoffs[1]).toMatch(/^Run #2 — /);
+    expect(kickoffs[0]).not.toBe(kickoffs[1]);
+    // Every message is labelled, not just the kickoff, so interleaved runs stay separable.
+    // Step summaries and the final line are labelled too, so interleaved runs stay separable.
+    expect(appended.length).toBeGreaterThan(kickoffs.length);
+    expect(appended.every((message) => /^Run #[12] — /.test(message))).toBe(true);
+  });
+
   it("opens a throwaway thread when freshThread is set, leaving the pointer intact", async () => {
     vi.spyOn(await import("@/lib/rtx/env"), "isRtxEmbedded").mockReturnValue(true);
     vi.spyOn(await import("@/lib/rtx/cli-provisioning"), "ensureRtxWorkspace").mockResolvedValue(

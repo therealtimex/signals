@@ -58,9 +58,4 @@ describe("workspace brief files", () => {
       "publish-jobs/job-1/brief.md"
     );
   });
-
-  it("labels the run ordinal so a shared template thread stays readable", () => {
-    expect(buildWorkflowRunBriefRoutingMessage("run-1", 3)).toMatch(/^Run #3 — /);
-    expect(buildWorkflowRunBriefRoutingMessage("run-1")).not.toContain("Run #");
-  });
 });

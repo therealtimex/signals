@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { createTemplate, getTemplate } from "@/lib/db/queries/workflow-templates";
+import {
+  claimTemplateThreadSlug,
+  createTemplate,
+  getTemplate,
+} from "@/lib/db/queries/workflow-templates";
 import { getOrCreateTemplateThread } from "@/lib/rtx/template-thread";
 import { resetCoreTables } from "@/test/db";
 
@@ -24,7 +28,8 @@ function makeTemplate(rtxThreadSlug: string | null = null) {
 /** Minimal RTX CLI API stub: `get-thread` presence + `create-thread`. */
 function stubRtxApi(options: { getThreadStatus?: number; createdSlug?: string }) {
   const calls: string[] = [];
-  const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+  const createdNames: string[] = [];
+  const fetchImpl = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
     calls.push(url);
     if (url.includes("/cli/get-thread/")) {
@@ -36,6 +41,9 @@ function stubRtxApi(options: { getThreadStatus?: number; createdSlug?: string })
       };
     }
     if (url.includes("/cli/create-thread/")) {
+      createdNames.push(
+        JSON.parse(String((init as RequestInit | undefined)?.body ?? "{}")).name,
+      );
       return {
         ok: true,
         status: 200,
@@ -45,7 +53,7 @@ function stubRtxApi(options: { getThreadStatus?: number; createdSlug?: string })
     throw new Error(`unexpected fetch: ${url}`);
   }) as unknown as typeof fetch;
 
-  return { fetchImpl, calls };
+  return { fetchImpl, calls, createdNames };
 }
 
 describe("getOrCreateTemplateThread", () => {
@@ -128,7 +136,7 @@ describe("getOrCreateTemplateThread", () => {
 
   it("uses a throwaway thread without repointing the template", async () => {
     const template = makeTemplate("thread-abc");
-    const { fetchImpl, calls } = stubRtxApi({ createdSlug: "thread-oneoff" });
+    const { fetchImpl, calls, createdNames } = stubRtxApi({ createdSlug: "thread-oneoff" });
 
     const result = await getOrCreateTemplateThread(
       {
@@ -144,5 +152,32 @@ describe("getOrCreateTemplateThread", () => {
     expect(result).toEqual({ threadSlug: "thread-oneoff", resolution: "fresh" });
     expect(getTemplate(template.id)?.rtxThreadSlug).toBe("thread-abc");
     expect(calls.some((url) => url.includes("/cli/get-thread/"))).toBe(false);
+    expect(createdNames).toEqual(["Top AI Influencers — one-off"]);
+  });
+
+  it("joins the winner's thread when a concurrent run claims the pointer first", async () => {
+    const template = makeTemplate();
+    const { fetchImpl } = stubRtxApi({ createdSlug: "thread-loser" });
+
+    // Simulate the race: another run persists its own thread while we are provisioning.
+    const cliProvisioning = await import("@/lib/rtx/cli-provisioning");
+    vi.spyOn(cliProvisioning, "createRtxPublishThread").mockImplementation(async () => {
+      claimTemplateThreadSlug(template.id, null, "thread-winner");
+      return "thread-loser";
+    });
+
+    const result = await getOrCreateTemplateThread(
+      {
+        template,
+        workspaceSlug: "signals",
+        threadName: "Top AI Influencers",
+      },
+      ENV,
+      fetchImpl,
+    );
+
+    expect(result).toEqual({ threadSlug: "thread-winner", resolution: "reused" });
+    expect(getTemplate(template.id)?.rtxThreadSlug).toBe("thread-winner");
+    vi.restoreAllMocks();
   });
 });
