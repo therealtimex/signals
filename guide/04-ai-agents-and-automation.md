@@ -37,6 +37,7 @@ List hygiene — keeping your CRM focused on active, relevant contacts.
 
 - **Prune Inactive Contacts** — Identifies contacts that appear inactive (no social activity, invalid profiles) and recommends them for archival. (~$0.35/run)
 - **Deduplicate & Merge Contacts** — Finds records that are the same person across X, LinkedIn, Gmail, and agent research runs, then consolidates their identities, channels, employment, and activity into one surviving record. (~$0.10/run)
+  Its **Review duplicates** button runs the same detection and merge engine in-app, with no agent and no model cost, and merges only the groups you confirm. (free)
 
 ### Content Agents
 Content creation — generating and publishing posts.

@@ -115,6 +115,18 @@ id of the record it was merged into, so you can always see where it went.
 Run it with a preview first if you want to see the plan before anything changes, and re-run it as
 often as you like — merging the same group twice does nothing the second time.
 
+### Reviewing duplicates yourself
+
+The agent is optional. The **Review duplicates** button on the agent's card opens a panel that
+runs the same detection engine directly — no agent, no model cost, no waiting on a terminal
+session. It lists each group with both records side by side, marks the one it suggests keeping,
+and merges only when you press **Merge** (or **Merge all**). Nothing is archived until you do.
+
+The panel opens on **Tier 1 only**, where a shared email address or platform handle is the
+evidence and no judgment is needed. Widen it to tier 2 or 3 when you want the fuzzier candidates,
+but read those groups before merging — two people at the same company with similar names are
+exactly what tier 2 is designed to surface, and occasionally they really are two people.
+
 ## Multi-Platform Golden Record
 
 The real power of Signals's contact system is the unified view. A founder you follow on X, connected with on LinkedIn, and emailed through Gmail shows up as **one contact** with three identities. Agents can enrich from any platform and the score reflects the combined data.

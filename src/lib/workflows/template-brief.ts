@@ -49,6 +49,16 @@ export function buildTemplateThreadName(templateName: string): string {
   return templateName.trim().slice(0, 60) || "Workflow";
 }
 
+/**
+ * Drop seed bookkeeping (`_seedVersion`) before the config reaches an agent — it is a
+ * migration marker, and an agent reading it as a run control is pure noise.
+ */
+function stripInternalConfigKeys(config: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(config).filter(([key]) => !key.startsWith("_"))
+  );
+}
+
 export function buildAgentWorkflowBrief(input: {
   template: Pick<
     WorkflowTemplate,
@@ -62,7 +72,7 @@ export function buildAgentWorkflowBrief(input: {
   const category = CATEGORY_LABELS[input.template.templateType] ?? input.template.templateType;
   const instructions = input.systemPromptOverride?.trim() || input.template.systemPrompt?.trim();
   const tools = getTemplateToolsHint(input.template.templateType).join(", ");
-  const configJson = JSON.stringify(input.config, null, 2);
+  const configJson = JSON.stringify(stripInternalConfigKeys(input.config), null, 2);
   const patrolContract = isSocialPatrolTemplateConfig(input.config)
     ? `${buildSocialPatrolBriefSection({
         workflowRunId: input.workflowRunId,

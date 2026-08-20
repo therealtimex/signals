@@ -36,9 +36,12 @@ import {
   UserPlus,
   MessageSquare,
   MoreHorizontal,
+  Users,
 } from "lucide-react";
 import { ActivateDialog } from "./activate-dialog";
 import { TemplateBuilder } from "./template-builder";
+import { DedupeReviewDialog } from "./dedupe-review-dialog";
+import { isDedupeTemplateConfig } from "@/lib/workflows/dedupe-template";
 import type { WorkflowTemplate } from "@/lib/db/types";
 
 interface Template {
@@ -153,12 +156,20 @@ function isPipelineTemplateConfig(config: string): boolean {
   return Boolean(parseTemplateConfig(config).pipeline);
 }
 
+function isDedupeTemplate(template: Template): boolean {
+  return (
+    template.templateType === "pruning" &&
+    isDedupeTemplateConfig(parseTemplateConfig(template.config))
+  );
+}
+
 export function TemplateGallery() {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTemplate, setActiveTemplate] = useState<Template | null>(null);
   const [editTemplate, setEditTemplate] = useState<Template | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Template | null>(null);
+  const [reviewTemplate, setReviewTemplate] = useState<Template | null>(null);
   const [builderOpen, setBuilderOpen] = useState(false);
   const [filter, setFilter] = useState<string>("all");
   const [duplicating, setDuplicating] = useState<string | null>(null);
@@ -257,6 +268,7 @@ export function TemplateGallery() {
               "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300";
             const isSystem = template.isSystem === 1;
             const isPipeline = isPipelineTemplateConfig(template.config);
+            const isDedupe = isDedupeTemplate(template);
 
             return (
               <Card
@@ -316,6 +328,17 @@ export function TemplateGallery() {
                       <Play className="mr-1.5 h-3 w-3" />
                       Run
                     </Button>
+                    {isDedupe && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-8 px-2"
+                        onClick={() => setReviewTemplate(template)}
+                        title="Review duplicates without an agent"
+                      >
+                        <Users className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
                     {isSystem ? (
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
@@ -361,6 +384,14 @@ export function TemplateGallery() {
             );
           })}
         </div>
+      )}
+
+      {reviewTemplate && (
+        <DedupeReviewDialog
+          open={!!reviewTemplate}
+          templateName={reviewTemplate.name}
+          onClose={() => setReviewTemplate(null)}
+        />
       )}
 
       {activeTemplate && (
