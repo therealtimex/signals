@@ -301,45 +301,63 @@ export function getContentPublishedOverTime(since: number): { date: string; coun
     .all(since) as { date: string; count: number }[];
 }
 
-/** Top posts by total engagement metrics. */
-export function getTopPostsByEngagement(limit = 10): {
+export type TopPostRow = {
   title: string | null;
+  /** Platform the post was published through, or null when the account is unknown. */
+  platform: string | null;
   platformUrl: string | null;
   likes: number;
-  impressions: number;
+  comments: number;
+  shares: number;
   retweets: number;
+  quotes: number;
+  impressions: number;
   total: number;
-}[] {
+};
+
+/**
+ * Top posts by total engagement, ranked within each platform.
+ *
+ * Platforms report different counters, so callers render one section per platform rather than a
+ * single mixed table — `limit` is per platform, not overall.
+ */
+export function getTopPostsByEngagement(limit = 10): TopPostRow[] {
   return raw
     .prepare(
-      `SELECT
-         ci.title,
-         cp.platform_url AS platformUrl,
-         em.likes,
-         em.impressions,
-         em.retweets,
-         (em.likes + em.impressions + em.retweets + em.comments + em.shares) AS total
-       FROM engagement_metrics em
-       JOIN content_posts cp ON cp.id = em.content_post_id
-       JOIN content_items ci ON ci.id = cp.content_item_id
-       WHERE em.id IN (
-         SELECT em2.id
-         FROM engagement_metrics em2
-         WHERE em2.content_post_id = em.content_post_id
-         ORDER BY em2.snapshot_at DESC
-         LIMIT 1
+      `WITH latest AS (
+         SELECT
+           ci.title AS title,
+           pa.platform AS platform,
+           cp.platform_url AS platformUrl,
+           em.likes AS likes,
+           em.comments AS comments,
+           em.shares AS shares,
+           em.retweets AS retweets,
+           em.quotes AS quotes,
+           em.impressions AS impressions,
+           (em.likes + em.impressions + em.retweets + em.comments + em.shares) AS total,
+           ROW_NUMBER() OVER (
+             PARTITION BY em.content_post_id ORDER BY em.snapshot_at DESC
+           ) AS snapshotRank
+         FROM engagement_metrics em
+         JOIN content_posts cp ON cp.id = em.content_post_id
+         JOIN content_items ci ON ci.id = cp.content_item_id
+         LEFT JOIN platform_accounts pa ON pa.id = cp.platform_account_id
+       ),
+       ranked AS (
+         SELECT
+           latest.*,
+           ROW_NUMBER() OVER (PARTITION BY platform ORDER BY total DESC) AS platformRank
+         FROM latest
+         WHERE snapshotRank = 1
        )
-       ORDER BY total DESC
-       LIMIT ?`
+       SELECT title, platform, platformUrl, likes, comments, shares, retweets, quotes,
+              impressions, total
+       FROM ranked
+       WHERE platformRank <= ?
+       ORDER BY platform IS NULL, platform ASC, total DESC`
     )
-    .all(limit) as {
-    title: string | null;
-    platformUrl: string | null;
-    likes: number;
-    impressions: number;
-    retweets: number;
-    total: number;
-  }[];
+    .all(limit) as TopPostRow[];
 }
 
 /** Content type distribution. */
@@ -354,25 +372,44 @@ export function getContentTypeDistribution(): { contentType: string; count: numb
     .all() as { contentType: string; count: number }[];
 }
 
-/** Average engagement metrics across all posts. */
-export function getAverageEngagementMetrics(since: number): {
+export type PlatformEngagementAverages = {
+  /** Platform the snapshots belong to, or null when the account is unknown. */
+  platform: string | null;
+  posts: number;
   avgLikes: number;
-  avgImpressions: number;
   avgComments: number;
+  avgShares: number;
   avgRetweets: number;
-} {
-  const row = raw
+  avgQuotes: number;
+  avgImpressions: number;
+};
+
+/**
+ * Average engagement per platform.
+ *
+ * Averaging across platforms would mix counters that do not exist on every network (an all-zero
+ * "Avg Retweets" for a Facebook-only account reads as a data bug), so the grouping is the point.
+ */
+export function getAverageEngagementMetrics(since: number): PlatformEngagementAverages[] {
+  return raw
     .prepare(
       `SELECT
-         COALESCE(AVG(likes), 0) AS avgLikes,
-         COALESCE(AVG(impressions), 0) AS avgImpressions,
-         COALESCE(AVG(comments), 0) AS avgComments,
-         COALESCE(AVG(retweets), 0) AS avgRetweets
-       FROM engagement_metrics
-       WHERE snapshot_at >= ?`
+         pa.platform AS platform,
+         COUNT(*) AS posts,
+         COALESCE(AVG(em.likes), 0) AS avgLikes,
+         COALESCE(AVG(em.comments), 0) AS avgComments,
+         COALESCE(AVG(em.shares), 0) AS avgShares,
+         COALESCE(AVG(em.retweets), 0) AS avgRetweets,
+         COALESCE(AVG(em.quotes), 0) AS avgQuotes,
+         COALESCE(AVG(em.impressions), 0) AS avgImpressions
+       FROM engagement_metrics em
+       JOIN content_posts cp ON cp.id = em.content_post_id
+       LEFT JOIN platform_accounts pa ON pa.id = cp.platform_account_id
+       WHERE em.snapshot_at >= ?
+       GROUP BY pa.platform
+       ORDER BY platform IS NULL, platform ASC`
     )
-    .get(since) as { avgLikes: number; avgImpressions: number; avgComments: number; avgRetweets: number } | undefined;
-  return row ?? { avgLikes: 0, avgImpressions: 0, avgComments: 0, avgRetweets: 0 };
+    .all(since) as PlatformEngagementAverages[];
 }
 
 // ── Sync Health Queries ───────────────────────────

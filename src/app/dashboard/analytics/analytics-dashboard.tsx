@@ -25,8 +25,22 @@ import {
   Heart,
   Eye,
   MessageSquare,
+  Quote,
   Repeat2,
+  Share2,
+  ThumbsUp,
+  type LucideIcon,
 } from "lucide-react";
+import {
+  getAnalyticsMetrics,
+  getAnalyticsSectionLabel,
+  type AnalyticsMetric,
+  type AnalyticsMetricKey,
+} from "@/lib/analytics/platform-columns";
+import type {
+  PlatformEngagementAverages,
+  TopPostRow,
+} from "@/lib/db/queries/analytics";
 
 type TimeRange = "7d" | "30d" | "90d" | "all";
 type TabId = "overview" | "agents" | "engagement" | "content" | "sync-health";
@@ -313,10 +327,100 @@ function EngagementTab({ data }: { data: any }) {
   );
 }
 
+const METRIC_ICONS: Record<AnalyticsMetricKey, LucideIcon> = {
+  likes: Heart,
+  comments: MessageSquare,
+  shares: Share2,
+  retweets: Repeat2,
+  quotes: Quote,
+  impressions: Eye,
+};
+
+/** Platforms whose "like" is a thumbs-up rather than a heart. */
+const THUMBS_UP_LIKE_PLATFORMS = new Set(["linkedin", "facebook"]);
+
+function metricIcon(key: AnalyticsMetricKey, platform: string | null): LucideIcon {
+  if (key === "likes" && platform && THUMBS_UP_LIKE_PLATFORMS.has(platform)) return ThumbsUp;
+  return METRIC_ICONS[key];
+}
+
+/** Averages are keyed by the same column names the metric specs use. */
+const AVERAGE_KEYS: Record<AnalyticsMetricKey, keyof PlatformEngagementAverages> = {
+  likes: "avgLikes",
+  comments: "avgComments",
+  shares: "avgShares",
+  retweets: "avgRetweets",
+  quotes: "avgQuotes",
+  impressions: "avgImpressions",
+};
+
+interface PlatformSection {
+  platform: string | null;
+  metrics: readonly AnalyticsMetric[];
+  posts: TopPostRow[];
+  averages: PlatformEngagementAverages | null;
+}
+
+/** One section per platform that has either ranked posts or averages worth showing. */
+function buildPlatformSections(
+  topPosts: TopPostRow[],
+  averages: PlatformEngagementAverages[]
+): PlatformSection[] {
+  const platforms: (string | null)[] = [];
+  for (const row of [...topPosts, ...averages]) {
+    if (!platforms.includes(row.platform)) platforms.push(row.platform);
+  }
+
+  return platforms
+    .map((platform) => ({
+      platform,
+      metrics: getAnalyticsMetrics(platform),
+      posts: topPosts.filter((row) => row.platform === platform),
+      averages: averages.find((row) => row.platform === platform) ?? null,
+    }))
+    .filter((section) => section.metrics.length > 0);
+}
+
+function PlatformEngagementSection({ section }: { section: PlatformSection }) {
+  const { platform, metrics, posts, averages } = section;
+  const label = getAnalyticsSectionLabel(platform);
+
+  return (
+    <div className="space-y-4">
+      <RankedTableCard
+        title={`Top Posts — ${label}`}
+        description="Best performing content on this platform"
+        data={posts}
+        columns={[
+          { key: "title", label: "Title", format: (v) => String(v ?? "Untitled") },
+          ...metrics.map((metric) => ({
+            key: metric.key,
+            label: metric.label,
+            align: "right" as const,
+          })),
+          { key: "total", label: "Total", align: "right" as const },
+        ]}
+        barKey="total"
+      />
+      {averages && (
+        <StatCardsRow
+          items={metrics.map((metric) => ({
+            label: `Avg ${metric.label}`,
+            value: Math.round(Number(averages[AVERAGE_KEYS[metric.key]])).toString(),
+            icon: metricIcon(metric.key, platform),
+          }))}
+        />
+      )}
+    </div>
+  );
+}
+
 function ContentTab({ data }: { data: any }) {
   if (!data) return null;
 
-  const { avgMetrics } = data;
+  const topPosts: TopPostRow[] = data.topPosts ?? [];
+  const averages: PlatformEngagementAverages[] = data.avgMetrics ?? [];
+  const sections = buildPlatformSections(topPosts, averages);
 
   return (
     <div className="space-y-4">
@@ -327,34 +431,23 @@ function ContentTab({ data }: { data: any }) {
         dataKeys={[{ key: "count", label: "Posts", color: "var(--chart-1)" }]}
         xAxisKey="date"
       />
-      <RankedTableCard
-        title="Top Posts by Engagement"
-        description="Best performing content"
-        data={data.topPosts}
-        columns={[
-          { key: "title", label: "Title", format: (v) => String(v ?? "Untitled") },
-          { key: "likes", label: "Likes", align: "right" },
-          { key: "impressions", label: "Views", align: "right" },
-          { key: "retweets", label: "Retweets", align: "right" },
-          { key: "total", label: "Total", align: "right" },
-        ]}
-        barKey="total"
+      {sections.length > 0 ? (
+        sections.map((section) => (
+          <PlatformEngagementSection key={section.platform ?? "unattributed"} section={section} />
+        ))
+      ) : (
+        <RankedTableCard
+          title="Top Posts by Engagement"
+          description="Best performing content"
+          data={[]}
+          columns={[{ key: "title", label: "Title" }]}
+        />
+      )}
+      <DonutChartCard
+        title="Content Type Distribution"
+        description="Posts by content type"
+        data={data.typeDistribution.map((r: any) => ({ name: r.contentType, value: r.count }))}
       />
-      <div className="grid gap-4 grid-cols-1 md:grid-cols-2">
-        <DonutChartCard
-          title="Content Type Distribution"
-          description="Posts by content type"
-          data={data.typeDistribution.map((r: any) => ({ name: r.contentType, value: r.count }))}
-        />
-        <StatCardsRow
-          items={[
-            { label: "Avg Likes", value: Math.round(avgMetrics.avgLikes).toString(), icon: Heart },
-            { label: "Avg Views", value: Math.round(avgMetrics.avgImpressions).toString(), icon: Eye },
-            { label: "Avg Comments", value: Math.round(avgMetrics.avgComments).toString(), icon: MessageSquare },
-            { label: "Avg Retweets", value: Math.round(avgMetrics.avgRetweets).toString(), icon: Repeat2 },
-          ]}
-        />
-      </div>
     </div>
   );
 }
