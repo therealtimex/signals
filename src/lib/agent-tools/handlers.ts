@@ -388,6 +388,9 @@ export async function handleFindDuplicateContacts(
         name: member.name,
         enrichmentScore: member.enrichmentScore,
         identityCount: member.identityCount,
+        // Surfaced so an agent overriding the suggested primary can see which
+        // member is the workspace owner — merge_contacts refuses to archive it.
+        isSelf: member.isSelf,
       })),
     })),
     total: candidates.length,

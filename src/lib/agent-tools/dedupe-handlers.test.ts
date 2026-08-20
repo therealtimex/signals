@@ -64,6 +64,28 @@ describe("dedupe agent tools", () => {
     );
   });
 
+  it("find_duplicate_contacts marks which member is the workspace owner", async () => {
+    const owner = createContact({ name: "Sam Altman", isSelf: true });
+    const twin = createContact({ name: "Sam Altman" });
+    for (const contact of [owner, twin]) {
+      createContactChannel({
+        contactId: contact.id,
+        channelType: "email",
+        value: "sam@openai.com",
+        source: "test",
+      });
+    }
+
+    const result = (await invokeAgentTool("find_duplicate_contacts", {})) as {
+      candidates: { primaryContactId: string; contacts: { id: string; isSelf: boolean }[] }[];
+    };
+
+    const [candidate] = result.candidates;
+    expect(candidate.primaryContactId).toBe(owner.id);
+    expect(candidate.contacts.find((c) => c.id === owner.id)?.isSelf).toBe(true);
+    expect(candidate.contacts.find((c) => c.id === twin.id)?.isSelf).toBe(false);
+  });
+
   it("merge_contacts consolidates the pair and clears the duplicate from detection", async () => {
     const { primary, secondary } = seedDuplicatePair();
 
