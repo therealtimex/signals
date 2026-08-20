@@ -336,6 +336,13 @@ function mergeIdentities(primaryId: string, secondaryId: string, counters: Count
  *
  * Genuinely different stints at the same org (a promotion history: two distinct
  * non-blank titles) still move across, because that is real history.
+ *
+ * Stints at a *differently named* org slip past that fold — "World Labs / Stanford
+ * University" and "Stanford University / World Labs" are two org rows — and then win the
+ * same tie-break for the same reason. So a merge never changes who the survivor currently
+ * works for unless the incoming stint carries a `startedAt` proving it is the more recent
+ * one; otherwise it moves across as history. Nothing is lost either way, and the survivor's
+ * headline cannot silently degrade — which matters most when no human is watching the merge.
  */
 function mergeEmployments(primaryId: string, secondaryId: string, counters: Counters): void {
   const primaryRows = db
@@ -352,7 +359,7 @@ function mergeEmployments(primaryId: string, secondaryId: string, counters: Coun
   if (rows.length === 0) return;
 
   const folded: string[] = [];
-  const movable: string[] = [];
+  const movable: typeof rows = [];
 
   for (const row of rows) {
     const sameOrg = primaryRows.filter((existing) => existing.orgId === row.orgId);
@@ -364,7 +371,7 @@ function mergeEmployments(primaryId: string, secondaryId: string, counters: Coun
         : sameOrg.find((existing) => normalizeTitle(existing.title) === ""));
 
     if (!target) {
-      movable.push(row.id);
+      movable.push(row);
       continue;
     }
 
@@ -385,13 +392,36 @@ function mergeEmployments(primaryId: string, secondaryId: string, counters: Coun
     db.delete(contactEmployments).where(inArray(contactEmployments.id, folded)).run();
     bump(counters.dropped, "contactEmployments", folded.length);
   }
-  if (movable.length > 0) {
+  if (movable.length === 0) return;
+
+  // Read the primary's current stints after the fold, which may have set isCurrent on one.
+  const primaryCurrent = primaryRows.filter((row) => row.isCurrent);
+  const primaryBestStart = primaryCurrent.reduce(
+    (best, row) => Math.max(best, row.startedAt ?? -1),
+    -1,
+  );
+
+  const moved: string[] = [];
+  const demoted: string[] = [];
+  for (const row of movable) {
+    const provesNewer = (row.startedAt ?? -1) > primaryBestStart;
+    if (primaryCurrent.length > 0 && row.isCurrent && !provesNewer) demoted.push(row.id);
+    else moved.push(row.id);
+  }
+
+  if (moved.length > 0) {
     db.update(contactEmployments)
       .set({ contactId: primaryId, updatedAt: nowUnix() })
-      .where(inArray(contactEmployments.id, movable))
+      .where(inArray(contactEmployments.id, moved))
       .run();
-    bump(counters.moved, "contactEmployments", movable.length);
   }
+  if (demoted.length > 0) {
+    db.update(contactEmployments)
+      .set({ contactId: primaryId, isCurrent: false, updatedAt: nowUnix() })
+      .where(inArray(contactEmployments.id, demoted))
+      .run();
+  }
+  bump(counters.moved, "contactEmployments", movable.length);
 }
 
 /** Personas are versioned; only one may stay `active` after the merge. */
