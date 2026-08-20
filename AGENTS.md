@@ -146,6 +146,11 @@ and follow the matching `SKILL.md` when the task fits.
 - Path alias `@/` → `src/`. TypeScript is strict; `npm run lint` allows zero warnings.
 - Test file suffix selects the Vitest project: `*.test.ts` (unit), `*.latency.test.ts`,
   `*.integration.test.ts`, `*.import-safety.test.ts`, `*.embedded.test.ts`.
+- Worker data dirs (`$SIGNALS_DATA_DIR/worker-<id>`) are shared by every file on that worker and
+  reused across runs, so a test that clears `platform_accounts` must call `resetCoreTables()`
+  (`src/test/db.ts`) first or it hits `FOREIGN KEY constraint failed` on rows another file left.
+  State kept outside SQLite survives every DB reset — the default mail alias lives in
+  `config.json` and needs `setDefaultMailAccountAlias(null)`.
 - Secrets go in `.env.local`; document new names in `.env.example`. Never log or commit them.
 - Worktrees share dependencies by symlink — see §11.
 - `.ci/`, `coverage/`, `test-results/`, `data/`, and `*.db` are gitignored. Keep it that way.

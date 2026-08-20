@@ -7,11 +7,15 @@ import {
   syncMailAccountsFromHimalaya,
   unregisterMailAccount,
 } from "@/lib/db/queries/mail-accounts";
-import { getDefaultMailAccountAlias } from "@/lib/mail/settings";
+import { getDefaultMailAccountAlias, setDefaultMailAccountAlias } from "@/lib/mail/settings";
+import { resetCoreTables } from "@/test/db";
 
 describe("mail-accounts queries", () => {
   beforeEach(() => {
+    resetCoreTables();
     db.delete(platformAccounts).run();
+    // The default alias lives in config.json, which survives every DB reset.
+    setDefaultMailAccountAlias(null);
   });
 
   it("syncs discovered Himalaya accounts and sets first as default", () => {
