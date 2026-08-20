@@ -13,6 +13,7 @@ import {
   Coins,
   Bot,
 } from "lucide-react";
+import Link from "next/link";
 import { formatWorkflowError } from "@/lib/workflows/format-error";
 import { WorkflowDetailSteps } from "./workflow-detail-steps";
 import { PruneResults } from "./prune-results";
@@ -109,9 +110,13 @@ function StatCard({
 export function WorkflowRunLive({
   initialRun,
   subjects = [],
+  contactsCreated = 0,
+  orgsCreated = 0,
 }: {
   initialRun: WorkflowRunWithSteps;
   subjects?: WorkflowRunSubject[];
+  contactsCreated?: number;
+  orgsCreated?: number;
 }) {
   const { data, isPolling } = useWorkflowPolling(initialRun.id, initialRun.status);
 
@@ -229,6 +234,28 @@ export function WorkflowRunLive({
           </span>
         </div>
       </Card>
+
+      {(contactsCreated > 0 || orgsCreated > 0) && (
+        <Card className="p-4 space-y-2">
+          {contactsCreated > 0 ? (
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">Contacts created</span>
+              <Link
+                href={`/dashboard/contacts?createdWorkflowRunId=${run.id}`}
+                className="font-medium text-primary hover:underline tabular-nums"
+              >
+                {contactsCreated}
+              </Link>
+            </div>
+          ) : null}
+          {orgsCreated > 0 ? (
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">Organizations created</span>
+              <span className="font-medium tabular-nums">{orgsCreated}</span>
+            </div>
+          ) : null}
+        </Card>
+      )}
 
       {/* Prune results (when applicable) */}
       {run.workflowType === "prune" && !isPolling && run.result && (

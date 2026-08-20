@@ -1,10 +1,18 @@
 import { AGENT_TOOLS } from "@/lib/agent-tools/registry";
 import { AgentToolError } from "@/lib/agent-tools/types";
+import { getImmutableBirthFieldsError } from "@/lib/api/contact-route-validation";
 
 export async function invokeAgentTool(tool: string, input: unknown) {
   const definition = AGENT_TOOLS[tool];
   if (!definition) {
     throw new AgentToolError("TOOL_NOT_FOUND", `Unknown tool: ${tool}`);
+  }
+
+  if (tool === "update_contact") {
+    const birthError = getImmutableBirthFieldsError(input);
+    if (birthError) {
+      throw new AgentToolError("VALIDATION_ERROR", birthError);
+    }
   }
 
   const parsed = definition.schema.safeParse(input ?? {});

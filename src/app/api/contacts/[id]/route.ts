@@ -6,6 +6,7 @@ import { ChannelWriteError } from "@/lib/db/queries/contact-channel-writes";
 import { EmploymentWriteError } from "@/lib/db/queries/contact-employment-writes";
 import {
   getDeprecatedPlatformFieldsError,
+  getImmutableBirthFieldsError,
   getUnsupportedIdentityFieldsError,
 } from "@/lib/api/contact-route-validation";
 import { resolveContactCompanyFields } from "@/lib/contact-org-api";
@@ -57,6 +58,11 @@ async function updateContactHandler(
     const deprecatedError = getDeprecatedPlatformFieldsError(body);
     if (deprecatedError) {
       return NextResponse.json({ error: deprecatedError }, { status: 400 });
+    }
+
+    const birthError = getImmutableBirthFieldsError(body);
+    if (birthError) {
+      return NextResponse.json({ error: birthError }, { status: 400 });
     }
 
     const identityError = getUnsupportedIdentityFieldsError(body);

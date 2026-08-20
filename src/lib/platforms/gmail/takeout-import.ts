@@ -41,7 +41,11 @@ function mapTakeoutRowToIdentity(row: TakeoutContactRow, contactId: string) {
   };
 }
 
-function processTakeoutRow(row: TakeoutContactRow, result: SyncResult): void {
+function processTakeoutRow(
+  row: TakeoutContactRow,
+  result: SyncResult,
+  workflowRunId?: string,
+): void {
   const existingIdentity = db
     .select()
     .from(contactIdentities)
@@ -87,7 +91,10 @@ function processTakeoutRow(row: TakeoutContactRow, result: SyncResult): void {
     }
   }
 
-  const contact = createContact(contactData, "import:gmail_takeout");
+  const contact = createContact(contactData, {
+    tag: "import:gmail_takeout",
+    workflowRunId: workflowRunId ?? null,
+  });
   createIdentity(mapTakeoutRowToIdentity(row, contact.id));
   if (row.company) {
     applyLegacyCompanyTitle(
@@ -101,7 +108,10 @@ function processTakeoutRow(row: TakeoutContactRow, result: SyncResult): void {
 }
 
 /** Import parsed Takeout rows into Signals contacts with golden-record dedup. */
-export function importTakeoutContacts(rows: TakeoutContactRow[]): SyncResult {
+export function importTakeoutContacts(
+  rows: TakeoutContactRow[],
+  workflowRunId?: string,
+): SyncResult {
   const result: SyncResult = { added: 0, updated: 0, skipped: 0, errors: [] };
 
   for (const row of rows) {
@@ -110,7 +120,7 @@ export function importTakeoutContacts(rows: TakeoutContactRow[]): SyncResult {
         result.skipped++;
         continue;
       }
-      processTakeoutRow(row, result);
+      processTakeoutRow(row, result, workflowRunId);
     } catch (err) {
       const label = row.displayName || row.email || row.resourceId;
       result.errors.push(

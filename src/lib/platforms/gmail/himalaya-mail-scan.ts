@@ -7,6 +7,7 @@ import {
   type MailAccountView,
 } from "@/lib/db/queries/mail-accounts";
 import { ensureOrgByDomain } from "@/lib/db/queries/orgs";
+import type { CreationProvenance } from "@/lib/db/creation-provenance-input";
 import { updatePlatformAccount } from "@/lib/db/queries/platform-accounts";
 import { getSyncCursor, updateSyncCursor } from "@/lib/db/queries/sync";
 import { listHimalayaEnvelopes } from "@/lib/mail/himalaya";
@@ -152,7 +153,8 @@ function resolveMailAccount(mailAccountId?: string): MailAccountView {
 function upsertContactFromAddress(
   addr: ParsedMailAddress,
   ownAddresses: Set<string>,
-  result: SyncResult
+  result: SyncResult,
+  workflowRunId?: string,
 ): string | null {
   if (ownAddresses.has(addr.email)) {
     result.skipped++;
@@ -175,17 +177,24 @@ function upsertContactFromAddress(
       name: addr.displayName || addr.email,
       email: addr.email,
     },
-    "sync:himalaya_correspondents"
+    {
+      tag: "sync:himalaya_correspondents",
+      workflowRunId: workflowRunId ?? null,
+    },
   );
   result.added++;
   return contact.id;
 }
 
-function applyOrgProjection(contactId: string, email: string): void {
+function applyOrgProjection(
+  contactId: string,
+  email: string,
+  provenance?: CreationProvenance,
+): void {
   const domain = extractEmailDomain(email);
   if (!domain || isFreemailDomain(domain)) return;
 
-  const org = ensureOrgByDomain(domain, "email_domain");
+  const org = ensureOrgByDomain(domain, "email_domain", provenance);
   ensureContactEmployment({
     contactId,
     orgId: org.id,
@@ -269,6 +278,7 @@ export async function syncHimalayaMailScan(
     mode?: HimalayaMailScanMode;
     maxEnvelopes?: number;
     pageSize?: number;
+    workflowRunId?: string;
   }
 ): Promise<SyncResult> {
   const result: SyncResult = { added: 0, updated: 0, skipped: 0, errors: [] };
@@ -278,6 +288,10 @@ export async function syncHimalayaMailScan(
   const mode = opts?.mode ?? "full";
   const maxEnvelopes = opts?.maxEnvelopes ?? DEFAULT_MAX_ENVELOPES_PER_RUN;
   const pageSize = opts?.pageSize ?? DEFAULT_PAGE_SIZE;
+  const workflowRunId = opts?.workflowRunId;
+  const orgProvenance = workflowRunId
+    ? { tag: "sync:himalaya_correspondents" as const, workflowRunId }
+    : undefined;
   const dataType = mode === "mail_activity" ? "himalaya_mail_activity" : "himalaya_correspondents";
 
   const cursor = getSyncCursor(account.id, dataType);
@@ -346,7 +360,7 @@ export async function syncHimalayaMailScan(
           if (ownAddresses.has(addr.email)) continue;
 
           if (mode === "correspondents" || mode === "full") {
-            upsertContactFromAddress(addr, ownAddresses, result);
+            upsertContactFromAddress(addr, ownAddresses, result, workflowRunId);
           }
 
           if (mode === "mail_activity" || mode === "full") {
@@ -374,7 +388,8 @@ export async function syncHimalayaMailScan(
             contactId = upsertContactFromAddress(
               { email: activity.email, displayName: activity.displayName },
               ownAddresses,
-              result
+              result,
+              workflowRunId,
             );
           } else {
             const existing = findContactByChannel("email", activity.email);
@@ -382,7 +397,7 @@ export async function syncHimalayaMailScan(
           }
 
           if (contactId) {
-            applyOrgProjection(contactId, activity.email);
+            applyOrgProjection(contactId, activity.email, orgProvenance);
           }
           applyMailActivity(activity, result);
         } catch (err) {
@@ -418,7 +433,7 @@ export async function syncHimalayaMailScan(
 /** Scan only correspondent contacts from Himalaya headers. */
 export async function syncHimalayaCorrespondents(
   mailAccountId?: string,
-  opts?: { maxEnvelopes?: number }
+  opts?: { maxEnvelopes?: number; workflowRunId?: string },
 ): Promise<SyncResult> {
   return syncHimalayaMailScan(mailAccountId, { mode: "correspondents", ...opts });
 }

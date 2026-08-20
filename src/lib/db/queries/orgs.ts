@@ -5,6 +5,12 @@ import { contacts, graphEdges, orgs } from "@/lib/db/schema";
 import { normalizeOrgName, orgDedupeKey } from "@/lib/db/backfills/org-names";
 import { getContactsByIds } from "@/lib/db/queries/contacts";
 import type { ContactWithIdentities, Org, PaginatedResult } from "@/lib/db/types";
+import {
+  birthFieldsFromProvenance,
+  normalizeCreationProvenance,
+  type CreationProvenance,
+} from "@/lib/db/creation-provenance-input";
+import type { CreationTag } from "@/lib/db/creation-sources";
 
 export type OrgRelationshipQueryOptions = {
   includeLocalOnly?: boolean;
@@ -24,6 +30,7 @@ export type CreateOrgInput = {
   description?: string | null;
   location?: string | null;
   source?: string;
+  provenance?: CreationTag | CreationProvenance;
 };
 
 export function listOrgs(opts?: {
@@ -61,6 +68,16 @@ export function listOrgs(opts?: {
 
 export function getOrgById(id: string): Org | undefined {
   return db.select().from(orgs).where(eq(orgs.id, id)).get();
+}
+
+export function countOrgsByCreatedWorkflowRun(runId: string): number {
+  return (
+    db
+      .select({ value: count() })
+      .from(orgs)
+      .where(eq(orgs.createdWorkflowRunId, runId))
+      .get()?.value ?? 0
+  );
 }
 
 export function listOrgsWithContactCounts(
@@ -156,6 +173,9 @@ export function createOrg(input: CreateOrgInput): Org {
   if (existing) return existing;
 
   const id = nanoid();
+  const birthFields = input.provenance
+    ? birthFieldsFromProvenance(normalizeCreationProvenance(input.provenance))
+    : {};
   db.insert(orgs)
     .values({
       id,
@@ -167,6 +187,7 @@ export function createOrg(input: CreateOrgInput): Org {
       location: input.location ?? null,
       source: input.source ?? "ui",
       scope: "shared",
+      ...birthFields,
     })
     .run();
 
@@ -174,7 +195,11 @@ export function createOrg(input: CreateOrgInput): Org {
 }
 
 /** Find or create an org by normalized company name. */
-export function ensureOrgByName(name: string, source = "agent"): Org {
+export function ensureOrgByName(
+  name: string,
+  source = "agent",
+  provenance?: CreationProvenance,
+): Org {
   const displayName = normalizeOrgName(name);
   const key = orgDedupeKey(displayName);
 
@@ -187,12 +212,16 @@ export function ensureOrgByName(name: string, source = "agent"): Org {
   if (existing) return existing;
 
   const id = nanoid();
+  const birthFields = provenance
+    ? birthFieldsFromProvenance(normalizeCreationProvenance(provenance))
+    : {};
   db.insert(orgs)
     .values({
       id,
       name: displayName,
       source,
       scope: "shared",
+      ...birthFields,
     })
     .run();
 
@@ -200,7 +229,11 @@ export function ensureOrgByName(name: string, source = "agent"): Org {
 }
 
 /** Find or create an org by email domain (work email org projection). */
-export function ensureOrgByDomain(domain: string, source = "email_domain"): Org {
+export function ensureOrgByDomain(
+  domain: string,
+  source = "email_domain",
+  provenance?: CreationProvenance,
+): Org {
   const normalized = domain.trim().toLowerCase();
   if (!normalized) {
     throw new Error("Domain is required");
@@ -213,6 +246,9 @@ export function ensureOrgByDomain(domain: string, source = "email_domain"): Org 
   const displayName = name.charAt(0).toUpperCase() + name.slice(1);
 
   const id = nanoid();
+  const birthFields = provenance
+    ? birthFieldsFromProvenance(normalizeCreationProvenance(provenance))
+    : {};
   db.insert(orgs)
     .values({
       id,
@@ -221,6 +257,7 @@ export function ensureOrgByDomain(domain: string, source = "email_domain"): Org 
       orgType: "company",
       source,
       scope: "shared",
+      ...birthFields,
     })
     .run();
 

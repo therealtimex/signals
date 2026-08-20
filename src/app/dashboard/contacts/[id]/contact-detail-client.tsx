@@ -42,6 +42,7 @@ import { ContactExploreCardView } from "@/components/contact-explore-card";
 import { ContactTimelineTab } from "@/components/contact-timeline-tab";
 import { ContactAvatarUpload } from "@/components/contact-avatar-upload";
 import { ContactRelationshipSection } from "@/components/contact-relationship-section";
+import { ContactSourceLine } from "@/components/contact-source-line";
 
 const platformLabels: Record<string, string> = {
   x: "X / Twitter",
@@ -54,6 +55,8 @@ interface ContactDetailClientProps {
   contact: ContactWithIdentities;
   tasks: Task[];
   explore: ContactExploreCard;
+  createdTemplateName?: string | null;
+  createdWorkflowRunHref?: string | null;
   profilePipelineTemplateId?: string | null;
 }
 
@@ -61,6 +64,8 @@ export function ContactDetailClient({
   contact,
   tasks,
   explore,
+  createdTemplateName,
+  createdWorkflowRunHref,
   profilePipelineTemplateId = null,
 }: ContactDetailClientProps) {
   const router = useRouter();
@@ -250,6 +255,16 @@ export function ContactDetailClient({
                 </span>
               )}
             </div>
+            {contact.createdSource ? (
+              <ContactSourceLine
+                createdSource={contact.createdSource}
+                createdSourceDetail={contact.createdSourceDetail}
+                createdWorkflowRunId={contact.createdWorkflowRunId}
+                createdAt={contact.createdAt}
+                createdTemplateName={createdTemplateName}
+                runHref={createdWorkflowRunHref}
+              />
+            ) : null}
           </div>
         </div>
         <div className="flex items-center gap-2">

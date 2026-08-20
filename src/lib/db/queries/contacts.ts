@@ -1,4 +1,4 @@
-import { eq, like, and, or, desc, asc, count, inArray, exists, sql, SQL } from "drizzle-orm";
+import { eq, like, and, or, desc, asc, count, inArray, exists, sql, SQL, gte, lte } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db/client";
 import {
@@ -27,6 +27,19 @@ import { attachContactDtos, getContactDtoById } from "@/lib/db/queries/contact-r
 import { recalcContactEnrichment } from "@/lib/db/contact-enrichment-recalc";
 import type { ContactDTO } from "@/lib/db/queries/contact-dto";
 import type { Contact, NewContact, PaginatedResult, ContactIdentity } from "@/lib/db/types";
+import type { CreationTag } from "@/lib/db/creation-sources";
+import {
+  birthFieldsFromProvenance,
+  normalizeCreationProvenance,
+  type CreationProvenance,
+} from "@/lib/db/creation-provenance-input";
+import {
+  CreatedSourceDetailFilterError,
+  resolveCreatedSourceDetailForFilter,
+  type CreatedSource,
+} from "@/lib/db/creation-sources";
+
+export type { CreationProvenance, CreatedSourceDetailFilterError };
 
 export type ContactWriteExtras = {
   email?: string | null;
@@ -91,6 +104,21 @@ function stripContactWriteExtras<T extends ContactWriteExtras>(
   return rest;
 }
 
+const BIRTH_FIELD_STRIP_KEYS = [
+  "createdSource",
+  "createdSourceDetail",
+  "createdWorkflowRunId",
+  "createdTemplateId",
+] as const;
+
+function stripBirthFields<T extends object>(data: T): T {
+  const copy = { ...data } as Record<string, unknown>;
+  for (const key of BIRTH_FIELD_STRIP_KEYS) {
+    delete copy[key];
+  }
+  return copy as T;
+}
+
 function attachChannels(rows: Contact[]): ContactDTO[] {
   return attachContactDtos(rows);
 }
@@ -123,11 +151,12 @@ function applyEmploymentWrites(
   contactId: string,
   extras: EmploymentWriteExtras | undefined,
   source: string,
+  provenance?: CreationProvenance,
 ): void {
   if (!extras) return;
 
   if (extras.employments !== undefined) {
-    syncEmploymentInputs(contactId, extras.employments, source);
+    syncEmploymentInputs(contactId, extras.employments, source, provenance);
   }
 
   const legacy: {
@@ -139,7 +168,7 @@ function applyEmploymentWrites(
   if (extras.company !== undefined) legacy.company = extras.company;
   if (extras.title !== undefined) legacy.title = extras.title;
   if (Object.keys(legacy).length > 0) {
-    applyLegacyCompanyTitle(contactId, legacy, source);
+    applyLegacyCompanyTitle(contactId, legacy, source, provenance);
   }
 }
 
@@ -165,9 +194,10 @@ function applyContactWrites(
   contactId: string,
   extras: ContactWriteExtras | undefined,
   source: string,
+  provenance?: CreationProvenance,
 ): void {
   applyChannelWrites(contactId, extras, source);
-  applyEmploymentWrites(contactId, extras, source);
+  applyEmploymentWrites(contactId, extras, source, provenance);
 }
 
 function validateContactWrites(
@@ -192,6 +222,12 @@ export function listContacts(opts?: {
   includeArchived?: boolean;
   sort?: "createdAt" | "enrichmentScore";
   order?: "asc" | "desc";
+  createdSource?: CreatedSource;
+  createdSourceDetail?: string;
+  createdWorkflowRunId?: string;
+  createdTemplateId?: string;
+  minEnrichmentScore?: number;
+  maxEnrichmentScore?: number;
 }): PaginatedResult<ContactDTO> {
   const conditions: SQL[] = [];
 
@@ -241,6 +277,26 @@ export function listContacts(opts?: {
     );
   }
 
+  if (opts?.createdSource) {
+    conditions.push(eq(contacts.createdSource, opts.createdSource));
+  }
+  if (opts?.createdSourceDetail) {
+    const detail = resolveCreatedSourceDetailForFilter(opts.createdSourceDetail);
+    conditions.push(eq(contacts.createdSourceDetail, detail));
+  }
+  if (opts?.createdWorkflowRunId) {
+    conditions.push(eq(contacts.createdWorkflowRunId, opts.createdWorkflowRunId));
+  }
+  if (opts?.createdTemplateId) {
+    conditions.push(eq(contacts.createdTemplateId, opts.createdTemplateId));
+  }
+  if (opts?.minEnrichmentScore !== undefined) {
+    conditions.push(gte(contacts.enrichmentScore, opts.minEnrichmentScore));
+  }
+  if (opts?.maxEnrichmentScore !== undefined) {
+    conditions.push(lte(contacts.enrichmentScore, opts.maxEnrichmentScore));
+  }
+
   const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
   const total =
@@ -282,10 +338,12 @@ export function getContactsByIds(ids: string[]): ContactDTO[] {
 
 export function createContact(
   data: ContactWriteInput,
-  channelSource = "api:create_contact",
+  provenance: CreationTag | CreationProvenance = "api:create_contact",
 ): ContactDTO {
   const id = nanoid();
   const rowData = stripContactWriteExtras(data);
+  const normalizedProvenance = normalizeCreationProvenance(provenance);
+  const birthFields = birthFieldsFromProvenance(normalizedProvenance);
 
   const nameFields =
     !rowData.firstName && !rowData.lastName && rowData.name ? parseName(rowData.name) : {};
@@ -304,17 +362,17 @@ export function createContact(
         .where(eq(contacts.isSelf, true))
         .run();
       tx.insert(contacts)
-        .values({ ...rowData, ...nameFields, name, id, isSelf: true })
+        .values({ ...rowData, ...nameFields, ...birthFields, name, id, isSelf: true })
         .run();
     });
-    applyContactWrites(id, data, channelSource);
+    applyContactWrites(id, data, normalizedProvenance.tag, normalizedProvenance);
     recalcEnrichment(id);
     return getContactById(id)!;
   }
 
   db.transaction(() => {
-    db.insert(contacts).values({ ...rowData, ...nameFields, name, id }).run();
-    applyContactWrites(id, data, channelSource);
+    db.insert(contacts).values({ ...rowData, ...nameFields, ...birthFields, name, id }).run();
+    applyContactWrites(id, data, normalizedProvenance.tag, normalizedProvenance);
   });
   recalcEnrichment(id);
   return getContactById(id)!;
@@ -330,7 +388,7 @@ export function updateContact(
 
   validateContactWrites(id, data);
 
-  const rowUpdates = stripContactWriteExtras(data);
+  const rowUpdates = stripBirthFields(stripContactWriteExtras(data));
   const updates = { ...rowUpdates };
 
   if (data.firstName !== undefined || data.lastName !== undefined) {
@@ -478,6 +536,16 @@ export function restoreContactsByWorkflowRun(workflowRunId: string): number {
     restored++;
   }
   return restored;
+}
+
+export function countContactsByCreatedWorkflowRun(runId: string): number {
+  return (
+    db
+      .select({ value: count() })
+      .from(contacts)
+      .where(eq(contacts.createdWorkflowRunId, runId))
+      .get()?.value ?? 0
+  );
 }
 
 export function countArchivedContacts(): number {

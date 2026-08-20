@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { nanoid } from "nanoid";
 import {
   backfillXArchiveHandles,
   importXArchiveContacts,
@@ -51,9 +52,11 @@ export async function POST(req: NextRequest) {
     let handleBackfillResult: SyncResult | null = null;
     if (hasContactSlices) {
       const merged = mergeArchiveUsers(contents.followers, contents.following);
-      contactsResult = importXArchiveContacts(merged);
+      const preAllocatedContactsRunId = nanoid();
+      contactsResult = importXArchiveContacts(merged, preAllocatedContactsRunId);
       handleBackfillResult = backfillXArchiveHandles(contents.handleMap);
       contactsRunId = recordImportRun({
+        id: preAllocatedContactsRunId,
         platform: "x",
         importSubType: X_ARCHIVE_CONTACTS_SUBTYPE,
         source: "zip",

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { nanoid } from "nanoid";
 import { getTakeoutImportKind, parseTakeoutContactsFile } from "@/lib/platforms/gmail/import-file";
 import { importTakeoutContacts } from "@/lib/platforms/gmail/takeout-import";
 import { recordImportRun } from "@/lib/workflows/record-import-run";
@@ -21,9 +22,11 @@ export async function POST(req: NextRequest) {
 
     const parsed = await parseTakeoutContactsFile(file);
     source = parsed.source;
-    const result = importTakeoutContacts(parsed.rows);
+    const runId = nanoid();
+    const result = importTakeoutContacts(parsed.rows, runId);
 
     const run = recordImportRun({
+      id: runId,
       platform: "gmail",
       importSubType: GMAIL_TAKEOUT_IMPORT_SUBTYPE,
       source: parsed.source,

@@ -58,7 +58,8 @@ export async function POST(req: NextRequest) {
           workflowType: "sync",
           syncSubType: "linkedin_contacts",
           platformAccountId: account.id,
-          syncFunction: () => syncContactsFromLinkedIn(account.id, { maxPages }),
+          syncFunction: (workflowRunId) =>
+            syncContactsFromLinkedIn(account.id, { maxPages }, workflowRunId),
         });
         return NextResponse.json({ success: true, result: syncResult, workflowRunId: workflowRun.id });
       }

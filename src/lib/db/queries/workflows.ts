@@ -14,10 +14,11 @@ import type {
 // ── Workflow Runs ──────────────────────────────
 
 export function createWorkflowRun(
-  data: Omit<NewWorkflowRun, "id">
+  data: Omit<NewWorkflowRun, "id"> & { id?: string },
 ): WorkflowRun {
-  const id = nanoid();
-  db.insert(workflowRuns).values({ ...data, id }).run();
+  const id = data.id ?? nanoid();
+  const { id: _ignored, ...rest } = data;
+  db.insert(workflowRuns).values({ ...rest, id }).run();
   return db.select().from(workflowRuns).where(eq(workflowRuns.id, id)).get()!;
 }
 

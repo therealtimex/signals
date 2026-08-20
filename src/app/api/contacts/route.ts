@@ -9,7 +9,13 @@ import {
   createContactIdentities,
 } from "@/lib/contact-identities-api";
 import { channelInputSchema, employmentInputSchema } from "@/lib/agent-tools/schemas";
-import { getDeprecatedPlatformFieldsError } from "@/lib/api/contact-route-validation";
+import {
+  getDeprecatedPlatformFieldsError,
+  getImmutableBirthFieldsError,
+} from "@/lib/api/contact-route-validation";
+import { validateWorkflowRunAndTemplateIds } from "@/lib/db/creation-provenance-input";
+import type { CreationTag, CreatedSource } from "@/lib/db/creation-sources";
+import { CreatedSourceDetailFilterError } from "@/lib/db/creation-sources";
 import { ChannelWriteError } from "@/lib/db/queries/contact-channel-writes";
 import { EmploymentWriteError } from "@/lib/db/queries/contact-employment-writes";
 
@@ -48,6 +54,9 @@ const createContactSchema = z.object({
   employments: z.array(employmentInputSchema).optional(),
   identity: contactIdentityInputSchema.optional(),
   identities: z.array(contactIdentityInputSchema).optional(),
+  createdVia: z.literal("manual").optional(),
+  workflowRunId: z.string().min(1).optional(),
+  templateId: z.string().min(1).optional(),
 }).refine(
   (data) => data.name || data.firstName || data.lastName,
   { message: "At least name, firstName, or lastName is required" }
@@ -62,9 +71,39 @@ export async function GET(req: NextRequest) {
   const pageSize = parseInt(searchParams.get("pageSize") ?? "25", 10) || 25;
 
   const includeArchived = searchParams.get("includeArchived") === "true";
+  const createdSource = searchParams.get("createdSource") ?? undefined;
+  const createdSourceDetail = searchParams.get("createdSourceDetail") ?? undefined;
+  const createdWorkflowRunId = searchParams.get("createdWorkflowRunId") ?? undefined;
+  const createdTemplateId = searchParams.get("createdTemplateId") ?? undefined;
+  const minEnrichmentScore = searchParams.get("minEnrichmentScore");
+  const maxEnrichmentScore = searchParams.get("maxEnrichmentScore");
 
-  const result = listContacts({ search, funnelStage, platform, page, pageSize, includeArchived });
-  return NextResponse.json({ data: result.data, total: result.total });
+  try {
+    const result = listContacts({
+      search,
+      funnelStage,
+      platform,
+      page,
+      pageSize,
+      includeArchived,
+      ...(createdSource ? { createdSource: createdSource as CreatedSource } : {}),
+      createdSourceDetail,
+      createdWorkflowRunId,
+      createdTemplateId,
+      ...(minEnrichmentScore !== null && minEnrichmentScore !== ""
+        ? { minEnrichmentScore: parseInt(minEnrichmentScore, 10) }
+        : {}),
+      ...(maxEnrichmentScore !== null && maxEnrichmentScore !== ""
+        ? { maxEnrichmentScore: parseInt(maxEnrichmentScore, 10) }
+        : {}),
+    });
+    return NextResponse.json({ data: result.data, total: result.total });
+  } catch (error) {
+    if (error instanceof CreatedSourceDetailFilterError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+    throw error;
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -75,7 +114,21 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: deprecatedError }, { status: 400 });
     }
 
-    const { identity, identities, orgId, company, employments, ...data } = createContactSchema.parse(body);
+    const { identity, identities, orgId, company, employments, createdVia, workflowRunId, templateId, ...data } =
+      createContactSchema.parse(body);
+
+    let resolvedIds: { workflowRunId: string | null; templateId: string | null };
+    try {
+      resolvedIds = validateWorkflowRunAndTemplateIds({ workflowRunId, templateId });
+    } catch (error) {
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : "Invalid workflow context" },
+        { status: 400 },
+      );
+    }
+
+    const creationTag: CreationTag =
+      createdVia === "manual" ? "manual:create_contact" : "api:create_contact";
 
     const resolvedCompany = resolveContactCompanyFields({ orgId, company });
     if ("error" in resolvedCompany) {
@@ -101,7 +154,11 @@ export async function POST(req: NextRequest) {
       identities && identities.length > 0 ? identities : identity ? [identity] : [];
 
     const contact = db.transaction(() => {
-      const created = createContact(contactPayload, "api:create_contact");
+      const created = createContact(contactPayload, {
+        tag: creationTag,
+        workflowRunId: resolvedIds.workflowRunId,
+        templateId: resolvedIds.templateId,
+      });
       if (identityPayload.length > 0) {
         createContactIdentities(created.id, identityPayload);
       }

@@ -13,6 +13,7 @@ export interface ImportRunConfig {
 }
 
 interface RecordImportRunOpts {
+  id?: string;
   platform: string;
   importSubType: string;
   source: ImportSource;
@@ -49,6 +50,7 @@ export function recordImportRun(opts: RecordImportRunOpts): WorkflowRun {
       opts.result.errors.length > 0 && successItems === 0 ? "failed" : "completed";
 
     return createWorkflowRun({
+      id: opts.id,
       workflowType: "import",
       status,
       totalItems: opts.totalRows ?? processedItems,
@@ -65,6 +67,7 @@ export function recordImportRun(opts: RecordImportRunOpts): WorkflowRun {
   }
 
   return createWorkflowRun({
+    id: opts.id,
     workflowType: "import",
     status: "failed",
     totalItems: opts.totalRows ?? null,

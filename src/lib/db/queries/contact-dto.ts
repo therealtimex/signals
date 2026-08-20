@@ -2,6 +2,7 @@ import { eq, and, desc, inArray } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { contactChannels, mediaAttachments } from "@/lib/db/schema";
 import type { Contact, ContactChannel, ContactEmployment, ContactIdentity } from "@/lib/db/types";
+import type { CreatedSource } from "@/lib/db/creation-sources";
 import { resolveContactAvatar } from "@/lib/db/queries/resolve-contact-avatar";
 import {
   resolveContactProfile,
@@ -44,6 +45,10 @@ export type ContactDTO = {
   bio: string | null;
   location: string | null;
   website: string | null;
+  createdSource: CreatedSource | null;
+  createdSourceDetail: string | null;
+  createdWorkflowRunId: string | null;
+  createdTemplateId: string | null;
 };
 
 function pickPrimaryChannel(
@@ -146,6 +151,10 @@ export function assembleContactDto(
     bio: profile.bio,
     location: profile.location,
     website: profile.website,
+    createdSource: contact.createdSource,
+    createdSourceDetail: contact.createdSourceDetail,
+    createdWorkflowRunId: contact.createdWorkflowRunId,
+    createdTemplateId: contact.createdTemplateId,
   };
 }
 

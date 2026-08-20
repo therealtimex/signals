@@ -142,6 +142,43 @@ describe("invokeAgentTool", () => {
     expect(rows[1]?.id).toBe(high.id);
   });
 
+  it("filters query_contacts by createdSourceDetail suffix x_archive", async () => {
+    const archive = createContact({ name: "Archive Import" }, "import:x_archive");
+    createContact({ name: "Manual Later" }, "manual:create_contact");
+
+    const result = await invokeAgentTool("query_contacts", {
+      createdSourceDetail: "x_archive",
+    });
+
+    const rows = (result as { contacts: Array<{ id: string }>; total: number }).contacts;
+    expect((result as { total: number }).total).toBe(1);
+    expect(rows[0]?.id).toBe(archive.id);
+  });
+
+  it("returns an error for ambiguous createdSourceDetail suffix", async () => {
+    const result = await invokeAgentTool("query_contacts", {
+      createdSourceDetail: "create_contact",
+    });
+
+    expect(result).toMatchObject({
+      error: expect.stringContaining("Ambiguous createdSourceDetail"),
+    });
+  });
+
+  it("rejects update_contact payloads that name birth fields", async () => {
+    const created = await invokeAgentTool("create_contact", { name: "Birth Guard" });
+    const contactId = (created as { id: string }).id;
+
+    await expect(
+      invokeAgentTool("update_contact", {
+        contactId,
+        createdSource: "manual",
+      }),
+    ).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+    } satisfies Partial<AgentToolError>);
+  });
+
   it("upserts a contact identity and returns it from get_contact", async () => {
     const created = await invokeAgentTool("create_contact", {
       name: "Identity Contact",

@@ -31,6 +31,8 @@ export const employmentInputSchema = z.object({
   isCurrent: z.boolean().optional(),
 });
 
+import { CREATED_SOURCES } from "@/lib/db/creation-sources";
+
 export const queryContactsSchema = z.object({
   search: z.string().optional(),
   funnelStage: funnelStage.optional(),
@@ -39,6 +41,12 @@ export const queryContactsSchema = z.object({
   pageSize: z.number().int().positive().max(100).optional(),
   sort: z.enum(["createdAt", "enrichmentScore"]).optional(),
   order: z.enum(["asc", "desc"]).optional(),
+  createdSource: z.enum(CREATED_SOURCES).optional(),
+  createdSourceDetail: z.string().min(1).optional(),
+  createdWorkflowRunId: z.string().min(1).optional(),
+  createdTemplateId: z.string().min(1).optional(),
+  minEnrichmentScore: z.number().int().optional(),
+  maxEnrichmentScore: z.number().int().optional(),
 });
 
 export const getContactSchema = z.object({
@@ -56,6 +64,8 @@ export const createContactSchema = z.object({
   funnelStage: funnelStage.optional(),
   firstName: z.string().optional(),
   lastName: z.string().optional(),
+  workflowRunId: z.string().min(1).optional(),
+  templateId: z.string().min(1).optional(),
 });
 
 export const updateContactSchema = z.object({

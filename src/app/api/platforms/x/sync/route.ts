@@ -45,7 +45,7 @@ export async function POST(req: NextRequest) {
           workflowType: "sync",
           syncSubType: "x_tweets",
           platformAccountId: account.id,
-          syncFunction: () => syncTweetsFromX(account.id, { maxPages }),
+          syncFunction: (_workflowRunId) => syncTweetsFromX(account.id, { maxPages }),
         });
         return NextResponse.json({ success: true, result: syncResult, workflowRunId: workflowRun.id });
       }
@@ -56,7 +56,7 @@ export async function POST(req: NextRequest) {
           workflowType: "sync",
           syncSubType: "x_mentions",
           platformAccountId: account.id,
-          syncFunction: () => syncMentionsFromX(account.id, { maxPages }),
+          syncFunction: (_workflowRunId) => syncMentionsFromX(account.id, { maxPages }),
         });
         return NextResponse.json({ success: true, result: syncResult, workflowRunId: workflowRun.id });
       }
@@ -86,7 +86,8 @@ export async function POST(req: NextRequest) {
           workflowType: "sync",
           syncSubType: "x_contacts",
           platformAccountId: account.id,
-          syncFunction: () => syncContactsFromPlatform(account.id, { maxPages }),
+          syncFunction: (workflowRunId) =>
+            syncContactsFromPlatform(account.id, { maxPages }, workflowRunId),
         });
         return NextResponse.json({ success: true, result: syncResult, workflowRunId: workflowRun.id });
       }
