@@ -19,6 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import Link from "next/link";
 import { AlertTriangle, ArrowRight, Check, Loader2, Search, Users } from "lucide-react";
 import {
   DEDUPE_TIER_PRESETS,
@@ -27,10 +28,12 @@ import {
 } from "@/lib/workflows/dedupe-template";
 import type { DedupeReviewGroup, DedupeReviewMember } from "@/lib/contacts/dedupe/review";
 import type { MergeContactsResult } from "@/lib/contacts/dedupe/merge";
+import type { RunDedupeMergeResult } from "@/lib/contacts/dedupe/run-merge";
 
 interface DedupeReviewDialogProps {
   open: boolean;
   onClose: () => void;
+  templateId: string;
   templateName: string;
 }
 
@@ -89,14 +92,20 @@ function MemberRow({ member }: { member: DedupeReviewMember }) {
   );
 }
 
-export function DedupeReviewDialog({ open, onClose, templateName }: DedupeReviewDialogProps) {
+export function DedupeReviewDialog({
+  open,
+  onClose,
+  templateId,
+  templateName,
+}: DedupeReviewDialogProps) {
   const [preset, setPreset] = useState<DedupeTierPreset>("1");
   const [groups, setGroups] = useState<DedupeReviewGroup[] | null>(null);
   const [scanning, setScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [pendingKey, setPendingKey] = useState<string | null>(null);
-  const [mergingAll, setMergingAll] = useState(false);
+  const [pendingKeys, setPendingKeys] = useState<string[]>([]);
   const [outcomes, setOutcomes] = useState<Record<string, MergeOutcome>>({});
+  const [threadPath, setThreadPath] = useState<string | null>(null);
+  const [runId, setRunId] = useState<string | null>(null);
 
   const scan = useCallback(async () => {
     setScanning(true);
@@ -119,54 +128,52 @@ export function DedupeReviewDialog({ open, onClose, templateName }: DedupeReview
     }
   }, [preset]);
 
-  const mergeGroup = useCallback(async (group: DedupeReviewGroup): Promise<boolean> => {
-    const key = groupKey(group);
-    setPendingKey(key);
-    try {
-      const res = await fetch("/api/contacts/dedupe/merge", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          primaryContactId: group.primaryContactId,
-          secondaryContactIds: group.secondaryContactIds,
-        }),
-      });
-      const data = (await res.json()) as MergeContactsResult & { error?: string };
-      if (!res.ok) throw new Error(data.error || "Merge failed");
-      setOutcomes((prev) => ({
-        ...prev,
-        [key]: { status: "merged", detail: describeMerge(data) },
-      }));
-      return true;
-    } catch (err) {
-      setOutcomes((prev) => ({
-        ...prev,
-        [key]: {
-          status: "failed",
-          detail: err instanceof Error ? err.message : "Merge failed",
-        },
-      }));
-      return false;
-    } finally {
-      setPendingKey(null);
-    }
-  }, []);
+  const mergeGroups = useCallback(
+    async (batch: DedupeReviewGroup[]) => {
+      if (batch.length === 0) return;
+      const keys = batch.map(groupKey);
+      setPendingKeys(keys);
+      setError(null);
+      try {
+        const res = await fetch("/api/contacts/dedupe/merge", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            templateId,
+            groups: batch.map((group) => ({
+              primaryContactId: group.primaryContactId,
+              secondaryContactIds: group.secondaryContactIds,
+            })),
+          }),
+        });
+        const data = (await res.json()) as RunDedupeMergeResult & { error?: string };
+        if (!res.ok) throw new Error(data.error || "Merge failed");
 
-  const mergeAll = useCallback(async () => {
-    if (!groups) return;
-    setMergingAll(true);
-    // Sequential: each merge re-points rows the next group may also touch.
-    for (const group of groups) {
-      if (outcomes[groupKey(group)]?.status === "merged") continue;
-      await mergeGroup(group);
-    }
-    setMergingAll(false);
-  }, [groups, mergeGroup, outcomes]);
+        // The server merges in request order, so results line up with the batch.
+        setOutcomes((prev) => {
+          const next = { ...prev };
+          data.groups.forEach((result, index) => {
+            next[keys[index]] = result.ok
+              ? { status: "merged", detail: describeMerge(result.result) }
+              : { status: "failed", detail: result.error };
+          });
+          return next;
+        });
+        setThreadPath(data.threadPath ?? null);
+        setRunId(data.workflowRunId ?? null);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Merge failed");
+      } finally {
+        setPendingKeys([]);
+      }
+    },
+    [templateId]
+  );
 
   const pendingGroups = (groups ?? []).filter(
     (group) => outcomes[groupKey(group)]?.status !== "merged"
   );
-  const busy = scanning || mergingAll || pendingKey !== null;
+  const busy = scanning || pendingKeys.length > 0;
   const needsReview = preset !== "1";
 
   return (
@@ -228,6 +235,19 @@ export function DedupeReviewDialog({ open, onClose, templateName }: DedupeReview
             <p className="rounded-md bg-destructive/10 p-2 text-xs text-destructive">{error}</p>
           )}
 
+          {runId && (
+            <div className="space-y-1 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-100">
+              <p>Recorded as a workflow run — no agent was launched.</p>
+              <Link
+                href={`/dashboard/workflows/${runId}`}
+                className="font-medium underline"
+              >
+                View run details
+              </Link>
+              {threadPath && <p className="truncate font-mono">{threadPath}</p>}
+            </div>
+          )}
+
           {groups !== null && (
             <>
               <Separator />
@@ -242,10 +262,12 @@ export function DedupeReviewDialog({ open, onClose, templateName }: DedupeReview
                     size="sm"
                     variant="outline"
                     className="h-7 text-xs"
-                    onClick={mergeAll}
+                    onClick={() => mergeGroups(pendingGroups)}
                     disabled={busy}
                   >
-                    {mergingAll && <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />}
+                    {pendingKeys.length > 1 && (
+                      <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
+                    )}
                     Merge all {pendingGroups.length}
                   </Button>
                 )}
@@ -281,10 +303,10 @@ export function DedupeReviewDialog({ open, onClose, templateName }: DedupeReview
                             size="sm"
                             variant="outline"
                             className="h-7 text-xs"
-                            onClick={() => mergeGroup(group)}
+                            onClick={() => mergeGroups([group])}
                             disabled={busy}
                           >
-                            {pendingKey === key ? (
+                            {pendingKeys.includes(key) ? (
                               <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
                             ) : (
                               <ArrowRight className="mr-1.5 h-3 w-3" />

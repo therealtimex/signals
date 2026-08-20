@@ -389,6 +389,7 @@ export function TemplateGallery() {
       {reviewTemplate && (
         <DedupeReviewDialog
           open={!!reviewTemplate}
+          templateId={reviewTemplate.id}
           templateName={reviewTemplate.name}
           onClose={() => setReviewTemplate(null)}
         />

@@ -122,6 +122,11 @@ runs the same detection engine directly — no agent, no model cost, no waiting 
 session. It lists each group with both records side by side, marks the one it suggests keeping,
 and merges only when you press **Merge** (or **Merge all**). Nothing is archived until you do.
 
+Merges from the panel are still recorded the way agent runs are: they appear in **Runs** as a
+prune run with one step per group, and they post a summary into the agent's thread alongside its
+agent runs. The difference is only in who did the work — the panel merges in-app, so the run
+carries no terminal session.
+
 The panel opens on **Tier 1 only**, where a shared email address or platform handle is the
 evidence and no judgment is needed. Widen it to tier 2 or 3 when you want the fuzzier candidates,
 but read those groups before merging — two people at the same company with similar names are
