@@ -9,6 +9,11 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const manifestPath = path.resolve(
   process.argv[2] ?? path.join(root, "marketplace", "release-manifest.json"),
 );
+if (!fs.existsSync(manifestPath)) {
+  console.error(`Release manifest not found: ${manifestPath}`);
+  console.error("Run: npm run build:standalone-artifact");
+  process.exit(1);
+}
 const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
 const errors = [];
 

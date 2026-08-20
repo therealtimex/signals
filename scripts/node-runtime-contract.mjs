@@ -5,6 +5,7 @@ import { pathToFileURL } from "node:url";
 export const SIGNALS_NODE_VERSION = "22.16.0";
 export const SIGNALS_NODE_VERSION_WITH_PREFIX = `v${SIGNALS_NODE_VERSION}`;
 export const SIGNALS_NODE_MODULE_ABI = "127";
+export const SIGNALS_NODE_ENGINE_RANGE = ">=22.16.0 <23";
 
 export function assertSignalsNodeRuntime({
   label = "Signals",
@@ -21,6 +22,24 @@ export function assertSignalsNodeRuntime({
   if (mismatches.length > 0) {
     throw new Error(
       `${label} requires ${mismatches.join(" and ")} so native dependencies match the RealtimeX host.`,
+    );
+  }
+}
+
+export function assertSignalsNodeRuntimeCompatibility({
+  label = "Signals",
+  version = process.version,
+  moduleAbi = process.versions.modules,
+  warn = console.warn,
+} = {}) {
+  if (moduleAbi !== SIGNALS_NODE_MODULE_ABI) {
+    throw new Error(
+      `${label} requires module ABI ${SIGNALS_NODE_MODULE_ABI} for native dependencies; received Node ${version} with ABI ${moduleAbi}.`,
+    );
+  }
+  if (version !== SIGNALS_NODE_VERSION_WITH_PREFIX) {
+    warn(
+      `${label} was built and tested with Node ${SIGNALS_NODE_VERSION}; running ${version} with compatible module ABI ${moduleAbi}.`,
     );
   }
 }

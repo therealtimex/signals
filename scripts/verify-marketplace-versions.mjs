@@ -9,7 +9,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { SIGNALS_NODE_VERSION } from "./node-runtime-contract.mjs";
+import {
+  SIGNALS_NODE_ENGINE_RANGE,
+  SIGNALS_NODE_VERSION,
+} from "./node-runtime-contract.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "..");
@@ -39,9 +42,9 @@ if (plugin.version !== pkg.version) {
 if (nvmNodeVersion !== SIGNALS_NODE_VERSION) {
   errors.push(`.nvmrc version ${nvmNodeVersion} != ${SIGNALS_NODE_VERSION}`);
 }
-if (pkg.engines?.node !== SIGNALS_NODE_VERSION) {
+if (pkg.engines?.node !== SIGNALS_NODE_ENGINE_RANGE) {
   errors.push(
-    `package.json engines.node ${pkg.engines?.node ?? "missing"} != ${SIGNALS_NODE_VERSION}`,
+    `package.json engines.node ${pkg.engines?.node ?? "missing"} != ${SIGNALS_NODE_ENGINE_RANGE}`,
   );
 }
 

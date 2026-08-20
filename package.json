@@ -28,7 +28,7 @@
     "test:standalone-artifact": "node scripts/test-standalone-artifact.mjs",
     "test:plugin-package": "node scripts/test-verify-signals-plugin-provision.mjs && node scripts/test-release-signature.mjs && node scripts/test-realtimex-plugin-package.mjs && node scripts/test-x-publish-agent-browser.mjs",
     "test:provision-verifier": "node scripts/test-verify-signals-plugin-provision.mjs",
-    "verify:node-runtime": "node scripts/node-runtime-contract.mjs",
+    "verify:node-runtime": "node scripts/node-runtime-contract.mjs && node scripts/test-node-runtime-contract.mjs",
     "verify:marketplace-versions": "node scripts/verify-marketplace-versions.mjs",
     "merge:release-manifests": "node scripts/merge-release-manifests.mjs",
     "validate:release-artifacts": "node scripts/validate-release-artifacts.mjs",
@@ -62,7 +62,7 @@
     "package.json"
   ],
   "engines": {
-    "node": "22.16.0"
+    "node": ">=22.16.0 <23"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

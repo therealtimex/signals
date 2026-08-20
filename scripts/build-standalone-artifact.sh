@@ -58,7 +58,7 @@ for required in server.js package.json node_modules .next; do
 done
 
 cp "${ROOT}/scripts/standalone-entry.mjs" "$STAGING/server.js"
-cp "${ROOT}/scripts/node-runtime-contract.mjs" "$STAGING/runtime-contract.mjs"
+cp "${ROOT}/scripts/node-runtime-contract.mjs" "$STAGING/node-runtime-contract.mjs"
 cp "${STANDALONE}/server.js" "$STAGING/next-server.js"
 cp "${STANDALONE}/package.json" "$STAGING/"
 cp "${ROOT}/LICENSE" "$STAGING/"

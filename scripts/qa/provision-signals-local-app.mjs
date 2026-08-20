@@ -50,7 +50,12 @@ function inspectNodeExecutable(executable) {
     { encoding: "utf8" },
   );
   if (result.status !== 0) {
-    return { error: result.stderr.trim() || `exited with ${result.status}` };
+    return {
+      error:
+        result.stderr?.trim() ||
+        result.error?.message ||
+        `exited with ${result.status}`,
+    };
   }
   try {
     return JSON.parse(result.stdout);

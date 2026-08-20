@@ -91,7 +91,7 @@ Publish and engage browser flows still use Signals-managed sessions. See `docs/r
 
 ## Local development
 
-Use `nvm use` from the repository root before installing dependencies. The checked-in `.nvmrc`, release builders, and runtime startup guard all require Node `22.16.0` / ABI `127`, matching the RealtimeX host and preventing native `better-sqlite3` ABI mismatches.
+Use `nvm use` from the repository root before installing dependencies. The checked-in `.nvmrc`, release builders, and smoke tests require Node `22.16.0` / ABI `127`, matching the RealtimeX host and preventing native `better-sqlite3` ABI mismatches. The shipped runtime hard-fails on an incompatible ABI but permits later Node 22 patches with ABI `127`, logging a version-drift warning instead of blocking startup.
 
 ```bash
 # Standalone (default)

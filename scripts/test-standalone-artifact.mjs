@@ -52,7 +52,7 @@ const requiredEntries = [
   "next-server.js",
   "package.json",
   "LICENSE",
-  "runtime-contract.mjs",
+  "node-runtime-contract.mjs",
   ".next/BUILD_ID",
   ".next/required-server-files.json",
   "public/favicon.ico",
@@ -83,7 +83,7 @@ const allowedRootFiles = new Set([
   "LICENSE",
   "next-server.js",
   "package.json",
-  "runtime-contract.mjs",
+  "node-runtime-contract.mjs",
   "server.js",
 ]);
 const allowedRootDirectories = new Set([

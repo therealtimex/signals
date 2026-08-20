@@ -10,15 +10,17 @@ Package and distribute Signals through the **RealtimeX marketplace** — not pub
 |----------|------|---------|
 | Plugin zip | `dist/com.realtimex.signals-plugin.zip` | Workspace provision, skills, flows, config |
 | Target runtime | `dist/signals-{version}-{platform}-{arch}.tar.gz` | Compiled Local App runtime for one native target |
-| Release manifest | `marketplace/release-manifest.json` | v2 platform map, runtime contract, sizes, and SHA-256 digests |
-| Signature envelope | `marketplace/release-manifest.sig.json` | Detached Ed25519 signature over the exact release-manifest bytes |
+| Release manifest | `marketplace/release-manifest.json` | Generated v2 platform map, runtime contract, sizes, and SHA-256 digests |
+| Signature envelope | `marketplace/release-manifest.sig.json` | Generated detached Ed25519 signature over the exact release-manifest bytes |
 
 Plugin id: `com.realtimex.signals`  
 Local app id: `47e45f71-3279-42f5-8e95-731de01b6eae`
 
 ## Build
 
-All dependency-install, build, smoke-test, and installed-runtime paths use exact Node `22.16.0` (module ABI `127`), matching the RealtimeX plugin host. Installation and artifact construction fail before compiling when the runtime differs, so native dependencies such as `better-sqlite3` cannot be published for the wrong ABI.
+Dependency installation, release builds, and smoke tests require exact Node `22.16.0` (module ABI `127`), matching the RealtimeX plugin host. The installed runtime hard-fails on ABI mismatch but warns and continues on compatible Node 22 patch drift. This prevents native dependencies such as `better-sqlite3` from being published for the wrong ABI without making an otherwise compatible host patch a startup blocker.
+
+The release manifest and signature are generated release outputs and are not tracked. A native artifact build creates a one-target manifest; release CI merges all six target manifests before signing and packaging.
 
 ```bash
 nvm use
