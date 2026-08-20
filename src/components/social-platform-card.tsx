@@ -13,6 +13,10 @@ import {
   ChevronDown,
   ChevronRight,
   ExternalLink,
+  Plus,
+  Search,
+  Star,
+  Trash2,
 } from "lucide-react";
 import {
   PlatformConnectionCard,
@@ -48,6 +52,21 @@ export type SocialPlatformCardProps = {
   disconnectingBrowser?: boolean;
   oauthConnecting?: boolean;
   oauthDisconnecting?: boolean;
+  targets?: Array<{
+    id: string;
+    kind: string;
+    name: string;
+    handle: string | null;
+    capabilities: string[];
+    isDefault: boolean;
+    lastVerifiedAt: number | null;
+  }>;
+  targetAction?: string | null;
+  onAddCurrent?: () => void;
+  onDiscover?: () => void;
+  onSetDefault?: (targetId: string) => void;
+  onVerifyTarget?: (targetId: string) => void;
+  onForgetTarget?: (targetId: string) => void;
 };
 
 function formatSyncTime(unix: number | null | undefined): string {
@@ -89,6 +108,13 @@ export function SocialPlatformCard(props: SocialPlatformCardProps) {
     oauthConnecting,
     oauthDisconnecting,
     oauthSupported = true,
+    targets = [],
+    targetAction,
+    onAddCurrent,
+    onDiscover,
+    onSetDefault,
+    onVerifyTarget,
+    onForgetTarget,
   } = props;
 
   if (loading) {
@@ -192,6 +218,117 @@ export function SocialPlatformCard(props: SocialPlatformCardProps) {
           )}
         </div>
       </div>
+
+      {rtxEmbedded && (
+        <div className="space-y-3 border-t pt-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="text-sm font-medium">Acting targets</p>
+              <p className="text-xs text-muted-foreground">
+                Agents select these stable target IDs before browsing or publishing.
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={onAddCurrent}
+                disabled={!onAddCurrent || targetAction === "add"}
+              >
+                {targetAction === "add" ? (
+                  <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                ) : (
+                  <Plus className="mr-1 h-3 w-3" />
+                )}
+                Add current
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={onDiscover}
+                disabled={!onDiscover || targetAction === "discover"}
+              >
+                {targetAction === "discover" ? (
+                  <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                ) : (
+                  <Search className="mr-1 h-3 w-3" />
+                )}
+                Discover
+              </Button>
+            </div>
+          </div>
+
+          {targets.length === 0 ? (
+            <p className="rounded-md bg-muted/40 p-3 text-xs text-muted-foreground">
+              No targets registered. Sign in in the browser session, then add the current target.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {targets.map((target) => (
+                <div
+                  key={target.id}
+                  className="flex flex-col gap-2 rounded-md border bg-muted/20 p-3 sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="truncate text-sm font-medium">{target.name}</span>
+                      <Badge variant="outline">{target.kind}</Badge>
+                      {target.isDefault && (
+                        <Badge variant="secondary">
+                          <Star className="mr-1 h-3 w-3 fill-current" /> Default
+                        </Badge>
+                      )}
+                      {target.capabilities.map((capability) => (
+                        <Badge key={capability} variant="outline">{capability}</Badge>
+                      ))}
+                    </div>
+                    <p className="mt-1 truncate font-mono text-xs text-muted-foreground">
+                      {target.handle ?? target.id} · {target.id}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Verified {formatSyncTime(target.lastVerifiedAt)}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    {!target.isDefault && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => onSetDefault?.(target.id)}
+                        disabled={targetAction === target.id}
+                      >
+                        <Star className="mr-1 h-3 w-3" /> Set default
+                      </Button>
+                    )}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => onVerifyTarget?.(target.id)}
+                      disabled={targetAction === target.id}
+                    >
+                      {targetAction === target.id ? (
+                        <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                      ) : (
+                        <CheckCircle className="mr-1 h-3 w-3" />
+                      )}
+                      Switch & verify
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-destructive hover:text-destructive"
+                      onClick={() => onForgetTarget?.(target.id)}
+                      disabled={targetAction === target.id}
+                    >
+                      <Trash2 className="mr-1 h-3 w-3" /> Forget
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {oauthSupported && (rtxEmbedded || oauthConnected) && (
         <div className="border-t pt-3">

@@ -12,7 +12,7 @@ Facebook browser connect is available in Settings for session validation and fut
 2. Manifest permission **`desktop.runtime-sessions`** granted (Local Apps consent).
 3. RealTimeX desktop running (relay for terminal agent launch).
 4. Skills installed in the Signals workspace: `realtimex-signals` + `signals-publish`.
-5. One-time login: open the **`signals-publish`** RTX Browser session from **Settings → Platform Connections** and sign in to X, LinkedIn, and/or Facebook in the same session when needed.
+5. One-time login: open a browser connection from **Settings → Platform Connections**, sign in, then add the current acting target. The shared default connection is **`signals-publish`**.
 
 ## User flow
 
@@ -20,14 +20,16 @@ Facebook browser connect is available in Settings for session validation and fut
 |------|----------------|
 | Compose | User drafts in Signals, selects platforms, clicks **Send to agent** |
 | CRM | `publish_jobs` row created (`queued`); item → `queued`; RTX thread + terminal agent launched |
-| Agent | `get_publish_job` → `x-publish.mjs` over CDP → `complete_publish` per platform |
+| Agent | `get_publish_job` → prepare target → publish over CDP → `complete_publish` → release lease |
 | List | Row shows `queued` → `publishing` → `published` / `failed`; **Open thread** raises RTX |
 
 ## Session doctrine
 
 | Rule | Value |
 |------|-------|
-| Session name | `signals-publish` (one session shared by **all** platforms) |
+| Default session | `signals-publish` (shared by all platforms) |
+| Shared concurrency | One whole-operation lease per connection; tabs do not make different-target work safe |
+| Dedicated concurrency | Different dedicated connections can execute concurrently |
 | Lifecycle | Stop between runs — **never delete** the profile |
 | Login recovery | Agent asks in-thread; user signs in via RealTimeX Browser |
 
@@ -85,8 +87,12 @@ markers are probed one selector at a time — a comma-joined union resolves thro
 ## Agent-tools (publish lane)
 
 - `get_publish_job` — payload snapshot + media paths
-- `update_publish_job` — mark platform in-flight
-- `complete_publish` — record success/failure; creates `content_posts`
+- `prepare_platform_target` — acquire the session lease, switch when supported, and verify the live identity
+- `update_publish_job` — mark target in-flight and renew its lease
+- `complete_publish` — record success/failure and acting `targetId`; creates `content_posts`
+- `release_platform_target` — release the lease in a finally/cleanup step
+
+X shared sessions support best-effort account switching. LinkedIn shared sessions are verify-only; use a dedicated connection for multiple members. Facebook profile/Page targets are browse-only in v1. When target preparation returns a non-null `expectedHandle`, mutating X actions include it and fail closed with `wrong_account` if the browser identity differs.
 
 See `docs/agent-tools.md` and `.claude/skills/signals-publish/SKILL.md`.
 

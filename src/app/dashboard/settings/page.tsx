@@ -20,6 +20,15 @@ type PlatformPayload = {
     grantedScopes?: string;
     syncCapable?: boolean;
   } | null;
+  targets?: Array<{
+    id: string;
+    kind: string;
+    name: string;
+    handle: string | null;
+    capabilities: string[];
+    isDefault: boolean;
+    lastVerifiedAt: number | null;
+  }>;
 };
 
 type SessionPayload = {
@@ -101,6 +110,7 @@ function SettingsContent() {
   const [fbOpening, setFbOpening] = useState(false);
   const [fbValidating, setFbValidating] = useState(false);
   const [fbDisconnecting, setFbDisconnecting] = useState(false);
+  const [targetActions, setTargetActions] = useState<Partial<Record<PlatformKey, string>>>({});
 
   const fetchPlatform = useCallback(async (platform: PlatformKey) => {
     const [platformRes, sessionRes] = await Promise.all([
@@ -280,6 +290,47 @@ function SettingsContent() {
     }
   }
 
+  async function runTargetAction(
+    platform: PlatformKey,
+    action: "add" | "discover" | "default" | "verify" | "forget",
+    targetId?: string
+  ) {
+    setTargetActions((current) => ({ ...current, [platform]: targetId ?? action }));
+    setError(null);
+    try {
+      const request =
+        action === "add"
+          ? { url: "/api/platform-targets/register-current", method: "POST", body: { platform } }
+          : action === "discover"
+            ? { url: "/api/platform-targets/discover", method: "POST", body: { platform } }
+            : action === "default"
+              ? { url: `/api/platform-targets/${targetId}/default`, method: "POST" }
+              : action === "verify"
+                ? { url: `/api/platform-targets/${targetId}/verify`, method: "POST" }
+                : { url: `/api/platform-targets/${targetId}`, method: "DELETE" };
+      const response = await fetch(request.url, {
+        method: request.method,
+        headers: request.body ? { "Content-Type": "application/json" } : undefined,
+        body: request.body ? JSON.stringify(request.body) : undefined,
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        setError(data.error || `Failed to ${action} target`);
+        return;
+      }
+      setSuccessMessage(
+        action === "discover"
+          ? `Discovered ${data.targets?.length ?? 0} ${PLATFORM_LABELS[platform]} target(s).`
+          : `${PLATFORM_LABELS[platform]} target ${action} completed.`
+      );
+      await ({ x: refreshX, linkedin: refreshLinkedIn, facebook: refreshFacebook }[platform])();
+    } catch {
+      setError(`Failed to ${action} ${PLATFORM_LABELS[platform]} target.`);
+    } finally {
+      setTargetActions((current) => ({ ...current, [platform]: undefined }));
+    }
+  }
+
   const xPayload = xState.payload;
   const liPayload = liState.payload;
   const fbPayload = fbState.payload;
@@ -321,8 +372,8 @@ function SettingsContent() {
         <CardHeader>
           <CardTitle>Platform Connections</CardTitle>
           <CardDescription>
-            One connection per platform, all sharing the <code>signals-publish</code> RealTimeX
-            Browser session — sign in to each platform in that window. Publish and file-based
+            Browser connections may retain multiple named acting targets. Shared sessions are
+            lease-serialized; dedicated sessions can run concurrently. Publish and file-based
             imports work without OAuth.
           </CardDescription>
         </CardHeader>
@@ -356,6 +407,13 @@ function SettingsContent() {
             disconnectingBrowser={xDisconnecting}
             oauthConnecting={xOAuthConnecting}
             oauthDisconnecting={xOAuthDisconnecting}
+            targets={xPayload?.targets}
+            targetAction={targetActions.x}
+            onAddCurrent={() => runTargetAction("x", "add")}
+            onDiscover={() => runTargetAction("x", "discover")}
+            onSetDefault={(id) => runTargetAction("x", "default", id)}
+            onVerifyTarget={(id) => runTargetAction("x", "verify", id)}
+            onForgetTarget={(id) => runTargetAction("x", "forget", id)}
           />
 
           <SocialPlatformCard
@@ -386,6 +444,13 @@ function SettingsContent() {
             disconnectingBrowser={liDisconnecting}
             oauthConnecting={liOAuthConnecting}
             oauthDisconnecting={liOAuthDisconnecting}
+            targets={liPayload?.targets}
+            targetAction={targetActions.linkedin}
+            onAddCurrent={() => runTargetAction("linkedin", "add")}
+            onDiscover={() => runTargetAction("linkedin", "discover")}
+            onSetDefault={(id) => runTargetAction("linkedin", "default", id)}
+            onVerifyTarget={(id) => runTargetAction("linkedin", "verify", id)}
+            onForgetTarget={(id) => runTargetAction("linkedin", "forget", id)}
           />
 
           <SocialPlatformCard
@@ -413,6 +478,13 @@ function SettingsContent() {
             opening={fbOpening}
             validating={fbValidating}
             disconnectingBrowser={fbDisconnecting}
+            targets={fbPayload?.targets}
+            targetAction={targetActions.facebook}
+            onAddCurrent={() => runTargetAction("facebook", "add")}
+            onDiscover={() => runTargetAction("facebook", "discover")}
+            onSetDefault={(id) => runTargetAction("facebook", "default", id)}
+            onVerifyTarget={(id) => runTargetAction("facebook", "verify", id)}
+            onForgetTarget={(id) => runTargetAction("facebook", "forget", id)}
           />
 
           <HimalayaMailAccountsSection />

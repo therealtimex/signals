@@ -25,6 +25,9 @@ export interface PublishJobPayload {
 
 export interface PublishJobTarget {
   platform: PublishPlatformTarget;
+  targetId?: string;
+  expectedHandle?: string | null;
+  sessionName?: string;
   status: PublishTargetStatus;
   platformPostId?: string;
   platformUrl?: string;

@@ -244,6 +244,9 @@ function ContentListInner({
         body: JSON.stringify({
           contentItemId: itemId,
           platforms: job.payload.platforms,
+          targets: job.targets
+            .filter((target) => target.targetId)
+            .map((target) => ({ targetId: target.targetId })),
           text: job.payload.text,
           mediaAssetIds: job.payload.mediaAssetIds?.length
             ? job.payload.mediaAssetIds

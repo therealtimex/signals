@@ -140,11 +140,18 @@ This also **repairs the P6a status overload**: `/api/content/publish` currently 
 
 Fix the pre-existing drift while touching this: `query_content` agent-tool schema (`schemas.ts:148-153`) declares `["draft","scheduled","published","archived"]` — `archived` doesn't exist in the DB and `review/approved/imported` are missing. Align it with the DB enum + new values.
 
-### 3.3 `content_posts` — unchanged
+### 3.3 `content_posts` — target audit extension (#191)
+
+Issue #191 adds nullable `target_id → platform_targets.id`. `platform_account_id` remains required
+as the credentials/sync bridge. New target-aware completions write both; legacy callbacks resolve
+the deterministic platform default before falling back to detected-handle registration.
 
 Per-platform published results remain `content_posts` rows (one per platform account), created **only at completion** by `complete_publish`, because `platformAccountId` is NOT NULL and the account row (auth_type `"session"`) can only be resolved once the agent has detected the logged-in handle. The P6a `ensureXPlatformAccount` helper is reused verbatim, generalized to `ensureSessionPlatformAccount(platform, handle)`.
 
 ### 3.4 Status derivation rules
+
+For multiple same-platform entries, status transitions match `targetId` first and use platform only
+for legacy job JSON. Job targets snapshot `targetId`, `expectedHandle`, and `sessionName`.
 
 Item status is **owned by the job state machine** while a job is active:
 
@@ -421,6 +428,11 @@ Provisioning: install both skills into the `signals` workspace at setup. Extend 
 The job model, tools, and UI are platform-generic. v1 acceptance covers X only. A LinkedIn target without a deterministic script: SKILL.md directs the agent to use `agent-browser` interactively (logged-in session required) and still report via `complete_publish`; if it declines, it must `complete_publish` with `success: false, errorCode: "unknown", error: "LinkedIn deterministic publish not yet supported"` so the target lands `failed`, item `partial`-aware per §3.4. LinkedIn chip carries a "beta" affordance in Compose.
 
 ### 7.5 Failure & edge modes (agent lane)
+
+Target-aware agents must hold a connection-scoped lease for the full operation and pass its
+`leaseId` to update/completion callbacks. Update renews the lease. Completion is always recorded
+even if the lease is stale, returning `leaseStale: true`; mutating browser work still fails closed
+when live identity verification differs from `expectedHandle` (`wrong_account`).
 
 | Mode | Handling |
 |---|---|

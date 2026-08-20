@@ -86,7 +86,7 @@ export function patchSignalsCliSource(sourceDir, version) {
   requireReplace(
     rootPath,
     /rootCmd\.AddCommand\(newImportCmd\(flags\)\)\n/,
-    `rootCmd.AddCommand(newSignalsImportCmd(flags))\n\trootCmd.AddCommand(newReconcileCmd(flags))\n`,
+    `rootCmd.AddCommand(newSignalsImportCmd(flags))\n\trootCmd.AddCommand(newReconcileCmd(flags))\n\trootCmd.AddCommand(newTargetsCmd(flags))\n`,
     "transcendence import/reconcile registration"
   );
 

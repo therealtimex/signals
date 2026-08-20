@@ -7,7 +7,8 @@ export type AgentToolCategory =
   | "workflows"
   | "analytics"
   | "tasks"
-  | "graph";
+  | "graph"
+  | "platforms";
 
 export type AgentToolDefinition<T extends z.ZodTypeAny = z.ZodTypeAny> = {
   name: string;

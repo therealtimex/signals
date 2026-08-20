@@ -90,6 +90,16 @@ import {
   handleUpsertPersona,
 } from "@/lib/agent-tools/handlers";
 import { handleListMailAccounts } from "@/lib/agent-tools/mail-handlers";
+import {
+  getPlatformTargetSchema,
+  handleGetPlatformTarget,
+  handleListPlatformTargets,
+  handlePreparePlatformTarget,
+  handleReleasePlatformTarget,
+  listPlatformTargetsSchema,
+  preparePlatformTargetSchema,
+  releasePlatformTargetSchema,
+} from "@/lib/agent-tools/platform-target-handlers";
 import type { AgentToolDefinition } from "@/lib/agent-tools/types";
 
 export const AGENT_TOOL_VERSION = "1";
@@ -429,6 +439,40 @@ export const AGENT_TOOLS: Record<string, AgentToolDefinition> = {
     schema: listMailAccountsSchema,
     parameters: zodToParameters(listMailAccountsSchema),
     execute: handleListMailAccounts,
+  },
+  list_platform_targets: {
+    name: "list_platform_targets",
+    description:
+      "List known X, LinkedIn, and Facebook acting targets and their browser connections.",
+    category: "platforms",
+    schema: listPlatformTargetsSchema,
+    parameters: zodToParameters(listPlatformTargetsSchema),
+    execute: handleListPlatformTargets,
+  },
+  get_platform_target: {
+    name: "get_platform_target",
+    description: "Get one platform target, its browser connection, and current lease state.",
+    category: "platforms",
+    schema: getPlatformTargetSchema,
+    parameters: zodToParameters(getPlatformTargetSchema),
+    execute: handleGetPlatformTarget,
+  },
+  prepare_platform_target: {
+    name: "prepare_platform_target",
+    description:
+      "Acquire the target's browser-session lease, activate it, and verify the live identity before browsing or publishing.",
+    category: "platforms",
+    schema: preparePlatformTargetSchema,
+    parameters: zodToParameters(preparePlatformTargetSchema),
+    execute: handlePreparePlatformTarget,
+  },
+  release_platform_target: {
+    name: "release_platform_target",
+    description: "Release a browser-session lease returned by prepare_platform_target.",
+    category: "platforms",
+    schema: releasePlatformTargetSchema,
+    parameters: zodToParameters(releasePlatformTargetSchema),
+    execute: handleReleasePlatformTarget,
   },
 };
 
