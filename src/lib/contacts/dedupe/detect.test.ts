@@ -212,6 +212,60 @@ describe("findDuplicateContacts", () => {
     expect(findDuplicateContacts()).toEqual([]);
   });
 
+  it("does not treat a shared role-account email as tier 1 evidence", () => {
+    // Two colleagues can both carry info@acme.com; that is a shared inbox, not
+    // evidence they are the same person.
+    const a = createContact({ name: "Alice Smith" });
+    const b = createContact({ name: "Bob Jones" });
+    for (const contact of [a, b]) {
+      createContactChannel({
+        contactId: contact.id,
+        channelType: "email",
+        value: "info@acme.com",
+        source: "test",
+      });
+    }
+
+    expect(findDuplicateContacts()).toEqual([]);
+  });
+
+  it("still matches a shared personal email", () => {
+    const a = createContact({ name: "Alice Smith" });
+    const b = createContact({ name: "A. Smith" });
+    for (const contact of [a, b]) {
+      createContactChannel({
+        contactId: contact.id,
+        channelType: "email",
+        value: "alice.smith@acme.com",
+        source: "test",
+      });
+    }
+
+    expect(findDuplicateContacts()).toHaveLength(1);
+  });
+
+  it("suggests the workspace owner as the primary, never a secondary", () => {
+    // mergeContacts refuses to archive the owner, so a group proposing it as a
+    // secondary could never be actioned.
+    const owner = createContact({ name: "Me", isSelf: true });
+    const twin = createContact({ name: "Me" });
+    for (const contact of [owner, twin]) {
+      createContactChannel({
+        contactId: contact.id,
+        channelType: "email",
+        value: "me@example.com",
+        source: "test",
+      });
+    }
+    // Give the twin the better score so only the isSelf rule can save the owner.
+    setEnrichmentScore(owner.id, 5);
+    setEnrichmentScore(twin.id, 90);
+
+    const [candidate] = findDuplicateContacts();
+    expect(candidate.primaryContactId).toBe(owner.id);
+    expect(candidate.secondaryContactIds).toEqual([twin.id]);
+  });
+
   it("honours the tier filter", () => {
     const org = createOrg({ name: "NVIDIA", source: "test" });
     const a = createContact({ name: "Jim Fan" });
@@ -270,7 +324,7 @@ describe("findDuplicateContacts", () => {
 });
 
 describe("pickPrimary", () => {
-  const base = { name: "Ada", enrichmentScore: 0, identityCount: 0, createdAt: 100 };
+  const base = { name: "Ada", enrichmentScore: 0, identityCount: 0, createdAt: 100, isSelf: false };
 
   it("prefers the highest enrichment score", () => {
     expect(
@@ -295,6 +349,15 @@ describe("pickPrimary", () => {
       pickPrimary([
         { ...base, contactId: "a", createdAt: 500 },
         { ...base, contactId: "b", createdAt: 100 },
+      ]),
+    ).toBe("b");
+  });
+
+  it("puts the workspace owner first regardless of score", () => {
+    expect(
+      pickPrimary([
+        { ...base, contactId: "a", enrichmentScore: 90 },
+        { ...base, contactId: "b", enrichmentScore: 5, isSelf: true },
       ]),
     ).toBe("b");
   });

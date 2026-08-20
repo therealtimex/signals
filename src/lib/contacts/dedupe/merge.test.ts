@@ -2,7 +2,13 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db/client";
-import { createContact, isContactArchived, listContacts } from "@/lib/db/queries/contacts";
+import {
+  createContact,
+  getOwnerContactId,
+  isContactArchived,
+  listContacts,
+  restoreContact,
+} from "@/lib/db/queries/contacts";
 import { createContactChannel } from "@/lib/db/queries/contact-channels";
 import {
   createContactEmployment,
@@ -468,6 +474,171 @@ describe("mergeContacts", () => {
 
     expect(result.enrichmentScore).toBeGreaterThanOrEqual(before);
     expect(resolveCurrentEmployment(primary.id)?.title).toBe("CEO");
+  });
+
+  it("survives a contact whose tags column is not JSON", () => {
+    // contacts.tags is a free-form text column and the API writes it straight
+    // through, so a non-JSON value must not abort the whole merge transaction.
+    const primary = createContact({ name: "Ada" });
+    const secondary = createContact({ name: "Ada" });
+    db.update(contacts)
+      .set({ tags: "vip,founder" })
+      .where(eq(contacts.id, secondary.id))
+      .run();
+    seedInteraction(secondary.id);
+
+    expect(() =>
+      mergeContacts({ primaryContactId: primary.id, secondaryContactIds: [secondary.id] }),
+    ).not.toThrow();
+    expect(
+      db.select().from(interactions).where(eq(interactions.contactId, primary.id)).all(),
+    ).toHaveLength(1);
+  });
+
+  it("leaves a non-JSON tags column on the primary alone", () => {
+    const primary = createContact({ name: "Ada" });
+    const secondary = createContact({ name: "Ada", tags: JSON.stringify(["b"]) });
+    db.update(contacts).set({ tags: "vip,founder" }).where(eq(contacts.id, primary.id)).run();
+
+    mergeContacts({ primaryContactId: primary.id, secondaryContactIds: [secondary.id] });
+
+    // Rewriting it as ["b"] would silently discard whatever the column held.
+    expect(db.select().from(contacts).where(eq(contacts.id, primary.id)).get()?.tags).toBe(
+      "vip,founder",
+    );
+  });
+
+  it("unions tags across every secondary in an N-way merge", () => {
+    const primary = createContact({ name: "Ada", tags: JSON.stringify(["a"]) });
+    const first = createContact({ name: "Ada", tags: JSON.stringify(["b"]) });
+    const second = createContact({ name: "Ada", tags: JSON.stringify(["c"]) });
+
+    mergeContacts({
+      primaryContactId: primary.id,
+      secondaryContactIds: [first.id, second.id],
+    });
+
+    const tags = JSON.parse(
+      db.select().from(contacts).where(eq(contacts.id, primary.id)).get()?.tags ?? "[]",
+    ) as string[];
+    expect(tags.sort()).toEqual(["a", "b", "c"]);
+  });
+
+  it("keeps the newest lastInteractionAt across every secondary", () => {
+    const primary = createContact({ name: "Ada" });
+    const first = createContact({ name: "Ada" });
+    const second = createContact({ name: "Ada" });
+    const setLast = (id: string, at: number) =>
+      db.update(contacts).set({ lastInteractionAt: at }).where(eq(contacts.id, id)).run();
+    setLast(primary.id, 100);
+    setLast(first.id, 500);
+    setLast(second.id, 300);
+
+    mergeContacts({
+      primaryContactId: primary.id,
+      secondaryContactIds: [first.id, second.id],
+    });
+
+    // 300 arriving after 500 must not walk recency backwards.
+    expect(
+      db.select().from(contacts).where(eq(contacts.id, primary.id)).get()?.lastInteractionAt,
+    ).toBe(500);
+  });
+
+  it("takes the first non-blank name across an N-way merge", () => {
+    const primary = createContact({ name: "Ada" });
+    const first = createContact({ name: "Ada Lovelace", firstName: "Ada", lastName: "Lovelace" });
+    const second = createContact({ name: "Ada Byron", firstName: "Ada", lastName: "Byron" });
+    db.update(contacts)
+      .set({ firstName: null, lastName: null })
+      .where(eq(contacts.id, primary.id))
+      .run();
+
+    mergeContacts({
+      primaryContactId: primary.id,
+      secondaryContactIds: [first.id, second.id],
+    });
+
+    const row = db.select().from(contacts).where(eq(contacts.id, primary.id)).get();
+    expect(row?.lastName).toBe("Lovelace");
+  });
+
+  it("merges all secondaries' graph rows onto the survivor in an N-way merge", () => {
+    const primary = createContact({ name: "Ada" });
+    const first = createContact({ name: "Ada" });
+    const second = createContact({ name: "Ada" });
+    seedInteraction(first.id);
+    seedInteraction(second.id);
+    seedTask(first.id);
+
+    const result = mergeContacts({
+      primaryContactId: primary.id,
+      secondaryContactIds: [first.id, second.id],
+    });
+
+    expect(result.merged.map((member) => member.status)).toEqual(["merged", "merged"]);
+    expect(result.moved).toMatchObject({ interactions: 2, tasks: 1 });
+    expect(
+      db.select().from(interactions).where(eq(interactions.contactId, primary.id)).all(),
+    ).toHaveLength(2);
+  });
+
+  it("refuses to archive the workspace owner", () => {
+    const owner = createContact({ name: "Me", isSelf: true });
+    const other = createContact({ name: "Me" });
+    seedInteraction(owner.id);
+
+    const result = mergeContacts({
+      primaryContactId: other.id,
+      secondaryContactIds: [owner.id],
+    });
+
+    expect(result.merged[0]).toMatchObject({
+      contactId: owner.id,
+      status: "skipped",
+      detail: "Contact is the workspace owner; merge the duplicate into it instead",
+    });
+    // Ownership must survive intact: getOwnerContactId still resolves to a live row.
+    expect(getOwnerContactId()).toBe(owner.id);
+    expect(mergedIntoContactId(db.select().from(contacts).where(eq(contacts.id, owner.id)).get()?.metadata)).toBeNull();
+    expect(
+      db.select().from(interactions).where(eq(interactions.contactId, owner.id)).all(),
+    ).toHaveLength(1);
+  });
+
+  it("merges a duplicate into the owner in the supported direction", () => {
+    const owner = createContact({ name: "Me", isSelf: true });
+    const duplicate = createContact({ name: "Me" });
+    seedInteraction(duplicate.id);
+
+    const result = mergeContacts({
+      primaryContactId: owner.id,
+      secondaryContactIds: [duplicate.id],
+    });
+
+    expect(result.merged[0]?.status).toBe("merged");
+    expect(getOwnerContactId()).toBe(owner.id);
+    expect(
+      db.select().from(interactions).where(eq(interactions.contactId, owner.id)).all(),
+    ).toHaveLength(1);
+  });
+
+  it("a restored merge tombstone can be merged again", () => {
+    const primary = createContact({ name: "Ada" });
+    const secondary = createContact({ name: "Ada" });
+    mergeContacts({ primaryContactId: primary.id, secondaryContactIds: [secondary.id] });
+
+    restoreContact(secondary.id);
+    seedInteraction(secondary.id);
+
+    // Without stripping the merge keys this reports already_merged forever and
+    // leaves a live duplicate that can never be consolidated.
+    const result = mergeContacts({
+      primaryContactId: primary.id,
+      secondaryContactIds: [secondary.id],
+    });
+    expect(result.merged[0]?.status).toBe("merged");
+    expect(result.moved).toMatchObject({ interactions: 1 });
   });
 
   it("is idempotent — replaying the same merge changes nothing", () => {

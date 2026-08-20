@@ -213,9 +213,22 @@ function normalizeTitle(title: string | null | undefined): string {
   return (title ?? "").trim().toLowerCase();
 }
 
+/**
+ * `contacts.tags` is a free-form text column that the API and the create_contact
+ * schema both pass through as `z.string()`, so it is not guaranteed to be JSON.
+ * A parse failure here would abort the whole merge transaction, so it degrades
+ * to "no tags" the same way `parseMetadata` does.
+ */
 function parseTags(raw: string | null | undefined): string[] {
-  const parsed: unknown = raw ? JSON.parse(raw) : [];
-  return Array.isArray(parsed) ? parsed.filter((tag): tag is string => typeof tag === "string") : [];
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed)
+      ? parsed.filter((tag): tag is string => typeof tag === "string")
+      : [];
+  } catch {
+    return [];
+  }
 }
 
 type Counters = { moved: Record<string, number>; dropped: Record<string, number> };
@@ -534,9 +547,24 @@ function repointSimple(primaryId: string, secondaryId: string, counters: Counter
   }
 }
 
+/** True when the column holds something we can safely rewrite as a tag array. */
+function hasParsableTags(raw: string | null | undefined): boolean {
+  if (!raw || raw.trim() === "") return true;
+  try {
+    return Array.isArray(JSON.parse(raw));
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Carry scalar detail the primary is missing. Only fills blanks and unions
  * tags — a merge must never overwrite data the survivor already had.
+ *
+ * The caller passes a mutable `primary` row and this folds the updates back
+ * into it, because an N-way merge calls this once per secondary: reading the
+ * primary once and comparing every secondary against that stale snapshot would
+ * let the last secondary overwrite what the earlier ones contributed.
  */
 function absorbContactFields(
   primary: typeof contacts.$inferSelect,
@@ -549,24 +577,29 @@ function absorbContactFields(
     updates.createdSource = secondary.createdSource;
     updates.createdSourceDetail = secondary.createdSourceDetail;
   }
-  if (!primary.lastInteractionAt && secondary.lastInteractionAt) {
-    updates.lastInteractionAt = secondary.lastInteractionAt;
-  } else if (
-    primary.lastInteractionAt &&
+  if (
     secondary.lastInteractionAt &&
-    secondary.lastInteractionAt > primary.lastInteractionAt
+    (!primary.lastInteractionAt || secondary.lastInteractionAt > primary.lastInteractionAt)
   ) {
     updates.lastInteractionAt = secondary.lastInteractionAt;
   }
 
-  const mergedTags = [...new Set([...parseTags(primary.tags), ...parseTags(secondary.tags)])];
-  if (mergedTags.length !== parseTags(primary.tags).length) {
-    updates.tags = JSON.stringify(mergedTags);
+  // Skip the union entirely when the survivor's column is non-JSON: rewriting it
+  // would discard whatever it holds, which is the opposite of the point.
+  if (hasParsableTags(primary.tags)) {
+    const primaryTags = parseTags(primary.tags);
+    const mergedTags = [...new Set([...primaryTags, ...parseTags(secondary.tags)])];
+    if (mergedTags.length !== primaryTags.length) {
+      updates.tags = JSON.stringify(mergedTags);
+    }
   }
 
   if (Object.keys(updates).length === 0) return;
   updates.updatedAt = nowUnix();
   db.update(contacts).set(updates).where(eq(contacts.id, primary.id)).run();
+  // Keep the in-memory row in step with the write, the same way mergeEmployments
+  // does for the stint it folds into.
+  Object.assign(primary, updates);
 }
 
 function tombstone(
@@ -625,6 +658,20 @@ export function mergeContacts(input: MergeContactsInput): MergeContactsResult {
           name: "Unknown",
           status: "skipped",
           detail: "Contact not found",
+        });
+        continue;
+      }
+
+      if (secondary.isSelf) {
+        // The workspace owner is a likely dedupe candidate (strong X identity plus
+        // a Gmail-takeout twin), and archiving it would leave getOwnerContactId
+        // pointing at a tombstone. Refuse rather than silently break ownership —
+        // the caller should merge the duplicate into the self contact instead.
+        merged.push({
+          contactId: secondary.id,
+          name: secondary.name,
+          status: "skipped",
+          detail: "Contact is the workspace owner; merge the duplicate into it instead",
         });
         continue;
       }

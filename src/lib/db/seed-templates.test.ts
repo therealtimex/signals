@@ -102,9 +102,13 @@ describe("Deduplicate & Merge Contacts seed", () => {
     const config = JSON.parse(template.config ?? "{}") as {
       tiers?: number[];
       minConfidence?: number;
+      limit?: number;
     };
+    // Key names match find_duplicate_contacts' arguments so the prompt can tell
+    // the agent to pass them straight through.
     expect(config.tiers).toEqual([1, 2]);
     expect(config.minConfidence).toBe(0.8);
+    expect(config.limit).toBe(25);
   });
 
   it("is idempotent across repeated seeding", () => {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   identityClaimKey,
+  isRoleAccountEmail,
   nameSimilarity,
   normalizePersonName,
   orgNameKey,
@@ -76,5 +77,27 @@ describe("nameSimilarity", () => {
   it("scores disjoint names as 0", () => {
     expect(nameSimilarity("Sam Altman", "Demis Hassabis")).toBe(0);
     expect(nameSimilarity("", "Demis Hassabis")).toBe(0);
+  });
+});
+
+describe("isRoleAccountEmail", () => {
+  it("recognises shared mailboxes", () => {
+    expect(isRoleAccountEmail("info@acme.com")).toBe(true);
+    expect(isRoleAccountEmail("SALES@Acme.com")).toBe(true);
+    expect(isRoleAccountEmail("no-reply@acme.com")).toBe(true);
+  });
+
+  it("sees through plus-addressing", () => {
+    expect(isRoleAccountEmail("info+crm@acme.com")).toBe(true);
+  });
+
+  it("leaves personal addresses alone", () => {
+    expect(isRoleAccountEmail("sam@openai.com")).toBe(false);
+    expect(isRoleAccountEmail("demis.hassabis@deepmind.com")).toBe(false);
+  });
+
+  it("handles empty input", () => {
+    expect(isRoleAccountEmail(null)).toBe(false);
+    expect(isRoleAccountEmail("")).toBe(false);
   });
 });

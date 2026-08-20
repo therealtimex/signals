@@ -55,6 +55,56 @@ export function identityClaimKey(platform: string, platformUserId: string): stri
 }
 
 /**
+ * Shared mailboxes, not people. Two colleagues can both legitimately carry
+ * `info@acme.com`, so a shared address like this is not evidence that they are
+ * the same person and must never reach the exact-match tier on its own.
+ */
+const ROLE_EMAIL_LOCAL_PARTS = new Set([
+  "abuse",
+  "accounts",
+  "admin",
+  "administrator",
+  "billing",
+  "careers",
+  "contact",
+  "enquiries",
+  "feedback",
+  "finance",
+  "help",
+  "hello",
+  "hi",
+  "hr",
+  "info",
+  "inquiries",
+  "jobs",
+  "legal",
+  "mail",
+  "marketing",
+  "media",
+  "noreply",
+  "no-reply",
+  "office",
+  "postmaster",
+  "press",
+  "sales",
+  "security",
+  "service",
+  "services",
+  "support",
+  "team",
+  "webmaster",
+]);
+
+/** True when the address looks like a shared inbox rather than one person's. */
+export function isRoleAccountEmail(email: string | null | undefined): boolean {
+  if (!email) return false;
+  const localPart = email.trim().toLowerCase().split("@")[0];
+  if (!localPart) return false;
+  // Strip plus-addressing so `info+crm@acme.com` is still recognised.
+  return ROLE_EMAIL_LOCAL_PARTS.has(localPart.split("+")[0]);
+}
+
+/**
  * Token-set similarity over normalized names, 0..1.
  *
  * Deliberately not edit distance: the observed duplicates differ by token

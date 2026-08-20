@@ -237,7 +237,8 @@ up split across those records, and the cross-claim constraint leaves the later o
 identities. Find those duplicates and merge them into a single surviving record.
 
 ## Process
-1. Call \`find_duplicate_contacts\` to get candidate groups. Each candidate reports:
+1. Call \`find_duplicate_contacts\`, passing this template's \`tiers\`, \`minConfidence\`, and
+   \`limit\` config values as the tool arguments of the same names. Each candidate reports:
    - \`tier\` 1 — exact match: same normalized email, or the same handle on one platform
    - \`tier\` 2 — fuzzy match: same or near-identical name at the same organization
    - \`tier\` 3 — graph overlap: shared employment node plus overlapping interaction threads
@@ -250,7 +251,9 @@ identities. Find those duplicates and merge them into a single surviving record.
 4. Use \`report_progress\` after each batch.
 
 ## Rules
-- Tier 1 groups are safe to merge directly. Verify tier 2 and tier 3 groups before merging.
+- Tier 1 evidence is strong but not proof. A shared *platform handle* is safe to merge directly;
+  a shared *email* still deserves a glance at the two names first, because personal addresses do
+  occasionally get reused. Always verify tier 2 and tier 3 groups before merging.
 - Never merge two people who merely share an employer or a common name — check the identities
   and interaction history first.
 - Keep the suggested primary unless a different record clearly holds more complete data. The
@@ -259,7 +262,7 @@ identities. Find those duplicates and merge them into a single surviving record.
   \`merged_into_contact_id\` pointing at it.
 - Merging is idempotent — a group that was already merged reports \`already_merged\`, so a
   re-run is safe.`,
-    config: { maxGroups: 25, minConfidence: 0.8, tiers: [1, 2] },
+    config: { limit: 25, minConfidence: 0.8, tiers: [1, 2] },
   },
   // --- Phase 6E: New seed templates ---
   {

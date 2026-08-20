@@ -18,7 +18,13 @@ import {
   interactions,
   orgs,
 } from "@/lib/db/schema";
-import { identityClaimKey, nameSimilarity, orgNameKey, personNameKey } from "./normalize";
+import {
+  identityClaimKey,
+  isRoleAccountEmail,
+  nameSimilarity,
+  orgNameKey,
+  personNameKey,
+} from "./normalize";
 
 export type DuplicateTier = 1 | 2 | 3;
 
@@ -36,6 +42,8 @@ export interface DuplicateGroupMember {
   enrichmentScore: number;
   identityCount: number;
   createdAt: number;
+  /** The workspace owner can never be merged away, so it always wins the primary pick. */
+  isSelf: boolean;
 }
 
 export interface DuplicateCandidate {
@@ -62,6 +70,7 @@ interface ContactFacts {
   name: string;
   enrichmentScore: number;
   createdAt: number;
+  isSelf: boolean;
   nameKey: string;
   emailKeys: Set<string>;
   handleKeys: Set<string>;
@@ -100,9 +109,13 @@ function loadContactFacts(contactIds?: string[]): Map<string, ContactFacts> {
       name: contacts.name,
       enrichmentScore: contacts.enrichmentScore,
       createdAt: contacts.createdAt,
+      isSelf: contacts.isSelf,
     })
     .from(contacts)
     .where(where)
+    // Ordered so which rows survive MAX_SCANNED_CONTACTS truncation is stable
+    // across runs rather than left to SQLite's scan order.
+    .orderBy(contacts.createdAt, contacts.id)
     .limit(MAX_SCANNED_CONTACTS)
     .all();
 
@@ -113,6 +126,7 @@ function loadContactFacts(contactIds?: string[]): Map<string, ContactFacts> {
       name: row.name,
       enrichmentScore: row.enrichmentScore,
       createdAt: row.createdAt,
+      isSelf: row.isSelf,
       nameKey: personNameKey(row.name),
       emailKeys: new Set(),
       handleKeys: new Set(),
@@ -155,6 +169,9 @@ function loadContactFacts(contactIds?: string[]): Map<string, ContactFacts> {
     .from(contactChannels)
     .where(and(inArray(contactChannels.contactId, ids), eq(contactChannels.channelType, "email")))
     .all()) {
+    // A shared inbox says nothing about identity, so it never becomes tier 1
+    // evidence. Two people at one company really can both carry info@acme.com.
+    if (isRoleAccountEmail(channel.valueNormalized)) continue;
     facts.get(channel.contactId)?.emailKeys.add(channel.valueNormalized);
   }
 
@@ -277,9 +294,14 @@ function tier3Evidence(a: ContactFacts, b: ContactFacts): PairEvidence | null {
  * Survivor rule from #209: highest enrichment score, then most linked
  * identities, then oldest record. Contact id is the final tiebreak so the
  * choice is stable across runs - which is what makes batch merges idempotent.
+ *
+ * `isSelf` outranks all of it: mergeContacts refuses to archive the workspace
+ * owner, so proposing it as a secondary would just produce a group that can
+ * never be actioned.
  */
 export function pickPrimary(members: DuplicateGroupMember[]): string {
   const ranked = [...members].sort((left, right) => {
+    if (left.isSelf !== right.isSelf) return left.isSelf ? -1 : 1;
     if (right.enrichmentScore !== left.enrichmentScore) {
       return right.enrichmentScore - left.enrichmentScore;
     }
@@ -358,6 +380,7 @@ export function findDuplicateContacts(options: FindDuplicatesOptions = {}): Dupl
         enrichmentScore: fact.enrichmentScore,
         identityCount: fact.identityCount,
         createdAt: fact.createdAt,
+        isSelf: fact.isSelf,
       }));
     if (members.length < 2) continue;
 
