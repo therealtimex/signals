@@ -104,6 +104,12 @@ function copyTranscendence() {
  */
 function writePlatformShim(targetDir) {
   const shimPath = path.join(targetDir, `${CLI_NAME}.cjs`);
+  // `bin/` is gitignored and never cleaned between builds, so any checkout that
+  // built before the rename keeps a stale signals-pp-cli.js beside the new file.
+  // Left there, `cp -R bin/` drags it into the plugin zip and the artifact guard
+  // in test-standalone-artifact.mjs rejects the release. rmSync with force is a
+  // no-op when the path is absent.
+  fs.rmSync(path.join(targetDir, `${CLI_NAME}.js`), { force: true });
   fs.writeFileSync(
     shimPath,
     `#!/usr/bin/env node

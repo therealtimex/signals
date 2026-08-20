@@ -35,12 +35,17 @@ if (!fs.existsSync(launcher)) {
   process.exit(1);
 }
 
-// A stray signals-pp-cli.js would be parsed as ESM here and is the exact bug
-// this test exists to prevent, so fail if the build starts emitting one again.
+// A stray signals-pp-cli.js is parsed as ESM under this package's
+// `"type": "module"` and is the exact bug this test exists to prevent. `bin/` is
+// gitignored and not cleaned between builds, so the usual cause is a leftover
+// from a pre-#222 build rather than a regression in the generator.
 const staleJsLauncher = path.join(binDir, "signals-pp-cli.js");
 if (fs.existsSync(staleJsLauncher)) {
   console.error(`unexpected ${staleJsLauncher}`);
-  console.error('the launcher must be .cjs — a .js file is parsed as ESM under "type": "module"');
+  console.error(
+    "stale signals-pp-cli.js from a pre-#222 build — delete it or re-run npm run build:signals-pp-cli",
+  );
+  console.error('(the launcher must be .cjs: a .js file is parsed as ESM under "type": "module")');
   process.exit(1);
 }
 
