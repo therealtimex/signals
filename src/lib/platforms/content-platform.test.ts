@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { PLATFORMS } from "@/lib/db/platforms";
 import {
   getEngagementMetrics,
   getPlatformLabel,
@@ -63,6 +64,12 @@ describe("getPlatformLabel", () => {
   it("falls back to the raw value, then to a generic noun", () => {
     expect(getPlatformLabel("mastodon")).toBe("mastodon");
     expect(getPlatformLabel(null)).toBe("Platform");
+  });
+
+  it("names every registered platform instead of echoing its id", () => {
+    for (const platform of PLATFORMS) {
+      expect(getPlatformLabel(platform)).not.toBe(platform);
+    }
   });
 });
 

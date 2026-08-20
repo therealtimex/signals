@@ -59,7 +59,7 @@ export function resolveContentPlatform(
 /** Short platform name for UI copy; "Platform" when the platform is unknown. */
 export function getPlatformLabel(platform: string | null | undefined): string {
   if (!platform) return "Platform";
-  if (isPlatform(platform)) return PLATFORM_SHORT_LABELS[platform] ?? platform;
+  if (isPlatform(platform)) return PLATFORM_SHORT_LABELS[platform];
   return platform;
 }
 
