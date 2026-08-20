@@ -24,6 +24,23 @@ const binaryName = process.platform === "win32" ? "signals-pp-cli.exe" : "signal
 const binary = path.join(binDir, `${platform}-${arch}`, binaryName);
 const launcher = path.join(binDir, "signals-pp-cli.cjs");
 
+// Checked before the binary-skip below, deliberately. A stray signals-pp-cli.js
+// is parsed as ESM under this package's `"type": "module"` and is the exact bug
+// this test exists to prevent — and it is still wrong whether or not the native
+// binary was built for this host. Behind the skip, a leftover would go unnoticed
+// on precisely the machines that never ran the build. `bin/` is gitignored and
+// not cleaned between builds, so the usual cause is a pre-#222 leftover rather
+// than a regression in the generator.
+const staleJsLauncher = path.join(binDir, "signals-pp-cli.js");
+if (fs.existsSync(staleJsLauncher)) {
+  console.error(`unexpected ${staleJsLauncher}`);
+  console.error(
+    "stale signals-pp-cli.js from a pre-#222 build — delete it or re-run npm run build:signals-pp-cli",
+  );
+  console.error('(the launcher must be .cjs: a .js file is parsed as ESM under "type": "module")');
+  process.exit(1);
+}
+
 if (!fs.existsSync(binary)) {
   console.log(`skip: signals-pp-cli binary missing at ${binary}`);
   process.exit(0);
@@ -32,20 +49,6 @@ if (!fs.existsSync(binary)) {
 if (!fs.existsSync(launcher)) {
   console.error(`expected launcher at ${launcher}`);
   console.error("run: npm run build:signals-pp-cli");
-  process.exit(1);
-}
-
-// A stray signals-pp-cli.js is parsed as ESM under this package's
-// `"type": "module"` and is the exact bug this test exists to prevent. `bin/` is
-// gitignored and not cleaned between builds, so the usual cause is a leftover
-// from a pre-#222 build rather than a regression in the generator.
-const staleJsLauncher = path.join(binDir, "signals-pp-cli.js");
-if (fs.existsSync(staleJsLauncher)) {
-  console.error(`unexpected ${staleJsLauncher}`);
-  console.error(
-    "stale signals-pp-cli.js from a pre-#222 build — delete it or re-run npm run build:signals-pp-cli",
-  );
-  console.error('(the launcher must be .cjs: a .js file is parsed as ESM under "type": "module")');
   process.exit(1);
 }
 

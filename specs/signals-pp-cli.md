@@ -235,7 +235,7 @@ Artifact shipping avoids version skew between the running Local App and a global
 ├─────────────────────────────────────────────────────────────────┤
 │ 4. Cross-compile binaries                                        │
 │    go build per target → tools/signals-pp-cli/bin/<os>-<arch>/   │
-│    + optional Node shim: tools/signals-pp-cli/bin/signals-pp-cli.cjs │
+│    + optional Node shim: bin/signals-pp-cli.cjs                  │
 ├─────────────────────────────────────────────────────────────────┤
 │ 5. Verify                                                        │
 │    cli-printing-press scorecard + dogfood on generated source    │
