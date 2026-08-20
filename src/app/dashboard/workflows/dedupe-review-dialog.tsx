@@ -170,6 +170,7 @@ export function DedupeReviewDialog({
     [templateId]
   );
 
+  const pendingKeySet = new Set(pendingKeys);
   const pendingGroups = (groups ?? []).filter(
     (group) => outcomes[groupKey(group)]?.status !== "merged"
   );
@@ -306,7 +307,7 @@ export function DedupeReviewDialog({
                             onClick={() => mergeGroups([group])}
                             disabled={busy}
                           >
-                            {pendingKeys.includes(key) ? (
+                            {pendingKeySet.has(key) ? (
                               <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
                             ) : (
                               <ArrowRight className="mr-1.5 h-3 w-3" />
