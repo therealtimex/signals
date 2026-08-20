@@ -5,6 +5,10 @@ import {
   listScheduledJobs,
   createScheduledJob,
 } from "@/lib/db/queries/scheduled-jobs";
+import { getTemplate } from "@/lib/db/queries/workflow-templates";
+import { parseTemplateConfig } from "@/lib/workflows/template-config";
+import { isDedupeTemplateConfig } from "@/lib/workflows/dedupe-template";
+import { DEDUPE_MERGE_JOB_TYPE } from "@/lib/contacts/dedupe/scheduled-merge";
 
 const createScheduleSchema = z.object({
   templateId: z.string().min(1, "templateId is required"),
@@ -41,11 +45,22 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // A dedupe template has no agent to dispatch, so it schedules as a maintenance sweep
+    // that runs the merge engine in-process — the one job type that actually executes.
+    const template = getTemplate(data.templateId);
+    const isDedupe = template
+      ? isDedupeTemplateConfig(parseTemplateConfig(template.config))
+      : false;
+    const payload = {
+      ...(data.payload ?? {}),
+      ...(isDedupe ? { templateId: data.templateId } : {}),
+    };
+
     const job = createScheduledJob({
-      jobType: "workflow",
+      jobType: isDedupe ? DEDUPE_MERGE_JOB_TYPE : "workflow",
       templateId: data.templateId,
       cronExpression: data.cronExpression,
-      payload: data.payload ? JSON.stringify(data.payload) : "{}",
+      payload: JSON.stringify(payload),
       enabled: data.enabled !== false ? 1 : 0,
     });
 
