@@ -70,6 +70,32 @@ describe("analytics engagement queries", () => {
       expect(rows.find((row) => row.platform === "facebook")).toMatchObject({ shares: 8 });
     });
 
+    it("totals exactly the counters each platform displays", () => {
+      seedPost("x-1", "acct-x", "X post", {
+        likes: 92,
+        comments: 14,
+        shares: 999, // X does not render shares, so it must not land in the total
+        retweets: 27,
+        quotes: 5,
+        impressions: 4210,
+      });
+      seedPost("fb-1", "acct-fb", "Facebook post", {
+        likes: 148,
+        comments: 23,
+        shares: 31,
+        retweets: 999, // likewise, Facebook renders no retweets
+        quotes: 999,
+        impressions: 5120,
+      });
+
+      const rows = getTopPostsByEngagement();
+      const x = rows.find((row) => row.platform === "x")!;
+      const facebook = rows.find((row) => row.platform === "facebook")!;
+
+      expect(x.total).toBe(92 + 14 + 27 + 5 + 4210);
+      expect(facebook.total).toBe(148 + 23 + 31 + 5120);
+    });
+
     it("applies the limit per platform, not across the whole result", () => {
       seedPost("x-1", "acct-x", "X high", { likes: 100 });
       seedPost("x-2", "acct-x", "X mid", { likes: 50 });
@@ -107,12 +133,12 @@ describe("analytics engagement queries", () => {
       const rows = getAverageEngagementMetrics(NOW - 1);
 
       expect(rows.find((row) => row.platform === "x")).toMatchObject({
-        posts: 2,
+        snapshots: 2,
         avgLikes: 15,
         avgRetweets: 5,
       });
       expect(rows.find((row) => row.platform === "facebook")).toMatchObject({
-        posts: 1,
+        snapshots: 1,
         avgLikes: 100,
         avgShares: 30,
       });

@@ -28,9 +28,9 @@ import {
   Quote,
   Repeat2,
   Share2,
-  ThumbsUp,
   type LucideIcon,
 } from "lucide-react";
+import { likeIcon } from "@/components/engagement-metrics";
 import {
   getAnalyticsSectionLabel,
   type AnalyticsMetricKey,
@@ -338,11 +338,8 @@ const METRIC_ICONS: Record<AnalyticsMetricKey, LucideIcon> = {
   impressions: Eye,
 };
 
-/** Platforms whose "like" is a thumbs-up rather than a heart. */
-const THUMBS_UP_LIKE_PLATFORMS = new Set(["linkedin", "facebook"]);
-
 function metricIcon(key: AnalyticsMetricKey, platform: string | null): LucideIcon {
-  if (key === "likes" && platform && THUMBS_UP_LIKE_PLATFORMS.has(platform)) return ThumbsUp;
+  if (key === "likes") return likeIcon(platform);
   return METRIC_ICONS[key];
 }
 

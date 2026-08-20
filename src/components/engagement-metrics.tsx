@@ -17,8 +17,13 @@ const METRIC_ICONS: Record<EngagementMetricKey, LucideIcon> = {
 /** Platforms whose "like" is a thumbs-up rather than a heart. */
 const THUMBS_UP_LIKE_PLATFORMS = new Set(["linkedin", "facebook"]);
 
+/** Shared so the analytics tab shows the same like icon as the content views. */
+export function likeIcon(platform: string | null | undefined): LucideIcon {
+  return platform && THUMBS_UP_LIKE_PLATFORMS.has(platform) ? ThumbsUp : Heart;
+}
+
 function metricIcon(key: EngagementMetricKey, platform: string | null | undefined): LucideIcon {
-  if (key === "likes" && platform && THUMBS_UP_LIKE_PLATFORMS.has(platform)) return ThumbsUp;
+  if (key === "likes") return likeIcon(platform);
   return METRIC_ICONS[key];
 }
 

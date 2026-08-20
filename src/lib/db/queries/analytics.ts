@@ -5,6 +5,8 @@
  */
 
 import { db } from "@/lib/db/client";
+import { PLATFORMS } from "@/lib/db/platforms";
+import { getAnalyticsMetrics } from "@/lib/analytics/platform-columns";
 
 // Access the underlying better-sqlite3 Database instance
 const raw = db.$client;
@@ -301,6 +303,25 @@ export function getContentPublishedOverTime(since: number): { date: string; coun
     .all(since) as { date: string; count: number }[];
 }
 
+/**
+ * `total` per platform, built from the same registry the UI renders columns from.
+ *
+ * Hardcoding one expression made X's Total exclude Quotes (a column X displays) while including
+ * shares (always 0 on X), so the row did not add up to what the user could see.
+ */
+function totalExpression(): string {
+  const branches = PLATFORMS.map((platform) => {
+    const columns = getAnalyticsMetrics(platform)
+      .map((metric) => `em.${metric.key}`)
+      .join(" + ");
+    return `WHEN '${platform}' THEN ${columns || "0"}`;
+  });
+  const fallback = getAnalyticsMetrics(null)
+    .map((metric) => `em.${metric.key}`)
+    .join(" + ");
+  return `CASE pa.platform ${branches.join(" ")} ELSE ${fallback} END`;
+}
+
 export type TopPostRow = {
   title: string | null;
   /** Platform the post was published through, or null when the account is unknown. */
@@ -335,7 +356,7 @@ export function getTopPostsByEngagement(limit = 10): TopPostRow[] {
            em.retweets AS retweets,
            em.quotes AS quotes,
            em.impressions AS impressions,
-           (em.likes + em.impressions + em.retweets + em.comments + em.shares) AS total,
+           ${totalExpression()} AS total,
            ROW_NUMBER() OVER (
              PARTITION BY em.content_post_id ORDER BY em.snapshot_at DESC
            ) AS snapshotRank
@@ -375,7 +396,8 @@ export function getContentTypeDistribution(): { contentType: string; count: numb
 export type PlatformEngagementAverages = {
   /** Platform the snapshots belong to, or null when the account is unknown. */
   platform: string | null;
-  posts: number;
+  /** Engagement snapshots in range, not distinct posts — a post re-snapshotted counts twice. */
+  snapshots: number;
   avgLikes: number;
   avgComments: number;
   avgShares: number;
@@ -395,7 +417,7 @@ export function getAverageEngagementMetrics(since: number): PlatformEngagementAv
     .prepare(
       `SELECT
          pa.platform AS platform,
-         COUNT(*) AS posts,
+         COUNT(*) AS snapshots,
          COALESCE(AVG(em.likes), 0) AS avgLikes,
          COALESCE(AVG(em.comments), 0) AS avgComments,
          COALESCE(AVG(em.shares), 0) AS avgShares,

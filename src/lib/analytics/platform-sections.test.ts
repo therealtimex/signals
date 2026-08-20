@@ -20,7 +20,7 @@ function post(platform: string | null, title: string): TopPostRow {
 function averages(platform: string | null): PlatformEngagementAverages {
   return {
     platform,
-    posts: 1,
+    snapshots: 1,
     avgLikes: 1,
     avgComments: 1,
     avgShares: 1,

@@ -1,5 +1,10 @@
-import { isPlatform, type Platform } from "@/lib/db/platforms";
-import { getPlatformLabel } from "@/lib/platforms/content-platform";
+import {
+  getEngagementMetricLabel,
+  getEngagementMetricSpecs,
+  getPlatformLabel,
+  SOCIAL_METRIC_KEYS,
+  type EngagementMetricKey,
+} from "@/lib/platforms/content-platform";
 
 /** `engagement_metrics` columns analytics can roll up. */
 export type AnalyticsMetricKey =
@@ -15,44 +20,41 @@ export interface AnalyticsMetric {
   label: string;
 }
 
-/** X replies are stored in the `comments` column, so the key and the label differ here. */
-const X_METRICS: readonly AnalyticsMetric[] = [
-  { key: "likes", label: "Likes" },
-  { key: "comments", label: "Replies" },
-  { key: "retweets", label: "Retweets" },
-  { key: "quotes", label: "Quotes" },
-  { key: "impressions", label: "Views" },
-];
-
-const SOCIAL_METRICS: readonly AnalyticsMetric[] = [
-  { key: "likes", label: "Likes" },
-  { key: "comments", label: "Comments" },
-  { key: "shares", label: "Shares" },
-  { key: "impressions", label: "Views" },
-];
-
-const PLATFORM_METRICS: Partial<Record<Platform, readonly AnalyticsMetric[]>> = {
-  x: X_METRICS,
-  linkedin: SOCIAL_METRICS,
-  facebook: SOCIAL_METRICS,
-  instagram: SOCIAL_METRICS,
-  threads: SOCIAL_METRICS,
-  bluesky: SOCIAL_METRICS,
-  gmail: [],
+/**
+ * Snapshot key -> `engagement_metrics` column.
+ *
+ * X replies are stored in the `comments` column, which is why the analytics key and its label
+ * ("Replies") differ for X — the label still comes from the snapshot key it derives from.
+ */
+const COLUMN_BY_METRIC_KEY: Record<EngagementMetricKey, AnalyticsMetricKey> = {
+  likes: "likes",
+  replies: "comments",
+  comments: "comments",
+  retweets: "retweets",
+  quotes: "quotes",
+  shares: "shares",
 };
+
+const VIEWS: AnalyticsMetric = { key: "impressions", label: "Views" };
+
+function toAnalyticsMetric(key: EngagementMetricKey): AnalyticsMetric {
+  return { key: COLUMN_BY_METRIC_KEY[key], label: getEngagementMetricLabel(key) };
+}
 
 /**
  * Counters worth showing for a platform, in display order.
  *
- * Empty means the platform reports no post engagement and deserves no section at all — rendering
- * an all-zero "Retweets" column under a Facebook account reads as a data bug, which is the whole
- * point of grouping analytics per platform.
+ * Derived from the registry in `content-platform.ts` so the analytics tab and the content views
+ * cannot drift apart — analytics only adds `impressions`, which is not part of a post snapshot.
+ * Empty means the platform reports no post engagement and deserves no section at all.
  */
 export function getAnalyticsMetrics(
   platform: string | null | undefined
 ): readonly AnalyticsMetric[] {
-  if (platform && isPlatform(platform)) return PLATFORM_METRICS[platform] ?? SOCIAL_METRICS;
-  return SOCIAL_METRICS;
+  const specs = getEngagementMetricSpecs(platform);
+  if (specs && specs.length === 0) return [];
+  const keys = specs ? specs.map((spec) => spec.key) : SOCIAL_METRIC_KEYS;
+  return [...keys.map(toAnalyticsMetric), VIEWS];
 }
 
 /** Section heading for a platform; posts with no resolvable account group under "Unattributed". */
