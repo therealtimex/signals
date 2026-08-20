@@ -26,23 +26,6 @@ export function getIdentityById(id: string): ContactIdentity | undefined {
   return db.select().from(contactIdentities).where(eq(contactIdentities.id, id)).get();
 }
 
-export function getIdentityByPlatformUser(
-  platform: string,
-  platformUserId: string,
-): ContactIdentity | undefined {
-  const resolvedPlatform = assertPlatform(platform);
-  return db
-    .select()
-    .from(contactIdentities)
-    .where(
-      and(
-        eq(contactIdentities.platform, resolvedPlatform),
-        eq(contactIdentities.platformUserId, platformUserId),
-      ),
-    )
-    .get();
-}
-
 export function createIdentity(data: Omit<NewContactIdentity, "id">): ContactIdentity {
   guardContactIdentityClaim(data.platform, data.platformUserId);
   const id = nanoid();

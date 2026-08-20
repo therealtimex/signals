@@ -101,10 +101,14 @@ Examples: `query-contacts`, `create-contact`, `enrich-contact`, `get-publish-job
 - `workflow-runs/<runId>/contacts.csv`
 - `workflow-runs/<runId>/contacts.json`
 
-**Dedupe keys (v1):** primary email, then `(platform, platformUserId)` when present. The
-platform lookup passes `includeArchived: true` so it sees archived claim holders — the
-`upsert_contact_identity` guard ignores archived status, so hiding them would create a
-duplicate that is then rejected.
+**Dedupe keys (v1):** email, then `(platform, platformUserId)` when present.
+
+- The email lookup uses `query_contacts`'s exact `email` filter — a server-side match on the
+  normalized channel value, so it also matches non-primary email addresses. Archived
+  contacts are excluded.
+- The platform lookup uses `resolve_platform_claim`, which is the same resolution
+  `upsert_contact_identity` enforces. It sees archived contact owners **and** org-held
+  claims, neither of which a `query_contacts` search can report.
 
 **Stdout (last line, JSON):**
 
@@ -120,9 +124,11 @@ duplicate that is then rejected.
 }
 ```
 
-`notes` carries non-failure explanations (currently: a row skipped because an **archived**
-contact already holds that `(platform, platformUserId)` claim). It never affects `success`
-or the exit code — restore the archived contact to import such a row.
+`notes` carries non-failure explanations. It never affects `success` or the exit code.
+Emitted when a row is skipped because its `(platform, platformUserId)` is already claimed by
+an **archived contact** (restore it to import the row) or by an **org identity** (reassign
+the account first). In both cases no contact is created, because `upsert_contact_identity`
+would reject the attach.
 
 **Exit codes:** `0` all succeeded or skipped cleanly · `3` file not found · `4` auth / `SIGNALS_NOT_RUNNING` · `5` partial row failure · `7` rate limited.
 
@@ -150,7 +156,7 @@ Agents stage `contacts.csv` or `contacts.json` under `workflow-runs/<runId>/`. B
 
 **JSON:** array of objects with the same keys (camelCase aliases accepted: `platformUserId`, `platformHandle`, `profileUrl`).
 
-Dedupe before create: match on normalized primary `email`, else `(platform, platformUserId)`.
+Dedupe before create: exact normalized `email` (any email channel, not just primary), else `(platform, platformUserId)` via `resolve_platform_claim`.
 
 ### 4.3 Layer 3 — local mirror (v1.1, optional)
 

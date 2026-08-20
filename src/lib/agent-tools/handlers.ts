@@ -1,5 +1,6 @@
-import { listContacts, getContactById, createContact, updateContact, recalcEnrichment, isContactArchived } from "@/lib/db/queries/contacts";
-import { createIdentity, getIdentityById, getIdentityByPlatformUser, updateIdentity } from "@/lib/db/queries/identities";
+import { listContacts, getContactById, createContact, updateContact, recalcEnrichment } from "@/lib/db/queries/contacts";
+import { createIdentity, getIdentityById, updateIdentity } from "@/lib/db/queries/identities";
+import { resolvePlatformClaim } from "@/lib/db/identity-claims";
 import { getDashboardMetrics } from "@/lib/db/queries/dashboard";
 import { listWorkflowRuns } from "@/lib/db/queries/workflows";
 import { listTemplates } from "@/lib/db/queries/workflow-templates";
@@ -25,6 +26,7 @@ import type {
   listWorkflowTemplatesSchema,
   queryAnalyticsSchema,
   queryContactsSchema,
+  resolvePlatformClaimSchema,
   queryContentSchema,
   queryGoalsSchema,
   queryWorkflowsSchema,
@@ -105,10 +107,10 @@ export async function handleQueryContacts(input: z.infer<typeof queryContactsSch
   try {
     const result = listContacts({
       search: input.search,
+      email: input.email,
       funnelStage: input.funnelStage,
       platform: input.platform,
       platformUserId: input.platformUserId,
-      includeArchived: input.includeArchived,
       page: input.page,
       pageSize: input.pageSize ?? DEFAULT_PAGE_SIZE,
       sort: input.sort,
@@ -136,7 +138,6 @@ export async function handleQueryContacts(input: z.infer<typeof queryContactsSch
         platform: primaryPlatform(c.identities),
         identityCount: c.identities.length,
         identities: c.identities.map(serializeContactIdentityRef),
-        archived: isContactArchived(c.metadata),
         resolvedAvatarUrl: c.resolvedAvatarUrl,
         ...serializeContactBirthFields(c),
       })),
@@ -147,6 +148,14 @@ export async function handleQueryContacts(input: z.infer<typeof queryContactsSch
     }
     throw error;
   }
+}
+
+export async function handleResolvePlatformClaim(
+  input: z.infer<typeof resolvePlatformClaimSchema>,
+) {
+  const claim = resolvePlatformClaim(assertPlatform(input.platform), input.platformUserId);
+  if (!claim.claimed) return { claimed: false };
+  return { claimed: true, claimant: claim.claimant };
 }
 
 export async function handleGetContact(input: z.infer<typeof getContactSchema>) {
@@ -329,14 +338,22 @@ export async function handleUpsertContactIdentity(
   } else {
     const platform = assertPlatform(input.platform!);
     const platformUserId = input.platformUserId!;
-    const existingByPlatform = getIdentityByPlatformUser(platform, platformUserId);
-    if (existingByPlatform) {
-      if (existingByPlatform.contactId !== input.contactId) {
+    // Same canonical resolution the read tool uses, so a caller that checked first
+    // cannot get a different answer than the guard that rejects it here.
+    const claim = resolvePlatformClaim(platform, platformUserId);
+    const claimant = claim.claimed ? claim.claimant : undefined;
+    if (claimant?.kind === "org") {
+      return {
+        error: `Platform account ${platform}:${platformUserId} is already claimed by org ${claimant.orgId}`,
+      };
+    }
+    if (claimant) {
+      if (claimant.contactId !== input.contactId) {
         return {
-          error: `Platform identity already linked to contact ${existingByPlatform.contactId}`,
+          error: `Platform identity already linked to contact ${claimant.contactId}`,
         };
       }
-      identity = updateIdentity(existingByPlatform.id, {
+      identity = updateIdentity(claimant.identityId, {
         ...sharedFields,
         platform,
         platformUserId,

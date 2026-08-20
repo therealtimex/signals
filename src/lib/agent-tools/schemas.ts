@@ -35,10 +35,10 @@ import { CREATED_SOURCES } from "@/lib/db/creation-sources";
 
 export const queryContactsSchema = z.object({
   search: z.string().optional(),
+  email: z.string().min(1).optional(),
   funnelStage: funnelStage.optional(),
   platform: platform.optional(),
   platformUserId: z.string().min(1).optional(),
-  includeArchived: z.boolean().optional(),
   page: z.number().int().positive().optional(),
   pageSize: z.number().int().positive().max(100).optional(),
   sort: z.enum(["createdAt", "enrichmentScore"]).optional(),
@@ -49,6 +49,11 @@ export const queryContactsSchema = z.object({
   createdTemplateId: z.string().min(1).optional(),
   minEnrichmentScore: z.number().int().optional(),
   maxEnrichmentScore: z.number().int().optional(),
+});
+
+export const resolvePlatformClaimSchema = z.object({
+  platform: platform,
+  platformUserId: z.string().min(1),
 });
 
 export const getContactSchema = z.object({

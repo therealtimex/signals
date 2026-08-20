@@ -8,6 +8,8 @@ import { db } from "@/lib/db/client";
 import { contacts } from "@/lib/db/schema";
 import { createIdentity } from "@/lib/db/queries/identities";
 import { createOrg } from "@/lib/db/queries/orgs";
+import { createOrgIdentity } from "@/lib/db/queries/org-identities";
+import { createContactChannel } from "@/lib/db/queries/contact-channels";
 import { listContactEmployments } from "@/lib/db/queries/contact-employments";
 import { resetCoreTables } from "@/test/db";
 
@@ -171,43 +173,146 @@ describe("invokeAgentTool", () => {
     );
   });
 
-  it("surfaces an archived claim holder to query_contacts via includeArchived", async () => {
-    // Fails before the #202 archived fix: includeArchived did not exist, so the
-    // CLI could not see the archived owner, created a duplicate, and
-    // upsert_contact_identity then rejected the already-claimed account.
-    const owner = createContact({ name: "Archived Owner" });
-    createIdentity({ contactId: owner.id, platform: "x", platformUserId: "sama" });
-    archiveContact(owner.id, "test");
-
-    const hidden = (await invokeAgentTool("query_contacts", {
+  it("resolve_platform_claim reports an unclaimed platform account", async () => {
+    const result = await invokeAgentTool("resolve_platform_claim", {
       platform: "x",
-      platformUserId: "sama",
-    })) as { contacts: unknown[] };
-    expect(hidden.contacts).toHaveLength(0);
+      platformUserId: "nobody",
+    });
 
-    const visible = (await invokeAgentTool("query_contacts", {
-      platform: "x",
-      platformUserId: "sama",
-      includeArchived: true,
-      pageSize: 50,
-    })) as { contacts: Array<{ id: string; archived: boolean }> };
-
-    expect(visible.contacts).toHaveLength(1);
-    expect(visible.contacts[0]?.id).toBe(owner.id);
-    expect(visible.contacts[0]?.archived).toBe(true);
+    expect(result).toEqual({ claimed: false });
   });
 
-  it("reports archived: false for a live contact", async () => {
-    const live = createContact({ name: "Live Contact" });
-    createIdentity({ contactId: live.id, platform: "x", platformUserId: "live-1" });
+  it("resolve_platform_claim reports an active contact claimant", async () => {
+    const owner = createContact({ name: "Sam Altman" });
+    const identity = createIdentity({
+      contactId: owner.id,
+      platform: "x",
+      platformUserId: "sama",
+    });
+
+    const result = await invokeAgentTool("resolve_platform_claim", {
+      platform: "x",
+      platformUserId: "sama",
+    });
+
+    expect(result).toEqual({
+      claimed: true,
+      claimant: {
+        kind: "contact",
+        contactId: owner.id,
+        identityId: identity.id,
+        archived: false,
+      },
+    });
+  });
+
+  it("resolve_platform_claim still reports an archived contact claimant", async () => {
+    // The write guard does not filter archived contacts, so neither may the
+    // resolver — that asymmetry was the #202 archived-owner bug.
+    const owner = createContact({ name: "Archived Owner" });
+    createIdentity({ contactId: owner.id, platform: "x", platformUserId: "archived-sama" });
+    archiveContact(owner.id, "test");
+
+    const result = (await invokeAgentTool("resolve_platform_claim", {
+      platform: "x",
+      platformUserId: "archived-sama",
+    })) as { claimed: boolean; claimant: { contactId: string; archived: boolean } };
+
+    expect(result.claimed).toBe(true);
+    expect(result.claimant.contactId).toBe(owner.id);
+    expect(result.claimant.archived).toBe(true);
+  });
+
+  it("resolve_platform_claim reports an org claimant", async () => {
+    // query_contacts could never have seen this: org claims live in a different
+    // table entirely, but assertPlatformAccountUnclaimed rejects them just as hard.
+    const org = createOrg({ name: "OpenAI" });
+    const orgIdentity = createOrgIdentity({
+      orgId: org.id,
+      platform: "x",
+      platformUserId: "openai",
+    });
+
+    const result = await invokeAgentTool("resolve_platform_claim", {
+      platform: "x",
+      platformUserId: "openai",
+    });
+
+    expect(result).toEqual({
+      claimed: true,
+      claimant: { kind: "org", orgId: org.id, identityId: orgIdentity.id },
+    });
+  });
+
+  it("upsert_contact_identity agrees with resolve_platform_claim on an org-held account", async () => {
+    const org = createOrg({ name: "OpenAI" });
+    createOrgIdentity({ orgId: org.id, platform: "x", platformUserId: "openai" });
+    const contact = createContact({ name: "Someone" });
+
+    const resolved = (await invokeAgentTool("resolve_platform_claim", {
+      platform: "x",
+      platformUserId: "openai",
+    })) as { claimed: boolean; claimant: { kind: string } };
+    const upserted = (await invokeAgentTool("upsert_contact_identity", {
+      contactId: contact.id,
+      platform: "x",
+      platformUserId: "openai",
+    })) as { error?: string };
+
+    expect(resolved.claimant.kind).toBe("org");
+    expect(upserted.error).toContain(`already claimed by org ${org.id}`);
+  });
+
+  it("query_contacts matches an exact normalized non-primary email", async () => {
+    // The flat `email` field carries one address, so a non-primary channel used to
+    // be a silent dedupe miss (#207).
+    const contact = createContact({ name: "Email Owner" });
+    createContactChannel({
+      contactId: contact.id,
+      channelType: "email",
+      value: "primary@example.com",
+      isPrimary: true,
+      source: "test",
+    });
+    createContactChannel({
+      contactId: contact.id,
+      channelType: "email",
+      value: "secondary@example.com",
+      source: "test",
+    });
+    const decoy = createContact({ name: "Decoy" });
+    createContactChannel({
+      contactId: decoy.id,
+      channelType: "email",
+      value: "decoy@example.com",
+      isPrimary: true,
+      source: "test",
+    });
 
     const result = (await invokeAgentTool("query_contacts", {
-      platform: "x",
-      platformUserId: "live-1",
-    })) as { contacts: Array<{ id: string; archived: boolean }> };
+      email: "  SECONDARY@Example.COM  ",
+    })) as { contacts: Array<{ id: string }> };
 
-    expect(result.contacts[0]?.id).toBe(live.id);
-    expect(result.contacts[0]?.archived).toBe(false);
+    expect(result.contacts).toHaveLength(1);
+    expect(result.contacts[0]?.id).toBe(contact.id);
+  });
+
+  it("query_contacts email filter excludes archived contacts", async () => {
+    const contact = createContact({ name: "Archived Email" });
+    createContactChannel({
+      contactId: contact.id,
+      channelType: "email",
+      value: "gone@example.com",
+      isPrimary: true,
+      source: "test",
+    });
+    archiveContact(contact.id, "test");
+
+    const result = (await invokeAgentTool("query_contacts", {
+      email: "gone@example.com",
+    })) as { contacts: unknown[] };
+
+    expect(result.contacts).toHaveLength(0);
   });
 
   it("filters query_contacts by createdSourceDetail suffix x_archive", async () => {
