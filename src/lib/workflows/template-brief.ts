@@ -1,5 +1,9 @@
 import type { WorkflowTemplate } from "@/lib/db/types";
 import { parseTemplateConfig } from "@/lib/workflows/template-config";
+import {
+  buildSocialPatrolBriefSection,
+  isSocialPatrolTemplateConfig,
+} from "@/lib/workflows/social-patrol";
 
 const CATEGORY_LABELS: Record<string, string> = {
   prospecting: "Search",
@@ -50,6 +54,12 @@ export function buildAgentWorkflowBrief(input: {
   const instructions = input.systemPromptOverride?.trim() || input.template.systemPrompt?.trim();
   const tools = getTemplateToolsHint(input.template.templateType).join(", ");
   const configJson = JSON.stringify(input.config, null, 2);
+  const patrolContract = isSocialPatrolTemplateConfig(input.config)
+    ? `${buildSocialPatrolBriefSection({
+        workflowRunId: input.workflowRunId,
+        config: input.config,
+      })}\n`
+    : null;
 
   const sections = [
     `You are executing the Signals agent workflow template "${input.template.name}".`,
@@ -84,6 +94,7 @@ export function buildAgentWorkflowBrief(input: {
     "9. Perform web search and browser work in RealTimeX (not via agent-tools).",
     "10. Report a concise summary in this thread when finished (import JSON summary is suitable).",
     "",
+    patrolContract,
     "Do not call legacy in-process workflow runners. This thread is the execution lane.",
   ];
 

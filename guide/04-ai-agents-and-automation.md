@@ -46,6 +46,7 @@ Content creation — generating and publishing posts.
 Relationship building — interacting with your contacts' content.
 
 - **Reply to Mentions** — Monitors and engages with mentions, replies, and tags on X. Uses browser automation to like and reply to relevant conversations. (~$0.15/run)
+- **Social Intent Patrol** — Runs a time-boxed patrol shift on one acting profile: scans monitored communities for high-intent pain posts, replies with technical value, and captures the engagers into the CRM. The activation dialog exposes sliders for session duration, personal posts, comments, and how many engagers to ingest, plus an approval checkpoint before any comment is published. (~$0.25/run)
 
 ### Outreach Agents
 Cold outreach — making first contact through platform engagement.
@@ -61,7 +62,7 @@ Each agent card shows:
 
 ### System vs. Custom Agents
 
-The gallery has two tabs: **System Agents** (the 10 pre-built ones) and **My Agents**. System agents are templates — you can clone any of them and customize the instructions, target criteria, and behavior for your specific use case. Custom agents inherit the same toolset and execution engine.
+The gallery has two tabs: **System Agents** (the pre-built ones) and **My Agents**. System agents are templates — you can clone any of them and customize the instructions, target criteria, and behavior for your specific use case. Custom agents inherit the same toolset and execution engine.
 
 ## Running an Agent
 

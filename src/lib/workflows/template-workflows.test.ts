@@ -5,6 +5,7 @@ import {
   parseTemplateConfig,
 } from "@/lib/workflows/template-config";
 import { buildAgentWorkflowBrief, getTemplateToolsHint } from "@/lib/workflows/template-brief";
+import { buildSocialPatrolTemplateConfig } from "@/lib/workflows/social-patrol";
 import { serializeTemplateForUi } from "@/lib/workflows/template-serializer";
 
 describe("template-config", () => {
@@ -60,6 +61,29 @@ describe("template-brief", () => {
     expect(brief).toContain("http://localhost:3000/api/agent-tools");
     expect(brief).toContain("do not start or manage Local Apps via pp-cli");
     expect(brief).not.toContain("Load the `realtimex-signals` skill");
+    expect(brief).not.toContain("Social Intent Patrol execution contract");
+  });
+
+  it("appends the patrol contract only for social patrol configs", () => {
+    const brief = buildAgentWorkflowBrief({
+      template: {
+        id: "tpl_patrol",
+        name: "Social Intent Patrol",
+        description: "Patrol communities",
+        templateType: "engagement",
+        platform: null,
+        systemPrompt: "Patrol the feed.",
+        targetPersona: "High-intent posters",
+      },
+      workflowRunId: "run_2",
+      config: buildSocialPatrolTemplateConfig(),
+      signalsBaseUrl: "http://localhost:3000",
+    });
+
+    expect(brief).toContain("Social Intent Patrol execution contract");
+    expect(brief).toContain("signals-pp-cli targets prepare");
+    // The shared execution requirements still apply.
+    expect(brief).toContain("Do not call legacy in-process workflow runners.");
   });
 });
 

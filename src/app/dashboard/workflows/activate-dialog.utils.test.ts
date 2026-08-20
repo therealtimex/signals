@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  actingTargetLabel,
   clampPipelineBatchSize,
   readRunLimitFromTemplateConfig,
 } from "@/app/dashboard/workflows/activate-dialog.utils";
@@ -44,5 +45,25 @@ describe("readRunLimitFromTemplateConfig", () => {
       tone: "professional",
       maxEngagements: "10",
     });
+  });
+});
+
+describe("actingTargetLabel", () => {
+  it("renders platform, name, and handle", () => {
+    expect(
+      actingTargetLabel({ platform: "facebook", name: "Le Dang Trung", handle: "ledangtrung" }),
+    ).toBe("Facebook: Le Dang Trung (ledangtrung)");
+    expect(actingTargetLabel({ platform: "x", name: "Trung Le", handle: "@trung_rta" })).toBe(
+      "X: Trung Le (@trung_rta)",
+    );
+  });
+
+  it("omits an empty handle and keeps unknown platforms readable", () => {
+    expect(actingTargetLabel({ platform: "linkedin", name: "Trung Le", handle: "  " })).toBe(
+      "LinkedIn: Trung Le",
+    );
+    expect(actingTargetLabel({ platform: "threads", name: "Trung Le", handle: null })).toBe(
+      "threads: Trung Le",
+    );
   });
 });

@@ -21,6 +21,12 @@ import {
   clampPipelineBatchSize,
   readRunLimitFromTemplateConfig,
 } from "@/app/dashboard/workflows/activate-dialog.utils";
+import { SocialPatrolFields } from "@/app/dashboard/workflows/social-patrol-fields";
+import {
+  buildSocialPatrolRunConfig,
+  isSocialPatrolTemplateConfig,
+  readSocialPatrolConfig,
+} from "@/lib/workflows/social-patrol";
 
 interface Template {
   id: string;
@@ -70,6 +76,9 @@ export function ActivateDialog({ template, open, onClose }: ActivateDialogProps)
   const [systemPrompt, setSystemPrompt] = useState(template.systemPrompt ?? "");
   const templateConfig = parseTemplateConfig(template.config);
   const isPipeline = isPipelineTemplateConfig(template.config);
+  const isPatrol = isSocialPatrolTemplateConfig(templateConfig);
+
+  const [patrol, setPatrol] = useState(() => readSocialPatrolConfig(templateConfig));
 
   const initialLimits = readRunLimitFromTemplateConfig(templateConfig);
   const [maxResults, setMaxResults] = useState(initialLimits.maxResults);
@@ -84,9 +93,9 @@ export function ActivateDialog({ template, open, onClose }: ActivateDialogProps)
   useEffect(() => {
     if (!open) return;
 
-    const limits = readRunLimitFromTemplateConfig(
-      parseTemplateConfig(template.config),
-    );
+    const config = parseTemplateConfig(template.config);
+    const limits = readRunLimitFromTemplateConfig(config);
+    setPatrol(readSocialPatrolConfig(config));
     setMaxResults(limits.maxResults);
     setMaxContacts(limits.maxContacts);
     setMaxEnrichmentScore(limits.maxEnrichmentScore);
@@ -143,6 +152,8 @@ export function ActivateDialog({ template, open, onClose }: ActivateDialogProps)
       if (isPipeline) {
         const backlogTotal = backlog?.backlogTotal ?? PROFILE_PIPELINE_MAX_BATCH;
         config.batchSize = clampPipelineBatchSize(pipelineBatchSize, backlogTotal);
+      } else if (isPatrol) {
+        Object.assign(config, buildSocialPatrolRunConfig(patrol));
       } else {
         if (template.templateType === "prospecting") {
           config.maxResults = parseInt(maxResults, 10) || 20;
@@ -212,6 +223,8 @@ export function ActivateDialog({ template, open, onClose }: ActivateDialogProps)
   const pipelineRunDisabled =
     isPipeline &&
     (backlogLoading || backlog == null || backlog.backlogTotal === 0);
+  // A patrol shift acts as a real profile — it cannot start without one.
+  const patrolRunDisabled = isPatrol && !patrol.targetId;
   const pipelineBatchMax = backlog
     ? Math.min(PROFILE_PIPELINE_MAX_BATCH, Math.max(1, backlog.backlogTotal))
     : PROFILE_PIPELINE_MAX_BATCH;
@@ -393,17 +406,27 @@ export function ActivateDialog({ template, open, onClose }: ActivateDialogProps)
                 </>
               )}
 
-              {(template.templateType === "engagement" || template.templateType === "outreach") && (
-                <div className="space-y-2">
-                  <Label htmlFor="max-engagements">Max Engagements</Label>
-                  <Input
-                    id="max-engagements"
-                    type="number"
-                    value={maxEngagements}
-                    onChange={(e) => setMaxEngagements(e.target.value)}
-                  />
-                </div>
+              {isPatrol && (
+                <SocialPatrolFields
+                  value={patrol}
+                  onChange={setPatrol}
+                  disabled={running}
+                />
               )}
+
+              {!isPatrol &&
+                (template.templateType === "engagement" ||
+                  template.templateType === "outreach") && (
+                  <div className="space-y-2">
+                    <Label htmlFor="max-engagements">Max Engagements</Label>
+                    <Input
+                      id="max-engagements"
+                      type="number"
+                      value={maxEngagements}
+                      onChange={(e) => setMaxEngagements(e.target.value)}
+                    />
+                  </div>
+                )}
 
               <Separator />
 
@@ -436,7 +459,7 @@ export function ActivateDialog({ template, open, onClose }: ActivateDialogProps)
             {!runLaunched && (
               <Button
                 onClick={handleRun}
-                disabled={running || pipelineRunDisabled}
+                disabled={running || pipelineRunDisabled || patrolRunDisabled}
               >
                 {running ? (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -447,9 +470,13 @@ export function ActivateDialog({ template, open, onClose }: ActivateDialogProps)
                   ? "Launching..."
                   : pipelineRunDisabled
                     ? "All contacts are up to date"
-                    : isPipeline
-                      ? "Run"
-                      : "Run Agent"}
+                    : patrolRunDisabled
+                      ? "Select an acting profile"
+                      : isPipeline
+                        ? "Run"
+                        : isPatrol
+                          ? "Start patrol shift"
+                          : "Run Agent"}
               </Button>
             )}
           </div>
