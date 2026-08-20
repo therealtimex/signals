@@ -314,7 +314,6 @@ async function hydrateXProfilesBatch(
           fetchImpl: ctx.fetchImpl,
           env: ctx.env,
           minRequestGapMs: optionalNumericOption(ctx.options?.minRequestGapMs),
-          maxBrowserResolutions: optionalNumericOption(ctx.options?.maxBrowserResolutions),
         },
       );
     } catch (error) {
@@ -567,7 +566,6 @@ export async function hydrateXProfiles(
         fetchImpl: ctx.fetchImpl,
         env: ctx.env,
         minRequestGapMs: optionalNumericOption(ctx.options?.minRequestGapMs),
-        maxBrowserResolutions: optionalNumericOption(ctx.options?.maxBrowserResolutions),
       });
       scope.resources.set(resourceKey, session);
       scope.deferCleanup(() => session?.dispose());

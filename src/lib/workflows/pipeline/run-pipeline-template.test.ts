@@ -605,6 +605,70 @@ describe("runPipelineTemplate", () => {
     ]);
   });
 
+  it("keeps cooldown-deferred contacts in backlog without running downstream steps", async () => {
+    const contact = createContact({ name: "X user 193" });
+    createIdentity({
+      contactId: contact.id,
+      platform: "x",
+      platformUserId: "193",
+      isActive: 1,
+    });
+    const plan = planProfilePipelineRun({ contactIds: [contact.id] });
+
+    vi.spyOn(PIPELINE_STEP_HANDLERS, "hydrate_x_profiles").mockImplementation(
+      async (ids, ctx) => ({
+        stepId: ctx.stepId,
+        outcomes: ids.map((contactId) => ({
+          contactId,
+          status: "skipped" as const,
+          reason: "x_web_deferred",
+        })),
+        aborted: false,
+      }),
+    );
+    const avatar = vi.spyOn(PIPELINE_STEP_HANDLERS, "enrich_contact_avatars");
+    const persona = vi.spyOn(PIPELINE_STEP_HANDLERS, "generate_persona");
+
+    const template = createPipelineTemplate();
+    const run = createWorkflowRun({
+      templateId: template.id,
+      workflowType: "enrich",
+      status: "running",
+      trigger: "template",
+      config: "{}",
+      startedAt: Math.floor(Date.now() / 1000),
+      totalItems: 1,
+    });
+
+    await executePipelineRun({
+      workflowRunId: run.id,
+      templateId: template.id,
+      pipeline: pipelineConfig,
+      plan,
+      forcePersona: false,
+      scheduleDrain: false,
+      trigger: "template",
+      workspaceSlug: null,
+      threadSlug: null,
+      fetchImpl: fetch,
+      env: process.env,
+    });
+
+    expect(avatar).not.toHaveBeenCalled();
+    expect(persona).not.toHaveBeenCalled();
+    expect(
+      listWorkflowSteps(run.id)
+        .filter((step) => step.stepType === "tool_call")
+        .map((step) => `${step.tool}:${step.contactId}`),
+    ).toEqual([`x_profile_hydrate:${contact.id}`]);
+    expect(JSON.parse(getWorkflowRun(run.id)?.result ?? "{}")).toMatchObject({
+      processed: 1,
+      cleared: 0,
+      remainingBacklog: 1,
+      skipped: { x_web_deferred: 1 },
+    });
+  });
+
   it("stops after a global handler abort and preserves completed contact counts", async () => {
     const contacts = ["Abort A", "Abort B", "Abort C"].map((name) => createContact({ name }));
     const contactIds = contacts.map((contact) => contact.id);

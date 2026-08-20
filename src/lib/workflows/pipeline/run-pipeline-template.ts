@@ -719,6 +719,18 @@ export async function executePipelineRun(input: ExecutePipelineRunInput): Promis
           }
           break contactLoop;
         }
+
+        if (
+          state.stepDecl.handler === "hydrate_x_profiles" &&
+          invocationReport.outcomes.some(
+            (outcome) =>
+              outcome.contactId === contactId &&
+              outcome.status === "skipped" &&
+              outcome.reason === "x_web_deferred",
+          )
+        ) {
+          continue contactLoop;
+        }
       }
     }
   } finally {

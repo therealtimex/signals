@@ -3,7 +3,6 @@ import {
   X_ANON_COOLDOWN_MS,
   X_ANON_HTTP_MAX_BYTES,
   X_ANON_HTTP_TIMEOUT_MS,
-  X_ANON_MAX_BROWSER_RESOLUTIONS_PER_RUN,
   X_ANON_MAX_REDIRECTS,
   X_ANON_MIN_REQUEST_GAP_MS,
   X_ANON_PARSE_FAILURE_BREAK_THRESHOLD,
@@ -38,7 +37,6 @@ export type XAnonWebTransportDeps = {
   env: EnvLike;
   resolver?: XAnonHandleResolverFactory;
   minRequestGapMs?: number;
-  maxBrowserResolutions?: number;
   sleep?: (ms: number) => Promise<void>;
   random?: () => number;
   now?: () => number;
@@ -247,10 +245,6 @@ export function createXAnonWebSession(deps: XAnonWebTransportDeps): XAnonWebSess
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const random = deps.random ?? Math.random;
   const minGap = Math.max(0, deps.minRequestGapMs ?? X_ANON_MIN_REQUEST_GAP_MS);
-  const maxBrowserResolutions = Math.max(
-    0,
-    deps.maxBrowserResolutions ?? X_ANON_MAX_BROWSER_RESOLUTIONS_PER_RUN,
-  );
   let lastRequestAt = 0;
   const pace = async () => {
     if (lastRequestAt > 0) {
@@ -262,7 +256,6 @@ export function createXAnonWebSession(deps: XAnonWebTransportDeps): XAnonWebSess
   };
 
   let resolver: XAnonHandleResolver | null = null;
-  let browserResolutions = 0;
   let consecutiveParseFailures = 0;
   let breakerReason: string | null = null;
   let disposed = false;
@@ -316,12 +309,6 @@ export function createXAnonWebSession(deps: XAnonWebTransportDeps): XAnonWebSess
         // A stale/recycled handle is ambiguous. Resolve the numeric ID once before caching/skipping.
         knownHandle = undefined;
       }
-
-      if (browserResolutions >= maxBrowserResolutions) {
-        outcomes.set(request.userId, { status: "skip", reason: "x_web_deferred" });
-        continue;
-      }
-      browserResolutions++;
 
       if (!resolver) {
         try {
