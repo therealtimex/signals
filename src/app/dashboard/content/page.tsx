@@ -20,23 +20,15 @@ export default async function ContentPage({
   });
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-heading-1">Content</h1>
-        <p className="text-muted-foreground mt-1">
-          Browse and manage content across platforms.
-        </p>
-      </div>
-      <ContentListClient
-        content={data}
-        total={total}
-        page={page}
-        pageSize={pageSize}
-        currentType={params.type}
-        currentOrigin={params.origin}
-        currentStatus={params.status}
-        currentPlatform={params.platform}
-      />
-    </div>
+    <ContentListClient
+      content={data}
+      total={total}
+      page={page}
+      pageSize={pageSize}
+      currentType={params.type}
+      currentOrigin={params.origin}
+      currentStatus={params.status}
+      currentPlatform={params.platform}
+    />
   );
 }

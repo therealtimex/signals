@@ -72,6 +72,16 @@ export const PLATFORM_DISPLAY_NAMES: Partial<Record<Platform, string>> = {
   threads: "Threads",
 };
 
+/** Compact labels for dense product surfaces such as tables and status chips. */
+export const PLATFORM_SHORT_LABELS: Partial<Record<Platform, string>> = {
+  x: "X",
+  linkedin: "LinkedIn",
+  gmail: "Gmail",
+  instagram: "Instagram",
+  facebook: "Facebook",
+  threads: "Threads",
+};
+
 /** Platforms registered in PLATFORM_CAPABILITIES with oauth disabled. */
 export function getPlatformsWithoutOAuth(): Platform[] {
   return (Object.entries(PLATFORM_CAPABILITIES) as [Platform, PlatformCapabilities][])

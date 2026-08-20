@@ -13,6 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { PostInput } from "@/components/post-input";
+import { FeedbackBanner } from "@/components/feedback-banner";
 import {
   Tooltip,
   TooltipContent,
@@ -438,9 +439,7 @@ export function ComposeDialog({
             </p>
 
             {error && (
-              <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200">
-                {error}
-              </div>
+              <FeedbackBanner tone="danger">{error}</FeedbackBanner>
             )}
           </div>
         )}
