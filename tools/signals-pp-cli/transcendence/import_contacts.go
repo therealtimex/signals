@@ -56,6 +56,14 @@ type contactMatch struct {
 	OrgID    string
 }
 
+// matched reports whether the row resolved to an existing owner of any kind.
+// Every consumer deciding "create or not" must branch on this rather than on ID
+// alone, or a new claimant kind silently reverts to creating a duplicate — which
+// is what happened to reconcile when org claims were added.
+func (m contactMatch) matched() bool {
+	return m.ID != "" || m.OrgID != ""
+}
+
 func newImportContactsCmd(flags *rootFlags) *cobra.Command {
 	var filePath string
 	var dedupe bool

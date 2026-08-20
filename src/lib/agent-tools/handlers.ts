@@ -1,6 +1,6 @@
 import { listContacts, getContactById, createContact, updateContact, recalcEnrichment } from "@/lib/db/queries/contacts";
 import { createIdentity, getIdentityById, updateIdentity } from "@/lib/db/queries/identities";
-import { resolvePlatformClaim } from "@/lib/db/identity-claims";
+import { PlatformAccountConflictError, resolvePlatformClaim } from "@/lib/db/identity-claims";
 import { getDashboardMetrics } from "@/lib/db/queries/dashboard";
 import { listWorkflowRuns } from "@/lib/db/queries/workflows";
 import { listTemplates } from "@/lib/db/queries/workflow-templates";
@@ -343,9 +343,14 @@ export async function handleUpsertContactIdentity(
     const claim = resolvePlatformClaim(platform, platformUserId);
     const claimant = claim.claimed ? claim.claimant : undefined;
     if (claimant?.kind === "org") {
-      return {
-        error: `Platform account ${platform}:${platformUserId} is already claimed by org ${claimant.orgId}`,
-      };
+      // Throw, don't return {error}. `invoke` turns this into a success:false
+      // envelope; an {error} inside a success:true envelope is invisible to the Go
+      // client, which only checks the outer flag — the row would be counted as
+      // enriched and the import would report success over a rejected attach.
+      throw new PlatformAccountConflictError(platform, platformUserId, {
+        kind: "org",
+        id: claimant.identityId,
+      });
     }
     if (claimant) {
       if (claimant.contactId !== input.contactId) {

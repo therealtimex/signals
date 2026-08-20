@@ -2,7 +2,6 @@ import { eq, and } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db/client";
 import { assertPlatformAccountUnclaimed, PlatformAccountConflictError } from "@/lib/db/identity-claims";
-import { assertPlatform } from "@/lib/db/platforms";
 import { contactIdentities } from "@/lib/db/schema";
 import { liftIdentityStatsFromPlatformData } from "@/lib/db/identity-stats";
 import type { ContactIdentity, NewContactIdentity } from "@/lib/db/types";

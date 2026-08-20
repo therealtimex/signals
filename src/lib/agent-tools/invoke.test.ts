@@ -253,14 +253,47 @@ describe("invokeAgentTool", () => {
       platform: "x",
       platformUserId: "openai",
     })) as { claimed: boolean; claimant: { kind: string } };
-    const upserted = (await invokeAgentTool("upsert_contact_identity", {
-      contactId: contact.id,
-      platform: "x",
-      platformUserId: "openai",
-    })) as { error?: string };
-
     expect(resolved.claimant.kind).toBe("org");
-    expect(upserted.error).toContain(`already claimed by org ${org.id}`);
+
+    // Must REJECT, not resolve with {error}. The Go client only inspects the outer
+    // envelope, so an {error} inside success:true is invisible to it and the import
+    // would count a rejected attach as enriched.
+    await expect(
+      invokeAgentTool("upsert_contact_identity", {
+        contactId: contact.id,
+        platform: "x",
+        platformUserId: "openai",
+      }),
+    ).rejects.toMatchObject({ code: "EXECUTION_ERROR" } satisfies Partial<AgentToolError>);
+  });
+
+  it("rejects an org-held account even when the contact was matched by email", async () => {
+    // The import's email path short-circuits before resolve_platform_claim, so the
+    // CLI-side org skip never fires for this row. The server rejection is the only
+    // thing standing between it and a silent false success.
+    const org = createOrg({ name: "OpenAI" });
+    createOrgIdentity({ orgId: org.id, platform: "x", platformUserId: "openai" });
+    const contact = createContact({ name: "Email Matched" });
+    createContactChannel({
+      contactId: contact.id,
+      channelType: "email",
+      value: "person@example.com",
+      isPrimary: true,
+      source: "test",
+    });
+
+    const byEmail = (await invokeAgentTool("query_contacts", {
+      email: "person@example.com",
+    })) as { contacts: Array<{ id: string }> };
+    expect(byEmail.contacts[0]?.id).toBe(contact.id);
+
+    await expect(
+      invokeAgentTool("upsert_contact_identity", {
+        contactId: contact.id,
+        platform: "x",
+        platformUserId: "openai",
+      }),
+    ).rejects.toMatchObject({ code: "EXECUTION_ERROR" } satisfies Partial<AgentToolError>);
   });
 
   it("query_contacts matches an exact normalized non-primary email", async () => {
