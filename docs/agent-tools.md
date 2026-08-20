@@ -40,6 +40,8 @@ Then pass `Authorization: Bearer your-secret-token` on each request.
 | `upsert_contact_identity` | contacts | Create or update a platform identity for a contact |
 | `enrich_contact` | contacts | Fill gaps without overwriting |
 | `archive_contact` | contacts | Archive with reason |
+| `find_duplicate_contacts` | contacts | Scan for duplicate contacts. Tier 1 = shared email or platform handle, tier 2 = matching name at the same org, tier 3 = shared employment node plus overlapping interaction threads. Read-only |
+| `merge_contacts` | contacts | Merge duplicates into a surviving primary and archive each secondary with `mergedIntoContactId`. Idempotent; supports `options.dryRun` |
 | `query_analytics` | analytics | Dashboard metrics |
 | `query_workflows` | workflows | List workflow runs |
 | `list_workflow_templates` | workflows | List startable templates |
