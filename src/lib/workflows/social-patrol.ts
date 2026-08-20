@@ -106,9 +106,15 @@ export function socialPatrolLeaseTtlSeconds(durationMinutes: number): number {
   return Math.min(clamped * 60, MAX_LEASE_TTL_SECONDS);
 }
 
-/** Read stored template/run config into a fully-populated, in-range patrol config. */
+/**
+ * Read stored template/run config into a fully-populated, in-range patrol config.
+ *
+ * An empty `intentKeywords` list is preserved rather than back-filled with the defaults: the
+ * seeded template already carries them explicitly, so the only way to reach empty is an operator
+ * clearing every pill. Re-injecting defaults here would make the brief contradict the runtime
+ * config block it ships alongside.
+ */
 export function readSocialPatrolConfig(config: Record<string, unknown>): SocialPatrolConfig {
-  const keywords = normalizeTagList(config.intentKeywords);
   return {
     targetId: typeof config.targetId === "string" && config.targetId.trim()
       ? config.targetId.trim()
@@ -121,7 +127,7 @@ export function readSocialPatrolConfig(config: Record<string, unknown>): SocialP
       config.maxScrapedContacts,
     ),
     communities: normalizeTagList(config.communities),
-    intentKeywords: keywords.length > 0 ? keywords : [...DEFAULT_INTENT_KEYWORDS],
+    intentKeywords: normalizeTagList(config.intentKeywords),
     // Approval stays on unless the operator explicitly turned it off.
     requireApproval: config.requireApproval !== false,
   };
@@ -180,13 +186,18 @@ export function buildSocialPatrolBriefSection(input: {
   const communities = patrol.communities.length > 0
     ? patrol.communities.join(", ")
     : "the acting profile's own feed (no communities configured)";
+  // An empty keyword list is a deliberate operator choice, so say so rather than
+  // reinstating defaults the runtime config block does not list.
+  const keywordScope = patrol.intentKeywords.length > 0
+    ? `Patrol these communities for intent keywords (${patrol.intentKeywords.join(", ")})`
+    : "Patrol these communities with no keyword filter configured — use judgment on what counts as buying intent";
 
   const lines = [
     "Social Intent Patrol execution contract:",
     `P1. Acquire the acting lease: signals-pp-cli targets prepare ${target} --intent browse --ttl ${ttl}`,
     `    Lease TTL is capped at ${MAX_LEASE_TTL_SECONDS}s — for a ${patrol.durationMinutes}-minute shift, renew with --lease <leaseId> instead of requesting a longer TTL.`,
-    "P2. Connect to the `signals-publish` RealTimeX Browser session over CDP using the agent-browser skill. Do not drive the platform through agent-tools.",
-    `P3. Patrol these communities for intent keywords (${patrol.intentKeywords.join(", ")}): ${communities}`,
+    "P2. Connect over CDP to the RealTimeX Browser session named in the `sessionName` field of that prepare response (commonly `signals-publish`, but a target on a dedicated connection returns its own session — never assume). Confirm the live identity matches the returned `expectedHandle` before acting, and drive the platform through agent-browser, not agent-tools.",
+    `P3. ${keywordScope}: ${communities}`,
     `P4. Stay inside the shift budget: at most ${patrol.maxPosts} personal profile post(s), ${patrol.maxComments} high-intent comment(s), and ${patrol.durationMinutes} minute(s) of wall clock.`,
     patrol.maxPosts === 0
       ? "    maxPosts is 0 — this is a lurk-and-engage-only shift. Do not publish to the personal profile."

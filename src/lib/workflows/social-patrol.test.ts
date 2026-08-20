@@ -77,7 +77,7 @@ describe("socialPatrolLeaseTtlSeconds", () => {
 });
 
 describe("readSocialPatrolConfig", () => {
-  it("fills defaults for an empty config", () => {
+  it("fills slider defaults for an empty config", () => {
     expect(readSocialPatrolConfig({})).toEqual({
       targetId: null,
       durationMinutes: 15,
@@ -85,9 +85,18 @@ describe("readSocialPatrolConfig", () => {
       maxComments: 2,
       maxScrapedContacts: 20,
       communities: [],
-      intentKeywords: DEFAULT_INTENT_KEYWORDS,
+      intentKeywords: [],
       requireApproval: true,
     });
+  });
+
+  it("preserves a cleared keyword list instead of restoring the defaults", () => {
+    // The seeded template carries the defaults explicitly, so empty means the operator
+    // removed every pill — the brief must not contradict the config block it ships with.
+    expect(readSocialPatrolConfig({ intentKeywords: [] }).intentKeywords).toEqual([]);
+    expect(
+      readSocialPatrolConfig(buildSocialPatrolTemplateConfig()).intentKeywords,
+    ).toEqual(DEFAULT_INTENT_KEYWORDS);
   });
 
   it("reads stored values and clamps out-of-range ones", () => {
@@ -125,11 +134,26 @@ describe("readSocialPatrolConfig", () => {
 });
 
 describe("buildSocialPatrolTemplateConfig", () => {
-  it("is detected as a patrol template and round-trips to the defaults", () => {
+  it("is detected as a patrol template and ships the documented defaults", () => {
     const config = buildSocialPatrolTemplateConfig();
     expect(isSocialPatrolTemplateConfig(config)).toBe(true);
     expect(isSocialPatrolTemplateConfig({ maxEngagements: 5 })).toBe(false);
-    expect(readSocialPatrolConfig(config)).toEqual(readSocialPatrolConfig({}));
+    expect(readSocialPatrolConfig(config)).toEqual({
+      targetId: null,
+      durationMinutes: 15,
+      maxPosts: 1,
+      maxComments: 2,
+      maxScrapedContacts: 20,
+      communities: [],
+      intentKeywords: DEFAULT_INTENT_KEYWORDS,
+      requireApproval: true,
+    });
+  });
+
+  it("round-trips through the run config unchanged", () => {
+    const stored = buildSocialPatrolTemplateConfig();
+    const draft = readSocialPatrolConfig(stored);
+    expect(readSocialPatrolConfig(buildSocialPatrolRunConfig(draft))).toEqual(draft);
   });
 });
 
@@ -201,7 +225,10 @@ describe("buildSocialPatrolBriefSection", () => {
     expect(section).toContain(
       `signals-pp-cli targets prepare tgt_fb --intent browse --ttl ${MAX_LEASE_TTL_SECONDS}`,
     );
-    expect(section).toContain("signals-publish");
+    // The session must come from the prepare response — a target on a dedicated connection
+    // returns its own session, so a hardcoded name would act as the wrong identity.
+    expect(section).toContain("`sessionName` field of that prepare response");
+    expect(section).toContain("expectedHandle");
     expect(section).toContain("Codex VN");
     expect(section).toContain("recommend, lỗi");
     expect(section).toContain("3 high-intent comment(s)");
@@ -233,5 +260,16 @@ describe("buildSocialPatrolBriefSection", () => {
       config: { ...config, communities: [] },
     });
     expect(section).toContain("no communities configured");
+  });
+
+  it("does not reinstate default keywords the run config no longer lists", () => {
+    const section = buildSocialPatrolBriefSection({
+      workflowRunId: "run_9",
+      config: { ...config, intentKeywords: [] },
+    });
+    expect(section).toContain("no keyword filter configured");
+    for (const keyword of DEFAULT_INTENT_KEYWORDS) {
+      expect(section).not.toContain(`(${keyword}`);
+    }
   });
 });
