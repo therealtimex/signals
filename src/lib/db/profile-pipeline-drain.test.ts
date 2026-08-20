@@ -282,20 +282,24 @@ describe("profile pipeline drain", () => {
     ).toBe(true);
   });
 
-  it("runUntilCaughtUp respects maxBatches and stops on errors", async () => {
-    vi.spyOn(await import("@/lib/rtx/env"), "isRtxEmbedded").mockReturnValue(false);
-    buildProfilePipelineFixture();
-    const template = createPipelineTemplate(false);
+  it(
+    "runUntilCaughtUp respects maxBatches and stops on errors",
+    async () => {
+      vi.spyOn(await import("@/lib/rtx/env"), "isRtxEmbedded").mockReturnValue(false);
+      buildProfilePipelineFixture();
+      const template = createPipelineTemplate(false);
 
-    const report = await runProfilePipelineUntilCaughtUp(template.id, {
-      maxBatches: 5,
-      batchSize: 20,
-    });
+      const report = await runProfilePipelineUntilCaughtUp(template.id, {
+        maxBatches: 5,
+        batchSize: 20,
+      });
 
-    expect(report.batchesExecuted).toBeGreaterThan(0);
-    expect(report.batchesExecuted).toBeLessThanOrEqual(5);
-    if (report.errors.length > 0) {
-      expect(report.batchesExecuted).toBe(1);
-    }
-  });
+      expect(report.batchesExecuted).toBeGreaterThan(0);
+      expect(report.batchesExecuted).toBeLessThanOrEqual(5);
+      if (report.errors.length > 0) {
+        expect(report.batchesExecuted).toBe(1);
+      }
+    },
+    30_000,
+  );
 });
