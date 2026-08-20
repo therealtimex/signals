@@ -17,22 +17,17 @@ import {
   Clock,
   ExternalLink,
   FileText,
-  Heart,
   Loader2,
-  MessageCircle,
   MessageSquare,
   Pencil,
   PenSquare,
-  Quote,
-  Repeat2,
   RotateCcw,
-  Share2,
-  ThumbsUp,
   X,
 } from "lucide-react";
 import { ComposeDialog } from "@/components/compose-dialog";
 import { ContentStatusBadge } from "@/components/content-status-badge";
 import { EmptyState } from "@/components/empty-state";
+import { EngagementMetrics } from "@/components/engagement-metrics";
 import { FeedbackBanner } from "@/components/feedback-banner";
 import { PageHeader } from "@/components/page-header";
 import { PaginationControls } from "@/components/pagination-controls";
@@ -53,6 +48,11 @@ import {
 import { usePublishJobs } from "@/hooks/use-publish-jobs";
 import type { ContentItemWithPost } from "@/lib/db/types";
 import { PLATFORM_SHORT_LABELS } from "@/lib/platforms/capabilities";
+import {
+  getEngagementMetrics,
+  parseEngagementSnapshot,
+  resolveContentPlatform,
+} from "@/lib/platforms/content-platform";
 import type { PublishJobTarget } from "@/lib/publish/types";
 import { cn } from "@/lib/utils";
 import {
@@ -110,17 +110,6 @@ type SentBanner = {
   threadPath: string | null;
 };
 
-function getItemPlatform(item: ContentItemWithPost): string | null {
-  const target = item.platformTarget?.split(",")[0]?.trim();
-  if (target) return target;
-
-  const url = item.post?.platformUrl?.toLowerCase();
-  if (url?.includes("x.com") || url?.includes("twitter.com")) return "x";
-  if (url?.includes("linkedin.com")) return "linkedin";
-  if (url?.includes("mail.google.com")) return "gmail";
-  return null;
-}
-
 function toContentUrl(params: URLSearchParams): string {
   const query = params.toString();
   return query ? `/dashboard/content?${query}` : "/dashboard/content";
@@ -141,13 +130,14 @@ function truncate(text: string | null | undefined, length: number): string {
   return text.length > length ? `${text.slice(0, length)}...` : text;
 }
 
-function parseEngagementSnapshot(value: string | null | undefined): Record<string, number> | null {
-  if (!value) return null;
-  try {
-    return JSON.parse(value) as Record<string, number>;
-  } catch {
-    return null;
+function renderEngagement(item: ContentItemWithPost) {
+  const snapshot = parseEngagementSnapshot(item.post?.engagementSnapshot);
+  const platform = resolveContentPlatform(item);
+  if (getEngagementMetrics(platform, snapshot).length === 0) {
+    return <span className="text-xs text-muted-foreground">—</span>;
   }
+
+  return <EngagementMetrics snapshot={snapshot} platform={platform} />;
 }
 
 function TargetStatusBadge({ target }: { target: PublishJobTarget }) {
@@ -281,7 +271,7 @@ function ContentListInner({
     const loading = Boolean(
       actionLoading?.includes(item.id) || (job?.id && actionLoading?.includes(job.id))
     );
-    const platform = getItemPlatform(item);
+    const platform = resolveContentPlatform(item);
     const platformLabel = platform
       ? PLATFORM_SHORT_LABELS[platform as keyof typeof PLATFORM_SHORT_LABELS] ?? platform
       : null;
@@ -337,33 +327,6 @@ function ContentListInner({
       stale: Boolean(job?.stale),
       hasJob: Boolean(job?.id),
     }).map((kind) => actionDefinitions[kind]);
-  }
-
-  function renderEngagement(item: ContentItemWithPost) {
-    const snapshot = parseEngagementSnapshot(item.post?.engagementSnapshot);
-    if (!snapshot) return <span className="text-xs text-muted-foreground">—</span>;
-
-    const platform = getItemPlatform(item);
-    if (platform === "gmail") return <span className="text-xs text-muted-foreground">—</span>;
-
-    if (platform === "linkedin") {
-      return (
-        <div className="flex items-center gap-3 text-xs text-muted-foreground">
-          <span className="flex items-center gap-1" title="Likes"><ThumbsUp className="size-3" />{snapshot.likes ?? 0}</span>
-          <span className="flex items-center gap-1" title="Comments"><MessageCircle className="size-3" />{snapshot.comments ?? 0}</span>
-          <span className="flex items-center gap-1" title="Shares"><Share2 className="size-3" />{snapshot.shares ?? 0}</span>
-        </div>
-      );
-    }
-
-    return (
-      <div className="flex items-center gap-3 text-xs text-muted-foreground">
-        <span className="flex items-center gap-1" title="Likes"><Heart className="size-3" />{snapshot.likes ?? 0}</span>
-        <span className="flex items-center gap-1" title="Replies"><MessageCircle className="size-3" />{snapshot.replies ?? 0}</span>
-        <span className="flex items-center gap-1" title="Retweets"><Repeat2 className="size-3" />{snapshot.retweets ?? 0}</span>
-        <span className="flex items-center gap-1" title="Quotes"><Quote className="size-3" />{snapshot.quotes ?? 0}</span>
-      </div>
-    );
   }
 
   function navigateToItem(itemId: string) {
@@ -496,7 +459,7 @@ function ContentListInner({
                     <TableCell className="max-w-0 overflow-hidden py-3 align-top whitespace-normal">
                       <div className="space-y-1.5">
                         <div className="flex flex-wrap items-center gap-1.5">
-                          <PlatformBadge platform={getItemPlatform(item)} />
+                          <PlatformBadge platform={resolveContentPlatform(item)} />
                           <span className="text-xs text-muted-foreground">
                             {contentTypeLabels[item.contentType] ?? item.contentType}
                           </span>
