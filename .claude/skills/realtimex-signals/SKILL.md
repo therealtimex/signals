@@ -19,7 +19,7 @@ Operate **Signals** (local-first social GTM CRM) via its stable REST API. Intell
 
 Every session:
 
-1. **Prefer the bundled CLI** when `tools/signals-pp-cli/bin/signals-pp-cli.js` exists (marketplace plugin) or `signals-pp-cli` is on `PATH`:
+1. **Prefer the bundled CLI** when `tools/signals-pp-cli/bin/signals-pp-cli.cjs` exists (marketplace plugin) or `signals-pp-cli` is on `PATH`:
 
 ```bash
 signals-pp-cli health

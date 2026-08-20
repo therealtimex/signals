@@ -94,15 +94,28 @@ function copyTranscendence() {
   }
 }
 
+/**
+ * The launcher is emitted as `.cjs`, not `.js`, on purpose. Its body is
+ * CommonJS, and this package declares `"type": "module"` — so a `.js` file
+ * would be parsed as ESM and die on `require`. The explicit extension is also
+ * what makes it correct inside the packaged plugin, which ships no
+ * package.json: `.cjs` never depends on Node's module-syntax detection.
+ * Same reason `skills/signals-publish/scripts/x-publish.cjs` carries it.
+ */
 function writePlatformShim(targetDir) {
-  const shimPath = path.join(targetDir, `${CLI_NAME}.js`);
+  const shimPath = path.join(targetDir, `${CLI_NAME}.cjs`);
+  // `bin/` is gitignored and never cleaned between builds, so any checkout that
+  // built before the rename keeps a stale signals-pp-cli.js beside the new file.
+  // Left there, `cp -R bin/` drags it into the plugin zip and the artifact guard
+  // in test-standalone-artifact.mjs rejects the release. rmSync with force is a
+  // no-op when the path is absent.
+  fs.rmSync(path.join(targetDir, `${CLI_NAME}.js`), { force: true });
   fs.writeFileSync(
     shimPath,
     `#!/usr/bin/env node
 const { spawnSync } = require("child_process");
 const path = require("path");
 const fs = require("fs");
-const os = require("os");
 const arch = process.arch === "x64" ? "x64" : process.arch;
 const platform = process.platform === "win32" ? "win32" : process.platform;
 const binaryName = process.platform === "win32" ? "${CLI_NAME}.exe" : "${CLI_NAME}";

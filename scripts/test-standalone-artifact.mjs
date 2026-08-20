@@ -59,7 +59,7 @@ const requiredEntries = [
   "guide/index.md",
   "resources/migrations/0000_tired_thanos.sql",
   "resources/migrations/meta/_journal.json",
-  "tools/signals-pp-cli/bin/signals-pp-cli.js",
+  "tools/signals-pp-cli/bin/signals-pp-cli.cjs",
 ];
 for (const entry of requiredEntries) {
   if (!entries.includes(entry)) errors.push(`Missing runtime entry: ${entry}`);
@@ -112,7 +112,7 @@ for (const entry of entries) {
   }
   if (
     entry.startsWith("tools/") &&
-    !/^tools\/signals-pp-cli\/bin\/(?:signals-pp-cli\.js|(?:darwin|linux)-[a-z0-9]+\/signals-pp-cli|win32-[a-z0-9]+\/signals-pp-cli\.exe)$/.test(
+    !/^tools\/signals-pp-cli\/bin\/(?:signals-pp-cli\.cjs|(?:darwin|linux)-[a-z0-9]+\/signals-pp-cli|win32-[a-z0-9]+\/signals-pp-cli\.exe)$/.test(
       entry,
     )
   ) {
