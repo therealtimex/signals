@@ -2,7 +2,7 @@
   "id": "com.realtimex.signals",
   "name": "realtimex-signals",
   "displayName": "Signals",
-  "version": "0.1.15",
+  "version": "0.2.0",
   "kind": "workspace-provision",
   "description": "Local-first social GTM and relationship CRM — workspace, agent skills, flows, and marketplace local app integration for Signals.",
   "author": {
