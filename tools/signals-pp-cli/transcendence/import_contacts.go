@@ -288,7 +288,7 @@ func importContactChunk(
 				summary.Errors = append(summary.Errors, err.Error())
 				continue
 			}
-			if existing.Archived {
+			if existing.ID != "" && existing.Archived {
 				// Enriching would be invisible (the contact is hidden) and
 				// un-archiving would silently undo a deliberate user action, so
 				// skip and say why. Either way we must not create a duplicate:

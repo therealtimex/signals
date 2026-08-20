@@ -55,11 +55,7 @@ function isArchivedContact(contactId: string): boolean {
     .where(eq(contacts.id, contactId))
     .get();
   if (!row) return false;
-  try {
-    return isContactArchived(row.metadata);
-  } catch {
-    return false;
-  }
+  return isContactArchived(row.metadata);
 }
 
 function endpointIssue(

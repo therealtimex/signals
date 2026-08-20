@@ -33,6 +33,38 @@ jobs:
           blocking: error
           version: "0.9.12"
 
+  # gofmt parses but does not type-check, and Go is otherwise compiled only in
+  # release.yml — so a broken overlay reaches the release pipeline with a green PR.
+  # This is the cheapest gate that actually type-checks tools/signals-pp-cli.
+  signals-pp-cli:
+    name: signals-pp-cli compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: "npm"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+          check-latest: true
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Generates the CLI from openapi/agent-tools.json, overlays
+      # tools/signals-pp-cli/transcendence/*.go, then runs go vet + go build.
+      # Host target only; cross-compilation stays in release.yml.
+      - name: Build signals-pp-cli
+        run: npm run build:signals-pp-cli
+
+      # Only runs for real once a binary exists — it self-skips otherwise.
+      - name: signals-pp-cli golden tests
+        run: npm run test:signals-pp-cli
+
   check:
     name: Quality gate
     runs-on: ubuntu-latest
