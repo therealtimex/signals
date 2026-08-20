@@ -65,6 +65,34 @@ const deps = (fetchImpl: typeof fetch, resolver?: XAnonHandleResolverFactory) =>
 describe("hydrateXProfilesViaAnonWeb", () => {
   beforeEach(() => resetXAnonWebCooldownForTests());
 
+  it("hydrates a handle-only request and reports the ID the profile page carries", async () => {
+    const fetchImpl = safeFetch(htmlResponse());
+    const resolver = vi.fn<XAnonHandleResolverFactory>();
+    const outcomes = await hydrateXProfilesViaAnonWeb(
+      [{ userId: "handle:tri_dao", knownHandle: "@tri_dao", handleOnly: true }],
+      deps(fetchImpl, resolver),
+    );
+    expect(outcomes.get("handle:tri_dao")).toMatchObject({
+      status: "hydrated",
+      user: { id: "568879807", username: "tri_dao" },
+      resolvedHandle: "tri_dao",
+    });
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    expect(resolver).not.toHaveBeenCalled();
+  });
+
+  it("skips a handle-only request whose handle is not a usable X handle", async () => {
+    const fetchImpl = vi.fn<typeof fetch>();
+    const resolver = vi.fn<XAnonHandleResolverFactory>();
+    const outcomes = await hydrateXProfilesViaAnonWeb(
+      [{ userId: "handle:bad", knownHandle: "not a handle", handleOnly: true }],
+      deps(fetchImpl, resolver),
+    );
+    expect(outcomes.get("handle:bad")).toEqual({ status: "skip", reason: "x_handle_invalid" });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(resolver).not.toHaveBeenCalled();
+  });
+
   it("uses a known handle without opening a browser and sends no credentials", async () => {
     const fetchImpl = safeFetch(htmlResponse());
     const resolver = vi.fn<XAnonHandleResolverFactory>();

@@ -14,6 +14,7 @@ import { enrichContactAvatars } from "@/lib/workflows/pipeline/handlers/enrich-c
 import {
   hydrateXProfiles,
   type XUserLookup,
+  type XUsernameLookup,
 } from "@/lib/workflows/pipeline/handlers/hydrate-x-profiles";
 import type { PipelineStepContext } from "@/lib/workflows/pipeline/types";
 import { resetCoreTables } from "@/test/db";
@@ -54,6 +55,23 @@ function seedArchiveContact(
     platformUrl: `https://x.com/i/user/${userId}`,
     platformData: JSON.stringify(input.platformData ?? { archiveFollower: true }),
     avatarUrl: input.avatarUrl,
+    isActive: 1,
+  });
+  return { contact, identity };
+}
+
+/** Contacts from agent research, CSV import or manual entry are keyed by handle, not by ID. */
+function seedHandleContact(
+  handle: string,
+  input: { name?: string; platformHandle?: string | null } = {},
+) {
+  const contact = createContact({ name: input.name ?? `@${handle}` });
+  const identity = createIdentity({
+    contactId: contact.id,
+    platform: "x",
+    platformUserId: handle,
+    platformHandle: input.platformHandle === undefined ? `@${handle}` : input.platformHandle,
+    platformData: JSON.stringify({ createdVia: "agent_research" }),
     isActive: 1,
   });
   return { contact, identity };
@@ -253,6 +271,157 @@ describe("hydrateXProfiles", () => {
     const second = await hydrateXProfiles([found.contact.id, missing.contact.id], ctx, secondLookup);
     expect(secondLookup).not.toHaveBeenCalled();
     expect(second.outcomes.map((outcome) => outcome.reason)).toEqual(["fresh", "not_found_cached"]);
+  });
+
+  it("hydrates handle-keyed identities by username and promotes them to the numeric ID", async () => {
+    seedAccount();
+    const { contact, identity } = seedHandleContact("sama");
+    const lookup = vi.fn<XUserLookup>(async () => ({ users: [], errors: [] }));
+    const handleLookup = vi.fn<XUsernameLookup>(async () => ({
+      users: [{ ...xUser("1605"), username: "sama" }],
+      errors: [],
+    }));
+
+    const report = await hydrateXProfiles([contact.id], ctx, lookup, undefined, handleLookup);
+
+    expect(report.outcomes).toEqual([{
+      contactId: contact.id,
+      status: "updated",
+      detail: { source: "x_api", identityIds: [identity.id], handle: "@sama" },
+    }]);
+    expect(lookup).not.toHaveBeenCalled();
+    expect(handleLookup).toHaveBeenCalledWith(expect.any(String), ["sama"]);
+
+    const stored = getIdentityById(identity.id);
+    expect(stored?.platformUserId).toBe("1605");
+    expect(stored?.displayName).toBe("Person 1605");
+    expect(stored?.avatarUrl).toBe("https://img.example.com/1605_normal.jpg");
+
+    const secondHandleLookup = vi.fn<XUsernameLookup>();
+    const second = await hydrateXProfiles([contact.id], ctx, lookup, undefined, secondHandleLookup);
+    expect(secondHandleLookup).not.toHaveBeenCalled();
+    expect(second.outcomes[0]).toMatchObject({ status: "skipped", reason: "fresh" });
+  });
+
+  it("resolves handle-only identities over the anonymous web path and persists the numeric ID", async () => {
+    const { contact, identity } = seedHandleContact("ylecun");
+    const webTransport = vi.fn<XAnonWebTransport>(async () => new Map([
+      ["handle:ylecun", {
+        status: "hydrated",
+        user: { ...xUser("48008938"), username: "ylecun" },
+        resolvedHandle: "ylecun",
+      }],
+    ]));
+
+    const report = await hydrateXProfiles([contact.id], ctx, vi.fn<XUserLookup>(), webTransport);
+
+    expect(report.outcomes).toEqual([{
+      contactId: contact.id,
+      status: "updated",
+      detail: { source: "x_web_anon", identityIds: [identity.id], handle: "@ylecun" },
+    }]);
+    expect(webTransport).toHaveBeenCalledWith(
+      [{ userId: "handle:ylecun", knownHandle: "ylecun", handleOnly: true }],
+      expect.objectContaining({ fetchImpl: ctx.fetchImpl, env: ctx.env }),
+    );
+    expect(getIdentityById(identity.id)?.platformUserId).toBe("48008938");
+  });
+
+  it("separates contacts with no X identity from identities that cannot be resolved", async () => {
+    seedAccount();
+    const noIdentity = createContact({ name: "No platforms" });
+    const unusable = createContact({ name: "Unusable identity" });
+    createIdentity({
+      contactId: unusable.id,
+      platform: "x",
+      platformUserId: "https://x.com/some one",
+      platformHandle: null,
+      isActive: 1,
+    });
+    const lookup = vi.fn<XUserLookup>();
+    const handleLookup = vi.fn<XUsernameLookup>();
+
+    const report = await hydrateXProfiles(
+      [noIdentity.id, unusable.id],
+      ctx,
+      lookup,
+      undefined,
+      handleLookup,
+    );
+
+    expect(report.outcomes.map((outcome) => [outcome.contactId, outcome.reason])).toEqual([
+      [noIdentity.id, "no_x_identity"],
+      [unusable.id, "x_identity_unresolved"],
+    ]);
+    expect(lookup).not.toHaveBeenCalled();
+    expect(handleLookup).not.toHaveBeenCalled();
+  });
+
+  it("caches handles the API cannot resolve as misses rather than reporting no_x_identity", async () => {
+    seedAccount();
+    const { contact, identity } = seedHandleContact("ghost_handle");
+    const handleLookup = vi.fn<XUsernameLookup>(async () => ({
+      users: [],
+      errors: [{ value: "ghost_handle", title: "Not Found Error" }],
+    }));
+
+    const first = await hydrateXProfiles(
+      [contact.id],
+      ctx,
+      vi.fn<XUserLookup>(),
+      undefined,
+      handleLookup,
+    );
+    expect(first.outcomes[0]).toMatchObject({ status: "skipped", reason: "not_found" });
+    expect(JSON.parse(getIdentityById(identity.id)?.platformData ?? "{}")).toMatchObject({
+      profileHydrationMiss: { status: "not_found", at: expect.any(Number) },
+    });
+
+    const secondHandleLookup = vi.fn<XUsernameLookup>();
+    const second = await hydrateXProfiles(
+      [contact.id],
+      ctx,
+      vi.fn<XUserLookup>(),
+      undefined,
+      secondHandleLookup,
+    );
+    expect(secondHandleLookup).not.toHaveBeenCalled();
+    expect(second.outcomes[0]).toMatchObject({ status: "skipped", reason: "not_found_cached" });
+  });
+
+  it("keeps the hydrated profile when the resolved ID already belongs to another identity", async () => {
+    seedAccount();
+    const existing = seedArchiveContact("1605");
+    const { contact, identity } = seedHandleContact("sama");
+    const handleLookup = vi.fn<XUsernameLookup>(async () => ({
+      users: [{ ...xUser("1605"), username: "sama" }],
+      errors: [],
+    }));
+
+    const report = await hydrateXProfiles(
+      [contact.id],
+      ctx,
+      vi.fn<XUserLookup>(),
+      undefined,
+      handleLookup,
+    );
+
+    expect(report.outcomes[0]).toMatchObject({
+      contactId: contact.id,
+      status: "updated",
+      detail: {
+        source: "x_api",
+        identityIds: [identity.id],
+        userIdConflicts: [expect.any(String)],
+      },
+    });
+    const stored = getIdentityById(identity.id);
+    expect(stored?.platformUserId).toBe("sama");
+    expect(stored?.displayName).toBe("Person 1605");
+    expect(JSON.parse(stored?.platformData ?? "{}")).toMatchObject({
+      userIdPromotion: { status: "conflict", resolvedUserId: "1605" },
+    });
+    expect(getIdentityById(existing.identity.id)?.platformUserId).toBe("1605");
   });
 
   it("uses anonymous web hydration when OAuth credentials are absent", async () => {

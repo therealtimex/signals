@@ -23,8 +23,7 @@ import { FunnelStageBadge } from "@/components/funnel-stage-badge";
 import { PriorityBadge } from "@/components/priority-badge";
 import { EnrichmentScoreBadge } from "@/components/enrichment-score-badge";
 import { IdentitiesSection } from "@/components/identities-section";
-import { EnrichButton } from "@/components/enrich-button";
-import { ArrowLeft, Trash2, Save, CheckCircle2, Circle, Archive, RotateCcw, Play, Loader2 } from "lucide-react";
+import { ArrowLeft, Trash2, Save, CheckCircle2, Circle, Archive, RotateCcw, Sparkles, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -290,12 +289,6 @@ export function ContactDetailClient({
               </Tooltip>
             </TooltipProvider>
           ) : null}
-          {contact.identities.some((i) => i.platform === "x") && (
-            <EnrichButton
-              contactId={contact.id}
-              onComplete={() => router.refresh()}
-            />
-          )}
           {!contactArchived &&
             !contact.isSelf &&
             profilePipelineTemplateId && (
@@ -308,9 +301,9 @@ export function ContactDetailClient({
                 {pipelineRunning ? (
                   <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
                 ) : (
-                  <Play className="mr-1.5 h-3.5 w-3.5" />
+                  <Sparkles className="mr-1.5 h-3.5 w-3.5" />
                 )}
-                Run for this contact
+                Enrich profile
               </Button>
             )}
           {pipelineError && (
