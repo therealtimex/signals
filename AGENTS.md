@@ -1,253 +1,199 @@
 # AGENTS.md
 
-This file is for coding agents (Codex/Claude/Cursor/etc.). Keep it strict and actionable.
+For coding agents (Claude/Codex/Cursor/etc.). `CLAUDE.md` is a symlink to this file, so it loads
+every session — keep it repo-specific. Generic "write clean code" advice does not belong here.
 
-## Overview
+**Project:** Signals — local-first social GTM & relationship knowledge graph, shipped as a
+RealTimeX Local App. Next.js 16 (App Router, Turbopack) + React 19 + TypeScript 5.8,
+SQLite via better-sqlite3 + Drizzle, Tailwind 4 / shadcn-ui, Vitest.
 
-<!-- AGENTSGEN:START section=overview -->
-- **Project:** signals
-- **Stack:** node (npm)
-- Keep changes small and verifiable.
-<!-- AGENTSGEN:END section=overview -->
+## 1) Runtime — do this before anything else
 
-<!-- AGENTSGEN:START section=repo_context -->
-### Repo context (read this first)
-
-**Project:** signals
-**Stack:** node
-**Repo root:** `.`
-
-#### Quick orientation
-- Start here:
-  - `README.md`
-- CI workflows live in: `.github/workflows/`
-
-- Planning/spec drafts (if used):
-  - Plans: `plans/`
-  - Drafts/specs: `drafts/`
-- Useful scripts (if any): `scripts/`
-
-#### Commands (copy/paste)
-**Dev / run**
 ```bash
-npm run dev
-```
-**Build**
-```bash
-npm run build
-```
-**Lint**
-```bash
-npm run lint
-```
-**Tests**
-```bash
-npm test
+nvm use && npm ci
 ```
 
-#### Local environment notes
+The repo pins Node **22.16.0** (`.nvmrc`, `engines: >=22.16.0 <23`) because `better-sqlite3` must
+match the RealtimeX host's module ABI **127**. On any other Node:
 
-- Prefer the repo's existing toolchain (don't upgrade it).
-- If you need new env vars: document names, don't invent secrets.
-- If a command fails due to missing deps, explain the minimal install step.
+- `npm ci` / `npm install` aborts in `preinstall` (`scripts/node-runtime-contract.mjs`).
+- Anything importing `src/lib/db/client.ts` throws `NODE_MODULE_VERSION 127 … requires <n>`.
 
-#### Where to put new things
+An ABI error means the wrong runtime, not a stale dependency. Do **not** "fix" it by upgrading
+Node, `better-sqlite3`, or Next.js, and do not `npm rebuild` — run `nvm use` instead.
 
-- Small scripts/utilities — `scripts/`
-- Specs/exec notes — `drafts/`
-- Plans (if requested) — `plans/`
-<!-- AGENTSGEN:END section=repo_context -->
+## 2) Data-directory safety
 
-<!-- AGENTSGEN:START section=guardrails -->
-### Guardrails (how to not break signals)
+Signals reads and writes `~/.signals` unless `SIGNALS_DATA_DIR` overrides it. `npm run check`
+includes `db:migrate`, so running the gate with the default env **migrates the real user
+database**. Point it somewhere disposable first:
 
-**Your job:** be useful, be safe, be boring. Small diffs. Deterministic output. No surprises.
+```bash
+export SIGNALS_DATA_DIR=/private/tmp/signals-agent-$$
+npm run check
+```
 
-#### 0) Scope & intent
-- Implement exactly what's requested. If requirements are ambiguous: ask one precise question (or make the smallest reasonable assumption and state it).
-- Prefer changing existing code over adding new systems.
-- Avoid framework upgrades unless explicitly asked.
+Vitest isolates SQLite per worker on its own (`src/test/setup-env.ts`); `db:migrate`, `dev`, and
+`build` do not. Never delete or hand-edit `data.db*` or committed migrations in
+`src/lib/db/migrations/` (30 files) — add a new one with `npm run db:generate`.
 
-#### 1) Safe edits only
-- Keep diffs small (target: <300 lines unless unavoidable).
-- Never rewrite whole files when a patch will do.
-- Preserve formatting, naming patterns, and local conventions.
+## 3) Commands
 
-#### 2) No destructive operations
-- Do not delete data, migrations, buckets, or user files.
-- Avoid broad refactors touching many modules at once.
-- Never remove features because unused without explicit instruction.
+| Task | Command |
+|---|---|
+| Install | `nvm use && npm ci` |
+| Dev server | `npm run dev` (port `${RTX_PORT:-${PORT:-3000}}`) |
+| **Full gate (run before finishing)** | `npm run check` |
+| Typecheck only | `npm run typecheck` |
+| Lint only | `npm run lint` (`--max-warnings 0`) |
+| Tests, once | `npm run test:run` |
+| Tests, watch | `npm test` — interactive; avoid in agent sessions |
+| One test file | `npx vitest run src/lib/workflows/format-error.test.ts` |
+| One project | `npx vitest run --project unit` (also `latency`, `integration`, `import-safety`, `embedded`) |
+| Integration suite | `npm run test:integration` |
+| Coverage (gated) | `npm run test:coverage` |
+| Migrations | `npm run db:generate` → `npm run db:migrate` |
+| React Doctor (blocking in CI) | `npm run doctor` |
+| Production build | `npm run build` |
 
-#### 3) Secrets & credentials
-- Never hardcode tokens/keys.
-- Never print secrets into logs.
-- If a secret is needed: use env vars + document the name.
+`npm run check` = typecheck → lint → `check:agent-tools-openapi` → coverage → skill-package →
+provision-verifier → `db:migrate` → build. It is the same gate CI runs.
 
-#### 4) Side effects / dangerous actions
-- Don't run commands that can modify the system/network unless asked.
-- Don't use dangerous flags unless explicitly approved.
-- If a task involves running arbitrary tools/scripts: isolate and explain.
+## 4) Verification and CI gates
 
-#### 5) Ask-before list (must confirm)
-Before doing any of these, ask:
-- schema changes
-- auth/payments/crypto
-- deletions or large refactors
-- new build tooling/CI changes
-- new major dependencies
+- `.github/workflows/pr-ci.yml` runs on every PR: **react-doctor** (`blocking: error`),
+  `verify:node-runtime`, `verify:marketplace-versions`, `npm run check`, `verify:fresh-import`,
+  and `test:integration` — each with `SIGNALS_DATA_DIR` pinned into the workspace.
+- `.github/workflows/release.yml` runs only on `main` pushes and `v*` tags. Never on PRs.
+- Coverage thresholds gate the build (`vitest.config.ts`: lines 80 / functions 75 / branches 48 /
+  statements 80) over an explicit `COVERAGE_INCLUDE` file list. Adding a file to that list without
+  tests will fail CI.
+- Touching agent tools? Re-run `npm run generate:agent-tools-openapi`, or
+  `check:agent-tools-openapi` fails the gate.
+- Decide what proves the change *before* patching: name the observable that moves if the fix
+  works — an API response, a DB row, a test assertion, a screenshot.
+- When sources disagree, trust the most authoritative one. The SQLite row and the API payload
+  outrank what the dashboard renders.
+- If you cannot run a check, say so explicitly: why, the exact command to run, expected outcome.
+  If you fell back to a lighter proof than the one the change deserved, name the fallback instead
+  of reporting the work as verified.
+- More detail: [`docs/qa/README.md`](./docs/qa/README.md).
 
-#### 6) Definition of Done (DoD)
-A change is done only if:
-- the behavior is correct,
-- tests/checks are run (or you explain why they can't be run),
-- the diff is minimal and readable,
-- docs/comments are updated if behavior changed.
+## 5) Layout
 
-#### 7) Output protocol
-When responding, include:
-- what changed (1-3 bullets),
-- how to verify (commands / steps),
-- risks/assumptions (if any).
-<!-- AGENTSGEN:END section=guardrails -->
+**Entry points — jump here first:**
 
-<!-- AGENTSGEN:START section=workflow -->
-### Workflow (how we ship changes in signals)
+| Concern | File |
+|---|---|
+| Agent-tools HTTP surface | `src/app/api/agent-tools/route.ts`, `.../invoke/route.ts` |
+| Tool dispatch | `src/lib/agent-tools/invoke.ts:5` (`invokeAgentTool`) |
+| Tool handlers | `src/lib/agent-tools/handlers.ts:89` onward |
+| Agent-tools request auth | `src/lib/agent-tools/auth.ts:4` |
+| DB handle / native open | `src/lib/db/client.ts:48` (`db`); line 21 opens better-sqlite3 and is what throws on the wrong Node |
+| Schema | `src/lib/db/schema.ts` |
+| Scheduler boot | `instrumentation.ts:193` (`initScheduler`) |
+| RTX host handshake | `src/lib/rtx/bootstrap.ts:56` (`bootstrapRtxIfEmbedded`) |
+| Enrichment routing | `src/lib/agents/router.ts:31` (`routeUrl`) |
+| Health probe | `src/app/api/health/route.ts:7` |
 
-#### 1) Start with reality
-- Read the nearest README / docs / existing patterns.
-- If there's a failing case: reproduce it (or create a minimal reproduction).
+Partial map — `src/lib/` has ~25 domain folders; browse it before adding a new one.
 
-#### 2) Work in thin slices
-- Prefer one small working increment over a big redesign.
-- Change one thing, verify, then move to the next.
+```
+src/app/api/        REST routes (agent-tools/, health/, contacts/, ...)
+src/app/dashboard/  UI routes
+src/lib/db/         schema.ts, client.ts, queries/, migrations/ (generated)
+src/lib/platforms/  x/, linkedin/, gmail/ (client + mappers + adapter)
+src/lib/agent-tools/  tool registry, invoke, JSON schemas, auth
+src/lib/agents/     router, workflow runners, tools/
+src/lib/browser/    Playwright publish/engage sessions
+src/lib/{scheduler,auth,analytics,rtx,graph,embeddings,workflows,publish}/
+src/components/     shadcn-ui based shared components
+scripts/            build/verify/release tooling (.mjs, ESM)
+tools/signals-pp-cli/   packaged CLI
+flows/              RealTimeX agent-flow JSON
+specs/              numbered feature specs (NN-name.md)
+docs/               integration docs (agent-tools, local-app, qa/)
+guide/              end-user guide
+.claude/skills/     project skills (realtimex-signals, signals-publish, react-doctor)
+test/fixtures/      shared fixtures
+```
 
-#### 3) Make changes reviewable
-- Keep diffs minimal.
-- Avoid unrelated formatting churn.
-- Prefer refactoring after the fix works, not before.
+Config lives in `package.json`, `.nvmrc`, `tsconfig.json`, `next.config.mjs`, `vitest.config.ts`,
+`eslint.config.mjs`, `drizzle.config.ts`, `tsup.config.ts`, `postcss.config.mjs`,
+`components.json`, `instrumentation.ts`, `rtx-manifest.json`.
 
-#### 4) Verification loop
-- Run fast checks after each meaningful change.
-- Run full checks before finalizing.
-- If you cannot run checks, explain why and what to run.
+**Where new things go:** library code → `src/lib/<domain>/`; tooling → `scripts/*.mjs`; a feature
+spec → `specs/NN-name.md`; user-facing docs → `guide/`; integration docs → `docs/`; tests →
+co-located `*.test.ts` next to the source.
 
-#### 5) Commit / PR discipline (even if you don't actually commit)
-Think like you're preparing a PR:
-- Clear intent
-- Small diff
-- Tests included
-- No breaking changes without warning
+## 6) Repo skills
 
-**Commit message style (suggested):**
-- Allowed types: feat, fix, test, docs, refactor
-- Example: `fix: handle empty input in parser`
+Task guides live in `.claude/skills/`. They are not auto-registered by every agent runtime — open
+and follow the matching `SKILL.md` when the task fits.
 
-#### 6) Communication rules
-- If the task is blocked by missing info: ask one concrete question.
-- If you make an assumption: state it explicitly and keep it reversible.
-<!-- AGENTSGEN:END section=workflow -->
+- **`react-doctor/SKILL.md`** — after any React component, hook, page, route, or state-flow
+  change. Not optional: react-doctor is a **blocking** PR check (`blocking: error` in
+  `pr-ci.yml`), so skipping it locally just moves the failure into CI. Run `npm run doctor`.
+- **`realtimex-signals/SKILL.md`** — driving Signals through the agent-tools REST API (contacts,
+  goals, tasks, workflows, analytics). Read it before changing tool schemas or handlers so the
+  documented contract and the implementation stay in sync.
+- **`signals-publish/SKILL.md`** — X publishing via RealTimeX Browser over CDP and the
+  `complete_publish` callback. Read it before touching `src/lib/publish/` or `src/lib/browser/`.
 
-<!-- AGENTSGEN:START section=verification -->
-### Verification (don't trust yourself, verify)
+## 7) Conventions that actually bite
 
-#### Fast checks (run often)
-- Define a fast check for this repo (lint / unit tests / smoke test).
-- If none exists, add a minimal smoke check.
+- ESM only (`"type": "module"`); standalone scripts are `.mjs`.
+- Path alias `@/` → `src/`. TypeScript is strict; `npm run lint` allows zero warnings.
+- Test file suffix selects the Vitest project: `*.test.ts` (unit), `*.latency.test.ts`,
+  `*.integration.test.ts`, `*.import-safety.test.ts`, `*.embedded.test.ts`.
+- Secrets go in `.env.local`; document new names in `.env.example`. Never log or commit them.
+- Worktrees share dependencies by symlink — see §11.
+- `.ci/`, `coverage/`, `test-results/`, `data/`, and `*.db` are gitignored. Keep it that way.
 
-#### Full checks (run before finalizing)
-- Run the repo's full test suite (or the closest equivalent).
+## 8) Guardrails
 
-#### If checks cannot be run
-State:
-- why (missing deps / CI-only / platform),
-- what to run,
-- expected outcome.
-<!-- AGENTSGEN:END section=verification -->
+Small, reviewable diffs. Prefer patching existing code over adding new systems. Preserve local
+naming and formatting; no unrelated churn.
 
-<!-- AGENTSGEN:START section=style -->
-### Style & conventions (node)
+**Confirm with the user before:** schema changes or new migrations; anything touching
+auth/crypto/stored credentials (`src/lib/auth/`); marketplace packaging, release manifests, or
+signing; CI workflow changes; new or major-version dependencies; deletions and broad refactors.
 
-#### 1) Follow the repo
-- Match existing naming, structure, and patterns.
-- Don't introduce new abstractions unless they reduce complexity.
+## 9) Git, GitHub, and PR conventions
 
-#### 2) Readability wins
-- Prefer clear code over clever code.
-- Keep functions small and single-purpose.
-- Choose explicit names over short names.
+- Default branch is `main` (`origin` = `github.com/therealtimex/signals`). Never commit to `main`
+  directly. Observed branch shapes: `issue-<n>`, `issue-<n>-<slug>`, `fix/<slug>`, `feat/<slug>`,
+  `agent/<slug>`.
+- Conventional Commits, with a scope when one is obvious: `feat: ...`, `fix(workflows): ...`,
+  `fix(release): ...`. Squash-merged titles carry the PR number, e.g. `feat: ... (#201)`.
+- Never commit `.env.local`, `*.db`, or anything under `.ci/`, `coverage/`, `test-results/`.
+- Outside of loop handoffs (below), commit and push only when the user asks.
 
-#### 3) Errors & edge cases
-- Validate inputs at boundaries.
-- Fail loudly for programmer errors, gracefully for user errors.
-- Add helpful error messages (actionable, not vague).
+**GitHub access — use `gh`, never a browser.** Read and write GitHub through the CLI:
+`gh pr view <n>`, `gh pr diff <n>`, `gh pr checks <n>`, `gh issue view <n>`, `gh run list`,
+`gh run view <id> --log-failed`, and `gh api` for anything without a porcelain command. Do not
+drive github.com through agent-browser, a browser session, or a plain web fetch — those return
+rendered HTML that is slow to parse, silently truncates long diffs and CI logs, and cannot see
+anything gated behind the authenticated session. `gh` is already authenticated here (account
+`therealtimex`, scopes `repo` and `workflow`). If a `gh` call fails, fix the command or the auth;
+do not fall back to a browser.
 
-#### 4) Logging (if applicable)
-- Log meaningful events, not noise.
-- Never log secrets or personal data.
+### Handing off to another agent in a loop
 
-#### 5) Types / docs (if applicable)
-- Add type hints where it improves clarity.
-- Add docstrings for public functions and tricky logic.
-- Write comments only when the why is non-obvious.
+A loop role usually resumes in a different worktree, session, or machine. Uncommitted changes are
+invisible to it and a local worktree path means nothing there, so **land the work before routing
+it**:
 
-#### 6) Dependencies
-- Prefer standard library / existing deps.
-- Avoid adding heavy dependencies for small tasks.
-<!-- AGENTSGEN:END section=style -->
+1. `git add -A && git commit -m "<conventional commit>"`
+2. `git push -u origin <branch>`
+3. `gh pr create --fill` (add `--draft` if it is not ready for review)
+4. Hand off the PR URL that command prints — not a branch name alone, and never a worktree path.
 
-## Rules Of Engagement
+Prefer this even for work in progress: a draft PR is a shared, durable reference the next role can
+read, comment on, and check CI against. If something genuinely cannot be committed yet, say so
+explicitly in the handoff and name what is missing, rather than routing a tree only you can see.
 
-<!-- AGENTSGEN:START section=rules -->
-**DO**
-- Prefer small diffs.
-- Add or update tests when behavior changes.
-- Run repo checks before finishing.
-
-**DON'T**
-- Do not rewrite unrelated code.
-- Do not refactor without confirming intent.
-- Do not commit secrets or local env files.
-
-**If uncertain**
-- Ask a short clarifying question before making big changes.
-
-**Warnings**
-- (none)
-<!-- AGENTSGEN:END section=rules -->
-
-## Commands
-
-<!-- AGENTSGEN:START section=commands -->
-- **Dev:** `npm run dev`
-- **Test:** `npm test`
-- **Lint:** `npm run lint`
-- **Build:** `npm run build`
-
-- **Run a single test:** (not specified)
-- **Where configs live:** `package-lock.json`, `package.json`
-<!-- AGENTSGEN:END section=commands -->
-
-<!-- AGENTSGEN:START section=node -->
-## Node project notes
-
-### Common commands
-- Install: `npm ci` (or `pnpm i --frozen-lockfile`)
-- Tests: `npm test`
-- Lint: `npm run lint`
-- Build: `npm run build`
-
-### Guardrails
-- Don't update lockfiles unless necessary
-- Prefer minimal dependency changes
-<!-- AGENTSGEN:END section=node -->
-
-## Repo Structure
-
-<!-- AGENTSGEN:START section=structure -->
-- **Config:** `package-lock.json`, `package.json`
-<!-- AGENTSGEN:END section=structure -->
-
-## RealtimeX integration QA
+## 10) RealtimeX integration QA
 
 Use this workflow when validating Signals changes against the RealTimeX desktop app:
 
@@ -258,34 +204,77 @@ Use this workflow when validating Signals changes against the RealTimeX desktop 
    yarn dev:all
    ```
 
-   The expected dev surfaces are the RealTimeX Electron renderer (`realtimex-app-dev://app`), frontend `3100`, server `3101`, and Electron CDP `9888`. Never use the production RealTimeX app for this testing.
+   The expected dev surfaces are the RealTimeX Electron renderer (`realtimex-app-dev://app`),
+   frontend `3100`, server `3101`, and Electron CDP `9888`. Never use the production RealTimeX app
+   for this testing.
 
-2. In the running RealTimeX dev app, add the Signals worktree under test as a Local App. Use `npm run dev`, the worktree as the working directory, and an isolated data directory such as `SIGNALS_DATA_DIR=/private/tmp/signals-qa-<run-id>-data`. Set the Local App home URL to `http://localhost:3010/dashboard`.
+2. In the running RealTimeX dev app, add the Signals worktree under test as a Local App. Use
+   `npm run dev`, the worktree as the working directory, and an isolated data directory such as
+   `SIGNALS_DATA_DIR=/private/tmp/signals-qa-<run-id>-data`.
 
-3. Start the Local App from the RealTimeX UI and grant only the manifest permissions required by the test. Verify that Signals is reachable on port `3010` before exercising the scenario.
+3. Start the Local App from the RealTimeX UI and grant only the manifest permissions required by
+   the test. Signals listens on the port RealTimeX assigns it — commonly `3010`, while a
+   standalone `npm run dev` defaults to `3000`. Read the assigned port from the Local App UI, then
+   use that same port for the home URL (`/dashboard`) and the health probe (`/api/health`) before
+   exercising the scenario.
 
-4. The bundled `rtxtest` launcher may lack its executable bit in the QA workspace. If direct invocation fails with `Permission denied`, invoke the same script through Node instead:
+4. The bundled `rtxtest` launcher may lack its executable bit in the QA workspace. If direct
+   invocation fails with `Permission denied`, invoke the same script through Node instead:
 
    ```bash
    node /Users/realtimex/.realtimex.ai/desktop-user-data/app/users/trungle_rta_vn/storage/working-data/realtimex-qa/.agents/skills/rtx-test-runner/scripts/bin/rtxtest <verb>
    ```
 
-   Do not point `rtxtest dev up` at the Signals repository; it is a Local App, not the RealTimeX app repo.
+   Do not point `rtxtest dev up` at the Signals repository; it is a Local App, not the RealTimeX
+   app repo.
 
-5. After QA, stop the Signals Local App from the UI, stop the `yarn dev:all` host, and confirm ports `3010`, `3100`, `3101`, and `9888` are clear. Keep the Local App configuration unless deletion is explicitly requested.
+5. After QA, stop the Signals Local App from the UI, stop the `yarn dev:all` host, and confirm the
+   Signals port plus `3100`, `3101`, and `9888` are clear. Keep the Local App configuration unless
+   deletion is explicitly requested.
 
-## Output Protocol
+### Visual evidence for UI changes
 
-<!-- AGENTSGEN:START section=output_protocol -->
-When you finish work, include:
-- Summary (1-3 bullets)
-- Files changed (list paths)
-- Verification (exact commands to run)
-<!-- AGENTSGEN:END section=output_protocol -->
+Screenshots are committed to `.evidence/` (tracked on purpose — it is not gitignored) and named
+`{before,after}_{view}_{desktop,mobile}_{light,dark}.png`, e.g. `before_drafts_mobile_dark.png`.
+Capture all four combinations for each view you touch, take the `before_` set from the unmodified
+build, and follow the existing filenames rather than inventing a parallel scheme.
 
-## Git command availability
+## 11) Worktrees
 
-- Before running Git commands, check whether `git --version` succeeds.
-- If Git is unavailable, explain that this repository was initialized without the Git CLI and ask the user to install Git before continuing with Git operations.
-- Guide the user to the official downloads at https://git-scm.com/downloads, selecting the installer or package instructions for their operating system.
-- Do not install Git, run a privileged package manager, or change the user's system configuration unless the user explicitly asks.
+Spawn a linked worktree and share the main checkout's dependencies with a symlink — do not run a
+second `npm ci`, and do not copy the tree:
+
+```bash
+git worktree add ../signals-<slug>
+cd ../signals-<slug>
+ln -s ../signals/node_modules node_modules
+nvm use
+```
+
+Two things had to be fixed for this to work, so do not "helpfully" revert either:
+
+- **Turbopack** rejects a `node_modules` symlink whose target sits outside the project root
+  (`Symlink node_modules is invalid, it points out of the filesystem root`). `next.config.mjs`
+  detects the symlink and widens `turbopack.root` to the deepest ancestor shared by the worktree
+  and the symlink target. It stays inert when `node_modules` is a real directory, so CI and
+  release builds keep the default root and their standalone output tracing.
+- **`.gitignore`** lists `node_modules` without a trailing slash. With the slash it matched only
+  directories, so a symlink showed up as `?? node_modules` in every worktree.
+
+Vitest needs no special handling: all five projects and the coverage thresholds run unchanged
+through the symlink, because Vite resolves the real path.
+
+Building in a fresh worktree, run migrations first — `npm run db:migrate && npm run build`. A bare
+`next build` against an unmigrated `SIGNALS_DATA_DIR` races page-data collection against schema
+creation and dies with `table \`contact_identities\` already exists`. `npm run check` already
+orders these correctly.
+
+## 12) Output protocol
+
+When you finish work, report:
+
+- what changed (1-3 bullets),
+- files changed (paths),
+- verification (exact commands you ran, and their result),
+- risks and assumptions, including any check you could not run,
+- the PR URL, whenever the work was pushed or handed off to another role.
