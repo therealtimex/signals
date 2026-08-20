@@ -32,11 +32,13 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import {
-  getAnalyticsMetrics,
   getAnalyticsSectionLabel,
-  type AnalyticsMetric,
   type AnalyticsMetricKey,
 } from "@/lib/analytics/platform-columns";
+import {
+  buildPlatformSections,
+  type PlatformSection,
+} from "@/lib/analytics/platform-sections";
 import type {
   PlatformEngagementAverages,
   TopPostRow,
@@ -353,33 +355,6 @@ const AVERAGE_KEYS: Record<AnalyticsMetricKey, keyof PlatformEngagementAverages>
   quotes: "avgQuotes",
   impressions: "avgImpressions",
 };
-
-interface PlatformSection {
-  platform: string | null;
-  metrics: readonly AnalyticsMetric[];
-  posts: TopPostRow[];
-  averages: PlatformEngagementAverages | null;
-}
-
-/** One section per platform that has either ranked posts or averages worth showing. */
-function buildPlatformSections(
-  topPosts: TopPostRow[],
-  averages: PlatformEngagementAverages[]
-): PlatformSection[] {
-  const platforms: (string | null)[] = [];
-  for (const row of [...topPosts, ...averages]) {
-    if (!platforms.includes(row.platform)) platforms.push(row.platform);
-  }
-
-  return platforms
-    .map((platform) => ({
-      platform,
-      metrics: getAnalyticsMetrics(platform),
-      posts: topPosts.filter((row) => row.platform === platform),
-      averages: averages.find((row) => row.platform === platform) ?? null,
-    }))
-    .filter((section) => section.metrics.length > 0);
-}
 
 function PlatformEngagementSection({ section }: { section: PlatformSection }) {
   const { platform, metrics, posts, averages } = section;
