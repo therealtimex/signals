@@ -33,7 +33,8 @@ Then pass `Authorization: Bearer your-secret-token` on each request.
 
 | Tool | Category | Description |
 |------|----------|-------------|
-| `query_contacts` | contacts | Search/filter contacts; `platformUserId` (+ `platform`) is an exact identity-claim lookup, results list their identities and `archived`. Archived contacts are hidden unless `includeArchived: true` — set it for claim lookups, since the `upsert_contact_identity` guard ignores archived status |
+| `query_contacts` | contacts | Search/filter **active** contacts; `email` is an exact normalized match (incl. non-primary channels), `platformUserId` an exact identity match. Results list their identities. Not a claim lookup — use `resolve_platform_claim` |
+| `resolve_platform_claim` | contacts | Is this platform account already claimed, by a contact **or an org** identity? Same resolution `upsert_contact_identity` enforces. Returns `{claimed:false}` or `{claimed:true, claimant:{kind, …, archived}}` |
 | `get_contact` | contacts | Full contact by ID |
 | `create_contact` | contacts | Create a contact (`channels[]`, `employments[]` supported) |
 | `update_contact` | contacts | Update contact fields |

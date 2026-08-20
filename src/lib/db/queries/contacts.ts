@@ -25,6 +25,8 @@ import {
 } from "@/lib/db/queries/contact-employment-writes";
 import { attachContactDtos, getContactDtoById } from "@/lib/db/queries/contact-read-model";
 import { recalcContactEnrichment } from "@/lib/db/contact-enrichment-recalc";
+export { isContactArchived } from "@/lib/db/contact-archive";
+import { normalizeChannelValue } from "@/lib/db/channel-types";
 import type { ContactDTO } from "@/lib/db/queries/contact-dto";
 import type { Contact, NewContact, PaginatedResult, ContactIdentity } from "@/lib/db/types";
 import type { CreationTag } from "@/lib/db/creation-sources";
@@ -213,21 +215,9 @@ function recalcEnrichment(contactId: string): void {
   recalcContactEnrichment(contactId);
 }
 
-/**
- * Canonical "is this contact archived" test. `archived: 1` lives in the contact
- * metadata blob (see `archiveContact`), so every reader has to parse it the same way.
- */
-export function isContactArchived(metadata: string | null | undefined): boolean {
-  if (!metadata) return false;
-  try {
-    return (JSON.parse(metadata) as { archived?: number }).archived === 1;
-  } catch {
-    return false;
-  }
-}
-
 export function listContacts(opts?: {
   search?: string;
+  email?: string;
   funnelStage?: string;
   platform?: string;
   platformUserId?: string;
@@ -270,6 +260,26 @@ export function listContacts(opts?: {
             ),
         ),
       )!,
+    );
+  }
+  if (opts?.email) {
+    // Exact match on the server-owned normalized dedup key, not substring `search`.
+    // This is what makes email dedupe deterministic and, unlike the flat `email`
+    // column, it also matches non-primary email channels.
+    const valueNormalized = normalizeChannelValue("email", opts.email);
+    conditions.push(
+      exists(
+        db
+          .select({ id: contactChannels.id })
+          .from(contactChannels)
+          .where(
+            and(
+              eq(contactChannels.contactId, contacts.id),
+              eq(contactChannels.channelType, "email"),
+              eq(contactChannels.valueNormalized, valueNormalized),
+            ),
+          ),
+      ),
     );
   }
   if (opts?.funnelStage) {

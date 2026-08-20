@@ -65,9 +65,9 @@ describe("contacts queries", () => {
   });
 
   it("hides an archived claim holder by default but returns it with includeArchived", () => {
-    // Regression for #202 finding 1: getIdentityByPlatformUser has no archived
-    // filter, so a claim lookup that hides archived contacts disagrees with the
-    // guard that later rejects the identity attach.
+    // #202 finding 1: the claim guard has no archived filter, so a claim lookup
+    // that hides archived contacts disagrees with it. Claim resolution now lives in
+    // resolvePlatformClaim; this pins the db-level archived boundary it relies on.
     const owner = createContact({ name: "Archived Owner" });
     createIdentity({ contactId: owner.id, platform: "x", platformUserId: "sama" });
     archiveContact(owner.id, "test");

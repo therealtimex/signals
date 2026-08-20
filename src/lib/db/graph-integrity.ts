@@ -2,7 +2,7 @@ import { and, eq, or } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { contactIdentities, contacts, embeddings, graphEdges, niches, orgIdentities } from "@/lib/db/schema";
 import { nodeExists } from "@/lib/db/queries/graph";
-import { isContactArchived } from "@/lib/db/queries/contacts";
+import { isContactArchived } from "@/lib/db/contact-archive";
 import type { GraphEdge, GraphNodeType } from "@/lib/db/types";
 
 export type GraphIntegrityIssueReason =

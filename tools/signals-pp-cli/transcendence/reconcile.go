@@ -86,12 +86,12 @@ func newReconcileCmd(flags *rootFlags) *cobra.Command {
 				if err != nil {
 					return classifyAPIError(err, flags)
 				}
-				// Shares findExistingContact with import, so the preview now also
-				// sees archived claim holders. A row whose (platform, platformUserId)
-				// belongs to an archived contact counts as WouldSkip because that is
-				// exactly what import will do with it — the preview would otherwise
-				// promise a create that import refuses.
-				if existing.ID != "" {
+				// Shares findExistingContact with import, so the preview also sees
+				// claim holders import will refuse: an archived contact, or an org
+				// identity holding the platform account. Both count as WouldSkip
+				// because that is exactly what import does with them — the preview
+				// would otherwise promise a create that import refuses.
+				if existing.matched() {
 					summary.WouldSkip++
 				} else {
 					summary.WouldCreate++

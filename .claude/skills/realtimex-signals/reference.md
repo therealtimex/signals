@@ -15,7 +15,8 @@ Invoke body: `{ "tool": "<name>", "input": { ... } }`
 
 | Tool | Use when |
 |------|----------|
-| `query_contacts` | Search/filter CRM contacts |
+| `query_contacts` | Search/filter active CRM contacts (`email` = exact normalized match, `platformUserId` = exact identity match) |
+| `resolve_platform_claim` | Is a platform account already claimed, by a contact or an org? Use before creating a contact for an imported handle |
 | `get_contact` | Full record by `contactId` |
 | `create_contact` | New contact (requires `name`; optional `channels[]`, `employments[]`) |
 | `update_contact` | Overwrite fields on existing contact |
@@ -78,6 +79,14 @@ Scores and metrics are validated at the query layer. Grounding uses shared-scope
 ```json
 { "search": "northwind", "funnelStage": "prospect", "pageSize": 20 }
 ```
+
+**resolve_platform_claim**
+```json
+{ "platform": "x", "platformUserId": "sama" }
+```
+Returns `{"claimed": false}` or `{"claimed": true, "claimant": {...}}`. A `contact`
+claimant reports `archived`; an `org` claimant means the account belongs to an
+organization. Both block `upsert_contact_identity`, so resolve before creating a contact.
 
 ## Platform enum
 

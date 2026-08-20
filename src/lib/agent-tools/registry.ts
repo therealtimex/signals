@@ -9,6 +9,7 @@ import {
   listWorkflowTemplatesSchema,
   queryAnalyticsSchema,
   queryContactsSchema,
+  resolvePlatformClaimSchema,
   queryContentSchema,
   queryGoalsSchema,
   queryWorkflowsSchema,
@@ -82,6 +83,7 @@ import {
   handleListWorkflowTemplates,
   handleQueryAnalytics,
   handleQueryContacts,
+  handleResolvePlatformClaim,
   handleQueryContent,
   handleQueryGoals,
   handleQueryWorkflows,
@@ -112,16 +114,29 @@ export const AGENT_TOOLS: Record<string, AgentToolDefinition> = {
   query_contacts: {
     name: "query_contacts",
     description:
-      "Search and filter contacts by name, email, company, funnel stage, or platform. " +
-      "Pass platformUserId (optionally with platform) for an exact platform-identity lookup; " +
-      "each result lists its platform identities and whether it is archived. " +
-      "Archived contacts are excluded unless includeArchived is true — set it when " +
-      "resolving whether a platform account is already claimed, because the claim " +
-      "guard on upsert_contact_identity ignores archived status.",
+      "Search and filter active contacts by name, company, funnel stage, or platform. " +
+      "Pass email for an exact normalized email match (including non-primary email " +
+      "channels), or platformUserId for an exact platform-identity match. " +
+      "To find out whether a platform account is already claimed, use " +
+      "resolve_platform_claim instead — this tool excludes archived contacts and " +
+      "does not see org-held claims.",
     category: "contacts",
     schema: queryContactsSchema,
     parameters: zodToParameters(queryContactsSchema),
     execute: handleQueryContacts,
+  },
+  resolve_platform_claim: {
+    name: "resolve_platform_claim",
+    description:
+      "Resolve whether a platform account is already claimed, by a contact identity or an " +
+      "org identity. This is the same resolution upsert_contact_identity enforces, so use " +
+      "it before creating a contact for an imported platform handle. Returns " +
+      "{claimed:false} or {claimed:true, claimant:{kind:'contact'|'org', ...}}; a contact " +
+      "claimant reports whether it is archived.",
+    category: "contacts",
+    schema: resolvePlatformClaimSchema,
+    parameters: zodToParameters(resolvePlatformClaimSchema),
+    execute: handleResolvePlatformClaim,
   },
   get_contact: {
     name: "get_contact",

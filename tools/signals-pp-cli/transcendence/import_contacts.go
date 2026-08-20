@@ -44,12 +44,24 @@ type importContactsSummary struct {
 	Notes []string `json:"notes"`
 }
 
-// contactMatch is the result of a dedupe lookup. Archived matters because the
-// claim guard behind upsert_contact_identity ignores archived status, so an
-// archived owner still blocks the identity we would attach.
+// contactMatch is the result of a dedupe lookup.
+//
+// Archived matters because the claim guard behind upsert_contact_identity does not
+// filter archived contacts, so an archived owner still blocks the identity we would
+// attach. OrgID matters because a platform account can be claimed by an org identity
+// as well, which blocks a contact identity just as hard.
 type contactMatch struct {
 	ID       string
 	Archived bool
+	OrgID    string
+}
+
+// matched reports whether the row resolved to an existing owner of any kind.
+// Every consumer deciding "create or not" must branch on this rather than on ID
+// alone, or a new claimant kind silently reverts to creating a duplicate — which
+// is what happened to reconcile when org claims were added.
+func (m contactMatch) matched() bool {
+	return m.ID != "" || m.OrgID != ""
 }
 
 func newImportContactsCmd(flags *rootFlags) *cobra.Command {
@@ -288,6 +300,16 @@ func importContactChunk(
 				summary.Errors = append(summary.Errors, err.Error())
 				continue
 			}
+			if existing.OrgID != "" {
+				// An org holds this platform account. Creating a contact would be
+				// rejected by the same guard, so skip and name the owner.
+				summary.Skipped++
+				summary.Notes = append(summary.Notes, fmt.Sprintf(
+					"%s: %s/%s is already claimed by org %s; reassign the account before importing this row",
+					row.Name, row.Platform, row.PlatformUserID, existing.OrgID,
+				))
+				continue
+			}
 			if existing.ID != "" && existing.Archived {
 				// Enriching would be invisible (the contact is hidden) and
 				// un-archiving would silently undo a deliberate user action, so
@@ -373,14 +395,16 @@ func invokeAgentTool(
 
 func findExistingContact(cmd *cobra.Command, c *client.Client, flags *rootFlags, row contactRow) (contactMatch, error) {
 	if row.Email != "" {
+		// Exact normalized match, server-side. Trust the filter rather than
+		// re-checking payload fields the server may not send (#207).
 		result, err := invokeAgentTool(cmd, c, flags, "query_contacts", map[string]any{
-			"search":   row.Email,
+			"email":    row.Email,
 			"pageSize": 20,
 		})
 		if err != nil {
 			return contactMatch{}, err
 		}
-		if id := matchContactByEmail(result, row.Email); id != "" {
+		if id := firstContactID(result); id != "" {
 			return contactMatch{ID: id}, nil
 		}
 	}
@@ -389,86 +413,55 @@ func findExistingContact(cmd *cobra.Command, c *client.Client, flags *rootFlags,
 		// not cover contact_identities, so searching the handle never matched and
 		// the import created a duplicate that upsert_contact_identity then
 		// rejected as an already-claimed platform account (#202).
-		// includeArchived mirrors the claim guard: getIdentityByPlatformUser has
-		// no archived filter, so a lookup that hides archived contacts would miss
-		// an owner that still blocks the identity attach.
-		result, err := invokeAgentTool(cmd, c, flags, "query_contacts", map[string]any{
-			"platformUserId":  row.PlatformUserID,
-			"platform":        row.Platform,
-			"includeArchived": true,
-			"pageSize":        50,
+		// resolve_platform_claim is the same resolution upsert_contact_identity
+		// enforces, so this cannot disagree with the guard the way a query_contacts
+		// reconstruction could (#206).
+		result, err := invokeAgentTool(cmd, c, flags, "resolve_platform_claim", map[string]any{
+			"platform":       row.Platform,
+			"platformUserId": row.PlatformUserID,
 		})
 		if err != nil {
 			return contactMatch{}, err
 		}
-		if match := matchContactByPlatform(result, row.Platform, row.PlatformUserID); match.ID != "" {
-			return match, nil
-		}
+		return platformClaimMatch(result), nil
 	}
 	return contactMatch{}, nil
 }
 
-func matchContactByEmail(result map[string]any, email string) string {
+// firstContactID takes the first contact from an exact-filter query result. Safe only
+// because the filter is exact and server-side; do not use it with fuzzy `search`.
+func firstContactID(result map[string]any) string {
 	contacts, ok := result["contacts"].([]any)
+	if !ok || len(contacts) == 0 {
+		return ""
+	}
+	contact, ok := contacts[0].(map[string]any)
 	if !ok {
 		return ""
 	}
-	normalized := strings.ToLower(strings.TrimSpace(email))
-	for _, item := range contacts {
-		contact, ok := item.(map[string]any)
-		if !ok {
-			continue
-		}
-		id, _ := contact["id"].(string)
-		if channels, ok := contact["channels"].([]any); ok {
-			for _, ch := range channels {
-				channel, ok := ch.(map[string]any)
-				if !ok {
-					continue
-				}
-				value, _ := channel["value"].(string)
-				if strings.ToLower(strings.TrimSpace(value)) == normalized {
-					return id
-				}
-			}
-		}
-		emailField, _ := contact["email"].(string)
-		if strings.ToLower(strings.TrimSpace(emailField)) == normalized {
-			return id
-		}
-	}
-	return ""
+	id, _ := contact["id"].(string)
+	return id
 }
 
-func matchContactByPlatform(result map[string]any, platform, platformUserID string) contactMatch {
-	contacts, ok := result["contacts"].([]any)
+func platformClaimMatch(result map[string]any) contactMatch {
+	if claimed, _ := result["claimed"].(bool); !claimed {
+		return contactMatch{}
+	}
+	claimant, ok := result["claimant"].(map[string]any)
 	if !ok {
 		return contactMatch{}
 	}
-	for _, item := range contacts {
-		contact, ok := item.(map[string]any)
-		if !ok {
-			continue
-		}
-		id, _ := contact["id"].(string)
-		archived, _ := contact["archived"].(bool)
-		identities, ok := contact["identities"].([]any)
-		if !ok {
-			continue
-		}
-		for _, identity := range identities {
-			entry, ok := identity.(map[string]any)
-			if !ok {
-				continue
-			}
-			p, _ := entry["platform"].(string)
-			pid, _ := entry["platformUserId"].(string)
-			if strings.EqualFold(p, platform) && pid == platformUserID {
-				return contactMatch{ID: id, Archived: archived}
-			}
-		}
+	switch kind, _ := claimant["kind"].(string); kind {
+	case "org":
+		orgID, _ := claimant["orgId"].(string)
+		return contactMatch{OrgID: orgID}
+	case "contact":
+		contactID, _ := claimant["contactId"].(string)
+		archived, _ := claimant["archived"].(bool)
+		return contactMatch{ID: contactID, Archived: archived}
+	default:
+		return contactMatch{}
 	}
-	return contactMatch{}
 }
 
 func createContactFromRow(cmd *cobra.Command, c *client.Client, flags *rootFlags, row contactRow) (string, error) {

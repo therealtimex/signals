@@ -130,6 +130,9 @@
                           "search": {
                             "type": "string"
                           },
+                          "email": {
+                            "type": "string"
+                          },
                           "funnelStage": {
                             "type": "string",
                             "enum": [
@@ -160,9 +163,6 @@
                           },
                           "platformUserId": {
                             "type": "string"
-                          },
-                          "includeArchived": {
-                            "type": "boolean"
                           },
                           "page": {
                             "type": "number"
@@ -210,6 +210,48 @@
                             "type": "number"
                           }
                         },
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "resolve_platform_claim"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "platform": {
+                            "type": "string",
+                            "enum": [
+                              "x",
+                              "linkedin",
+                              "gmail",
+                              "substack",
+                              "instagram",
+                              "facebook",
+                              "threads",
+                              "tiktok",
+                              "youtube",
+                              "bluesky",
+                              "telegram",
+                              "whatsapp"
+                            ]
+                          },
+                          "platformUserId": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "platform",
+                          "platformUserId"
+                        ],
                         "additionalProperties": false
                       }
                     },
@@ -2501,6 +2543,7 @@
                     "type": "string",
                     "enum": [
                       "query_contacts",
+                      "resolve_platform_claim",
                       "get_contact",
                       "create_contact",
                       "update_contact",
@@ -2691,6 +2734,6 @@
   ],
   "x-signals-agent-tools": {
     "manifestVersion": "1",
-    "toolCount": 45
+    "toolCount": 46
   }
 }
