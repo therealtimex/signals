@@ -52,14 +52,45 @@ jobs:
           go-version: "1.26.x"
           check-latest: true
 
+      # tools/signals-pp-cli/source is generated at build time, so it has no committed
+      # go.sum for setup-go's own cache to key on — every run re-downloaded the whole
+      # module graph and re-compiled the generator. That is minutes of proxy traffic per
+      # PR and a fresh roll of the dice on proxy.golang.org each time; one dropped stream
+      # (INTERNAL_ERROR mid-zip) fails the job with nothing wrong in the diff.
+      #
+      # The key covers everything that decides the module graph: the pinned generator
+      # version and Go toolchain in the build script, the spec the CLI is generated from,
+      # and the hand-written overlay whose imports get compiled alongside it. ~/go/bin
+      # carries the generator binary itself — build-signals-pp-cli.mjs compares
+      # `cli-printing-press --version` against its pin and reinstalls on a mismatch, so a
+      # stale hit cannot be silently used.
+      - name: Cache Go modules and the CLI generator
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/go/bin
+            ~/.cache/go-build
+          key: ${{ runner.os }}-signals-pp-cli-go-${{ hashFiles('scripts/build-signals-pp-cli.mjs', 'openapi/agent-tools.json', 'tools/signals-pp-cli/transcendence/**/*.go') }}
+          restore-keys: |
+            ${{ runner.os }}-signals-pp-cli-go-
+
       - name: Install dependencies
         run: npm ci
 
       # Generates the CLI from openapi/agent-tools.json, overlays
       # tools/signals-pp-cli/transcendence/*.go, then runs go vet + go build.
       # Host target only; cross-compilation stays in release.yml.
+      #
+      # Retried once: a cold cache still fetches from proxy.golang.org, and that fetch is
+      # the only part of this job that can fail without anything being wrong. A real
+      # compile error fails both attempts and still fails the job.
       - name: Build signals-pp-cli
-        run: npm run build:signals-pp-cli
+        run: |
+          npm run build:signals-pp-cli && exit 0
+          echo "::warning::build:signals-pp-cli failed once — retrying in case the Go module proxy dropped a fetch"
+          sleep 15
+          npm run build:signals-pp-cli
 
       # Only runs for real once a binary exists — it self-skips otherwise.
       - name: signals-pp-cli golden tests
