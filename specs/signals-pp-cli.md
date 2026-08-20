@@ -101,7 +101,10 @@ Examples: `query-contacts`, `create-contact`, `enrich-contact`, `get-publish-job
 - `workflow-runs/<runId>/contacts.csv`
 - `workflow-runs/<runId>/contacts.json`
 
-**Dedupe keys (v1):** primary email, then `(platform, platformUserId)` when present.
+**Dedupe keys (v1):** primary email, then `(platform, platformUserId)` when present. The
+platform lookup passes `includeArchived: true` so it sees archived claim holders — the
+`upsert_contact_identity` guard ignores archived status, so hiding them would create a
+duplicate that is then rejected.
 
 **Stdout (last line, JSON):**
 
@@ -112,9 +115,14 @@ Examples: `query-contacts`, `create-contact`, `enrich-contact`, `get-publish-job
   "skipped": 4,
   "enriched": 2,
   "failed": 0,
-  "errors": []
+  "errors": [],
+  "notes": []
 }
 ```
+
+`notes` carries non-failure explanations (currently: a row skipped because an **archived**
+contact already holds that `(platform, platformUserId)` claim). It never affects `success`
+or the exit code — restore the archived contact to import such a row.
 
 **Exit codes:** `0` all succeeded or skipped cleanly · `3` file not found · `4` auth / `SIGNALS_NOT_RUNNING` · `5` partial row failure · `7` rate limited.
 

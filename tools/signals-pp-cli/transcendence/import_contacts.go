@@ -38,6 +38,18 @@ type importContactsSummary struct {
 	Enriched int      `json:"enriched"`
 	Failed   int      `json:"failed"`
 	Errors   []string `json:"errors"`
+	// Notes carries non-failure explanations (e.g. a row skipped because an
+	// archived contact already holds the platform claim). Kept separate from
+	// Errors so it never affects Success or the exit code.
+	Notes []string `json:"notes"`
+}
+
+// contactMatch is the result of a dedupe lookup. Archived matters because the
+// claim guard behind upsert_contact_identity ignores archived status, so an
+// archived owner still blocks the identity we would attach.
+type contactMatch struct {
+	ID       string
+	Archived bool
 }
 
 func newImportContactsCmd(flags *rootFlags) *cobra.Command {
@@ -90,6 +102,7 @@ create or enrich contacts via agent-tools invoke.`,
 			summary := importContactsSummary{
 				Success: true,
 				Errors:  []string{},
+				Notes:   []string{},
 			}
 
 			for start := 0; start < len(rows); start += batchSize {
@@ -275,8 +288,20 @@ func importContactChunk(
 				summary.Errors = append(summary.Errors, err.Error())
 				continue
 			}
-			if existing != "" {
-				if enriched, err := enrichExistingContact(cmd, c, flags, existing, row); err != nil {
+			if existing.ID != "" && existing.Archived {
+				// Enriching would be invisible (the contact is hidden) and
+				// un-archiving would silently undo a deliberate user action, so
+				// skip and say why. Either way we must not create a duplicate:
+				// upsert_contact_identity would reject the claim right after.
+				summary.Skipped++
+				summary.Notes = append(summary.Notes, fmt.Sprintf(
+					"%s: %s/%s is already claimed by archived contact %s; restore it to import this row",
+					row.Name, row.Platform, row.PlatformUserID, existing.ID,
+				))
+				continue
+			}
+			if existing.ID != "" {
+				if enriched, err := enrichExistingContact(cmd, c, flags, existing.ID, row); err != nil {
 					summary.Failed++
 					summary.Errors = append(summary.Errors, err.Error())
 				} else if enriched {
@@ -346,33 +371,41 @@ func invokeAgentTool(
 	return result, nil
 }
 
-func findExistingContact(cmd *cobra.Command, c *client.Client, flags *rootFlags, row contactRow) (string, error) {
+func findExistingContact(cmd *cobra.Command, c *client.Client, flags *rootFlags, row contactRow) (contactMatch, error) {
 	if row.Email != "" {
 		result, err := invokeAgentTool(cmd, c, flags, "query_contacts", map[string]any{
 			"search":   row.Email,
 			"pageSize": 20,
 		})
 		if err != nil {
-			return "", err
+			return contactMatch{}, err
 		}
 		if id := matchContactByEmail(result, row.Email); id != "" {
-			return id, nil
+			return contactMatch{ID: id}, nil
 		}
 	}
 	if row.Platform != "" && row.PlatformUserID != "" {
+		// platformUserId is an exact identity-claim filter. Free-text search does
+		// not cover contact_identities, so searching the handle never matched and
+		// the import created a duplicate that upsert_contact_identity then
+		// rejected as an already-claimed platform account (#202).
+		// includeArchived mirrors the claim guard: getIdentityByPlatformUser has
+		// no archived filter, so a lookup that hides archived contacts would miss
+		// an owner that still blocks the identity attach.
 		result, err := invokeAgentTool(cmd, c, flags, "query_contacts", map[string]any{
-			"search":   row.PlatformUserID,
-			"platform": row.Platform,
-			"pageSize": 50,
+			"platformUserId":  row.PlatformUserID,
+			"platform":        row.Platform,
+			"includeArchived": true,
+			"pageSize":        50,
 		})
 		if err != nil {
-			return "", err
+			return contactMatch{}, err
 		}
-		if id := matchContactByPlatform(result, row.Platform, row.PlatformUserID); id != "" {
-			return id, nil
+		if match := matchContactByPlatform(result, row.Platform, row.PlatformUserID); match.ID != "" {
+			return match, nil
 		}
 	}
-	return "", nil
+	return contactMatch{}, nil
 }
 
 func matchContactByEmail(result map[string]any, email string) string {
@@ -407,10 +440,10 @@ func matchContactByEmail(result map[string]any, email string) string {
 	return ""
 }
 
-func matchContactByPlatform(result map[string]any, platform, platformUserID string) string {
+func matchContactByPlatform(result map[string]any, platform, platformUserID string) contactMatch {
 	contacts, ok := result["contacts"].([]any)
 	if !ok {
-		return ""
+		return contactMatch{}
 	}
 	for _, item := range contacts {
 		contact, ok := item.(map[string]any)
@@ -418,6 +451,7 @@ func matchContactByPlatform(result map[string]any, platform, platformUserID stri
 			continue
 		}
 		id, _ := contact["id"].(string)
+		archived, _ := contact["archived"].(bool)
 		identities, ok := contact["identities"].([]any)
 		if !ok {
 			continue
@@ -430,11 +464,11 @@ func matchContactByPlatform(result map[string]any, platform, platformUserID stri
 			p, _ := entry["platform"].(string)
 			pid, _ := entry["platformUserId"].(string)
 			if strings.EqualFold(p, platform) && pid == platformUserID {
-				return id
+				return contactMatch{ID: id, Archived: archived}
 			}
 		}
 	}
-	return ""
+	return contactMatch{}
 }
 
 func createContactFromRow(cmd *cobra.Command, c *client.Client, flags *rootFlags, row contactRow) (string, error) {

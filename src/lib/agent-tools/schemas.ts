@@ -37,6 +37,8 @@ export const queryContactsSchema = z.object({
   search: z.string().optional(),
   funnelStage: funnelStage.optional(),
   platform: platform.optional(),
+  platformUserId: z.string().min(1).optional(),
+  includeArchived: z.boolean().optional(),
   page: z.number().int().positive().optional(),
   pageSize: z.number().int().positive().max(100).optional(),
   sort: z.enum(["createdAt", "enrichmentScore"]).optional(),

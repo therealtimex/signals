@@ -1,4 +1,4 @@
-import { listContacts, getContactById, createContact, updateContact, recalcEnrichment } from "@/lib/db/queries/contacts";
+import { listContacts, getContactById, createContact, updateContact, recalcEnrichment, isContactArchived } from "@/lib/db/queries/contacts";
 import { createIdentity, getIdentityById, getIdentityByPlatformUser, updateIdentity } from "@/lib/db/queries/identities";
 import { getDashboardMetrics } from "@/lib/db/queries/dashboard";
 import { listWorkflowRuns } from "@/lib/db/queries/workflows";
@@ -66,6 +66,21 @@ function primaryPlatform(
   return primary?.platform ?? identities[0]?.platform ?? null;
 }
 
+/** Compact identity ref for list payloads: enough to resolve a platform claim. */
+function serializeContactIdentityRef(identity: {
+  platform: string;
+  platformUserId: string;
+  platformHandle: string | null;
+  isPrimary: number | boolean;
+}) {
+  return {
+    platform: identity.platform,
+    platformUserId: identity.platformUserId,
+    handle: identity.platformHandle,
+    isPrimary: Boolean(identity.isPrimary),
+  };
+}
+
 function serializeContactIdentity(identity: ContactIdentity) {
   return {
     id: identity.id,
@@ -92,6 +107,8 @@ export async function handleQueryContacts(input: z.infer<typeof queryContactsSch
       search: input.search,
       funnelStage: input.funnelStage,
       platform: input.platform,
+      platformUserId: input.platformUserId,
+      includeArchived: input.includeArchived,
       page: input.page,
       pageSize: input.pageSize ?? DEFAULT_PAGE_SIZE,
       sort: input.sort,
@@ -118,6 +135,8 @@ export async function handleQueryContacts(input: z.infer<typeof queryContactsSch
         stage: c.funnelStage,
         platform: primaryPlatform(c.identities),
         identityCount: c.identities.length,
+        identities: c.identities.map(serializeContactIdentityRef),
+        archived: isContactArchived(c.metadata),
         resolvedAvatarUrl: c.resolvedAvatarUrl,
         ...serializeContactBirthFields(c),
       })),
