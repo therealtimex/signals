@@ -254,3 +254,30 @@
 .animate-step-slide-in {
   animation: stepSlideIn 0.3s ease-out both;
 }
+
+@keyframes signals-mascot-blink {
+  0%, 44%, 56%, 100% { transform: scaleY(1); }
+  50% { transform: scaleY(0.1); }
+}
+
+@keyframes signals-mascot-look {
+  0% { translate: 0px 0px; }
+  100% { translate: 4px 3px; }
+}
+
+.signals-mascot-eye-blink {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: signals-mascot-blink 3s ease-in-out infinite;
+}
+
+.signals-mascot-eye-look {
+  animation: signals-mascot-look 3s ease-in-out infinite alternate;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .signals-mascot-eye-blink,
+  .signals-mascot-eye-look {
+    animation: none;
+  }
+}

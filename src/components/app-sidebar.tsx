@@ -15,9 +15,10 @@ import {
   HelpCircle,
 } from "lucide-react";
 import Link from "next/link";
-import Image from "next/image";
 import { usePathname } from "next/navigation";
 import packageMetadata from "../../package.json";
+import { SignalsMascot } from "@/components/signals-mascot";
+import { mascotMoodForPathname } from "@/components/signals-mascot-mood";
 import {
   Sidebar,
   SidebarContent,
@@ -46,18 +47,16 @@ const navItems = [
 
 export function AppSidebar() {
   const pathname = usePathname();
+  const mascotMood = mascotMoodForPathname(pathname);
 
   return (
     <Sidebar className="border-r border-sidebar-border">
       <SidebarHeader className="h-14 flex-row items-center border-b border-sidebar-border px-6 py-0">
-        <Link href="/dashboard" className="flex min-w-0 flex-1 items-center gap-3">
-          <Image
-            src="/favicon-32x32.png"
-            alt="Signals"
-            width={32}
-            height={32}
-            className="rounded-lg"
-          />
+        <Link
+          href="/dashboard"
+          className="flex min-w-0 flex-1 items-center gap-3"
+        >
+          <SignalsMascot mood={mascotMood} size={36} />
           <span className="text-lg font-bold text-gradient-brand font-display">
             Signals
           </span>
@@ -82,7 +81,7 @@ export function AppSidebar() {
                       className={cn(
                         "font-display font-medium transition-all duration-200",
                         isActive &&
-                          "border-l-2 border-primary bg-primary/8 text-primary"
+                          "border-l-2 border-primary bg-primary/8 text-primary",
                       )}
                     >
                       <Link href={item.href}>
@@ -106,7 +105,7 @@ export function AppSidebar() {
               className={cn(
                 "font-display font-medium transition-all duration-200",
                 pathname === "/dashboard/settings" &&
-                  "border-l-2 border-primary bg-primary/8 text-primary"
+                  "border-l-2 border-primary bg-primary/8 text-primary",
               )}
             >
               <Link href="/dashboard/settings">
@@ -122,7 +121,7 @@ export function AppSidebar() {
               className={cn(
                 "font-display font-medium transition-all duration-200",
                 pathname.startsWith("/dashboard/guide") &&
-                  "border-l-2 border-primary bg-primary/8 text-primary"
+                  "border-l-2 border-primary bg-primary/8 text-primary",
               )}
             >
               <Link href="/dashboard/guide">
@@ -138,7 +137,7 @@ export function AppSidebar() {
               className={cn(
                 "font-display font-medium transition-all duration-200",
                 pathname === "/dashboard/help" &&
-                  "border-l-2 border-primary bg-primary/8 text-primary"
+                  "border-l-2 border-primary bg-primary/8 text-primary",
               )}
             >
               <Link href="/dashboard/help">

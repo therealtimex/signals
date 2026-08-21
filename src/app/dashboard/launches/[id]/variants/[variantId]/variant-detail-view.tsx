@@ -157,6 +157,7 @@ export function VariantDetailView({
           {runs.length === 0 ? (
             <EmptyState
               icon={Wind}
+              mood="sleepy"
               title="No simulation runs yet"
               description={RUN_TIMELINE_CTA}
             />

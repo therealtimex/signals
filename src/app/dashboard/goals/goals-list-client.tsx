@@ -85,6 +85,7 @@ function GoalsListInner({
       <>
         <EmptyState
           icon={Target}
+          mood="attentive"
           title="No goals yet"
           description="Create your first demand generation goal to start tracking progress across your workflows."
         />
