@@ -114,9 +114,9 @@ describe("ContactExploreCardView", () => {
     expect(html).not.toContain("Regenerate");
   });
 
-  it("formatPlatformHandle returns stored value unchanged", () => {
-    expect(formatPlatformHandle("@username")).toBe("@username");
-    expect(formatPlatformHandle("/in/name")).toBe("/in/name");
+  it("formatPlatformHandle adds the X sigil and leaves other platforms alone", () => {
+    expect(formatPlatformHandle("x", "username")).toBe("@username");
+    expect(formatPlatformHandle("linkedin", "/in/name")).toBe("/in/name");
   });
 
   it("renders header, relationship chip, org badge, and recent posts", () => {

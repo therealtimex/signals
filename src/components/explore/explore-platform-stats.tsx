@@ -49,6 +49,7 @@ export function ExplorePlatformStats({ identities }: ExplorePlatformStatsProps) 
                       )}
                       {identity.platformHandle && (
                         <ExplorePlatformHandle
+                          platform={identity.platform}
                           handle={identity.platformHandle}
                           platformUrl={identity.platformUrl}
                         />

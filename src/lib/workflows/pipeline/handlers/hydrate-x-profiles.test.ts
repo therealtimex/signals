@@ -146,7 +146,7 @@ describe("hydrateXProfiles", () => {
     const hydrated = getIdentityById(identity.id)!;
     expect(hydrated).toMatchObject({
       displayName: "Person 42",
-      platformHandle: "@person42",
+      platformHandle: "person42",
       platformUrl: "https://x.com/person42",
       bio: "Bio 42",
       avatarUrl: "https://img.example.com/42_normal.jpg",

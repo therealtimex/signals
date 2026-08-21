@@ -58,7 +58,7 @@ export function mapXUserToIdentity(
     contactId,
     platform: "x" as const,
     platformUserId: xUser.id,
-    platformHandle: `@${xUser.username}`,
+    platformHandle: xUser.username,
     platformUrl: `https://x.com/${xUser.username}`,
     platformData,
     displayName: xUser.name,

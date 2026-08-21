@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { formatPlatformHandle } from "@/lib/contact-identity-handle";
 import {
   Select,
   SelectContent,
@@ -184,7 +185,7 @@ export function IdentitiesSection({ contactId, identities }: IdentitiesSectionPr
                     </div>
                     <p className="text-sm mt-1 truncate">
                       {identity.platformHandle
-                        ? `@${identity.platformHandle}`
+                        ? formatPlatformHandle(identity.platform, identity.platformHandle)
                         : identity.platformUserId}
                     </p>
                   </div>

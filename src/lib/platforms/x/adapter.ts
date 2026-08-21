@@ -22,7 +22,7 @@ import type { XUser } from "@/lib/platforms/x/client";
 function toProfile(xUser: XUser): PlatformUserProfile {
   return {
     platformUserId: xUser.id,
-    platformHandle: `@${xUser.username}`,
+    platformHandle: xUser.username,
     displayName: xUser.name,
     bio: xUser.description ?? null,
     location: xUser.location ?? null,
