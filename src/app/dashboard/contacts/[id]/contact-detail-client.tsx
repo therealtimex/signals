@@ -248,22 +248,32 @@ export function ContactDetailClient({
   const canEnrich = !contactArchived && !contact.isSelf && Boolean(profilePipelineTemplateId);
   const thinProfile = contact.enrichmentScore < 60 && !contact.isSelf;
   const showHeadline = !isRedundantHeadline(contact.headline, contact.title, contact.company);
-  const metaItems = [
-    contact.location,
-    contact.email,
-    contact.phone,
-    primaryIdentity
-      ? (platformLabels[primaryIdentity.platform] ?? primaryIdentity.platform)
-      : null,
-    contact.website ? (
-      <MetaLink href={hrefForWebsite(contact.website)}>
-        {formatWebsiteLabel(contact.website)}
-      </MetaLink>
-    ) : null,
-    contact.profileUrl ? (
-      <MetaLink href={contact.profileUrl}>View profile</MetaLink>
-    ) : null,
-  ].filter((item): item is ReactNode => Boolean(item));
+  const metaItems: { key: string; node: ReactNode }[] = [];
+  if (contact.location) metaItems.push({ key: "location", node: contact.location });
+  if (contact.email) metaItems.push({ key: "email", node: contact.email });
+  if (contact.phone) metaItems.push({ key: "phone", node: contact.phone });
+  if (primaryIdentity) {
+    metaItems.push({
+      key: "platform",
+      node: platformLabels[primaryIdentity.platform] ?? primaryIdentity.platform,
+    });
+  }
+  if (contact.website) {
+    metaItems.push({
+      key: "website",
+      node: (
+        <MetaLink href={hrefForWebsite(contact.website)}>
+          {formatWebsiteLabel(contact.website)}
+        </MetaLink>
+      ),
+    });
+  }
+  if (contact.profileUrl) {
+    metaItems.push({
+      key: "profile",
+      node: <MetaLink href={contact.profileUrl}>View profile</MetaLink>,
+    });
+  }
   const identityDetails = [
     showHeadline && contact.headline ? (
       <p key="headline" className="text-sm text-muted-foreground">
@@ -282,9 +292,9 @@ export function ContactDetailClient({
     ) : null,
     metaItems.length > 0 ? (
       <p key="meta" className="flex flex-wrap text-sm text-muted-foreground">
-        {metaItems.map((item, index) => (
-          <span key={index} className="after:mx-1.5 after:content-['·'] last:after:hidden">
-            {item}
+        {metaItems.map((item) => (
+          <span key={item.key} className="after:mx-1.5 after:content-['·'] last:after:hidden">
+            {item.node}
           </span>
         ))}
       </p>
