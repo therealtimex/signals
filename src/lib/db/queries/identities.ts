@@ -9,9 +9,17 @@ import type { ContactIdentity, NewContactIdentity } from "@/lib/db/types";
 
 /**
  * `platform_handle` stores the bare identifier; the `@` on an X handle is presentation and is
- * added by `formatPlatformHandle` at render time. Every writer — the identities API route, both
- * agent-tools upserts, the Go importer, and the two manual forms — goes through create/update,
- * so normalizing here is what keeps migration 0029 from silently undoing itself.
+ * added by `formatPlatformHandle` at render time. Normalizing here is what keeps migration 0029
+ * from silently undoing itself.
+ *
+ * Covered by this choke point: the identities API route, both agent-tools upserts, the Go
+ * importer (which POSTs to `/api/agent-tools/invoke`), and the two manual forms.
+ *
+ * **Not covered:** `sync-gmail-contacts.ts` and `sync-linkedin-contacts.ts` set
+ * `platform_handle` with raw drizzle. That is safe only because both are non-X and
+ * `normalizePlatformHandle` is trim-only off X. **A new X writer must go through
+ * create/update, not copy those two** — a raw-drizzle X write would reintroduce exactly the
+ * drift this exists to stop.
  */
 function normalizeHandleForWrite(
   platform: string,

@@ -4,10 +4,11 @@ import { createIdentity, updateIdentity } from "@/lib/db/queries/identities";
 import { resetCoreTables } from "@/test/db";
 
 /**
- * Migration 0029 normalized stored handles, but every write boundary — the identities API
- * route, both agent-tools upserts, the Go importer, and the two manual forms — routes through
- * create/update. Without normalization here the storage silently drifts back and the migration
- * undoes itself.
+ * Migration 0029 normalized stored handles. The identities API route, both agent-tools
+ * upserts, the Go importer, and the two manual forms all route through create/update, so
+ * normalizing there is what stops the storage drifting back. `sync-gmail-contacts.ts` and
+ * `sync-linkedin-contacts.ts` bypass it with raw drizzle; they are safe only because both are
+ * non-X. See the note on `normalizeHandleForWrite`.
  */
 describe("contact identity handle normalization on write", () => {
   beforeEach(() => {
