@@ -22,8 +22,9 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Plus, Trash2, ExternalLink } from "lucide-react";
+import { Plus, Trash2 } from "lucide-react";
 import type { ContactIdentity } from "@/lib/db/types";
+import { PlatformMark } from "@/components/platform-mark";
 
 const platformLabels: Record<string, string> = {
   x: "X / Twitter",
@@ -35,9 +36,10 @@ const platformLabels: Record<string, string> = {
 interface IdentitiesSectionProps {
   contactId: string;
   identities: ContactIdentity[];
+  contactName?: string | null;
 }
 
-export function IdentitiesSection({ contactId, identities }: IdentitiesSectionProps) {
+export function IdentitiesSection({ contactId, identities, contactName }: IdentitiesSectionProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [adding, setAdding] = useState(false);
@@ -76,8 +78,7 @@ export function IdentitiesSection({ contactId, identities }: IdentitiesSectionPr
 
   return (
     <div className="space-y-3">
-      <div className="flex justify-between items-center">
-        <h3 className="text-lg font-semibold">Platform Identities</h3>
+      <div className="flex justify-end">
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
             <Button size="sm" variant="outline">
@@ -157,63 +158,68 @@ export function IdentitiesSection({ contactId, identities }: IdentitiesSectionPr
           </CardContent>
         </Card>
       ) : (
-        <div className="space-y-2">
-          {identities.map((identity) => (
-            <Card key={identity.id}>
-              <CardContent className="flex items-center justify-between py-3">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <Badge variant="secondary">
-                        {platformLabels[identity.platform] ?? identity.platform}
-                      </Badge>
-                      {identity.isPrimary === 1 && (
-                        <Badge variant="outline" className="text-xs">
-                          Primary
-                        </Badge>
-                      )}
-                      <Badge
-                        variant="outline"
-                        className={
-                          identity.isActive
-                            ? "bg-chart-4/15 text-chart-4 border-chart-4/25"
-                            : "bg-muted/15 text-muted-foreground border-muted"
-                        }
-                      >
-                        {identity.isActive ? "Active" : "Inactive"}
-                      </Badge>
+        <Card className="gap-0 py-0">
+          <ul className="divide-y">
+            {identities.map((identity) => {
+              const handle = identity.platformHandle
+                ? formatPlatformHandle(identity.platform, identity.platformHandle)
+                : identity.platformUserId;
+              const handleNode = identity.platformUrl ? (
+                <a
+                  href={identity.platformUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-sm font-medium text-primary hover:underline"
+                >
+                  {handle}
+                </a>
+              ) : (
+                <p className="text-sm font-medium">{handle}</p>
+              );
+
+              return (
+                <li key={identity.id} className="flex items-center justify-between gap-3 px-6 py-3">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <PlatformMark platform={identity.platform} />
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        {handleNode}
+                        {identity.isPrimary === 1 && (
+                          <Badge variant="outline" className="text-xs">
+                            Primary
+                          </Badge>
+                        )}
+                        {identity.isActive ? null : (
+                          <Badge
+                            variant="outline"
+                            className="bg-muted/15 text-xs text-muted-foreground border-muted"
+                          >
+                            Inactive
+                          </Badge>
+                        )}
+                      </div>
+                      {identity.displayName &&
+                      identity.displayName !== handle &&
+                      identity.displayName !== contactName ? (
+                        <p className="truncate text-xs text-muted-foreground">
+                          {identity.displayName}
+                        </p>
+                      ) : null}
                     </div>
-                    <p className="text-sm mt-1 truncate">
-                      {identity.platformHandle
-                        ? formatPlatformHandle(identity.platform, identity.platformHandle)
-                        : identity.platformUserId}
-                    </p>
                   </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  {identity.platformUrl && (
-                    <a
-                      href={identity.platformUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      <Button variant="ghost" size="icon">
-                        <ExternalLink className="h-4 w-4" />
-                      </Button>
-                    </a>
-                  )}
                   <Button
                     variant="ghost"
                     size="icon"
                     onClick={() => handleDelete(identity.id)}
+                    aria-label={`Remove ${handle}`}
                   >
                     <Trash2 className="h-4 w-4 text-muted-foreground" />
                   </Button>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+                </li>
+              );
+            })}
+          </ul>
+        </Card>
       )}
     </div>
   );

@@ -10,6 +10,7 @@ const platformDotStyles: Record<string, string> = {
   x: "bg-platform-x",
   linkedin: "bg-platform-linkedin",
   gmail: "bg-platform-gmail",
+  facebook: "bg-[#1877F2]",
 };
 
 export function PlatformBadge({ platform }: PlatformBadgeProps) {

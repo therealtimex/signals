@@ -40,6 +40,7 @@
   --color-platform-x: var(--platform-x);
   --color-platform-linkedin: var(--platform-linkedin);
   --color-platform-gmail: var(--platform-gmail);
+  --color-platform-facebook: var(--platform-facebook);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
@@ -89,6 +90,7 @@
   --platform-x: oklch(0.20 0 0);
   --platform-linkedin: oklch(0.54 0.13 252);
   --platform-gmail: oklch(0.63 0.19 29);
+  --platform-facebook: oklch(0.47 0.18 260);
   --border: oklch(0.91 0.01 270);
   --input: oklch(0.91 0.01 270);
   --ring: oklch(0.50 0.18 195);
@@ -136,6 +138,7 @@
   --platform-x: oklch(0.95 0 0);
   --platform-linkedin: oklch(0.62 0.13 252);
   --platform-gmail: oklch(0.70 0.17 29);
+  --platform-facebook: oklch(0.55 0.18 260);
   --border: oklch(0.28 0.02 270);
   --input: oklch(0.28 0.02 270);
   --ring: oklch(0.65 0.18 195);
