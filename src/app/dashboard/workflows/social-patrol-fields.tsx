@@ -114,17 +114,6 @@ export function SocialPatrolFields({ value, onChange, disabled }: SocialPatrolFi
         />
 
         <PatrolSlider
-          id="patrol-posts"
-          label="Personal profile posts"
-          sliderKey="maxPosts"
-          value={value.maxPosts}
-          onChange={setSlider}
-          disabled={disabled}
-          format={(v) => (v === 1 ? "1 post" : `${v} posts`)}
-          hint={value.maxPosts === 0 ? "Lurk & engage-only — nothing gets published to the profile." : undefined}
-        />
-
-        <PatrolSlider
           id="patrol-comments"
           label="High-intent comments"
           sliderKey="maxComments"
@@ -132,6 +121,11 @@ export function SocialPatrolFields({ value, onChange, disabled }: SocialPatrolFi
           onChange={setSlider}
           disabled={disabled}
           format={(v) => (v === 1 ? "1 comment" : `${v} comments`)}
+          hint={
+            value.maxComments === 0
+              ? "Scan & ingest only — the agent reads the communities without replying."
+              : undefined
+          }
         />
 
         <PatrolSlider

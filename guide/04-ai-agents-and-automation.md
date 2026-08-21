@@ -47,7 +47,7 @@ Content creation — generating and publishing posts.
 Relationship building — interacting with your contacts' content.
 
 - **Reply to Mentions** — Monitors and engages with mentions, replies, and tags on X. Uses browser automation to like and reply to relevant conversations. (~$0.15/run)
-- **Social Intent Patrol** — Runs a time-boxed patrol shift on one acting profile: scans monitored communities for high-intent pain posts, replies with technical value, and captures the engagers into the CRM. The activation dialog exposes sliders for session duration, personal posts, comments, and how many engagers to ingest, plus an approval checkpoint before any comment is published. (~$0.25/run)
+- **Social Intent Patrol** — Runs a time-boxed hunting shift on one acting profile: scans monitored communities for high-intent pain posts, replies with technical value, and captures the engagers into the CRM. Outbound only — it never posts to your own timeline (use **Profile Publishing & Repost** for that). The activation dialog exposes sliders for session duration, comments, and how many engagers to ingest, plus an approval checkpoint before any comment is published. (~$0.25/run)
 
 ### Outreach Agents
 Cold outreach — making first contact through platform engagement.

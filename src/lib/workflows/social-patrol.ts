@@ -1,5 +1,9 @@
 /**
- * "Social Intent Patrol" — a time-boxed engagement shift executed in the Terminal Agent lane.
+ * "Social Intent Patrol" — a time-boxed community-hunting shift executed in the Terminal Agent lane.
+ *
+ * The shift is outbound only: scan monitored communities, reply to pain posts, and capture the
+ * people around them. Broadcasting to the acting profile's own timeline belongs to the
+ * "Profile Publishing & Repost" template, not here.
  *
  * The slider bounds, defaults, and run-config shape live here so the activate dialog, the seed
  * template, and the launch brief cannot drift apart.
@@ -20,7 +24,6 @@ export const MAX_TAG_COUNT = 20;
 
 export type SocialPatrolSliderKey =
   | "durationMinutes"
-  | "maxPosts"
   | "maxComments"
   | "maxScrapedContacts";
 
@@ -34,7 +37,6 @@ export interface SocialPatrolSliderBounds {
 /** Anti-spam guardrails from the template contract — every value is operator-tunable per run. */
 export const SOCIAL_PATROL_SLIDERS: Record<SocialPatrolSliderKey, SocialPatrolSliderBounds> = {
   durationMinutes: { min: 5, max: 60, step: 5, fallback: 15 },
-  maxPosts: { min: 0, max: 3, step: 1, fallback: 1 },
   maxComments: { min: 0, max: 5, step: 1, fallback: 2 },
   maxScrapedContacts: { min: 5, max: 50, step: 5, fallback: 20 },
 };
@@ -51,7 +53,6 @@ export interface SocialPatrolConfig {
   /** `platform_targets.id` of the acting profile, or null while the operator has not picked one. */
   targetId: string | null;
   durationMinutes: number;
-  maxPosts: number;
   maxComments: number;
   maxScrapedContacts: number;
   /** Group names or feed URLs to patrol. */
@@ -120,7 +121,6 @@ export function readSocialPatrolConfig(config: Record<string, unknown>): SocialP
       ? config.targetId.trim()
       : null,
     durationMinutes: clampSocialPatrolSlider("durationMinutes", config.durationMinutes),
-    maxPosts: clampSocialPatrolSlider("maxPosts", config.maxPosts),
     maxComments: clampSocialPatrolSlider("maxComments", config.maxComments),
     maxScrapedContacts: clampSocialPatrolSlider(
       "maxScrapedContacts",
@@ -145,7 +145,6 @@ export function buildSocialPatrolRunConfig(
     targetId: draft.targetId?.trim() || null,
     durationMinutes,
     leaseTtlSeconds: socialPatrolLeaseTtlSeconds(durationMinutes),
-    maxPosts: clampSocialPatrolSlider("maxPosts", draft.maxPosts),
     maxComments: clampSocialPatrolSlider("maxComments", draft.maxComments),
     maxScrapedContacts: clampSocialPatrolSlider(
       "maxScrapedContacts",
@@ -163,13 +162,30 @@ export function buildSocialPatrolTemplateConfig(): Record<string, unknown> {
     [SOCIAL_PATROL_CONFIG_KEY]: { version: SOCIAL_PATROL_CONFIG_VERSION },
     targetId: null,
     durationMinutes: SOCIAL_PATROL_SLIDERS.durationMinutes.fallback,
-    maxPosts: SOCIAL_PATROL_SLIDERS.maxPosts.fallback,
     maxComments: SOCIAL_PATROL_SLIDERS.maxComments.fallback,
     maxScrapedContacts: SOCIAL_PATROL_SLIDERS.maxScrapedContacts.fallback,
     communities: [],
     intentKeywords: [...DEFAULT_INTENT_KEYWORDS],
     requireApproval: true,
   };
+}
+
+/**
+ * Run-config keys this template no longer understands. Installs seeded before the shift dropped
+ * personal-profile posting still carry them, and `mergeRunConfig` would forward the stale value
+ * into the brief's runtime block where an agent could read it as a live budget.
+ */
+export const RETIRED_SOCIAL_PATROL_CONFIG_KEYS = ["maxPosts"] as const;
+
+/** Drop retired keys from a stored patrol config, returning null when nothing changed. */
+export function stripRetiredSocialPatrolConfigKeys(
+  config: Record<string, unknown>,
+): Record<string, unknown> | null {
+  const retired = RETIRED_SOCIAL_PATROL_CONFIG_KEYS.filter((key) => key in config);
+  if (retired.length === 0) return null;
+  const next = { ...config };
+  for (const key of retired) delete next[key];
+  return next;
 }
 
 /**
@@ -194,13 +210,15 @@ export function buildSocialPatrolBriefSection(input: {
 
   const lines = [
     "Social Intent Patrol execution contract:",
+    "P0. This shift is outbound only: lurk, reply in other people's threads, and capture engagers. Never publish, quote, or repost to the acting profile's own timeline — that is the \"Profile Publishing & Repost\" template's job.",
     `P1. Acquire the acting lease: signals-pp-cli targets prepare ${target} --intent browse --ttl ${ttl}`,
     `    Lease TTL is capped at ${MAX_LEASE_TTL_SECONDS}s — for a ${patrol.durationMinutes}-minute shift, renew with --lease <leaseId> instead of requesting a longer TTL.`,
     "P2. Connect over CDP to the RealTimeX Browser session named in the `sessionName` field of that prepare response (commonly `signals-publish`, but a target on a dedicated connection returns its own session — never assume). Confirm the live identity matches the returned `expectedHandle` before acting, and drive the platform through agent-browser, not agent-tools.",
     `P3. ${keywordScope}: ${communities}`,
-    `P4. Stay inside the shift budget: at most ${patrol.maxPosts} personal profile post(s), ${patrol.maxComments} high-intent comment(s), and ${patrol.durationMinutes} minute(s) of wall clock.`,
-    patrol.maxPosts === 0
-      ? "    maxPosts is 0 — this is a lurk-and-engage-only shift. Do not publish to the personal profile."
+    "    Scan the group/community feeds, the keyword search feeds, and the newest unanswered questions. Prefer posts where the author is stuck over posts that already have a good answer.",
+    `P4. Stay inside the shift budget: at most ${patrol.maxComments} high-intent comment(s) and ${patrol.durationMinutes} minute(s) of wall clock.`,
+    patrol.maxComments === 0
+      ? "    maxComments is 0 — this is a scan-and-ingest-only shift. Read the communities and mine engagers, but do not reply to anything."
       : null,
     patrol.requireApproval
       ? "P5. Approval checkpoint is ON: post each drafted comment in this thread and wait for confirmation before publishing it."
@@ -209,7 +227,7 @@ export function buildSocialPatrolBriefSection(input: {
     `P7. Write back: stage workflow-runs/${input.workflowRunId}/contacts.csv, then commit with`,
     `    signals-pp-cli import contacts --file workflow-runs/${input.workflowRunId}/contacts.csv --dedupe`,
     "    Record every published reply as a Signals content_item attributed to this workflow run.",
-    "P8. Release the lease when the shift ends: signals-pp-cli targets release --lease <leaseId>, then summarize posts, comments, and ingested contacts with links in this thread.",
+    "P8. Release the lease when the shift ends: signals-pp-cli targets release --lease <leaseId>, then summarize comments and ingested contacts with links in this thread.",
   ];
 
   return lines.filter((line) => line !== null).join("\n");

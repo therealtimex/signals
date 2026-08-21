@@ -28,7 +28,7 @@ describe("Contact profile pipeline seed", () => {
       pipeline?: { version?: number; steps?: Array<{ id: string; handler: string }> };
     };
 
-    expect(config._seedVersion).toBe(5);
+    expect(config._seedVersion).toBe(6);
     expect(config.pipeline?.version).toBe(2);
     expect(config.pipeline?.steps).toEqual([
       { id: "hydrate", executor: "code", handler: "hydrate_x_profiles" },
@@ -63,7 +63,7 @@ describe("Contact profile pipeline seed", () => {
     const updated = getSystemTemplateByName(CONTACT_PROFILE_PIPELINE_TEMPLATE_NAME)!;
     const config = JSON.parse(updated.config ?? "{}") as Record<string, any>;
     expect(config).toMatchObject({
-      _seedVersion: 5,
+      _seedVersion: 6,
       customTopLevel: true,
       pipeline: {
         version: 2,
@@ -144,16 +144,39 @@ describe("Social Intent Patrol seed", () => {
 
     const config = JSON.parse(template.config ?? "{}") as Record<string, unknown>;
     expect(isSocialPatrolTemplateConfig(config)).toBe(true);
+    expect(config).not.toHaveProperty("maxPosts");
     expect(readSocialPatrolConfig(config)).toEqual({
       targetId: null,
       durationMinutes: 15,
-      maxPosts: 1,
       maxComments: 2,
       maxScrapedContacts: 20,
       communities: [],
       intentKeywords: DEFAULT_INTENT_KEYWORDS,
       requireApproval: true,
     });
+  });
+
+  it("strips the retired maxPosts budget from an older install on re-seed", () => {
+    seedTemplates();
+    const template = getSystemTemplateByName(SOCIAL_INTENT_PATROL_TEMPLATE_NAME)!;
+    db.update(workflowTemplates).set({
+      config: JSON.stringify({
+        ...JSON.parse(template.config ?? "{}"),
+        _seedVersion: 5,
+        maxPosts: 2,
+        // Operator-tuned controls must survive the migration.
+        maxComments: 4,
+      }),
+    }).where(eq(workflowTemplates.id, template.id)).run();
+
+    expect(seedTemplates().updated).toBe(1);
+    const config = JSON.parse(
+      getSystemTemplateByName(SOCIAL_INTENT_PATROL_TEMPLATE_NAME)!.config ?? "{}",
+    ) as Record<string, unknown>;
+
+    expect(config).not.toHaveProperty("maxPosts");
+    expect(config._seedVersion).toBe(6);
+    expect(config.maxComments).toBe(4);
   });
 
   it("is idempotent across repeated seeding", () => {

@@ -11,6 +11,7 @@ import {
   normalizeTagList,
   readSocialPatrolConfig,
   socialPatrolLeaseTtlSeconds,
+  stripRetiredSocialPatrolConfigKeys,
 } from "@/lib/workflows/social-patrol";
 
 describe("clampSocialPatrolSlider", () => {
@@ -22,15 +23,14 @@ describe("clampSocialPatrolSlider", () => {
     expect(clampSocialPatrolSlider("maxScrapedContacts", 1)).toBe(5);
   });
 
-  it("keeps zero for the engage-only sliders instead of falling back", () => {
-    expect(clampSocialPatrolSlider("maxPosts", 0)).toBe(0);
+  it("keeps zero for the scan-only comment budget instead of falling back", () => {
     expect(clampSocialPatrolSlider("maxComments", 0)).toBe(0);
   });
 
   it("falls back to the default for non-numeric values", () => {
-    expect(clampSocialPatrolSlider("maxPosts", undefined)).toBe(1);
     expect(clampSocialPatrolSlider("maxComments", "not a number")).toBe(2);
     expect(clampSocialPatrolSlider("durationMinutes", null)).toBe(15);
+    expect(clampSocialPatrolSlider("maxScrapedContacts", undefined)).toBe(20);
   });
 
   it("accepts numeric strings from range inputs", () => {
@@ -81,7 +81,6 @@ describe("readSocialPatrolConfig", () => {
     expect(readSocialPatrolConfig({})).toEqual({
       targetId: null,
       durationMinutes: 15,
-      maxPosts: 1,
       maxComments: 2,
       maxScrapedContacts: 20,
       communities: [],
@@ -104,7 +103,6 @@ describe("readSocialPatrolConfig", () => {
       readSocialPatrolConfig({
         targetId: " tgt_1 ",
         durationMinutes: 45,
-        maxPosts: 9,
         maxComments: 0,
         maxScrapedContacts: 50,
         communities: ["Codex VN"],
@@ -114,7 +112,6 @@ describe("readSocialPatrolConfig", () => {
     ).toEqual({
       targetId: "tgt_1",
       durationMinutes: 45,
-      maxPosts: 3,
       maxComments: 0,
       maxScrapedContacts: 50,
       communities: ["Codex VN"],
@@ -141,7 +138,6 @@ describe("buildSocialPatrolTemplateConfig", () => {
     expect(readSocialPatrolConfig(config)).toEqual({
       targetId: null,
       durationMinutes: 15,
-      maxPosts: 1,
       maxComments: 2,
       maxScrapedContacts: 20,
       communities: [],
@@ -155,6 +151,25 @@ describe("buildSocialPatrolTemplateConfig", () => {
     const draft = readSocialPatrolConfig(stored);
     expect(readSocialPatrolConfig(buildSocialPatrolRunConfig(draft))).toEqual(draft);
   });
+
+  it("no longer carries a personal-profile post budget", () => {
+    expect(buildSocialPatrolTemplateConfig()).not.toHaveProperty("maxPosts");
+    expect(Object.keys(buildSocialPatrolRunConfig(readSocialPatrolConfig({})))).not.toContain(
+      "maxPosts",
+    );
+  });
+});
+
+describe("stripRetiredSocialPatrolConfigKeys", () => {
+  it("drops a stale maxPosts left by an older seed", () => {
+    expect(
+      stripRetiredSocialPatrolConfigKeys({ socialPatrol: { version: 1 }, maxPosts: 2, maxComments: 3 }),
+    ).toEqual({ socialPatrol: { version: 1 }, maxComments: 3 });
+  });
+
+  it("returns null when there is nothing to strip", () => {
+    expect(stripRetiredSocialPatrolConfigKeys(buildSocialPatrolTemplateConfig())).toBeNull();
+  });
 });
 
 describe("buildSocialPatrolRunConfig", () => {
@@ -163,7 +178,6 @@ describe("buildSocialPatrolRunConfig", () => {
       buildSocialPatrolRunConfig({
         targetId: "tgt_fb",
         durationMinutes: 60,
-        maxPosts: 0,
         maxComments: 5,
         maxScrapedContacts: 50,
         communities: ["Codex VN", "codex vn"],
@@ -174,7 +188,6 @@ describe("buildSocialPatrolRunConfig", () => {
       targetId: "tgt_fb",
       durationMinutes: 60,
       leaseTtlSeconds: MAX_LEASE_TTL_SECONDS,
-      maxPosts: 0,
       maxComments: 5,
       maxScrapedContacts: 50,
       communities: ["Codex VN"],
@@ -187,7 +200,6 @@ describe("buildSocialPatrolRunConfig", () => {
     const config = buildSocialPatrolRunConfig({
       targetId: null,
       durationMinutes: 500,
-      maxPosts: 99,
       maxComments: -4,
       maxScrapedContacts: 3,
       communities: [],
@@ -198,7 +210,6 @@ describe("buildSocialPatrolRunConfig", () => {
     expect(config).toMatchObject({
       targetId: null,
       durationMinutes: 60,
-      maxPosts: 3,
       maxComments: 0,
       maxScrapedContacts: 5,
       requireApproval: false,
@@ -211,7 +222,6 @@ describe("buildSocialPatrolBriefSection", () => {
     socialPatrol: { version: 1 },
     targetId: "tgt_fb",
     durationMinutes: 60,
-    maxPosts: 0,
     maxComments: 3,
     maxScrapedContacts: 25,
     communities: ["Codex VN"],
@@ -239,19 +249,38 @@ describe("buildSocialPatrolBriefSection", () => {
     expect(section).toContain("signals-pp-cli targets release --lease <leaseId>");
   });
 
-  it("calls out lurk-only mode and the approval checkpoint", () => {
+  it("forbids posting to the acting profile's own timeline", () => {
     const section = buildSocialPatrolBriefSection({ workflowRunId: "run_9", config });
-    expect(section).toContain("lurk-and-engage-only shift");
+    expect(section).toContain("This shift is outbound only");
+    expect(section).toContain("Profile Publishing & Repost");
+    // The retired personal-post budget must not resurface as an instruction.
+    expect(section).not.toContain("personal profile post");
+    expect(section).not.toContain("maxPosts");
+  });
+
+  it("calls out the approval checkpoint", () => {
+    const section = buildSocialPatrolBriefSection({ workflowRunId: "run_9", config });
     expect(section).toContain("Approval checkpoint is ON");
   });
 
   it("switches the approval line when confirmation is disabled", () => {
     const section = buildSocialPatrolBriefSection({
       workflowRunId: "run_9",
-      config: { ...config, maxPosts: 2, requireApproval: false },
+      config: { ...config, requireApproval: false },
     });
     expect(section).toContain("Approval checkpoint is OFF");
-    expect(section).not.toContain("lurk-and-engage-only shift");
+  });
+
+  it("calls out scan-only mode when the comment budget is zero", () => {
+    expect(
+      buildSocialPatrolBriefSection({
+        workflowRunId: "run_9",
+        config: { ...config, maxComments: 0 },
+      }),
+    ).toContain("scan-and-ingest-only shift");
+    expect(
+      buildSocialPatrolBriefSection({ workflowRunId: "run_9", config }),
+    ).not.toContain("scan-and-ingest-only shift");
   });
 
   it("names the fallback scope when no communities are configured", () => {
