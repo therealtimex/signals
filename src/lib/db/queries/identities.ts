@@ -4,7 +4,22 @@ import { db } from "@/lib/db/client";
 import { assertPlatformAccountUnclaimed, PlatformAccountConflictError } from "@/lib/db/identity-claims";
 import { contactIdentities } from "@/lib/db/schema";
 import { liftIdentityStatsFromPlatformData } from "@/lib/db/identity-stats";
+import { normalizePlatformHandle } from "@/lib/contact-identity-handle";
 import type { ContactIdentity, NewContactIdentity } from "@/lib/db/types";
+
+/**
+ * `platform_handle` stores the bare identifier; the `@` on an X handle is presentation and is
+ * added by `formatPlatformHandle` at render time. Every writer — the identities API route, both
+ * agent-tools upserts, the Go importer, and the two manual forms — goes through create/update,
+ * so normalizing here is what keeps migration 0029 from silently undoing itself.
+ */
+function normalizeHandleForWrite(
+  platform: string,
+  handle: string | null | undefined,
+): string | null | undefined {
+  if (handle === undefined || handle === null) return handle;
+  return normalizePlatformHandle(platform, handle) || null;
+}
 
 function guardContactIdentityClaim(
   platform: string,
@@ -31,7 +46,14 @@ export function createIdentity(data: Omit<NewContactIdentity, "id">): ContactIde
   const lifted = liftIdentityStatsFromPlatformData(data.platformData, {
     statsUpdatedAt: data.lastSyncedAt ?? undefined,
   });
-  db.insert(contactIdentities).values({ ...data, ...lifted, id }).run();
+  db.insert(contactIdentities)
+    .values({
+      ...data,
+      platformHandle: normalizeHandleForWrite(data.platform, data.platformHandle),
+      ...lifted,
+      id,
+    })
+    .run();
   return getIdentityById(id)!;
 }
 
@@ -56,6 +78,9 @@ export function updateIdentity(
   db.update(contactIdentities)
     .set({
       ...data,
+      ...(data.platformHandle === undefined
+        ? {}
+        : { platformHandle: normalizeHandleForWrite(nextPlatform, data.platformHandle) }),
       ...lifted,
       updatedAt: Math.floor(Date.now() / 1000),
     })
