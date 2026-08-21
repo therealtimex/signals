@@ -12,9 +12,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 export {
   formatAccountAge,
-  formatPlatformHandle,
   formatRelativeGeneratedAt,
 } from "@/components/explore/explore-format";
+export { formatPlatformHandle } from "@/lib/contact-identity-handle";
 
 interface ContactExploreCardProps {
   contactId: string;

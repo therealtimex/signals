@@ -70,6 +70,7 @@ export function ExploreIdentityHeader({
           <div className="flex flex-wrap gap-x-2 gap-y-1 text-xs text-muted-foreground">
             {handle && (
               <ExplorePlatformHandle
+                platform={primaryIdentity.platform}
                 handle={handle}
                 platformUrl={primaryIdentity?.platformUrl ?? null}
               />

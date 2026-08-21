@@ -211,7 +211,7 @@ function updateIdentityFromUser(
     displayName: identity.displayName?.trim() ? identity.displayName : user.name,
     platformHandle: identity.platformHandle?.trim()
       ? identity.platformHandle
-      : `@${user.username}`,
+      : user.username,
     platformUrl: isArchiveProfileUrl(identity.platformUrl, identity.platformUserId)
       ? `https://x.com/${user.username}`
       : identity.platformUrl,

@@ -75,7 +75,7 @@ describe("mapXUserToContact", () => {
     const identity = mapXUserToIdentity(xUser, "contact-1");
 
     expect(identity.contactId).toBe("contact-1");
-    expect(identity.platformHandle).toBe("@solo");
+    expect(identity.platformHandle).toBe("solo");
     expect(identity.lastSyncedAt).toBe(Math.floor(Date.parse("2026-01-15T12:00:00Z") / 1000));
     expect(JSON.parse(identity.platformData!)).toMatchObject({
       followersCount: 1,

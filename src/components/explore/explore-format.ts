@@ -14,11 +14,6 @@ export function formatAccountAge(
   return `${days.toLocaleString()} days on ${platformLabel}`;
 }
 
-/** Platform handles are stored platform-formatted (@user, /in/name); render verbatim. */
-export function formatPlatformHandle(handle: string): string {
-  return handle;
-}
-
 export function formatRelativeGeneratedAt(
   unixSeconds: number,
   now: number = Math.floor(Date.now() / 1000),

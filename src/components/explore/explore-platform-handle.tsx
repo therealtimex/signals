@@ -1,17 +1,19 @@
-import { formatPlatformHandle } from "@/components/explore/explore-format";
+import { formatPlatformHandle } from "@/lib/contact-identity-handle";
 
 type ExplorePlatformHandleProps = {
+  platform: string;
   handle: string;
   platformUrl: string | null;
   className?: string;
 };
 
 export function ExplorePlatformHandle({
+  platform,
   handle,
   platformUrl,
   className = "text-xs text-muted-foreground",
 }: ExplorePlatformHandleProps) {
-  const text = formatPlatformHandle(handle);
+  const text = formatPlatformHandle(platform, handle);
   if (platformUrl) {
     return (
       <a
