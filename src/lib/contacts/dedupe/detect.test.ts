@@ -127,6 +127,50 @@ describe("findDuplicateContacts", () => {
     expect(candidate.confidence).toBeLessThanOrEqual(0.95);
   });
 
+  it("Tier 2: matches identical normalized name with corporate suffix variations", () => {
+    const orgA = createOrg({ name: "Safe Superintelligence Inc. (SSI)", source: "test" });
+    const orgB = createOrg({ name: "Safe Superintelligence (SSI)", source: "test" });
+    const a = createContact({ name: "Ilya Sutskever" });
+    const b = createContact({ name: "Ilya Sutskever" });
+    createContactEmployment({ contactId: a.id, orgId: orgA.id, source: "test" });
+    createContactEmployment({ contactId: b.id, orgId: orgB.id, source: "test" });
+
+    const [candidate] = findDuplicateContacts();
+    expect(candidate).toMatchObject({
+      tier: 2,
+      confidence: 0.95,
+      reason: "Identical normalized name at the same organization",
+    });
+  });
+
+  it("Tier 2: matches identical multi-token name with a sparse zero-identity record", () => {
+    const org = createOrg({ name: "OpenAI", source: "test" });
+    const a = createContact({ name: "Sam Altman" });
+    const b = createContact({ name: "Sam Altman" });
+    createContactEmployment({ contactId: a.id, orgId: org.id, source: "test" });
+    createIdentity({
+      contactId: a.id,
+      platform: "x",
+      platformUserId: "sama",
+      platformHandle: "sama",
+    });
+
+    const [candidate] = findDuplicateContacts();
+    expect(candidate).toMatchObject({
+      tier: 2,
+      confidence: 0.85,
+      reason: "Identical normalized name with sparse secondary record",
+    });
+    expect(candidate.primaryContactId).toBe(a.id);
+    expect(candidate.secondaryContactIds).toEqual([b.id]);
+  });
+
+  it("Tier 2: does not match single-token names without organization", () => {
+    createContact({ name: "Bob" });
+    createContact({ name: "Bob" });
+    expect(findDuplicateContacts()).toEqual([]);
+  });
+
   it("Tier 2: does not fire on the same name at different organizations", () => {
     const deepmind = createOrg({ name: "Google DeepMind", source: "test" });
     const nvidia = createOrg({ name: "NVIDIA", source: "test" });

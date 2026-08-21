@@ -47,6 +47,25 @@ describe("orgNameKey", () => {
     expect(orgNameKey("NVIDIA")).toBe(orgNameKey("nvidia"));
   });
 
+  it("strips corporate suffixes and punctuation", () => {
+    expect(orgNameKey("Safe Superintelligence Inc. (SSI)")).toBe("safe superintelligence ssi");
+    expect(orgNameKey("Safe Superintelligence (SSI)")).toBe("safe superintelligence ssi");
+    expect(orgNameKey("Safe Superintelligence Inc. (SSI)")).toBe(
+      orgNameKey("Safe Superintelligence (SSI)"),
+    );
+    expect(orgNameKey("OpenAI, Inc.")).toBe(orgNameKey("OpenAI"));
+    expect(orgNameKey("Microsoft Corporation")).toBe(orgNameKey("Microsoft Corp."));
+    expect(orgNameKey("Google LLC")).toBe(orgNameKey("Google"));
+    expect(orgNameKey("DeepMind Technologies Ltd.")).toBe(
+      orgNameKey("DeepMind Technologies Limited"),
+    );
+  });
+
+  it("preserves single-token corporate names", () => {
+    expect(orgNameKey("LLC")).toBe("llc");
+    expect(orgNameKey("Company")).toBe("company");
+  });
+
   it("returns empty for missing names", () => {
     expect(orgNameKey(undefined)).toBe("");
   });
