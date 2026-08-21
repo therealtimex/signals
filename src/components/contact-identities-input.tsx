@@ -130,7 +130,7 @@ export function ContactIdentitiesInput({ onChange }: ContactIdentitiesInputProps
                     onChange={(event) =>
                       updateRow(row.rowId, { platformHandle: event.target.value })
                     }
-                    placeholder="sama"
+                    placeholder="Handle without @"
                   />
                 </div>
                 <div className="grid gap-2">
