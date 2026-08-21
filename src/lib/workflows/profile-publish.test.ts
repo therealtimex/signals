@@ -192,6 +192,19 @@ describe("buildProfilePublishBriefSection", () => {
     expect(section).toContain("Punchy Tips");
   });
 
+  it("names the media upload hop that turns a local asset into a mediaAssetId", () => {
+    const section = brief();
+    // A publish job carries ids, not paths, and no agent-tool uploads a file — without this
+    // step the agent has nowhere to get an id and the post ships with no image.
+    expect(section).toContain("http://127.0.0.1:3000/api/media");
+    expect(section).toContain("multipart/form-data");
+    expect(section).toContain("context=compose");
+    expect(section).toContain("platformTarget accepts only x or linkedin");
+    expect(section).toContain("mediaAssetIds are the ids from B4");
+    // Facebook media has no upload lane — /api/media 400s on any other platformTarget.
+    expect(section).toContain("Facebook has no upload lane here");
+  });
+
   it("spells out both publishing lanes with the resolved Signals base URL", () => {
     const section = brief();
     expect(section).toContain("http://127.0.0.1:3000/api/content/send-to-agent");

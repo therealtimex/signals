@@ -108,6 +108,28 @@ describe("template-brief", () => {
     expect(brief).toContain("Do not call legacy in-process workflow runners.");
   });
 
+  it("keeps a retired patrol key out of the runtime config block", () => {
+    const brief = buildAgentWorkflowBrief({
+      template: {
+        id: "tpl_patrol_clone",
+        name: "My patrol clone",
+        description: "Cloned before the personal-post budget was retired",
+        templateType: "engagement",
+        platform: null,
+        systemPrompt: "Patrol the feed.",
+        targetPersona: null,
+      },
+      workflowRunId: "run_clone",
+      // A clone (isSystem=0) never re-seeds, so the strip has to happen here too.
+      config: { ...buildSocialPatrolTemplateConfig(), maxPosts: 2, _seedVersion: 5 },
+      signalsBaseUrl: "http://localhost:3000",
+    });
+
+    expect(brief).not.toContain("maxPosts");
+    expect(brief).not.toContain("_seedVersion");
+    expect(brief).toContain('"maxComments"');
+  });
+
   it("appends the publishing contract only for profile publish configs", () => {
     const brief = buildAgentWorkflowBrief({
       template: {

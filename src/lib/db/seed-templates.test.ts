@@ -182,6 +182,11 @@ describe("Social Intent Patrol seed", () => {
     expect(config).not.toHaveProperty("maxPosts");
     expect(config._seedVersion).toBe(6);
     expect(config.maxComments).toBe(4);
+    // The card copy is structural — an existing install must not keep describing a shift that
+    // still posts to your own timeline.
+    expect(getSystemTemplateByName(SOCIAL_INTENT_PATROL_TEMPLATE_NAME)!.description).toContain(
+      "Outbound only",
+    );
   });
 
   it("is idempotent across repeated seeding", () => {

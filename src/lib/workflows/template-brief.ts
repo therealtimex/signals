@@ -3,6 +3,7 @@ import { parseTemplateConfig } from "@/lib/workflows/template-config";
 import {
   buildSocialPatrolBriefSection,
   isSocialPatrolTemplateConfig,
+  stripRetiredSocialPatrolConfigKeys,
 } from "@/lib/workflows/social-patrol";
 import {
   buildProfilePublishBriefSection,
@@ -56,11 +57,18 @@ export function buildTemplateThreadName(templateName: string): string {
 /**
  * Drop seed bookkeeping (`_seedVersion`) before the config reaches an agent — it is a
  * migration marker, and an agent reading it as a run control is pure noise.
+ *
+ * Retired template keys go the same way. The seed migration only rewrites system templates, so a
+ * clone made before a key was retired still carries it, and the runtime block is exactly where an
+ * agent would read it as a live budget.
  */
 function stripInternalConfigKeys(config: Record<string, unknown>): Record<string, unknown> {
-  return Object.fromEntries(
+  const visible = Object.fromEntries(
     Object.entries(config).filter(([key]) => !key.startsWith("_"))
   );
+  return isSocialPatrolTemplateConfig(visible)
+    ? stripRetiredSocialPatrolConfigKeys(visible) ?? visible
+    : visible;
 }
 
 export function buildAgentWorkflowBrief(input: {

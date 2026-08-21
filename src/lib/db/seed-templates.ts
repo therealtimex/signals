@@ -523,7 +523,11 @@ export function seedTemplates(): { seeded: number; updated: number; skipped: boo
         db.update(workflowTemplates)
           .set({
             systemPrompt: seed.systemPrompt,
-            ...(seed.name === CONTACT_PROFILE_PIPELINE_TEMPLATE_NAME
+            // Descriptions are structural, not operator-tuned: refresh them for the templates
+            // whose copy has changed so an existing install does not keep stale card text (it
+            // also feeds the brief's `Goal:` line).
+            ...(seed.name === CONTACT_PROFILE_PIPELINE_TEMPLATE_NAME ||
+            seed.name === SOCIAL_INTENT_PATROL_TEMPLATE_NAME
               ? { description: seed.description }
               : {}),
             config: JSON.stringify(updatedConfig),

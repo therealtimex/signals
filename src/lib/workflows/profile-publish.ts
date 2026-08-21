@@ -85,7 +85,14 @@ export interface ProfilePublishConfig {
   maxOriginalPosts: number;
   /** Curated quote-posts / reposts per selected profile. */
   maxReposts: number;
-  /** Focus topics and keyword tags. */
+  /**
+   * Focus topics and keyword tags.
+   *
+   * `topics` and `tone` are also generic `content` template-limit keys
+   * (src/lib/workflows/template-config.ts). A *duplicated* publish template edited through the
+   * builder's free-text Tone input therefore stores an arbitrary string here, which
+   * `readProfilePublishTone` coerces back to the default. Values left alone round-trip fine.
+   */
   topics: string[];
   tone: ProfilePublishTone;
   /** Render drafts in the thread and wait for a go-ahead before publishing. */
@@ -177,6 +184,11 @@ export function buildProfilePublishTemplateConfig(): Record<string, unknown> {
  * LinkedIn originals go through the deterministic publish-job path (`/api/content/send-to-agent`),
  * while Facebook targets and every repost/quote-post have no publish-job type and must be driven
  * through agent-browser under a lease.
+ *
+ * The media hop is spelled out for the same reason. A publish job carries `mediaAssetIds`, not
+ * file paths, and no agent-tool uploads a local file — `get_publish_job` resolves an id it does
+ * not know to `path: null`, so an agent that skips the upload silently ships a post with no
+ * image (src/lib/agent-tools/publish-handlers.ts:116).
  */
 export function buildProfilePublishBriefSection(input: {
   workflowRunId: string;
@@ -200,25 +212,29 @@ export function buildProfilePublishBriefSection(input: {
     publish.sourceFolderPath
       ? `B3. Scan ${publish.sourceFolderPath} for deeper context: read .md and .txt notes, and attach matching .png/.jpg assets to the post they belong to. Never attach an asset you cannot tie to a specific claim in the draft.`
       : "B3. No source folder configured — draft from the instructions and topics alone, and publish without media unless the operator supplies some.",
+    "B4. Upload every asset you intend to attach before you draft the publish call — a publish job carries media asset ids, not file paths, and there is no agent-tool that uploads one:",
+    `    a. POST ${input.signalsBaseUrl}/api/media as multipart/form-data with file=@<local path>, context=compose, and platformTarget set to the platform you are attaching it to. The 201 response is the created asset; its \`id\` is what goes into mediaAssetIds.`,
+    "    b. platformTarget accepts only x or linkedin — anything else is a 400 — and it selects the size and type limits the file is checked against (X: 5 MB, 4 images; LinkedIn: 10 MB, 9 images; JPEG/PNG/GIF/WebP or MP4). Upload the file once per platform you attach it to so each asset is checked against that platform's limits.",
+    "    c. Facebook has no upload lane here: carry its media through agent-browser in step B10 instead. Never invent or reuse an id you did not get back from /api/media — an unknown id resolves to no media and the post ships without the image.",
     publish.topics.length > 0
-      ? `B4. Focus topics: ${publish.topics.join(", ")}. Tone: ${tone.label} — ${tone.brief}.`
-      : `B4. No focus topics configured — follow the operator instructions. Tone: ${tone.label} — ${tone.brief}.`,
-    `B5. Budget per selected profile: at most ${publish.maxOriginalPosts} original timeline post(s) and ${publish.maxReposts} curated quote-post/repost(s).`,
+      ? `B5. Focus topics: ${publish.topics.join(", ")}. Tone: ${tone.label} — ${tone.brief}.`
+      : `B5. No focus topics configured — follow the operator instructions. Tone: ${tone.label} — ${tone.brief}.`,
+    `B6. Budget per selected profile: at most ${publish.maxOriginalPosts} original timeline post(s) and ${publish.maxReposts} curated quote-post/repost(s).`,
     publish.maxOriginalPosts === 0
       ? "    maxOriginalPosts is 0 — this is a curation-only run. Quote and repost other people's work; publish nothing original."
       : null,
     publish.maxReposts === 0
       ? "    maxReposts is 0 — original posts only. Do not quote or repost anything."
       : null,
-    "B6. Platform-native drafting — same substance, native shape: X is a punchy thread with a standalone hook post; LinkedIn is structured takeaways with line breaks and a closing question; Facebook is one conversational post with no jargon shorthand. Never cross-post identical text.",
+    "B7. Platform-native drafting — same substance, native shape: X is a punchy thread with a standalone hook post; LinkedIn is structured takeaways with line breaks and a closing question; Facebook is one conversational post with no jargon shorthand. Never cross-post identical text.",
     publish.requireApproval
-      ? "B7. Approval gate is ON: post every draft in this thread grouped by target profile and wait for explicit confirmation before publishing anything."
-      : "B7. Approval gate is OFF: publish the drafts directly, and log each one in this thread as it goes out.",
-    "B8. Publish an original post to an X or LinkedIn target through the deterministic lane:",
+      ? "B8. Approval gate is ON: post every draft in this thread grouped by target profile and wait for explicit confirmation before publishing anything."
+      : "B8. Approval gate is OFF: publish the drafts directly, and log each one in this thread as it goes out.",
+    "B9. Publish an original post to an X or LinkedIn target through the deterministic lane:",
     `    a. POST ${input.signalsBaseUrl}/api/content with the draft (contentType "post" or "thread", status "draft", origin "authored", direction "outbound").`,
-    `    b. POST ${input.signalsBaseUrl}/api/content/send-to-agent with { contentItemId, targets: [{ targetId }], text, mediaAssetIds } — that opens the publish job and hands it to the signals-publish lane. Record the returned jobId here.`,
-    "B9. Facebook targets and every repost/quote-post have no publish-job type. Drive them yourself: signals-pp-cli targets prepare <targetId> --intent publish, act through agent-browser on the returned sessionName after confirming expectedHandle, then release with signals-pp-cli targets release --lease <leaseId>.",
-    `B10. Record every post you publish outside the publish-job lane as a Signals content_item attributed to workflow run ${input.workflowRunId}, then summarize what went live per profile with links in this thread.`,
+    `    b. POST ${input.signalsBaseUrl}/api/content/send-to-agent with { contentItemId, targets: [{ targetId }], text, mediaAssetIds } — mediaAssetIds are the ids from B4. That opens the publish job and hands it to the signals-publish lane. Record the returned jobId here.`,
+    "B10. Facebook targets and every repost/quote-post have no publish-job type. Drive them yourself: signals-pp-cli targets prepare <targetId> --intent publish, act through agent-browser on the returned sessionName after confirming expectedHandle, attach media straight from the local path, then release with signals-pp-cli targets release --lease <leaseId>.",
+    `B11. Record every post you publish outside the publish-job lane as a Signals content_item attributed to workflow run ${input.workflowRunId}, then summarize what went live per profile with links in this thread.`,
   ];
 
   return lines.filter((line) => line !== null).join("\n");
