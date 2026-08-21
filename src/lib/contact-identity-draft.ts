@@ -1,4 +1,5 @@
-import type { Platform } from "@/lib/db/platforms";
+import { PLATFORMS, type Platform } from "@/lib/db/platforms";
+import { PLATFORM_SHORT_LABELS } from "@/lib/platforms/capabilities";
 
 export type DraftContactIdentity = {
   platform: Platform;
@@ -8,18 +9,14 @@ export type DraftContactIdentity = {
   isPrimary: boolean;
 };
 
-export const CRM_IDENTITY_PLATFORMS = ["x", "linkedin", "gmail", "substack"] as const satisfies readonly Platform[];
+export const CRM_IDENTITY_PLATFORMS = PLATFORMS;
 
-export const platformLabels: Record<string, string> = {
+export const platformLabels: Record<Platform, string> = {
+  ...PLATFORM_SHORT_LABELS,
   x: "X / Twitter",
-  linkedin: "LinkedIn",
-  gmail: "Gmail",
-  substack: "Substack",
 };
 
-export function emptyDraftIdentity(
-  platform: (typeof CRM_IDENTITY_PLATFORMS)[number] = "x",
-): DraftContactIdentity {
+export function emptyDraftIdentity(platform: Platform = "x"): DraftContactIdentity {
   return {
     platform,
     platformUserId: "",

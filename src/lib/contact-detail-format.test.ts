@@ -7,6 +7,7 @@ import {
   formatTimelineOccurredAt,
   formatWebsiteLabel,
   hrefForWebsite,
+  formatContactListSubtitle,
   isRedundantHeadline,
 } from "@/lib/contact-detail-format";
 
@@ -69,5 +70,31 @@ describe("isRedundantHeadline", () => {
 
   it("keeps a distinct headline", () => {
     expect(isRedundantHeadline("Building AGI", "CEO", "OpenAI")).toBe(false);
+  });
+});
+
+describe("formatContactListSubtitle", () => {
+  it("prefers a distinct headline", () => {
+    expect(
+      formatContactListSubtitle({
+        headline: "Building AGI",
+        title: "CEO",
+        company: "OpenAI",
+      }),
+    ).toBe("Building AGI");
+  });
+
+  it("falls back to title and company when the headline repeats them", () => {
+    expect(
+      formatContactListSubtitle({
+        headline: "CEO at OpenAI",
+        title: "CEO",
+        company: "OpenAI",
+      }),
+    ).toBe("CEO · OpenAI");
+  });
+
+  it("returns null when there is nothing to show", () => {
+    expect(formatContactListSubtitle({ headline: null, title: null, company: null })).toBeNull();
   });
 });

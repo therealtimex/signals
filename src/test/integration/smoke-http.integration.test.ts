@@ -23,7 +23,8 @@ describe("smoke:core HTTP", () => {
     expect(response.ok).toBe(true);
     const html = await response.text();
     expect(html).toContain("Contacts");
-    expect(html).toContain("Manage your CRM contacts across platforms.");
+    expect(html).toMatch(/\d+ contacts?/);
+    expect(html).toContain("Identities");
   });
 
   it("settings page HTML loads", async () => {

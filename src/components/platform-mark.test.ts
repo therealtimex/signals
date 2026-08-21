@@ -21,4 +21,19 @@ describe("PlatformMark", () => {
     expect(html).toContain("bg-[#1877F2]");
     expect(html).not.toContain(">F<");
   });
+
+  it.each([
+    ["instagram", "Instagram", ">I<"],
+    ["threads", "Threads", ">T<"],
+    ["tiktok", "TikTok", ">T<"],
+    ["youtube", "YouTube", ">Y<"],
+    ["bluesky", "Bluesky", ">B<"],
+    ["telegram", "Telegram", ">T<"],
+    ["whatsapp", "WhatsApp", ">W<"],
+  ] as const)("renders a %s logo instead of a letter fallback", (platform, label, letter) => {
+    const html = renderToStaticMarkup(createElement(PlatformMark, { platform }));
+    expect(html).toContain(label);
+    expect(html).toContain("<svg");
+    expect(html).not.toContain(letter);
+  });
 });

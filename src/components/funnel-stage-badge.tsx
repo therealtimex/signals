@@ -13,7 +13,7 @@ const stageColors: Record<string, string> = {
 export function FunnelStageBadge({ stage }: { stage: string }) {
   return (
     <Badge variant="outline" className={cn("font-medium", stageColors[stage] ?? "bg-muted/15 text-muted-foreground border-muted")}>
-      {stage}
+      {stage.replaceAll("_", " ").replace(/^\w/, (letter) => letter.toUpperCase())}
     </Badge>
   );
 }

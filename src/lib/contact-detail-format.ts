@@ -135,3 +135,18 @@ export function isRedundantHeadline(
   }
   return false;
 }
+
+export function formatContactListSubtitle(contact: {
+  headline?: string | null;
+  title?: string | null;
+  company?: string | null;
+}): string | null {
+  const headline = contact.headline?.trim() ?? "";
+  if (headline && !isRedundantHeadline(headline, contact.title, contact.company)) {
+    return headline;
+  }
+  const title = contact.title?.trim() ?? "";
+  const company = contact.company?.trim() ?? "";
+  if (title && company) return `${title} · ${company}`;
+  return title || company || null;
+}

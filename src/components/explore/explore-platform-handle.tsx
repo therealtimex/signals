@@ -1,4 +1,4 @@
-import { formatPlatformHandle } from "@/lib/contact-identity-handle";
+import { formatPlatformHandle, identityProfileHref } from "@/lib/contact-identity-handle";
 
 type ExplorePlatformHandleProps = {
   platform: string;
@@ -14,10 +14,11 @@ export function ExplorePlatformHandle({
   className = "text-xs text-muted-foreground",
 }: ExplorePlatformHandleProps) {
   const text = formatPlatformHandle(platform, handle);
-  if (platformUrl) {
+  const href = identityProfileHref({ platform, platformHandle: handle, platformUrl });
+  if (href) {
     return (
       <a
-        href={platformUrl}
+        href={href}
         target="_blank"
         rel="noopener noreferrer"
         className={`hover:underline ${className}`}
