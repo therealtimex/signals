@@ -247,32 +247,53 @@ function tier1Evidence(a: ContactFacts, b: ContactFacts): PairEvidence | null {
   return null;
 }
 
-/** Tier 2: same person, same employer, spelled differently. */
+/** Tier 2: same person, same employer, spelled differently, or exact name collision with sparse records. */
 function tier2Evidence(a: ContactFacts, b: ContactFacts): PairEvidence | null {
-  if (!hasIntersection(a.orgKeys, b.orgKeys)) return null;
+  if (hasIntersection(a.orgKeys, b.orgKeys)) {
+    if (a.nameKey && a.nameKey === b.nameKey) {
+      return {
+        a: a.id,
+        b: b.id,
+        tier: 2,
+        confidence: 0.95,
+        reason: "Identical normalized name at the same organization",
+      };
+    }
 
-  if (a.nameKey && a.nameKey === b.nameKey) {
+    const similarity = nameSimilarity(a.name, b.name);
+    if (similarity >= TIER2_NAME_FLOOR) {
+      // Map [0.8, 1] onto [0.8, 0.95] so Tier 2 never claims Tier 1 certainty.
+      const confidence =
+        0.8 + ((similarity - TIER2_NAME_FLOOR) / (1 - TIER2_NAME_FLOOR)) * (0.95 - 0.8);
+      return {
+        a: a.id,
+        b: b.id,
+        tier: 2,
+        confidence: Number(confidence.toFixed(3)),
+        reason: `Similar name (${similarity.toFixed(2)}) at the same organization`,
+      };
+    }
+  }
+
+  // Exact multi-token name match where at least one record has no organization or 0 identities,
+  // provided neither has an explicit conflicting organization.
+  if (
+    a.nameKey &&
+    a.nameKey === b.nameKey &&
+    a.nameKey.includes(" ") &&
+    !(a.orgKeys.size > 0 && b.orgKeys.size > 0) &&
+    (a.identityCount === 0 || b.identityCount === 0 || (a.orgKeys.size === 0 && b.orgKeys.size === 0))
+  ) {
     return {
       a: a.id,
       b: b.id,
       tier: 2,
-      confidence: 0.95,
-      reason: "Identical normalized name at the same organization",
+      confidence: 0.85,
+      reason: "Identical normalized name with sparse secondary record",
     };
   }
 
-  const similarity = nameSimilarity(a.name, b.name);
-  if (similarity < TIER2_NAME_FLOOR) return null;
-  // Map [0.8, 1] onto [0.8, 0.95] so Tier 2 never claims Tier 1 certainty.
-  const confidence =
-    0.8 + ((similarity - TIER2_NAME_FLOOR) / (1 - TIER2_NAME_FLOOR)) * (0.95 - 0.8);
-  return {
-    a: a.id,
-    b: b.id,
-    tier: 2,
-    confidence: Number(confidence.toFixed(3)),
-    reason: `Similar name (${similarity.toFixed(2)}) at the same organization`,
-  };
+  return null;
 }
 
 /** Tier 3: the graph, not the strings, is the evidence. */

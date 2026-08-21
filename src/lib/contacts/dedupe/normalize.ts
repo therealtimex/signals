@@ -43,10 +43,45 @@ export function personNameKey(raw: string | null | undefined): string {
   return normalized.split(" ").sort().join(" ");
 }
 
-/** Case-folded org key. Mirrors `orgDedupeKey` but tolerates null. */
+const CORPORATE_SUFFIXES = new Set([
+  "inc",
+  "incorporated",
+  "corp",
+  "corporation",
+  "llc",
+  "llp",
+  "ltd",
+  "limited",
+  "co",
+  "company",
+  "gmbh",
+  "ag",
+  "sa",
+  "sarl",
+  "bv",
+  "nv",
+  "pty",
+  "pvt",
+]);
+
+/** Case-folded, suffix-stripped org key. Mirrors `orgDedupeKey` but tolerates null. */
 export function orgNameKey(raw: string | null | undefined): string {
   if (!raw) return "";
-  return raw.trim().replace(/\s+/g, " ").toLowerCase();
+  const folded = raw
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!folded) return "";
+
+  const tokens = folded.split(" ").filter((token, _idx, all) => {
+    if (all.length > 1 && CORPORATE_SUFFIXES.has(token)) return false;
+    return token.length > 0;
+  });
+
+  return tokens.join(" ");
 }
 
 /** Identity claim key — matches the `idx_identity_platform_user` unique index. */
