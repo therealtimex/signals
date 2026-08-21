@@ -107,6 +107,7 @@ function LaunchesListInner({
       <>
         <EmptyState
           icon={Rocket}
+          mood="excited"
           title="No launches yet"
           description="Create a launch here or from your terminal agent to start testing content in the Wind Tunnel."
         />

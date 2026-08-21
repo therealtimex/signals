@@ -105,6 +105,7 @@ export function ExploreMapView() {
       <div className="min-h-[60vh] flex flex-col items-center justify-center gap-4">
         <EmptyState
           icon={Telescope}
+          mood="sad"
           title="Could not load audience map"
           description={loadState.message}
         />
@@ -130,6 +131,7 @@ export function ExploreMapView() {
       <div className="min-h-[60vh] flex flex-col items-center justify-center gap-4">
         <EmptyState
           icon={Users}
+          mood="shy"
           title="Set yourself to see your audience"
           description={
             hasContactCandidates
@@ -175,6 +177,7 @@ export function ExploreMapView() {
         />
         <EmptyState
           icon={Telescope}
+          mood="curious"
           title="No audience connections synced yet"
           description={emptyDescription}
           cta={

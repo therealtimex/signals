@@ -127,6 +127,7 @@ function AutomationTabsInner({ runs, totalRuns, subjectsByRunId }: AutomationTab
             <Card className="border-border/50">
               <EmptyState
                 icon={Zap}
+                mood="sleepy"
                 title="No runs yet"
                 description="Runs are created when you run agents, sync platforms, or import files."
               />

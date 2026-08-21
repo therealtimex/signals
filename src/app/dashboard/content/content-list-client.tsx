@@ -412,6 +412,7 @@ function ContentListInner({
         <Card className="border-border/50">
           <EmptyState
             icon={FileText}
+            mood="curious"
             title="No content yet"
             description="Create new content with Compose, or sync posts from Automation."
             action={(
