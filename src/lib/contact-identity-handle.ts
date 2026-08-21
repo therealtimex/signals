@@ -22,3 +22,64 @@ export function formatPlatformHandle(platform: string, handle: string): string {
   if (!bare) return "";
   return platform === "x" ? `@${bare}` : bare;
 }
+
+function storedHttpUrl(value: string | null | undefined): string | null {
+  const trimmed = value?.trim() ?? "";
+  if (!trimmed) return null;
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  if (trimmed.startsWith("mailto:")) return trimmed;
+  return null;
+}
+
+function linkedInHref(handle: string): string {
+  if (/^https?:\/\//i.test(handle)) return handle;
+  const vanity = handle.replace(/^\/?(in\/)?/i, "").replace(/\/$/, "");
+  return `https://www.linkedin.com/in/${vanity}`;
+}
+
+/** Public profile URL: stored `platformUrl` first, otherwise a canonical URL from the handle. */
+export function identityProfileHref(identity: {
+  platform: string;
+  platformHandle?: string | null;
+  platformUrl?: string | null;
+}): string | null {
+  const stored = storedHttpUrl(identity.platformUrl);
+  if (stored) return stored;
+
+  const handle = identity.platformHandle
+    ? normalizePlatformHandle(identity.platform, identity.platformHandle)
+    : "";
+  if (!handle) return null;
+
+  switch (identity.platform) {
+    case "x":
+      return `https://x.com/${handle}`;
+    case "linkedin":
+      return linkedInHref(handle);
+    case "gmail":
+      return handle.includes("@") ? `mailto:${handle}` : null;
+    case "substack":
+      if (handle.includes(".")) return `https://${handle.replace(/^https?:\/\//, "")}`;
+      return `https://substack.com/@${handle}`;
+    case "instagram":
+      return `https://www.instagram.com/${handle.replace(/^@/, "")}`;
+    case "facebook":
+      return `https://www.facebook.com/${handle}`;
+    case "threads":
+      return `https://www.threads.net/@${handle.replace(/^@/, "")}`;
+    case "tiktok":
+      return `https://www.tiktok.com/@${handle.replace(/^@/, "")}`;
+    case "youtube":
+      return `https://www.youtube.com/@${handle.replace(/^@/, "")}`;
+    case "bluesky":
+      return `https://bsky.app/profile/${handle.replace(/^@/, "")}`;
+    case "telegram":
+      return `https://t.me/${handle.replace(/^@/, "")}`;
+    case "whatsapp": {
+      const digits = handle.replace(/\D/g, "");
+      return digits.length >= 8 ? `https://wa.me/${digits}` : null;
+    }
+    default:
+      return null;
+  }
+}

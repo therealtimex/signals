@@ -64,6 +64,8 @@ describe("identity handle rendering", () => {
     expect(html).toContain("@chickadeedee3");
     expect(html).toContain("@sama");
     expect(html).not.toContain("@@");
+    expect(html).toContain("href=\"https://x.com/chickadeedee3\"");
+    expect(html).toContain("href=\"https://x.com/sama\"");
     expect(html).toContain("X / Twitter");
     expect(html).not.toContain("Platform Identities");
   });
@@ -83,6 +85,7 @@ describe("identity handle rendering", () => {
 
     expect(html).toContain("someone@example.com");
     expect(html).not.toContain("@someone@example.com");
+    expect(html).toContain("href=\"mailto:someone@example.com\"");
   });
 
   it("renders one sigil on the explore surface, whatever the row stores", () => {
@@ -105,6 +108,8 @@ describe("identity handle rendering", () => {
     expect(stored).toContain("@chickadeedee3");
     expect(bare).not.toContain("@@");
     expect(stored).not.toContain("@@");
+    expect(bare).toContain("href=\"https://x.com/chickadeedee3\"");
+    expect(stored).toContain("href=\"https://x.com/chickadeedee3\"");
   });
 
   it("does not prefix a non-X handle on the explore surface", () => {
@@ -118,5 +123,6 @@ describe("identity handle rendering", () => {
 
     expect(html).toContain("nguyen-k-phung-cfa");
     expect(html).not.toContain("@nguyen-k-phung-cfa");
+    expect(html).toContain("href=\"https://www.linkedin.com/in/nguyen-k-phung-cfa\"");
   });
 });

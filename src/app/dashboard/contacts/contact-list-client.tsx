@@ -26,17 +26,14 @@ import { ContactListAvatar } from "@/components/contact-list-avatar";
 import { FunnelStageBadge } from "@/components/funnel-stage-badge";
 import { EnrichmentScoreBadge } from "@/components/enrichment-score-badge";
 import { PaginationControls } from "@/components/pagination-controls";
+import { PlatformMark } from "@/components/platform-mark";
 import { Users, Archive } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { formatContactListSubtitle } from "@/lib/contact-detail-format";
+import { identityProfileHref } from "@/lib/contact-identity-handle";
 import type { ContactDTO } from "@/lib/db/queries/contact-dto";
 
 const funnelStages = ["all", "prospect", "engaged", "qualified", "opportunity", "customer", "advocate"];
-const platformLabels: Record<string, string> = {
-  x: "X",
-  linkedin: "LI",
-  gmail: "GM",
-  substack: "SS",
-};
 
 /** Check if a contact is archived by parsing its metadata JSON. */
 function isArchived(contact: ContactDTO): boolean {
@@ -50,7 +47,6 @@ function isArchived(contact: ContactDTO): boolean {
 
 interface ContactListClientProps {
   contacts: ContactDTO[];
-  selfContact?: ContactDTO;
   total: number;
   page: number;
   pageSize: number;
@@ -62,7 +58,6 @@ interface ContactListClientProps {
 
 export function ContactListClient({
   contacts,
-  selfContact,
   total,
   page,
   pageSize,
@@ -150,19 +145,8 @@ export function ContactListClient({
           </Button>
         </div>
       ) : null}
-      {selfContact ? (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Badge variant="secondary">You</Badge>
-          <span>
-            Your profile:{" "}
-            <Link href={`/dashboard/contacts/${selfContact.id}`} className="font-medium text-foreground hover:underline">
-              {selfContact.name}
-            </Link>
-          </span>
-        </div>
-      ) : null}
-      <div className="flex items-center gap-4">
-        <form onSubmit={handleSearchSubmit} className="flex-1">
+      <div className="flex flex-wrap items-center gap-3">
+        <form onSubmit={handleSearchSubmit} className="min-w-56 flex-1">
           <Input
             placeholder="Search contacts..."
             value={search}
@@ -207,29 +191,35 @@ export function ContactListClient({
         </Card>
       ) : (
         <div className="rounded-md border">
-          <Table className="table-fixed">
+          <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead className="w-36">Company</TableHead>
-                <TableHead className="w-28">Identities</TableHead>
-                <TableHead className="w-28">Stage</TableHead>
-                <TableHead className="w-28">Enrichment</TableHead>
+                <TableHead className="min-w-0 w-full">Name</TableHead>
+                <TableHead className="w-auto min-w-[7.5rem] whitespace-nowrap">Identities</TableHead>
+                <TableHead className="hidden w-auto whitespace-nowrap sm:table-cell">Stage</TableHead>
+                <TableHead className="hidden w-auto whitespace-nowrap sm:table-cell">Enrichment</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {contacts.map((contact) => {
                 const archived = isArchived(contact);
+                const subtitle = formatContactListSubtitle(contact);
+                const href = `/dashboard/contacts/${contact.id}`;
                 return (
-                <TableRow key={contact.id} className={`hover:bg-accent/30 transition-colors ${archived ? "opacity-60" : ""}`}>
-                  <TableCell>
+                <TableRow
+                  key={contact.id}
+                  className={`cursor-pointer hover:bg-accent/30 transition-colors ${archived ? "opacity-60" : ""}`}
+                  onClick={() => router.push(href)}
+                >
+                  <TableCell className="min-w-0">
                     <div className="flex items-center gap-3 min-w-0">
                       <ContactListAvatar contact={contact} />
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 min-w-0">
                           <Link
-                            href={`/dashboard/contacts/${contact.id}`}
+                            href={href}
                             className="font-medium hover:underline truncate"
+                            onClick={(event) => event.stopPropagation()}
                           >
                             {contact.name}
                           </Link>
@@ -245,34 +235,46 @@ export function ContactListClient({
                             </Badge>
                           )}
                         </div>
-                        {contact.headline ? (
+                        {subtitle ? (
                           <p className="text-xs text-muted-foreground truncate">
-                            {contact.headline}
+                            {subtitle}
                           </p>
                         ) : null}
                       </div>
                     </div>
                   </TableCell>
-                  <TableCell className="text-muted-foreground truncate">
-                    {contact.company ?? "—"}
-                  </TableCell>
-                  <TableCell>
+                  <TableCell className="whitespace-nowrap">
                     {contact.identities.length > 0 ? (
-                      <div className="flex gap-1">
-                        {contact.identities.map((identity) => (
-                          <Badge key={identity.id} variant="secondary" className="text-xs">
-                            {platformLabels[identity.platform] ?? identity.platform}
-                          </Badge>
-                        ))}
+                      <div className="flex w-max items-center gap-1">
+                        {contact.identities.map((identity) => {
+                          const profileHref = identityProfileHref(identity);
+                          const mark = (
+                            <PlatformMark platform={identity.platform} size="sm" />
+                          );
+                          if (!profileHref) {
+                            return (
+                              <span key={identity.id}>{mark}</span>
+                            );
+                          }
+                          return (
+                            <a
+                              key={identity.id}
+                              href={profileHref}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={(event) => event.stopPropagation()}
+                            >
+                              {mark}
+                            </a>
+                          );
+                        })}
                       </div>
-                    ) : (
-                      <span className="text-muted-foreground">—</span>
-                    )}
+                    ) : null}
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="hidden whitespace-nowrap sm:table-cell">
                     <FunnelStageBadge stage={contact.funnelStage} />
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="hidden whitespace-nowrap sm:table-cell">
                     <EnrichmentScoreBadge score={contact.enrichmentScore} />
                   </TableCell>
                 </TableRow>

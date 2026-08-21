@@ -68,7 +68,7 @@ export function ContactIdentitiesInput({ onChange }: ContactIdentitiesInputProps
 
       {rows.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          Optional — link X, LinkedIn, Gmail, or Substack accounts.
+          Optional — link social and email accounts.
         </p>
       ) : (
         <div className="space-y-3">

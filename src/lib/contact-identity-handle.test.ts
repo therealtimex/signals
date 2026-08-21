@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   formatPlatformHandle,
+  identityProfileHref,
   normalizePlatformHandle,
 } from "@/lib/contact-identity-handle";
 
@@ -27,6 +28,36 @@ describe("formatPlatformHandle", () => {
     expect(formatPlatformHandle("x", "   ")).toBe("");
     expect(formatPlatformHandle("x", "@")).toBe("");
     expect(formatPlatformHandle("gmail", "  ")).toBe("");
+  });
+});
+
+describe("identityProfileHref", () => {
+  it("prefers a stored profile URL", () => {
+    expect(
+      identityProfileHref({
+        platform: "x",
+        platformHandle: "qa",
+        platformUrl: "https://x.com/realhandle",
+      }),
+    ).toBe("https://x.com/realhandle");
+  });
+
+  it("builds a canonical URL from a bare handle", () => {
+    expect(identityProfileHref({ platform: "x", platformHandle: "@qa" })).toBe("https://x.com/qa");
+    expect(identityProfileHref({ platform: "instagram", platformHandle: "qa" })).toBe(
+      "https://www.instagram.com/qa",
+    );
+    expect(identityProfileHref({ platform: "gmail", platformHandle: "qa@gmail.com" })).toBe(
+      "mailto:qa@gmail.com",
+    );
+    expect(identityProfileHref({ platform: "linkedin", platformHandle: "/in/name" })).toBe(
+      "https://www.linkedin.com/in/name",
+    );
+  });
+
+  it("returns null when there is no handle or URL", () => {
+    expect(identityProfileHref({ platform: "x", platformHandle: null, platformUrl: null })).toBeNull();
+    expect(identityProfileHref({ platform: "whatsapp", platformHandle: "qa" })).toBeNull();
   });
 });
 

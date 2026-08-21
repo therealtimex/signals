@@ -1,4 +1,4 @@
-import { getOwnerContactId, listContacts, getContactById } from "@/lib/db/queries/contacts";
+import { listContacts } from "@/lib/db/queries/contacts";
 import { parsePaginationParams } from "@/lib/pagination";
 import { ContactListClient } from "./contact-list-client";
 import type { CreatedSource } from "@/lib/db/creation-sources";
@@ -25,8 +25,6 @@ export default async function ContactsPage({
   const params = await searchParams;
   const { page, pageSize } = parsePaginationParams(params);
   const includeArchived = params.archived === "true";
-  const ownerId = getOwnerContactId();
-  const selfContact = ownerId ? getContactById(ownerId) : undefined;
 
   let data;
   let total;
@@ -63,12 +61,11 @@ export default async function ContactsPage({
       <div>
         <h1 className="text-heading-1">Contacts</h1>
         <p className="text-muted-foreground mt-1">
-          Manage your CRM contacts across platforms.
+          {total === 1 ? "1 contact" : `${total} contacts`}
         </p>
       </div>
       <ContactListClient
         contacts={data}
-        selfContact={selfContact}
         total={total}
         page={page}
         pageSize={pageSize}

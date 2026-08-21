@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { formatPlatformHandle } from "@/lib/contact-identity-handle";
+import { formatPlatformHandle, identityProfileHref } from "@/lib/contact-identity-handle";
 import {
   Select,
   SelectContent,
@@ -25,13 +25,8 @@ import {
 import { Plus, Trash2 } from "lucide-react";
 import type { ContactIdentity } from "@/lib/db/types";
 import { PlatformMark } from "@/components/platform-mark";
-
-const platformLabels: Record<string, string> = {
-  x: "X / Twitter",
-  linkedin: "LinkedIn",
-  gmail: "Gmail",
-  substack: "Substack",
-};
+import { CRM_IDENTITY_PLATFORMS, platformLabels } from "@/lib/contact-identity-draft";
+import type { Platform } from "@/lib/db/platforms";
 
 interface IdentitiesSectionProps {
   contactId: string;
@@ -44,7 +39,7 @@ export function IdentitiesSection({ contactId, identities, contactName }: Identi
   const [open, setOpen] = useState(false);
   const [adding, setAdding] = useState(false);
   const [form, setForm] = useState({
-    platform: "x" as "x" | "linkedin" | "gmail" | "substack",
+    platform: "x" as Platform,
     platformUserId: "",
     platformHandle: "",
     platformUrl: "",
@@ -103,9 +98,9 @@ export function IdentitiesSection({ contactId, identities, contactName }: Identi
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {Object.entries(platformLabels).map(([k, v]) => (
-                      <SelectItem key={k} value={k}>
-                        {v}
+                    {CRM_IDENTITY_PLATFORMS.map((platform) => (
+                      <SelectItem key={platform} value={platform}>
+                        {platformLabels[platform]}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -164,49 +159,59 @@ export function IdentitiesSection({ contactId, identities, contactName }: Identi
               const handle = identity.platformHandle
                 ? formatPlatformHandle(identity.platform, identity.platformHandle)
                 : identity.platformUserId;
-              const handleNode = identity.platformUrl ? (
-                <a
-                  href={identity.platformUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-sm font-medium text-primary hover:underline"
-                >
+              const href = identityProfileHref(identity);
+              const handleText = href ? (
+                <span className="text-sm font-medium text-primary group-hover:underline">
                   {handle}
-                </a>
+                </span>
               ) : (
                 <p className="text-sm font-medium">{handle}</p>
+              );
+              const identityBody = (
+                <>
+                  <PlatformMark platform={identity.platform} />
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      {handleText}
+                      {identity.isPrimary === 1 && (
+                        <Badge variant="outline" className="text-xs">
+                          Primary
+                        </Badge>
+                      )}
+                      {identity.isActive ? null : (
+                        <Badge
+                          variant="outline"
+                          className="bg-muted/15 text-xs text-muted-foreground border-muted"
+                        >
+                          Inactive
+                        </Badge>
+                      )}
+                    </div>
+                    {identity.displayName &&
+                    identity.displayName !== handle &&
+                    identity.displayName !== contactName ? (
+                      <p className="truncate text-xs text-muted-foreground">
+                        {identity.displayName}
+                      </p>
+                    ) : null}
+                  </div>
+                </>
               );
 
               return (
                 <li key={identity.id} className="flex items-center justify-between gap-3 px-6 py-3">
-                  <div className="flex min-w-0 items-center gap-3">
-                    <PlatformMark platform={identity.platform} />
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        {handleNode}
-                        {identity.isPrimary === 1 && (
-                          <Badge variant="outline" className="text-xs">
-                            Primary
-                          </Badge>
-                        )}
-                        {identity.isActive ? null : (
-                          <Badge
-                            variant="outline"
-                            className="bg-muted/15 text-xs text-muted-foreground border-muted"
-                          >
-                            Inactive
-                          </Badge>
-                        )}
-                      </div>
-                      {identity.displayName &&
-                      identity.displayName !== handle &&
-                      identity.displayName !== contactName ? (
-                        <p className="truncate text-xs text-muted-foreground">
-                          {identity.displayName}
-                        </p>
-                      ) : null}
-                    </div>
-                  </div>
+                  {href ? (
+                    <a
+                      href={href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="group flex min-w-0 items-center gap-3"
+                    >
+                      {identityBody}
+                    </a>
+                  ) : (
+                    <div className="flex min-w-0 items-center gap-3">{identityBody}</div>
+                  )}
                   <Button
                     variant="ghost"
                     size="icon"

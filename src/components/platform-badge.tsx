@@ -11,6 +11,14 @@ const platformDotStyles: Record<string, string> = {
   linkedin: "bg-platform-linkedin",
   gmail: "bg-platform-gmail",
   facebook: "bg-[#1877F2]",
+  instagram: "bg-[#E4405F]",
+  threads: "bg-neutral-900",
+  tiktok: "bg-neutral-950",
+  youtube: "bg-[#FF0000]",
+  bluesky: "bg-[#1185FE]",
+  telegram: "bg-[#26A5E4]",
+  whatsapp: "bg-[#25D366]",
+  substack: "bg-orange-600",
 };
 
 export function PlatformBadge({ platform }: PlatformBadgeProps) {
