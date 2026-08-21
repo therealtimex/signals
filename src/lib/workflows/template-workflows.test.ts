@@ -6,6 +6,7 @@ import {
 } from "@/lib/workflows/template-config";
 import { buildAgentWorkflowBrief, getTemplateToolsHint } from "@/lib/workflows/template-brief";
 import { buildSocialPatrolTemplateConfig } from "@/lib/workflows/social-patrol";
+import { buildProfilePublishTemplateConfig } from "@/lib/workflows/profile-publish";
 import { serializeTemplateForUi } from "@/lib/workflows/template-serializer";
 
 describe("template-config", () => {
@@ -102,7 +103,30 @@ describe("template-brief", () => {
 
     expect(brief).toContain("Social Intent Patrol execution contract");
     expect(brief).toContain("signals-pp-cli targets prepare");
+    expect(brief).not.toContain("Profile Publishing & Repost execution contract");
     // The shared execution requirements still apply.
+    expect(brief).toContain("Do not call legacy in-process workflow runners.");
+  });
+
+  it("appends the publishing contract only for profile publish configs", () => {
+    const brief = buildAgentWorkflowBrief({
+      template: {
+        id: "tpl_publish",
+        name: "Profile Publishing & Repost",
+        description: "Broadcast to your own timelines",
+        templateType: "content",
+        platform: null,
+        systemPrompt: "Publish the notes.",
+        targetPersona: "Your own audience",
+      },
+      workflowRunId: "run_3",
+      config: { ...buildProfilePublishTemplateConfig(), targetIds: ["tgt_x"] },
+      signalsBaseUrl: "http://localhost:3000",
+    });
+
+    expect(brief).toContain("Profile Publishing & Repost execution contract");
+    expect(brief).toContain("http://localhost:3000/api/content/send-to-agent");
+    expect(brief).not.toContain("Social Intent Patrol execution contract");
     expect(brief).toContain("Do not call legacy in-process workflow runners.");
   });
 });

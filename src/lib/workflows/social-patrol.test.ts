@@ -2,13 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_INTENT_KEYWORDS,
   MAX_LEASE_TTL_SECONDS,
-  MAX_TAG_COUNT,
   buildSocialPatrolBriefSection,
   buildSocialPatrolRunConfig,
   buildSocialPatrolTemplateConfig,
   clampSocialPatrolSlider,
   isSocialPatrolTemplateConfig,
-  normalizeTagList,
   readSocialPatrolConfig,
   socialPatrolLeaseTtlSeconds,
   stripRetiredSocialPatrolConfigKeys,
@@ -35,33 +33,6 @@ describe("clampSocialPatrolSlider", () => {
 
   it("accepts numeric strings from range inputs", () => {
     expect(clampSocialPatrolSlider("durationMinutes", "30")).toBe(30);
-  });
-});
-
-describe("normalizeTagList", () => {
-  it("trims, drops blanks, and de-duplicates case-insensitively", () => {
-    expect(normalizeTagList([" Codex VN ", "codex vn", "", "  ", "Vibe Code"])).toEqual([
-      "Codex VN",
-      "Vibe Code",
-    ]);
-  });
-
-  it("splits comma-separated strings", () => {
-    expect(normalizeTagList("recommend, alternative ,token")).toEqual([
-      "recommend",
-      "alternative",
-      "token",
-    ]);
-  });
-
-  it("caps the list length", () => {
-    const many = Array.from({ length: MAX_TAG_COUNT + 5 }, (_, i) => `tag${i}`);
-    expect(normalizeTagList(many)).toHaveLength(MAX_TAG_COUNT);
-  });
-
-  it("returns an empty list for unusable input", () => {
-    expect(normalizeTagList(undefined)).toEqual([]);
-    expect(normalizeTagList([1, null, {}])).toEqual([]);
   });
 });
 

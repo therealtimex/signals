@@ -9,6 +9,12 @@
  * template, and the launch brief cannot drift apart.
  */
 
+import {
+  clampSlider,
+  normalizeTagList,
+  type SliderBounds,
+} from "@/lib/workflows/template-field-utils";
+
 export const SOCIAL_INTENT_PATROL_TEMPLATE_NAME = "Social Intent Patrol";
 
 /** Marker key in a template config that switches the activate dialog to the patrol form. */
@@ -19,23 +25,13 @@ export const SOCIAL_PATROL_CONFIG_VERSION = 1;
 /** Upper bound accepted by `prepare_platform_target` (src/lib/agent-tools/platform-target-handlers.ts). */
 export const MAX_LEASE_TTL_SECONDS = 1800;
 
-/** Cap on monitored communities / intent keywords so one run cannot fan out unbounded. */
-export const MAX_TAG_COUNT = 20;
-
 export type SocialPatrolSliderKey =
   | "durationMinutes"
   | "maxComments"
   | "maxScrapedContacts";
 
-export interface SocialPatrolSliderBounds {
-  min: number;
-  max: number;
-  step: number;
-  fallback: number;
-}
-
 /** Anti-spam guardrails from the template contract — every value is operator-tunable per run. */
-export const SOCIAL_PATROL_SLIDERS: Record<SocialPatrolSliderKey, SocialPatrolSliderBounds> = {
+export const SOCIAL_PATROL_SLIDERS: Record<SocialPatrolSliderKey, SliderBounds> = {
   durationMinutes: { min: 5, max: 60, step: 5, fallback: 15 },
   maxComments: { min: 0, max: 5, step: 1, fallback: 2 },
   maxScrapedContacts: { min: 5, max: 50, step: 5, fallback: 20 },
@@ -66,35 +62,8 @@ export function isSocialPatrolTemplateConfig(config: Record<string, unknown>): b
   return Boolean(config[SOCIAL_PATROL_CONFIG_KEY]);
 }
 
-/** Snap to the slider's step grid, then clamp into range. */
 export function clampSocialPatrolSlider(key: SocialPatrolSliderKey, value: unknown): number {
-  const { min, max, step, fallback } = SOCIAL_PATROL_SLIDERS[key];
-  const numeric = toFiniteNumber(value);
-  if (numeric === null) return fallback;
-  const snapped = min + Math.round((numeric - min) / step) * step;
-  return Math.min(Math.max(snapped, min), max);
-}
-
-/** Trim, drop blanks, de-duplicate case-insensitively, and cap the list length. */
-export function normalizeTagList(value: unknown, max = MAX_TAG_COUNT): string[] {
-  const raw = Array.isArray(value)
-    ? value
-    : typeof value === "string"
-      ? value.split(",")
-      : [];
-  const seen = new Set<string>();
-  const tags: string[] = [];
-  for (const entry of raw) {
-    if (typeof entry !== "string") continue;
-    const tag = entry.trim();
-    if (!tag) continue;
-    const key = tag.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    tags.push(tag);
-    if (tags.length >= max) break;
-  }
-  return tags;
+  return clampSlider(SOCIAL_PATROL_SLIDERS[key], value);
 }
 
 /**
@@ -231,13 +200,4 @@ export function buildSocialPatrolBriefSection(input: {
   ];
 
   return lines.filter((line) => line !== null).join("\n");
-}
-
-function toFiniteNumber(value: unknown): number | null {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string" && value.trim()) {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed)) return parsed;
-  }
-  return null;
 }

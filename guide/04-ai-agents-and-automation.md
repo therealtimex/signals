@@ -42,6 +42,7 @@ List hygiene — keeping your CRM focused on active, relevant contacts.
 Content creation — generating and publishing posts.
 
 - **Thought Leadership Posts** — Generates and publishes thought leadership content on X and LinkedIn. Creates posts aligned with your brand voice. (~$0.20/run)
+- **Profile Publishing & Repost** — Broadcasts to your own timelines across X, Facebook, and LinkedIn in a single run. Tick every profile you want to cross-post to, paste your raw notes (and optionally point it at a local folder of `.md`/`.txt` notes and screenshots), set how many original posts and curated quote-posts/reposts to publish per profile, pick a tone, and keep the confirmation gate on to review every draft before it goes live. The agent reshapes the same idea per platform rather than pasting identical text. (~$0.30/run)
 
 ### Engage Agents
 Relationship building — interacting with your contacts' content.

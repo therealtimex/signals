@@ -4,6 +4,10 @@ import {
   buildSocialPatrolBriefSection,
   isSocialPatrolTemplateConfig,
 } from "@/lib/workflows/social-patrol";
+import {
+  buildProfilePublishBriefSection,
+  isProfilePublishTemplateConfig,
+} from "@/lib/workflows/profile-publish";
 
 const CATEGORY_LABELS: Record<string, string> = {
   prospecting: "Search",
@@ -79,6 +83,13 @@ export function buildAgentWorkflowBrief(input: {
         config: input.config,
       })}\n`
     : null;
+  const publishContract = isProfilePublishTemplateConfig(input.config)
+    ? `${buildProfilePublishBriefSection({
+        workflowRunId: input.workflowRunId,
+        config: input.config,
+        signalsBaseUrl: input.signalsBaseUrl,
+      })}\n`
+    : null;
 
   const sections = [
     `You are executing the Signals agent workflow template "${input.template.name}".`,
@@ -114,6 +125,7 @@ export function buildAgentWorkflowBrief(input: {
     "10. Report a concise summary in this thread when finished (import JSON summary is suitable).",
     "",
     patrolContract,
+    publishContract,
     "Do not call legacy in-process workflow runners. This thread is the execution lane.",
   ];
 

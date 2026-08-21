@@ -13,6 +13,11 @@ import {
   isSocialPatrolTemplateConfig,
   readSocialPatrolConfig,
 } from "@/lib/workflows/social-patrol";
+import {
+  PROFILE_PUBLISH_TEMPLATE_NAME,
+  isProfilePublishTemplateConfig,
+  readProfilePublishConfig,
+} from "@/lib/workflows/profile-publish";
 import { resetCoreTables } from "@/test/db";
 
 describe("Contact profile pipeline seed", () => {
@@ -177,6 +182,48 @@ describe("Social Intent Patrol seed", () => {
     expect(config).not.toHaveProperty("maxPosts");
     expect(config._seedVersion).toBe(6);
     expect(config.maxComments).toBe(4);
+  });
+
+  it("is idempotent across repeated seeding", () => {
+    seedTemplates();
+    expect(seedTemplates()).toEqual({ seeded: 0, updated: 0, skipped: true });
+  });
+});
+
+describe("Profile Publishing & Repost seed", () => {
+  beforeEach(() => {
+    resetCoreTables();
+  });
+
+  it("seeds a Content template carrying the publishing defaults", () => {
+    seedTemplates();
+    const template = getSystemTemplateByName(PROFILE_PUBLISH_TEMPLATE_NAME)!;
+
+    // The Content tab in the template gallery filters on templateType === "content".
+    expect(template.templateType).toBe("content");
+    // Cross-platform: the acting targets chosen at run time decide the platforms.
+    expect(template.platform).toBeNull();
+
+    const config = JSON.parse(template.config ?? "{}") as Record<string, unknown>;
+    expect(isProfilePublishTemplateConfig(config)).toBe(true);
+    expect(readProfilePublishConfig(config)).toEqual({
+      targetIds: [],
+      instructions: "",
+      maxOriginalPosts: 1,
+      maxReposts: 1,
+      topics: [],
+      tone: "technical",
+      requireApproval: true,
+    });
+  });
+
+  it("keeps the publishing lane out of community hunting", () => {
+    seedTemplates();
+    const template = getSystemTemplateByName(PROFILE_PUBLISH_TEMPLATE_NAME)!;
+
+    expect(template.systemPrompt).toContain("Social Intent Patrol");
+    expect(template.systemPrompt).toContain("maxOriginalPosts");
+    expect(template.systemPrompt).toContain("maxReposts");
   });
 
   it("is idempotent across repeated seeding", () => {
