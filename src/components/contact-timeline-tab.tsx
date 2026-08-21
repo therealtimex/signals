@@ -385,7 +385,7 @@ export function ContactTimelineTab({ contactId }: ContactTimelineTabProps) {
               />
             ) : (
               <p className="text-sm text-muted-foreground">
-                Preview isn't available for this file type.
+                Preview is not available for this file type.
               </p>
             )}
           </DialogContent>
