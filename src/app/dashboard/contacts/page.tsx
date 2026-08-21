@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { listContacts } from "@/lib/db/queries/contacts";
 import { parsePaginationParams } from "@/lib/pagination";
 import { ContactListClient } from "./contact-list-client";
@@ -64,16 +65,18 @@ export default async function ContactsPage({
           {total === 1 ? "1 contact" : `${total} contacts`}
         </p>
       </div>
-      <ContactListClient
-        contacts={data}
-        total={total}
-        page={page}
-        pageSize={pageSize}
-        currentSearch={params.search}
-        currentFunnelStage={params.funnelStage}
-        includeArchived={includeArchived}
-        currentWorkflowRunId={params.createdWorkflowRunId}
-      />
+      <Suspense>
+        <ContactListClient
+          contacts={data}
+          total={total}
+          page={page}
+          pageSize={pageSize}
+          currentSearch={params.search}
+          currentFunnelStage={params.funnelStage}
+          includeArchived={includeArchived}
+          currentWorkflowRunId={params.createdWorkflowRunId}
+        />
+      </Suspense>
     </div>
   );
 }
