@@ -127,7 +127,7 @@ export function IdentitiesSection({ contactId, identities }: IdentitiesSectionPr
                   onChange={(e) =>
                     setForm({ ...form, platformHandle: e.target.value })
                   }
-                  placeholder="sama"
+                  placeholder="Handle without @"
                 />
               </div>
               <div className="grid gap-2">
