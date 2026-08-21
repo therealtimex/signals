@@ -200,7 +200,9 @@ describe("hydrateXProfiles", () => {
     const hydrated = getIdentityById(identity.id)!;
     expect(hydrated).toMatchObject({
       displayName: "Edited Display",
-      platformHandle: "@edited",
+      // Stored bare: the write layer strips the sigil the user typed above. What this test
+      // guards is that hydration keeps the edit instead of replacing it with `person7`.
+      platformHandle: "edited",
       platformUrl: "https://x.com/edited",
       bio: "Edited bio",
       avatarUrl: null,

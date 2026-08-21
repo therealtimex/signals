@@ -223,7 +223,7 @@ export const contactIdentities = sqliteTable("contact_identities", {
     .references(() => contacts.id, { onDelete: "cascade" }),
   platform: text("platform").notNull(), // "x" | "linkedin" | "gmail" | "substack"
   platformUserId: text("platform_user_id").notNull(),
-  platformHandle: text("platform_handle"),   // @username (X), vanityName (LinkedIn)
+  platformHandle: text("platform_handle"),   // bare identifier: username (X), vanityName (LinkedIn)
   platformUrl: text("platform_url"),         // profile URL on that platform
   platformData: text("platform_data").default("{}"), // JSON blob, shape varies per platform
   isPrimary: integer("is_primary").default(0),
