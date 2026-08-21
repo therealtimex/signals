@@ -329,7 +329,8 @@ export async function handleCompletePublish(input: z.infer<typeof completePublis
             platformPostId: normalized.platformPostId,
             platformUrl:
               normalized.platformUrl?.trim() ||
-              buildPlatformPostUrl(normalized.platform, normalized.platformPostId),
+              buildPlatformPostUrl(normalized.platform, normalized.platformPostId) ||
+              undefined,
             completedAt: now,
           }
         : target
