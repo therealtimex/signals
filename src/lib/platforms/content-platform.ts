@@ -4,7 +4,13 @@ import { PLATFORM_SHORT_LABELS } from "@/lib/platforms/capabilities";
 /** Minimal content shape needed to tell which platform a content item belongs to. */
 export interface ContentPlatformSource {
   platformTarget?: string | null;
-  post?: { platformUrl?: string | null } | null;
+  post?: ContentPostLinkSource | null;
+}
+
+/** Stored or derivable permalink fields for a published platform post. */
+export interface ContentPostLinkSource {
+  platformUrl?: string | null;
+  platformPostId?: string | null;
 }
 
 const PLATFORM_HOSTS: ReadonlyArray<readonly [Platform, readonly string[]]> = [
@@ -61,6 +67,43 @@ export function getPlatformLabel(platform: string | null | undefined): string {
   if (!platform) return "Platform";
   if (isPlatform(platform)) return PLATFORM_SHORT_LABELS[platform];
   return platform;
+}
+
+/**
+ * Build a canonical permalink from a platform id and post id when the stored URL is missing.
+ * Returns null for platforms where the URL shape is unknown or needs more context.
+ */
+export function buildPlatformPostUrl(
+  platform: string | null | undefined,
+  platformPostId: string | null | undefined
+): string | null {
+  const id = platformPostId?.trim();
+  if (!id || !platform) return null;
+
+  switch (platform.toLowerCase()) {
+    case "x":
+      return `https://x.com/i/status/${id}`;
+    case "linkedin":
+      return `https://www.linkedin.com/feed/update/urn:li:activity:${id}`;
+    default:
+      return null;
+  }
+}
+
+/**
+ * Resolve the outbound permalink for a content post.
+ * Prefers the stored URL; falls back to a canonical URL derived from platformPostId.
+ */
+export function resolveContentPostUrl(
+  platform: string | null | undefined,
+  source: ContentPostLinkSource | null | undefined
+): string | null {
+  if (!source) return null;
+
+  const stored = source.platformUrl?.trim();
+  if (stored) return stored;
+
+  return buildPlatformPostUrl(platform, source.platformPostId);
 }
 
 export type EngagementMetricKey =

@@ -52,6 +52,7 @@ import {
   getEngagementMetrics,
   parseEngagementSnapshot,
   resolveContentPlatform,
+  resolveContentPostUrl,
 } from "@/lib/platforms/content-platform";
 import type { PublishJobTarget } from "@/lib/publish/types";
 import { cn } from "@/lib/utils";
@@ -275,6 +276,10 @@ function ContentListInner({
     const platformLabel = platform
       ? PLATFORM_SHORT_LABELS[platform as keyof typeof PLATFORM_SHORT_LABELS] ?? platform
       : null;
+    const publishedTarget = job?.targets?.find((target) => target.status === "published");
+    const platformUrl =
+      resolveContentPostUrl(platform, item.post) ??
+      resolveContentPostUrl(publishedTarget?.platform ?? platform, publishedTarget);
     const actionDefinitions: Record<ContentRowActionKind, RowAction> = {
       edit: {
         label: "Edit",
@@ -303,8 +308,8 @@ function ContentListInner({
         label: getOpenPlatformLabel(platformLabel),
         icon: ExternalLink,
         onSelect: () => {
-          if (item.post?.platformUrl) {
-            window.open(item.post.platformUrl, "_blank", "noopener,noreferrer");
+          if (platformUrl) {
+            window.open(platformUrl, "_blank", "noopener,noreferrer");
           }
         },
       },
@@ -323,7 +328,7 @@ function ContentListInner({
       status: item.status,
       hasRetryPayload: Boolean(job?.payload),
       hasThread: Boolean(job?.rtxThreadSlug && job.id),
-      hasPlatformUrl: Boolean(item.post?.platformUrl),
+      hasPlatformUrl: Boolean(platformUrl),
       stale: Boolean(job?.stale),
       hasJob: Boolean(job?.id),
     }).map((kind) => actionDefinitions[kind]);

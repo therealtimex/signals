@@ -80,6 +80,24 @@ describe("publish agent-tool handlers", () => {
     expect(afterDuplicate?.status).toBe("completed");
   });
 
+  it("derives platformUrl from platformPostId when complete_publish omits it", async () => {
+    const { item, job } = seedDraftAndJob();
+
+    await handleCompletePublish({
+      jobId: job.id,
+      platform: "x",
+      success: true,
+      handle: "@user",
+      platformPostId: "9876543210",
+    });
+
+    const post = db.select().from(contentPosts).all().find((row) => row.contentItemId === item.id);
+    expect(post?.platformUrl).toBe("https://x.com/i/status/9876543210");
+
+    const updated = getPublishJobById(job.id);
+    expect(updated?.targetsParsed[0]?.platformUrl).toBe("https://x.com/i/status/9876543210");
+  });
+
   it("records late callbacks on superseded jobs without driving item status", async () => {
     const { item, job } = seedDraftAndJob();
 

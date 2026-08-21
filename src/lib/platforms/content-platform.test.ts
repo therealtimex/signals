@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { PLATFORMS } from "@/lib/db/platforms";
 import {
+  buildPlatformPostUrl,
   getEngagementMetrics,
   getPlatformLabel,
   parseEngagementSnapshot,
   platformFromPlatformUrl,
   resolveContentPlatform,
+  resolveContentPostUrl,
 } from "@/lib/platforms/content-platform";
 
 describe("platformFromPlatformUrl", () => {
@@ -51,6 +53,41 @@ describe("resolveContentPlatform", () => {
 
   it("passes unrecognized targets through", () => {
     expect(resolveContentPlatform({ platformTarget: "mastodon" })).toBe("mastodon");
+  });
+});
+
+describe("resolveContentPostUrl", () => {
+  it("returns the stored URL when present", () => {
+    expect(
+      resolveContentPostUrl("x", {
+        platformUrl: "https://x.com/acme/status/1",
+        platformPostId: "1",
+      })
+    ).toBe("https://x.com/acme/status/1");
+  });
+
+  it("derives canonical URLs from platformPostId when platformUrl is missing", () => {
+    expect(resolveContentPostUrl("x", { platformPostId: "123" })).toBe(
+      "https://x.com/i/status/123"
+    );
+    expect(resolveContentPostUrl("linkedin", { platformPostId: "456" })).toBe(
+      "https://www.linkedin.com/feed/update/urn:li:activity:456"
+    );
+  });
+
+  it("returns null when nothing can be resolved", () => {
+    expect(resolveContentPostUrl("x", null)).toBeNull();
+    expect(resolveContentPostUrl("x", {})).toBeNull();
+    expect(resolveContentPostUrl("facebook", { platformPostId: "789" })).toBeNull();
+  });
+});
+
+describe("buildPlatformPostUrl", () => {
+  it("builds known platform permalinks", () => {
+    expect(buildPlatformPostUrl("x", "42")).toBe("https://x.com/i/status/42");
+    expect(buildPlatformPostUrl("linkedin", "99")).toBe(
+      "https://www.linkedin.com/feed/update/urn:li:activity:99"
+    );
   });
 });
 

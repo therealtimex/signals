@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { getContentItem, getThreadItems } from "@/lib/db/queries/content";
 import { getContentGtmContext } from "@/lib/db/queries/content-gtm-context";
+import { getLatestPublishJobForContentItem } from "@/lib/db/queries/publish-jobs";
 import { WindTunnelSection } from "@/components/wind-tunnel-section";
 import { listEngagementsByContentPost } from "@/lib/db/queries/engagements";
 import {
@@ -17,6 +18,7 @@ import {
   getPlatformLabel,
   parseEngagementSnapshot,
   resolveContentPlatform,
+  resolveContentPostUrl,
 } from "@/lib/platforms/content-platform";
 import { EngagementActions } from "./engagement-actions";
 import { ContentStatusBadge } from "@/components/content-status-badge";
@@ -78,6 +80,11 @@ export default async function ContentDetailPage({
   const threadItems = item.threadId ? getThreadItems(item.threadId) : [];
   const isThread = threadItems.length > 1;
   const gtm = getContentGtmContext(id)!;
+  const publishJob = getLatestPublishJobForContentItem(id);
+  const publishedTarget = publishJob?.targetsParsed.find((target) => target.status === "published");
+  const platformUrl =
+    resolveContentPostUrl(platform, item.post) ??
+    resolveContentPostUrl(publishedTarget?.platform ?? platform, publishedTarget);
 
   return (
     <div className="space-y-6 max-w-3xl">
@@ -115,10 +122,10 @@ export default async function ContentDetailPage({
                 </Badge>
               )}
             </div>
-            {item.post?.platformUrl && (
+            {platformUrl && (
               <Button variant="ghost" size="sm" className="shrink-0" asChild>
                 <a
-                  href={item.post.platformUrl}
+                  href={platformUrl}
                   target="_blank"
                   rel="noopener noreferrer"
                 >

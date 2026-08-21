@@ -23,6 +23,7 @@ import {
   normalizePlatformTargetIdentity,
 } from "@/lib/platforms/target-identity";
 import { PlatformTargetError } from "@/lib/platforms/target-errors";
+import { buildPlatformPostUrl } from "@/lib/platforms/content-platform";
 import { RTX_PUBLISH_SESSION_NAME } from "@/lib/publish/constants";
 import type { PublishJobTarget, PublishPlatformTarget } from "@/lib/publish/types";
 import type { PublishErrorCode } from "@/lib/browser/publishers/types";
@@ -303,7 +304,10 @@ export async function handleCompletePublish(input: z.infer<typeof completePublis
         platformAccountId: account.id,
         targetId: actingTarget.id,
         platformPostId: normalized.platformPostId,
-        platformUrl: normalized.platformUrl ?? null,
+        platformUrl:
+          normalized.platformUrl?.trim() ||
+          buildPlatformPostUrl(normalized.platform, normalized.platformPostId) ||
+          null,
         publishedAt: now,
         status: "published",
       });
@@ -323,7 +327,9 @@ export async function handleCompletePublish(input: z.infer<typeof completePublis
             handle: normalized.handle,
             targetId: normalized.targetId ?? target.targetId,
             platformPostId: normalized.platformPostId,
-            platformUrl: normalized.platformUrl,
+            platformUrl:
+              normalized.platformUrl?.trim() ||
+              buildPlatformPostUrl(normalized.platform, normalized.platformPostId),
             completedAt: now,
           }
         : target
