@@ -25,10 +25,12 @@ vi.mock("@/components/pagination-controls", () => ({
 }));
 
 vi.mock("@/components/ui/select", () => {
-  const passthrough =
-    (tag: string) =>
-    ({ children }: { children?: React.ReactNode }) =>
-      createElement(tag, null, children);
+  function passthrough(tag: string) {
+    function SelectStub({ children }: { children?: React.ReactNode }) {
+      return createElement(tag, null, children);
+    }
+    return SelectStub;
+  }
   return {
     Select: passthrough("div"),
     SelectContent: passthrough("div"),
