@@ -189,6 +189,80 @@ describe("ContactExploreCardView", () => {
     expect(html).toContain("Hello world");
     expect(html).toContain("View post");
     expect(html).toContain("href=\"https://x.com/ada\"");
+    expect(html).toContain("1,200 followers");
+    expect(html).not.toContain("Followers:");
+  });
+
+  it("hides the duplicate profile and empty audience sections on the contact page", () => {
+    const html = renderToStaticMarkup(
+      createElement(ContactExploreCardView, {
+        contactId: "contact-1",
+        explore: {
+          ...absentExplore,
+          org: {
+            id: "org-rtx",
+            name: "RealTimeX.ai",
+            domain: "realtimex.ai",
+            avatarUrl: null,
+          },
+          identities: [
+            {
+              id: "fb-1",
+              platform: "facebook",
+              platformHandle: "ledangtrung",
+              displayName: null,
+              followersCount: null,
+              followingCount: null,
+              postsCount: null,
+              listedCount: null,
+              engagementRate: null,
+              statsUpdatedAt: null,
+              metricSnapshotAt: null,
+              avatarUrl: "https://broken.example/fb.png",
+              bio: null,
+              location: null,
+              isVerified: false,
+              platformCreatedAt: null,
+              platformUrl: null,
+              isPrimary: false,
+              createdAt: 1,
+            },
+          ],
+        },
+        showIdentityHeader: false,
+      }),
+    );
+    expect(html).not.toContain("Audience profile");
+    expect(html).not.toContain("@ RealTimeX.ai");
+    expect(html).not.toContain("No shared niche memberships yet");
+    expect(html).not.toContain("No synced posts yet");
+    expect(html).not.toContain("Followers:");
+    expect(html).toContain("Facebook");
+    expect(html).toContain("ledangtrung");
+  });
+
+  it("does not repeat interest names as a separate niches card", () => {
+    const html = renderToStaticMarkup(
+      createElement(ContactExploreCardView, {
+        contactId: "contact-1",
+        explore: {
+          ...sharedExplore("Visible summary"),
+          niches: [
+            {
+              id: "niche-1",
+              name: "AI",
+              slug: "ai",
+              nicheType: "interest",
+              weight: 0.85,
+            },
+          ],
+        },
+        showIdentityHeader: false,
+      }),
+    );
+    expect(html).toContain("AI");
+    expect(html).not.toContain("Niches");
+    expect(html).not.toContain("85%");
   });
 
   it("shows local-only badge without generate affordance", () => {

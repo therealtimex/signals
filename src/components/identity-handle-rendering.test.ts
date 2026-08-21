@@ -64,6 +64,8 @@ describe("identity handle rendering", () => {
     expect(html).toContain("@chickadeedee3");
     expect(html).toContain("@sama");
     expect(html).not.toContain("@@");
+    expect(html).toContain("X / Twitter");
+    expect(html).not.toContain("Platform Identities");
   });
 
   it("does not prefix a non-X handle in the identities section", () => {

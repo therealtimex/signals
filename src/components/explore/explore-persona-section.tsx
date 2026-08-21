@@ -28,9 +28,29 @@ export function ExplorePersonaSection({
     <Card>
       <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
         <CardTitle className="text-base">Persona</CardTitle>
-        {persona.visibility === "shared" && persona.stale && (
-          <Badge variant="destructive">Stale</Badge>
-        )}
+        <div className="flex items-center gap-2">
+          {persona.visibility === "shared" && persona.stale && (
+            <Badge variant="destructive">Stale</Badge>
+          )}
+          {persona.visibility === "shared" ? (
+            persona.stale ? (
+              <Button size="sm" onClick={() => onGenerate(false)} disabled={generating}>
+                {generating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Refresh persona
+              </Button>
+            ) : (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => onGenerate(true)}
+                disabled={generating}
+              >
+                {generating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Regenerate
+              </Button>
+            )
+          ) : null}
+        </div>
       </CardHeader>
       <CardContent className="space-y-3">
         {persona.visibility === "absent" && (
@@ -63,8 +83,7 @@ export function ExplorePersonaSection({
           </TooltipProvider>
         )}
         {persona.visibility === "shared" && (
-          <div className="space-y-3">
-            <div className="space-y-2">
+            <div className="space-y-3">
               <div className="flex flex-wrap items-center gap-2">
                 {persona.archetype && <Badge variant="secondary">{persona.archetype}</Badge>}
                 {persona.tone && (
@@ -92,20 +111,6 @@ export function ExplorePersonaSection({
                 </p>
               )}
             </div>
-            <div className="flex flex-wrap gap-2">
-              {persona.stale ? (
-                <Button onClick={() => onGenerate(false)} disabled={generating}>
-                  {generating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  Refresh persona
-                </Button>
-              ) : (
-                <Button variant="secondary" onClick={() => onGenerate(true)} disabled={generating}>
-                  {generating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  Regenerate
-                </Button>
-              )}
-            </div>
-          </div>
         )}
         {error && <p className="text-sm text-destructive">{error}</p>}
       </CardContent>
@@ -116,7 +121,7 @@ export function ExplorePersonaSection({
 function ChipRow({ label, items }: { label: string; items: string[] }) {
   return (
     <div className="space-y-1">
-      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className="text-xs text-muted-foreground">{label}</p>
       <div className="flex flex-wrap gap-1.5">
         {items.map((item) => (
           <Badge key={item} variant="outline">

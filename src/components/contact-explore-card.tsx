@@ -8,7 +8,8 @@ import { ExplorePersonaSection } from "@/components/explore/explore-persona-sect
 import { ExplorePlatformStats } from "@/components/explore/explore-platform-stats";
 import { ExploreNicheChips } from "@/components/explore/explore-niche-chips";
 import { ExploreRecentPosts } from "@/components/explore/explore-recent-posts";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { nichesBeyondInterests } from "@/components/explore/explore-format";
+import { Card, CardContent } from "@/components/ui/card";
 
 export {
   formatAccountAge,
@@ -19,9 +20,14 @@ export { formatPlatformHandle } from "@/lib/contact-identity-handle";
 interface ContactExploreCardProps {
   contactId: string;
   explore: ContactExploreCard;
+  showIdentityHeader?: boolean;
 }
 
-export function ContactExploreCardView({ contactId, explore: initialExplore }: ContactExploreCardProps) {
+export function ContactExploreCardView({
+  contactId,
+  explore: initialExplore,
+  showIdentityHeader = true,
+}: ContactExploreCardProps) {
   const [explore, setExplore] = useState(initialExplore);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -73,19 +79,18 @@ export function ContactExploreCardView({ contactId, explore: initialExplore }: C
 
   return (
     <div className="space-y-4">
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Audience profile</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <ExploreIdentityHeader
-            contact={explore.contact}
-            primaryIdentity={primaryIdentity}
-            relationship={explore.relationship}
-            org={explore.org}
-          />
-        </CardContent>
-      </Card>
+      {showIdentityHeader ? (
+        <Card>
+          <CardContent className="pt-6">
+            <ExploreIdentityHeader
+              contact={explore.contact}
+              primaryIdentity={primaryIdentity}
+              relationship={explore.relationship}
+              org={explore.org}
+            />
+          </CardContent>
+        </Card>
+      ) : null}
 
       <ExplorePersonaSection
         persona={explore.persona}
@@ -95,7 +100,9 @@ export function ContactExploreCardView({ contactId, explore: initialExplore }: C
       />
 
       <ExplorePlatformStats identities={explore.identities} />
-      <ExploreNicheChips niches={explore.niches} />
+      <ExploreNicheChips
+        niches={nichesBeyondInterests(explore.niches, explore.persona.interests)}
+      />
       <ExploreRecentPosts posts={explore.recentPosts} />
     </div>
   );

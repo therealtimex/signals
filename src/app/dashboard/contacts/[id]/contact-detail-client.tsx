@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -17,13 +17,32 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { ContactForm } from "@/components/contact-form";
 import { AddTaskDialog } from "@/components/add-task-dialog";
 import { FunnelStageBadge } from "@/components/funnel-stage-badge";
 import { PriorityBadge } from "@/components/priority-badge";
 import { EnrichmentScoreBadge } from "@/components/enrichment-score-badge";
 import { IdentitiesSection } from "@/components/identities-section";
-import { ArrowLeft, Trash2, Save, CheckCircle2, Circle, Archive, RotateCcw, Sparkles, Loader2 } from "lucide-react";
+import {
+  ArrowLeft,
+  Trash2,
+  Save,
+  CheckCircle2,
+  Circle,
+  Archive,
+  RotateCcw,
+  Sparkles,
+  Loader2,
+  Pencil,
+} from "lucide-react";
 import Link from "next/link";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -42,6 +61,7 @@ import { ContactTimelineTab } from "@/components/contact-timeline-tab";
 import { ContactAvatarUpload } from "@/components/contact-avatar-upload";
 import { ContactRelationshipSection } from "@/components/contact-relationship-section";
 import { ContactSourceLine } from "@/components/contact-source-line";
+import { formatWebsiteLabel, hrefForWebsite, isRedundantHeadline } from "@/lib/contact-detail-format";
 
 const platformLabels: Record<string, string> = {
   x: "X / Twitter",
@@ -59,6 +79,19 @@ interface ContactDetailClientProps {
   profilePipelineTemplateId?: string | null;
 }
 
+function MetaLink({ href, children }: { href: string; children: ReactNode }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="text-primary hover:underline"
+    >
+      {children}
+    </a>
+  );
+}
+
 export function ContactDetailClient({
   contact,
   tasks,
@@ -68,6 +101,8 @@ export function ContactDetailClient({
   profilePipelineTemplateId = null,
 }: ContactDetailClientProps) {
   const router = useRouter();
+  const [tab, setTab] = useState("details");
+  const [editOpen, setEditOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [pipelineRunning, setPipelineRunning] = useState(false);
@@ -142,6 +177,7 @@ export function ContactDetailClient({
         formChanges.current = {};
         channelsData.current = null;
         employmentsData.current = null;
+        setEditOpen(false);
         router.refresh();
       }
     } finally {
@@ -186,7 +222,6 @@ export function ContactDetailClient({
     try { tags = JSON.parse(contact.tags); } catch { /* malformed JSON, ignore */ }
   }
 
-  // Parse archived state from metadata
   const [restoring, setRestoring] = useState(false);
   let contactArchived = false;
   let archiveReason = "";
@@ -207,9 +242,76 @@ export function ContactDetailClient({
     setRestoring(false);
   }
 
+  const primaryIdentity =
+    contact.identities.find((id) => id.isPrimary) ?? contact.identities[0];
+  const openTaskCount = tasks.filter((task) => task.status !== "done").length;
+  const canEnrich = !contactArchived && !contact.isSelf && Boolean(profilePipelineTemplateId);
+  const thinProfile = contact.enrichmentScore < 60 && !contact.isSelf;
+  const showHeadline = !isRedundantHeadline(contact.headline, contact.title, contact.company);
+  const metaItems: { key: string; node: ReactNode }[] = [];
+  if (contact.location) metaItems.push({ key: "location", node: contact.location });
+  if (contact.email) metaItems.push({ key: "email", node: contact.email });
+  if (contact.phone) metaItems.push({ key: "phone", node: contact.phone });
+  if (primaryIdentity) {
+    metaItems.push({
+      key: "platform",
+      node: platformLabels[primaryIdentity.platform] ?? primaryIdentity.platform,
+    });
+  }
+  if (contact.website) {
+    metaItems.push({
+      key: "website",
+      node: (
+        <MetaLink href={hrefForWebsite(contact.website)}>
+          {formatWebsiteLabel(contact.website)}
+        </MetaLink>
+      ),
+    });
+  }
+  if (contact.profileUrl) {
+    metaItems.push({
+      key: "profile",
+      node: <MetaLink href={contact.profileUrl}>View profile</MetaLink>,
+    });
+  }
+  const identityDetails = [
+    showHeadline && contact.headline ? (
+      <p key="headline" className="text-sm text-muted-foreground">
+        {contact.headline}
+      </p>
+    ) : null,
+    contact.bio ? (
+      <p key="bio" className="max-w-2xl text-sm">
+        {contact.bio}
+      </p>
+    ) : null,
+    thinProfile ? (
+      <p key="thin" className="text-sm text-muted-foreground">
+        This profile is still thin. Enrich to pull public details.
+      </p>
+    ) : null,
+    metaItems.length > 0 ? (
+      <p key="meta" className="flex flex-wrap text-sm text-muted-foreground">
+        {metaItems.map((item) => (
+          <span key={item.key} className="after:mx-1.5 after:content-['·'] last:after:hidden">
+            {item.node}
+          </span>
+        ))}
+      </p>
+    ) : null,
+    tags.length > 0 ? (
+      <div key="tags" className="flex flex-wrap gap-1">
+        {tags.map((tag) => (
+          <Badge key={tag} variant="secondary">
+            {tag}
+          </Badge>
+        ))}
+      </div>
+    ) : null,
+  ].filter(Boolean);
+
   return (
     <div className="space-y-6">
-      {/* Archived banner */}
       {contactArchived && (
         <Card className="border-destructive/50 bg-destructive/5">
           <CardContent className="flex items-center justify-between py-3">
@@ -235,44 +337,57 @@ export function ContactDetailClient({
         </Card>
       )}
 
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <Link href="/dashboard/contacts">
+      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
+        <div className="flex min-w-0 flex-1 basis-64 items-start gap-2">
+          <Link href="/dashboard/contacts" className="-ml-2 mt-1 shrink-0">
             <Button variant="ghost" size="icon">
               <ArrowLeft className="h-4 w-4" />
             </Button>
           </Link>
-          <div>
-            <h1 className="text-heading-1">{contact.name}</h1>
-            <div className="flex items-center gap-2 mt-1">
-              {contact.company && (
-                <span className="text-muted-foreground">{contact.company}</span>
-              )}
-              {contact.title && (
-                <span className="text-muted-foreground">
-                  {contact.company ? ` · ${contact.title}` : contact.title}
-                </span>
-              )}
+          <div className="flex min-w-0 flex-1 items-center gap-4">
+            <ContactAvatarUpload
+              contactId={contact.id}
+              currentAvatarUrl={contact.resolvedAvatarUrl ?? contact.avatarUrl}
+              name={contact.name}
+              firstName={contact.firstName}
+              lastName={contact.lastName}
+              size="md"
+            />
+            <div className="min-w-0 flex-1 space-y-2">
+              <div>
+                <h1 className="text-heading-1 truncate">{contact.name}</h1>
+                <div className="mt-1 flex flex-wrap items-center gap-2">
+                  {(contact.company || contact.title) && (
+                    <span className="text-muted-foreground">
+                      {[contact.company, contact.title].filter(Boolean).join(" · ")}
+                    </span>
+                  )}
+                  <FunnelStageBadge stage={contact.funnelStage} />
+                  <EnrichmentScoreBadge score={contact.enrichmentScore} />
+                </div>
+                {contact.createdSource ? (
+                  <ContactSourceLine
+                    createdSource={contact.createdSource}
+                    createdSourceDetail={contact.createdSourceDetail}
+                    createdWorkflowRunId={contact.createdWorkflowRunId}
+                    createdAt={contact.createdAt}
+                    createdTemplateName={createdTemplateName}
+                    runHref={createdWorkflowRunHref}
+                    compact
+                  />
+                ) : null}
+              </div>
+              {identityDetails.length > 0 ? identityDetails : null}
             </div>
-            {contact.createdSource ? (
-              <ContactSourceLine
-                createdSource={contact.createdSource}
-                createdSourceDetail={contact.createdSourceDetail}
-                createdWorkflowRunId={contact.createdWorkflowRunId}
-                createdAt={contact.createdAt}
-                createdTemplateName={createdTemplateName}
-                runHref={createdWorkflowRunHref}
-              />
-            ) : null}
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 flex-wrap items-center gap-3">
           {!contactArchived ? (
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <div className="flex items-center gap-2 rounded-md border border-border px-3 py-1.5">
-                    <Label htmlFor="contact-is-self" className="text-sm">
+                  <div className="flex items-center gap-2">
+                    <Label htmlFor="contact-is-self" className="text-xs text-muted-foreground">
                       This is me
                     </Label>
                     <Switch
@@ -289,32 +404,33 @@ export function ContactDetailClient({
               </Tooltip>
             </TooltipProvider>
           ) : null}
-          {!contactArchived &&
-            !contact.isSelf &&
-            profilePipelineTemplateId && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => void handleRunProfilePipeline()}
-                disabled={pipelineRunning}
-              >
-                {pipelineRunning ? (
-                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Sparkles className="mr-1.5 h-3.5 w-3.5" />
-                )}
-                Enrich profile
-              </Button>
-            )}
+          {!contactArchived ? (
+            <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}>
+              <Pencil className="h-3.5 w-3.5" />
+              Edit
+            </Button>
+          ) : null}
+          {canEnrich ? (
+            <Button
+              size="sm"
+              onClick={() => void handleRunProfilePipeline()}
+              disabled={pipelineRunning}
+            >
+              {pipelineRunning ? (
+                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Sparkles className="mr-1.5 h-3.5 w-3.5" />
+              )}
+              Enrich profile
+            </Button>
+          ) : null}
           {pipelineError && (
             <span className="text-xs text-destructive">{pipelineError}</span>
           )}
-          <FunnelStageBadge stage={contact.funnelStage} />
-          <EnrichmentScoreBadge score={contact.enrichmentScore} />
         </div>
       </div>
 
-      <Tabs defaultValue="details">
+      <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="details">Details</TabsTrigger>
           <TabsTrigger value="identities">
@@ -326,149 +442,19 @@ export function ContactDetailClient({
         </TabsList>
 
         <TabsContent value="details" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Contact Information</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <ContactAvatarUpload
-                contactId={contact.id}
-                currentAvatarUrl={contact.resolvedAvatarUrl ?? contact.avatarUrl}
-              />
-              {contact.headline && (
-                <p className="text-sm text-muted-foreground">{contact.headline}</p>
-              )}
-              {contact.bio && <p className="text-sm">{contact.bio}</p>}
-
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                {contact.email && (
-                  <div>
-                    <span className="text-muted-foreground">Email: </span>
-                    {contact.email}
-                  </div>
-                )}
-                {contact.phone && (
-                  <div>
-                    <span className="text-muted-foreground">Phone: </span>
-                    {contact.phone}
-                  </div>
-                )}
-                {contact.location && (
-                  <div>
-                    <span className="text-muted-foreground">Location: </span>
-                    {contact.location}
-                  </div>
-                )}
-                {contact.website && (
-                  <div>
-                    <span className="text-muted-foreground">Website: </span>
-                    <a
-                      href={contact.website}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-primary hover:underline"
-                    >
-                      {contact.website}
-                    </a>
-                  </div>
-                )}
-                {(() => {
-                  const primaryIdentity =
-                    contact.identities.find((id) => id.isPrimary) ?? contact.identities[0];
-                  if (!primaryIdentity) return null;
-                  return (
-                    <div>
-                      <span className="text-muted-foreground">Platform: </span>
-                      {platformLabels[primaryIdentity.platform] ?? primaryIdentity.platform}
-                    </div>
-                  );
-                })()}
-                {contact.profileUrl && (
-                  <div>
-                    <span className="text-muted-foreground">Profile: </span>
-                    <a
-                      href={contact.profileUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-primary hover:underline"
-                    >
-                      View Profile
-                    </a>
-                  </div>
-                )}
-              </div>
-
-              {tags.length > 0 && (
-                <div className="flex gap-1 flex-wrap">
-                  {tags.map((tag) => (
-                    <Badge key={tag} variant="secondary">
-                      {tag}
-                    </Badge>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          <ContactRelationshipSection contactId={contact.id} />
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Edit Contact</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <ContactForm
-                defaultValues={contact}
-                onChange={(partial) => {
-                  formChanges.current = { ...formChanges.current, ...partial };
-                }}
-                onChannelsChange={(channels) => {
-                  channelsData.current = channels;
-                }}
-                onEmploymentsChange={(employments) => {
-                  employmentsData.current = employments;
-                }}
-              />
-              <div className="flex justify-between">
-                <AlertDialog>
-                  <AlertDialogTrigger asChild>
-                    <Button variant="destructive" disabled={deleting}>
-                      <Trash2 className="mr-2 h-4 w-4" />
-                      {deleting ? "Deleting..." : "Delete Contact"}
-                    </Button>
-                  </AlertDialogTrigger>
-                  <AlertDialogContent>
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>Delete contact?</AlertDialogTitle>
-                      <AlertDialogDescription>
-                        This will permanently delete {contact.name} and all associated
-                        tasks. This action cannot be undone.
-                      </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel>Cancel</AlertDialogCancel>
-                      <AlertDialogAction onClick={handleDelete}>
-                        Delete
-                      </AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
-                {deleteError && (
-                  <p className="text-sm text-destructive">{deleteError}</p>
-                )}
-                <Button onClick={handleSave} disabled={saving}>
-                  <Save className="mr-2 h-4 w-4" />
-                  {saving ? "Saving..." : "Save Changes"}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+          <ContactRelationshipSection
+            contactId={contact.id}
+            isSelf={contact.isSelf}
+            openTaskCount={openTaskCount}
+            onOpenTasks={() => setTab("tasks")}
+          />
         </TabsContent>
 
         <TabsContent value="identities" className="space-y-4">
           <IdentitiesSection
             contactId={contact.id}
             identities={contact.identities}
+            contactName={contact.name}
           />
         </TabsContent>
 
@@ -536,9 +522,70 @@ export function ContactDetailClient({
         </TabsContent>
 
         <TabsContent value="audience" className="space-y-4">
-          <ContactExploreCardView contactId={contact.id} explore={explore} />
+          <ContactExploreCardView
+            contactId={contact.id}
+            explore={explore}
+            showIdentityHeader={false}
+          />
         </TabsContent>
       </Tabs>
+
+      <Sheet open={editOpen} onOpenChange={setEditOpen}>
+        <SheetContent className="sm:max-w-xl overflow-y-auto">
+          <SheetHeader>
+            <SheetTitle>Edit contact</SheetTitle>
+            <SheetDescription>
+              Update name, role, and profile fields for {contact.name}.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="px-4">
+            <ContactForm
+              defaultValues={contact}
+              onChange={(partial) => {
+                formChanges.current = { ...formChanges.current, ...partial };
+              }}
+              onChannelsChange={(channels) => {
+                channelsData.current = channels;
+              }}
+              onEmploymentsChange={(employments) => {
+                employmentsData.current = employments;
+              }}
+            />
+          </div>
+          {deleteError && (
+            <p className="px-4 text-sm text-destructive">{deleteError}</p>
+          )}
+          <SheetFooter className="flex-row justify-between sm:justify-between">
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="destructive" disabled={deleting}>
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  {deleting ? "Deleting..." : "Delete"}
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete contact?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This will permanently delete {contact.name} and all associated
+                    tasks. This action cannot be undone.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={handleDelete}>
+                    Delete
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+            <Button onClick={handleSave} disabled={saving}>
+              <Save className="mr-2 h-4 w-4" />
+              {saving ? "Saving..." : "Save changes"}
+            </Button>
+          </SheetFooter>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

@@ -1,9 +1,6 @@
-export const platformLabels: Record<string, string> = {
-  x: "X",
-  linkedin: "LinkedIn",
-  gmail: "Gmail",
-  substack: "Substack",
-};
+import { PLATFORM_SHORT_LABELS } from "@/lib/platforms/capabilities";
+
+export const platformLabels: Record<string, string> = { ...PLATFORM_SHORT_LABELS };
 
 export function formatAccountAge(
   platformCreatedAt: number,
@@ -31,4 +28,28 @@ export function formatRelativeGeneratedAt(
 export function formatCount(value: number | null | undefined): string {
   if (value == null) return "—";
   return value.toLocaleString();
+}
+
+export function hasAudienceMetrics(identity: {
+  followersCount?: number | null;
+  followingCount?: number | null;
+  postsCount?: number | null;
+  listedCount?: number | null;
+  engagementRate?: number | null;
+}): boolean {
+  return [
+    identity.followersCount,
+    identity.followingCount,
+    identity.postsCount,
+    identity.listedCount,
+    identity.engagementRate,
+  ].some((value) => value != null);
+}
+
+export function nichesBeyondInterests<T extends { name: string }>(
+  niches: T[],
+  interests: string[],
+): T[] {
+  const covered = new Set(interests.map((item) => item.trim().toLowerCase()));
+  return niches.filter((niche) => !covered.has(niche.name.trim().toLowerCase()));
 }
