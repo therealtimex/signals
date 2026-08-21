@@ -43,7 +43,7 @@ export function SocialPatrolFields({ value, onChange, disabled }: SocialPatrolFi
 
   useEffect(() => {
     const controller = new AbortController();
-    fetch("/api/platform-targets?kind=account", { signal: controller.signal })
+    fetch("/api/platform-targets", { signal: controller.signal })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((data: { targets?: ActingTarget[] }) => {
         setTargets((data.targets ?? []).filter((t) => t.status === "active"));
