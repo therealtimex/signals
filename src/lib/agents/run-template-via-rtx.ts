@@ -4,7 +4,6 @@ import type { WorkflowRun, WorkflowTemplate } from "@/lib/db/types";
 import {
   buildAgentWorkflowBrief,
   buildTemplateThreadName,
-  formatRunLabelPrefix,
   mergeRunConfig,
 } from "@/lib/workflows/template-brief";
 import {
@@ -235,9 +234,12 @@ export async function runTemplateViaRtx(
       {
         workspaceSlug,
         threadSlug,
-        message:
-          formatRunLabelPrefix(template.totalRuns + 1) +
-          buildWorkflowRunBriefRoutingMessage(run.id),
+        message: buildWorkflowRunBriefRoutingMessage({
+          templateName: template.name,
+          runId: run.id,
+          runNumber: template.totalRuns + 1,
+          absolutePath: briefWrite.absolutePath,
+        }),
         reason: `Run agent workflow template ${template.name} (${template.id})`,
       },
       env,

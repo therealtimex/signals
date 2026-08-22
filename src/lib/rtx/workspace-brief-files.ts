@@ -11,16 +11,87 @@ export function publishJobBriefRelativePath(jobId: string): string {
   return `publish-jobs/${jobId}/brief.md`;
 }
 
-export function buildWorkflowRunBriefRoutingMessage(runId: string): string {
-  return `Execute the Signals workflow brief at \`workflow-runs/${runId}/brief.md\`. Report a concise summary in this thread when finished.`;
+export interface WorkflowRunBriefRoutingInput {
+  runId: string;
+  templateName?: string | null;
+  runNumber?: number;
+  absolutePath?: string;
 }
 
-export function buildPublishJobBriefRoutingMessage(jobId: string): string {
-  return `Execute the Signals publish brief at \`publish-jobs/${jobId}/brief.md\`. Report a concise summary in this thread when finished.`;
+export interface PublishJobBriefRoutingInput {
+  jobId: string;
+  title?: string | null;
+  platforms?: string[];
+  absolutePath?: string;
+}
+
+export function buildWorkflowRunBriefRoutingMessage(
+  runIdOrInput: string | WorkflowRunBriefRoutingInput
+): string {
+  if (typeof runIdOrInput === "string") {
+    return [
+      "Signals workflow handoff",
+      `Run: ${runIdOrInput}`,
+      "State: ready",
+      "Type: workflow-brief",
+      "Context: Follow workspace guidelines and operating model in AGENTS.md.",
+      "Required: Read the brief file before acting and follow its instructions.",
+      `File: @workflow-runs/${runIdOrInput}/brief.md`,
+    ].join("\n");
+  }
+
+  const { runId, templateName, runNumber, absolutePath } = runIdOrInput;
+  const targetPath = absolutePath ? `@${absolutePath}` : `@workflow-runs/${runId}/brief.md`;
+  const name = templateName?.trim() || "Workflow";
+  const runLabel = runNumber && runNumber > 0 ? `#${runNumber} (${runId})` : runId;
+
+  return [
+    `Signals workflow handoff -> ${name}`,
+    `Run: ${runLabel}`,
+    "State: ready",
+    "Type: workflow-brief",
+    "Context: Follow workspace guidelines and operating model in AGENTS.md.",
+    "Required: Read the brief file before acting and follow its instructions.",
+    `File: ${targetPath}`,
+  ].join("\n");
+}
+
+export function buildPublishJobBriefRoutingMessage(
+  jobIdOrInput: string | PublishJobBriefRoutingInput
+): string {
+  if (typeof jobIdOrInput === "string") {
+    return [
+      "Signals publish handoff",
+      `Job: ${jobIdOrInput}`,
+      "State: ready",
+      "Type: publish-brief",
+      "Context: Follow workspace guidelines and operating model in AGENTS.md.",
+      "Required: Read the brief file before acting and follow its instructions.",
+      `File: @publish-jobs/${jobIdOrInput}/brief.md`,
+    ].join("\n");
+  }
+
+  const { jobId, title, platforms, absolutePath } = jobIdOrInput;
+  const targetPath = absolutePath ? `@${absolutePath}` : `@publish-jobs/${jobId}/brief.md`;
+  const postTitle = title?.trim() || "Social Post";
+  const platformList = platforms && platforms.length > 0 ? platforms.join(", ") : undefined;
+
+  const lines = [
+    `Signals publish handoff -> ${postTitle}`,
+    `Job: ${jobId}`,
+    platformList ? `Platforms: ${platformList}` : null,
+    "State: ready",
+    "Type: publish-brief",
+    "Context: Follow workspace guidelines and operating model in AGENTS.md.",
+    "Required: Read the brief file before acting and follow its instructions.",
+    `File: ${targetPath}`,
+  ].filter(Boolean) as string[];
+
+  return lines.join("\n");
 }
 
 export type WriteWorkspaceBriefResult =
-  | { success: true; relativePath: string }
+  | { success: true; relativePath: string; absolutePath: string }
   | { success: false; error: string };
 
 export async function writeRtxWorkspaceBriefFile(
@@ -42,7 +113,7 @@ export async function writeRtxWorkspaceBriefFile(
   try {
     await mkdir(dirname(filePath), { recursive: true });
     await writeFile(filePath, content, "utf8");
-    return { success: true, relativePath };
+    return { success: true, relativePath, absolutePath: filePath };
   } catch (error) {
     return {
       success: false,

@@ -470,13 +470,24 @@ export function buildPublishAgentInitialMessage(input: {
   return `You are the publish agent for Signals CRM.
 
 Job: ${input.jobId} — publish content item "${title}" (${input.contentItemId}) to: ${platformList}.
-Signals base URL: ${input.signalsBaseUrl}
+
+Workspace context:
+- Personality & guidelines: Follow \`AGENTS.md\` for workspace operating model, skill checklist, and privacy rules.
+- Workspace skills available: \`signals-publish\`, \`realtimex-signals\`, \`agent-browser\`.
+
+Environment setup:
+\`\`\`bash
+# 1. Export base URL for CLI tools in this session:
+export SIGNALS_BASE_URL="${input.signalsBaseUrl}"
+
+# 2. Verify health:
+curl -s ${input.signalsBaseUrl}/api/health
+\`\`\`
 
 Signals is already running — do not start or manage Local Apps via pp-cli.
-Verify: curl -s ${input.signalsBaseUrl}/api/health
 
 1. Call agent-tool \`get_publish_job\` with jobId "${input.jobId}" via POST ${input.signalsBaseUrl}/api/agent-tools/invoke.
-2. If workspace skill scripts exist, you may use \`signals-publish\` and \`realtimex-signals\` scripts under \`.claude/skills/\`; otherwise call agent-tools directly at the base URL above.
+2. If workspace skill scripts exist, you may use \`signals-publish\` and \`realtimex-signals\` scripts under \`.claude/skills/\` or \`.agents/skills/\`; otherwise call agent-tools directly at the base URL above.
 3. The author's threading/format intent is expressed in the post body. Apply each platform's best practices (e.g., split into a thread on X if the content warrants it; single post on LinkedIn).
 4. Publish deterministically using the skill's publish script against the RealTimeX Browser session "signals-publish". Call \`update_publish_job\` when you start each platform.
 5. After each platform, call \`complete_publish\` with the result (success requires the detected handle, post id, and URL; failures need error + errorCode from: session_expired, captcha, upload_failed, timeout, unknown).

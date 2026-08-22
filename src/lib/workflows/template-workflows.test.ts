@@ -57,8 +57,9 @@ describe("template-brief", () => {
     expect(brief).toContain("Search X for founders.");
     expect(brief).toContain(getTemplateToolsHint("prospecting").join(", "));
     expect(brief).toContain("signals-pp-cli import contacts");
-    expect(brief).toContain("workflow-runs/run_1/contacts.csv");
     expect(brief).toContain("signals-pp-cli health");
+    expect(brief).toContain('export SIGNALS_BASE_URL="http://localhost:3000"');
+    expect(brief).toContain("AGENTS.md");
     expect(brief).toContain("http://localhost:3000/api/agent-tools");
     expect(brief).toContain("do not start or manage Local Apps via pp-cli");
     expect(brief).not.toContain("Load the `realtimex-signals` skill");
