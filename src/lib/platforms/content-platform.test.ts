@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { PLATFORMS } from "@/lib/db/platforms";
 import {
   buildPlatformPostUrl,
+  extractLinkSourceFromPlatformData,
+  extractPlatformPostId,
   getEngagementMetrics,
   getPlatformLabel,
   parseEngagementSnapshot,
@@ -26,6 +28,77 @@ describe("platformFromPlatformUrl", () => {
   });
 });
 
+describe("extractLinkSourceFromPlatformData", () => {
+  it("extracts platformUrl and platformPostId from JSON string", () => {
+    expect(
+      extractLinkSourceFromPlatformData(
+        JSON.stringify({
+          platformUrl: "https://x.com/trung_rta/status/2090604150715506906",
+          platformPostId: "2090604150715506906",
+        })
+      )
+    ).toEqual({
+      platformUrl: "https://x.com/trung_rta/status/2090604150715506906",
+      platformPostId: "2090604150715506906",
+    });
+  });
+
+  it("extracts aliases tweetUrl, url, tweetId, and postId", () => {
+    expect(
+      extractLinkSourceFromPlatformData(
+        JSON.stringify({
+          tweetUrl: "https://x.com/user/status/123",
+          tweetId: "123",
+        })
+      )
+    ).toEqual({
+      platformUrl: "https://x.com/user/status/123",
+      platformPostId: "123",
+    });
+
+    expect(
+      extractLinkSourceFromPlatformData({
+        url: "https://x.com/user/status/456",
+        postId: 456,
+      })
+    ).toEqual({
+      platformUrl: "https://x.com/user/status/456",
+      platformPostId: "456",
+    });
+  });
+
+  it("returns null for null, empty or non-matching platformData", () => {
+    expect(extractLinkSourceFromPlatformData(null)).toBeNull();
+    expect(extractLinkSourceFromPlatformData("")).toBeNull();
+    expect(extractLinkSourceFromPlatformData("{}")).toBeNull();
+    expect(extractLinkSourceFromPlatformData("invalid json")).toBeNull();
+  });
+});
+
+describe("extractPlatformPostId", () => {
+  it("prefers platformPostId on source", () => {
+    expect(
+      extractPlatformPostId({
+        platformPostId: "111",
+        platformData: JSON.stringify({ platformPostId: "222" }),
+      })
+    ).toBe("111");
+  });
+
+  it("falls back to platformData post id", () => {
+    expect(
+      extractPlatformPostId({
+        platformData: JSON.stringify({ tweetId: "333" }),
+      })
+    ).toBe("333");
+  });
+
+  it("returns null when no post id exists", () => {
+    expect(extractPlatformPostId(null)).toBeNull();
+    expect(extractPlatformPostId({})).toBeNull();
+  });
+});
+
 describe("resolveContentPlatform", () => {
   it("prefers the account the post was published through", () => {
     const platform = resolveContentPlatform(
@@ -41,6 +114,17 @@ describe("resolveContentPlatform", () => {
       post: { platformUrl: "https://www.linkedin.com/feed/update/urn:li:share:1" },
     });
     expect(platform).toBe("linkedin");
+  });
+
+  it("resolves platform from platformData platformUrl when post is absent", () => {
+    expect(
+      resolveContentPlatform({
+        platformTarget: "x,linkedin",
+        platformData: JSON.stringify({
+          platformUrl: "https://www.linkedin.com/feed/update/urn:li:share:1",
+        }),
+      })
+    ).toBe("linkedin");
   });
 
   it("falls back to the first draft target when there is no post", () => {
@@ -81,6 +165,25 @@ describe("resolveContentPostUrl", () => {
         platformPostId: "https://www.facebook.com/acme/posts/789",
       })
     ).toBe("https://www.facebook.com/acme/posts/789");
+  });
+
+  it("resolves platformUrl and derives URLs from platformData", () => {
+    expect(
+      resolveContentPostUrl("x", {
+        platformData: JSON.stringify({
+          platformUrl: "https://x.com/trung_rta/status/2090604150715506906",
+          platformPostId: "2090604150715506906",
+        }),
+      })
+    ).toBe("https://x.com/trung_rta/status/2090604150715506906");
+
+    expect(
+      resolveContentPostUrl("x", {
+        platformData: JSON.stringify({
+          tweetId: "2090604150715506906",
+        }),
+      })
+    ).toBe("https://x.com/i/status/2090604150715506906");
   });
 
   it("returns null when nothing can be resolved", () => {

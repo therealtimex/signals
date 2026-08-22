@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { ArrowLeft, ExternalLink } from "lucide-react";
 import { EngagementMetrics } from "@/components/engagement-metrics";
 import {
+  extractPlatformPostId,
   getPlatformLabel,
   parseEngagementSnapshot,
   resolveContentPlatform,
@@ -69,7 +70,8 @@ export default async function ContentDetailPage({
 
   // Engagement actions are X-only for now (see /api/platforms/x/engage)
   const xAccount = isX ? getPlatformAccountByPlatform("x") : undefined;
-  const canEngage = !!xAccount && xAccount.status === "active" && !!item.post?.platformPostId;
+  const platformPostId = item.post?.platformPostId ?? extractPlatformPostId(item);
+  const canEngage = !!xAccount && xAccount.status === "active" && !!platformPostId;
 
   // Get engagement history for this post
   const engagementHistory = item.post
@@ -84,7 +86,8 @@ export default async function ContentDetailPage({
   const publishedTarget = publishJob?.targetsParsed.find((target) => target.status === "published");
   const platformUrl =
     resolveContentPostUrl(platform, item.post) ??
-    resolveContentPostUrl(publishedTarget?.platform ?? platform, publishedTarget);
+    resolveContentPostUrl(publishedTarget?.platform ?? platform, publishedTarget) ??
+    resolveContentPostUrl(platform, item);
 
   return (
     <div className="space-y-6 max-w-3xl">
@@ -220,10 +223,10 @@ export default async function ContentDetailPage({
       )}
 
       {/* Engagement action bar */}
-      {canEngage && item.post && (
+      {canEngage && platformPostId && (
         <EngagementActions
-          tweetId={item.post.platformPostId!}
-          contentPostId={item.post.id}
+          tweetId={platformPostId}
+          contentPostId={item.post?.id}
           engagementHistory={engagementHistory}
         />
       )}

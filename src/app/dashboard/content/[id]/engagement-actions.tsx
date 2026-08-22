@@ -11,7 +11,7 @@ import type { Engagement } from "@/lib/db/types";
 
 interface EngagementActionsProps {
   tweetId: string;
-  contentPostId: string;
+  contentPostId?: string | null;
   engagementHistory: Engagement[];
 }
 
