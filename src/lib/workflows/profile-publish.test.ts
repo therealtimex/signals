@@ -16,10 +16,12 @@ import {
 import { isSocialPatrolTemplateConfig } from "@/lib/workflows/social-patrol";
 
 describe("clampProfilePublishSlider", () => {
-  it("clamps each budget into its documented range", () => {
-    expect(clampProfilePublishSlider("maxOriginalPosts", 9)).toBe(3);
+  it("clamps each budget into its documented range (0..100)", () => {
+    expect(clampProfilePublishSlider("maxOriginalPosts", 150)).toBe(100);
     expect(clampProfilePublishSlider("maxOriginalPosts", -1)).toBe(0);
-    expect(clampProfilePublishSlider("maxReposts", 12)).toBe(5);
+    expect(clampProfilePublishSlider("maxOriginalPosts", 42)).toBe(42);
+    expect(clampProfilePublishSlider("maxReposts", 150)).toBe(100);
+    expect(clampProfilePublishSlider("maxReposts", 88)).toBe(88);
   });
 
   it("keeps a deliberate zero but falls back for unusable values", () => {
@@ -137,7 +139,7 @@ describe("buildProfilePublishRunConfig", () => {
         targetIds: ["tgt_x", "tgt_x", " tgt_li "],
         instructions: "  Ship notes for v0.3  ",
         sourceFolderPath: "  ~/vault  ",
-        maxOriginalPosts: 99,
+        maxOriginalPosts: 999,
         maxReposts: -3,
         topics: ["ai-agents", "AI-Agents", "crm"],
         tone: "technical",
@@ -147,7 +149,7 @@ describe("buildProfilePublishRunConfig", () => {
       targetIds: ["tgt_x", "tgt_li"],
       instructions: "Ship notes for v0.3",
       sourceFolderPath: "~/vault",
-      maxOriginalPosts: 3,
+      maxOriginalPosts: 100,
       maxReposts: 0,
       topics: ["ai-agents", "crm"],
       tone: "technical",

@@ -26,15 +26,13 @@ export const SOCIAL_PATROL_CONFIG_VERSION = 1;
 export const MAX_LEASE_TTL_SECONDS = 1800;
 
 export type SocialPatrolSliderKey =
-  | "durationMinutes"
   | "maxComments"
   | "maxScrapedContacts";
 
 /** Anti-spam guardrails from the template contract — every value is operator-tunable per run. */
 export const SOCIAL_PATROL_SLIDERS: Record<SocialPatrolSliderKey, SliderBounds> = {
-  durationMinutes: { min: 5, max: 60, step: 5, fallback: 15 },
-  maxComments: { min: 0, max: 5, step: 1, fallback: 2 },
-  maxScrapedContacts: { min: 5, max: 50, step: 5, fallback: 20 },
+  maxComments: { min: 1, max: 100, step: 1, fallback: 5 },
+  maxScrapedContacts: { min: 1, max: 100, step: 1, fallback: 20 },
 };
 
 export const DEFAULT_INTENT_KEYWORDS = [
@@ -48,7 +46,6 @@ export const DEFAULT_INTENT_KEYWORDS = [
 export interface SocialPatrolConfig {
   /** `platform_targets.id` of the acting profile, or null while the operator has not picked one. */
   targetId: string | null;
-  durationMinutes: number;
   maxComments: number;
   maxScrapedContacts: number;
   /** Group names or feed URLs to patrol. */
@@ -66,14 +63,9 @@ export function clampSocialPatrolSlider(key: SocialPatrolSliderKey, value: unkno
   return clampSlider(SOCIAL_PATROL_SLIDERS[key], value);
 }
 
-/**
- * A shift can outlast the maximum lease, so the TTL is the shift length capped at the
- * `prepare_platform_target` ceiling. Longer shifts renew the lease instead of asking for a
- * TTL the tool would reject.
- */
-export function socialPatrolLeaseTtlSeconds(durationMinutes: number): number {
-  const clamped = clampSocialPatrolSlider("durationMinutes", durationMinutes);
-  return Math.min(clamped * 60, MAX_LEASE_TTL_SECONDS);
+/** Standard safe lease TTL for browser automation. Longer shifts renew before expiry. */
+export function socialPatrolLeaseTtlSeconds(): number {
+  return MAX_LEASE_TTL_SECONDS;
 }
 
 /**
@@ -89,7 +81,6 @@ export function readSocialPatrolConfig(config: Record<string, unknown>): SocialP
     targetId: typeof config.targetId === "string" && config.targetId.trim()
       ? config.targetId.trim()
       : null,
-    durationMinutes: clampSocialPatrolSlider("durationMinutes", config.durationMinutes),
     maxComments: clampSocialPatrolSlider("maxComments", config.maxComments),
     maxScrapedContacts: clampSocialPatrolSlider(
       "maxScrapedContacts",
@@ -109,11 +100,9 @@ export function readSocialPatrolConfig(config: Record<string, unknown>): SocialP
 export function buildSocialPatrolRunConfig(
   draft: SocialPatrolConfig,
 ): Record<string, unknown> {
-  const durationMinutes = clampSocialPatrolSlider("durationMinutes", draft.durationMinutes);
   return {
     targetId: draft.targetId?.trim() || null,
-    durationMinutes,
-    leaseTtlSeconds: socialPatrolLeaseTtlSeconds(durationMinutes),
+    leaseTtlSeconds: MAX_LEASE_TTL_SECONDS,
     maxComments: clampSocialPatrolSlider("maxComments", draft.maxComments),
     maxScrapedContacts: clampSocialPatrolSlider(
       "maxScrapedContacts",
@@ -130,7 +119,6 @@ export function buildSocialPatrolTemplateConfig(): Record<string, unknown> {
   return {
     [SOCIAL_PATROL_CONFIG_KEY]: { version: SOCIAL_PATROL_CONFIG_VERSION },
     targetId: null,
-    durationMinutes: SOCIAL_PATROL_SLIDERS.durationMinutes.fallback,
     maxComments: SOCIAL_PATROL_SLIDERS.maxComments.fallback,
     maxScrapedContacts: SOCIAL_PATROL_SLIDERS.maxScrapedContacts.fallback,
     communities: [],
@@ -141,10 +129,10 @@ export function buildSocialPatrolTemplateConfig(): Record<string, unknown> {
 
 /**
  * Run-config keys this template no longer understands. Installs seeded before the shift dropped
- * personal-profile posting still carry them, and `mergeRunConfig` would forward the stale value
- * into the brief's runtime block where an agent could read it as a live budget.
+ * personal-profile posting or session duration still carry them, and `mergeRunConfig` would forward
+ * the stale value into the brief's runtime block where an agent could read it as a live budget.
  */
-export const RETIRED_SOCIAL_PATROL_CONFIG_KEYS = ["maxPosts"] as const;
+export const RETIRED_SOCIAL_PATROL_CONFIG_KEYS = ["maxPosts", "durationMinutes"] as const;
 
 /** Drop retired keys from a stored patrol config, returning null when nothing changed. */
 export function stripRetiredSocialPatrolConfigKeys(
@@ -166,7 +154,7 @@ export function buildSocialPatrolBriefSection(input: {
   config: Record<string, unknown>;
 }): string {
   const patrol = readSocialPatrolConfig(input.config);
-  const ttl = socialPatrolLeaseTtlSeconds(patrol.durationMinutes);
+  const ttl = MAX_LEASE_TTL_SECONDS;
   const target = patrol.targetId ?? "<targetId>";
   const communities = patrol.communities.length > 0
     ? patrol.communities.join(", ")
@@ -181,14 +169,11 @@ export function buildSocialPatrolBriefSection(input: {
     "Social Intent Patrol execution contract:",
     "P0. This shift is outbound only: lurk, reply in other people's threads, and capture engagers. Never publish, quote, or repost to the acting profile's own timeline — that is the \"Profile Publishing & Repost\" template's job.",
     `P1. Acquire the acting lease: signals-pp-cli targets prepare ${target} --intent browse --ttl ${ttl}`,
-    `    Lease TTL is capped at ${MAX_LEASE_TTL_SECONDS}s — for a ${patrol.durationMinutes}-minute shift, renew with --lease <leaseId> instead of requesting a longer TTL.`,
+    `    Lease TTL defaults to ${MAX_LEASE_TTL_SECONDS}s — for longer shifts, renew with --lease <leaseId> before the lease expires.`,
     "P2. Connect over CDP to the RealTimeX Browser session named in the `sessionName` field of that prepare response (commonly `signals-publish`, but a target on a dedicated connection returns its own session — never assume). Confirm the live identity matches the returned `expectedHandle` before acting, and drive the platform through agent-browser, not agent-tools.",
     `P3. ${keywordScope}: ${communities}`,
     "    Scan the group/community feeds, the keyword search feeds, and the newest unanswered questions. Prefer posts where the author is stuck over posts that already have a good answer.",
-    `P4. Stay inside the shift budget: at most ${patrol.maxComments} high-intent comment(s) and ${patrol.durationMinutes} minute(s) of wall clock.`,
-    patrol.maxComments === 0
-      ? "    maxComments is 0 — this is a scan-and-ingest-only shift. Read the communities and mine engagers, but do not reply to anything."
-      : null,
+    `P4. Stay inside the shift budget: at most ${patrol.maxComments} high-intent comment(s). Complete the shift once this budget is met or monitored feeds are fully scanned.`,
     patrol.requireApproval
       ? "P5. Approval checkpoint is ON: post each drafted comment in this thread and wait for confirmation before publishing it."
       : "P5. Approval checkpoint is OFF: publish drafted comments directly, and log each one in this thread.",

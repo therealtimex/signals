@@ -34,8 +34,8 @@ export type ProfilePublishSliderKey = "maxOriginalPosts" | "maxReposts";
 
 /** Per-profile publishing budget — the bounds come from the template contract. */
 export const PROFILE_PUBLISH_SLIDERS: Record<ProfilePublishSliderKey, SliderBounds> = {
-  maxOriginalPosts: { min: 0, max: 3, step: 1, fallback: 1 },
-  maxReposts: { min: 0, max: 5, step: 1, fallback: 1 },
+  maxOriginalPosts: { min: 0, max: 100, step: 1, fallback: 1 },
+  maxReposts: { min: 0, max: 100, step: 1, fallback: 1 },
 };
 
 /**

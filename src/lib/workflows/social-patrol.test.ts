@@ -13,37 +13,30 @@ import {
 } from "@/lib/workflows/social-patrol";
 
 describe("clampSocialPatrolSlider", () => {
-  it("snaps to the step grid and clamps into range", () => {
-    expect(clampSocialPatrolSlider("durationMinutes", 17)).toBe(15);
-    expect(clampSocialPatrolSlider("durationMinutes", 3)).toBe(5);
-    expect(clampSocialPatrolSlider("durationMinutes", 999)).toBe(60);
-    expect(clampSocialPatrolSlider("maxScrapedContacts", 23)).toBe(25);
-    expect(clampSocialPatrolSlider("maxScrapedContacts", 1)).toBe(5);
-  });
-
-  it("keeps zero for the scan-only comment budget instead of falling back", () => {
-    expect(clampSocialPatrolSlider("maxComments", 0)).toBe(0);
+  it("snaps to the step grid and clamps into range 1..100", () => {
+    expect(clampSocialPatrolSlider("maxComments", 0)).toBe(1);
+    expect(clampSocialPatrolSlider("maxComments", 150)).toBe(100);
+    expect(clampSocialPatrolSlider("maxComments", 42)).toBe(42);
+    expect(clampSocialPatrolSlider("maxScrapedContacts", 0)).toBe(1);
+    expect(clampSocialPatrolSlider("maxScrapedContacts", 150)).toBe(100);
+    expect(clampSocialPatrolSlider("maxScrapedContacts", 73)).toBe(73);
   });
 
   it("falls back to the default for non-numeric values", () => {
-    expect(clampSocialPatrolSlider("maxComments", "not a number")).toBe(2);
-    expect(clampSocialPatrolSlider("durationMinutes", null)).toBe(15);
+    expect(clampSocialPatrolSlider("maxComments", "not a number")).toBe(5);
+    expect(clampSocialPatrolSlider("maxComments", null)).toBe(5);
     expect(clampSocialPatrolSlider("maxScrapedContacts", undefined)).toBe(20);
   });
 
   it("accepts numeric strings from range inputs", () => {
-    expect(clampSocialPatrolSlider("durationMinutes", "30")).toBe(30);
+    expect(clampSocialPatrolSlider("maxComments", "30")).toBe(30);
+    expect(clampSocialPatrolSlider("maxScrapedContacts", "80")).toBe(80);
   });
 });
 
 describe("socialPatrolLeaseTtlSeconds", () => {
-  it("matches the shift length while it fits the lease ceiling", () => {
-    expect(socialPatrolLeaseTtlSeconds(15)).toBe(900);
-    expect(socialPatrolLeaseTtlSeconds(30)).toBe(1800);
-  });
-
-  it("caps longer shifts at the prepare_platform_target maximum", () => {
-    expect(socialPatrolLeaseTtlSeconds(60)).toBe(MAX_LEASE_TTL_SECONDS);
+  it("returns the standard maximum lease TTL", () => {
+    expect(socialPatrolLeaseTtlSeconds()).toBe(MAX_LEASE_TTL_SECONDS);
   });
 });
 
@@ -51,8 +44,7 @@ describe("readSocialPatrolConfig", () => {
   it("fills slider defaults for an empty config", () => {
     expect(readSocialPatrolConfig({})).toEqual({
       targetId: null,
-      durationMinutes: 15,
-      maxComments: 2,
+      maxComments: 5,
       maxScrapedContacts: 20,
       communities: [],
       intentKeywords: [],
@@ -61,8 +53,6 @@ describe("readSocialPatrolConfig", () => {
   });
 
   it("preserves a cleared keyword list instead of restoring the defaults", () => {
-    // The seeded template carries the defaults explicitly, so empty means the operator
-    // removed every pill — the brief must not contradict the config block it ships with.
     expect(readSocialPatrolConfig({ intentKeywords: [] }).intentKeywords).toEqual([]);
     expect(
       readSocialPatrolConfig(buildSocialPatrolTemplateConfig()).intentKeywords,
@@ -73,18 +63,16 @@ describe("readSocialPatrolConfig", () => {
     expect(
       readSocialPatrolConfig({
         targetId: " tgt_1 ",
-        durationMinutes: 45,
-        maxComments: 0,
-        maxScrapedContacts: 50,
+        maxComments: 50,
+        maxScrapedContacts: 100,
         communities: ["Codex VN"],
         intentKeywords: ["lỗi"],
         requireApproval: false,
       }),
     ).toEqual({
       targetId: "tgt_1",
-      durationMinutes: 45,
-      maxComments: 0,
-      maxScrapedContacts: 50,
+      maxComments: 50,
+      maxScrapedContacts: 100,
       communities: ["Codex VN"],
       intentKeywords: ["lỗi"],
       requireApproval: false,
@@ -108,8 +96,7 @@ describe("buildSocialPatrolTemplateConfig", () => {
     expect(isSocialPatrolTemplateConfig({ maxEngagements: 5 })).toBe(false);
     expect(readSocialPatrolConfig(config)).toEqual({
       targetId: null,
-      durationMinutes: 15,
-      maxComments: 2,
+      maxComments: 5,
       maxScrapedContacts: 20,
       communities: [],
       intentKeywords: DEFAULT_INTENT_KEYWORDS,
@@ -123,18 +110,24 @@ describe("buildSocialPatrolTemplateConfig", () => {
     expect(readSocialPatrolConfig(buildSocialPatrolRunConfig(draft))).toEqual(draft);
   });
 
-  it("no longer carries a personal-profile post budget", () => {
+  it("no longer carries durationMinutes or maxPosts", () => {
+    expect(buildSocialPatrolTemplateConfig()).not.toHaveProperty("durationMinutes");
     expect(buildSocialPatrolTemplateConfig()).not.toHaveProperty("maxPosts");
-    expect(Object.keys(buildSocialPatrolRunConfig(readSocialPatrolConfig({})))).not.toContain(
-      "maxPosts",
-    );
+    const runKeys = Object.keys(buildSocialPatrolRunConfig(readSocialPatrolConfig({})));
+    expect(runKeys).not.toContain("durationMinutes");
+    expect(runKeys).not.toContain("maxPosts");
   });
 });
 
 describe("stripRetiredSocialPatrolConfigKeys", () => {
-  it("drops a stale maxPosts left by an older seed", () => {
+  it("drops stale maxPosts and durationMinutes left by older seeds", () => {
     expect(
-      stripRetiredSocialPatrolConfigKeys({ socialPatrol: { version: 1 }, maxPosts: 2, maxComments: 3 }),
+      stripRetiredSocialPatrolConfigKeys({
+        socialPatrol: { version: 1 },
+        maxPosts: 2,
+        durationMinutes: 15,
+        maxComments: 3,
+      }),
     ).toEqual({ socialPatrol: { version: 1 }, maxComments: 3 });
   });
 
@@ -144,12 +137,11 @@ describe("stripRetiredSocialPatrolConfigKeys", () => {
 });
 
 describe("buildSocialPatrolRunConfig", () => {
-  it("emits the run payload with a derived lease TTL", () => {
+  it("emits the run payload with standard lease TTL", () => {
     expect(
       buildSocialPatrolRunConfig({
         targetId: "tgt_fb",
-        durationMinutes: 60,
-        maxComments: 5,
+        maxComments: 10,
         maxScrapedContacts: 50,
         communities: ["Codex VN", "codex vn"],
         intentKeywords: ["recommend"],
@@ -157,9 +149,8 @@ describe("buildSocialPatrolRunConfig", () => {
       }),
     ).toEqual({
       targetId: "tgt_fb",
-      durationMinutes: 60,
       leaseTtlSeconds: MAX_LEASE_TTL_SECONDS,
-      maxComments: 5,
+      maxComments: 10,
       maxScrapedContacts: 50,
       communities: ["Codex VN"],
       intentKeywords: ["recommend"],
@@ -170,9 +161,8 @@ describe("buildSocialPatrolRunConfig", () => {
   it("re-clamps a stale draft rather than trusting the dialog state", () => {
     const config = buildSocialPatrolRunConfig({
       targetId: null,
-      durationMinutes: 500,
       maxComments: -4,
-      maxScrapedContacts: 3,
+      maxScrapedContacts: 500,
       communities: [],
       intentKeywords: [],
       requireApproval: false,
@@ -180,9 +170,8 @@ describe("buildSocialPatrolRunConfig", () => {
 
     expect(config).toMatchObject({
       targetId: null,
-      durationMinutes: 60,
-      maxComments: 0,
-      maxScrapedContacts: 5,
+      maxComments: 1,
+      maxScrapedContacts: 100,
       requireApproval: false,
     });
   });
@@ -192,9 +181,8 @@ describe("buildSocialPatrolBriefSection", () => {
   const config = {
     socialPatrol: { version: 1 },
     targetId: "tgt_fb",
-    durationMinutes: 60,
-    maxComments: 3,
-    maxScrapedContacts: 25,
+    maxComments: 8,
+    maxScrapedContacts: 30,
     communities: ["Codex VN"],
     intentKeywords: ["recommend", "lỗi"],
     requireApproval: true,
@@ -206,14 +194,12 @@ describe("buildSocialPatrolBriefSection", () => {
     expect(section).toContain(
       `signals-pp-cli targets prepare tgt_fb --intent browse --ttl ${MAX_LEASE_TTL_SECONDS}`,
     );
-    // The session must come from the prepare response — a target on a dedicated connection
-    // returns its own session, so a hardcoded name would act as the wrong identity.
     expect(section).toContain("`sessionName` field of that prepare response");
     expect(section).toContain("expectedHandle");
     expect(section).toContain("Codex VN");
     expect(section).toContain("recommend, lỗi");
-    expect(section).toContain("3 high-intent comment(s)");
-    expect(section).toContain("25 contact(s)");
+    expect(section).toContain("8 high-intent comment(s)");
+    expect(section).toContain("30 contact(s)");
     expect(section).toContain(
       "signals-pp-cli import contacts --file workflow-runs/run_9/contacts.csv --dedupe",
     );
@@ -224,9 +210,9 @@ describe("buildSocialPatrolBriefSection", () => {
     const section = buildSocialPatrolBriefSection({ workflowRunId: "run_9", config });
     expect(section).toContain("This shift is outbound only");
     expect(section).toContain("Profile Publishing & Repost");
-    // The retired personal-post budget must not resurface as an instruction.
     expect(section).not.toContain("personal profile post");
     expect(section).not.toContain("maxPosts");
+    expect(section).not.toContain("durationMinutes");
   });
 
   it("calls out the approval checkpoint", () => {
@@ -240,18 +226,6 @@ describe("buildSocialPatrolBriefSection", () => {
       config: { ...config, requireApproval: false },
     });
     expect(section).toContain("Approval checkpoint is OFF");
-  });
-
-  it("calls out scan-only mode when the comment budget is zero", () => {
-    expect(
-      buildSocialPatrolBriefSection({
-        workflowRunId: "run_9",
-        config: { ...config, maxComments: 0 },
-      }),
-    ).toContain("scan-and-ingest-only shift");
-    expect(
-      buildSocialPatrolBriefSection({ workflowRunId: "run_9", config }),
-    ).not.toContain("scan-and-ingest-only shift");
   });
 
   it("names the fallback scope when no communities are configured", () => {

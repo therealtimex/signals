@@ -41,10 +41,6 @@ export function SocialPatrolFields({ value, onChange, disabled }: SocialPatrolFi
     [onChange, value],
   );
 
-  const leaseTtlMinutes = Math.round(
-    socialPatrolLeaseTtlSeconds(value.durationMinutes) / 60,
-  );
-
   return (
     <div className="space-y-4">
       <div className="space-y-2">
@@ -82,17 +78,6 @@ export function SocialPatrolFields({ value, onChange, disabled }: SocialPatrolFi
         <p className="text-xs font-medium text-muted-foreground">Shift budget</p>
 
         <BoundedSlider
-          id="patrol-duration"
-          label="Session duration"
-          bounds={SOCIAL_PATROL_SLIDERS.durationMinutes}
-          value={value.durationMinutes}
-          onChange={(next) => setSlider("durationMinutes", next)}
-          disabled={disabled}
-          format={(v) => `${v} min`}
-          hint={`Browser lease TTL is capped at ${leaseTtlMinutes} min — longer shifts renew the lease.`}
-        />
-
-        <BoundedSlider
           id="patrol-comments"
           label="High-intent comments"
           bounds={SOCIAL_PATROL_SLIDERS.maxComments}
@@ -100,11 +85,6 @@ export function SocialPatrolFields({ value, onChange, disabled }: SocialPatrolFi
           onChange={(next) => setSlider("maxComments", next)}
           disabled={disabled}
           format={(v) => (v === 1 ? "1 comment" : `${v} comments`)}
-          hint={
-            value.maxComments === 0
-              ? "Scan & ingest only — the agent reads the communities without replying."
-              : undefined
-          }
         />
 
         <BoundedSlider
@@ -114,7 +94,7 @@ export function SocialPatrolFields({ value, onChange, disabled }: SocialPatrolFi
           value={value.maxScrapedContacts}
           onChange={(next) => setSlider("maxScrapedContacts", next)}
           disabled={disabled}
-          format={(v) => `${v} contacts`}
+          format={(v) => (v === 1 ? "1 contact" : `${v} contacts`)}
         />
       </div>
 
