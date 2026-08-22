@@ -274,12 +274,16 @@ export function ActivateDialog({ template, open, onClose }: ActivateDialogProps)
   function handlePipelineBatchSizeChange(nextValue: number) {
     pipelineBatchSizeTouched.current = true;
     if (backlog) {
-      setPipelineBatchSize(clampPipelineBatchSize(nextValue, backlog.backlogTotal));
+      setPipelineState((prev) => ({
+        ...prev,
+        batchSize: clampPipelineBatchSize(nextValue, backlog.backlogTotal),
+      }));
       return;
     }
-    setPipelineBatchSize(
-      Math.min(Math.max(1, Math.floor(nextValue)), PROFILE_PIPELINE_MAX_BATCH),
-    );
+    setPipelineState((prev) => ({
+      ...prev,
+      batchSize: Math.min(Math.max(1, Math.floor(nextValue)), PROFILE_PIPELINE_MAX_BATCH),
+    }));
   }
 
   return (
