@@ -70,19 +70,32 @@ function isPipelineTemplateConfig(config: string): boolean {
 }
 
 export function ActivateDialog({ template, open, onClose }: ActivateDialogProps) {
-  const [running, setRunning] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [threadPath, setThreadPath] = useState<string | null>(null);
-  const [workflowRunId, setWorkflowRunId] = useState<string | null>(null);
-  const [backlog, setBacklog] = useState<PipelineBacklogPreview | null>(null);
-  const [backlogLoading, setBacklogLoading] = useState(false);
-  const [freshThread, setFreshThread] = useState(false);
-  const [pipelineBatchSize, setPipelineBatchSize] = useState(
-    PROFILE_PIPELINE_DEFAULT_BATCH,
-  );
-  const pipelineBatchSizeTouched = useRef(false);
+  const [launchState, setLaunchState] = useState<{
+    running: boolean;
+    error: string | null;
+    threadPath: string | null;
+    workflowRunId: string | null;
+  }>({
+    running: false,
+    error: null,
+    threadPath: null,
+    workflowRunId: null,
+  });
 
+  const [pipelineState, setPipelineState] = useState<{
+    backlog: PipelineBacklogPreview | null;
+    loading: boolean;
+    batchSize: number;
+  }>({
+    backlog: null,
+    loading: false,
+    batchSize: PROFILE_PIPELINE_DEFAULT_BATCH,
+  });
+
+  const pipelineBatchSizeTouched = useRef(false);
+  const [freshThread, setFreshThread] = useState(false);
   const [systemPrompt, setSystemPrompt] = useState(template.systemPrompt ?? "");
+
   const templateConfig = parseTemplateConfig(template.config);
   const isPipeline = isPipelineTemplateConfig(template.config);
   const isPatrol = isSocialPatrolTemplateConfig(templateConfig);
@@ -92,74 +105,71 @@ export function ActivateDialog({ template, open, onClose }: ActivateDialogProps)
   const [profilePublish, setProfilePublish] = useState(() =>
     readProfilePublishConfig(templateConfig),
   );
+  const [limits, setLimits] = useState(() => readRunLimitFromTemplateConfig(templateConfig));
 
-  const initialLimits = readRunLimitFromTemplateConfig(templateConfig);
-  const [maxResults, setMaxResults] = useState(initialLimits.maxResults);
-  const [maxContacts, setMaxContacts] = useState(initialLimits.maxContacts);
-  const [maxEnrichmentScore, setMaxEnrichmentScore] = useState(initialLimits.maxEnrichmentScore);
-  const [companyName, setCompanyName] = useState(initialLimits.companyName);
-  const [inactivityDays, setInactivityDays] = useState(initialLimits.inactivityDays);
-  const [topics, setTopics] = useState(initialLimits.topics);
-  const [tone, setTone] = useState(initialLimits.tone);
-  const [maxEngagements, setMaxEngagements] = useState(initialLimits.maxEngagements);
+  const { running, error, threadPath, workflowRunId } = launchState;
+  const { backlog, loading: backlogLoading, batchSize: pipelineBatchSize } = pipelineState;
+
+  function updateLimit<K extends keyof ReturnType<typeof readRunLimitFromTemplateConfig>>(
+    key: K,
+    value: string,
+  ) {
+    setLimits((prev) => ({ ...prev, [key]: value }));
+  }
 
   useEffect(() => {
     if (!open) return;
 
     const config = parseTemplateConfig(template.config);
-    const limits = readRunLimitFromTemplateConfig(config);
     setPatrol(readSocialPatrolConfig(config));
     setProfilePublish(readProfilePublishConfig(config));
-    setMaxResults(limits.maxResults);
-    setMaxContacts(limits.maxContacts);
-    setMaxEnrichmentScore(limits.maxEnrichmentScore);
-    setCompanyName(limits.companyName);
-    setInactivityDays(limits.inactivityDays);
-    setTopics(limits.topics);
-    setTone(limits.tone);
-    setMaxEngagements(limits.maxEngagements);
+    setLimits(readRunLimitFromTemplateConfig(config));
     setSystemPrompt(template.systemPrompt ?? "");
     setFreshThread(false);
+    setLaunchState({ running: false, error: null, threadPath: null, workflowRunId: null });
   }, [open, template.id, template.config, template.systemPrompt, template.templateType]);
 
   useEffect(() => {
     if (!open || !isPipeline) {
-      setBacklog(null);
-      setPipelineBatchSize(PROFILE_PIPELINE_DEFAULT_BATCH);
+      setPipelineState({
+        backlog: null,
+        loading: false,
+        batchSize: PROFILE_PIPELINE_DEFAULT_BATCH,
+      });
       pipelineBatchSizeTouched.current = false;
       return;
     }
 
     const controller = new AbortController();
-    setBacklogLoading(true);
+    setPipelineState((prev) => ({ ...prev, loading: true }));
     fetch(`/api/workflows/templates/${template.id}/backlog`, {
       signal: controller.signal,
     })
       .then((r) => r.json())
       .then((data: PipelineBacklogPreview & { error?: string }) => {
         if (typeof data.backlogTotal === "number" && typeof data.batchSize === "number") {
-          if (!pipelineBatchSizeTouched.current) {
-            setPipelineBatchSize(
-              clampPipelineBatchSize(data.batchSize, data.backlogTotal),
-            );
-          }
-          setBacklog({ backlogTotal: data.backlogTotal, batchSize: data.batchSize });
+          setPipelineState((prev) => ({
+            ...prev,
+            backlog: { backlogTotal: data.backlogTotal, batchSize: data.batchSize },
+            batchSize: pipelineBatchSizeTouched.current
+              ? prev.batchSize
+              : clampPipelineBatchSize(data.batchSize, data.backlogTotal),
+            loading: false,
+          }));
+        } else {
+          setPipelineState((prev) => ({ ...prev, loading: false }));
         }
       })
       .catch((error: unknown) => {
         if (error instanceof DOMException && error.name === "AbortError") return;
-        setBacklog(null);
-      })
-      .finally(() => setBacklogLoading(false));
+        setPipelineState((prev) => ({ ...prev, backlog: null, loading: false }));
+      });
 
     return () => controller.abort();
   }, [open, isPipeline, template.id]);
 
   async function handleRun() {
-    setRunning(true);
-    setError(null);
-    setThreadPath(null);
-    setWorkflowRunId(null);
+    setLaunchState({ running: true, error: null, threadPath: null, workflowRunId: null });
 
     try {
       const config: Record<string, unknown> = {};
@@ -173,24 +183,24 @@ export function ActivateDialog({ template, open, onClose }: ActivateDialogProps)
         Object.assign(config, buildProfilePublishRunConfig(profilePublish));
       } else {
         if (template.templateType === "prospecting") {
-          config.maxResults = parseInt(maxResults, 10) || 20;
+          config.maxResults = parseInt(limits.maxResults, 10) || 20;
         }
         if (template.templateType === "enrichment") {
-          config.maxContacts = parseInt(maxContacts, 10) || 10;
-          config.maxEnrichmentScore = parseInt(maxEnrichmentScore, 10) || 50;
+          config.maxContacts = parseInt(limits.maxContacts, 10) || 10;
+          config.maxEnrichmentScore = parseInt(limits.maxEnrichmentScore, 10) || 50;
         }
         if (template.templateType === "pruning") {
-          config.maxContacts = parseInt(maxContacts, 10) || 20;
-          config.companyName = companyName || undefined;
-          config.inactivityDays = parseInt(inactivityDays, 10) || 365;
+          config.maxContacts = parseInt(limits.maxContacts, 10) || 20;
+          config.companyName = limits.companyName || undefined;
+          config.inactivityDays = parseInt(limits.inactivityDays, 10) || 365;
         }
         if (template.templateType === "content") {
-          const topicsList = topics.split(",").map((t) => t.trim()).filter(Boolean);
+          const topicsList = limits.topics.split(",").map((t) => t.trim()).filter(Boolean);
           if (topicsList.length > 0) config.topics = topicsList;
-          if (tone) config.tone = tone;
+          if (limits.tone) config.tone = limits.tone;
         }
         if (template.templateType === "engagement" || template.templateType === "outreach") {
-          const maxEng = parseInt(maxEngagements, 10);
+          const maxEng = parseInt(limits.maxEngagements, 10);
           if (maxEng > 0) {
             config.maxEngagements = maxEng;
             config.maxReplies = maxEng;
@@ -213,27 +223,38 @@ export function ActivateDialog({ template, open, onClose }: ActivateDialogProps)
       try {
         data = raw ? (JSON.parse(raw) as typeof data) : {};
       } catch {
-        setError(raw.trim() || "Failed to start agent");
+        setLaunchState({
+          running: false,
+          error: raw.trim() || "Failed to start agent",
+          threadPath: null,
+          workflowRunId: null,
+        });
         return;
       }
 
       if (!res.ok) {
-        setError(
-          typeof data.error === "string" ? data.error : "Failed to start agent",
-        );
+        setLaunchState({
+          running: false,
+          error: typeof data.error === "string" ? data.error : "Failed to start agent",
+          threadPath: null,
+          workflowRunId: null,
+        });
         return;
       }
 
-      if (data.workflowRunId) {
-        setWorkflowRunId(data.workflowRunId);
-      }
-      if (data.threadPath) {
-        setThreadPath(data.threadPath);
-      }
+      setLaunchState({
+        running: false,
+        error: null,
+        workflowRunId: data.workflowRunId ?? null,
+        threadPath: data.threadPath ?? null,
+      });
     } catch {
-      setError("Failed to start agent");
-    } finally {
-      setRunning(false);
+      setLaunchState({
+        running: false,
+        error: "Failed to start agent",
+        threadPath: null,
+        workflowRunId: null,
+      });
     }
   }
 
@@ -374,8 +395,8 @@ export function ActivateDialog({ template, open, onClose }: ActivateDialogProps)
                   <Input
                     id="max-results"
                     type="number"
-                    value={maxResults}
-                    onChange={(e) => setMaxResults(e.target.value)}
+                    value={limits.maxResults}
+                    onChange={(e) => updateLimit("maxResults", e.target.value)}
                   />
                 </div>
               )}
@@ -387,8 +408,8 @@ export function ActivateDialog({ template, open, onClose }: ActivateDialogProps)
                     <Input
                       id="max-contacts"
                       type="number"
-                      value={maxContacts}
-                      onChange={(e) => setMaxContacts(e.target.value)}
+                      value={limits.maxContacts}
+                      onChange={(e) => updateLimit("maxContacts", e.target.value)}
                     />
                   </div>
                   <div className="space-y-2">
@@ -396,8 +417,8 @@ export function ActivateDialog({ template, open, onClose }: ActivateDialogProps)
                     <Input
                       id="max-score"
                       type="number"
-                      value={maxEnrichmentScore}
-                      onChange={(e) => setMaxEnrichmentScore(e.target.value)}
+                      value={limits.maxEnrichmentScore}
+                      onChange={(e) => updateLimit("maxEnrichmentScore", e.target.value)}
                     />
                   </div>
                 </>
@@ -410,8 +431,8 @@ export function ActivateDialog({ template, open, onClose }: ActivateDialogProps)
                     <Input
                       id="company-name"
                       placeholder="e.g., Acme Corp"
-                      value={companyName}
-                      onChange={(e) => setCompanyName(e.target.value)}
+                      value={limits.companyName}
+                      onChange={(e) => updateLimit("companyName", e.target.value)}
                     />
                   </div>
                   <div className="space-y-2">
@@ -419,8 +440,8 @@ export function ActivateDialog({ template, open, onClose }: ActivateDialogProps)
                     <Input
                       id="inactivity-days"
                       type="number"
-                      value={inactivityDays}
-                      onChange={(e) => setInactivityDays(e.target.value)}
+                      value={limits.inactivityDays}
+                      onChange={(e) => updateLimit("inactivityDays", e.target.value)}
                     />
                   </div>
                 </>
@@ -433,8 +454,8 @@ export function ActivateDialog({ template, open, onClose }: ActivateDialogProps)
                     <Input
                       id="topics"
                       placeholder="AI, fintech, developer tools"
-                      value={topics}
-                      onChange={(e) => setTopics(e.target.value)}
+                      value={limits.topics}
+                      onChange={(e) => updateLimit("topics", e.target.value)}
                     />
                   </div>
                   <div className="space-y-2">
@@ -442,8 +463,8 @@ export function ActivateDialog({ template, open, onClose }: ActivateDialogProps)
                     <Input
                       id="tone"
                       placeholder="professional"
-                      value={tone}
-                      onChange={(e) => setTone(e.target.value)}
+                      value={limits.tone}
+                      onChange={(e) => updateLimit("tone", e.target.value)}
                     />
                   </div>
                 </>
@@ -473,8 +494,8 @@ export function ActivateDialog({ template, open, onClose }: ActivateDialogProps)
                     <Input
                       id="max-engagements"
                       type="number"
-                      value={maxEngagements}
-                      onChange={(e) => setMaxEngagements(e.target.value)}
+                      value={limits.maxEngagements}
+                      onChange={(e) => updateLimit("maxEngagements", e.target.value)}
                     />
                   </div>
                 )}
