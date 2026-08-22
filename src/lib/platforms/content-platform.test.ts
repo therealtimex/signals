@@ -73,12 +73,20 @@ describe("resolveContentPostUrl", () => {
     expect(resolveContentPostUrl("linkedin", { platformPostId: "456" })).toBe(
       "https://www.linkedin.com/feed/update/urn:li:activity:456"
     );
+    expect(resolveContentPostUrl("facebook", { platformPostId: "789" })).toBe(
+      "https://www.facebook.com/789"
+    );
+    expect(
+      resolveContentPostUrl("facebook", {
+        platformPostId: "https://www.facebook.com/acme/posts/789",
+      })
+    ).toBe("https://www.facebook.com/acme/posts/789");
   });
 
   it("returns null when nothing can be resolved", () => {
     expect(resolveContentPostUrl("x", null)).toBeNull();
     expect(resolveContentPostUrl("x", {})).toBeNull();
-    expect(resolveContentPostUrl("facebook", { platformPostId: "789" })).toBeNull();
+    expect(resolveContentPostUrl("gmail", { platformPostId: "789" })).toBeNull();
   });
 });
 
@@ -87,6 +95,12 @@ describe("buildPlatformPostUrl", () => {
     expect(buildPlatformPostUrl("x", "42")).toBe("https://x.com/i/status/42");
     expect(buildPlatformPostUrl("linkedin", "99")).toBe(
       "https://www.linkedin.com/feed/update/urn:li:activity:99"
+    );
+    expect(buildPlatformPostUrl("facebook", "slug.post")).toBe(
+      "https://www.facebook.com/slug.post"
+    );
+    expect(buildPlatformPostUrl("facebook", "https://www.facebook.com/acme/posts/1")).toBe(
+      "https://www.facebook.com/acme/posts/1"
     );
   });
 });
