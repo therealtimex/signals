@@ -3,9 +3,10 @@
 import { useRef, useState, useCallback } from "react";
 import { ImagePlus } from "lucide-react";
 import { ALL_ALLOWED_TYPES, PLATFORM_MEDIA_CONSTRAINTS } from "@/lib/media/constraints";
+import type { PublishPlatformTarget } from "@/lib/publish/types";
 
 interface MediaDropzoneProps {
-  platform: "x" | "linkedin";
+  platform: PublishPlatformTarget;
   currentCount: number;
   maxSlots: number;
   onFilesSelected: (files: File[]) => void;

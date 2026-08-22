@@ -41,7 +41,7 @@ function seedTarget(platform: "x" | "facebook" = "x") {
     kind: platform === "x" ? "account" : "profile",
     name: "Target",
     handle: "@target",
-    capabilities: platform === "facebook" ? ["browse"] : ["browse", "publish"],
+    capabilities: platform === "facebook" ? ["browse", "publish"] : ["browse", "publish"],
     source: "test",
   });
   return { connection, target };
@@ -80,14 +80,44 @@ describe("platform target agent-tool handlers", () => {
       code: "TARGET_NOT_FOUND",
     });
     const facebook = seedTarget("facebook");
+    const preparedFacebook = await handlePreparePlatformTarget({
+      targetId: facebook.target.id,
+      intent: "publish",
+    });
+    expect(preparedFacebook).toMatchObject({
+      targetId: facebook.target.id,
+      verified: true,
+    });
+    if (!("lease" in preparedFacebook)) throw new Error("Expected prepared lease");
+    await handleReleasePlatformTarget({ leaseId: preparedFacebook.lease.leaseId });
+
+    const browseOnly = registerPlatformTarget({
+      connectionId: facebook.connection.id,
+      platform: "facebook",
+      kind: "profile",
+      name: "Browse only",
+      handle: "browse.only",
+      capabilities: ["browse"],
+      source: "test",
+    });
     expect(
-      await handlePreparePlatformTarget({ targetId: facebook.target.id, intent: "publish" })
+      await handlePreparePlatformTarget({ targetId: browseOnly.id, intent: "publish" })
     ).toMatchObject({ code: "TARGET_CAPABILITY_UNSUPPORTED" });
 
-    acquireSessionLease(facebook.connection.id, { holder: "agent-a" });
+    const contentionConnection = ensureBrowserConnection({ sessionName: "signals-contention" });
+    const contentionTarget = registerPlatformTarget({
+      connectionId: contentionConnection.id,
+      platform: "facebook",
+      kind: "profile",
+      name: "Contention target",
+      handle: "contention.target",
+      capabilities: ["browse"],
+      source: "test",
+    });
+    acquireSessionLease(contentionConnection.id, { holder: "agent-a" });
     expect(
       await handlePreparePlatformTarget({
-        targetId: facebook.target.id,
+        targetId: contentionTarget.id,
         intent: "browse",
         holder: "agent-b",
       })

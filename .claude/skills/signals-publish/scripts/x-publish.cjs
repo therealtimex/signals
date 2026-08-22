@@ -51,12 +51,42 @@ function normalizeThreadTexts(payload) {
   return raw.map((entry) => String(entry)).filter((entry) => entry.trim());
 }
 
+function normalizeKind(payload) {
+  const kind = payload?.kind;
+  if (kind === "repost" || kind === "quote") return kind;
+  return "original";
+}
+
+function resolvePayloadSourceUrl(payload) {
+  const url = String(payload?.sourcePostUrl ?? "").trim();
+  if (url) return url;
+  const id = String(payload?.sourcePostId ?? "").trim();
+  if (!id) return null;
+  return `https://x.com/i/status/${id}`;
+}
+
 function validatePayload(payload) {
-  if (!String(payload?.text ?? "").trim()) {
-    throw {
-      message: "payload.text is required and must be non-empty",
-      errorCode: "unknown",
-    };
+  const kind = normalizeKind(payload);
+  if (kind === "original") {
+    if (!String(payload?.text ?? "").trim()) {
+      throw {
+        message: "payload.text is required and must be non-empty",
+        errorCode: "unknown",
+      };
+    }
+  } else {
+    if (!resolvePayloadSourceUrl(payload)) {
+      throw {
+        message: "payload.sourcePostUrl or payload.sourcePostId is required for repost/quote jobs",
+        errorCode: "unknown",
+      };
+    }
+    if (kind === "quote" && !String(payload?.text ?? "").trim()) {
+      throw {
+        message: "payload.text is required for quote-post jobs",
+        errorCode: "unknown",
+      };
+    }
   }
   if (
     Object.prototype.hasOwnProperty.call(payload ?? {}, "expectedHandle") &&
@@ -1111,6 +1141,65 @@ function waitForVerifiedPost(expectedText, handle, baseline, timeoutMs = 20_000)
   };
 }
 
+function runRepostOrQuote({ payload, kind, handle, dryRun }) {
+  const sourceUrl = resolvePayloadSourceUrl(payload);
+  requireAb(["open", sourceUrl], "open source post");
+  sleep(2000);
+  waitForSelector('[data-testid="retweet"]', "wait for repost button on source post");
+  requireAb(["click", '[data-testid="retweet"]'], "open repost menu");
+  sleep(500);
+
+  if (kind === "repost") {
+    waitForSelector('[data-testid="retweetConfirm"]', "wait for repost confirm");
+    if (dryRun) {
+      emit({
+        success: true,
+        dryRun: true,
+        handle,
+        kind,
+        message: "Repost menu opened; confirm not clicked (dry-run).",
+      });
+      return;
+    }
+    requireAb(["click", '[data-testid="retweetConfirm"]'], "confirm repost");
+    sleep(1500);
+    const postId = extractStatusIdFromHref(sourceUrl);
+    emit({
+      success: true,
+      handle,
+      kind,
+      platformPostId: postId ?? undefined,
+      platformUrl: sourceUrl,
+    });
+    return;
+  }
+
+  waitForSelector('[data-testid="quoteTweet"]', "wait for quote option");
+  requireAb(["click", '[data-testid="quoteTweet"]'], "open quote compose");
+  sleep(1000);
+  activeComposeScope = resolveComposeScope();
+  fillCompose({ ...payload, threadTexts: [] });
+
+  if (dryRun) {
+    emit({
+      success: true,
+      dryRun: true,
+      handle,
+      kind,
+      message: "Quote compose filled; Tweet was not clicked (dry-run).",
+    });
+    return;
+  }
+
+  const baseline = captureProfileStatusBaseline(handle);
+  waitForSelector(activeComposeScope.tweetButton, "wait for quote tweet button");
+  requireAb(["click", activeComposeScope.tweetButton], "click quote tweet button");
+  sleep(2000);
+
+  const result = waitForVerifiedPost(payload.text, handle, baseline);
+  emit(result.success ? { ...result, handle, kind: "quote" } : result);
+}
+
 function main() {
   const { port, payload, dryRun } = parseArgs(process.argv);
   ensureAgentBrowser();
@@ -1149,6 +1238,12 @@ function main() {
       return;
     }
     const handle = expectedHandle ?? detectedHandle;
+
+    const kind = normalizeKind(payload);
+    if (kind !== "original") {
+      runRepostOrQuote({ payload, kind, handle, dryRun });
+      return;
+    }
 
     const baseline = dryRun ? null : captureProfileStatusBaseline(handle);
     fillCompose(payload);

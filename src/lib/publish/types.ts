@@ -1,4 +1,6 @@
-export type PublishPlatformTarget = "x" | "linkedin";
+export type PublishPlatformTarget = "x" | "linkedin" | "facebook";
+
+export type PublishJobKind = "original" | "repost" | "quote";
 
 export type PublishJobStatus =
   | "queued"
@@ -16,9 +18,15 @@ export type PublishTargetStatus =
   | "skipped";
 
 export interface PublishJobPayload {
+  /** Defaults to "original" when omitted (legacy jobs). */
+  kind?: PublishJobKind;
   text: string;
   mediaAssetIds: string[];
   platforms: PublishPlatformTarget[];
+  /** Required for repost/quote jobs when sourcePostId is absent. */
+  sourcePostUrl?: string;
+  /** Platform-native post id; resolved to a URL per platform when sourcePostUrl is absent. */
+  sourcePostId?: string;
   title?: string;
   composedAt: number;
 }

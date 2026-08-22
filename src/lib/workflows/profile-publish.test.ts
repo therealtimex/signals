@@ -199,18 +199,17 @@ describe("buildProfilePublishBriefSection", () => {
     expect(section).toContain("http://127.0.0.1:3000/api/media");
     expect(section).toContain("multipart/form-data");
     expect(section).toContain("context=compose");
-    expect(section).toContain("platformTarget accepts only x or linkedin");
-    expect(section).toContain("mediaAssetIds are the ids from B4");
-    // Facebook media has no upload lane — /api/media 400s on any other platformTarget.
-    expect(section).toContain("Facebook has no upload lane here");
+    expect(section).toContain("platformTarget accepts x, linkedin, or facebook");
+    expect(section).toContain("kind: \"repost\"");
+    expect(section).not.toContain("Facebook has no upload lane here");
   });
 
   it("spells out both publishing lanes with the resolved Signals base URL", () => {
     const section = brief();
     expect(section).toContain("http://127.0.0.1:3000/api/content/send-to-agent");
-    // Facebook and reposts have no publish-job type — the agent must drive them itself.
-    expect(section).toContain("Facebook targets and every repost/quote-post");
-    expect(section).toContain("signals-pp-cli targets release --lease <leaseId>");
+    expect(section).toContain("signals-publish lane");
+    expect(section).toContain("kind: \"quote\"");
+    expect(section).not.toContain("Drive them yourself");
     expect(section).toContain("run_7");
   });
 

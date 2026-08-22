@@ -25,6 +25,8 @@ import {
 import { PlatformTargetError } from "@/lib/platforms/target-errors";
 import { buildPlatformPostUrl } from "@/lib/platforms/content-platform";
 import { RTX_PUBLISH_SESSION_NAME } from "@/lib/publish/constants";
+import { normalizePublishJobKind, resolveSourcePostUrl } from "@/lib/publish/payload";
+import { PUBLISH_PLATFORM_TARGETS } from "@/lib/publish/payload";
 import type { PublishJobTarget, PublishPlatformTarget } from "@/lib/publish/types";
 import type { PublishErrorCode } from "@/lib/browser/publishers/types";
 
@@ -34,7 +36,7 @@ export const getPublishJobSchema = z.object({
 
 export const updatePublishJobSchema = z.object({
   jobId: z.string().min(1),
-  platform: z.enum(["x", "linkedin"]).optional(),
+  platform: z.enum(PUBLISH_PLATFORM_TARGETS).optional(),
   status: z.enum(["publishing", "failed"]),
   note: z.string().optional(),
   error: z.string().optional(),
@@ -45,7 +47,7 @@ export const updatePublishJobSchema = z.object({
 
 export const completePublishSchema = z.object({
   jobId: z.string().min(1),
-  platform: z.enum(["x", "linkedin"]),
+  platform: z.enum(PUBLISH_PLATFORM_TARGETS),
   targetId: z.string().min(1).optional(),
   leaseId: z.string().min(1).optional(),
   success: z.boolean(),
@@ -135,9 +137,29 @@ export async function handleGetPublishJob(input: z.infer<typeof getPublishJobSch
       status: item?.status ?? null,
     },
     payload: {
+      kind: normalizePublishJobKind(job.payloadParsed.kind),
       text: job.payloadParsed.text,
       platforms: job.payloadParsed.platforms,
       media,
+      ...(job.payloadParsed.sourcePostUrl
+        ? { sourcePostUrl: job.payloadParsed.sourcePostUrl }
+        : {}),
+      ...(job.payloadParsed.sourcePostId
+        ? { sourcePostId: job.payloadParsed.sourcePostId }
+        : {}),
+      ...(resolveSourcePostUrl({
+        sourcePostUrl: job.payloadParsed.sourcePostUrl,
+        sourcePostId: job.payloadParsed.sourcePostId,
+        platform: job.payloadParsed.platforms[0],
+      })
+        ? {
+            resolvedSourcePostUrl: resolveSourcePostUrl({
+              sourcePostUrl: job.payloadParsed.sourcePostUrl,
+              sourcePostId: job.payloadParsed.sourcePostId,
+              platform: job.payloadParsed.platforms[0],
+            }),
+          }
+        : {}),
     },
     targets: job.targetsParsed,
     prepareRequired: true,

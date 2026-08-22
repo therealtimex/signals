@@ -50,5 +50,6 @@ export function defaultTargetKind(platform: PlatformTargetPlatform): PlatformTar
 export function defaultTargetCapabilities(
   platform: PlatformTargetPlatform
 ): PlatformTargetCapability[] {
-  return platform === "facebook" ? ["browse"] : ["browse", "publish"];
+  void platform;
+  return ["browse", "publish"];
 }
