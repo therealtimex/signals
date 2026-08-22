@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import {
   Dialog,
+  DialogClose,
   DialogContent,
   DialogDescription,
   DialogHeader,
@@ -14,7 +15,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
-import { Loader2, Play } from "lucide-react";
+import { Loader2, Play, X } from "lucide-react";
 import Link from "next/link";
 import {
   PROFILE_PIPELINE_DEFAULT_BATCH,
@@ -262,13 +263,35 @@ export function ActivateDialog({ template, open, onClose }: ActivateDialogProps)
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-lg max-h-[80vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>{template.name}</DialogTitle>
-          <DialogDescription>{template.description}</DialogDescription>
-        </DialogHeader>
+      <DialogContent
+        showCloseButton={false}
+        className="sm:max-w-2xl max-h-[85vh] p-0 flex flex-col overflow-hidden gap-0"
+      >
+        <div className="flex flex-col gap-1.5 p-6 pb-4 border-b shrink-0 bg-background">
+          <div className="flex items-center justify-between gap-4">
+            <DialogTitle className="text-lg font-semibold leading-none">
+              {template.name}
+            </DialogTitle>
+            <DialogClose asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 rounded-md opacity-70 hover:opacity-100 -mr-2"
+                onClick={onClose}
+              >
+                <X className="h-4 w-4" />
+                <span className="sr-only">Close</span>
+              </Button>
+            </DialogClose>
+          </div>
+          {template.description && (
+            <DialogDescription className="text-sm text-muted-foreground">
+              {template.description}
+            </DialogDescription>
+          )}
+        </div>
 
-        <div className="space-y-4 pt-2">
+        <div className="flex-1 overflow-y-auto p-6 space-y-4">
           {isPipeline && !runLaunched && (
             <div className="rounded-lg bg-muted/50 p-3 text-sm">
               {backlogLoading ? (
@@ -500,42 +523,42 @@ export function ActivateDialog({ template, open, onClose }: ActivateDialogProps)
               {error}
             </div>
           )}
+        </div>
 
-          <div className="flex justify-end gap-2 pt-2">
-            <Button variant="outline" onClick={onClose} disabled={running}>
-              {runLaunched ? "Close" : "Cancel"}
+        <div className="p-4 px-6 border-t shrink-0 bg-background/95 backdrop-blur flex justify-end gap-2">
+          <Button variant="outline" onClick={onClose} disabled={running}>
+            {runLaunched ? "Close" : "Cancel"}
+          </Button>
+          {!runLaunched && (
+            <Button
+              onClick={handleRun}
+              disabled={
+                running ||
+                pipelineRunDisabled ||
+                patrolRunDisabled ||
+                profilePublishRunDisabled
+              }
+            >
+              {running ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Play className="mr-2 h-4 w-4" />
+              )}
+              {running
+                ? "Launching..."
+                : pipelineRunDisabled
+                  ? "All contacts are up to date"
+                  : patrolRunDisabled || profilePublishRunDisabled
+                    ? "Select an acting profile"
+                    : isPipeline
+                      ? "Run"
+                      : isPatrol
+                        ? "Start patrol shift"
+                        : isProfilePublish
+                          ? "Draft & publish"
+                          : "Run Agent"}
             </Button>
-            {!runLaunched && (
-              <Button
-                onClick={handleRun}
-                disabled={
-                  running ||
-                  pipelineRunDisabled ||
-                  patrolRunDisabled ||
-                  profilePublishRunDisabled
-                }
-              >
-                {running ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Play className="mr-2 h-4 w-4" />
-                )}
-                {running
-                  ? "Launching..."
-                  : pipelineRunDisabled
-                    ? "All contacts are up to date"
-                    : patrolRunDisabled || profilePublishRunDisabled
-                      ? "Select an acting profile"
-                      : isPipeline
-                        ? "Run"
-                        : isPatrol
-                          ? "Start patrol shift"
-                          : isProfilePublish
-                            ? "Draft & publish"
-                            : "Run Agent"}
-              </Button>
-            )}
-          </div>
+          )}
         </div>
       </DialogContent>
     </Dialog>

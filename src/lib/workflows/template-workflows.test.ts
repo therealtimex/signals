@@ -126,6 +126,7 @@ describe("template-brief", () => {
     });
 
     expect(brief).not.toContain("maxPosts");
+    expect(brief).not.toContain("durationMinutes");
     expect(brief).not.toContain("_seedVersion");
     expect(brief).toContain('"maxComments"');
   });

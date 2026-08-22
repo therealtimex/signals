@@ -13,7 +13,7 @@ import {
 } from "@/lib/workflows/profile-publish";
 
 /** Bump this when seed template prompts change to trigger updates on existing installs. */
-const SEED_VERSION = 6;
+const SEED_VERSION = 7;
 
 export const CONTACT_PROFILE_PIPELINE_TEMPLATE_NAME = "Contact profile pipeline";
 
@@ -380,12 +380,12 @@ Do NOT ask questions — you are autonomous. Make reasonable assumptions and pro
   {
     name: SOCIAL_INTENT_PATROL_TEMPLATE_NAME,
     description:
-      "Run a time-boxed hunting shift on an acting profile: scan monitored communities for high-intent pain posts, reply with technical value, and capture the engagers into the CRM. Outbound only — no timeline posting.",
+      "Run an intent-driven hunting shift on an acting profile: scan monitored communities for high-intent pain posts, reply with technical value, and capture the engagers into the CRM. Outbound only — no timeline posting.",
     templateType: "engagement",
     targetPersona:
       "People publicly declaring intent in monitored communities — asking for tool recommendations, alternatives, or help with setup and token errors — plus everyone who reacts to those posts",
     estimatedCost: 0.25,
-    systemPrompt: `You are a community hunting agent working one time-boxed shift on a real acting profile.
+    systemPrompt: `You are a community hunting agent working a shift on a real acting profile.
 
 ## Objective
 High-intent buyers declare pain in public. Lurk in the monitored communities, answer the pain
@@ -418,8 +418,8 @@ Do NOT ask questions about scope — the runtime config is the scope. Do pause f
 checkpoint when it is enabled.
 
 ## Rules
-- Never exceed maxComments, maxScrapedContacts, or durationMinutes. They exist to keep the
-  acting profile below platform rate limits, not as soft targets to hit.
+- Never exceed maxComments or maxScrapedContacts. They exist to keep the acting profile below
+  platform rate limits, not as soft targets to hit.
 - One comment per post, and never comment twice in the same thread.
 - Skip posts that are already well answered, off-topic, or hostile.
 - Never fabricate a technical claim to look helpful. If you are unsure, do not reply.

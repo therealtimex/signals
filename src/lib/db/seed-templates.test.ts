@@ -33,7 +33,7 @@ describe("Contact profile pipeline seed", () => {
       pipeline?: { version?: number; steps?: Array<{ id: string; handler: string }> };
     };
 
-    expect(config._seedVersion).toBe(6);
+    expect(config._seedVersion).toBe(7);
     expect(config.pipeline?.version).toBe(2);
     expect(config.pipeline?.steps).toEqual([
       { id: "hydrate", executor: "code", handler: "hydrate_x_profiles" },
@@ -68,7 +68,7 @@ describe("Contact profile pipeline seed", () => {
     const updated = getSystemTemplateByName(CONTACT_PROFILE_PIPELINE_TEMPLATE_NAME)!;
     const config = JSON.parse(updated.config ?? "{}") as Record<string, any>;
     expect(config).toMatchObject({
-      _seedVersion: 6,
+      _seedVersion: 7,
       customTopLevel: true,
       pipeline: {
         version: 2,
@@ -150,10 +150,10 @@ describe("Social Intent Patrol seed", () => {
     const config = JSON.parse(template.config ?? "{}") as Record<string, unknown>;
     expect(isSocialPatrolTemplateConfig(config)).toBe(true);
     expect(config).not.toHaveProperty("maxPosts");
+    expect(config).not.toHaveProperty("durationMinutes");
     expect(readSocialPatrolConfig(config)).toEqual({
       targetId: null,
-      durationMinutes: 15,
-      maxComments: 2,
+      maxComments: 5,
       maxScrapedContacts: 20,
       communities: [],
       intentKeywords: DEFAULT_INTENT_KEYWORDS,
@@ -161,16 +161,17 @@ describe("Social Intent Patrol seed", () => {
     });
   });
 
-  it("strips the retired maxPosts budget from an older install on re-seed", () => {
+  it("strips the retired maxPosts and durationMinutes from an older install on re-seed", () => {
     seedTemplates();
     const template = getSystemTemplateByName(SOCIAL_INTENT_PATROL_TEMPLATE_NAME)!;
     db.update(workflowTemplates).set({
       config: JSON.stringify({
         ...JSON.parse(template.config ?? "{}"),
-        _seedVersion: 5,
+        _seedVersion: 6,
         maxPosts: 2,
+        durationMinutes: 40,
         // Operator-tuned controls must survive the migration.
-        maxComments: 4,
+        maxComments: 8,
       }),
     }).where(eq(workflowTemplates.id, template.id)).run();
 
@@ -180,8 +181,9 @@ describe("Social Intent Patrol seed", () => {
     ) as Record<string, unknown>;
 
     expect(config).not.toHaveProperty("maxPosts");
-    expect(config._seedVersion).toBe(6);
-    expect(config.maxComments).toBe(4);
+    expect(config).not.toHaveProperty("durationMinutes");
+    expect(config._seedVersion).toBe(7);
+    expect(config.maxComments).toBe(8);
     // The card copy is structural — an existing install must not keep describing a shift that
     // still posts to your own timeline.
     expect(getSystemTemplateByName(SOCIAL_INTENT_PATROL_TEMPLATE_NAME)!.description).toContain(
