@@ -5,12 +5,74 @@ import { PLATFORM_SHORT_LABELS } from "@/lib/platforms/capabilities";
 export interface ContentPlatformSource {
   platformTarget?: string | null;
   post?: ContentPostLinkSource | null;
+  platformData?: string | null;
 }
 
 /** Stored or derivable permalink fields for a published platform post. */
 export interface ContentPostLinkSource {
   platformUrl?: string | null;
   platformPostId?: string | null;
+  platformData?: string | null;
+}
+
+/**
+ * Extract platformUrl and/or platformPostId from platformData JSON if present.
+ */
+export function extractLinkSourceFromPlatformData(
+  platformData: string | Record<string, unknown> | null | undefined
+): ContentPostLinkSource | null {
+  if (!platformData) return null;
+  try {
+    const parsed =
+      typeof platformData === "string"
+        ? (JSON.parse(platformData) as Record<string, unknown>)
+        : platformData;
+    if (!parsed || typeof parsed !== "object") return null;
+
+    const platformUrl =
+      typeof parsed.platformUrl === "string" && parsed.platformUrl.trim()
+        ? parsed.platformUrl.trim()
+        : typeof parsed.url === "string" && parsed.url.trim()
+          ? parsed.url.trim()
+          : typeof parsed.tweetUrl === "string" && parsed.tweetUrl.trim()
+            ? parsed.tweetUrl.trim()
+            : null;
+
+    const platformPostId =
+      typeof parsed.platformPostId === "string" && parsed.platformPostId.trim()
+        ? parsed.platformPostId.trim()
+        : typeof parsed.platformPostId === "number"
+          ? String(parsed.platformPostId)
+          : typeof parsed.tweetId === "string" && parsed.tweetId.trim()
+            ? parsed.tweetId.trim()
+            : typeof parsed.tweetId === "number"
+              ? String(parsed.tweetId)
+              : typeof parsed.postId === "string" && parsed.postId.trim()
+                ? parsed.postId.trim()
+                : typeof parsed.postId === "number"
+                  ? String(parsed.postId)
+                  : null;
+
+    if (!platformUrl && !platformPostId) return null;
+    return { platformUrl, platformPostId };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Extract the raw platform post identifier from a source (direct or platformData).
+ */
+export function extractPlatformPostId(
+  source: ContentPostLinkSource | null | undefined
+): string | null {
+  if (!source) return null;
+  if (source.platformPostId?.trim()) return source.platformPostId.trim();
+  if (source.platformData) {
+    const fromData = extractLinkSourceFromPlatformData(source.platformData);
+    if (fromData?.platformPostId) return fromData.platformPostId;
+  }
+  return null;
 }
 
 const PLATFORM_HOSTS: ReadonlyArray<readonly [Platform, readonly string[]]> = [
@@ -55,7 +117,9 @@ export function resolveContentPlatform(
 ): string | null {
   if (accountPlatform) return accountPlatform.toLowerCase();
 
-  const fromUrl = platformFromPlatformUrl(item.post?.platformUrl);
+  const fromUrl =
+    platformFromPlatformUrl(item.post?.platformUrl) ??
+    platformFromPlatformUrl(extractLinkSourceFromPlatformData(item.platformData)?.platformUrl);
   if (fromUrl) return fromUrl;
 
   const target = item.platformTarget?.split(",")[0]?.trim().toLowerCase();
@@ -94,7 +158,7 @@ export function buildPlatformPostUrl(
 
 /**
  * Resolve the outbound permalink for a content post.
- * Prefers the stored URL; falls back to a canonical URL derived from platformPostId.
+ * Prefers the stored URL; falls back to a canonical URL derived from platformPostId or platformData.
  */
 export function resolveContentPostUrl(
   platform: string | null | undefined,
@@ -105,7 +169,19 @@ export function resolveContentPostUrl(
   const stored = source.platformUrl?.trim();
   if (stored) return stored;
 
-  return buildPlatformPostUrl(platform, source.platformPostId);
+  const derived = buildPlatformPostUrl(platform, source.platformPostId);
+  if (derived) return derived;
+
+  if (source.platformData) {
+    const fromData = extractLinkSourceFromPlatformData(source.platformData);
+    if (fromData) {
+      if (fromData.platformUrl) return fromData.platformUrl;
+      const derivedFromData = buildPlatformPostUrl(platform, fromData.platformPostId);
+      if (derivedFromData) return derivedFromData;
+    }
+  }
+
+  return null;
 }
 
 export type EngagementMetricKey =

@@ -279,7 +279,8 @@ function ContentListInner({
     const publishedTarget = job?.targets?.find((target) => target.status === "published");
     const platformUrl =
       resolveContentPostUrl(platform, item.post) ??
-      resolveContentPostUrl(publishedTarget?.platform ?? platform, publishedTarget);
+      resolveContentPostUrl(publishedTarget?.platform ?? platform, publishedTarget) ??
+      resolveContentPostUrl(platform, item);
     const actionDefinitions: Record<ContentRowActionKind, RowAction> = {
       edit: {
         label: "Edit",
