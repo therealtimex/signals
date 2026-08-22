@@ -6,6 +6,7 @@ import { nanoid } from "nanoid";
 import imageSize from "image-size";
 import { createMediaAsset, listMediaAssets, MEDIA_DIR } from "@/lib/db/queries/media";
 import { validateMediaFile } from "@/lib/media/constraints";
+import { PUBLISH_PLATFORM_TARGETS } from "@/lib/publish/payload";
 import { validateAttachmentFile } from "@/lib/media/attachment-constraints";
 import { isImageType } from "@/lib/media/constraints";
 
@@ -28,7 +29,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid upload context" }, { status: 400 });
     }
 
-    if (platformTarget && platformTarget !== "x" && platformTarget !== "linkedin") {
+    if (
+      platformTarget &&
+      !(PUBLISH_PLATFORM_TARGETS as readonly string[]).includes(platformTarget)
+    ) {
       return NextResponse.json({ error: "Invalid platformTarget" }, { status: 400 });
     }
 
@@ -40,7 +44,8 @@ export async function POST(req: NextRequest) {
         size: file.size,
       });
     } else {
-      const platform = (platformTarget as "x" | "linkedin") || "x";
+      const platform =
+        (platformTarget as (typeof PUBLISH_PLATFORM_TARGETS)[number]) || "x";
       validationError = validateMediaFile(
         { name: file.name, type: file.type, size: file.size },
         platform,

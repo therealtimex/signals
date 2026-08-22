@@ -9,6 +9,7 @@ import { MediaDropzone } from "@/components/media-dropzone";
 import { MediaThumbnailGrid } from "@/components/media-thumbnail-grid";
 import type { MediaThumbnailItem } from "@/components/media-thumbnail-grid";
 import { PLATFORM_MEDIA_CONSTRAINTS, isVideoType } from "@/lib/media/constraints";
+import type { PublishPlatformTarget } from "@/lib/publish/types";
 
 interface PostInputProps {
   value: string;
@@ -25,7 +26,7 @@ interface PostInputProps {
   media?: MediaThumbnailItem[];
   onAddMedia?: (files: File[]) => void;
   onRemoveMedia?: (id: string) => void;
-  platform?: "x" | "linkedin";
+  platform?: PublishPlatformTarget;
 }
 
 export function PostInput({
@@ -160,7 +161,7 @@ export function PostInput({
 }
 
 function computeMaxSlots(
-  platform: "x" | "linkedin",
+  platform: PublishPlatformTarget,
   media: MediaThumbnailItem[],
 ): number {
   const constraints = PLATFORM_MEDIA_CONSTRAINTS[platform];

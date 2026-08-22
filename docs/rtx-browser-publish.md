@@ -4,7 +4,7 @@ Signals **does not** publish X content in-process. Compose sends drafts to a **R
 
 LinkedIn is best-effort (beta): the agent may use interactive browser automation until a deterministic script ships.
 
-Facebook browser connect is available in Settings for session validation and future agent-browser enrichment; publish is not yet supported on the agent lane.
+Facebook publish runs on the same agent lane as X via `facebook-publish.cjs` inside the `signals-publish` skill. Browser connect in Settings still handles session validation and target registration.
 
 ## Prerequisites
 
@@ -92,7 +92,7 @@ markers are probed one selector at a time — a comma-joined union resolves thro
 - `complete_publish` — record success/failure and acting `targetId`; creates `content_posts`
 - `release_platform_target` — release the lease in a finally/cleanup step
 
-X shared sessions support best-effort account switching. LinkedIn shared sessions are verify-only; use a dedicated connection for multiple members. Facebook profile/Page targets are browse-only in v1. When target preparation returns a non-null `expectedHandle`, mutating X actions include it and fail closed with `wrong_account` if the browser identity differs.
+X shared sessions support best-effort account switching. LinkedIn shared sessions are verify-only; use a dedicated connection for multiple members. Facebook profile/Page targets support original-post publish on the agent lane; repost/quote jobs remain X-only in v1. When target preparation returns a non-null `expectedHandle`, mutating actions include it and fail closed with `wrong_account` if the browser identity differs.
 
 See `docs/agent-tools.md` and `.claude/skills/signals-publish/SKILL.md`.
 

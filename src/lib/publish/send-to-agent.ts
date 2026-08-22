@@ -9,6 +9,10 @@ import {
 import type { PublishJobPayload, PublishPlatformTarget } from "@/lib/publish/types";
 import type { PublishJobTarget } from "@/lib/publish/types";
 import {
+  isPublishPlatformTarget,
+  validatePublishJobPayload,
+} from "@/lib/publish/payload";
+import {
   getBrowserConnectionById,
   resolveDefaultTarget,
   resolveTargetById,
@@ -39,6 +43,9 @@ export type SendToAgentInput = {
   targets?: Array<{ targetId: string }>;
   text: string;
   mediaAssetIds?: string[];
+  kind?: PublishJobPayload["kind"];
+  sourcePostUrl?: string;
+  sourcePostId?: string;
   /** Base URL of the running Signals instance (derive from the incoming HTTP request). */
   signalsBaseUrl?: string;
 };
@@ -97,7 +104,7 @@ export async function sendContentToAgent(
     if (
       !target ||
       target.status !== "active" ||
-      (target.platform !== "x" && target.platform !== "linkedin")
+      !isPublishPlatformTarget(target.platform)
     ) {
       return {
         success: false,
@@ -142,13 +149,25 @@ export async function sendContentToAgent(
   }
 
   const platforms = [...new Set(targetSnapshots.map((target) => target.platform))];
-  const payload: PublishJobPayload = {
+  const payloadResult = validatePublishJobPayload({
     text: input.text,
     mediaAssetIds: input.mediaAssetIds ?? [],
     platforms,
     title: item.title ?? undefined,
+    kind: input.kind,
+    sourcePostUrl: input.sourcePostUrl,
+    sourcePostId: input.sourcePostId,
     composedAt: Math.floor(Date.now() / 1000),
-  };
+  });
+  if (!payloadResult.ok) {
+    return {
+      success: false,
+      error: payloadResult.error,
+      errorCode: payloadResult.errorCode,
+      httpStatus: 400,
+    };
+  }
+  const payload = payloadResult.payload;
 
   supersedeActiveJobsForContentItem(input.contentItemId);
   const job = createPublishJob({

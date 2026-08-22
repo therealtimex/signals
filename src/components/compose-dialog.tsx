@@ -57,6 +57,13 @@ const PLATFORM_OPTIONS: {
     placeholder: "What do you want to talk about?",
     beta: true,
   },
+  {
+    id: "facebook",
+    label: "Facebook",
+    maxChars: 63206,
+    placeholder: "What's on your mind?",
+    beta: true,
+  },
 ];
 
 const STANDALONE_TOOLTIP = "Publishing requires the RealTimeX Local App";
@@ -83,7 +90,7 @@ function parsePlatformTarget(value: string | null | undefined): Platform[] {
   const parts = value
     .split(",")
     .map((p) => p.trim())
-    .filter((p): p is Platform => p === "x" || p === "linkedin");
+    .filter((p): p is Platform => p === "x" || p === "linkedin" || p === "facebook");
   return parts.length > 0 ? parts : ["x"];
 }
 

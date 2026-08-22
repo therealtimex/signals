@@ -1,4 +1,4 @@
-type Platform = "x" | "linkedin";
+type Platform = "x" | "linkedin" | "facebook";
 
 interface MediaConstraints {
   maxImages: number;
@@ -24,6 +24,16 @@ export const PLATFORM_MEDIA_CONSTRAINTS: Record<Platform, MediaConstraints> = {
   },
   linkedin: {
     maxImages: 9,
+    maxVideos: 1,
+    maxImageSizeBytes: 10 * 1024 * 1024, // 10 MB
+    maxVideoSizeBytes: 200 * 1024 * 1024, // 200 MB
+    allowedImageTypes: ["image/jpeg", "image/png", "image/gif", "image/webp"],
+    allowedVideoTypes: ["video/mp4"],
+    imageSizeLabel: "10 MB",
+    videoSizeLabel: "200 MB",
+  },
+  facebook: {
+    maxImages: 10,
     maxVideos: 1,
     maxImageSizeBytes: 10 * 1024 * 1024, // 10 MB
     maxVideoSizeBytes: 200 * 1024 * 1024, // 200 MB
@@ -93,11 +103,15 @@ export function validateMediaSet(
   }
 
   if (images.length > constraints.maxImages) {
-    return `Maximum ${constraints.maxImages} images per post on ${platform === "x" ? "X" : "LinkedIn"}`;
+    const label =
+      platform === "x" ? "X" : platform === "linkedin" ? "LinkedIn" : "Facebook";
+    return `Maximum ${constraints.maxImages} images per post on ${label}`;
   }
 
   if (videos.length > constraints.maxVideos) {
-    return `Maximum ${constraints.maxVideos} video per post on ${platform === "x" ? "X" : "LinkedIn"}`;
+    const label =
+      platform === "x" ? "X" : platform === "linkedin" ? "LinkedIn" : "Facebook";
+    return `Maximum ${constraints.maxVideos} video per post on ${label}`;
   }
 
   return null;

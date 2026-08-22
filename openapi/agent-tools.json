@@ -2287,7 +2287,8 @@
                             "type": "string",
                             "enum": [
                               "x",
-                              "linkedin"
+                              "linkedin",
+                              "facebook"
                             ]
                           },
                           "status": {
@@ -2341,7 +2342,8 @@
                             "type": "string",
                             "enum": [
                               "x",
-                              "linkedin"
+                              "linkedin",
+                              "facebook"
                             ]
                           },
                           "targetId": {

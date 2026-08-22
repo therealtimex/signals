@@ -85,6 +85,8 @@ export function buildPlatformPostUrl(
       return `https://x.com/i/status/${id}`;
     case "linkedin":
       return `https://www.linkedin.com/feed/update/urn:li:activity:${id}`;
+    case "facebook":
+      return id.startsWith("http") ? id : `https://www.facebook.com/${id}`;
     default:
       return null;
   }
