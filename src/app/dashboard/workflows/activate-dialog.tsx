@@ -179,6 +179,325 @@ export function ActivateDialog({ template, open, onClose }: ActivateDialogProps)
   );
 }
 
+function ActivateDialogPipelineBacklog({
+  backlog,
+  backlogLoading,
+  pipelineRunDisabled,
+  pipelineBatchSize,
+  pipelineBatchMax,
+  onBatchSizeChange,
+}: {
+  backlog: PipelineBacklogPreview | null;
+  backlogLoading: boolean;
+  pipelineRunDisabled: boolean;
+  pipelineBatchSize: number;
+  pipelineBatchMax: number;
+  onBatchSizeChange: (value: number) => void;
+}) {
+  return (
+    <div className="rounded-lg bg-muted/50 p-3 text-sm">
+      {backlogLoading ? (
+        <span className="text-muted-foreground">Loading backlog…</span>
+      ) : backlog ? (
+        pipelineRunDisabled ? (
+          <span>All contacts are up to date</span>
+        ) : (
+          <div className="space-y-3">
+            <p>
+              <strong>{backlog.backlogTotal}</strong> contacts need profile work ·
+              weakest scores first
+            </p>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <Label htmlFor="pipeline-batch-size" className="text-xs">
+                  Contacts this run
+                </Label>
+                <span className="text-xs font-medium tabular-nums">
+                  {pipelineBatchSize}
+                </span>
+              </div>
+              <input
+                id="pipeline-batch-size"
+                type="range"
+                min={1}
+                max={pipelineBatchMax}
+                step={1}
+                value={pipelineBatchSize}
+                onChange={(e) => onBatchSizeChange(Number(e.target.value))}
+                className="h-2 w-full cursor-pointer accent-primary"
+              />
+              <p className="text-xs text-muted-foreground">
+                Up to {pipelineBatchMax} per run
+              </p>
+            </div>
+          </div>
+        )
+      ) : (
+        <span className="text-muted-foreground">Could not load backlog preview</span>
+      )}
+    </div>
+  );
+}
+
+function ActivateDialogRunStatus({
+  isPipeline,
+  workflowRunId,
+  threadPath,
+}: {
+  isPipeline: boolean;
+  workflowRunId: string | null;
+  threadPath: string | null;
+}) {
+  return (
+    <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-100 space-y-2">
+      {isPipeline ? (
+        <p>Profile pipeline run started.</p>
+      ) : (
+        <p>Agent launched in RealTimeX.</p>
+      )}
+      {workflowRunId && (
+        <Link
+          href={`/dashboard/workflows/${workflowRunId}`}
+          className="text-xs font-medium underline"
+        >
+          View run details
+        </Link>
+      )}
+      {threadPath && <p className="font-mono text-xs">{threadPath}</p>}
+    </div>
+  );
+}
+
+function ActivateDialogFormFields({
+  template,
+  limits,
+  patrol,
+  profilePublish,
+  systemPrompt,
+  freshThread,
+  running,
+  isPatrol,
+  isProfilePublish,
+  dispatch,
+}: {
+  template: Template;
+  limits: DialogState["limits"];
+  patrol: DialogState["patrol"];
+  profilePublish: DialogState["profilePublish"];
+  systemPrompt: string;
+  freshThread: boolean;
+  running: boolean;
+  isPatrol: boolean;
+  isProfilePublish: boolean;
+  dispatch: React.Dispatch<DialogAction>;
+}) {
+  return (
+    <>
+      {template.templateType === "prospecting" && (
+        <div className="space-y-2">
+          <Label htmlFor="max-results">Max Results</Label>
+          <Input
+            id="max-results"
+            type="number"
+            value={limits.maxResults}
+            onChange={(e) =>
+              dispatch({
+                type: "SET_LIMIT",
+                key: "maxResults",
+                value: e.target.value,
+              })
+            }
+          />
+        </div>
+      )}
+
+      {template.templateType === "enrichment" && (
+        <>
+          <div className="space-y-2">
+            <Label htmlFor="max-contacts">Max Contacts</Label>
+            <Input
+              id="max-contacts"
+              type="number"
+              value={limits.maxContacts}
+              onChange={(e) =>
+                dispatch({
+                  type: "SET_LIMIT",
+                  key: "maxContacts",
+                  value: e.target.value,
+                })
+              }
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="max-score">Max Enrichment Score</Label>
+            <Input
+              id="max-score"
+              type="number"
+              value={limits.maxEnrichmentScore}
+              onChange={(e) =>
+                dispatch({
+                  type: "SET_LIMIT",
+                  key: "maxEnrichmentScore",
+                  value: e.target.value,
+                })
+              }
+            />
+          </div>
+        </>
+      )}
+
+      {template.templateType === "pruning" && (
+        <>
+          <div className="space-y-2">
+            <Label htmlFor="company-name">Company Name</Label>
+            <Input
+              id="company-name"
+              placeholder="e.g., Acme Corp"
+              value={limits.companyName}
+              onChange={(e) =>
+                dispatch({
+                  type: "SET_LIMIT",
+                  key: "companyName",
+                  value: e.target.value,
+                })
+              }
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="inactivity-days">Inactivity Days</Label>
+            <Input
+              id="inactivity-days"
+              type="number"
+              value={limits.inactivityDays}
+              onChange={(e) =>
+                dispatch({
+                  type: "SET_LIMIT",
+                  key: "inactivityDays",
+                  value: e.target.value,
+                })
+              }
+            />
+          </div>
+        </>
+      )}
+
+      {template.templateType === "content" && !isProfilePublish && (
+        <>
+          <div className="space-y-2">
+            <Label htmlFor="topics">Topics / Industries</Label>
+            <Input
+              id="topics"
+              placeholder="AI, fintech, developer tools"
+              value={limits.topics}
+              onChange={(e) =>
+                dispatch({
+                  type: "SET_LIMIT",
+                  key: "topics",
+                  value: e.target.value,
+                })
+              }
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="tone">Tone</Label>
+            <Input
+              id="tone"
+              placeholder="professional"
+              value={limits.tone}
+              onChange={(e) =>
+                dispatch({
+                  type: "SET_LIMIT",
+                  key: "tone",
+                  value: e.target.value,
+                })
+              }
+            />
+          </div>
+        </>
+      )}
+
+      {isPatrol && (
+        <SocialPatrolFields
+          value={patrol}
+          onChange={(next) => dispatch({ type: "SET_PATROL", patrol: next })}
+          disabled={running}
+        />
+      )}
+
+      {isProfilePublish && (
+        <ProfilePublishFields
+          value={profilePublish}
+          onChange={(next) =>
+            dispatch({ type: "SET_PROFILE_PUBLISH", profilePublish: next })
+          }
+          disabled={running}
+        />
+      )}
+
+      {!isPatrol &&
+        (template.templateType === "engagement" ||
+          template.templateType === "outreach") && (
+          <div className="space-y-2">
+            <Label htmlFor="max-engagements">Max Engagements</Label>
+            <Input
+              id="max-engagements"
+              type="number"
+              value={limits.maxEngagements}
+              onChange={(e) =>
+                dispatch({
+                  type: "SET_LIMIT",
+                  key: "maxEngagements",
+                  value: e.target.value,
+                })
+              }
+            />
+          </div>
+        )}
+
+      <Separator />
+
+      <details className="space-y-2">
+        <summary className="text-sm font-medium cursor-pointer">
+          Instructions (Advanced)
+        </summary>
+        <div className="pt-2">
+          <Textarea
+            value={systemPrompt}
+            onChange={(e) =>
+              dispatch({
+                type: "SET_SYSTEM_PROMPT",
+                systemPrompt: e.target.value,
+              })
+            }
+            rows={8}
+            className="text-xs font-mono"
+          />
+        </div>
+      </details>
+
+      <div className="flex items-start justify-between gap-4 rounded-lg border p-3">
+        <div className="space-y-0.5">
+          <Label htmlFor="fresh-thread" className="text-sm font-medium">
+            Start fresh thread for this run
+          </Label>
+          <p className="text-xs text-muted-foreground">
+            Runs land in this template&apos;s dedicated RealTimeX thread so the agent
+            keeps prior context. Turn this on for an isolated one-off session.
+          </p>
+        </div>
+        <Switch
+          id="fresh-thread"
+          checked={freshThread}
+          onCheckedChange={(checked) =>
+            dispatch({ type: "SET_FRESH_THREAD", freshThread: checked })
+          }
+          disabled={running}
+        />
+      </div>
+    </>
+  );
+}
+
 function ActivateDialogContent({
   template,
   onClose,
@@ -381,49 +700,14 @@ function ActivateDialogContent({
 
       <div className="flex-1 overflow-y-auto p-6 space-y-4">
         {isPipeline && !runLaunched && (
-          <div className="rounded-lg bg-muted/50 p-3 text-sm">
-            {backlogLoading ? (
-              <span className="text-muted-foreground">Loading backlog…</span>
-            ) : backlog ? (
-              pipelineRunDisabled ? (
-                <span>All contacts are up to date</span>
-              ) : (
-                <div className="space-y-3">
-                  <p>
-                    <strong>{backlog.backlogTotal}</strong> contacts need profile work
-                    · weakest scores first
-                  </p>
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <Label htmlFor="pipeline-batch-size" className="text-xs">
-                        Contacts this run
-                      </Label>
-                      <span className="text-xs font-medium tabular-nums">
-                        {pipelineBatchSize}
-                      </span>
-                    </div>
-                    <input
-                      id="pipeline-batch-size"
-                      type="range"
-                      min={1}
-                      max={pipelineBatchMax}
-                      step={1}
-                      value={pipelineBatchSize}
-                      onChange={(e) =>
-                        handlePipelineBatchSizeChange(Number(e.target.value))
-                      }
-                      className="h-2 w-full cursor-pointer accent-primary"
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      Up to {pipelineBatchMax} per run
-                    </p>
-                  </div>
-                </div>
-              )
-            ) : (
-              <span className="text-muted-foreground">Could not load backlog preview</span>
-            )}
-          </div>
+          <ActivateDialogPipelineBacklog
+            backlog={backlog}
+            backlogLoading={backlogLoading}
+            pipelineRunDisabled={pipelineRunDisabled}
+            pipelineBatchSize={pipelineBatchSize}
+            pipelineBatchMax={pipelineBatchMax}
+            onBatchSizeChange={handlePipelineBatchSizeChange}
+          />
         )}
 
         {template.targetPersona && !isPipeline && (
@@ -434,233 +718,26 @@ function ActivateDialogContent({
         )}
 
         {runLaunched && (
-          <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-100 space-y-2">
-            {isPipeline ? (
-              <p>Profile pipeline run started.</p>
-            ) : (
-              <p>Agent launched in RealTimeX.</p>
-            )}
-            {workflowRunId && (
-              <Link
-                href={`/dashboard/workflows/${workflowRunId}`}
-                className="text-xs font-medium underline"
-              >
-                View run details
-              </Link>
-            )}
-            {threadPath && (
-              <p className="font-mono text-xs">{threadPath}</p>
-            )}
-          </div>
+          <ActivateDialogRunStatus
+            isPipeline={isPipeline}
+            workflowRunId={workflowRunId}
+            threadPath={threadPath}
+          />
         )}
 
         {!runLaunched && !isPipeline && (
-          <>
-            {template.templateType === "prospecting" && (
-              <div className="space-y-2">
-                <Label htmlFor="max-results">Max Results</Label>
-                <Input
-                  id="max-results"
-                  type="number"
-                  value={limits.maxResults}
-                  onChange={(e) =>
-                    dispatch({
-                      type: "SET_LIMIT",
-                      key: "maxResults",
-                      value: e.target.value,
-                    })
-                  }
-                />
-              </div>
-            )}
-
-            {template.templateType === "enrichment" && (
-              <>
-                <div className="space-y-2">
-                  <Label htmlFor="max-contacts">Max Contacts</Label>
-                  <Input
-                    id="max-contacts"
-                    type="number"
-                    value={limits.maxContacts}
-                    onChange={(e) =>
-                      dispatch({
-                        type: "SET_LIMIT",
-                        key: "maxContacts",
-                        value: e.target.value,
-                      })
-                    }
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="max-score">Max Enrichment Score</Label>
-                  <Input
-                    id="max-score"
-                    type="number"
-                    value={limits.maxEnrichmentScore}
-                    onChange={(e) =>
-                      dispatch({
-                        type: "SET_LIMIT",
-                        key: "maxEnrichmentScore",
-                        value: e.target.value,
-                      })
-                    }
-                  />
-                </div>
-              </>
-            )}
-
-            {template.templateType === "pruning" && (
-              <>
-                <div className="space-y-2">
-                  <Label htmlFor="company-name">Company Name</Label>
-                  <Input
-                    id="company-name"
-                    placeholder="e.g., Acme Corp"
-                    value={limits.companyName}
-                    onChange={(e) =>
-                      dispatch({
-                        type: "SET_LIMIT",
-                        key: "companyName",
-                        value: e.target.value,
-                      })
-                    }
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="inactivity-days">Inactivity Days</Label>
-                  <Input
-                    id="inactivity-days"
-                    type="number"
-                    value={limits.inactivityDays}
-                    onChange={(e) =>
-                      dispatch({
-                        type: "SET_LIMIT",
-                        key: "inactivityDays",
-                        value: e.target.value,
-                      })
-                    }
-                  />
-                </div>
-              </>
-            )}
-
-            {template.templateType === "content" && !isProfilePublish && (
-              <>
-                <div className="space-y-2">
-                  <Label htmlFor="topics">Topics / Industries</Label>
-                  <Input
-                    id="topics"
-                    placeholder="AI, fintech, developer tools"
-                    value={limits.topics}
-                    onChange={(e) =>
-                      dispatch({
-                        type: "SET_LIMIT",
-                        key: "topics",
-                        value: e.target.value,
-                      })
-                    }
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="tone">Tone</Label>
-                  <Input
-                    id="tone"
-                    placeholder="professional"
-                    value={limits.tone}
-                    onChange={(e) =>
-                      dispatch({
-                        type: "SET_LIMIT",
-                        key: "tone",
-                        value: e.target.value,
-                      })
-                    }
-                  />
-                </div>
-              </>
-            )}
-
-            {isPatrol && (
-              <SocialPatrolFields
-                value={patrol}
-                onChange={(next) => dispatch({ type: "SET_PATROL", patrol: next })}
-                disabled={running}
-              />
-            )}
-
-            {isProfilePublish && (
-              <ProfilePublishFields
-                value={profilePublish}
-                onChange={(next) =>
-                  dispatch({ type: "SET_PROFILE_PUBLISH", profilePublish: next })
-                }
-                disabled={running}
-              />
-            )}
-
-            {!isPatrol &&
-              (template.templateType === "engagement" ||
-                template.templateType === "outreach") && (
-                <div className="space-y-2">
-                  <Label htmlFor="max-engagements">Max Engagements</Label>
-                  <Input
-                    id="max-engagements"
-                    type="number"
-                    value={limits.maxEngagements}
-                    onChange={(e) =>
-                      dispatch({
-                        type: "SET_LIMIT",
-                        key: "maxEngagements",
-                        value: e.target.value,
-                      })
-                    }
-                  />
-                </div>
-              )}
-
-            <Separator />
-
-            <details className="space-y-2">
-              <summary className="text-sm font-medium cursor-pointer">
-                Instructions (Advanced)
-              </summary>
-              <div className="pt-2">
-                <Textarea
-                  value={systemPrompt}
-                  onChange={(e) =>
-                    dispatch({
-                      type: "SET_SYSTEM_PROMPT",
-                      systemPrompt: e.target.value,
-                    })
-                  }
-                  rows={8}
-                  className="text-xs font-mono"
-                />
-              </div>
-            </details>
-          </>
-        )}
-
-        {!runLaunched && (
-          <div className="flex items-start justify-between gap-4 rounded-lg border p-3">
-            <div className="space-y-0.5">
-              <Label htmlFor="fresh-thread" className="text-sm font-medium">
-                Start fresh thread for this run
-              </Label>
-              <p className="text-xs text-muted-foreground">
-                Runs land in this template&apos;s dedicated RealTimeX thread so the
-                agent keeps prior context. Turn this on for an isolated one-off
-                session.
-              </p>
-            </div>
-            <Switch
-              id="fresh-thread"
-              checked={freshThread}
-              onCheckedChange={(checked) =>
-                dispatch({ type: "SET_FRESH_THREAD", freshThread: checked })
-              }
-              disabled={running}
-            />
-          </div>
+          <ActivateDialogFormFields
+            template={template}
+            limits={limits}
+            patrol={patrol}
+            profilePublish={profilePublish}
+            systemPrompt={systemPrompt}
+            freshThread={freshThread}
+            running={running}
+            isPatrol={isPatrol}
+            isProfilePublish={isProfilePublish}
+            dispatch={dispatch}
+          />
         )}
 
         {error && (
