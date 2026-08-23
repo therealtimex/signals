@@ -178,7 +178,7 @@ export function buildSocialPatrolBriefSection(input: {
       ? "P5. Approval checkpoint is ON: post each drafted comment in this thread and wait for confirmation before publishing it."
       : "P5. Approval checkpoint is OFF: publish drafted comments directly, and log each one in this thread.",
     `P6. Mine engagers (likers and repliers) of the pain posts you engage with, up to ${patrol.maxScrapedContacts} contact(s).`,
-    `P7. Write back: stage workflow-runs/${input.workflowRunId}/contacts.csv, then commit with`,
+    `P7. Write back: stage workflow-runs/${input.workflowRunId}/contacts.csv (header: name,company,title,email,platform,platform_handle,profile_url,avatar_url,notes), then commit with`,
     `    signals-pp-cli import contacts --file workflow-runs/${input.workflowRunId}/contacts.csv --dedupe`,
     "    Record every published reply as a Signals content_item attributed to this workflow run.",
     "P8. Release the lease when the shift ends: signals-pp-cli targets release --lease <leaseId>, then summarize comments and ingested contacts with links in this thread.",
