@@ -112,6 +112,8 @@ export function buildContactNurtureTemplateConfig(
   };
 }
 
+import { getPlatformTargetById } from "@/lib/db/queries/platform-targets";
+
 export interface ContactNurtureTargetInfo {
   id: string;
   platform: string;
@@ -130,21 +132,39 @@ export function buildContactNurtureBriefSection(input: {
     ? "All assigned relationship goals (follow_back, repost_amplification, mutual_engagement, warm_conversation, partnership)"
     : `Only "${nurture.relationshipGoalFilter}" goals`;
 
-  const targetPlatform = (input.platformTarget?.platform || "x").toLowerCase();
-  const targetName = input.platformTarget
-    ? `${input.platformTarget.name}${input.platformTarget.handle ? ` (${input.platformTarget.handle})` : ""} [ID: ${input.platformTarget.id}]`
-    : (nurture.targetId ? `Target ID: ${nurture.targetId}` : "Auto-detect default acting target per contact platform");
+  let resolvedTarget = input.platformTarget;
+  if (!resolvedTarget && nurture.targetId) {
+    try {
+      const found = getPlatformTargetById(nurture.targetId);
+      if (found) {
+        resolvedTarget = {
+          id: found.id,
+          platform: found.platform,
+          name: found.name,
+          handle: found.handle,
+        };
+      }
+    } catch {
+      // ignore in test / offline environments
+    }
+  }
 
+  const targetPlatform = (resolvedTarget?.platform || "x").toLowerCase();
   const isLinkedIn = targetPlatform === "linkedin";
   const isFacebook = targetPlatform === "facebook";
-  const defaultInteractionType = isLinkedIn || isFacebook ? "comment" : "reply";
+  const platformLabel = isLinkedIn ? "LinkedIn" : isFacebook ? "Facebook" : "X";
+  const targetName = resolvedTarget
+    ? `${platformLabel}: ${resolvedTarget.name || resolvedTarget.handle}${resolvedTarget.handle ? ` (${resolvedTarget.handle})` : ""} [ID: ${resolvedTarget.id}]`
+    : (nurture.targetId ? `Target ID: ${nurture.targetId}` : "Auto-detect default acting target per contact platform");
+
+  const defaultInteractionType = isLinkedIn ? "linkedin_comment" : isFacebook ? "facebook_post" : "reply";
 
   const lines = [
     "Contact Relationship Nurture execution contract:",
     `N0. Goal filter: ${goalText}. Max targets to inspect: ${nurture.maxTargets}. Max actions: ${nurture.maxActionsPerRun}.`,
-    `    Acting Profile: ${targetName}. Platform: ${targetPlatform}.`,
+    `    Acting Profile: ${targetName}. Active Platform: ${targetPlatform}.`,
     `N1. Query unachieved contacts via query_contacts({ relationshipGoalStatus: "not_started" }) and query_contacts({ relationshipGoalStatus: "in_progress" }).`,
-    "N2. For each contact, call get_contact({ contactId }) to inspect their persona, conversion triggers, and tone.",
+    "N2. For each contact, call get_contact({ contactId }) to inspect their persona, conversion triggers, tone, and platform.",
     isLinkedIn
       ? "N3. Open RealTimeX Browser session for LinkedIn and inspect the contact's live profile / post stream to check for milestone achievements."
       : isFacebook

@@ -103,10 +103,11 @@ describe("buildContactNurtureBriefSection", () => {
       },
     });
 
-    expect(brief).toContain("Acting Profile: Trung Le (ledangtrung) [ID: tgt_linkedin_1]. Platform: linkedin.");
+    expect(brief).toContain("LinkedIn: Trung Le (ledangtrung) [ID: tgt_linkedin_1]");
+    expect(brief).toContain("Active Platform: linkedin");
     expect(brief).toContain("RealTimeX Browser session for LinkedIn");
     expect(brief).toContain('"platformTarget": "linkedin"');
-    expect(brief).toContain('"interactionType": "comment"');
+    expect(brief).toContain('"interactionType": "linkedin_comment"');
     expect(brief).toContain("send connection request");
   });
 });
