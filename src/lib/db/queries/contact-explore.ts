@@ -21,9 +21,15 @@ import type { ContactIdentity, IdentityMetric } from "@/lib/db/types";
 export type ContactExploreContact = {
   id: string;
   name: string;
+  firstName?: string | null;
+  lastName?: string | null;
+  company?: string | null;
+  title?: string | null;
   headline: string | null;
   avatarUrl: string | null;
   location: string | null;
+  relationshipGoal?: string | null;
+  relationshipGoalStatus?: string | null;
 };
 
 export type ContactExplorePersona = {
@@ -468,6 +474,10 @@ export function getContactExploreCard(contactId: string): ContactExploreCard | u
     .select({
       id: contacts.id,
       name: contacts.name,
+      firstName: contacts.firstName,
+      lastName: contacts.lastName,
+      relationshipGoal: contacts.relationshipGoal,
+      relationshipGoalStatus: contacts.relationshipGoalStatus,
     })
     .from(contacts)
     .where(eq(contacts.id, contactId))
@@ -494,20 +504,27 @@ export function getContactExploreCard(contactId: string): ContactExploreCard | u
     identities: identityRows,
     primaryEmail: resolveContactPrimaryEmail(contactId),
   });
+  const org = primaryOrgForContact(contactId);
 
   return {
     contact: {
       id: contactRow.id,
       name: contactRow.name,
+      firstName: contactRow.firstName,
+      lastName: contactRow.lastName,
+      company: org?.name ?? null,
+      title: profile.headline ?? null,
       headline: profile.headline,
       avatarUrl,
       location: profile.location,
+      relationshipGoal: contactRow.relationshipGoal,
+      relationshipGoalStatus: contactRow.relationshipGoalStatus,
     },
     persona: buildPersonaProjection(contactId),
     identities,
     niches: sharedNichesForContact(contactId),
     relationship: deriveRelationship(contactId, ownerId),
-    org: primaryOrgForContact(contactId),
+    org,
     recentPosts: recentPostsForContact(contactId),
   };
 }
