@@ -17,7 +17,7 @@ import {
 } from "@/lib/workflows/contact-relationship-nurture";
 
 /** Bump this when seed template prompts change to trigger updates on existing installs. */
-const SEED_VERSION = 10;
+const SEED_VERSION = 11;
 
 export const CONTACT_PROFILE_PIPELINE_TEMPLATE_NAME = "Contact profile pipeline";
 
@@ -51,11 +51,12 @@ Search for influential people in the AI/ML space on X (Twitter) and LinkedIn. Fo
 ## Process
 1. Search for "top AI influencers 2025" and similar queries
 2. For each person found, fetch their profile pages for details
-3. Create or enrich contact records with their information
-4. Report progress after processing each batch
+3. Extract full public profile details: name, handle, avatarUrl (profile picture image URL), bio/headline, company, and follower metrics
+4. Create or enrich contact records with their information (always include avatarUrl when available)
+5. Report progress after processing each batch
 
 ## Output
-Aim to find 15-20 high-quality contacts with company, title, and social profiles.`,
+Aim to find 15-20 high-quality contacts with company, title, avatarUrl, and social profiles.`,
     config: { maxResults: 20, targetDomains: ["x.com", "linkedin.com"] },
   },
   {
@@ -76,11 +77,12 @@ Search for leaders in fintech, crypto, and digital banking:
 ## Process
 1. Search for fintech leaders, startup founders, and notable executives
 2. Fetch profile pages and company pages for context
-3. Create or enrich contact records
-4. Report progress regularly
+3. Extract full public profile details: name, handle, avatarUrl (profile picture image URL), bio/headline, and company
+4. Create or enrich contact records with their information (always include avatarUrl when available)
+5. Report progress regularly
 
 ## Output
-Find 15-20 contacts with company, title, and at least one social profile.`,
+Find 15-20 contacts with company, title, avatarUrl, and at least one social profile.`,
     config: { maxResults: 20, targetDomains: ["x.com", "linkedin.com", "crunchbase.com"] },
   },
   {
@@ -100,12 +102,12 @@ Search for developer advocates and DevRel professionals:
 
 ## Process
 1. Search for "developer advocate" profiles and lists
-2. Fetch their profiles for company, title, and bio
-3. Create or enrich contact records
+2. Fetch their profiles for company, title, avatarUrl (profile picture image URL), and bio
+3. Create or enrich contact records (always include avatarUrl when available)
 4. Focus on people actively posting technical content
 
 ## Output
-Find 15-20 developer advocates with company, title, and social links.`,
+Find 15-20 developer advocates with company, title, avatarUrl, and social links.`,
     config: { maxResults: 20, targetDomains: ["x.com", "linkedin.com", "github.com"] },
   },
   {
@@ -118,6 +120,7 @@ Find 15-20 developer advocates with company, title, and social links.`,
 
 ## Objective
 For each contact provided, search the web to find missing information:
+- Profile avatar image URL (avatarUrl)
 - Company name and website
 - Job title and headline
 - Email address
@@ -128,7 +131,7 @@ For each contact provided, search the web to find missing information:
 1. Review each contact's current data to identify gaps
 2. Search for the person by name + any known details (company, handle)
 3. Fetch relevant profile pages (LinkedIn, company website, etc.)
-4. Use enrich_contact to fill in missing fields
+4. Use enrich_contact to fill in missing fields (including avatarUrl)
 5. Report progress after each contact
 
 ## Rules
