@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   RELATIONSHIP_GOAL_ENUM,
   RELATIONSHIP_GOAL_ICONS,
@@ -21,22 +22,28 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Sparkles, Copy, Check, Target, Lightbulb, ChevronRight, Zap } from "lucide-react";
+import { Copy, Check, Target, Lightbulb, ChevronRight, Zap, Loader2 } from "lucide-react";
 
 interface ExploreTargetPlaybookProps {
   contact: ContactGoalContext;
   persona?: PersonaGoalContext | null;
   onGoalChange?: (goal: RelationshipGoal) => void;
+  onDispatched?: () => void;
 }
 
 export function ExploreTargetPlaybook({
   contact,
   persona,
   onGoalChange,
+  onDispatched,
 }: ExploreTargetPlaybookProps) {
+  const router = useRouter();
   const [selectedGoalOverride, setSelectedGoalOverride] = useState<RelationshipGoal | null>(null);
   const [copiedPrompt, setCopiedPrompt] = useState(false);
   const [copiedDraft, setCopiedDraft] = useState(false);
+  const [isDispatching, setIsDispatching] = useState(false);
+  const [dispatchedSuccess, setDispatchedSuccess] = useState(false);
+  const [dispatchError, setDispatchError] = useState<string | null>(null);
 
   const activeGoal = (selectedGoalOverride ?? contact.relationshipGoal ?? "follow_back") as RelationshipGoal;
   const tactic = generateGoalTactic(contact, persona, activeGoal);
@@ -69,6 +76,34 @@ export function ExploreTargetPlaybook({
     setSelectedGoalOverride(goal);
     if (onGoalChange) {
       onGoalChange(goal);
+    }
+  }
+
+  async function handleDispatchAgentTask() {
+    if (!tactic || !contact.id) return;
+    setIsDispatching(true);
+    setDispatchError(null);
+    try {
+      const res = await fetch(`/api/contacts/${contact.id}/dispatch-goal-tactic`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ goal: activeGoal }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to dispatch agent task");
+      }
+      setDispatchedSuccess(true);
+      if (onDispatched) {
+        onDispatched();
+      }
+      router.refresh();
+      setTimeout(() => setDispatchedSuccess(false), 4000);
+    } catch (err) {
+      setDispatchError(err instanceof Error ? err.message : "Failed to dispatch task");
+      setTimeout(() => setDispatchError(null), 4000);
+    } finally {
+      setIsDispatching(false);
     }
   }
 
@@ -159,7 +194,7 @@ export function ExploreTargetPlaybook({
             >
               {copiedDraft ? (
                 <>
-                  <Check className="h-3 w-3 text-green-500" />
+                  <Check className="h-3 w-3 text-emerald-500" />
                   <span>Copied</span>
                 </>
               ) : (
@@ -175,25 +210,65 @@ export function ExploreTargetPlaybook({
           </div>
         </div>
 
-        {/* Agent Prompt & Dispatch */}
-        <div className="pt-1 flex items-center gap-2">
-          <Button
-            size="sm"
-            onClick={handleCopyPrompt}
-            className="flex-1 gap-2 text-xs font-medium"
-          >
-            {copiedPrompt ? (
-              <>
-                <Check className="h-3.5 w-3.5 text-green-300" />
-                <span>Agent Instructions Copied to Clipboard</span>
-              </>
-            ) : (
-              <>
-                <Zap className="h-3.5 w-3.5 text-amber-300" />
-                <span>Copy Agent Instructions for RealTimeX</span>
-              </>
-            )}
-          </Button>
+        {/* Agent Task Dispatch & Prompt Copy */}
+        <div className="pt-1 space-y-2">
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              onClick={handleDispatchAgentTask}
+              disabled={isDispatching}
+              className="flex-1 gap-2 text-xs font-medium"
+            >
+              {isDispatching ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  <span>Dispatching to Nurture Agent...</span>
+                </>
+              ) : dispatchedSuccess ? (
+                <>
+                  <Check className="h-3.5 w-3.5 text-emerald-300" />
+                  <span>Task Staged for Nurture Agent!</span>
+                </>
+              ) : (
+                <>
+                  <Zap className="h-3.5 w-3.5 text-amber-300" />
+                  <span>Dispatch to Nurture Agent</span>
+                </>
+              )}
+            </Button>
+
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleCopyPrompt}
+              className="h-9 px-2.5 text-xs gap-1.5 shrink-0"
+              title="Copy raw agent instructions to clipboard"
+            >
+              {copiedPrompt ? (
+                <>
+                  <Check className="h-3.5 w-3.5 text-emerald-500" />
+                  <span className="hidden sm:inline">Copied</span>
+                </>
+              ) : (
+                <>
+                  <Copy className="h-3.5 w-3.5 text-muted-foreground" />
+                  <span className="hidden sm:inline">Copy Prompt</span>
+                </>
+              )}
+            </Button>
+          </div>
+
+          {dispatchedSuccess && (
+            <p className="text-[11px] text-emerald-600 dark:text-emerald-400">
+              ✓ Agent task created and dispatched to the <strong>Contact Relationship Nurture</strong> thread in RealTimeX.
+            </p>
+          )}
+
+          {dispatchError && (
+            <p className="text-[11px] text-destructive">
+              ✕ {dispatchError}
+            </p>
+          )}
         </div>
       </CardContent>
     </Card>
