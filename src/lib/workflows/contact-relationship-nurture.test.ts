@@ -82,6 +82,31 @@ describe("buildContactNurtureBriefSection", () => {
     expect(brief).toContain("MANDATORY WRITE-BACK TO SIGNALS");
     expect(brief).toContain("/api/content");
     expect(brief).toContain("log_interaction");
+    expect(brief).toContain('"interactionType": "reply"');
+    expect(brief).toContain('"platformTarget": "x"');
     expect(brief).toContain("run-nurture-123");
+  });
+
+  it("dynamically customizes brief instructions and write-back contract for LinkedIn target", () => {
+    const brief = buildContactNurtureBriefSection({
+      workflowRunId: "run-linkedin-456",
+      config: buildContactNurtureTemplateConfig({
+        targetId: "tgt_linkedin_1",
+        relationshipGoalFilter: "follow_back",
+      }),
+      signalsBaseUrl: "http://localhost:3010",
+      platformTarget: {
+        id: "tgt_linkedin_1",
+        platform: "linkedin",
+        name: "Trung Le",
+        handle: "ledangtrung",
+      },
+    });
+
+    expect(brief).toContain("Acting Profile: Trung Le (ledangtrung) [ID: tgt_linkedin_1]. Platform: linkedin.");
+    expect(brief).toContain("RealTimeX Browser session for LinkedIn");
+    expect(brief).toContain('"platformTarget": "linkedin"');
+    expect(brief).toContain('"interactionType": "comment"');
+    expect(brief).toContain("send connection request");
   });
 });
