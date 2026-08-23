@@ -35,19 +35,23 @@ export async function POST(
     const body = await req.json().catch(() => ({}));
     const data = dispatchSchema.parse(body);
 
+    const signalsBaseUrl = resolveSignalsBaseUrlFromRequest(req);
     const persona = getActivePersona(id, { includeLocalOnly: true });
-    const tactic = generateGoalTactic(contact, persona, data.goal ?? "follow_back");
-    if (!tactic) {
-      return NextResponse.json(
-        { error: "Could not generate relationship goal tactic for contact" },
-        { status: 400 },
-      );
-    }
 
     let template = getSystemTemplateByName(CONTACT_RELATIONSHIP_NURTURE_TEMPLATE_NAME);
     if (!template) {
       seedTemplates();
       template = getSystemTemplateByName(CONTACT_RELATIONSHIP_NURTURE_TEMPLATE_NAME);
+    }
+
+    const tactic = generateGoalTactic(contact, persona, data.goal ?? "follow_back", {
+      signalsBaseUrl,
+    });
+    if (!tactic) {
+      return NextResponse.json(
+        { error: "Could not generate relationship goal tactic for contact" },
+        { status: 400 },
+      );
     }
 
     const task = createTask({

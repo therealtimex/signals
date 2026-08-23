@@ -48,4 +48,36 @@ describe("ExploreTargetPlaybook", () => {
     expect(html).toContain("Dispatch to Nurture Agent");
     expect(html).toContain("Copy Prompt");
   });
+
+  it("renders in_progress feedback badge and re-dispatch button", () => {
+    const html = renderToStaticMarkup(
+      createElement(ExploreTargetPlaybook, {
+        contact: {
+          ...mockContact,
+          relationshipGoalStatus: "in_progress",
+        },
+        persona: mockPersona,
+      }),
+    );
+
+    expect(html).toContain("In Progress");
+    expect(html).toContain("In Progress · Re-dispatch Agent Task");
+    expect(html).toContain("Active Agent Nurture Task Staged");
+  });
+
+  it("renders achieved milestone feedback and re-run button", () => {
+    const html = renderToStaticMarkup(
+      createElement(ExploreTargetPlaybook, {
+        contact: {
+          ...mockContact,
+          relationshipGoalStatus: "achieved",
+        },
+        persona: mockPersona,
+      }),
+    );
+
+    expect(html).toContain("Achieved");
+    expect(html).toContain("Goal Achieved · Re-run Sequence");
+    expect(html).toContain("Relationship Goal Achieved!");
+  });
 });

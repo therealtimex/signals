@@ -53,6 +53,7 @@ export function generateGoalTactic(
   contact: ContactGoalContext,
   persona?: PersonaGoalContext | null,
   overrideGoal?: RelationshipGoal | null,
+  options?: { signalsBaseUrl?: string; taskId?: string },
 ): GoalTactic | null {
   const goal = (overrideGoal ?? contact.relationshipGoal) as RelationshipGoal | null;
   if (!goal || !(goal in RELATIONSHIP_GOAL_LABELS)) {
@@ -67,7 +68,6 @@ export function generateGoalTactic(
 
   const interests = parseArrayField(persona?.interests);
   const conversionTriggers = parseArrayField(persona?.conversionTriggers);
-  const engagementFormats = parseArrayField(persona?.engagementFormats);
 
   const interestsList = interests.length > 0
     ? interests.slice(0, 3).join(", ")
@@ -76,6 +76,11 @@ export function generateGoalTactic(
   const trigger = conversionTriggers.length > 0
     ? conversionTriggers[0]
     : "shared technical interests";
+
+  const baseUrl = options?.signalsBaseUrl || "$SIGNALS_BASE_URL";
+  const taskCompletion = options?.taskId
+    ? `\n   d. Mark CRM task done: POST ${baseUrl}/api/agent-tools/invoke with { "tool": "update_task", "input": { "taskId": "${options.taskId}", "status": "done" } }`
+    : "";
 
   switch (goal) {
     case "follow_back": {
@@ -90,7 +95,20 @@ export function generateGoalTactic(
           `Follow ${handle} from the acting profile after positive interaction.`,
         ],
         suggestedDraft: `Great work scaling ${company}. The focus on ${interestsList} is especially relevant as the space matures.`,
-        agentPrompt: `Execute 3-touch follow-back protocol on ${handle} (${name}):\n1. Inspect recent posts by ${handle} on ${contact.platform || "X"}.\n2. Leave a high-value comment matching their interest in ${interestsList}.\n3. Follow ${handle} from acting profile.\n4. Log touchpoint in Signals.`,
+        agentPrompt: `Execute 3-touch follow-back protocol on ${handle} (${name}):
+1. Inspect recent posts by ${handle} on ${contact.platform || "X"} via RealTimeX Browser / CDP.
+2. Leave a high-value comment on their post about ${interestsList} (Suggested angle: "${name}, great work scaling ${company}...").
+3. Follow ${handle} from the acting profile after commenting.
+4. WRITE BACK TO SIGNALS CRM (Required):
+   a. Save published comment to Signals Content:
+      POST ${baseUrl}/api/content
+      { "body": "<published comment text>", "contentType": "reply", "status": "published", "origin": "authored", "direction": "outbound", "platformTarget": "x", "contactId": "${contact.id}" }
+   b. Log interaction touchpoint:
+      POST ${baseUrl}/api/agent-tools/invoke
+      { "tool": "log_interaction", "input": { "contactId": "${contact.id}", "interactionType": "social_reply", "summary": "Replied to ${handle}'s post on ${interestsList} and followed" } }
+   c. Update contact goal status:
+      POST ${baseUrl}/api/agent-tools/invoke
+      { "tool": "update_contact", "input": { "contactId": "${contact.id}", "relationshipGoalStatus": "in_progress" } }${taskCompletion}`,
       };
     }
 
@@ -106,7 +124,19 @@ export function generateGoalTactic(
           `Engage with ${name}'s reply when they acknowledge the spotlight.`,
         ],
         suggestedDraft: `Fascinating approach by ${handle} with ${company} — tackling ${interestsList} with a fresh model. Worth checking out for anyone tracking ${trigger}.`,
-        agentPrompt: `Draft and publish an organic spotlight post for ${handle} (${name}, ${company}):\n1. Highlight ${company}'s unique angle on ${interestsList}.\n2. Tag ${handle} naturally as the creator/builder.\n3. Tone: ${tone}.\n4. Log content post in Signals.`,
+        agentPrompt: `Draft and publish an organic spotlight post for ${handle} (${name}, ${company}):
+1. Draft high-signal spotlight highlighting ${company}'s work on ${interestsList} and tag ${handle}.
+2. Publish post via RealTimeX Browser session.
+3. WRITE BACK TO SIGNALS CRM (Required):
+   a. Save published post to Signals Content:
+      POST ${baseUrl}/api/content
+      { "body": "<published post text>", "contentType": "post", "status": "published", "origin": "authored", "direction": "outbound", "platformTarget": "x", "contactId": "${contact.id}" }
+   b. Log interaction touchpoint:
+      POST ${baseUrl}/api/agent-tools/invoke
+      { "tool": "log_interaction", "input": { "contactId": "${contact.id}", "interactionType": "tweet", "summary": "Published spotlight breakdown tagging ${handle}" } }
+   c. Update contact goal status:
+      POST ${baseUrl}/api/agent-tools/invoke
+      { "tool": "update_contact", "input": { "contactId": "${contact.id}", "relationshipGoalStatus": "in_progress" } }${taskCompletion}`,
       };
     }
 
@@ -122,7 +152,19 @@ export function generateGoalTactic(
           `Acknowledge their responses promptly to build conversational momentum.`,
         ],
         suggestedDraft: `We noticed a similar pattern when testing ${interestsList} — decoupling the distribution layer made the biggest difference.`,
-        agentPrompt: `Lurk and engage on ${handle}'s active discussions:\n1. Search latest posts from ${handle} discussing ${interestsList}.\n2. Post a high-effort value reply in a ${tone} tone.\n3. Record engagement in Signals CRM.`,
+        agentPrompt: `Engage on ${handle}'s active discussions:
+1. Find latest discussion post from ${handle} regarding ${interestsList}.
+2. Post an authoritative, value-dense answer in a ${tone} tone.
+3. WRITE BACK TO SIGNALS CRM (Required):
+   a. Save comment to Signals Content:
+      POST ${baseUrl}/api/content
+      { "body": "<reply text>", "contentType": "reply", "status": "published", "origin": "authored", "direction": "outbound", "platformTarget": "x", "contactId": "${contact.id}" }
+   b. Log interaction:
+      POST ${baseUrl}/api/agent-tools/invoke
+      { "tool": "log_interaction", "input": { "contactId": "${contact.id}", "interactionType": "social_reply", "summary": "Contributed domain answer to ${handle}'s thread" } }
+   c. Update contact status:
+      POST ${baseUrl}/api/agent-tools/invoke
+      { "tool": "update_contact", "input": { "contactId": "${contact.id}", "relationshipGoalStatus": "in_progress" } }${taskCompletion}`,
       };
     }
 
@@ -138,7 +180,18 @@ export function generateGoalTactic(
           `Keep the ask low-friction: share a relevant insight or ask for their perspective on ${interestsList}.`,
         ],
         suggestedDraft: `Hey ${name}, loved your recent point about ${interestsList}. Had a quick thought on how that relates to ${company} — open to comparing notes?`,
-        agentPrompt: `Prepare warm conversation outreach for ${handle} (${name}):\n1. Reference recent public engagement on ${company}.\n2. Focus message on ${trigger}.\n3. Tone: ${tone}.\n4. Stage draft task in Signals.`,
+        agentPrompt: `Send warm DM outreach to ${handle} (${name}):
+1. Send personalized DM referencing public engagement on ${company} focusing on ${trigger}.
+2. WRITE BACK TO SIGNALS CRM (Required):
+   a. Save message to Signals Content:
+      POST ${baseUrl}/api/content
+      { "body": "<dm text>", "contentType": "dm", "status": "published", "origin": "authored", "direction": "outbound", "platformTarget": "x", "contactId": "${contact.id}" }
+   b. Log interaction:
+      POST ${baseUrl}/api/agent-tools/invoke
+      { "tool": "log_interaction", "input": { "contactId": "${contact.id}", "interactionType": "dm", "summary": "Sent warm DM to ${handle} regarding ${interestsList}" } }
+   c. Update contact status:
+      POST ${baseUrl}/api/agent-tools/invoke
+      { "tool": "update_contact", "input": { "contactId": "${contact.id}", "relationshipGoalStatus": "in_progress" } }${taskCompletion}`,
       };
     }
 
@@ -154,7 +207,16 @@ export function generateGoalTactic(
           `Reach out through ${handle} with concrete mutual value metrics.`,
         ],
         suggestedDraft: `Hey ${name}, seeing great alignment between our ecosystems around ${interestsList}. Would love to explore a joint co-marketing feature that gives ${company} extra distribution.`,
-        agentPrompt: `Draft partnership brief for ${name} (${company}):\n1. Scope mutual co-marketing or integration opportunity around ${interestsList}.\n2. Emphasize ${trigger}.\n3. Create follow-up task in Signals.`,
+        agentPrompt: `Draft partnership proposal for ${name} (${company}):
+1. Scope mutual co-marketing opportunity around ${interestsList} emphasizing ${trigger}.
+2. Reach out to ${handle} or stage brief in CRM.
+3. WRITE BACK TO SIGNALS CRM (Required):
+   a. Log interaction touchpoint:
+      POST ${baseUrl}/api/agent-tools/invoke
+      { "tool": "log_interaction", "input": { "contactId": "${contact.id}", "interactionType": "email", "summary": "Staged partnership proposal for ${name} on ${interestsList}" } }
+   b. Update contact status:
+      POST ${baseUrl}/api/agent-tools/invoke
+      { "tool": "update_contact", "input": { "contactId": "${contact.id}", "relationshipGoalStatus": "in_progress" } }${taskCompletion}`,
       };
     }
   }

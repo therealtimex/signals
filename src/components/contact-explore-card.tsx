@@ -79,16 +79,25 @@ export function ContactExploreCardView({
       });
       if (generation !== generationRef.current) return;
 
+      if (!res.ok) {
+        let errMessage = "Persona generation failed";
+        try {
+          const errBody = (await res.json()) as { error?: string };
+          if (errBody?.error) errMessage = errBody.error;
+        } catch {
+          // Fallback
+        }
+        if (generation !== generationRef.current) return;
+        setError(errMessage);
+        return;
+      }
+
       const body = (await res.json()) as {
         error?: string;
         persona?: ContactExplorePersona;
       };
       if (generation !== generationRef.current) return;
 
-      if (!res.ok) {
-        setError(body.error ?? "Persona generation failed");
-        return;
-      }
       if (body.persona) {
         setExplore((current) => ({ ...current, persona: body.persona! }));
       }
@@ -100,6 +109,16 @@ export function ContactExploreCardView({
         setGenerating(false);
       }
     }
+  }
+
+  function handlePlaybookDispatched(status = "in_progress") {
+    setExplore((current) => ({
+      ...current,
+      contact: {
+        ...current.contact,
+        relationshipGoalStatus: status,
+      },
+    }));
   }
 
   return (
@@ -140,6 +159,7 @@ export function ContactExploreCardView({
           }}
           persona={explore.persona}
           onGoalChange={handlePlaybookGoalChange}
+          onDispatched={handlePlaybookDispatched}
         />
       ) : null}
 
