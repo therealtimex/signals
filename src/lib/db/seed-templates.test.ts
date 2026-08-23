@@ -66,7 +66,16 @@ describe("Contact profile pipeline seed", () => {
 
     expect(seedTemplates().updated).toBe(1);
     const updated = getSystemTemplateByName(CONTACT_PROFILE_PIPELINE_TEMPLATE_NAME)!;
-    const config = JSON.parse(updated.config ?? "{}") as Record<string, unknown>;
+    const config = JSON.parse(updated.config ?? "{}") as {
+      _seedVersion?: number;
+      customTopLevel?: boolean;
+      pipeline?: {
+        version?: number;
+        planner?: string;
+        batchSize?: number;
+        steps?: Array<{ id: string }>;
+      };
+    };
     expect(config).toMatchObject({
       _seedVersion: 8,
       customTopLevel: true,
@@ -79,7 +88,7 @@ describe("Contact profile pipeline seed", () => {
         customPipelineField: "keep",
       },
     });
-    expect(config.pipeline.steps.map((step: { id: string }) => step.id)).toEqual([
+    expect(config.pipeline?.steps?.map((step: { id: string }) => step.id)).toEqual([
       "hydrate",
       "avatar",
       "persona",
