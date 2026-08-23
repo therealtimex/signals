@@ -28,6 +28,7 @@ type contactRow struct {
 	PlatformUserID string
 	PlatformHandle string
 	ProfileURL     string
+	AvatarURL      string
 	Notes          string
 }
 
@@ -272,6 +273,7 @@ func mapContactRow(item map[string]any) (contactRow, error) {
 		PlatformUserID: get("platform_user_id", "platformUserId"),
 		PlatformHandle: get("platform_handle", "platformHandle"),
 		ProfileURL:     get("profile_url", "profileUrl"),
+		AvatarURL:      get("avatar_url", "avatarUrl"),
 		Notes:          get("notes"),
 	}
 	if row.Email != "" && !strings.Contains(row.Email, "@") {
@@ -408,7 +410,12 @@ func findExistingContact(cmd *cobra.Command, c *client.Client, flags *rootFlags,
 			return contactMatch{ID: id}, nil
 		}
 	}
-	if row.Platform != "" && row.PlatformUserID != "" {
+	if row.Platform != "" && (row.PlatformUserID != "" || row.PlatformHandle != "") {
+		targetUser := row.PlatformUserID
+		if targetUser == "" {
+			targetUser = row.PlatformHandle
+		}
+		targetUser = strings.TrimPrefix(targetUser, "@")
 		// platformUserId is an exact identity-claim filter. Free-text search does
 		// not cover contact_identities, so searching the handle never matched and
 		// the import created a duplicate that upsert_contact_identity then
@@ -418,7 +425,7 @@ func findExistingContact(cmd *cobra.Command, c *client.Client, flags *rootFlags,
 		// reconstruction could (#206).
 		result, err := invokeAgentTool(cmd, c, flags, "resolve_platform_claim", map[string]any{
 			"platform":       row.Platform,
-			"platformUserId": row.PlatformUserID,
+			"platformUserId": targetUser,
 		})
 		if err != nil {
 			return contactMatch{}, err
@@ -464,12 +471,27 @@ func platformClaimMatch(result map[string]any) contactMatch {
 	}
 }
 
+func isLikelyAvatarURL(url string) bool {
+	lower := strings.ToLower(url)
+	return strings.Contains(lower, "pbs.twimg.com") ||
+		strings.Contains(lower, "media.licdn.com") ||
+		strings.Contains(lower, "avatars.githubusercontent.com") ||
+		strings.HasSuffix(lower, ".jpg") ||
+		strings.HasSuffix(lower, ".jpeg") ||
+		strings.HasSuffix(lower, ".png") ||
+		strings.HasSuffix(lower, ".webp") ||
+		strings.HasSuffix(lower, ".gif")
+}
+
 func createContactFromRow(cmd *cobra.Command, c *client.Client, flags *rootFlags, row contactRow) (string, error) {
 	input := map[string]any{
 		"name": row.Name,
 	}
 	if row.Company != "" {
 		input["company"] = row.Company
+	}
+	if row.Title != "" {
+		input["title"] = row.Title
 	}
 	if row.Email != "" {
 		input["channels"] = []map[string]any{
@@ -480,6 +502,33 @@ func createContactFromRow(cmd *cobra.Command, c *client.Client, flags *rootFlags
 			},
 		}
 	}
+	if row.Platform != "" {
+		input["platform"] = row.Platform
+	}
+	if row.PlatformUserID != "" {
+		input["platformUserId"] = row.PlatformUserID
+	}
+	if row.PlatformHandle != "" {
+		input["platformHandle"] = row.PlatformHandle
+	}
+	profileURL := row.ProfileURL
+	avatarURL := row.AvatarURL
+	if isLikelyAvatarURL(profileURL) {
+		if avatarURL == "" {
+			avatarURL = profileURL
+		}
+		profileURL = ""
+	}
+	if profileURL != "" {
+		input["platformUrl"] = profileURL
+	}
+	if avatarURL != "" {
+		input["avatarUrl"] = avatarURL
+	}
+	if row.Notes != "" {
+		input["notes"] = row.Notes
+	}
+
 	result, err := invokeAgentTool(cmd, c, flags, "create_contact", input)
 	if err != nil {
 		return "", err
@@ -523,8 +572,19 @@ func enrichExistingContact(cmd *cobra.Command, c *client.Client, flags *rootFlag
 		if row.PlatformHandle != "" {
 			identity["platformHandle"] = row.PlatformHandle
 		}
-		if strings.HasPrefix(row.ProfileURL, "https://") {
-			identity["avatarUrl"] = row.ProfileURL
+		profileURL := row.ProfileURL
+		avatarURL := row.AvatarURL
+		if isLikelyAvatarURL(profileURL) {
+			if avatarURL == "" {
+				avatarURL = profileURL
+			}
+			profileURL = ""
+		}
+		if profileURL != "" {
+			identity["platformUrl"] = profileURL
+		}
+		if avatarURL != "" {
+			identity["avatarUrl"] = avatarURL
 		}
 		if _, err := invokeAgentTool(cmd, c, flags, "upsert_contact_identity", identity); err != nil {
 			return enriched, err

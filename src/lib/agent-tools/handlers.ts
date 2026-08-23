@@ -478,9 +478,17 @@ export async function handleUpsertContactIdentity(
     return { error: error instanceof Error ? error.message : "Invalid avatarUrl" };
   }
 
+  let platformUrl = input.platformUrl?.trim() || undefined;
+  if (platformUrl && /pbs\.twimg\.com|media\.licdn\.com|avatars\.githubusercontent\.com|\.(png|jpe?g|webp|gif)(\?.*)?$/i.test(platformUrl)) {
+    if (!avatarUrl) {
+      avatarUrl = platformUrl;
+    }
+    platformUrl = undefined;
+  }
+
   const sharedFields = {
     platformHandle: input.platformHandle,
-    platformUrl: input.platformUrl,
+    platformUrl,
     platformData: input.platformData ? JSON.stringify(input.platformData) : undefined,
     displayName: input.displayName,
     headline: input.headline,

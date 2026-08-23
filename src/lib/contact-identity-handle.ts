@@ -23,9 +23,14 @@ export function formatPlatformHandle(platform: string, handle: string): string {
   return platform === "x" ? `@${bare}` : bare;
 }
 
+function isLikelyAvatarUrl(url: string): boolean {
+  return /pbs\.twimg\.com|media\.licdn\.com|avatars\.githubusercontent\.com|\.(png|jpe?g|webp|gif)(\?.*)?$/i.test(url);
+}
+
 function storedHttpUrl(value: string | null | undefined): string | null {
   const trimmed = value?.trim() ?? "";
   if (!trimmed) return null;
+  if (isLikelyAvatarUrl(trimmed)) return null;
   if (/^https?:\/\//i.test(trimmed)) return trimmed;
   if (trimmed.startsWith("mailto:")) return trimmed;
   return null;

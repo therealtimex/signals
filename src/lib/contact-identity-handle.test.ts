@@ -42,6 +42,16 @@ describe("identityProfileHref", () => {
     ).toBe("https://x.com/realhandle");
   });
 
+  it("ignores image CDN URLs in platformUrl and falls back to handle profile link", () => {
+    expect(
+      identityProfileHref({
+        platform: "x",
+        platformHandle: "shobhitdixitt",
+        platformUrl: "https://pbs.twimg.com/profile_images/1490077923063123968/NfcQZBff_x96.jpg",
+      }),
+    ).toBe("https://x.com/shobhitdixitt");
+  });
+
   it("builds a canonical URL from a bare handle", () => {
     expect(identityProfileHref({ platform: "x", platformHandle: "@qa" })).toBe("https://x.com/qa");
     expect(identityProfileHref({ platform: "instagram", platformHandle: "qa" })).toBe(
