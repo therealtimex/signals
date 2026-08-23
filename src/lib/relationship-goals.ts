@@ -39,3 +39,11 @@ export const RELATIONSHIP_GOAL_STATUS_LABELS: Record<RelationshipGoalStatus, str
   achieved: "Achieved",
   paused: "Paused",
 };
+
+export const RELATIONSHIP_GOAL_ICONS: Record<RelationshipGoal, string> = {
+  follow_back: "👤+",
+  repost_amplification: "🔁",
+  mutual_engagement: "💬",
+  warm_conversation: "✉️",
+  partnership: "🤝",
+};

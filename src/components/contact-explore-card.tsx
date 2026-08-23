@@ -5,6 +5,8 @@ import type { ContactExploreCard, ContactExplorePersona } from "@/lib/db/queries
 import { selectPrimaryIdentity } from "@/components/explore/explore-utils";
 import { ExploreIdentityHeader } from "@/components/explore/explore-identity-header";
 import { ExplorePersonaSection } from "@/components/explore/explore-persona-section";
+import { ExploreTargetPlaybook } from "@/components/explore/explore-target-playbook";
+import type { RelationshipGoal } from "@/lib/relationship-goals";
 import { ExplorePlatformStats } from "@/components/explore/explore-platform-stats";
 import { ExploreNicheChips } from "@/components/explore/explore-niche-chips";
 import { ExploreRecentPosts } from "@/components/explore/explore-recent-posts";
@@ -41,6 +43,29 @@ export function ContactExploreCardView({
   }, [contactId, initialExplore]);
 
   const primaryIdentity = selectPrimaryIdentity(explore.identities);
+
+  async function handlePlaybookGoalChange(goal: RelationshipGoal) {
+    try {
+      await fetch(`/api/contacts/${contactId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          relationshipGoal: goal,
+          relationshipGoalStatus: "not_started",
+        }),
+      });
+      setExplore((current) => ({
+        ...current,
+        contact: {
+          ...current.contact,
+          relationshipGoal: goal,
+          relationshipGoalStatus: "not_started",
+        },
+      }));
+    } catch {
+      // Non-blocking
+    }
+  }
 
   async function handleGeneratePersona(force: boolean) {
     const generation = generationRef.current;
@@ -98,6 +123,25 @@ export function ContactExploreCardView({
         error={error}
         onGenerate={handleGeneratePersona}
       />
+
+      {explore.persona.visibility === "shared" ? (
+        <ExploreTargetPlaybook
+          contact={{
+            id: explore.contact.id,
+            name: explore.contact.name,
+            firstName: explore.contact.firstName,
+            lastName: explore.contact.lastName,
+            company: explore.contact.company,
+            title: explore.contact.title,
+            platform: primaryIdentity?.platform,
+            platformHandle: primaryIdentity?.platformHandle,
+            relationshipGoal: explore.contact.relationshipGoal,
+            relationshipGoalStatus: explore.contact.relationshipGoalStatus,
+          }}
+          persona={explore.persona}
+          onGoalChange={handlePlaybookGoalChange}
+        />
+      ) : null}
 
       <ExplorePlatformStats identities={explore.identities} />
       <ExploreNicheChips
