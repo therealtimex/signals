@@ -74,6 +74,24 @@ export function readContactNurtureConfig(config: Record<string, unknown>): Conta
   };
 }
 
+export function buildContactNurtureRunConfig(
+  config: ContactNurtureConfig,
+): Record<string, unknown> {
+  return {
+    [CONTACT_NURTURE_CONFIG_KEY]: { version: CONTACT_NURTURE_CONFIG_VERSION },
+    targetId: config.targetId,
+    relationshipGoalFilter: config.relationshipGoalFilter,
+    maxTargets: clampContactNurtureSlider("maxTargets", config.maxTargets),
+    maxActionsPerRun: clampContactNurtureSlider("maxActionsPerRun", config.maxActionsPerRun),
+    delayBetweenActionsSeconds: clampContactNurtureSlider(
+      "delayBetweenActionsSeconds",
+      config.delayBetweenActionsSeconds,
+    ),
+    requireApproval: config.requireApproval,
+    autoAchieveOnMilestone: config.autoAchieveOnMilestone,
+  };
+}
+
 export function buildContactNurtureTemplateConfig(
   overrides?: Partial<ContactNurtureConfig>,
 ): Record<string, unknown> {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildContactNurtureBriefSection,
+  buildContactNurtureRunConfig,
   buildContactNurtureTemplateConfig,
   clampContactNurtureSlider,
   isContactNurtureTemplateConfig,
@@ -34,6 +35,31 @@ describe("readContactNurtureConfig & buildContactNurtureTemplateConfig", () => {
     const raw = buildContactNurtureTemplateConfig();
     expect(isContactNurtureTemplateConfig(raw)).toBe(true);
     expect(isContactNurtureTemplateConfig({})).toBe(false);
+  });
+});
+
+describe("buildContactNurtureRunConfig", () => {
+  it("constructs clamped runtime config payload with version marker", () => {
+    const runConfig = buildContactNurtureRunConfig({
+      targetId: "target-123",
+      relationshipGoalFilter: "follow_back",
+      maxTargets: 99,
+      maxActionsPerRun: 0,
+      delayBetweenActionsSeconds: 10,
+      requireApproval: false,
+      autoAchieveOnMilestone: true,
+    });
+
+    expect(runConfig).toEqual({
+      contactNurture: { version: 1 },
+      targetId: "target-123",
+      relationshipGoalFilter: "follow_back",
+      maxTargets: 50,
+      maxActionsPerRun: 1,
+      delayBetweenActionsSeconds: 15,
+      requireApproval: false,
+      autoAchieveOnMilestone: true,
+    });
   });
 });
 
