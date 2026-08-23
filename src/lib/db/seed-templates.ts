@@ -17,7 +17,7 @@ import {
 } from "@/lib/workflows/contact-relationship-nurture";
 
 /** Bump this when seed template prompts change to trigger updates on existing installs. */
-const SEED_VERSION = 9;
+const SEED_VERSION = 10;
 
 export const CONTACT_PROFILE_PIPELINE_TEMPLATE_NAME = "Contact profile pipeline";
 
@@ -512,10 +512,10 @@ Progress relationships with high-value CRM contacts by executing personalized, p
 After executing any action:
 1. Save published content/replies:
    POST $SIGNALS_BASE_URL/api/content with JSON:
-   { "body": "<published text>", "contentType": "reply", "status": "published", "origin": "authored", "direction": "outbound", "platformTarget": "x", "contactId": "<contactId>" }
+   { "body": "<published text>", "contentType": "reply", "status": "published", "origin": "authored", "direction": "outbound", "platformTarget": "<platformTarget: x|linkedin|facebook>", "contactId": "<contactId>" }
 2. Log the touchpoint interaction:
    POST $SIGNALS_BASE_URL/api/agent-tools/invoke with JSON:
-   { "tool": "log_interaction", "input": { "contactId": "<contactId>", "interactionType": "social_reply", "summary": "<summary>" } }
+   { "tool": "log_interaction", "input": { "contactId": "<contactId>", "interactionType": "reply", "summary": "<summary>" } }
 3. Update contact milestone status:
    POST $SIGNALS_BASE_URL/api/agent-tools/invoke with JSON:
    { "tool": "update_contact", "input": { "contactId": "<contactId>", "relationshipGoalStatus": "in_progress" (or "achieved") } }`,

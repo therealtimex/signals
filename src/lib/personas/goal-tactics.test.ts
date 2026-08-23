@@ -73,4 +73,29 @@ describe("generateGoalTactic", () => {
     expect(tactic?.strategy).toBeTruthy();
     expect(tactic?.recommendedActions.length).toBeGreaterThanOrEqual(3);
   });
+
+  it("generates platform-native LinkedIn tactics with valid interactionType and platformTarget", () => {
+    const linkedInContact = {
+      id: "c-li-1",
+      name: "Sarah Chen",
+      firstName: "Sarah",
+      company: "Acme AI",
+      title: "VP Product",
+      platform: "linkedin",
+      platformHandle: "sarahchen",
+      relationshipGoal: "follow_back",
+    };
+
+    const tactic = generateGoalTactic(linkedInContact, {
+      archetype: "Enterprise Leader",
+      interests: ["Enterprise AI", "Product Strategy"],
+      conversionTriggers: ["Partnership opportunities"],
+    });
+
+    expect(tactic).not.toBeNull();
+    expect(tactic?.headline).toContain("Connection");
+    expect(tactic?.agentPrompt).toContain('"platformTarget": "linkedin"');
+    expect(tactic?.agentPrompt).toContain('"interactionType": "comment"');
+    expect(tactic?.agentPrompt).toContain("Send connection request to");
+  });
 });
