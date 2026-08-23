@@ -123,7 +123,20 @@ export function buildContactNurtureBriefSection(input: {
     nurture.requireApproval
       ? "N6. Approval gate is ON: Present touchpoints/drafts in this thread in batches of 3–5 and wait for operator confirmation before publishing."
       : "N6. Approval gate is OFF: Execute touchpoints directly and log evidence in this thread.",
-    `N7. Record all interactions in Signals CRM and attribute to workflow run ${input.workflowRunId}.`,
+    "N7. MANDATORY WRITE-BACK TO SIGNALS (Record every action):",
+    `    a. For any comment/reply or post published, write it to Signals Content immediately via:`,
+    `       POST ${input.signalsBaseUrl}/api/content with JSON:`,
+    `       { "body": "<published text>", "contentType": "reply", "status": "published", "origin": "authored", "direction": "outbound", "platformTarget": "x", "contactId": "<contactId>" }`,
+    `    b. Log the interaction touchpoint in Signals via:`,
+    `       POST ${input.signalsBaseUrl}/api/agent-tools/invoke with JSON:`,
+    `       { "tool": "log_interaction", "input": { "contactId": "<contactId>", "interactionType": "social_reply", "summary": "<description of action taken>" } }`,
+    `    c. If target taskId is provided in config/brief, complete the task:`,
+    `       POST ${input.signalsBaseUrl}/api/agent-tools/invoke with JSON:`,
+    `       { "tool": "update_task", "input": { "taskId": "<taskId>", "status": "done" } }`,
+    `    d. Update contact relationship goal progress:`,
+    `       POST ${input.signalsBaseUrl}/api/agent-tools/invoke with JSON:`,
+    `       { "tool": "update_contact", "input": { "contactId": "<contactId>", "relationshipGoalStatus": "in_progress" } }`,
+    `N8. Attribute all created items to workflow run ${input.workflowRunId} and report summary with links in this thread.`,
   ];
 
   return lines.join("\n");

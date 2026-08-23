@@ -7,6 +7,7 @@ import {
   RELATIONSHIP_GOAL_ICONS,
   RELATIONSHIP_GOAL_LABELS,
   type RelationshipGoal,
+  type RelationshipGoalStatus,
 } from "@/lib/relationship-goals";
 import {
   generateGoalTactic,
@@ -28,7 +29,7 @@ interface ExploreTargetPlaybookProps {
   contact: ContactGoalContext;
   persona?: PersonaGoalContext | null;
   onGoalChange?: (goal: RelationshipGoal) => void;
-  onDispatched?: () => void;
+  onDispatched?: (status?: RelationshipGoalStatus) => void;
 }
 
 export function ExploreTargetPlaybook({
@@ -46,6 +47,7 @@ export function ExploreTargetPlaybook({
   const [dispatchError, setDispatchError] = useState<string | null>(null);
 
   const activeGoal = (selectedGoalOverride ?? contact.relationshipGoal ?? "follow_back") as RelationshipGoal;
+  const effectiveStatus = (dispatchedSuccess ? "in_progress" : contact.relationshipGoalStatus) || "not_started";
   const tactic = generateGoalTactic(contact, persona, activeGoal);
 
   if (!tactic) return null;
@@ -74,6 +76,7 @@ export function ExploreTargetPlaybook({
 
   function handleSelectGoal(goal: RelationshipGoal) {
     setSelectedGoalOverride(goal);
+    setDispatchedSuccess(false);
     if (onGoalChange) {
       onGoalChange(goal);
     }
@@ -95,13 +98,16 @@ export function ExploreTargetPlaybook({
       }
       setDispatchedSuccess(true);
       if (onDispatched) {
-        onDispatched();
+        onDispatched("in_progress");
       }
-      router.refresh();
-      setTimeout(() => setDispatchedSuccess(false), 4000);
+      try {
+        router.refresh();
+      } catch {
+        // Safe router refresh
+      }
     } catch (err) {
       setDispatchError(err instanceof Error ? err.message : "Failed to dispatch task");
-      setTimeout(() => setDispatchError(null), 4000);
+      setTimeout(() => setDispatchError(null), 5000);
     } finally {
       setIsDispatching(false);
     }
@@ -115,7 +121,19 @@ export function ExploreTargetPlaybook({
             <Target className="h-4 w-4" />
           </div>
           <div>
-            <CardTitle className="text-base font-semibold">Target Playbook</CardTitle>
+            <div className="flex items-center gap-2">
+              <CardTitle className="text-base font-semibold">Target Playbook</CardTitle>
+              {effectiveStatus === "achieved" && (
+                <Badge className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20 text-[10px] font-semibold gap-1 py-0 h-4">
+                  <Check className="h-2.5 w-2.5" /> Achieved
+                </Badge>
+              )}
+              {effectiveStatus === "in_progress" && (
+                <Badge className="bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20 text-[10px] font-medium gap-1 py-0 h-4">
+                  <span className="h-1 w-1 rounded-full bg-amber-500 animate-pulse" /> In Progress
+                </Badge>
+              )}
+            </div>
             <p className="text-xs text-muted-foreground">Persona-driven relationship tactics</p>
           </div>
         </div>
@@ -211,23 +229,34 @@ export function ExploreTargetPlaybook({
         </div>
 
         {/* Agent Task Dispatch & Prompt Copy */}
-        <div className="pt-1 space-y-2">
+        <div className="pt-1 space-y-2.5">
           <div className="flex items-center gap-2">
             <Button
               size="sm"
               onClick={handleDispatchAgentTask}
               disabled={isDispatching}
-              className="flex-1 gap-2 text-xs font-medium"
+              className={`flex-1 gap-2 text-xs font-medium ${
+                effectiveStatus === "achieved"
+                  ? "bg-emerald-600 hover:bg-emerald-700 text-white"
+                  : effectiveStatus === "in_progress"
+                  ? "bg-primary/90 hover:bg-primary text-primary-foreground"
+                  : ""
+              }`}
             >
               {isDispatching ? (
                 <>
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
                   <span>Dispatching to Nurture Agent...</span>
                 </>
-              ) : dispatchedSuccess ? (
+              ) : effectiveStatus === "achieved" ? (
                 <>
-                  <Check className="h-3.5 w-3.5 text-emerald-300" />
-                  <span>Task Staged for Nurture Agent!</span>
+                  <Check className="h-3.5 w-3.5 text-white" />
+                  <span>Goal Achieved · Re-run Sequence</span>
+                </>
+              ) : effectiveStatus === "in_progress" ? (
+                <>
+                  <Zap className="h-3.5 w-3.5 text-amber-300" />
+                  <span>In Progress · Re-dispatch Agent Task</span>
                 </>
               ) : (
                 <>
@@ -258,10 +287,28 @@ export function ExploreTargetPlaybook({
             </Button>
           </div>
 
-          {dispatchedSuccess && (
-            <p className="text-[11px] text-emerald-600 dark:text-emerald-400">
-              ✓ Agent task created and dispatched to the <strong>Contact Relationship Nurture</strong> thread in RealTimeX.
-            </p>
+          {effectiveStatus === "achieved" && (
+            <div className="rounded-md border border-emerald-500/20 bg-emerald-500/[0.06] p-2.5 text-[11px] text-emerald-700 dark:text-emerald-300 space-y-1">
+              <p className="font-semibold flex items-center gap-1.5">
+                <Check className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+                Relationship Goal Achieved!
+              </p>
+              <p className="text-muted-foreground leading-relaxed">
+                The milestone for this contact was completed. You can select another goal above or review recorded touchpoints in the <strong>Activity</strong> tab.
+              </p>
+            </div>
+          )}
+
+          {effectiveStatus === "in_progress" && (
+            <div className="rounded-md border border-primary/20 bg-primary/[0.04] p-2.5 text-[11px] text-foreground space-y-1">
+              <p className="font-medium flex items-center gap-1.5 text-primary">
+                <Zap className="h-3.5 w-3.5 text-amber-500" />
+                Active Agent Nurture Task Staged
+              </p>
+              <p className="text-muted-foreground leading-relaxed">
+                Dispatched to the <strong>Contact Relationship Nurture</strong> thread in RealTimeX. Check the <strong>Tasks</strong> tab to monitor task progress.
+              </p>
+            </div>
           )}
 
           {dispatchError && (

@@ -17,7 +17,7 @@ import {
 } from "@/lib/workflows/contact-relationship-nurture";
 
 /** Bump this when seed template prompts change to trigger updates on existing installs. */
-const SEED_VERSION = 8;
+const SEED_VERSION = 9;
 
 export const CONTACT_PROFILE_PIPELINE_TEMPLATE_NAME = "Contact profile pipeline";
 
@@ -507,7 +507,18 @@ Progress relationships with high-value CRM contacts by executing personalized, p
 - Apply a salted sleep delay (20s–45s) between consecutive interactions to protect account health.
 - Never exceed maxActionsPerRun.
 - If requireApproval is true, present batches of 3–5 drafts for operator approval before publishing.
-- Record all interactions, notes, and milestones in Signals CRM.`,
+
+## Mandatory Write-Back to Signals CRM
+After executing any action:
+1. Save published content/replies:
+   POST $SIGNALS_BASE_URL/api/content with JSON:
+   { "body": "<published text>", "contentType": "reply", "status": "published", "origin": "authored", "direction": "outbound", "platformTarget": "x", "contactId": "<contactId>" }
+2. Log the touchpoint interaction:
+   POST $SIGNALS_BASE_URL/api/agent-tools/invoke with JSON:
+   { "tool": "log_interaction", "input": { "contactId": "<contactId>", "interactionType": "social_reply", "summary": "<summary>" } }
+3. Update contact milestone status:
+   POST $SIGNALS_BASE_URL/api/agent-tools/invoke with JSON:
+   { "tool": "update_contact", "input": { "contactId": "<contactId>", "relationshipGoalStatus": "in_progress" (or "achieved") } }`,
     config: buildContactNurtureTemplateConfig(),
   },
 ];

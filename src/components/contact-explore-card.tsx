@@ -35,12 +35,14 @@ export function ContactExploreCardView({
   const [error, setError] = useState<string | null>(null);
   const generationRef = useRef(0);
 
-  useEffect(() => {
-    generationRef.current += 1;
+  // Keep explore state in sync when initialExplore prop updates
+  const [prevExplore, setPrevExplore] = useState(initialExplore);
+  if (initialExplore !== prevExplore) {
+    setPrevExplore(initialExplore);
     setExplore(initialExplore);
     setError(null);
     setGenerating(false);
-  }, [contactId, initialExplore]);
+  }
 
   const primaryIdentity = selectPrimaryIdentity(explore.identities);
 
@@ -79,16 +81,17 @@ export function ContactExploreCardView({
       });
       if (generation !== generationRef.current) return;
 
+      if (!res.ok) {
+        setError("Persona generation failed");
+        return;
+      }
+
       const body = (await res.json()) as {
         error?: string;
         persona?: ContactExplorePersona;
       };
       if (generation !== generationRef.current) return;
 
-      if (!res.ok) {
-        setError(body.error ?? "Persona generation failed");
-        return;
-      }
       if (body.persona) {
         setExplore((current) => ({ ...current, persona: body.persona! }));
       }
@@ -100,6 +103,16 @@ export function ContactExploreCardView({
         setGenerating(false);
       }
     }
+  }
+
+  function handlePlaybookDispatched(status = "in_progress") {
+    setExplore((current) => ({
+      ...current,
+      contact: {
+        ...current.contact,
+        relationshipGoalStatus: status,
+      },
+    }));
   }
 
   return (
@@ -140,6 +153,7 @@ export function ContactExploreCardView({
           }}
           persona={explore.persona}
           onGoalChange={handlePlaybookGoalChange}
+          onDispatched={handlePlaybookDispatched}
         />
       ) : null}
 
