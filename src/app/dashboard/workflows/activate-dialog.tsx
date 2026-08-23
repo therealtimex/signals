@@ -25,6 +25,7 @@ import {
 } from "@/app/dashboard/workflows/activate-dialog.utils";
 import { SocialPatrolFields } from "@/app/dashboard/workflows/social-patrol-fields";
 import { ProfilePublishFields } from "@/app/dashboard/workflows/profile-publish-fields";
+import { ContactNurtureFields } from "@/app/dashboard/workflows/contact-nurture-fields";
 import {
   buildSocialPatrolRunConfig,
   isSocialPatrolTemplateConfig,
@@ -35,6 +36,11 @@ import {
   isProfilePublishTemplateConfig,
   readProfilePublishConfig,
 } from "@/lib/workflows/profile-publish";
+import {
+  buildContactNurtureRunConfig,
+  isContactNurtureTemplateConfig,
+  readContactNurtureConfig,
+} from "@/lib/workflows/contact-relationship-nurture";
 
 interface Template {
   id: string;
@@ -81,6 +87,7 @@ interface DialogState {
   systemPrompt: string;
   patrol: ReturnType<typeof readSocialPatrolConfig>;
   profilePublish: ReturnType<typeof readProfilePublishConfig>;
+  contactNurture: ReturnType<typeof readContactNurtureConfig>;
   limits: ReturnType<typeof readRunLimitFromTemplateConfig>;
 }
 
@@ -95,6 +102,7 @@ type DialogAction =
   | { type: "SET_SYSTEM_PROMPT"; systemPrompt: string }
   | { type: "SET_PATROL"; patrol: ReturnType<typeof readSocialPatrolConfig> }
   | { type: "SET_PROFILE_PUBLISH"; profilePublish: ReturnType<typeof readProfilePublishConfig> }
+  | { type: "SET_CONTACT_NURTURE"; contactNurture: ReturnType<typeof readContactNurtureConfig> }
   | {
       type: "SET_LIMIT";
       key: keyof ReturnType<typeof readRunLimitFromTemplateConfig>;
@@ -115,6 +123,7 @@ function initDialogState(template: Template): DialogState {
     systemPrompt: template.systemPrompt ?? "",
     patrol: readSocialPatrolConfig(config),
     profilePublish: readProfilePublishConfig(config),
+    contactNurture: readContactNurtureConfig(config),
     limits: readRunLimitFromTemplateConfig(config),
   };
 }
@@ -158,6 +167,8 @@ function dialogReducer(state: DialogState, action: DialogAction): DialogState {
       return { ...state, patrol: action.patrol };
     case "SET_PROFILE_PUBLISH":
       return { ...state, profilePublish: action.profilePublish };
+    case "SET_CONTACT_NURTURE":
+      return { ...state, contactNurture: action.contactNurture };
     case "SET_LIMIT":
       return { ...state, limits: { ...state.limits, [action.key]: action.value } };
     default:
@@ -273,22 +284,26 @@ function ActivateDialogFormFields({
   limits,
   patrol,
   profilePublish,
+  contactNurture,
   systemPrompt,
   freshThread,
   running,
   isPatrol,
   isProfilePublish,
+  isContactNurture,
   dispatch,
 }: {
   template: Template;
   limits: DialogState["limits"];
   patrol: DialogState["patrol"];
   profilePublish: DialogState["profilePublish"];
+  contactNurture: DialogState["contactNurture"];
   systemPrompt: string;
   freshThread: boolean;
   running: boolean;
   isPatrol: boolean;
   isProfilePublish: boolean;
+  isContactNurture: boolean;
   dispatch: React.Dispatch<DialogAction>;
 }) {
   return (
@@ -434,7 +449,18 @@ function ActivateDialogFormFields({
         />
       )}
 
+      {isContactNurture && (
+        <ContactNurtureFields
+          value={contactNurture}
+          onChange={(next) =>
+            dispatch({ type: "SET_CONTACT_NURTURE", contactNurture: next })
+          }
+          disabled={running}
+        />
+      )}
+
       {!isPatrol &&
+        !isContactNurture &&
         (template.templateType === "engagement" ||
           template.templateType === "outreach") && (
           <div className="space-y-2">
@@ -512,6 +538,7 @@ function ActivateDialogContent({
   const isPipeline = isPipelineTemplateConfig(template.config);
   const isPatrol = isSocialPatrolTemplateConfig(templateConfig);
   const isProfilePublish = isProfilePublishTemplateConfig(templateConfig);
+  const isContactNurture = isContactNurtureTemplateConfig(templateConfig);
 
   const {
     running,
@@ -525,6 +552,7 @@ function ActivateDialogContent({
     systemPrompt,
     patrol,
     profilePublish,
+    contactNurture,
     limits,
   } = state;
 
@@ -571,6 +599,8 @@ function ActivateDialogContent({
         Object.assign(config, buildSocialPatrolRunConfig(patrol));
       } else if (isProfilePublish) {
         Object.assign(config, buildProfilePublishRunConfig(profilePublish));
+      } else if (isContactNurture) {
+        Object.assign(config, buildContactNurtureRunConfig(contactNurture));
       } else {
         if (template.templateType === "prospecting") {
           config.maxResults = parseInt(limits.maxResults, 10) || 20;
@@ -731,11 +761,13 @@ function ActivateDialogContent({
             limits={limits}
             patrol={patrol}
             profilePublish={profilePublish}
+            contactNurture={contactNurture}
             systemPrompt={systemPrompt}
             freshThread={freshThread}
             running={running}
             isPatrol={isPatrol}
             isProfilePublish={isProfilePublish}
+            isContactNurture={isContactNurture}
             dispatch={dispatch}
           />
         )}
