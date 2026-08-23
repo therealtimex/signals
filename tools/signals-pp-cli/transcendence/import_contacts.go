@@ -471,6 +471,18 @@ func platformClaimMatch(result map[string]any) contactMatch {
 	}
 }
 
+func isLikelyAvatarURL(url string) bool {
+	lower := strings.ToLower(url)
+	return strings.Contains(lower, "pbs.twimg.com") ||
+		strings.Contains(lower, "media.licdn.com") ||
+		strings.Contains(lower, "avatars.githubusercontent.com") ||
+		strings.HasSuffix(lower, ".jpg") ||
+		strings.HasSuffix(lower, ".jpeg") ||
+		strings.HasSuffix(lower, ".png") ||
+		strings.HasSuffix(lower, ".webp") ||
+		strings.HasSuffix(lower, ".gif")
+}
+
 func createContactFromRow(cmd *cobra.Command, c *client.Client, flags *rootFlags, row contactRow) (string, error) {
 	input := map[string]any{
 		"name": row.Name,
@@ -499,14 +511,19 @@ func createContactFromRow(cmd *cobra.Command, c *client.Client, flags *rootFlags
 	if row.PlatformHandle != "" {
 		input["platformHandle"] = row.PlatformHandle
 	}
-	if row.ProfileURL != "" {
-		input["platformUrl"] = row.ProfileURL
+	profileURL := row.ProfileURL
+	avatarURL := row.AvatarURL
+	if isLikelyAvatarURL(profileURL) {
+		if avatarURL == "" {
+			avatarURL = profileURL
+		}
+		profileURL = ""
 	}
-	if row.AvatarURL != "" {
-		input["avatarUrl"] = row.AvatarURL
-	} else if strings.HasPrefix(row.ProfileURL, "https://pbs.twimg.com") || strings.HasPrefix(row.ProfileURL, "https://media.licdn.com") {
-		// Backward-compat fallback if agent staged CDN image URL in profile_url
-		input["avatarUrl"] = row.ProfileURL
+	if profileURL != "" {
+		input["platformUrl"] = profileURL
+	}
+	if avatarURL != "" {
+		input["avatarUrl"] = avatarURL
 	}
 	if row.Notes != "" {
 		input["notes"] = row.Notes
@@ -555,14 +572,19 @@ func enrichExistingContact(cmd *cobra.Command, c *client.Client, flags *rootFlag
 		if row.PlatformHandle != "" {
 			identity["platformHandle"] = row.PlatformHandle
 		}
-		if row.ProfileURL != "" {
-			identity["platformUrl"] = row.ProfileURL
+		profileURL := row.ProfileURL
+		avatarURL := row.AvatarURL
+		if isLikelyAvatarURL(profileURL) {
+			if avatarURL == "" {
+				avatarURL = profileURL
+			}
+			profileURL = ""
 		}
-		if row.AvatarURL != "" {
-			identity["avatarUrl"] = row.AvatarURL
-		} else if strings.HasPrefix(row.ProfileURL, "https://pbs.twimg.com") || strings.HasPrefix(row.ProfileURL, "https://media.licdn.com") {
-			// Backward-compat fallback if agent staged CDN image URL in profile_url
-			identity["avatarUrl"] = row.ProfileURL
+		if profileURL != "" {
+			identity["platformUrl"] = profileURL
+		}
+		if avatarURL != "" {
+			identity["avatarUrl"] = avatarURL
 		}
 		if _, err := invokeAgentTool(cmd, c, flags, "upsert_contact_identity", identity); err != nil {
 			return enriched, err
