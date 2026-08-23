@@ -18,6 +18,7 @@ import { enrichContact } from "@/lib/agents/tools/enrich-contact";
 import { archiveContactTool } from "@/lib/agents/tools/archive-contact";
 import { findDuplicateContacts } from "@/lib/contacts/dedupe/detect";
 import { MergeContactsError, mergeContacts } from "@/lib/contacts/dedupe/merge";
+import { personNameKey, orgNameKey } from "@/lib/contacts/dedupe/normalize";
 import type { WorkflowType } from "@/lib/workflows/types";
 import type {
   archiveContactSchema,
@@ -206,6 +207,88 @@ export async function handleGetContact(input: z.infer<typeof getContactSchema>) 
   };
 }
 
+function isContactArchived(contact: { metadata?: string | null }): boolean {
+  if (!contact.metadata) return false;
+  try {
+    const meta = JSON.parse(contact.metadata);
+    return meta.archived === 1 || meta.archived === true;
+  } catch {
+    return false;
+  }
+}
+
+function findMatchingExistingContact(
+  input: z.infer<typeof createContactSchema>
+): ReturnType<typeof getContactById> | undefined {
+  // 1. By platform identity claim
+  if (input.platform) {
+    const p = assertPlatform(input.platform);
+    const userIdOrHandle = (input.platformUserId || input.platformHandle || "").trim().replace(/^@/, "");
+    if (userIdOrHandle) {
+      const claim = resolvePlatformClaim(p, userIdOrHandle);
+      if (claim.claimed && claim.claimant.kind === "contact") {
+        const contact = getContactById(claim.claimant.contactId);
+        if (contact && !isContactArchived(contact)) {
+          return contact;
+        }
+      }
+    }
+  }
+
+  // Also check channels for platform matches
+  if (input.channels) {
+    for (const ch of input.channels) {
+      const p = ch.channelType;
+      if (p === "x" || p === "linkedin" || p === "gmail" || p === "substack" || p === "instagram" || p === "facebook" || p === "threads" || p === "tiktok" || p === "youtube" || p === "bluesky" || p === "telegram" || p === "whatsapp") {
+        const val = ch.value?.trim().replace(/^@/, "");
+        if (val) {
+          try {
+            const claim = resolvePlatformClaim(assertPlatform(p), val);
+            if (claim.claimed && claim.claimant.kind === "contact") {
+              const contact = getContactById(claim.claimant.contactId);
+              if (contact && !isContactArchived(contact)) {
+                return contact;
+              }
+            }
+          } catch {
+            // Ignore non-standard platform names
+          }
+        }
+      }
+    }
+  }
+
+  // 2. By email
+  const email = input.email?.trim() || input.channels?.find((ch) => ch.channelType === "email")?.value?.trim();
+  if (email && email.includes("@")) {
+    const matches = listContacts({ email });
+    const match = matches.data.find((c) => !isContactArchived(c));
+    if (match) {
+      return getContactById(match.id);
+    }
+  }
+
+  // 3. By exact normalized name + company
+  if (input.name && input.company) {
+    const normName = personNameKey(input.name);
+    const normCompany = orgNameKey(input.company);
+    if (normName && normCompany) {
+      const candidates = listContacts({ search: input.name, pageSize: 50 });
+      for (const cand of candidates.data) {
+        if (isContactArchived(cand)) continue;
+        if (personNameKey(cand.name) === normName) {
+          const candCompany = cand.company || cand.currentEmployment?.orgName;
+          if (candCompany && orgNameKey(candCompany) === normCompany) {
+            return getContactById(cand.id);
+          }
+        }
+      }
+    }
+  }
+
+  return undefined;
+}
+
 export async function handleCreateContact(input: z.infer<typeof createContactSchema>) {
   const { workflowRunId, templateId, ...rest } = input;
   let resolvedIds: { workflowRunId: string | null; templateId: string | null };
@@ -215,11 +298,77 @@ export async function handleCreateContact(input: z.infer<typeof createContactSch
     return { error: error instanceof Error ? error.message : "Invalid workflow context" };
   }
 
+  // Auto-deduplication check: enrich existing contact if found
+  const existing = findMatchingExistingContact(input);
+  if (existing) {
+    const enrichData: Record<string, unknown> = {};
+    if (rest.company && !existing.company) enrichData.company = rest.company;
+    if (rest.title && !existing.title) enrichData.title = rest.title;
+    if (rest.headline && !existing.headline) enrichData.headline = rest.headline;
+    if (rest.bio && !existing.bio) enrichData.bio = rest.bio;
+    if (rest.location && !existing.location) enrichData.location = rest.location;
+    if (rest.website && !existing.website) enrichData.website = rest.website;
+    if (rest.notes) enrichData.metadata = { notes: rest.notes };
+    if (Object.keys(enrichData).length > 0) {
+      enrichContact(existing.id, enrichData);
+    }
+
+    if (existing.identities && existing.identities.length > 0 && (rest.headline || rest.bio || rest.location || rest.website || rest.avatarUrl)) {
+      const primaryIdent = existing.identities.find((i) => i.isPrimary) ?? existing.identities[0];
+      if (primaryIdent) {
+        const patch: Record<string, unknown> = {};
+        if (rest.headline && !primaryIdent.headline) patch.headline = rest.headline;
+        if (rest.bio && !primaryIdent.bio) patch.bio = rest.bio;
+        if (rest.location && !primaryIdent.location) patch.location = rest.location;
+        if (rest.website && !primaryIdent.websiteUrl) patch.websiteUrl = rest.website;
+        if (rest.avatarUrl && !primaryIdent.avatarUrl) patch.avatarUrl = rest.avatarUrl;
+        if (Object.keys(patch).length > 0) {
+          updateIdentity(primaryIdent.id, patch);
+        }
+      }
+    }
+
+    if (rest.platform && (rest.platformUserId || rest.platformHandle)) {
+      try {
+        await handleUpsertContactIdentity({
+          contactId: existing.id,
+          platform: rest.platform,
+          platformUserId: rest.platformUserId ?? rest.platformHandle,
+          platformHandle: rest.platformHandle,
+          platformUrl: rest.platformUrl,
+          avatarUrl: rest.avatarUrl,
+        });
+      } catch {
+        // Non-blocking if identity is already cleanly linked
+      }
+    }
+
+    recalcEnrichment(existing.id);
+    const updated = getContactById(existing.id) ?? existing;
+
+    return {
+      id: updated.id,
+      name: updated.name,
+      email: updated.email,
+      company: updated.company,
+      currentEmployment: updated.currentEmployment,
+      enrichmentScore: updated.enrichmentScore,
+      isExisting: true,
+      message: `Contact "${updated.name}" already exists (${updated.id}); enriched existing record.`,
+      ...serializeContactBirthFields(updated),
+    };
+  }
+
   const payload: Parameters<typeof createContact>[0] = {
     name: rest.name,
     firstName: rest.firstName,
     lastName: rest.lastName,
     funnelStage: rest.funnelStage ?? "prospect",
+    headline: rest.headline,
+    bio: rest.bio,
+    location: rest.location,
+    website: rest.website,
+    avatarUrl: rest.avatarUrl,
   };
 
   if (rest.email !== undefined) payload.email = rest.email || null;
@@ -239,15 +388,38 @@ export async function handleCreateContact(input: z.infer<typeof createContactSch
     templateId: resolvedIds.templateId,
   });
 
+  if (rest.platform && (rest.platformUserId || rest.platformHandle)) {
+    try {
+      await handleUpsertContactIdentity({
+        contactId: contact.id,
+        platform: rest.platform,
+        platformUserId: rest.platformUserId ?? rest.platformHandle,
+        platformHandle: rest.platformHandle,
+        platformUrl: rest.platformUrl,
+        avatarUrl: rest.avatarUrl,
+      });
+    } catch {
+      // Non-blocking
+    }
+  }
+
+  if (rest.notes) {
+    enrichContact(contact.id, { metadata: { notes: rest.notes } });
+  }
+
+  recalcEnrichment(contact.id);
+  const result = getContactById(contact.id) ?? contact;
+
   return {
-    id: contact.id,
-    name: contact.name,
-    email: contact.email,
-    company: contact.company,
-    currentEmployment: contact.currentEmployment,
-    enrichmentScore: contact.enrichmentScore,
-    message: `Contact "${contact.name}" created successfully.`,
-    ...serializeContactBirthFields(contact),
+    id: result.id,
+    name: result.name,
+    email: result.email,
+    company: result.company,
+    currentEmployment: result.currentEmployment,
+    enrichmentScore: result.enrichmentScore,
+    isExisting: false,
+    message: `Contact "${result.name}" created successfully.`,
+    ...serializeContactBirthFields(result),
   };
 }
 

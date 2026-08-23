@@ -463,4 +463,124 @@ describe("invokeAgentTool", () => {
       error: expect.stringContaining("upload-avatar"),
     });
   });
+
+  it("creates a contact with direct platform, handle, and avatarUrl in a single call", async () => {
+    const created = await invokeAgentTool("create_contact", {
+      name: "David Founder",
+      company: "AuraBid",
+      title: "Creator",
+      platform: "x",
+      platformHandle: "chhddavid",
+      platformUserId: "chhddavid",
+      avatarUrl: "https://example.com/chhddavid.jpg",
+    });
+
+    expect(created).toMatchObject({
+      name: "David Founder",
+      company: "AuraBid",
+      isExisting: false,
+    });
+
+    const contactId = (created as { id: string }).id;
+    const contact = await invokeAgentTool("get_contact", { contactId });
+    expect(contact).toMatchObject({
+      resolvedAvatarUrl: "https://example.com/chhddavid.jpg",
+      identities: [
+        expect.objectContaining({
+          platform: "x",
+          handle: "chhddavid",
+          avatarUrl: "https://example.com/chhddavid.jpg",
+        }),
+      ],
+    });
+  });
+
+  it("auto-deduplicates when create_contact is called with matching platform claim and enriches existing", async () => {
+    const first = await invokeAgentTool("create_contact", {
+      name: "Miguel Caçador Peixoto",
+      company: "bidwall.app",
+      platform: "x",
+      platformHandle: "mcpeixoto457",
+      platformUserId: "mcpeixoto457",
+      avatarUrl: "https://example.com/avatar.jpg",
+    });
+
+    const firstId = (first as { id: string }).id;
+
+    // Second call with same platform handle but added title and notes
+    const second = await invokeAgentTool("create_contact", {
+      name: "Miguel Caçador Peixoto",
+      title: "Founder",
+      platform: "x",
+      platformHandle: "mcpeixoto457",
+      notes: "Met at demo day",
+    });
+
+    expect(second).toMatchObject({
+      id: firstId,
+      name: "Miguel Caçador Peixoto",
+      company: "bidwall.app",
+      isExisting: true,
+      message: expect.stringContaining("already exists"),
+    });
+
+    // Check that existing contact was enriched with title
+    const contact = await invokeAgentTool("get_contact", { contactId: firstId });
+    expect(contact).toMatchObject({
+      title: "Founder",
+      company: "bidwall.app",
+      identities: [
+        expect.objectContaining({
+          platform: "x",
+          handle: "mcpeixoto457",
+        }),
+      ],
+    });
+  });
+
+  it("auto-deduplicates when create_contact is called with matching email", async () => {
+    const first = await invokeAgentTool("create_contact", {
+      name: "Alex Builder",
+      email: "alex@example.com",
+      company: "Original Co",
+    });
+
+    const firstId = (first as { id: string }).id;
+
+    const second = await invokeAgentTool("create_contact", {
+      name: "Alex Builder",
+      email: "alex@example.com",
+      title: "CTO",
+    });
+
+    expect(second).toMatchObject({
+      id: firstId,
+      isExisting: true,
+    });
+  });
+
+  it("auto-deduplicates when create_contact is called with exact matching name and company", async () => {
+    const first = await invokeAgentTool("create_contact", {
+      name: "Sarah Connors",
+      company: "Cyberdyne Systems",
+    });
+
+    const firstId = (first as { id: string }).id;
+
+    const second = await invokeAgentTool("create_contact", {
+      name: "Sarah Connors",
+      company: "Cyberdyne Systems",
+      title: "AI Safety Lead",
+    });
+
+    expect(second).toMatchObject({
+      id: firstId,
+      isExisting: true,
+    });
+
+    const contact = await invokeAgentTool("get_contact", { contactId: firstId });
+    expect(contact).toMatchObject({
+      title: "AI Safety Lead",
+    });
+  });
 });
