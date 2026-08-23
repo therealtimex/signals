@@ -111,7 +111,7 @@ export function generateGoalTactic(
 4. WRITE BACK TO SIGNALS CRM (Required):
    a. Save published comment to Signals Content:
       POST ${baseUrl}/api/content
-      { "body": "<published comment text>", "contentType": "reply", "status": "published", "origin": "authored", "direction": "outbound", "platformTarget": "${platformTarget}", "contactId": "${contact.id}" }
+      { "body": "<published comment text>", "contentType": "reply", "status": "published", "origin": "authored", "direction": "outbound", "platformTarget": "${platformTarget}", "platformUrl": "<published comment url>", "contactId": "${contact.id}" }
    b. Log interaction touchpoint:
       POST ${baseUrl}/api/agent-tools/invoke
       { "tool": "log_interaction", "input": { "contactId": "${contact.id}", "interactionType": "${replyInteractionType}", "summary": "Commented on ${handle}'s post on ${interestsList} and ${isLinkedIn ? "sent connection request" : "followed"}" } }
@@ -139,7 +139,7 @@ export function generateGoalTactic(
 3. WRITE BACK TO SIGNALS CRM (Required):
    a. Save published post to Signals Content:
       POST ${baseUrl}/api/content
-      { "body": "<published post text>", "contentType": "post", "status": "published", "origin": "authored", "direction": "outbound", "platformTarget": "${platformTarget}", "contactId": "${contact.id}" }
+      { "body": "<published post text>", "contentType": "post", "status": "published", "origin": "authored", "direction": "outbound", "platformTarget": "${platformTarget}", "platformUrl": "<published post url>", "contactId": "${contact.id}" }
    b. Log interaction touchpoint:
       POST ${baseUrl}/api/agent-tools/invoke
       { "tool": "log_interaction", "input": { "contactId": "${contact.id}", "interactionType": "${isLinkedIn ? "comment" : "quote"}", "summary": "Published spotlight breakdown tagging ${handle}" } }
@@ -167,7 +167,7 @@ export function generateGoalTactic(
 3. WRITE BACK TO SIGNALS CRM (Required):
    a. Save comment to Signals Content:
       POST ${baseUrl}/api/content
-      { "body": "<reply text>", "contentType": "reply", "status": "published", "origin": "authored", "direction": "outbound", "platformTarget": "${platformTarget}", "contactId": "${contact.id}" }
+      { "body": "<reply text>", "contentType": "reply", "status": "published", "origin": "authored", "direction": "outbound", "platformTarget": "${platformTarget}", "platformUrl": "<published reply url>", "contactId": "${contact.id}" }
    b. Log interaction:
       POST ${baseUrl}/api/agent-tools/invoke
       { "tool": "log_interaction", "input": { "contactId": "${contact.id}", "interactionType": "${replyInteractionType}", "summary": "Contributed domain answer to ${handle}'s thread" } }

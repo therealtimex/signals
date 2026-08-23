@@ -112,8 +112,6 @@ export function buildContactNurtureTemplateConfig(
   };
 }
 
-import { getPlatformTargetById } from "@/lib/db/queries/platform-targets";
-
 export interface ContactNurtureTargetInfo {
   id: string;
   platform: string;
@@ -132,30 +130,21 @@ export function buildContactNurtureBriefSection(input: {
     ? "All assigned relationship goals (follow_back, repost_amplification, mutual_engagement, warm_conversation, partnership)"
     : `Only "${nurture.relationshipGoalFilter}" goals`;
 
-  let resolvedTarget = input.platformTarget;
-  if (!resolvedTarget && nurture.targetId) {
-    try {
-      const found = getPlatformTargetById(nurture.targetId);
-      if (found) {
-        resolvedTarget = {
-          id: found.id,
-          platform: found.platform,
-          name: found.name,
-          handle: found.handle,
-        };
-      }
-    } catch {
-      // ignore in test / offline environments
-    }
-  }
+  const targetPlatform = (
+    input.platformTarget?.platform ||
+    (typeof input.config.targetPlatform === "string" ? input.config.targetPlatform : "") ||
+    "x"
+  ).toLowerCase();
 
-  const targetPlatform = (resolvedTarget?.platform || "x").toLowerCase();
   const isLinkedIn = targetPlatform === "linkedin";
   const isFacebook = targetPlatform === "facebook";
   const platformLabel = isLinkedIn ? "LinkedIn" : isFacebook ? "Facebook" : "X";
-  const targetName = resolvedTarget
-    ? `${platformLabel}: ${resolvedTarget.name || resolvedTarget.handle}${resolvedTarget.handle ? ` (${resolvedTarget.handle})` : ""} [ID: ${resolvedTarget.id}]`
-    : (nurture.targetId ? `Target ID: ${nurture.targetId}` : "Auto-detect default acting target per contact platform");
+
+  const targetName = input.platformTarget
+    ? `${platformLabel}: ${input.platformTarget.name || input.platformTarget.handle}${input.platformTarget.handle ? ` (${input.platformTarget.handle})` : ""} [ID: ${input.platformTarget.id}]`
+    : (typeof input.config.targetName === "string"
+        ? `${platformLabel}: ${input.config.targetName}${input.config.targetHandle ? ` (${input.config.targetHandle})` : ""}${nurture.targetId ? ` [ID: ${nurture.targetId}]` : ""}`
+        : (nurture.targetId ? `Target ID: ${nurture.targetId}` : "Auto-detect default acting target per contact platform"));
 
   const defaultInteractionType = isLinkedIn ? "linkedin_comment" : isFacebook ? "facebook_post" : "reply";
 
@@ -196,7 +185,7 @@ export function buildContactNurtureBriefSection(input: {
     "N7. MANDATORY WRITE-BACK TO SIGNALS (Record every action):",
     `    a. For any comment/reply or post published, write it to Signals Content immediately via:`,
     `       POST ${input.signalsBaseUrl}/api/content with JSON:`,
-    `       { "body": "<published text>", "contentType": "reply", "status": "published", "origin": "authored", "direction": "outbound", "platformTarget": "${targetPlatform}", "contactId": "<contactId>" }`,
+    `       { "body": "<published text>", "contentType": "reply", "status": "published", "origin": "authored", "direction": "outbound", "platformTarget": "${targetPlatform}", "platformUrl": "<url of published post/reply on ${platformLabel}>", "contactId": "<contactId>" }`,
     `    b. Log the interaction touchpoint in Signals via:`,
     `       POST ${input.signalsBaseUrl}/api/agent-tools/invoke with JSON:`,
     `       { "tool": "log_interaction", "input": { "contactId": "<contactId>", "interactionType": "${defaultInteractionType}", "summary": "<description of action taken>" } }`,

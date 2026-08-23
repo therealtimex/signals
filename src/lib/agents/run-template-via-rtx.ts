@@ -228,10 +228,23 @@ export async function runTemplateViaRtx(
         fetchImpl
       );
 
+    let runtimeConfig = { ...mergedConfig };
+    if (typeof mergedConfig.targetId === "string" && !mergedConfig.targetPlatform) {
+      const target = getPlatformTargetById(mergedConfig.targetId);
+      if (target) {
+        runtimeConfig = {
+          ...runtimeConfig,
+          targetPlatform: target.platform,
+          targetName: target.name || target.handle,
+          targetHandle: target.handle,
+        };
+      }
+    }
+
     const brief = buildAgentWorkflowBrief({
       template,
       workflowRunId: run.id,
-      config: mergedConfig,
+      config: runtimeConfig,
       signalsBaseUrl,
       systemPromptOverride: input.systemPrompt,
     });

@@ -15,6 +15,9 @@ const createContentSchema = z.object({
   threadId: z.string().optional(),
   parentItemId: z.string().optional(),
   platformData: z.string().optional(),
+  platformUrl: z.string().optional(),
+  url: z.string().optional(),
+  platformPostId: z.string().optional(),
 });
 
 export async function GET(req: NextRequest) {
@@ -37,7 +40,37 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const data = createContentSchema.parse(body);
 
-    const item = createContentItem(data);
+    const postUrl = data.platformUrl || data.url;
+    let mergedPlatformData = data.platformData;
+    if (postUrl || data.platformPostId) {
+      try {
+        const parsed = data.platformData ? JSON.parse(data.platformData) : {};
+        if (postUrl) parsed.platformUrl = postUrl;
+        if (data.platformPostId) parsed.platformPostId = data.platformPostId;
+        mergedPlatformData = JSON.stringify(parsed);
+      } catch {
+        mergedPlatformData = JSON.stringify({
+          ...(postUrl ? { platformUrl: postUrl } : {}),
+          ...(data.platformPostId ? { platformPostId: data.platformPostId } : {}),
+        });
+      }
+    }
+
+    const { platformUrl: _pUrl, url: _url, platformPostId: _pId, ...contentItemData } = data;
+    contentItemData.platformData = mergedPlatformData;
+
+    let postData = undefined;
+    if (data.platformAccountId) {
+      postData = {
+        platformAccountId: data.platformAccountId,
+        platformUrl: postUrl ?? null,
+        platformPostId: data.platformPostId ?? null,
+        publishedAt: data.status === "published" ? Math.floor(Date.now() / 1000) : null,
+        status: data.status === "published" ? ("published" as const) : ("scheduled" as const),
+      };
+    }
+
+    const item = createContentItem(contentItemData, postData);
     return NextResponse.json(item, { status: 201 });
   } catch (error) {
     if (error instanceof z.ZodError) {

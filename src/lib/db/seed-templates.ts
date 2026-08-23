@@ -512,7 +512,7 @@ Progress relationships with high-value CRM contacts by executing personalized, p
 After executing any action:
 1. Save published content/replies:
    POST $SIGNALS_BASE_URL/api/content with JSON:
-   { "body": "<published text>", "contentType": "reply", "status": "published", "origin": "authored", "direction": "outbound", "platformTarget": "<platformTarget: x|linkedin|facebook>", "contactId": "<contactId>" }
+   { "body": "<published text>", "contentType": "reply", "status": "published", "origin": "authored", "direction": "outbound", "platformTarget": "<platformTarget: x|linkedin|facebook>", "platformUrl": "<url of published post/reply>", "contactId": "<contactId>" }
 2. Log the touchpoint interaction:
    POST $SIGNALS_BASE_URL/api/agent-tools/invoke with JSON:
    { "tool": "log_interaction", "input": { "contactId": "<contactId>", "interactionType": "reply", "summary": "<summary>" } }
