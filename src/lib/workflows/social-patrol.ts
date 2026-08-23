@@ -172,16 +172,19 @@ export function buildSocialPatrolBriefSection(input: {
     `    Lease TTL defaults to ${MAX_LEASE_TTL_SECONDS}s — for longer shifts, renew with --lease <leaseId> before the lease expires.`,
     "P2. Connect over CDP to the RealTimeX Browser session named in the `sessionName` field of that prepare response (commonly `signals-publish`, but a target on a dedicated connection returns its own session — never assume). Confirm the live identity matches the returned `expectedHandle` before acting, and drive the platform through agent-browser, not agent-tools.",
     `P3. ${keywordScope}: ${communities}`,
-    "    Scan the group/community feeds, the keyword search feeds, and the newest unanswered questions. Prefer posts where the author is stuck over posts that already have a good answer.",
-    `P4. Stay inside the shift budget: at most ${patrol.maxComments} high-intent comment(s). Complete the shift once this budget is met or monitored feeds are fully scanned.`,
+    "    Iterate through keywords and scroll feeds deeply to discover fresh, qualifying pain posts where the author is stuck, comparing solutions, or seeking tool recommendations.",
+    `P4. Execute a continuous hunting chain toward the shift target: ${patrol.maxComments} high-intent comment(s).`,
+    "    Methodical sequence per thread: Locate qualifying pain post -> Draft technical value reply -> Publish (or batch for approval) -> Mine post author + engagers -> Salted sleep -> Advance to next candidate thread.",
+    "    Continue this chain until the comment budget is fulfilled or candidate search feeds are fully exhausted.",
+    "P5. Salted sleep pacing: inject a randomized delay of 20s–45s between published replies to preserve human-like cadence and protect the acting profile against burst rate limits.",
     patrol.requireApproval
-      ? "P5. Approval checkpoint is ON: post each drafted comment in this thread and wait for confirmation before publishing it."
-      : "P5. Approval checkpoint is OFF: publish drafted comments directly, and log each one in this thread.",
-    `P6. Mine engagers (likers and repliers) of the pain posts you engage with, up to ${patrol.maxScrapedContacts} contact(s).`,
-    `P7. Write back: stage workflow-runs/${input.workflowRunId}/contacts.csv (header: name,company,title,email,platform,platform_handle,profile_url,avatar_url,notes), then commit with`,
+      ? "P6. Approval checkpoint is ON: draft comments in batches of 3–5, post each batch in this thread for confirmation, and publish approved batches with salted delays before hunting the next batch."
+      : "P6. Approval checkpoint is OFF: publish drafted replies directly with salted delays between each post, logging each published link in this thread.",
+    `P7. Mine engagers (post authors, likers, and repliers) from the threads you engage with, targeting up to ${patrol.maxScrapedContacts} contact(s).`,
+    `P8. Write back: stage workflow-runs/${input.workflowRunId}/contacts.csv (header: name,company,title,email,platform,platform_handle,profile_url,avatar_url,notes), then commit with`,
     `    signals-pp-cli import contacts --file workflow-runs/${input.workflowRunId}/contacts.csv --dedupe`,
     "    Record every published reply as a Signals content_item attributed to this workflow run.",
-    "P8. Release the lease when the shift ends: signals-pp-cli targets release --lease <leaseId>, then summarize comments and ingested contacts with links in this thread.",
+    "P9. Release the lease when the shift ends: signals-pp-cli targets release --lease <leaseId>, then summarize comments and ingested contacts with links in this thread.",
   ];
 
   return lines.filter((line) => line !== null).join("\n");
