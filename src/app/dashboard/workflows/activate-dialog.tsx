@@ -564,8 +564,13 @@ function ActivateDialogContent({
     fetch(`/api/workflows/templates/${template.id}/backlog`, {
       signal: controller.signal,
     })
-      .then((r) => r.json())
-      .then((data: PipelineBacklogPreview & { error?: string }) => {
+      .then(async (r) => {
+        if (!r.ok) {
+          throw new Error("Failed to load backlog");
+        }
+        return r.json() as Promise<PipelineBacklogPreview & { error?: string }>;
+      })
+      .then((data) => {
         if (typeof data.backlogTotal === "number" && typeof data.batchSize === "number") {
           dispatch({
             type: "SET_BACKLOG",
@@ -638,25 +643,25 @@ function ActivateDialogContent({
         }),
       });
 
-      const raw = await res.text();
-      let data: { error?: unknown; threadPath?: string; workflowRunId?: string } = {};
-      try {
-        data = raw ? (JSON.parse(raw) as typeof data) : {};
-      } catch {
+      if (!res.ok) {
+        let errorMsg = "Failed to start agent";
+        try {
+          const data = (await res.json()) as { error?: unknown };
+          if (typeof data.error === "string") errorMsg = data.error;
+        } catch {
+          // ignore json parse error on non-ok status
+        }
         dispatch({
           type: "RUN_ERROR",
-          error: raw.trim() || "Failed to start agent",
+          error: errorMsg,
         });
         return;
       }
 
-      if (!res.ok) {
-        dispatch({
-          type: "RUN_ERROR",
-          error: typeof data.error === "string" ? data.error : "Failed to start agent",
-        });
-        return;
-      }
+      const data = (await res.json().catch(() => ({}))) as {
+        threadPath?: string;
+        workflowRunId?: string;
+      };
 
       dispatch({
         type: "RUN_SUCCESS",
