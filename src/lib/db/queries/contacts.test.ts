@@ -272,4 +272,31 @@ describe("contacts queries", () => {
     expect(countContactsByCreatedWorkflowRun("run-b")).toBe(1);
     expect(countContactsByCreatedWorkflowRun("missing")).toBe(0);
   });
+
+  it("handles relationship_goal creation, default status, updates, and filtering", () => {
+    const contact = createContact({
+      name: "Özkan Taşlı",
+      relationshipGoal: "follow_back",
+    });
+
+    expect(contact.relationshipGoal).toBe("follow_back");
+    expect(contact.relationshipGoalStatus).toBe("not_started");
+    expect(contact.relationshipGoalUpdatedAt).toBeGreaterThan(0);
+
+    const updated = updateContact(contact.id, {
+      relationshipGoalStatus: "in_progress",
+    });
+    expect(updated?.relationshipGoal).toBe("follow_back");
+    expect(updated?.relationshipGoalStatus).toBe("in_progress");
+
+    createContact({ name: "Other Contact", relationshipGoal: "repost_amplification" });
+
+    const followBackResults = listContacts({ relationshipGoal: "follow_back" });
+    expect(followBackResults.total).toBe(1);
+    expect(followBackResults.data[0]?.name).toBe("Özkan Taşlı");
+
+    const inProgressResults = listContacts({ relationshipGoalStatus: "in_progress" });
+    expect(inProgressResults.total).toBe(1);
+    expect(inProgressResults.data[0]?.name).toBe("Özkan Taşlı");
+  });
 });

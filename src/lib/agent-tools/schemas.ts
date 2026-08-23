@@ -1,5 +1,9 @@
 import { z } from "zod";
 import { PLATFORMS } from "@/lib/db/platforms";
+import {
+  RELATIONSHIP_GOAL_ENUM,
+  RELATIONSHIP_GOAL_STATUS_ENUM,
+} from "@/lib/relationship-goals";
 
 const funnelStage = z.enum([
   "prospect",
@@ -9,6 +13,9 @@ const funnelStage = z.enum([
   "customer",
   "advocate",
 ]);
+
+const relationshipGoal = z.enum(RELATIONSHIP_GOAL_ENUM);
+const relationshipGoalStatus = z.enum(RELATIONSHIP_GOAL_STATUS_ENUM);
 
 const platform = z.enum(PLATFORMS as unknown as [string, ...string[]]);
 
@@ -37,6 +44,8 @@ export const queryContactsSchema = z.object({
   search: z.string().optional(),
   email: z.string().min(1).optional(),
   funnelStage: funnelStage.optional(),
+  relationshipGoal: relationshipGoal.optional(),
+  relationshipGoalStatus: relationshipGoalStatus.optional(),
   platform: platform.optional(),
   platformUserId: z.string().min(1).optional(),
   page: z.number().int().positive().optional(),
@@ -79,6 +88,8 @@ export const createContactSchema = z.object({
   avatarUrl: z.string().optional(),
   notes: z.string().optional(),
   funnelStage: funnelStage.optional(),
+  relationshipGoal: relationshipGoal.optional(),
+  relationshipGoalStatus: relationshipGoalStatus.optional(),
   firstName: z.string().optional(),
   lastName: z.string().optional(),
   workflowRunId: z.string().min(1).optional(),
@@ -98,6 +109,8 @@ export const updateContactSchema = z.object({
   location: z.string().optional(),
   website: z.string().optional(),
   funnelStage: funnelStage.optional(),
+  relationshipGoal: relationshipGoal.optional().nullable(),
+  relationshipGoalStatus: relationshipGoalStatus.optional().nullable(),
   tags: z.string().optional(),
   is_self: z.boolean().optional(),
 });

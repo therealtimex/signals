@@ -28,6 +28,8 @@ import {
 import { ContactForm } from "@/components/contact-form";
 import { AddTaskDialog } from "@/components/add-task-dialog";
 import { FunnelStageBadge } from "@/components/funnel-stage-badge";
+import { RelationshipGoalSelector } from "@/components/relationship-goal-badge";
+import type { RelationshipGoal, RelationshipGoalStatus } from "@/lib/relationship-goals";
 import { PriorityBadge } from "@/components/priority-badge";
 import { EnrichmentScoreBadge } from "@/components/enrichment-score-badge";
 import { IdentitiesSection } from "@/components/identities-section";
@@ -242,6 +244,21 @@ export function ContactDetailClient({
     setRestoring(false);
   }
 
+  async function handleRelationshipGoalChange(
+    goal: RelationshipGoal | null,
+    status: RelationshipGoalStatus
+  ) {
+    await fetch(`/api/contacts/${contact.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        relationshipGoal: goal,
+        relationshipGoalStatus: goal ? status : null,
+      }),
+    });
+    router.refresh();
+  }
+
   const primaryIdentity =
     contact.identities.find((id) => id.isPrimary) ?? contact.identities[0];
   const openTaskCount = tasks.filter((task) => task.status !== "done").length;
@@ -363,6 +380,12 @@ export function ContactDetailClient({
                     </span>
                   )}
                   <FunnelStageBadge stage={contact.funnelStage} />
+                  <RelationshipGoalSelector
+                    goal={contact.relationshipGoal}
+                    status={contact.relationshipGoalStatus}
+                    onSelect={handleRelationshipGoalChange}
+                    disabled={contactArchived}
+                  />
                   <EnrichmentScoreBadge score={contact.enrichmentScore} />
                 </div>
                 {contact.createdSource ? (
