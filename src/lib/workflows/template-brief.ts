@@ -9,6 +9,10 @@ import {
   buildProfilePublishBriefSection,
   isProfilePublishTemplateConfig,
 } from "@/lib/workflows/profile-publish";
+import {
+  buildContactNurtureBriefSection,
+  isContactNurtureTemplateConfig,
+} from "@/lib/workflows/contact-relationship-nurture";
 
 const CATEGORY_LABELS: Record<string, string> = {
   prospecting: "Search",
@@ -27,7 +31,7 @@ const TOOLS_BY_TYPE: Record<string, string[]> = {
   content: ["query_content", "create_task"],
   engagement: ["query_contacts", "create_task"],
   outreach: ["query_contacts", "create_task"],
-  nurture: ["query_contacts", "query_goals", "create_task"],
+  nurture: ["query_contacts", "get_contact", "update_contact", "query_goals", "create_task"],
 };
 
 export function getTemplateToolsHint(templateType: string): string[] {
@@ -98,6 +102,13 @@ export function buildAgentWorkflowBrief(input: {
         signalsBaseUrl: input.signalsBaseUrl,
       })}\n`
     : null;
+  const nurtureContract = isContactNurtureTemplateConfig(input.config)
+    ? `${buildContactNurtureBriefSection({
+        workflowRunId: input.workflowRunId,
+        config: input.config,
+        signalsBaseUrl: input.signalsBaseUrl,
+      })}\n`
+    : null;
 
   const sections = [
     `You are executing the Signals agent workflow template "${input.template.name}".`,
@@ -113,10 +124,9 @@ export function buildAgentWorkflowBrief(input: {
     "- Personality & guidelines: Follow `AGENTS.md` for workspace operating model, skill checklist, and privacy rules.",
     "- Workspace skills available: `realtimex-signals`, `signals-publish`, `agent-browser`.",
     "",
-    "Instructions for your RealTimeX agent:",
-    instructions || "(No custom instructions — follow the category defaults below.)",
+    instructions ? `Instructions:\n${instructions}` : null,
     "",
-    "Runtime config:",
+    "Runtime config (override with run options):",
     "```json",
     configJson,
     "```",
@@ -145,6 +155,7 @@ export function buildAgentWorkflowBrief(input: {
     "",
     patrolContract,
     publishContract,
+    nurtureContract,
     "Do not call legacy in-process workflow runners. This thread is the execution lane.",
   ];
 

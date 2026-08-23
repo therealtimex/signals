@@ -11,9 +11,13 @@ import {
   PROFILE_PUBLISH_TEMPLATE_NAME,
   buildProfilePublishTemplateConfig,
 } from "@/lib/workflows/profile-publish";
+import {
+  CONTACT_RELATIONSHIP_NURTURE_TEMPLATE_NAME,
+  buildContactNurtureTemplateConfig,
+} from "@/lib/workflows/contact-relationship-nurture";
 
 /** Bump this when seed template prompts change to trigger updates on existing installs. */
-const SEED_VERSION = 7;
+const SEED_VERSION = 8;
 
 export const CONTACT_PROFILE_PIPELINE_TEMPLATE_NAME = "Contact profile pipeline";
 
@@ -470,6 +474,41 @@ gate when it is enabled.
   leave it out.
 - Attribute every content item you create to this workflow run.`,
     config: buildProfilePublishTemplateConfig(),
+  },
+  {
+    name: CONTACT_RELATIONSHIP_NURTURE_TEMPLATE_NAME,
+    description: "Autonomous persona-grounded relationship progression. Nurtures CRM contacts toward goals (follow back, repost, mutual engagement, conversation, partnership) with salted pacing delays and milestone tracking.",
+    templateType: "nurture",
+    targetPersona: "High-value CRM contacts with assigned relationship goals",
+    estimatedCost: 0.45,
+    systemPrompt: `You are an autonomous relationship nurture agent for Signals CRM.
+
+## Objective
+Progress relationships with high-value CRM contacts by executing personalized, persona-grounded touchpoints aligned with each contact's assigned relationship goal (follow_back, repost_amplification, mutual_engagement, warm_conversation, partnership).
+
+## Scope & Target Resolution
+1. Query unachieved relationship contacts:
+   - Call query_contacts({ relationshipGoalStatus: "not_started" }) and query_contacts({ relationshipGoalStatus: "in_progress" }).
+   - Filter by relationshipGoalFilter if specified in the runtime config.
+   - Respect maxTargets and maxActionsPerRun limits.
+
+2. For each target contact:
+   - Inspect their persona (interests, conversion triggers, tone, archetype) using get_contact({ contactId }).
+   - Connect to the acting profile via RealTimeX Browser / CDP.
+   - Check if milestone has been achieved (e.g. contact followed back or reposted). If achieved, call update_contact({ contactId, relationshipGoalStatus: "achieved" }).
+   - If unachieved:
+     * follow_back: Leave a high-value comment on their recent post matching their persona interests, wait 20s–40s salted delay, then follow. Update status to "in_progress".
+     * repost_amplification: Publish an organic spotlight post highlighting their project and tag them.
+     * mutual_engagement: Post an authoritative answer on their active discussions.
+     * warm_conversation: Send a tailored direct message or stage draft task.
+     * partnership: Stage co-marketing proposal draft in CRM.
+
+## Safety & Account Health
+- Apply a salted sleep delay (20s–45s) between consecutive interactions to protect account health.
+- Never exceed maxActionsPerRun.
+- If requireApproval is true, present batches of 3–5 drafts for operator approval before publishing.
+- Record all interactions, notes, and milestones in Signals CRM.`,
+    config: buildContactNurtureTemplateConfig(),
   },
 ];
 
