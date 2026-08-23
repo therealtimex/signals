@@ -369,6 +369,50 @@
                           "title": {
                             "type": "string"
                           },
+                          "headline": {
+                            "type": "string"
+                          },
+                          "bio": {
+                            "type": "string"
+                          },
+                          "location": {
+                            "type": "string"
+                          },
+                          "website": {
+                            "type": "string"
+                          },
+                          "platform": {
+                            "type": "string",
+                            "enum": [
+                              "x",
+                              "linkedin",
+                              "gmail",
+                              "substack",
+                              "instagram",
+                              "facebook",
+                              "threads",
+                              "tiktok",
+                              "youtube",
+                              "bluesky",
+                              "telegram",
+                              "whatsapp"
+                            ]
+                          },
+                          "platformUserId": {
+                            "type": "string"
+                          },
+                          "platformHandle": {
+                            "type": "string"
+                          },
+                          "platformUrl": {
+                            "type": "string"
+                          },
+                          "avatarUrl": {
+                            "type": "string"
+                          },
+                          "notes": {
+                            "type": "string"
+                          },
                           "funnelStage": {
                             "type": "string",
                             "enum": [
