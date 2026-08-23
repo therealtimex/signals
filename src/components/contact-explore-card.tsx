@@ -35,14 +35,12 @@ export function ContactExploreCardView({
   const [error, setError] = useState<string | null>(null);
   const generationRef = useRef(0);
 
-  // Keep explore state in sync when initialExplore prop updates
-  const [prevExplore, setPrevExplore] = useState(initialExplore);
-  if (initialExplore !== prevExplore) {
-    setPrevExplore(initialExplore);
+  useEffect(() => {
+    generationRef.current += 1;
     setExplore(initialExplore);
     setError(null);
     setGenerating(false);
-  }
+  }, [contactId, initialExplore]);
 
   const primaryIdentity = selectPrimaryIdentity(explore.identities);
 
@@ -82,7 +80,15 @@ export function ContactExploreCardView({
       if (generation !== generationRef.current) return;
 
       if (!res.ok) {
-        setError("Persona generation failed");
+        let errMessage = "Persona generation failed";
+        try {
+          const errBody = (await res.json()) as { error?: string };
+          if (errBody?.error) errMessage = errBody.error;
+        } catch {
+          // Fallback
+        }
+        if (generation !== generationRef.current) return;
+        setError(errMessage);
         return;
       }
 
