@@ -33,7 +33,7 @@ describe("Contact profile pipeline seed", () => {
       pipeline?: { version?: number; steps?: Array<{ id: string; handler: string }> };
     };
 
-    expect(config._seedVersion).toBe(7);
+    expect(config._seedVersion).toBe(8);
     expect(config.pipeline?.version).toBe(2);
     expect(config.pipeline?.steps).toEqual([
       { id: "hydrate", executor: "code", handler: "hydrate_x_profiles" },
@@ -66,9 +66,18 @@ describe("Contact profile pipeline seed", () => {
 
     expect(seedTemplates().updated).toBe(1);
     const updated = getSystemTemplateByName(CONTACT_PROFILE_PIPELINE_TEMPLATE_NAME)!;
-    const config = JSON.parse(updated.config ?? "{}") as Record<string, any>;
+    const config = JSON.parse(updated.config ?? "{}") as {
+      _seedVersion?: number;
+      customTopLevel?: boolean;
+      pipeline?: {
+        version?: number;
+        planner?: string;
+        batchSize?: number;
+        steps?: Array<{ id: string }>;
+      };
+    };
     expect(config).toMatchObject({
-      _seedVersion: 7,
+      _seedVersion: 8,
       customTopLevel: true,
       pipeline: {
         version: 2,
@@ -79,7 +88,7 @@ describe("Contact profile pipeline seed", () => {
         customPipelineField: "keep",
       },
     });
-    expect(config.pipeline.steps.map((step: { id: string }) => step.id)).toEqual([
+    expect(config.pipeline?.steps?.map((step: { id: string }) => step.id)).toEqual([
       "hydrate",
       "avatar",
       "persona",
@@ -182,7 +191,7 @@ describe("Social Intent Patrol seed", () => {
 
     expect(config).not.toHaveProperty("maxPosts");
     expect(config).not.toHaveProperty("durationMinutes");
-    expect(config._seedVersion).toBe(7);
+    expect(config._seedVersion).toBe(8);
     expect(config.maxComments).toBe(8);
     // The card copy is structural — an existing install must not keep describing a shift that
     // still posts to your own timeline.
@@ -236,5 +245,23 @@ describe("Profile Publishing & Repost seed", () => {
   it("is idempotent across repeated seeding", () => {
     seedTemplates();
     expect(seedTemplates()).toEqual({ seeded: 0, updated: 0, skipped: true });
+  });
+});
+
+describe("Contact Relationship Nurture seed", () => {
+  beforeEach(() => {
+    resetCoreTables();
+  });
+
+  it("seeds a Nurture template carrying relationship nurture defaults", () => {
+    seedTemplates();
+    const template = getSystemTemplateByName("Contact Relationship Nurture")!;
+
+    expect(template).toBeDefined();
+    expect(template.templateType).toBe("nurture");
+    expect(template.platform).toBeNull();
+    expect(template.systemPrompt).toContain("follow_back");
+    expect(template.systemPrompt).toContain("repost_amplification");
+    expect(template.systemPrompt).toContain("salted sleep delay");
   });
 });
