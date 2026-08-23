@@ -21,9 +21,9 @@ export interface PersonaGoalContext {
   archetype?: string | null;
   tone?: string | null;
   summary?: string | null;
-  interests?: string[];
-  conversionTriggers?: string[];
-  engagementFormats?: string[];
+  interests?: string[] | string | null;
+  conversionTriggers?: string[] | string | null;
+  engagementFormats?: string[] | string | null;
 }
 
 export interface GoalTactic {
@@ -34,6 +34,19 @@ export interface GoalTactic {
   recommendedActions: string[];
   suggestedDraft: string;
   agentPrompt: string;
+}
+
+function parseArrayField(field: unknown): string[] {
+  if (Array.isArray(field)) return field.map(String);
+  if (typeof field === "string" && field.trim()) {
+    try {
+      const parsed = JSON.parse(field);
+      if (Array.isArray(parsed)) return parsed.map(String);
+    } catch {
+      return field.split(",").map((s) => s.trim()).filter(Boolean);
+    }
+  }
+  return [];
 }
 
 export function generateGoalTactic(
@@ -52,13 +65,17 @@ export function generateGoalTactic(
   const role = contact.title || persona?.archetype || "builder";
   const tone = persona?.tone || "thoughtful and authentic";
 
-  const interestsList = persona?.interests && persona.interests.length > 0
-    ? persona.interests.slice(0, 3).join(", ")
+  const interests = parseArrayField(persona?.interests);
+  const conversionTriggers = parseArrayField(persona?.conversionTriggers);
+  const engagementFormats = parseArrayField(persona?.engagementFormats);
+
+  const interestsList = interests.length > 0
+    ? interests.slice(0, 3).join(", ")
     : "their core domain";
 
-  const trigger = persona?.conversionTriggers && persona.conversionTriggers.length > 0
-    ? persona.conversionTriggers[0]
-    : "mutual technical value";
+  const trigger = conversionTriggers.length > 0
+    ? conversionTriggers[0]
+    : "shared technical interests";
 
   switch (goal) {
     case "follow_back": {

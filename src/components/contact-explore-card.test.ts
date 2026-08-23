@@ -11,6 +11,10 @@ import {
 } from "@/components/contact-explore-card";
 import type { ContactExploreCard } from "@/lib/db/queries/contact-explore";
 
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }),
+}));
+
 const baseContact = {
   id: "contact-1",
   name: "Test Contact",

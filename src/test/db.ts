@@ -35,10 +35,12 @@ import {
   browserConnections,
   browserSessionLeases,
   platformTargets,
+  tasks,
 } from "@/lib/db/schema";
 
 /** Clear core tables used by unit tests (child rows first). */
 export function resetCoreTables(): void {
+  db.delete(tasks).run();
   db.delete(browserSessionLeases).run();
   db.delete(workflowSteps).run();
   db.delete(scheduledJobs).run();
