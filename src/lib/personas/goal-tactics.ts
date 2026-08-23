@@ -82,30 +82,39 @@ export function generateGoalTactic(
     ? `\n   d. Mark CRM task done: POST ${baseUrl}/api/agent-tools/invoke with { "tool": "update_task", "input": { "taskId": "${options.taskId}", "status": "done" } }`
     : "";
 
+  const platform = (contact.platform || "x").toLowerCase();
+  const platformTarget = platform === "linkedin" ? "linkedin" : platform === "facebook" ? "facebook" : "x";
+  const isLinkedIn = platformTarget === "linkedin";
+  const isFacebook = platformTarget === "facebook";
+  const platformName = isLinkedIn ? "LinkedIn" : isFacebook ? "Facebook" : "X";
+  const replyInteractionType = isLinkedIn || isFacebook ? "comment" : "reply";
+  const connectAction = isLinkedIn ? "send connection request to" : "follow";
+  const connectLabel = isLinkedIn ? "connection" : "follow-back";
+
   switch (goal) {
     case "follow_back": {
       return {
         goal,
         goalLabel: RELATIONSHIP_GOAL_LABELS[goal],
-        headline: `3-Touch Follow-Back Strategy for ${name}`,
-        strategy: `${name} responds to ${trigger}. Establish familiarity and technical credibility before following to trigger a natural follow-back.`,
+        headline: `3-Touch ${isLinkedIn ? "Connection" : "Follow-Back"} Strategy for ${name}`,
+        strategy: `${name} responds to ${trigger}. Establish familiarity and technical credibility before connecting/following to trigger a natural ${connectLabel}.`,
         recommendedActions: [
           `Like ${name}'s latest milestone or project update about ${company}.`,
-          `Reply with a concise, high-signal technical observation on ${interestsList} in a ${tone} tone.`,
-          `Follow ${handle} from the acting profile after positive interaction.`,
+          `${isLinkedIn ? "Leave a thoughtful comment" : "Reply with a concise, high-signal technical observation"} on ${interestsList} in a ${tone} tone.`,
+          `${isLinkedIn ? "Send a connection request to" : "Follow"} ${handle} from the acting profile after positive interaction.`,
         ],
         suggestedDraft: `Great work scaling ${company}. The focus on ${interestsList} is especially relevant as the space matures.`,
-        agentPrompt: `Execute 3-touch follow-back protocol on ${handle} (${name}):
-1. Inspect recent posts by ${handle} on ${contact.platform || "X"} via RealTimeX Browser / CDP.
+        agentPrompt: `Execute 3-touch ${connectLabel} protocol on ${handle} (${name}):
+1. Inspect recent posts by ${handle} on ${platformName} via RealTimeX Browser / CDP.
 2. Leave a high-value comment on their post about ${interestsList} (Suggested angle: "${name}, great work scaling ${company}...").
-3. Follow ${handle} from the acting profile after commenting.
+3. ${isLinkedIn ? "Send connection request to" : "Follow"} ${handle} from the acting profile after commenting.
 4. WRITE BACK TO SIGNALS CRM (Required):
    a. Save published comment to Signals Content:
       POST ${baseUrl}/api/content
-      { "body": "<published comment text>", "contentType": "reply", "status": "published", "origin": "authored", "direction": "outbound", "platformTarget": "x", "contactId": "${contact.id}" }
+      { "body": "<published comment text>", "contentType": "reply", "status": "published", "origin": "authored", "direction": "outbound", "platformTarget": "${platformTarget}", "platformUrl": "<published comment url>", "contactId": "${contact.id}" }
    b. Log interaction touchpoint:
       POST ${baseUrl}/api/agent-tools/invoke
-      { "tool": "log_interaction", "input": { "contactId": "${contact.id}", "interactionType": "social_reply", "summary": "Replied to ${handle}'s post on ${interestsList} and followed" } }
+      { "tool": "log_interaction", "input": { "contactId": "${contact.id}", "interactionType": "${replyInteractionType}", "summary": "Commented on ${handle}'s post on ${interestsList} and ${isLinkedIn ? "sent connection request" : "followed"}" } }
    c. Update contact goal status:
       POST ${baseUrl}/api/agent-tools/invoke
       { "tool": "update_contact", "input": { "contactId": "${contact.id}", "relationshipGoalStatus": "in_progress" } }${taskCompletion}`,
@@ -130,10 +139,10 @@ export function generateGoalTactic(
 3. WRITE BACK TO SIGNALS CRM (Required):
    a. Save published post to Signals Content:
       POST ${baseUrl}/api/content
-      { "body": "<published post text>", "contentType": "post", "status": "published", "origin": "authored", "direction": "outbound", "platformTarget": "x", "contactId": "${contact.id}" }
+      { "body": "<published post text>", "contentType": "post", "status": "published", "origin": "authored", "direction": "outbound", "platformTarget": "${platformTarget}", "platformUrl": "<published post url>", "contactId": "${contact.id}" }
    b. Log interaction touchpoint:
       POST ${baseUrl}/api/agent-tools/invoke
-      { "tool": "log_interaction", "input": { "contactId": "${contact.id}", "interactionType": "tweet", "summary": "Published spotlight breakdown tagging ${handle}" } }
+      { "tool": "log_interaction", "input": { "contactId": "${contact.id}", "interactionType": "${isLinkedIn ? "comment" : "quote"}", "summary": "Published spotlight breakdown tagging ${handle}" } }
    c. Update contact goal status:
       POST ${baseUrl}/api/agent-tools/invoke
       { "tool": "update_contact", "input": { "contactId": "${contact.id}", "relationshipGoalStatus": "in_progress" } }${taskCompletion}`,
@@ -158,10 +167,10 @@ export function generateGoalTactic(
 3. WRITE BACK TO SIGNALS CRM (Required):
    a. Save comment to Signals Content:
       POST ${baseUrl}/api/content
-      { "body": "<reply text>", "contentType": "reply", "status": "published", "origin": "authored", "direction": "outbound", "platformTarget": "x", "contactId": "${contact.id}" }
+      { "body": "<reply text>", "contentType": "reply", "status": "published", "origin": "authored", "direction": "outbound", "platformTarget": "${platformTarget}", "platformUrl": "<published reply url>", "contactId": "${contact.id}" }
    b. Log interaction:
       POST ${baseUrl}/api/agent-tools/invoke
-      { "tool": "log_interaction", "input": { "contactId": "${contact.id}", "interactionType": "social_reply", "summary": "Contributed domain answer to ${handle}'s thread" } }
+      { "tool": "log_interaction", "input": { "contactId": "${contact.id}", "interactionType": "${replyInteractionType}", "summary": "Contributed domain answer to ${handle}'s thread" } }
    c. Update contact status:
       POST ${baseUrl}/api/agent-tools/invoke
       { "tool": "update_contact", "input": { "contactId": "${contact.id}", "relationshipGoalStatus": "in_progress" } }${taskCompletion}`,
@@ -176,19 +185,19 @@ export function generateGoalTactic(
         strategy: `${name} is motivated by ${trigger}. Bridge recent public interactions into a private message asking for their feedback or sharing a specific resource.`,
         recommendedActions: [
           `Verify that at least 2 public interactions (likes/replies) have been completed.`,
-          `Send a short, personalized DM referencing their work on ${company}.`,
+          `Send a short, personalized ${isLinkedIn ? "message" : "DM"} referencing their work on ${company}.`,
           `Keep the ask low-friction: share a relevant insight or ask for their perspective on ${interestsList}.`,
         ],
         suggestedDraft: `Hey ${name}, loved your recent point about ${interestsList}. Had a quick thought on how that relates to ${company} — open to comparing notes?`,
-        agentPrompt: `Send warm DM outreach to ${handle} (${name}):
-1. Send personalized DM referencing public engagement on ${company} focusing on ${trigger}.
+        agentPrompt: `Send warm ${isLinkedIn ? "message" : "DM"} outreach to ${handle} (${name}):
+1. Send personalized ${isLinkedIn ? "message" : "DM"} referencing public engagement on ${company} focusing on ${trigger}.
 2. WRITE BACK TO SIGNALS CRM (Required):
    a. Save message to Signals Content:
       POST ${baseUrl}/api/content
-      { "body": "<dm text>", "contentType": "dm", "status": "published", "origin": "authored", "direction": "outbound", "platformTarget": "x", "contactId": "${contact.id}" }
+      { "body": "<${isLinkedIn ? "message" : "dm"} text>", "contentType": "dm", "status": "published", "origin": "authored", "direction": "outbound", "platformTarget": "${platformTarget}", "contactId": "${contact.id}" }
    b. Log interaction:
       POST ${baseUrl}/api/agent-tools/invoke
-      { "tool": "log_interaction", "input": { "contactId": "${contact.id}", "interactionType": "dm", "summary": "Sent warm DM to ${handle} regarding ${interestsList}" } }
+      { "tool": "log_interaction", "input": { "contactId": "${contact.id}", "interactionType": "${isLinkedIn ? "message" : "dm"}", "summary": "Sent warm ${isLinkedIn ? "message" : "DM"} to ${handle} regarding ${interestsList}" } }
    c. Update contact status:
       POST ${baseUrl}/api/agent-tools/invoke
       { "tool": "update_contact", "input": { "contactId": "${contact.id}", "relationshipGoalStatus": "in_progress" } }${taskCompletion}`,

@@ -1,6 +1,8 @@
 import { createWorkflowRun, createWorkflowStep, nextStepIndex, updateWorkflowRun } from "@/lib/db/queries/workflows";
 import { getTemplate, updateTemplate } from "@/lib/db/queries/workflow-templates";
 import type { WorkflowRun, WorkflowTemplate } from "@/lib/db/types";
+import { getPlatformTargetById } from "@/lib/db/queries/platform-targets";
+import { isContactNurtureTemplateConfig } from "@/lib/workflows/contact-relationship-nurture";
 import {
   buildAgentWorkflowBrief,
   buildTemplateThreadName,
@@ -148,7 +150,22 @@ export async function runTemplateViaRtx(
     };
   }
 
-  const mergedConfig = mergeRunConfig(template, input.config);
+  let mergedConfig = mergeRunConfig(template, input.config);
+  if (
+    isContactNurtureTemplateConfig(mergedConfig) &&
+    typeof mergedConfig.targetId === "string" &&
+    mergedConfig.targetId.trim()
+  ) {
+    const target = getPlatformTargetById(mergedConfig.targetId.trim());
+    if (target) {
+      mergedConfig = {
+        ...mergedConfig,
+        targetPlatform: target.platform,
+        targetName: target.name,
+        targetHandle: target.handle,
+      };
+    }
+  }
   const workflowType = TEMPLATE_TO_WORKFLOW_TYPE[template.templateType] ?? "agent";
   const now = Math.floor(Date.now() / 1000);
 
@@ -211,10 +228,23 @@ export async function runTemplateViaRtx(
         fetchImpl
       );
 
+    let runtimeConfig = { ...mergedConfig };
+    if (typeof mergedConfig.targetId === "string" && !mergedConfig.targetPlatform) {
+      const target = getPlatformTargetById(mergedConfig.targetId);
+      if (target) {
+        runtimeConfig = {
+          ...runtimeConfig,
+          targetPlatform: target.platform,
+          targetName: target.name || target.handle,
+          targetHandle: target.handle,
+        };
+      }
+    }
+
     const brief = buildAgentWorkflowBrief({
       template,
       workflowRunId: run.id,
-      config: mergedConfig,
+      config: runtimeConfig,
       signalsBaseUrl,
       systemPromptOverride: input.systemPrompt,
     });

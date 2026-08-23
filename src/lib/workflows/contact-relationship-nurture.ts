@@ -112,30 +112,71 @@ export function buildContactNurtureTemplateConfig(
   };
 }
 
+export interface ContactNurtureTargetInfo {
+  id: string;
+  platform: string;
+  name: string;
+  handle?: string | null;
+}
+
 export function buildContactNurtureBriefSection(input: {
   workflowRunId: string;
   config: Record<string, unknown>;
   signalsBaseUrl: string;
+  platformTarget?: ContactNurtureTargetInfo | null;
 }): string {
   const nurture = readContactNurtureConfig(input.config);
   const goalText = nurture.relationshipGoalFilter === "all"
     ? "All assigned relationship goals (follow_back, repost_amplification, mutual_engagement, warm_conversation, partnership)"
     : `Only "${nurture.relationshipGoalFilter}" goals`;
 
+  const targetPlatform = (
+    input.platformTarget?.platform ||
+    (typeof input.config.targetPlatform === "string" ? input.config.targetPlatform : "") ||
+    "x"
+  ).toLowerCase();
+
+  const isLinkedIn = targetPlatform === "linkedin";
+  const isFacebook = targetPlatform === "facebook";
+  const platformLabel = isLinkedIn ? "LinkedIn" : isFacebook ? "Facebook" : "X";
+
+  const targetName = input.platformTarget
+    ? `${platformLabel}: ${input.platformTarget.name || input.platformTarget.handle}${input.platformTarget.handle ? ` (${input.platformTarget.handle})` : ""} [ID: ${input.platformTarget.id}]`
+    : (typeof input.config.targetName === "string"
+        ? `${platformLabel}: ${input.config.targetName}${input.config.targetHandle ? ` (${input.config.targetHandle})` : ""}${nurture.targetId ? ` [ID: ${nurture.targetId}]` : ""}`
+        : (nurture.targetId ? `Target ID: ${nurture.targetId}` : "Auto-detect default acting target per contact platform"));
+
+  const defaultInteractionType = isLinkedIn ? "linkedin_comment" : isFacebook ? "facebook_post" : "reply";
+
   const lines = [
     "Contact Relationship Nurture execution contract:",
     `N0. Goal filter: ${goalText}. Max targets to inspect: ${nurture.maxTargets}. Max actions: ${nurture.maxActionsPerRun}.`,
+    `    Acting Profile: ${targetName}. Active Platform: ${targetPlatform}.`,
     `N1. Query unachieved contacts via query_contacts({ relationshipGoalStatus: "not_started" }) and query_contacts({ relationshipGoalStatus: "in_progress" }).`,
-    "N2. For each contact, call get_contact({ contactId }) to inspect their persona, conversion triggers, and tone.",
-    "N3. Open RealTimeX Browser session and inspect the contact's live social stream to check for milestone achievements.",
+    "N2. For each contact, call get_contact({ contactId }) to inspect their persona, conversion triggers, tone, and platform.",
+    isLinkedIn
+      ? "N3. Open RealTimeX Browser session for LinkedIn and inspect the contact's live profile / post stream to check for milestone achievements."
+      : isFacebook
+        ? "N3. Open RealTimeX Browser session for Facebook and inspect the contact's profile / activity stream to check for milestone achievements."
+        : "N3. Open RealTimeX Browser session and inspect the contact's live social stream to check for milestone achievements.",
     nurture.autoAchieveOnMilestone
-      ? "    Auto-achieve is ON: If contact is now following the acting profile or reposted our content, immediately call update_contact({ contactId, relationshipGoalStatus: \"achieved\" }) and record milestone."
+      ? isLinkedIn
+        ? "    Auto-achieve is ON: If contact is now connected / following the acting profile or reposted our content, immediately call update_contact({ contactId, relationshipGoalStatus: \"achieved\" }) and record milestone."
+        : "    Auto-achieve is ON: If contact is now following the acting profile or reposted our content, immediately call update_contact({ contactId, relationshipGoalStatus: \"achieved\" }) and record milestone."
       : "    Auto-achieve is OFF: Log observed milestone in thread for operator review.",
     "N4. Grounded tactical execution:",
-    "    - follow_back: Comment with high-signal technical value on recent post -> wait salted delay -> follow.",
-    "    - repost_amplification: Curate organic spotlight post / breakdown tagging them.",
-    "    - mutual_engagement: Answer question or debate thread authoritatively.",
-    "    - warm_conversation: Send personalized DM referencing public interaction.",
+    isLinkedIn
+      ? "    - follow_back: Comment with high-signal domain value on recent post -> wait salted delay -> send connection request / follow."
+      : "    - follow_back: Comment with high-signal technical value on recent post -> wait salted delay -> follow.",
+    isLinkedIn
+      ? "    - repost_amplification: Curate organic spotlight post / breakdown on LinkedIn mentioning them."
+      : "    - repost_amplification: Curate organic spotlight post / breakdown tagging them.",
+    isLinkedIn
+      ? "    - mutual_engagement: Contribute authoritative answer or perspective on their active post discussions."
+      : "    - mutual_engagement: Answer question or debate thread authoritatively.",
+    isLinkedIn
+      ? "    - warm_conversation: Send personalized LinkedIn message / InMail referencing public interaction."
+      : "    - warm_conversation: Send personalized DM referencing public interaction.",
     "    - partnership: Stage co-marketing proposal brief.",
     `N5. Account Safety: Sleep ${nurture.delayBetweenActionsSeconds}s (with salted random variance) between consecutive posts/interactions.`,
     nurture.requireApproval
@@ -144,10 +185,10 @@ export function buildContactNurtureBriefSection(input: {
     "N7. MANDATORY WRITE-BACK TO SIGNALS (Record every action):",
     `    a. For any comment/reply or post published, write it to Signals Content immediately via:`,
     `       POST ${input.signalsBaseUrl}/api/content with JSON:`,
-    `       { "body": "<published text>", "contentType": "reply", "status": "published", "origin": "authored", "direction": "outbound", "platformTarget": "x", "contactId": "<contactId>" }`,
+    `       { "body": "<published text>", "contentType": "reply", "status": "published", "origin": "authored", "direction": "outbound", "platformTarget": "${targetPlatform}", "platformUrl": "<url of published post/reply on ${platformLabel}>", "contactId": "<contactId>" }`,
     `    b. Log the interaction touchpoint in Signals via:`,
     `       POST ${input.signalsBaseUrl}/api/agent-tools/invoke with JSON:`,
-    `       { "tool": "log_interaction", "input": { "contactId": "<contactId>", "interactionType": "social_reply", "summary": "<description of action taken>" } }`,
+    `       { "tool": "log_interaction", "input": { "contactId": "<contactId>", "interactionType": "${defaultInteractionType}", "summary": "<description of action taken>" } }`,
     `    c. If target taskId is provided in config/brief, complete the task:`,
     `       POST ${input.signalsBaseUrl}/api/agent-tools/invoke with JSON:`,
     `       { "tool": "update_task", "input": { "taskId": "<taskId>", "status": "done" } }`,

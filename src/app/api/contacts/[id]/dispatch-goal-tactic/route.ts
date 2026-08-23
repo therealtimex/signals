@@ -72,6 +72,11 @@ export async function POST(
       });
     }
 
+    const primaryIdentity = contact.identities?.[0];
+    const contactPlatform =
+      primaryIdentity?.platform ||
+      (contact.profileUrl?.includes("linkedin.com") ? "linkedin" : "x");
+
     let rtxResult = null;
     if (template) {
       const signalsBaseUrl = resolveSignalsBaseUrlFromRequest(req);
@@ -81,6 +86,7 @@ export async function POST(
           ...parseTemplateConfig(template.config),
           targetContactId: id,
           targetContactName: contact.name,
+          targetPlatform: contactPlatform,
           relationshipGoal: tactic.goal,
           taskId: task.id,
         },
