@@ -218,7 +218,12 @@ export async function sendContentToAgent(
       {
         workspaceSlug,
         threadSlug,
-        message: buildPublishJobBriefRoutingMessage(job.id),
+        message: buildPublishJobBriefRoutingMessage({
+          jobId: job.id,
+          title: item.title,
+          platforms,
+          absolutePath: briefWrite.absolutePath,
+        }),
         reason: `Publish content item ${input.contentItemId} to ${platforms.join(", ")}`,
       },
       env,

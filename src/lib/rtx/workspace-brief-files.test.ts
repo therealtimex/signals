@@ -36,10 +36,12 @@ describe("workspace brief files", () => {
     expect(workflowWrite).toEqual({
       success: true,
       relativePath: "workflow-runs/run-42/brief.md",
+      absolutePath: join(workspaceDir, "workflow-runs/run-42/brief.md"),
     });
     expect(publishWrite).toEqual({
       success: true,
       relativePath: "publish-jobs/job-99/brief.md",
+      absolutePath: join(workspaceDir, "publish-jobs/job-99/brief.md"),
     });
 
     expect(
@@ -50,12 +52,54 @@ describe("workspace brief files", () => {
     ).toBe(publishBrief);
   });
 
-  it("builds short routing messages that point at brief paths", () => {
+  it("builds Loop-inspired structured handoff routing messages for workflow runs", () => {
+    const message = buildWorkflowRunBriefRoutingMessage({
+      templateName: "Social Intent Patrol",
+      runId: "run-1",
+      runNumber: 1,
+      absolutePath: "/path/to/workspace/workflow-runs/run-1/brief.md",
+    });
+
+    expect(message).toBe([
+      "Signals workflow handoff -> Social Intent Patrol",
+      "Run: #1 (run-1)",
+      "State: ready",
+      "Type: workflow-brief",
+      "Context: Follow workspace guidelines and operating model in AGENTS.md.",
+      "Required: Read the brief file before acting and follow its instructions.",
+      "File: @/path/to/workspace/workflow-runs/run-1/brief.md",
+    ].join("\n"));
+
+    // String fallback
     expect(buildWorkflowRunBriefRoutingMessage("run-1")).toContain(
-      "workflow-runs/run-1/brief.md"
+      "File: @workflow-runs/run-1/brief.md"
     );
+    expect(buildWorkflowRunBriefRoutingMessage("run-1")).toContain("AGENTS.md");
+  });
+
+  it("builds Loop-inspired structured handoff routing messages for publish jobs", () => {
+    const message = buildPublishJobBriefRoutingMessage({
+      jobId: "job-1",
+      title: "AI Agent Migration",
+      platforms: ["X", "LinkedIn"],
+      absolutePath: "/path/to/workspace/publish-jobs/job-1/brief.md",
+    });
+
+    expect(message).toBe([
+      "Signals publish handoff -> AI Agent Migration",
+      "Job: job-1",
+      "Platforms: X, LinkedIn",
+      "State: ready",
+      "Type: publish-brief",
+      "Context: Follow workspace guidelines and operating model in AGENTS.md.",
+      "Required: Read the brief file before acting and follow its instructions.",
+      "File: @/path/to/workspace/publish-jobs/job-1/brief.md",
+    ].join("\n"));
+
+    // String fallback
     expect(buildPublishJobBriefRoutingMessage("job-1")).toContain(
-      "publish-jobs/job-1/brief.md"
+      "File: @publish-jobs/job-1/brief.md"
     );
+    expect(buildPublishJobBriefRoutingMessage("job-1")).toContain("AGENTS.md");
   });
 });
