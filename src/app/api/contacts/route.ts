@@ -28,6 +28,11 @@ function isUniqueConstraintError(error: unknown): boolean {
   );
 }
 
+import {
+  RELATIONSHIP_GOAL_ENUM,
+  RELATIONSHIP_GOAL_STATUS_ENUM,
+} from "@/lib/relationship-goals";
+
 const createContactSchema = z.object({
   name: z.string().min(1, "Name is required").optional(),
   firstName: z.string().optional(),
@@ -48,6 +53,8 @@ const createContactSchema = z.object({
   funnelStage: z
     .enum(["prospect", "engaged", "qualified", "opportunity", "customer", "advocate"])
     .optional(),
+  relationshipGoal: z.enum(RELATIONSHIP_GOAL_ENUM).optional(),
+  relationshipGoalStatus: z.enum(RELATIONSHIP_GOAL_STATUS_ENUM).optional(),
   score: z.number().int().min(0).optional(),
   isSelf: z.boolean().optional(),
   channels: z.array(channelInputSchema).optional(),
@@ -66,6 +73,8 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const search = searchParams.get("search") ?? undefined;
   const funnelStage = searchParams.get("funnelStage") ?? undefined;
+  const relationshipGoal = searchParams.get("relationshipGoal") ?? undefined;
+  const relationshipGoalStatus = searchParams.get("relationshipGoalStatus") ?? undefined;
   const platform = searchParams.get("platform") ?? undefined;
   const page = parseInt(searchParams.get("page") ?? "1", 10) || 1;
   const pageSize = parseInt(searchParams.get("pageSize") ?? "25", 10) || 25;
@@ -82,6 +91,8 @@ export async function GET(req: NextRequest) {
     const result = listContacts({
       search,
       funnelStage,
+      relationshipGoal,
+      relationshipGoalStatus,
       platform,
       page,
       pageSize,

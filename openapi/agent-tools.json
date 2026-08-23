@@ -144,6 +144,25 @@
                               "advocate"
                             ]
                           },
+                          "relationshipGoal": {
+                            "type": "string",
+                            "enum": [
+                              "follow_back",
+                              "repost_amplification",
+                              "mutual_engagement",
+                              "warm_conversation",
+                              "partnership"
+                            ]
+                          },
+                          "relationshipGoalStatus": {
+                            "type": "string",
+                            "enum": [
+                              "not_started",
+                              "in_progress",
+                              "achieved",
+                              "paused"
+                            ]
+                          },
                           "platform": {
                             "type": "string",
                             "enum": [
@@ -424,6 +443,25 @@
                               "advocate"
                             ]
                           },
+                          "relationshipGoal": {
+                            "type": "string",
+                            "enum": [
+                              "follow_back",
+                              "repost_amplification",
+                              "mutual_engagement",
+                              "warm_conversation",
+                              "partnership"
+                            ]
+                          },
+                          "relationshipGoalStatus": {
+                            "type": "string",
+                            "enum": [
+                              "not_started",
+                              "in_progress",
+                              "achieved",
+                              "paused"
+                            ]
+                          },
                           "firstName": {
                             "type": "string"
                           },
@@ -554,6 +592,25 @@
                               "opportunity",
                               "customer",
                               "advocate"
+                            ]
+                          },
+                          "relationshipGoal": {
+                            "type": "string",
+                            "enum": [
+                              "follow_back",
+                              "repost_amplification",
+                              "mutual_engagement",
+                              "warm_conversation",
+                              "partnership"
+                            ]
+                          },
+                          "relationshipGoalStatus": {
+                            "type": "string",
+                            "enum": [
+                              "not_started",
+                              "in_progress",
+                              "achieved",
+                              "paused"
                             ]
                           },
                           "tags": {

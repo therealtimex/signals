@@ -219,6 +219,8 @@ export function listContacts(opts?: {
   search?: string;
   email?: string;
   funnelStage?: string;
+  relationshipGoal?: string;
+  relationshipGoalStatus?: string;
   platform?: string;
   platformUserId?: string;
   page?: number;
@@ -284,6 +286,22 @@ export function listContacts(opts?: {
   }
   if (opts?.funnelStage) {
     conditions.push(eq(contacts.funnelStage, opts.funnelStage as Contact["funnelStage"]));
+  }
+  if (opts?.relationshipGoal) {
+    conditions.push(
+      eq(
+        contacts.relationshipGoal,
+        opts.relationshipGoal as NonNullable<Contact["relationshipGoal"]>,
+      ),
+    );
+  }
+  if (opts?.relationshipGoalStatus) {
+    conditions.push(
+      eq(
+        contacts.relationshipGoalStatus,
+        opts.relationshipGoalStatus as NonNullable<Contact["relationshipGoalStatus"]>,
+      ),
+    );
   }
   if (opts?.platform || opts?.platformUserId) {
     // Both filters resolve against the same identity row so a
@@ -386,6 +404,11 @@ export function createContact(
 
   const now = Math.floor(Date.now() / 1000);
 
+  if (rowData.relationshipGoal && !rowData.relationshipGoalStatus) {
+    rowData.relationshipGoalStatus = "not_started";
+    rowData.relationshipGoalUpdatedAt = now;
+  }
+
   if (rowData.isSelf === true) {
     db.transaction((tx) => {
       tx.update(contacts)
@@ -429,6 +452,13 @@ export function updateContact(
   }
 
   const now = Math.floor(Date.now() / 1000);
+
+  if (data.relationshipGoal !== undefined || data.relationshipGoalStatus !== undefined) {
+    if (updates.relationshipGoal && !updates.relationshipGoalStatus && !existing.relationshipGoalStatus) {
+      updates.relationshipGoalStatus = "not_started";
+    }
+    updates.relationshipGoalUpdatedAt = now;
+  }
 
   if (data.isSelf === true) {
     db.transaction(() => {

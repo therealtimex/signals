@@ -24,6 +24,7 @@ import { Badge } from "@/components/ui/badge";
 import { AddContactDialog } from "@/components/add-contact-dialog";
 import { ContactListAvatar } from "@/components/contact-list-avatar";
 import { FunnelStageBadge } from "@/components/funnel-stage-badge";
+import { RelationshipGoalBadge } from "@/components/relationship-goal-badge";
 import { EnrichmentScoreBadge } from "@/components/enrichment-score-badge";
 import { PaginationControls } from "@/components/pagination-controls";
 import { PlatformMark } from "@/components/platform-mark";
@@ -272,7 +273,15 @@ export function ContactListClient({
                     ) : null}
                   </TableCell>
                   <TableCell className="hidden whitespace-nowrap sm:table-cell">
-                    <FunnelStageBadge stage={contact.funnelStage} />
+                    <div className="flex flex-col gap-1 items-start">
+                      <FunnelStageBadge stage={contact.funnelStage} />
+                      {contact.relationshipGoal ? (
+                        <RelationshipGoalBadge
+                          goal={contact.relationshipGoal}
+                          status={contact.relationshipGoalStatus}
+                        />
+                      ) : null}
+                    </div>
                   </TableCell>
                   <TableCell className="hidden whitespace-nowrap sm:table-cell">
                     <EnrichmentScoreBadge score={contact.enrichmentScore} />

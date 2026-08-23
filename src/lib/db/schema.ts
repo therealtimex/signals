@@ -6,6 +6,10 @@ import {
   VARIANT_STATUS_ENUM,
 } from "./gtm-status";
 import { PLATFORM_ENUM } from "./platforms";
+import {
+  RELATIONSHIP_GOAL_ENUM,
+  RELATIONSHIP_GOAL_STATUS_ENUM,
+} from "../relationship-goals";
 
 // Helper for default timestamps (unix epoch seconds)
 const timestamps = {
@@ -123,6 +127,13 @@ export const contacts = sqliteTable("contacts", {
   metadata: text("metadata").default("{}"), // JSON
   lastInteractionAt: integer("last_interaction_at"),
   isSelf: integer("is_self", { mode: "boolean" }).notNull().default(false),
+  relationshipGoal: text("relationship_goal", {
+    enum: RELATIONSHIP_GOAL_ENUM,
+  }),
+  relationshipGoalStatus: text("relationship_goal_status", {
+    enum: RELATIONSHIP_GOAL_STATUS_ENUM,
+  }),
+  relationshipGoalUpdatedAt: integer("relationship_goal_updated_at"),
   createdSource: text("created_source", {
     enum: ["manual", "agent", "import", "sync", "api"],
   }),

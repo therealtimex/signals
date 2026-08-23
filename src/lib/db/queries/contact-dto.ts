@@ -19,6 +19,9 @@ export type ContactDTO = {
   enrichmentScore: number;
   tags: string | null;
   funnelStage: Contact["funnelStage"];
+  relationshipGoal: Contact["relationshipGoal"];
+  relationshipGoalStatus: Contact["relationshipGoalStatus"];
+  relationshipGoalUpdatedAt: number | null;
   score: number;
   metadata: string | null;
   lastInteractionAt: number | null;
@@ -125,6 +128,9 @@ export function assembleContactDto(
     enrichmentScore: contact.enrichmentScore,
     tags: contact.tags,
     funnelStage: contact.funnelStage,
+    relationshipGoal: contact.relationshipGoal,
+    relationshipGoalStatus: contact.relationshipGoalStatus,
+    relationshipGoalUpdatedAt: contact.relationshipGoalUpdatedAt,
     score: contact.score,
     metadata: contact.metadata,
     lastInteractionAt: contact.lastInteractionAt,

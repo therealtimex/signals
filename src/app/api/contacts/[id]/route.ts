@@ -11,6 +11,11 @@ import {
 } from "@/lib/api/contact-route-validation";
 import { resolveContactCompanyFields } from "@/lib/contact-org-api";
 
+import {
+  RELATIONSHIP_GOAL_ENUM,
+  RELATIONSHIP_GOAL_STATUS_ENUM,
+} from "@/lib/relationship-goals";
+
 const updateContactSchema = z.object({
   name: z.string().min(1).optional(),
   firstName: z.string().optional(),
@@ -31,6 +36,8 @@ const updateContactSchema = z.object({
   funnelStage: z
     .enum(["prospect", "engaged", "qualified", "opportunity", "customer", "advocate"])
     .optional(),
+  relationshipGoal: z.enum(RELATIONSHIP_GOAL_ENUM).optional().nullable(),
+  relationshipGoalStatus: z.enum(RELATIONSHIP_GOAL_STATUS_ENUM).optional().nullable(),
   score: z.number().int().min(0).optional(),
   isSelf: z.boolean().optional(),
   channels: z.array(channelInputSchema).optional(),
