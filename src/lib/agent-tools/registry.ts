@@ -15,6 +15,7 @@ import {
   queryWorkflowsSchema,
   startWorkflowSchema,
   dispatchFollowOnWorkflowSchema,
+  completeWorkflowRunSchema,
   updateContactSchema,
   upsertContactIdentitySchema,
   getPersonaSchema,
@@ -90,6 +91,7 @@ import {
   handleQueryWorkflows,
   handleStartWorkflow,
   handleDispatchFollowOnWorkflow,
+  handleCompleteWorkflowRun,
   handleUpdateContact,
   handleUpsertContactIdentity,
   handleGetPersona,
@@ -250,6 +252,15 @@ export const AGENT_TOOLS: Record<string, AgentToolDefinition> = {
     schema: dispatchFollowOnWorkflowSchema,
     parameters: zodToParameters(dispatchFollowOnWorkflowSchema),
     execute: handleDispatchFollowOnWorkflow,
+  },
+  complete_workflow_run: {
+    name: "complete_workflow_run",
+    description:
+      "Mark a workflow run as completed, update processed counts, and trigger automated follow-on cascading and webhook dispatch.",
+    category: "workflows",
+    schema: completeWorkflowRunSchema,
+    parameters: zodToParameters(completeWorkflowRunSchema),
+    execute: handleCompleteWorkflowRun,
   },
   query_content: {
     name: "query_content",

@@ -298,3 +298,13 @@ export const upsertPersonaSchema = z
   );
 
 export const listMailAccountsSchema = z.object({});
+
+export const completeWorkflowRunSchema = z.object({
+  runId: z.string().min(1).describe("The workflow run ID to mark completed"),
+  status: z.enum(["completed", "failed"]).default("completed").describe("Final status of the workflow run"),
+  processedItems: z.number().int().nonnegative().optional().describe("Number of items processed"),
+  successItems: z.number().int().nonnegative().optional().describe("Number of items successfully processed"),
+  createdContactIds: z.array(z.string()).optional().describe("IDs of newly created/discovered contacts in this run"),
+  summary: z.string().optional().describe("Summary of the run results and mapped cluster"),
+  errors: z.array(z.string()).optional().describe("Any error messages encountered during the run"),
+});

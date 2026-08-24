@@ -234,7 +234,13 @@ export async function emitWorkflowCompletedEvent(
   const rawConfig = JSON.parse(run.config ?? "{}") as Record<string, unknown>;
   const cascadeConfig = readWorkflowCascadeConfig(rawConfig);
 
-  const createdContactIds = options?.createdContactIds ?? (rawConfig.targetContactIds as string[] | undefined) ?? [];
+  let createdContactIds = options?.createdContactIds ?? (rawConfig.targetContactIds as string[] | undefined) ?? [];
+  if (createdContactIds.length === 0) {
+    const attributed = db.select({ id: contacts.id }).from(contacts).where(eq(contacts.createdWorkflowRunId, runId)).all();
+    if (attributed.length > 0) {
+      createdContactIds = attributed.map((c) => c.id);
+    }
+  }
 
   const eventPayload: WorkflowCompletedEventPayload = {
     event: "workflow.completed",

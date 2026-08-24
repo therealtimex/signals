@@ -2,7 +2,7 @@ import { listContacts, getContactById, createContact, updateContact, recalcEnric
 import { createIdentity, getIdentityById, updateIdentity } from "@/lib/db/queries/identities";
 import { PlatformAccountConflictError, resolvePlatformClaim } from "@/lib/db/identity-claims";
 import { getDashboardMetrics } from "@/lib/db/queries/dashboard";
-import { listWorkflowRuns } from "@/lib/db/queries/workflows";
+import { getWorkflowRun, listWorkflowRuns, updateWorkflowRun } from "@/lib/db/queries/workflows";
 import { listTemplates } from "@/lib/db/queries/workflow-templates";
 import { listContentItems } from "@/lib/db/queries/content";
 import { listGoals } from "@/lib/db/queries/goals";
@@ -20,6 +20,7 @@ import { findDuplicateContacts } from "@/lib/contacts/dedupe/detect";
 import { MergeContactsError, mergeContacts } from "@/lib/contacts/dedupe/merge";
 import { personNameKey, orgNameKey } from "@/lib/contacts/dedupe/normalize";
 import { dispatchWorkflowCascade } from "@/lib/workflows/chaining";
+import { emitWorkflowCompletedEvent } from "@/lib/webhooks/workflow-events";
 import type { WorkflowType } from "@/lib/workflows/types";
 import type {
   archiveContactSchema,
@@ -38,6 +39,7 @@ import type {
   queryWorkflowsSchema,
   startWorkflowSchema,
   dispatchFollowOnWorkflowSchema,
+  completeWorkflowRunSchema,
   updateContactSchema,
   getPersonaSchema,
   getPersonaEvidenceSchema,
@@ -864,5 +866,46 @@ export async function handleUpsertPersona(input: z.infer<typeof upsertPersonaSch
     tone: persona.tone,
     summary: persona.summary,
     message: "Persona saved (previous active persona superseded if present).",
+  };
+}
+
+export async function handleCompleteWorkflowRun(input: z.infer<typeof completeWorkflowRunSchema>) {
+  const run = getWorkflowRun(input.runId);
+  if (!run) {
+    return { error: `Workflow run ${input.runId} not found` };
+  }
+
+  const completedAt = Math.floor(Date.now() / 1000);
+  const existingResult = JSON.parse(run.result ?? "{}") as Record<string, unknown>;
+  const resultJson = JSON.stringify({
+    ...existingResult,
+    ...(input.summary ? { summary: input.summary } : {}),
+    ...(input.createdContactIds ? { createdContactIds: input.createdContactIds } : {}),
+  });
+
+  const updatedRun = updateWorkflowRun(input.runId, {
+    status: input.status,
+    completedAt,
+    ...(input.processedItems !== undefined ? { processedItems: input.processedItems } : {}),
+    ...(input.successItems !== undefined ? { successItems: input.successItems } : {}),
+    result: resultJson,
+    ...(input.errors ? { errors: JSON.stringify(input.errors) } : {}),
+  });
+
+  // Automatically emit completion event and trigger workflow cascading / webhook bridge
+  const eventResult = await emitWorkflowCompletedEvent(input.runId, {
+    summary: input.summary,
+    createdContactIds: input.createdContactIds,
+  });
+
+  return {
+    success: true,
+    runId: updatedRun?.id ?? input.runId,
+    status: updatedRun?.status ?? input.status,
+    completedAt: updatedRun?.completedAt ?? completedAt,
+    processedItems: updatedRun?.processedItems ?? input.processedItems ?? 0,
+    cascadeResult: eventResult.cascadeResult,
+    routingRecommendation: eventResult.routingRecommendation,
+    message: `Workflow run ${input.runId} marked as ${input.status}. Follow-on cascades and webhook dispatch completed.`,
   };
 }
