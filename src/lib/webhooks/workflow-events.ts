@@ -46,14 +46,15 @@ export function evaluateAgenticRouting(createdContactIds: string[]): {
     };
   }
 
+  const contactIdSet = new Set(createdContactIds);
   const rows = db
     .select()
     .from(contacts)
     .all()
-    .filter((c) => createdContactIds.includes(c.id));
+    .filter((c) => contactIdSet.has(c.id));
 
   const identities = createdContactIds.length > 0
-    ? db.select().from(contactIdentities).all().filter((ci) => createdContactIds.includes(ci.contactId))
+    ? db.select().from(contactIdentities).all().filter((ci) => contactIdSet.has(ci.contactId))
     : [];
 
   let investorCount = 0;
