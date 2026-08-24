@@ -21,7 +21,7 @@ import {
 } from "@/lib/workflows/network-snowball";
 
 /** Bump this when seed template prompts change to trigger updates on existing installs. */
-const SEED_VERSION = 16;
+const SEED_VERSION = 17;
 
 export const CONTACT_PROFILE_PIPELINE_TEMPLATE_NAME = "Contact profile pipeline";
 
@@ -558,7 +558,9 @@ Follow the numbered "Network Snowball execution contract" below.
    - Investors & Backers: Extract tagged partner handles, mentioned VC firms, and celebrating angels in the replies.
    - Founding Team: Extract co-founders, CTO, and core engineers linked in bios and announcements.
    - Advocates: Extract high-profile developers quote-posting with technical praise or benchmark results.
-3. Apply the Bot & Clone Gate: Skip automated bots (*bot, *_agent, *digest), scraper clones, and news feeds.
+3. Apply the Anti-Hallucination & Bot Gate:
+   - Anti-Hallucination: Never guess or synthesize vanity profile URLs (e.g. guessing https://linkedin.com/in/<name> from a person's name). Only attach a profile URL/handle if verified from the page links/DOM or search. If unverified, leave profile_url blank.
+   - Bot Gate: Skip automated bots (*bot, *_agent, *digest), scraper clones, and news feeds.
 4. Extract rich profile details: name, handle, avatarUrl (real photo image URL from platform DOM / Bookface / Twitter CDN, never synthetic redirecting URLs), bio/headline, company, and role.
 5. Ingest contacts via signals-pp-cli import contacts --file workflow-runs/<runId>/contacts.csv --dedupe.
 6. In the notes column, clearly record the causal anchor (e.g. "role: Lead Investor in Acme Seed round").
@@ -566,6 +568,7 @@ Follow the numbered "Network Snowball execution contract" below.
 
 ## Rules
 - Focus on real human decision-makers. Apply the 'Engage for visibility, skip for contacts' bot rule.
+- Never guess vanity profile links — verify handles against authentic source links or leave blank.
 - Always capture real, working avatarUrl (HTTP 200 image URL) so profiles render with real photos across the CRM.
 - Keep within the maxContacts and maxHops limits in the runtime config.`,
     config: buildNetworkSnowballTemplateConfig(),

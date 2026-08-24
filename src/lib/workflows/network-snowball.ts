@@ -153,8 +153,9 @@ export function buildNetworkSnowballBriefSection(input: {
     `S2. Discover Connected Nodes: Traverse 1st-degree relational edges from the seed entity:`,
     `    - Backers / Investors: Extract tagged partner handles, mentioned VC funds, and congratulatory angels in replies.`,
     `    - Founding Team: Extract co-founders, CTO, and core team members mentioned or linked in the entity bio.`,
-    `    - Advocates: Extract high-profile engineers quote-posting with domain proof or product endorsements.`,
-    "S3. Bot & Clone Filter Gate: Apply the 'Engage for visibility, skip for contacts' rule. Discard automated news bots, clone mirror accounts, and impersonal aggregators (*bot, *daily, *digest) from contacts.csv.",
+    "S3. Anti-Hallucination & Bot Filter Gate:",
+    "    - Anti-Hallucination Rule: Never guess or synthesize vanity profile URLs (e.g. guessing https://linkedin.com/in/<name> from a person's name). Only attach a profile URL or handle if it was explicitly extracted from the page links/DOM or verified via direct search. If unverified, leave profile_url blank rather than mapping to a wrong individual.",
+    "    - Bot/Clone Filter: Apply the 'Engage for visibility, skip for contacts' rule. Discard automated news bots, clone mirror accounts, and impersonal aggregators (*bot, *daily, *digest) from contacts.csv.",
     "S4. Identity-First Avatar Extraction: Prioritize extracting authentic profile photo assets directly from each contact's primary identity (e.g. visit their LinkedIn profile over CDP for media.licdn.com, X for pbs.twimg.com, or YC/company directory for Bookface/CDN photos). Verify that avatar_url is a direct, permanent image asset (HTTP 200). Never guess synthetic redirecting URLs.",
     snowball.requireApproval
       ? `S5. Approval & Write Back: Candidate roster must be presented in this thread for operator review before bulk committing. Once confirmed, stage workflow-runs/${input.workflowRunId}/contacts.csv and commit with:\n    signals-pp-cli import contacts --file workflow-runs/${input.workflowRunId}/contacts.csv --dedupe\n    In the notes field, explicitly record the causal relationship (e.g., 'role: Lead Investor in Acme Seed round' or 'role: Co-Founder & CTO').`

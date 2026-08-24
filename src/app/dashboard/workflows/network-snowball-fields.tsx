@@ -175,18 +175,18 @@ export function NetworkSnowballFields({
         />
       </div>
 
-      {/* Approval Toggle */}
+      {/* Auto-commit Toggle */}
       <div className="flex items-center justify-between pt-2">
         <div className="space-y-0.5">
-          <Label htmlFor="snowball-approval">Batch approval checkpoint</Label>
+          <Label htmlFor="snowball-auto-commit">Auto-commit to CRM</Label>
           <p className="text-xs text-muted-foreground">
-            Review discovered contact batches in the agent thread before committing to CRM.
+            Automatically add discovered contacts directly to Signals CRM. Turn off to review candidates in the agent thread first.
           </p>
         </div>
         <Switch
-          id="snowball-approval"
-          checked={value.requireApproval}
-          onCheckedChange={(checked) => onChange({ ...value, requireApproval: checked })}
+          id="snowball-auto-commit"
+          checked={!value.requireApproval}
+          onCheckedChange={(autoCommit) => onChange({ ...value, requireApproval: !autoCommit })}
           disabled={disabled}
         />
       </div>

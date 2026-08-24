@@ -108,8 +108,9 @@ describe("buildNetworkSnowballBriefSection", () => {
     expect(brief).toContain("https://x.com/acme/status/987");
     expect(brief).toContain("12 connected contact(s)");
     expect(brief).toContain("Lead VCs, participating funds, and angel investors");
-    expect(brief).toContain("Bot & Clone Filter Gate");
+    expect(brief).toContain("Anti-Hallucination & Bot Filter Gate");
     expect(brief).toContain("Engage for visibility, skip for contacts");
+    expect(brief).toContain("Anti-Hallucination Rule");
     expect(brief).toContain("Identity-First Avatar Extraction");
     expect(brief).toContain("workflow-runs/run_snow_1/contacts.csv");
     expect(brief).toContain("signals-pp-cli import contacts");
