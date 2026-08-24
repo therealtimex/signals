@@ -21,6 +21,8 @@ import { MergeContactsError, mergeContacts } from "@/lib/contacts/dedupe/merge";
 import { personNameKey, orgNameKey } from "@/lib/contacts/dedupe/normalize";
 import { dispatchWorkflowCascade } from "@/lib/workflows/chaining";
 import { emitWorkflowCompletedEvent } from "@/lib/webhooks/workflow-events";
+import { runTemplateViaRtx } from "@/lib/agents/run-template-via-rtx";
+import { isRtxEmbedded } from "@/lib/rtx/env";
 import type { WorkflowType } from "@/lib/workflows/types";
 import type {
   archiveContactSchema,
@@ -691,6 +693,26 @@ export async function handleListWorkflowTemplates(
 }
 
 export async function handleStartWorkflow(input: z.infer<typeof startWorkflowSchema>) {
+  if (isRtxEmbedded()) {
+    try {
+      const rtxResult = await runTemplateViaRtx({
+        templateId: input.templateId,
+      });
+      if (rtxResult.success) {
+        return {
+          runId: rtxResult.workflowRunId,
+          status: "running",
+          workflowType: rtxResult.workflowRun.workflowType,
+          message: `Workflow launched in RealTimeX thread ${rtxResult.threadSlug}`,
+          threadSlug: rtxResult.threadSlug,
+          threadPath: rtxResult.threadPath,
+        };
+      }
+    } catch (err) {
+      console.warn("[handleStartWorkflow] RTX run failed, falling back to db record:", err);
+    }
+  }
+
   const run = startAgentWorkflow({
     templateId: input.templateId,
     workflowType: (input.workflowType as WorkflowType) ?? "agent",
@@ -712,6 +734,24 @@ export async function handleDispatchFollowOnWorkflow(
     createdContactIds: input.contactIds ?? [],
     overrideAction: input.followOnAction,
   });
+
+  if (result.triggered && result.childRunIds && result.childRunIds.length > 0 && isRtxEmbedded()) {
+    for (const childRunId of result.childRunIds) {
+      try {
+        const childRun = getWorkflowRun(childRunId);
+        if (childRun && childRun.templateId) {
+          const childConfig = JSON.parse(childRun.config ?? "{}") as Record<string, unknown>;
+          await runTemplateViaRtx({
+            templateId: childRun.templateId,
+            config: childConfig,
+            existingRunId: childRun.id,
+          });
+        }
+      } catch (err) {
+        console.warn(`[handleDispatchFollowOnWorkflow] Failed to launch RTX agent for child run ${childRunId}:`, err);
+      }
+    }
+  }
 
   return {
     success: result.triggered,

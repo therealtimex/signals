@@ -299,7 +299,8 @@ export async function emitWorkflowCompletedEvent(
     routingRecommendation,
   });
 
-  await writeOrchestratorBriefFile(workspaceSlug, runId, briefMarkdown);
+  const briefWriteResult = await writeOrchestratorBriefFile(workspaceSlug, runId, briefMarkdown);
+  const absolutePath = briefWriteResult.success ? briefWriteResult.absolutePath : undefined;
 
   // 2. If agentic_router is active, dispatch the file-based brief message to the Signals Orchestrator thread
   if (cascadeConfig.followOnActions.includes("agentic_router")) {
@@ -314,6 +315,7 @@ export async function emitWorkflowCompletedEvent(
         templateName: eventPayload.templateName,
         eventType: eventPayload.event,
         suggestedAction: routingRecommendation?.suggestedAction,
+        absolutePath,
       });
 
       await dispatchTerminalAgentViaSendMessage(

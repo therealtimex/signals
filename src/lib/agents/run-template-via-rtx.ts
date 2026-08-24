@@ -1,4 +1,10 @@
-import { createWorkflowRun, createWorkflowStep, nextStepIndex, updateWorkflowRun } from "@/lib/db/queries/workflows";
+import {
+  createWorkflowRun,
+  createWorkflowStep,
+  getWorkflowRun,
+  nextStepIndex,
+  updateWorkflowRun,
+} from "@/lib/db/queries/workflows";
 import { getTemplate, updateTemplate } from "@/lib/db/queries/workflow-templates";
 import type { WorkflowRun, WorkflowTemplate } from "@/lib/db/types";
 import { getPlatformTargetById } from "@/lib/db/queries/platform-targets";
@@ -45,6 +51,8 @@ export type RunTemplateViaRtxInput = {
   signalsBaseUrl?: string;
   /** Run in a throwaway thread instead of the template's dedicated one. */
   freshThread?: boolean;
+  /** Existing run ID if already pre-created (e.g. by cascade dispatcher). */
+  existingRunId?: string;
 };
 
 export type RunTemplateViaRtxResult =
@@ -169,18 +177,48 @@ export async function runTemplateViaRtx(
   const workflowType = TEMPLATE_TO_WORKFLOW_TYPE[template.templateType] ?? "agent";
   const now = Math.floor(Date.now() / 1000);
 
-  const run = createWorkflowRun({
-    templateId: template.id,
-    workflowType,
-    status: "running",
-    config: JSON.stringify({
-      ...mergedConfig,
-      templateName: template.name,
-      templateCategory: template.templateType,
-    }),
-    trigger: "template",
-    startedAt: now,
-  });
+  let run: WorkflowRun;
+  if (input.existingRunId) {
+    const existing = getWorkflowRun(input.existingRunId);
+    if (existing) {
+      updateWorkflowRun(existing.id, {
+        status: "running",
+        startedAt: now,
+        config: JSON.stringify({
+          ...mergedConfig,
+          templateName: template.name,
+          templateCategory: template.templateType,
+        }),
+      });
+      run = getWorkflowRun(existing.id)!;
+    } else {
+      run = createWorkflowRun({
+        templateId: template.id,
+        workflowType,
+        status: "running",
+        config: JSON.stringify({
+          ...mergedConfig,
+          templateName: template.name,
+          templateCategory: template.templateType,
+        }),
+        trigger: "template",
+        startedAt: now,
+      });
+    }
+  } else {
+    run = createWorkflowRun({
+      templateId: template.id,
+      workflowType,
+      status: "running",
+      config: JSON.stringify({
+        ...mergedConfig,
+        templateName: template.name,
+        templateCategory: template.templateType,
+      }),
+      trigger: "template",
+      startedAt: now,
+    });
+  }
 
   const signalsBaseUrl = input.signalsBaseUrl ?? resolveSignalsBaseUrlFromEnv(env);
   const health = await verifySignalsHealth(signalsBaseUrl, fetchImpl);
