@@ -21,7 +21,7 @@ import {
 } from "@/lib/workflows/network-snowball";
 
 /** Bump this when seed template prompts change to trigger updates on existing installs. */
-const SEED_VERSION = 15;
+const SEED_VERSION = 16;
 
 export const CONTACT_PROFILE_PIPELINE_TEMPLATE_NAME = "Contact profile pipeline";
 
@@ -559,14 +559,14 @@ Follow the numbered "Network Snowball execution contract" below.
    - Founding Team: Extract co-founders, CTO, and core engineers linked in bios and announcements.
    - Advocates: Extract high-profile developers quote-posting with technical praise or benchmark results.
 3. Apply the Bot & Clone Gate: Skip automated bots (*bot, *_agent, *digest), scraper clones, and news feeds.
-4. Extract rich profile details: name, handle, avatarUrl (profile picture image URL), bio/headline, company, and role.
+4. Extract rich profile details: name, handle, avatarUrl (real photo image URL from platform DOM / Bookface / Twitter CDN, never synthetic redirecting URLs), bio/headline, company, and role.
 5. Ingest contacts via signals-pp-cli import contacts --file workflow-runs/<runId>/contacts.csv --dedupe.
 6. In the notes column, clearly record the causal anchor (e.g. "role: Lead Investor in Acme Seed round").
 7. Report the mapped ecosystem cluster with links in this thread.
 
 ## Rules
 - Focus on real human decision-makers. Apply the 'Engage for visibility, skip for contacts' bot rule.
-- Always capture avatarUrl so profiles render with real photos across the CRM.
+- Always capture real, working avatarUrl (HTTP 200 image URL) so profiles render with real photos across the CRM.
 - Keep within the maxContacts and maxHops limits in the runtime config.`,
     config: buildNetworkSnowballTemplateConfig(),
   },

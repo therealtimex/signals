@@ -110,7 +110,7 @@ describe("buildNetworkSnowballBriefSection", () => {
     expect(brief).toContain("Lead VCs, participating funds, and angel investors");
     expect(brief).toContain("Bot & Clone Filter Gate");
     expect(brief).toContain("Engage for visibility, skip for contacts");
-    expect(brief).toContain("Profile Hydration & Avatar Capture");
+    expect(brief).toContain("Profile Hydration & Real Avatar Capture");
     expect(brief).toContain("workflow-runs/run_snow_1/contacts.csv");
     expect(brief).toContain("signals-pp-cli import contacts");
   });
