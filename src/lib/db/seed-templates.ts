@@ -15,9 +15,13 @@ import {
   CONTACT_RELATIONSHIP_NURTURE_TEMPLATE_NAME,
   buildContactNurtureTemplateConfig,
 } from "@/lib/workflows/contact-relationship-nurture";
+import {
+  NETWORK_SNOWBALL_TEMPLATE_NAME,
+  buildNetworkSnowballTemplateConfig,
+} from "@/lib/workflows/network-snowball";
 
 /** Bump this when seed template prompts change to trigger updates on existing installs. */
-const SEED_VERSION = 14;
+const SEED_VERSION = 15;
 
 export const CONTACT_PROFILE_PIPELINE_TEMPLATE_NAME = "Contact profile pipeline";
 
@@ -531,6 +535,40 @@ After executing any action:
    POST $SIGNALS_BASE_URL/api/agent-tools/invoke with JSON:
    { "tool": "update_contact", "input": { "contactId": "<contactId>", "relationshipGoalStatus": "in_progress" (or "achieved") } }`,
     config: buildContactNurtureTemplateConfig(),
+  },
+  {
+    name: NETWORK_SNOWBALL_TEMPLATE_NAME,
+    description:
+      "Expand your network from a high-signal event or announcement (funding round, product launch, executive hire). Traverses causal edges to discover connected investors, angels, co-founders, and technical advocates.",
+    templateType: "prospecting",
+    targetPersona:
+      "Second-degree connected decision makers: lead VCs, angel investors, co-founders, founding engineers, and high-signal product advocates tied to a seed announcement",
+    estimatedCost: 0.35,
+    systemPrompt: `You are an ecosystem snowball agent expanding relationship graphs from high-signal trigger events.
+
+## Objective
+Start from a seed post URL, founder profile, or organization announcement (such as a funding round or launch). Traverse the causal relationship edges to discover and map connected high-value nodes — lead partners, angel investors, co-founders, and technical advocates — into Signals CRM.
+
+## Execution lane
+Follow the numbered "Network Snowball execution contract" below.
+
+## Process
+1. Inspect the seed event via RealTimeX Browser / agent-browser. Parse the primary company, founders, and event context (e.g. "$4M Seed led by VC X with Angels Y, Z").
+2. Discover 1st-degree connected entities based on the configured focus:
+   - Investors & Backers: Extract tagged partner handles, mentioned VC firms, and celebrating angels in the replies.
+   - Founding Team: Extract co-founders, CTO, and core engineers linked in bios and announcements.
+   - Advocates: Extract high-profile developers quote-posting with technical praise or benchmark results.
+3. Apply the Bot & Clone Gate: Skip automated bots (*bot, *_agent, *digest), scraper clones, and news feeds.
+4. Extract rich profile details: name, handle, avatarUrl (profile picture image URL), bio/headline, company, and role.
+5. Ingest contacts via signals-pp-cli import contacts --file workflow-runs/<runId>/contacts.csv --dedupe.
+6. In the notes column, clearly record the causal anchor (e.g. "role: Lead Investor in Acme Seed round").
+7. Report the mapped ecosystem cluster with links in this thread.
+
+## Rules
+- Focus on real human decision-makers. Apply the 'Engage for visibility, skip for contacts' bot rule.
+- Always capture avatarUrl so profiles render with real photos across the CRM.
+- Keep within the maxContacts and maxHops limits in the runtime config.`,
+    config: buildNetworkSnowballTemplateConfig(),
   },
 ];
 

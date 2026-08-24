@@ -1,8 +1,12 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Sparkles } from "lucide-react";
+import { SnowballDialog } from "@/components/snowball-dialog";
 import {
   Table,
   TableBody,
@@ -28,18 +32,31 @@ interface OrganizationDetailClientProps {
 }
 
 export function OrganizationDetailClient({ org, contacts }: OrganizationDetailClientProps) {
+  const [snowballOpen, setSnowballOpen] = useState(false);
+
   return (
     <div className="space-y-6">
-      <div>
-        <div className="flex items-center gap-3">
-          <h1 className="text-heading-1">{org.name}</h1>
-          <Badge variant="secondary" className="capitalize">
-            {org.orgType}
-          </Badge>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-3">
+            <h1 className="text-heading-1">{org.name}</h1>
+            <Badge variant="secondary" className="capitalize">
+              {org.orgType}
+            </Badge>
+          </div>
+          <p className="text-muted-foreground mt-1">
+            Organization profile and linked contacts.
+          </p>
         </div>
-        <p className="text-muted-foreground mt-1">
-          Organization profile and linked contacts.
-        </p>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setSnowballOpen(true)}
+          className="self-start sm:self-auto"
+        >
+          <Sparkles className="h-3.5 w-3.5 text-primary mr-1.5" />
+          Snowball Network
+        </Button>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2">
@@ -152,6 +169,14 @@ export function OrganizationDetailClient({ org, contacts }: OrganizationDetailCl
           )}
         </CardContent>
       </Card>
+
+      <SnowballDialog
+        open={snowballOpen}
+        onClose={() => setSnowballOpen(false)}
+        seedType="org_id"
+        seedValue={org.name}
+        entityName={org.name}
+      />
     </div>
   );
 }

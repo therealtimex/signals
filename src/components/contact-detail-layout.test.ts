@@ -30,6 +30,7 @@ vi.mock("@/components/ui/dialog", async () => {
       h(tag, null, children);
   return {
     Dialog: passthrough("div"),
+    DialogClose: passthrough("div"),
     DialogContent: passthrough("div"),
     DialogHeader: passthrough("div"),
     DialogTitle: ({ children }: { children?: React.ReactNode }) => h("h2", null, children),
