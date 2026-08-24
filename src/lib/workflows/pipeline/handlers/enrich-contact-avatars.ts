@@ -177,6 +177,21 @@ function recoverAvatarFromLegacyMetadata(
   return { identity: primary, avatarUrl };
 }
 
+function recoverAvatarFromIdentityPlatform(
+  identities: ContactIdentity[],
+): { identity: ContactIdentity; avatarUrl: string } | undefined {
+  for (const identity of orderIdentitiesForRecovery(identities)) {
+    if (identity.avatarUrl?.trim()) continue;
+    if (identity.platform === "x" && identity.platformHandle?.trim()) {
+      const cleanHandle = identity.platformHandle.trim().replace(/^@/, "");
+      if (/^[a-zA-Z0-9_]{1,15}$/.test(cleanHandle)) {
+        return { identity, avatarUrl: `https://unavatar.io/x/${cleanHandle}` };
+      }
+    }
+  }
+  return undefined;
+}
+
 function gravatarProbeUrl(email: string): string {
   const normalized = email.trim().toLowerCase();
   const hash = createHash("md5").update(normalized).digest("hex");
@@ -249,6 +264,17 @@ async function enrichOneContact(
       contactId,
       status: "updated",
       detail: { source: "legacy_metadata", identityId: legacyRecovery.identity.id },
+    };
+  }
+
+  const identityPlatformRecovery = recoverAvatarFromIdentityPlatform(identities);
+  if (identityPlatformRecovery) {
+    updateIdentity(identityPlatformRecovery.identity.id, { avatarUrl: identityPlatformRecovery.avatarUrl });
+    recalcContactEnrichment(contactId);
+    return {
+      contactId,
+      status: "updated",
+      detail: { source: "identity_platform", identityId: identityPlatformRecovery.identity.id },
     };
   }
 
