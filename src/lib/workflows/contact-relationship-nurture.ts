@@ -182,6 +182,7 @@ export function buildContactNurtureBriefSection(input: {
     nurture.requireApproval
       ? "N6. Approval gate is ON: Present touchpoints/drafts in this thread in batches of 3–5 and wait for operator confirmation before publishing."
       : "N6. Approval gate is OFF: Execute touchpoints directly and log evidence in this thread.",
+    "    - Submission & Verification: On Facebook, LinkedIn, or X (especially Lexical/Draft.js contenteditable inputs), locate and click the native submit button element (e.g. 'Post comment', 'Comment', 'Reply', or 'Send') rather than relying solely on synthetic Enter keys. Always take a DOM snapshot to verify that the input box is cleared and the published comment/post appears in the live comment stream BEFORE proceeding to CRM write-back.",
     "N7. MANDATORY WRITE-BACK TO SIGNALS (Record every action):",
     `    a. For any comment/reply or post published, write it to Signals Content immediately via:`,
     `       POST ${input.signalsBaseUrl}/api/content with JSON:`,
