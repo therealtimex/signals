@@ -180,10 +180,11 @@ export function buildSocialPatrolBriefSection(input: {
     patrol.requireApproval
       ? "P6. Approval checkpoint is ON: draft comments in batches of 3–5, post each batch in this thread for confirmation, and publish approved batches with salted delays before hunting the next batch."
       : "P6. Approval checkpoint is OFF: publish drafted replies directly with salted delays between each post, logging each published link in this thread.",
-    `P7. Mine engagers (post authors, likers, and repliers) from the threads you engage with, targeting up to ${patrol.maxScrapedContacts} contact(s). Extract full profile data including profile picture URL (avatar_url) from post and user elements.`,
-    `P8. Write back: stage workflow-runs/${input.workflowRunId}/contacts.csv (header: name,company,title,email,platform,platform_handle,profile_url,avatar_url,notes), then commit with`,
+    `P7. Mine human engagers (post authors, likers, and repliers) from the threads you engage with, targeting up to ${patrol.maxScrapedContacts} contact(s). Extract full profile data including profile picture URL (avatar_url) from post and user elements.`,
+    "    Bot / Clone Rule: Engage with popular bot, curator, or aggregator accounts if their thread has high human visibility, but DO NOT ingest automated bots, mirror clones, or news feeds into contacts.csv (save the reply with contactId: null). Identify bots by handles ending in *bot/*_agent/*digest, automated bio disclosures, or zero-conversation link scraping.",
+    `P8. Write back: stage workflow-runs/${input.workflowRunId}/contacts.csv (header: name,company,title,email,platform,platform_handle,profile_url,avatar_url,notes) containing only real human prospects, then commit with`,
     `    signals-pp-cli import contacts --file workflow-runs/${input.workflowRunId}/contacts.csv --dedupe`,
-    "    Record every published reply as a Signals content_item attributed to this workflow run.",
+    "    Record every published reply as a Signals content_item attributed to this workflow run (linking contactId for human prospects, or contactId: null for bot/aggregator threads).",
     "P9. Release the lease when the shift ends: signals-pp-cli targets release --lease <leaseId>, then summarize comments and ingested contacts with links in this thread.",
   ];
 

@@ -17,7 +17,7 @@ import {
 } from "@/lib/workflows/contact-relationship-nurture";
 
 /** Bump this when seed template prompts change to trigger updates on existing installs. */
-const SEED_VERSION = 13;
+const SEED_VERSION = 14;
 
 export const CONTACT_PROFILE_PIPELINE_TEMPLATE_NAME = "Contact profile pipeline";
 
@@ -52,8 +52,9 @@ Search for influential people in the AI/ML space on X (Twitter) and LinkedIn. Fo
 1. Search for "top AI influencers 2025" and similar queries
 2. For each person found, fetch their profile pages for details
 3. Extract full public profile details: name, handle, avatarUrl (profile picture image URL), bio/headline, company, and follower metrics
-4. Create or enrich contact records with their information (always include avatarUrl when available)
-5. Report progress after processing each batch
+4. Filter out automated bots, clone mirrors, and news feeds (*bot, *daily, *digest) — only add real human professionals
+5. Create or enrich contact records with their information (always include avatarUrl when available)
+6. Report progress after processing each batch
 
 ## Output
 Aim to find 15-20 high-quality contacts with company, title, avatarUrl, and social profiles.`,
@@ -78,8 +79,9 @@ Search for leaders in fintech, crypto, and digital banking:
 1. Search for fintech leaders, startup founders, and notable executives
 2. Fetch profile pages and company pages for context
 3. Extract full public profile details: name, handle, avatarUrl (profile picture image URL), bio/headline, and company
-4. Create or enrich contact records with their information (always include avatarUrl when available)
-5. Report progress regularly
+4. Filter out automated bots, clone mirrors, and news feeds (*bot, *daily, *digest) — only add real human professionals
+5. Create or enrich contact records with their information (always include avatarUrl when available)
+6. Report progress regularly
 
 ## Output
 Find 15-20 contacts with company, title, avatarUrl, and at least one social profile.`,
@@ -103,8 +105,9 @@ Search for developer advocates and DevRel professionals:
 ## Process
 1. Search for "developer advocate" profiles and lists
 2. Fetch their profiles for company, title, avatarUrl (profile picture image URL), and bio
-3. Create or enrich contact records (always include avatarUrl when available)
-4. Focus on people actively posting technical content
+3. Filter out automated bots, clone mirrors, and news feeds (*bot, *daily, *digest) — only add real human professionals
+4. Create or enrich contact records (always include avatarUrl when available)
+5. Focus on people actively posting technical content
 
 ## Output
 Find 15-20 developer advocates with company, title, avatarUrl, and social links.`,
@@ -428,6 +431,7 @@ checkpoint when it is enabled.
 ## Rules
 - Methodically pursue your target \`maxComments\` budget without exceeding platform rate limits.
 - Apply a 20s–45s salted sleep between published comments to protect the acting profile.
+- Bot / Clone Rule (Engage for visibility, skip for contacts): Reply to popular bots, curators, or aggregators if their thread has high human visibility, but DO NOT ingest automated bots, mirror clones, or news feeds into \`contacts.csv\` (save the reply with \`contactId: null\`). Identify bots by handles ending in \`*bot\` / \`*_agent\` / \`*digest\`, automated bio disclosures, or zero-conversation link scraping.
 - One comment per post, and never comment twice in the same thread.
 - Skip posts that are already well answered, off-topic, or hostile.
 - Never fabricate a technical claim to look helpful. If you are unsure, do not reply.

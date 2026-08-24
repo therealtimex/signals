@@ -203,6 +203,8 @@ describe("buildSocialPatrolBriefSection", () => {
     expect(section).toContain("Salted sleep pacing: inject a randomized delay of 20s–45s");
     expect(section).toContain("batches of 3–5");
     expect(section).toContain("30 contact(s)");
+    expect(section).toContain("Bot / Clone Rule");
+    expect(section).toContain("DO NOT ingest automated bots");
     expect(section).toContain(
       "signals-pp-cli import contacts --file workflow-runs/run_9/contacts.csv --dedupe",
     );
