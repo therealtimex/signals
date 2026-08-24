@@ -1,13 +1,11 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useState } from "react";
 import {
   Dialog,
   DialogClose,
   DialogContent,
   DialogDescription,
-  DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -37,7 +35,32 @@ export function SnowballDialog({
   seedValue,
   entityName,
 }: SnowballDialogProps) {
-  const router = useRouter();
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      {open && (
+        <SnowballDialogContent
+          key={`${seedType}-${seedValue}`}
+          onClose={onClose}
+          seedType={seedType}
+          seedValue={seedValue}
+          entityName={entityName}
+        />
+      )}
+    </Dialog>
+  );
+}
+
+function SnowballDialogContent({
+  onClose,
+  seedType,
+  seedValue,
+  entityName,
+}: {
+  onClose: () => void;
+  seedType: SnowballSeedType;
+  seedValue: string;
+  entityName: string;
+}) {
   const [config, setConfig] = useState<NetworkSnowballConfig>(() =>
     readNetworkSnowballConfig({
       ...buildNetworkSnowballTemplateConfig(),
@@ -49,21 +72,6 @@ export function SnowballDialog({
   const [error, setError] = useState<string | null>(null);
   const [workflowRunId, setWorkflowRunId] = useState<string | null>(null);
   const [threadPath, setThreadPath] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (open) {
-      setConfig((prev) =>
-        readNetworkSnowballConfig({
-          ...prev,
-          seedType,
-          seedValue,
-        }),
-      );
-      setError(null);
-      setWorkflowRunId(null);
-      setThreadPath(null);
-    }
-  }, [open, seedType, seedValue]);
 
   async function handleLaunch() {
     setRunning(true);
@@ -111,87 +119,85 @@ export function SnowballDialog({
   const runLaunched = Boolean(workflowRunId || threadPath);
 
   return (
-    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col p-0 gap-0">
-        <div className="p-6 pb-4 border-b shrink-0 space-y-1.5">
-          <div className="flex items-center justify-between">
-            <DialogTitle className="text-xl flex items-center gap-2">
-              <Sparkles className="h-5 w-5 text-primary" />
-              Snowball Network: {entityName}
-            </DialogTitle>
-            <DialogClose asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 rounded-md opacity-70 hover:opacity-100 -mr-2"
-                onClick={onClose}
-              >
-                <X className="h-4 w-4" />
-                <span className="sr-only">Close</span>
-              </Button>
-            </DialogClose>
-          </div>
-          <DialogDescription className="text-sm text-muted-foreground">
-            Traverse causal edges to discover and link connected investors, co-founders, angels, and technical advocates into the Signals graph.
-          </DialogDescription>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-6 space-y-4">
-          {runLaunched ? (
-            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-100 space-y-2">
-              <p className="font-medium">Snowball agent launched in RealTimeX!</p>
-              <p className="text-xs text-muted-foreground">
-                The agent is inspecting live feeds and traversing relationship edges.
-              </p>
-              {workflowRunId && (
-                <div className="pt-2">
-                  <Link
-                    href={`/dashboard/workflows/${workflowRunId}`}
-                    className="inline-flex items-center justify-center rounded-md bg-emerald-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-800"
-                    onClick={onClose}
-                  >
-                    View Live Run & Thread
-                  </Link>
-                </div>
-              )}
-              {threadPath && <p className="font-mono text-xs text-muted-foreground pt-1">{threadPath}</p>}
-            </div>
-          ) : (
-            <NetworkSnowballFields
-              value={config}
-              onChange={setConfig}
-              disabled={running}
-            />
-          )}
-
-          {error && (
-            <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200">
-              {error}
-            </div>
-          )}
-        </div>
-
-        <div className="p-4 px-6 border-t shrink-0 bg-background/95 backdrop-blur flex justify-end gap-2">
-          <Button variant="outline" onClick={onClose} disabled={running}>
-            {runLaunched ? "Close" : "Cancel"}
-          </Button>
-          {!runLaunched && (
-            <Button onClick={handleLaunch} disabled={running || !config.seedValue.trim()}>
-              {running ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Launching Snowball…
-                </>
-              ) : (
-                <>
-                  <Sparkles className="mr-2 h-4 w-4" />
-                  Launch Snowball Run
-                </>
-              )}
+    <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col p-0 gap-0">
+      <div className="p-6 pb-4 border-b shrink-0 space-y-1.5">
+        <div className="flex items-center justify-between">
+          <DialogTitle className="text-xl flex items-center gap-2">
+            <Sparkles className="h-5 w-5 text-primary" />
+            Snowball Network: {entityName}
+          </DialogTitle>
+          <DialogClose asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 rounded-md opacity-70 hover:opacity-100 -mr-2"
+              onClick={onClose}
+            >
+              <X className="h-4 w-4" />
+              <span className="sr-only">Close</span>
             </Button>
-          )}
+          </DialogClose>
         </div>
-      </DialogContent>
-    </Dialog>
+        <DialogDescription className="text-sm text-muted-foreground">
+          Traverse causal edges to discover and link connected investors, co-founders, angels, and technical advocates into the Signals graph.
+        </DialogDescription>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-6 space-y-4">
+        {runLaunched ? (
+          <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-100 space-y-2">
+            <p className="font-medium">Snowball agent launched in RealTimeX!</p>
+            <p className="text-xs text-muted-foreground">
+              The agent is inspecting live feeds and traversing relationship edges.
+            </p>
+            {workflowRunId && (
+              <div className="pt-2">
+                <Link
+                  href={`/dashboard/workflows/${workflowRunId}`}
+                  className="inline-flex items-center justify-center rounded-md bg-emerald-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-800"
+                  onClick={onClose}
+                >
+                  View Live Run & Thread
+                </Link>
+              </div>
+            )}
+            {threadPath && <p className="font-mono text-xs text-muted-foreground pt-1">{threadPath}</p>}
+          </div>
+        ) : (
+          <NetworkSnowballFields
+            value={config}
+            onChange={setConfig}
+            disabled={running}
+          />
+        )}
+
+        {error && (
+          <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200">
+            {error}
+          </div>
+        )}
+      </div>
+
+      <div className="p-4 px-6 border-t shrink-0 bg-background/95 backdrop-blur flex justify-end gap-2">
+        <Button variant="outline" onClick={onClose} disabled={running}>
+          {runLaunched ? "Close" : "Cancel"}
+        </Button>
+        {!runLaunched && (
+          <Button onClick={handleLaunch} disabled={running || !config.seedValue.trim()}>
+            {running ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Launching Snowball…
+              </>
+            ) : (
+              <>
+                <Sparkles className="mr-2 h-4 w-4" />
+                Launch Snowball Run
+              </>
+            )}
+          </Button>
+        )}
+      </div>
+    </DialogContent>
   );
 }
