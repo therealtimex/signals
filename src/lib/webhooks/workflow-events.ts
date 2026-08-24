@@ -152,18 +152,19 @@ export async function emitWorkflowCompletedEvent(
   let cascadeResult: DispatchCascadeResult | undefined;
   let routingRecommendation: { suggestedAction: "nurture" | "patrol" | "profile_pipeline" | "review"; rationale: string } | undefined;
 
-  if (cascadeConfig.followOnAction === "agentic_router") {
+  if (cascadeConfig.followOnActions.includes("agentic_router")) {
     routingRecommendation = evaluateAgenticRouting(createdContactIds);
     cascadeResult = {
       triggered: true,
+      followOnActions: cascadeConfig.followOnActions,
       followOnAction: "agentic_router",
       reason: routingRecommendation.rationale,
     };
-  } else if (cascadeConfig.followOnAction !== "none" && cascadeConfig.cascadePolicy === "immediate") {
+  } else if (cascadeConfig.followOnActions.length > 0 && cascadeConfig.cascadePolicy === "immediate") {
     cascadeResult = dispatchWorkflowCascade({
       parentRunId: runId,
       createdContactIds,
-      overrideAction: cascadeConfig.followOnAction,
+      overrideActions: cascadeConfig.followOnActions,
     });
   }
 

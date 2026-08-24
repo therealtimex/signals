@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback } from "react";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -195,58 +196,78 @@ export function NetworkSnowballFields({
         />
       </div>
 
-      {/* Follow-on Action (Workflow Cascade) */}
-      <div className="space-y-2 pt-2 border-t">
-        <Label htmlFor="snowball-follow-on">Follow-on Action (Workflow Snowballing)</Label>
-        <p className="text-xs text-muted-foreground">
-          Automatically cascade newly discovered contacts into follow-on enrichment or outreach workflows upon completion.
-        </p>
-        <Select
-          value={value.followOnAction ?? "none"}
-          onValueChange={(next) =>
-            onChange({
-              ...value,
-              followOnAction: next as FollowOnActionType,
-            })
-          }
-          disabled={disabled}
-        >
-          <SelectTrigger id="snowball-follow-on">
-            <SelectValue placeholder="Select follow-on workflow" />
-          </SelectTrigger>
-          <SelectContent>
-            {FOLLOW_ON_ACTION_OPTIONS.map((opt) => (
-              <SelectItem key={opt.value} value={opt.value}>
-                {opt.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      {value.followOnAction && value.followOnAction !== "none" && (
-        <div className="space-y-2">
-          <Label htmlFor="snowball-cascade-policy">Cascade policy</Label>
-          <Select
-            value={value.cascadePolicy ?? "immediate"}
-            onValueChange={(next) =>
-              onChange({
-                ...value,
-                cascadePolicy: next as "immediate" | "supervised",
-              })
-            }
-            disabled={disabled}
-          >
-            <SelectTrigger id="snowball-cascade-policy">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="immediate">⚡ Immediate — auto-trigger on completion</SelectItem>
-              <SelectItem value="supervised">🛡️ Supervised — prompt for confirmation in thread</SelectItem>
-            </SelectContent>
-          </Select>
+      {/* Follow-on Actions (Workflow Cascade) */}
+      <div className="space-y-3 pt-2 border-t">
+        <div>
+          <Label>Follow-on Actions (Workflow Snowballing)</Label>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Select one or more workflows to automatically cascade newly discovered contacts into upon completion.
+          </p>
         </div>
-      )}
+
+        <div className="space-y-2 rounded-lg border p-3 bg-muted/20">
+          {FOLLOW_ON_ACTION_OPTIONS.map((opt) => {
+            const currentActions = value.followOnActions ?? (value.followOnAction ? [value.followOnAction] : []);
+            const isChecked = currentActions.includes(opt.value);
+
+            return (
+              <label
+                key={opt.value}
+                htmlFor={`cascade-${opt.value}`}
+                className="flex items-start gap-3 p-2 rounded-md hover:bg-muted/50 cursor-pointer transition-colors"
+              >
+                <Checkbox
+                  id={`cascade-${opt.value}`}
+                  checked={isChecked}
+                  onCheckedChange={(checked) => {
+                    const next = checked
+                      ? [...currentActions.filter((a) => a !== opt.value), opt.value]
+                      : currentActions.filter((a) => a !== opt.value);
+                    onChange({
+                      ...value,
+                      followOnActions: next,
+                      followOnAction: next[0],
+                    });
+                  }}
+                  disabled={disabled}
+                  className="mt-0.5"
+                />
+                <div className="space-y-0.5 leading-none">
+                  <div className="text-sm font-medium flex items-center gap-1.5">
+                    <span>{opt.badge}</span>
+                    <span>{opt.label}</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">{opt.description}</p>
+                </div>
+              </label>
+            );
+          })}
+        </div>
+
+        {(value.followOnActions?.length ?? (value.followOnAction ? 1 : 0)) > 0 && (
+          <div className="space-y-2 pt-1">
+            <Label htmlFor="snowball-cascade-policy">Cascade policy</Label>
+            <Select
+              value={value.cascadePolicy ?? "immediate"}
+              onValueChange={(next) =>
+                onChange({
+                  ...value,
+                  cascadePolicy: next as "immediate" | "supervised",
+                })
+              }
+              disabled={disabled}
+            >
+              <SelectTrigger id="snowball-cascade-policy">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="immediate">⚡ Immediate — auto-trigger on completion</SelectItem>
+                <SelectItem value="supervised">🛡️ Supervised — prompt for confirmation in thread</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

@@ -17,7 +17,7 @@ describe("Workflow Chaining & Cascading Engine", () => {
 
   it("reads default cascade config for empty or null input", () => {
     expect(readWorkflowCascadeConfig(null)).toEqual({
-      followOnAction: "none",
+      followOnActions: [],
       cascadePolicy: "immediate",
       maxCascadeDepth: 3,
       currentDepth: 0,
@@ -25,9 +25,9 @@ describe("Workflow Chaining & Cascading Engine", () => {
     });
   });
 
-  it("reads and clamps custom cascade config", () => {
+  it("reads and clamps custom cascade config with multi-actions", () => {
     const config = readWorkflowCascadeConfig({
-      followOnAction: "profile_pipeline",
+      followOnActions: ["profile_pipeline", "contact_nurture"],
       cascadePolicy: "supervised",
       maxCascadeDepth: 10, // should clamp to 5
       currentDepth: -2, // should clamp to 0
@@ -35,7 +35,7 @@ describe("Workflow Chaining & Cascading Engine", () => {
     });
 
     expect(config).toEqual({
-      followOnAction: "profile_pipeline",
+      followOnActions: ["profile_pipeline", "contact_nurture"],
       cascadePolicy: "supervised",
       maxCascadeDepth: 5,
       currentDepth: 0,
@@ -55,22 +55,27 @@ describe("Workflow Chaining & Cascading Engine", () => {
     expect(template?.name).toBe("Contact profile pipeline");
   });
 
-  it("dispatches deterministic cascade run to child workflow", () => {
-    const template = createTemplate({
+  it("dispatches deterministic cascade run to multiple child workflows", () => {
+    const t1 = createTemplate({
+      name: "Contact profile pipeline",
+      templateType: "enrichment",
+      status: "active",
+    });
+
+    const t2 = createTemplate({
       name: "Contact Relationship Nurture",
       templateType: "nurture",
       status: "active",
-      config: JSON.stringify({ followBack: true }),
     });
 
     const parentRun = createWorkflowRun({
-      templateId: template.id,
+      templateId: t1.id,
       workflowType: "search",
       status: "completed",
       trigger: "template",
       config: JSON.stringify({
         cascadeConfig: buildWorkflowCascadeConfig({
-          followOnAction: "contact_nurture",
+          followOnActions: ["profile_pipeline", "contact_nurture"],
           cascadePolicy: "immediate",
           currentDepth: 0,
           maxCascadeDepth: 3,
@@ -84,9 +89,10 @@ describe("Workflow Chaining & Cascading Engine", () => {
     });
 
     expect(result.triggered).toBe(true);
-    expect(result.childRunId).toBeDefined();
-    expect(result.targetTemplateName).toBe("Contact Relationship Nurture");
-    expect(result.followOnAction).toBe("contact_nurture");
+    expect(result.childRunIds).toHaveLength(2);
+    expect(result.targetTemplateNames).toContain("Contact profile pipeline");
+    expect(result.targetTemplateNames).toContain("Contact Relationship Nurture");
+    expect(result.followOnActions).toEqual(["profile_pipeline", "contact_nurture"]);
   });
 
   it("handles agentic_router without spawning child run directly", () => {
@@ -103,7 +109,7 @@ describe("Workflow Chaining & Cascading Engine", () => {
       trigger: "template",
       config: JSON.stringify({
         cascadeConfig: buildWorkflowCascadeConfig({
-          followOnAction: "agentic_router",
+          followOnActions: ["agentic_router"],
         }),
       }),
     });
@@ -115,7 +121,7 @@ describe("Workflow Chaining & Cascading Engine", () => {
 
     expect(result.triggered).toBe(true);
     expect(result.followOnAction).toBe("agentic_router");
-    expect(result.childRunId).toBeUndefined();
+    expect(result.childRunIds).toBeUndefined();
   });
 
   it("enforces maxCascadeDepth to prevent infinite recursion", () => {
@@ -132,7 +138,7 @@ describe("Workflow Chaining & Cascading Engine", () => {
       trigger: "template",
       config: JSON.stringify({
         cascadeConfig: buildWorkflowCascadeConfig({
-          followOnAction: "social_patrol",
+          followOnActions: ["social_patrol"],
           currentDepth: 3,
           maxCascadeDepth: 3,
         }),

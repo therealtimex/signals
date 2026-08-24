@@ -1,12 +1,11 @@
 export type FollowOnActionType =
-  | "none"
   | "profile_pipeline"
   | "contact_nurture"
   | "social_patrol"
   | "agentic_router";
 
 export interface WorkflowCascadeConfig {
-  followOnAction: FollowOnActionType;
+  followOnActions: FollowOnActionType[];
   cascadePolicy?: "immediate" | "supervised";
   maxCascadeDepth?: number;
   currentDepth?: number;
@@ -19,43 +18,45 @@ export const MAX_CASCADE_DEPTH_DEFAULT = 3;
 export const FOLLOW_ON_ACTION_OPTIONS: Array<{
   value: FollowOnActionType;
   label: string;
+  badge: string;
   description: string;
   targetTemplateName?: string;
 }> = [
   {
-    value: "none",
-    label: "None (Single run only)",
-    description: "Conclude after this workflow completes without follow-on actions.",
-  },
-  {
     value: "profile_pipeline",
-    label: "⚡ Contact Profile Pipeline (Hydrate & Persona)",
+    badge: "⚡",
+    label: "Contact Profile Pipeline (Hydrate & Persona)",
     description: "Automatically hydrate bios, avatars, and AI personas for newly discovered contacts.",
     targetTemplateName: "Contact profile pipeline",
   },
   {
     value: "contact_nurture",
-    label: "🤝 Contact Relationship Nurture",
+    badge: "🤝",
+    label: "Contact Relationship Nurture",
     description: "Queue follow and warm engagement actions on X/LinkedIn for discovered contacts.",
     targetTemplateName: "Contact Relationship Nurture",
   },
   {
     value: "social_patrol",
-    label: "🎯 Social Intent Patrol",
+    badge: "🎯",
+    label: "Social Intent Patrol",
     description: "Monitor discovered founders and investors for active launch and product discussions.",
     targetTemplateName: "Social Intent Patrol",
   },
   {
     value: "agentic_router",
-    label: "🤖 Smart Agentic Routing (Webhook / Orchestrator)",
+    badge: "🤖",
+    label: "Smart Agentic Routing (Webhook / Orchestrator)",
     description: "Post a workflow.completed webhook for the RealTimeX Orchestrator agent to inspect the cohort and dynamically dispatch the next step.",
   },
 ];
 
+const VALID_ACTION_SET = new Set<string>(FOLLOW_ON_ACTION_OPTIONS.map((opt) => opt.value));
+
 export function readWorkflowCascadeConfig(rawConfig: Record<string, unknown> | null | undefined): WorkflowCascadeConfig {
   if (!rawConfig) {
     return {
-      followOnAction: "none",
+      followOnActions: [],
       cascadePolicy: "immediate",
       maxCascadeDepth: MAX_CASCADE_DEPTH_DEFAULT,
       currentDepth: 0,
@@ -64,11 +65,14 @@ export function readWorkflowCascadeConfig(rawConfig: Record<string, unknown> | n
 
   const cascade = (rawConfig[CASCADE_CONFIG_KEY] as Record<string, unknown> | undefined) ?? rawConfig;
 
-  const followOnAction =
-    typeof cascade.followOnAction === "string" &&
-    FOLLOW_ON_ACTION_OPTIONS.some((opt) => opt.value === cascade.followOnAction)
-      ? (cascade.followOnAction as FollowOnActionType)
-      : "none";
+  let followOnActions: FollowOnActionType[] = [];
+  if (Array.isArray(cascade.followOnActions)) {
+    followOnActions = cascade.followOnActions.filter((act): act is FollowOnActionType =>
+      typeof act === "string" && VALID_ACTION_SET.has(act)
+    );
+  } else if (typeof cascade.followOnAction === "string" && VALID_ACTION_SET.has(cascade.followOnAction)) {
+    followOnActions = [cascade.followOnAction as FollowOnActionType];
+  }
 
   const cascadePolicy = cascade.cascadePolicy === "supervised" ? "supervised" : "immediate";
 
@@ -83,7 +87,7 @@ export function readWorkflowCascadeConfig(rawConfig: Record<string, unknown> | n
     : undefined;
 
   return {
-    followOnAction,
+    followOnActions,
     cascadePolicy,
     maxCascadeDepth,
     currentDepth,
@@ -92,8 +96,10 @@ export function readWorkflowCascadeConfig(rawConfig: Record<string, unknown> | n
 }
 
 export function buildWorkflowCascadeConfig(config: Partial<WorkflowCascadeConfig>): Record<string, unknown> {
+  const followOnActions = config.followOnActions ?? [];
   return {
-    followOnAction: config.followOnAction ?? "none",
+    followOnActions,
+    followOnAction: followOnActions[0] ?? "none", // Legacy compatibility
     cascadePolicy: config.cascadePolicy ?? "immediate",
     maxCascadeDepth: config.maxCascadeDepth ?? MAX_CASCADE_DEPTH_DEFAULT,
     currentDepth: config.currentDepth ?? 0,

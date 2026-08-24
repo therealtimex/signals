@@ -39,7 +39,8 @@ describe("readNetworkSnowballConfig", () => {
       targetPlatform: "all",
       autoLinkGraphEdges: true,
       requireApproval: false,
-      followOnAction: "none",
+      followOnActions: [],
+      followOnAction: undefined,
       cascadePolicy: "immediate",
     });
   });
@@ -55,6 +56,7 @@ describe("readNetworkSnowballConfig", () => {
         targetPlatform: "x",
         autoLinkGraphEdges: false,
         requireApproval: true,
+        followOnActions: ["profile_pipeline", "contact_nurture"],
       }),
     ).toEqual({
       seedType: "contact_id",
@@ -65,7 +67,8 @@ describe("readNetworkSnowballConfig", () => {
       targetPlatform: "x",
       autoLinkGraphEdges: false,
       requireApproval: true,
-      followOnAction: "none",
+      followOnActions: ["profile_pipeline", "contact_nurture"],
+      followOnAction: "profile_pipeline",
       cascadePolicy: "immediate",
     });
   });

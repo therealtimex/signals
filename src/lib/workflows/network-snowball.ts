@@ -62,6 +62,7 @@ export interface NetworkSnowballConfig {
   targetPlatform: "x" | "linkedin" | "all";
   autoLinkGraphEdges: boolean;
   requireApproval: boolean;
+  followOnActions?: FollowOnActionType[];
   followOnAction?: FollowOnActionType;
   cascadePolicy?: "immediate" | "supervised";
 }
@@ -106,7 +107,8 @@ export function readNetworkSnowballConfig(
     targetPlatform,
     autoLinkGraphEdges: typeof config.autoLinkGraphEdges === "boolean" ? config.autoLinkGraphEdges : true,
     requireApproval: typeof config.requireApproval === "boolean" ? config.requireApproval : false,
-    followOnAction: cascade.followOnAction,
+    followOnActions: cascade.followOnActions,
+    followOnAction: cascade.followOnActions[0],
     cascadePolicy: cascade.cascadePolicy,
   };
 }
@@ -114,6 +116,7 @@ export function readNetworkSnowballConfig(
 export function buildNetworkSnowballRunConfig(
   config: NetworkSnowballConfig,
 ): Record<string, unknown> {
+  const followOnActions = config.followOnActions ?? (config.followOnAction ? [config.followOnAction] : []);
   return {
     [NETWORK_SNOWBALL_CONFIG_KEY]: { version: NETWORK_SNOWBALL_CONFIG_VERSION },
     seedType: config.seedType,
@@ -125,7 +128,7 @@ export function buildNetworkSnowballRunConfig(
     autoLinkGraphEdges: config.autoLinkGraphEdges,
     requireApproval: config.requireApproval,
     [CASCADE_CONFIG_KEY]: buildWorkflowCascadeConfig({
-      followOnAction: config.followOnAction ?? "none",
+      followOnActions,
       cascadePolicy: config.cascadePolicy ?? "immediate",
     }),
   };
@@ -143,7 +146,7 @@ export function buildNetworkSnowballTemplateConfig(): Record<string, unknown> {
     autoLinkGraphEdges: true,
     requireApproval: false,
     [CASCADE_CONFIG_KEY]: buildWorkflowCascadeConfig({
-      followOnAction: "none",
+      followOnActions: [],
       cascadePolicy: "immediate",
     }),
   };

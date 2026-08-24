@@ -70,7 +70,7 @@ describe("Workflow Events & Agentic Router", () => {
       trigger: "template",
       config: JSON.stringify({
         cascadeConfig: buildWorkflowCascadeConfig({
-          followOnAction: "contact_nurture",
+          followOnActions: ["contact_nurture"],
           cascadePolicy: "immediate",
         }),
       }),
@@ -85,8 +85,8 @@ describe("Workflow Events & Agentic Router", () => {
     expect(result.emitted).toBe(true);
     expect(result.event.event).toBe("workflow.completed");
     expect(result.cascadeResult?.triggered).toBe(true);
-    expect(result.cascadeResult?.childRunId).toBeDefined();
-    expect(result.cascadeResult?.targetTemplateName).toBe("Contact Relationship Nurture");
+    expect(result.cascadeResult?.childRunIds).toHaveLength(1);
+    expect(result.cascadeResult?.targetTemplateNames).toContain("Contact Relationship Nurture");
   });
 
   it("emits event with agentic router recommendation", async () => {
@@ -103,7 +103,7 @@ describe("Workflow Events & Agentic Router", () => {
       trigger: "template",
       config: JSON.stringify({
         cascadeConfig: buildWorkflowCascadeConfig({
-          followOnAction: "agentic_router",
+          followOnActions: ["agentic_router"],
         }),
       }),
     });
