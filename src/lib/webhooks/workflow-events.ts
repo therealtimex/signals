@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { workflowRuns, workflowTemplates, contacts, contactIdentities } from "@/lib/db/schema";
@@ -30,6 +31,96 @@ export interface EmitWorkflowCompletedResult {
     suggestedAction: "nurture" | "patrol" | "profile_pipeline" | "review";
     rationale: string;
   };
+  outboundDelivered?: boolean;
+}
+
+export interface OutboundWebhookHeaders {
+  [header: string]: string;
+}
+
+/**
+ * Builds standard signed webhook headers conforming to the RealTimeX Local Apps contract.
+ */
+export function buildSignedWebhookHeaders(
+  rawBody: string,
+  options?: {
+    secret?: string;
+    eventType?: string;
+    source?: string;
+    deliveryId?: string;
+    timestamp?: string;
+  }
+): OutboundWebhookHeaders {
+  const secret =
+    options?.secret ??
+    process.env.REALTIMEX_WEBHOOK_SECRET ??
+    process.env.SIGNALS_WEBHOOK_SECRET;
+
+  const signatureHeader =
+    process.env.REALTIMEX_WEBHOOK_SIGNATURE_HEADER || "x-realtimex-signature";
+  const signaturePrefix =
+    process.env.REALTIMEX_WEBHOOK_SIGNATURE_PREFIX || "sha256=";
+  const timestampHeader =
+    process.env.REALTIMEX_WEBHOOK_TIMESTAMP_HEADER || "x-realtimex-timestamp";
+  const deliveryIdHeader =
+    process.env.REALTIMEX_WEBHOOK_DELIVERY_ID_HEADER || "x-realtimex-delivery-id";
+  const eventTypeHeader =
+    process.env.REALTIMEX_WEBHOOK_EVENT_TYPE_HEADER || "x-realtimex-event-type";
+  const sourceHeader =
+    process.env.REALTIMEX_WEBHOOK_SOURCE_HEADER || "x-realtimex-source";
+
+  const timestamp = options?.timestamp || new Date().toISOString();
+  const deliveryId = options?.deliveryId || crypto.randomUUID();
+  const eventType = options?.eventType || process.env.REALTIMEX_WEBHOOK_EVENT_TYPE || "workflow.completed";
+  const source = options?.source || process.env.REALTIMEX_WEBHOOK_SOURCE || "com.realtimex.signals";
+
+  const headers: OutboundWebhookHeaders = {
+    "Content-Type": "application/json",
+    [timestampHeader]: timestamp,
+    [deliveryIdHeader]: deliveryId,
+    [eventTypeHeader]: eventType,
+    [sourceHeader]: source,
+  };
+
+  if (secret) {
+    const hmacHex = crypto
+      .createHmac("sha256", secret)
+      .update(rawBody)
+      .digest("hex");
+    headers[signatureHeader] = `${signaturePrefix}${hmacHex}`;
+  }
+
+  return headers;
+}
+
+/**
+ * Verifies an incoming HMAC signature against the raw body string.
+ */
+export function verifyHmacSignature(
+  rawBody: string,
+  providedSignature: string | null | undefined,
+  secret: string
+): boolean {
+  if (!providedSignature || !secret) return false;
+  const hmacHex = crypto.createHmac("sha256", secret).update(rawBody).digest("hex");
+  const prefix = process.env.REALTIMEX_WEBHOOK_SIGNATURE_PREFIX || "sha256=";
+  const expectedWithPrefix = `${prefix}${hmacHex}`;
+
+  try {
+    const candidateA = Buffer.from(hmacHex);
+    const candidateB = Buffer.from(expectedWithPrefix);
+    const provided = Buffer.from(providedSignature.trim());
+
+    if (provided.length === candidateA.length && crypto.timingSafeEqual(candidateA, provided)) {
+      return true;
+    }
+    if (provided.length === candidateB.length && crypto.timingSafeEqual(candidateB, provided)) {
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -64,50 +155,49 @@ export function evaluateAgenticRouting(createdContactIds: string[]): {
     const contactIdentityList = identities.filter((ci) => ci.contactId === contact.id);
     const combinedText = [
       contact.name,
-      contact.tags,
-      contact.metadata,
-      ...contactIdentityList.flatMap((ci) => [ci.headline, ci.bio, ci.displayName]),
+      ...contactIdentityList.map((i) => `${i.headline || ""} ${i.bio || ""}`),
     ]
-      .filter((v): v is string => typeof v === "string" && v.trim().length > 0)
       .join(" ")
       .toLowerCase();
 
-    if (
+    const isInvestor =
       combinedText.includes("investor") ||
       combinedText.includes("partner") ||
       combinedText.includes("angel") ||
-      combinedText.includes("general partner") ||
-      combinedText.includes("lead investor") ||
-      combinedText.includes("vc") ||
-      combinedText.includes("venture")
-    ) {
+      combinedText.includes("venture") ||
+      combinedText.includes("capital");
+
+    if (isInvestor) {
       investorCount++;
     }
 
-    const hasAvatar = Boolean(contactIdentityList.some((ci) => Boolean(ci.avatarUrl)));
-    const hasPersona = Boolean(contact.metadata && contact.metadata.includes("persona"));
-    if (!hasAvatar && !hasPersona) {
+    const hasAvatar = contactIdentityList.some((i) => Boolean(i.avatarUrl));
+    if (!hasAvatar) {
       missingAvatarOrPersona++;
     }
   }
 
-  if (investorCount > 0 && investorCount >= rows.length * 0.3) {
+  const total = rows.length;
+  const investorRatio = total > 0 ? investorCount / total : 0;
+  const unhydratedRatio = total > 0 ? missingAvatarOrPersona / total : 0;
+
+  if (investorRatio >= 0.3) {
     return {
       suggestedAction: "nurture",
-      rationale: `Detected ${investorCount} high-value investor node(s). Prioritize warm follow + engagement sequence.`,
+      rationale: `Detected ${investorCount} high-value investor node(s) (${Math.round(investorRatio * 100)}% of cohort). Prioritize warm follow + engagement sequence.`,
     };
   }
 
-  if (missingAvatarOrPersona > rows.length * 0.5) {
+  if (unhydratedRatio >= 0.5) {
     return {
       suggestedAction: "profile_pipeline",
-      rationale: `${missingAvatarOrPersona} contact(s) lack rich persona/avatar data. Run Contact Profile Pipeline first.`,
+      rationale: `${missingAvatarOrPersona} contact(s) lack complete avatar or profile data. Run Contact Profile Pipeline first to enrich bios and synthesize AI personas.`,
     };
   }
 
   return {
     suggestedAction: "patrol",
-    rationale: `Active ecosystem cohort detected (${rows.length} contacts). Monitor ongoing launch and technical intent.`,
+    rationale: `Discovered active founder/operator cohort. Deploy Social Intent Patrol to monitor launch chatter and product activity.`,
   };
 }
 
@@ -120,6 +210,7 @@ export async function emitWorkflowCompletedEvent(
     summary?: string;
     createdContactIds?: string[];
     webhookUrl?: string;
+    secret?: string;
     fetchImpl?: typeof fetch;
   }
 ): Promise<EmitWorkflowCompletedResult> {
@@ -170,23 +261,33 @@ export async function emitWorkflowCompletedEvent(
     });
   }
 
-  // Outbound Webhook dispatch (RealTimeX, n8n, Zapier, custom URL)
+  // Outbound Webhook dispatch (RealTimeX Webhook Ingress, n8n, Zapier, custom URL)
   const targetWebhookUrl =
     options?.webhookUrl ??
-    process.env.SIGNALS_WEBHOOK_URL ??
-    process.env.REALTIMEX_WEBHOOK_URL;
+    process.env.REALTIMEX_WEBHOOK_URL ??
+    process.env.SIGNALS_WEBHOOK_URL;
 
+  let outboundDelivered = false;
   if (targetWebhookUrl) {
     try {
       const fetcher = options?.fetchImpl ?? fetch;
+      const rawBody = JSON.stringify({
+        ...eventPayload,
+        routingRecommendation,
+      });
+
+      const headers = buildSignedWebhookHeaders(rawBody, {
+        secret: options?.secret,
+        eventType: "workflow.completed",
+        source: "com.realtimex.signals",
+      });
+
       await fetcher(targetWebhookUrl, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...eventPayload,
-          routingRecommendation,
-        }),
+        headers,
+        body: rawBody,
       });
+      outboundDelivered = true;
     } catch {
       // Non-blocking outbound delivery
     }
@@ -197,5 +298,6 @@ export async function emitWorkflowCompletedEvent(
     event: eventPayload,
     cascadeResult,
     routingRecommendation,
+    outboundDelivered,
   };
 }
