@@ -76,30 +76,25 @@ export function buildSignedWebhookHeaders(
     process.env.REALTIMEX_WEBHOOK_SECRET ??
     process.env.SIGNALS_WEBHOOK_SECRET;
 
-  const signatureHeader =
-    process.env.REALTIMEX_WEBHOOK_SIGNATURE_HEADER || "x-realtimex-signature";
   const signaturePrefix =
     process.env.REALTIMEX_WEBHOOK_SIGNATURE_PREFIX || "sha256=";
-  const timestampHeader =
-    process.env.REALTIMEX_WEBHOOK_TIMESTAMP_HEADER || "x-realtimex-timestamp";
-  const deliveryIdHeader =
-    process.env.REALTIMEX_WEBHOOK_DELIVERY_ID_HEADER || "x-realtimex-delivery-id";
-  const eventTypeHeader =
-    process.env.REALTIMEX_WEBHOOK_EVENT_TYPE_HEADER || "x-realtimex-event-type";
-  const sourceHeader =
-    process.env.REALTIMEX_WEBHOOK_SOURCE_HEADER || "x-realtimex-source";
-
-  const timestamp = options?.timestamp || new Date().toISOString();
+  const timestamp = options?.timestamp || Math.floor(Date.now() / 1000).toString();
   const deliveryId = options?.deliveryId || crypto.randomUUID();
   const eventType = options?.eventType || process.env.REALTIMEX_WEBHOOK_EVENT_TYPE || "workflow.completed";
   const source = options?.source || process.env.REALTIMEX_WEBHOOK_SOURCE || "com.realtimex.signals";
 
   const headers: OutboundWebhookHeaders = {
     "Content-Type": "application/json",
-    [timestampHeader]: timestamp,
-    [deliveryIdHeader]: deliveryId,
-    [eventTypeHeader]: eventType,
-    [sourceHeader]: source,
+    // Standard Generic HMAC Ingress Headers
+    "X-Webhook-Timestamp": timestamp,
+    "X-Webhook-Id": deliveryId,
+    "X-Webhook-Event": eventType,
+    "X-Webhook-Source": source,
+    // RealTimeX namespace headers
+    "x-realtimex-timestamp": timestamp,
+    "x-realtimex-delivery-id": deliveryId,
+    "x-realtimex-event-type": eventType,
+    "x-realtimex-source": source,
   };
 
   if (secret) {
@@ -107,7 +102,9 @@ export function buildSignedWebhookHeaders(
       .createHmac("sha256", secret)
       .update(rawBody)
       .digest("hex");
-    headers[signatureHeader] = `${signaturePrefix}${hmacHex}`;
+    const signature = `${signaturePrefix}${hmacHex}`;
+    headers["X-Webhook-Signature-256"] = signature;
+    headers["x-realtimex-signature"] = signature;
   }
 
   return headers;
