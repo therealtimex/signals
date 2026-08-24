@@ -180,7 +180,7 @@ export function buildSocialPatrolBriefSection(input: {
     patrol.requireApproval
       ? "P6. Approval checkpoint is ON: draft comments in batches of 3–5, post each batch in this thread for confirmation, and publish approved batches with salted delays before hunting the next batch."
       : "P6. Approval checkpoint is OFF: publish drafted replies directly with salted delays between each post, logging each published link in this thread.",
-    `P7. Mine engagers (post authors, likers, and repliers) from the threads you engage with, targeting up to ${patrol.maxScrapedContacts} contact(s).`,
+    `P7. Mine engagers (post authors, likers, and repliers) from the threads you engage with, targeting up to ${patrol.maxScrapedContacts} contact(s). Extract full profile data including profile picture URL (avatar_url) from post and user elements.`,
     `P8. Write back: stage workflow-runs/${input.workflowRunId}/contacts.csv (header: name,company,title,email,platform,platform_handle,profile_url,avatar_url,notes), then commit with`,
     `    signals-pp-cli import contacts --file workflow-runs/${input.workflowRunId}/contacts.csv --dedupe`,
     "    Record every published reply as a Signals content_item attributed to this workflow run.",
