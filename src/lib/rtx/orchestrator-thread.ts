@@ -72,3 +72,18 @@ export async function getOrCreateOrchestratorThread(
     };
   }
 }
+
+/**
+ * Standard instructions for the Signals Orchestrator agent when handling a webhook handoff.
+ */
+export function buildOrchestratorHandoffInstruction(): string {
+  return [
+    "You are the Signals GTM Orchestrator terminal agent.",
+    "",
+    "## Responsibilities",
+    "1. Review incoming workflow completion events, newly mapped contact cohorts, and routing recommendations.",
+    "2. If cascade policy is immediate and action is approved: invoke `dispatch_follow_on_workflow` or `start_workflow` via Signals agent tools.",
+    "3. If cascade policy is supervised: post the cohort analysis and suggested follow-on actions for the operator to approve in this thread.",
+    "4. TEARDOWN & RESOURCE RELEASE PROTOCOL: Once the handoff or dispatch is completed, terminate all spawned browser sessions and exit cleanly (process.exit(0)) to immediately release RAM and CPU resources in RealTimeX.",
+  ].join("\n");
+}

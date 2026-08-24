@@ -163,6 +163,7 @@ export function buildAgentWorkflowBrief(input: {
     `8. For single-record edits, invoke tools (${tools}) via POST ${input.signalsBaseUrl}/api/agent-tools/invoke with JSON { \"tool\": \"...\", \"input\": { ... } }.`,
     "9. Perform web search and browser work in RealTimeX (not via agent-tools).",
     "10. Report a concise summary in this thread when finished (import JSON summary is suitable).",
+    "11. TEARDOWN & RESOURCE RELEASE: When the task or handoff completes, terminate all spawned browser sessions and exit cleanly (process.exit(0)) to immediately release RAM and CPU resources.",
     "",
     patrolContract,
     publishContract,
