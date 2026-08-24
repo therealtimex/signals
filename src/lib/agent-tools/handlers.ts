@@ -19,6 +19,7 @@ import { archiveContactTool } from "@/lib/agents/tools/archive-contact";
 import { findDuplicateContacts } from "@/lib/contacts/dedupe/detect";
 import { MergeContactsError, mergeContacts } from "@/lib/contacts/dedupe/merge";
 import { personNameKey, orgNameKey } from "@/lib/contacts/dedupe/normalize";
+import { dispatchWorkflowCascade } from "@/lib/workflows/chaining";
 import type { WorkflowType } from "@/lib/workflows/types";
 import type {
   archiveContactSchema,
@@ -36,6 +37,7 @@ import type {
   queryGoalsSchema,
   queryWorkflowsSchema,
   startWorkflowSchema,
+  dispatchFollowOnWorkflowSchema,
   updateContactSchema,
   getPersonaSchema,
   getPersonaEvidenceSchema,
@@ -697,6 +699,24 @@ export async function handleStartWorkflow(input: z.infer<typeof startWorkflowSch
     status: run.status,
     workflowType: run.workflowType,
     message: AGENT_ORCHESTRATION_MESSAGE,
+  };
+}
+
+export async function handleDispatchFollowOnWorkflow(
+  input: z.infer<typeof dispatchFollowOnWorkflowSchema>
+) {
+  const result = dispatchWorkflowCascade({
+    parentRunId: input.parentWorkflowRunId,
+    createdContactIds: input.contactIds ?? [],
+    overrideAction: input.followOnAction,
+  });
+
+  return {
+    success: result.triggered,
+    childRunId: result.childRunId,
+    targetTemplateName: result.targetTemplateName,
+    followOnAction: result.followOnAction,
+    reason: result.reason,
   };
 }
 

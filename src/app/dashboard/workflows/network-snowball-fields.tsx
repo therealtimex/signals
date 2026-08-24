@@ -20,6 +20,10 @@ import {
   type SnowballFocusType,
   type SnowballSeedType,
 } from "@/lib/workflows/network-snowball";
+import {
+  FOLLOW_ON_ACTION_OPTIONS,
+  type FollowOnActionType,
+} from "@/lib/workflows/chaining";
 
 interface NetworkSnowballFieldsProps {
   value: NetworkSnowballConfig;
@@ -190,6 +194,59 @@ export function NetworkSnowballFields({
           disabled={disabled}
         />
       </div>
+
+      {/* Follow-on Action (Workflow Cascade) */}
+      <div className="space-y-2 pt-2 border-t">
+        <Label htmlFor="snowball-follow-on">Follow-on Action (Workflow Snowballing)</Label>
+        <p className="text-xs text-muted-foreground">
+          Automatically cascade newly discovered contacts into follow-on enrichment or outreach workflows upon completion.
+        </p>
+        <Select
+          value={value.followOnAction ?? "none"}
+          onValueChange={(next) =>
+            onChange({
+              ...value,
+              followOnAction: next as FollowOnActionType,
+            })
+          }
+          disabled={disabled}
+        >
+          <SelectTrigger id="snowball-follow-on">
+            <SelectValue placeholder="Select follow-on workflow" />
+          </SelectTrigger>
+          <SelectContent>
+            {FOLLOW_ON_ACTION_OPTIONS.map((opt) => (
+              <SelectItem key={opt.value} value={opt.value}>
+                {opt.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {value.followOnAction && value.followOnAction !== "none" && (
+        <div className="space-y-2">
+          <Label htmlFor="snowball-cascade-policy">Cascade policy</Label>
+          <Select
+            value={value.cascadePolicy ?? "immediate"}
+            onValueChange={(next) =>
+              onChange({
+                ...value,
+                cascadePolicy: next as "immediate" | "supervised",
+              })
+            }
+            disabled={disabled}
+          >
+            <SelectTrigger id="snowball-cascade-policy">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="immediate">⚡ Immediate — auto-trigger on completion</SelectItem>
+              <SelectItem value="supervised">🛡️ Supervised — prompt for confirmation in thread</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      )}
     </div>
   );
 }

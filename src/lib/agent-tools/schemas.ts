@@ -238,7 +238,16 @@ export const listWorkflowTemplatesSchema = z.object({
 
 export const startWorkflowSchema = z.object({
   templateId: z.string().min(1),
-  workflowType: z.enum(["search", "enrich", "prune", "agent"]).optional(),
+  workflowType: z.enum(["search", "enrich", "prune", "agent", "nurture", "content", "sync"]).optional(),
+  config: z.record(z.unknown()).optional(),
+  parentWorkflowId: z.string().optional(),
+  targetContactIds: z.array(z.string().min(1)).optional(),
+});
+
+export const dispatchFollowOnWorkflowSchema = z.object({
+  parentWorkflowRunId: z.string().min(1),
+  followOnAction: z.enum(["profile_pipeline", "contact_nurture", "social_patrol", "agentic_router"]),
+  contactIds: z.array(z.string().min(1)).optional(),
 });
 
 export const getPersonaSchema = z.object({

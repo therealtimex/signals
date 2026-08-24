@@ -180,7 +180,7 @@ describe("template-brief", () => {
     expect(brief).toContain("Network Snowball execution contract:");
     expect(brief).toContain("https://x.com/seed/status/456");
     expect(brief).toContain("Lead VCs, participating funds, and angel investors");
-    expect(brief).toContain("Bot & Clone Filter Gate");
+    expect(brief).toContain("Anti-Hallucination & Bot Filter Gate");
     expect(brief).not.toContain("Social Intent Patrol execution contract");
   });
 });

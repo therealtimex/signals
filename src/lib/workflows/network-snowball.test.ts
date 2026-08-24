@@ -39,6 +39,8 @@ describe("readNetworkSnowballConfig", () => {
       targetPlatform: "all",
       autoLinkGraphEdges: true,
       requireApproval: false,
+      followOnAction: "none",
+      cascadePolicy: "immediate",
     });
   });
 
@@ -63,6 +65,8 @@ describe("readNetworkSnowballConfig", () => {
       targetPlatform: "x",
       autoLinkGraphEdges: false,
       requireApproval: true,
+      followOnAction: "none",
+      cascadePolicy: "immediate",
     });
   });
 });

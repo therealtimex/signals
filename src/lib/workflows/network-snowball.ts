@@ -11,6 +11,12 @@ import {
   clampSlider,
   type SliderBounds,
 } from "@/lib/workflows/template-field-utils";
+import {
+  buildWorkflowCascadeConfig,
+  CASCADE_CONFIG_KEY,
+  readWorkflowCascadeConfig,
+  type FollowOnActionType,
+} from "@/lib/workflows/chaining";
 
 export const NETWORK_SNOWBALL_TEMPLATE_NAME = "Network Snowball";
 
@@ -56,6 +62,8 @@ export interface NetworkSnowballConfig {
   targetPlatform: "x" | "linkedin" | "all";
   autoLinkGraphEdges: boolean;
   requireApproval: boolean;
+  followOnAction?: FollowOnActionType;
+  cascadePolicy?: "immediate" | "supervised";
 }
 
 export function isNetworkSnowballTemplateConfig(config: Record<string, unknown>): boolean {
@@ -74,18 +82,20 @@ export function readNetworkSnowballConfig(
 ): NetworkSnowballConfig {
   const seedType = typeof config.seedType === "string" &&
     (SNOWBALL_SEED_TYPES as readonly string[]).includes(config.seedType)
-    ? (config.seedType as SnowballSeedType)
-    : "event_url";
+      ? (config.seedType as SnowballSeedType)
+      : "event_url";
 
   const focus = typeof config.focus === "string" &&
     (SNOWBALL_FOCUS_TYPES as readonly string[]).includes(config.focus)
-    ? (config.focus as SnowballFocusType)
-    : "investors_and_angels";
+      ? (config.focus as SnowballFocusType)
+      : "investors_and_angels";
 
   const targetPlatform = typeof config.targetPlatform === "string" &&
     ["x", "linkedin", "all"].includes(config.targetPlatform)
-    ? (config.targetPlatform as "x" | "linkedin" | "all")
-    : "all";
+      ? (config.targetPlatform as "x" | "linkedin" | "all")
+      : "all";
+
+  const cascade = readWorkflowCascadeConfig(config);
 
   return {
     seedType,
@@ -96,6 +106,8 @@ export function readNetworkSnowballConfig(
     targetPlatform,
     autoLinkGraphEdges: typeof config.autoLinkGraphEdges === "boolean" ? config.autoLinkGraphEdges : true,
     requireApproval: typeof config.requireApproval === "boolean" ? config.requireApproval : false,
+    followOnAction: cascade.followOnAction,
+    cascadePolicy: cascade.cascadePolicy,
   };
 }
 
@@ -112,6 +124,10 @@ export function buildNetworkSnowballRunConfig(
     targetPlatform: config.targetPlatform,
     autoLinkGraphEdges: config.autoLinkGraphEdges,
     requireApproval: config.requireApproval,
+    [CASCADE_CONFIG_KEY]: buildWorkflowCascadeConfig({
+      followOnAction: config.followOnAction ?? "none",
+      cascadePolicy: config.cascadePolicy ?? "immediate",
+    }),
   };
 }
 
@@ -126,6 +142,10 @@ export function buildNetworkSnowballTemplateConfig(): Record<string, unknown> {
     targetPlatform: "all",
     autoLinkGraphEdges: true,
     requireApproval: false,
+    [CASCADE_CONFIG_KEY]: buildWorkflowCascadeConfig({
+      followOnAction: "none",
+      cascadePolicy: "immediate",
+    }),
   };
 }
 

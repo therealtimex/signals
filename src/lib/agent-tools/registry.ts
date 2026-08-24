@@ -14,6 +14,7 @@ import {
   queryGoalsSchema,
   queryWorkflowsSchema,
   startWorkflowSchema,
+  dispatchFollowOnWorkflowSchema,
   updateContactSchema,
   upsertContactIdentitySchema,
   getPersonaSchema,
@@ -88,6 +89,7 @@ import {
   handleQueryGoals,
   handleQueryWorkflows,
   handleStartWorkflow,
+  handleDispatchFollowOnWorkflow,
   handleUpdateContact,
   handleUpsertContactIdentity,
   handleGetPersona,
@@ -239,6 +241,15 @@ export const AGENT_TOOLS: Record<string, AgentToolDefinition> = {
     schema: startWorkflowSchema,
     parameters: zodToParameters(startWorkflowSchema),
     execute: handleStartWorkflow,
+  },
+  dispatch_follow_on_workflow: {
+    name: "dispatch_follow_on_workflow",
+    description:
+      "Cascade newly created contacts from a completed parent workflow run into a follow-on enrichment or outreach workflow.",
+    category: "workflows",
+    schema: dispatchFollowOnWorkflowSchema,
+    parameters: zodToParameters(dispatchFollowOnWorkflowSchema),
+    execute: handleDispatchFollowOnWorkflow,
   },
   query_content: {
     name: "query_content",
