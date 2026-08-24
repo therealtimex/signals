@@ -13,6 +13,10 @@ import {
   buildContactNurtureBriefSection,
   isContactNurtureTemplateConfig,
 } from "@/lib/workflows/contact-relationship-nurture";
+import {
+  buildNetworkSnowballBriefSection,
+  isNetworkSnowballTemplateConfig,
+} from "@/lib/workflows/network-snowball";
 
 const CATEGORY_LABELS: Record<string, string> = {
   prospecting: "Search",
@@ -109,6 +113,13 @@ export function buildAgentWorkflowBrief(input: {
         signalsBaseUrl: input.signalsBaseUrl,
       })}\n`
     : null;
+  const snowballContract = isNetworkSnowballTemplateConfig(input.config)
+    ? `${buildNetworkSnowballBriefSection({
+        workflowRunId: input.workflowRunId,
+        config: input.config,
+        signalsBaseUrl: input.signalsBaseUrl,
+      })}\n`
+    : null;
 
   const sections = [
     `You are executing the Signals agent workflow template "${input.template.name}".`,
@@ -156,6 +167,7 @@ export function buildAgentWorkflowBrief(input: {
     patrolContract,
     publishContract,
     nurtureContract,
+    snowballContract,
     "Do not call legacy in-process workflow runners. This thread is the execution lane.",
   ];
 

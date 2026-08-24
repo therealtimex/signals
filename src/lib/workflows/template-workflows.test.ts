@@ -153,6 +153,36 @@ describe("template-brief", () => {
     expect(brief).not.toContain("Social Intent Patrol execution contract");
     expect(brief).toContain("Do not call legacy in-process workflow runners.");
   });
+
+  it("appends the snowball contract only for network snowball configs", () => {
+    const brief = buildAgentWorkflowBrief({
+      template: {
+        id: "tpl_snow",
+        name: "Network Snowball",
+        description: "Expand network from seed event",
+        templateType: "prospecting",
+        platform: null,
+        systemPrompt: "Snowball the network.",
+        targetPersona: "Investors and angels",
+      },
+      workflowRunId: "run_snow_2",
+      config: {
+        networkSnowball: { version: 1 },
+        seedType: "event_url",
+        seedValue: "https://x.com/seed/status/456",
+        focus: "investors_and_angels",
+        maxContacts: 10,
+        maxHops: 1,
+      },
+      signalsBaseUrl: "http://localhost:3000",
+    });
+
+    expect(brief).toContain("Network Snowball execution contract:");
+    expect(brief).toContain("https://x.com/seed/status/456");
+    expect(brief).toContain("Lead VCs, participating funds, and angel investors");
+    expect(brief).toContain("Bot & Clone Filter Gate");
+    expect(brief).not.toContain("Social Intent Patrol execution contract");
+  });
 });
 
 describe("template-serializer", () => {

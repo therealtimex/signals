@@ -63,6 +63,7 @@ import { ContactTimelineTab } from "@/components/contact-timeline-tab";
 import { ContactAvatarUpload } from "@/components/contact-avatar-upload";
 import { ContactRelationshipSection } from "@/components/contact-relationship-section";
 import { ContactSourceLine } from "@/components/contact-source-line";
+import { SnowballDialog } from "@/components/snowball-dialog";
 import { formatWebsiteLabel, hrefForWebsite, isRedundantHeadline } from "@/lib/contact-detail-format";
 
 const platformLabels: Record<string, string> = {
@@ -105,6 +106,7 @@ export function ContactDetailClient({
   const router = useRouter();
   const [tab, setTab] = useState("details");
   const [editOpen, setEditOpen] = useState(false);
+  const [snowballOpen, setSnowballOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [pipelineRunning, setPipelineRunning] = useState(false);
@@ -433,6 +435,16 @@ export function ContactDetailClient({
               Edit
             </Button>
           ) : null}
+          {!contactArchived ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setSnowballOpen(true)}
+            >
+              <Sparkles className="h-3.5 w-3.5 text-primary" />
+              Snowball Network
+            </Button>
+          ) : null}
           {canEnrich ? (
             <Button
               size="sm"
@@ -609,6 +621,14 @@ export function ContactDetailClient({
           </SheetFooter>
         </SheetContent>
       </Sheet>
+
+      <SnowballDialog
+        open={snowballOpen}
+        onClose={() => setSnowballOpen(false)}
+        seedType="contact_id"
+        seedValue={primaryIdentity?.platformHandle ? `@${primaryIdentity.platformHandle}` : contact.name}
+        entityName={contact.name}
+      />
     </div>
   );
 }

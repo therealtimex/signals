@@ -26,6 +26,7 @@ import {
 import { SocialPatrolFields } from "@/app/dashboard/workflows/social-patrol-fields";
 import { ProfilePublishFields } from "@/app/dashboard/workflows/profile-publish-fields";
 import { ContactNurtureFields } from "@/app/dashboard/workflows/contact-nurture-fields";
+import { NetworkSnowballFields } from "@/app/dashboard/workflows/network-snowball-fields";
 import {
   buildSocialPatrolRunConfig,
   isSocialPatrolTemplateConfig,
@@ -41,6 +42,11 @@ import {
   isContactNurtureTemplateConfig,
   readContactNurtureConfig,
 } from "@/lib/workflows/contact-relationship-nurture";
+import {
+  buildNetworkSnowballRunConfig,
+  isNetworkSnowballTemplateConfig,
+  readNetworkSnowballConfig,
+} from "@/lib/workflows/network-snowball";
 
 interface Template {
   id: string;
@@ -88,6 +94,7 @@ interface DialogState {
   patrol: ReturnType<typeof readSocialPatrolConfig>;
   profilePublish: ReturnType<typeof readProfilePublishConfig>;
   contactNurture: ReturnType<typeof readContactNurtureConfig>;
+  snowball: ReturnType<typeof readNetworkSnowballConfig>;
   limits: ReturnType<typeof readRunLimitFromTemplateConfig>;
 }
 
@@ -103,6 +110,7 @@ type DialogAction =
   | { type: "SET_PATROL"; patrol: ReturnType<typeof readSocialPatrolConfig> }
   | { type: "SET_PROFILE_PUBLISH"; profilePublish: ReturnType<typeof readProfilePublishConfig> }
   | { type: "SET_CONTACT_NURTURE"; contactNurture: ReturnType<typeof readContactNurtureConfig> }
+  | { type: "SET_NETWORK_SNOWBALL"; snowball: ReturnType<typeof readNetworkSnowballConfig> }
   | {
       type: "SET_LIMIT";
       key: keyof ReturnType<typeof readRunLimitFromTemplateConfig>;
@@ -124,6 +132,7 @@ function initDialogState(template: Template): DialogState {
     patrol: readSocialPatrolConfig(config),
     profilePublish: readProfilePublishConfig(config),
     contactNurture: readContactNurtureConfig(config),
+    snowball: readNetworkSnowballConfig(config),
     limits: readRunLimitFromTemplateConfig(config),
   };
 }
@@ -169,6 +178,8 @@ function dialogReducer(state: DialogState, action: DialogAction): DialogState {
       return { ...state, profilePublish: action.profilePublish };
     case "SET_CONTACT_NURTURE":
       return { ...state, contactNurture: action.contactNurture };
+    case "SET_NETWORK_SNOWBALL":
+      return { ...state, snowball: action.snowball };
     case "SET_LIMIT":
       return { ...state, limits: { ...state.limits, [action.key]: action.value } };
     default:
@@ -285,12 +296,14 @@ function ActivateDialogFormFields({
   patrol,
   profilePublish,
   contactNurture,
+  snowball,
   systemPrompt,
   freshThread,
   running,
   isPatrol,
   isProfilePublish,
   isContactNurture,
+  isNetworkSnowball,
   dispatch,
 }: {
   template: Template;
@@ -298,17 +311,19 @@ function ActivateDialogFormFields({
   patrol: DialogState["patrol"];
   profilePublish: DialogState["profilePublish"];
   contactNurture: DialogState["contactNurture"];
+  snowball: DialogState["snowball"];
   systemPrompt: string;
   freshThread: boolean;
   running: boolean;
   isPatrol: boolean;
   isProfilePublish: boolean;
   isContactNurture: boolean;
+  isNetworkSnowball: boolean;
   dispatch: React.Dispatch<DialogAction>;
 }) {
   return (
     <>
-      {template.templateType === "prospecting" && (
+      {template.templateType === "prospecting" && !isNetworkSnowball && (
         <div className="space-y-2">
           <Label htmlFor="max-results">Max Results</Label>
           <Input
@@ -459,6 +474,16 @@ function ActivateDialogFormFields({
         />
       )}
 
+      {isNetworkSnowball && (
+        <NetworkSnowballFields
+          value={snowball}
+          onChange={(next) =>
+            dispatch({ type: "SET_NETWORK_SNOWBALL", snowball: next })
+          }
+          disabled={running}
+        />
+      )}
+
       {!isPatrol &&
         !isContactNurture &&
         (template.templateType === "engagement" ||
@@ -539,6 +564,7 @@ function ActivateDialogContent({
   const isPatrol = isSocialPatrolTemplateConfig(templateConfig);
   const isProfilePublish = isProfilePublishTemplateConfig(templateConfig);
   const isContactNurture = isContactNurtureTemplateConfig(templateConfig);
+  const isNetworkSnowball = isNetworkSnowballTemplateConfig(templateConfig);
 
   const {
     running,
@@ -553,6 +579,7 @@ function ActivateDialogContent({
     patrol,
     profilePublish,
     contactNurture,
+    snowball,
     limits,
   } = state;
 
@@ -606,6 +633,8 @@ function ActivateDialogContent({
         Object.assign(config, buildProfilePublishRunConfig(profilePublish));
       } else if (isContactNurture) {
         Object.assign(config, buildContactNurtureRunConfig(contactNurture));
+      } else if (isNetworkSnowball) {
+        Object.assign(config, buildNetworkSnowballRunConfig(snowball));
       } else {
         if (template.templateType === "prospecting") {
           config.maxResults = parseInt(limits.maxResults, 10) || 20;
@@ -767,12 +796,14 @@ function ActivateDialogContent({
             patrol={patrol}
             profilePublish={profilePublish}
             contactNurture={contactNurture}
+            snowball={snowball}
             systemPrompt={systemPrompt}
             freshThread={freshThread}
             running={running}
             isPatrol={isPatrol}
             isProfilePublish={isProfilePublish}
             isContactNurture={isContactNurture}
+            isNetworkSnowball={isNetworkSnowball}
             dispatch={dispatch}
           />
         )}

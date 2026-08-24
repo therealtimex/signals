@@ -33,7 +33,7 @@ describe("Contact profile pipeline seed", () => {
       pipeline?: { version?: number; steps?: Array<{ id: string; handler: string }> };
     };
 
-    expect(config._seedVersion).toBe(14);
+    expect(config._seedVersion).toBe(15);
     expect(config.pipeline?.version).toBe(2);
     expect(config.pipeline?.steps).toEqual([
       { id: "hydrate", executor: "code", handler: "hydrate_x_profiles" },
@@ -77,7 +77,7 @@ describe("Contact profile pipeline seed", () => {
       };
     };
     expect(config).toMatchObject({
-      _seedVersion: 14,
+      _seedVersion: 15,
       customTopLevel: true,
       pipeline: {
         version: 2,
@@ -191,7 +191,7 @@ describe("Social Intent Patrol seed", () => {
 
     expect(config).not.toHaveProperty("maxPosts");
     expect(config).not.toHaveProperty("durationMinutes");
-    expect(config._seedVersion).toBe(14);
+    expect(config._seedVersion).toBe(15);
     expect(config.maxComments).toBe(8);
     // The card copy is structural — an existing install must not keep describing a shift that
     // still posts to your own timeline.
@@ -265,3 +265,35 @@ describe("Contact Relationship Nurture seed", () => {
     expect(template.systemPrompt).toContain("salted sleep delay");
   });
 });
+
+describe("Network Snowball seed", () => {
+  beforeEach(() => {
+    resetCoreTables();
+  });
+
+  it("seeds Network Snowball template carrying snowball defaults", () => {
+    seedTemplates();
+    const template = getSystemTemplateByName("Network Snowball")!;
+
+    expect(template).toBeDefined();
+    expect(template.templateType).toBe("prospecting");
+    expect(template.platform).toBeNull();
+    expect(template.systemPrompt).toContain("lead partners, angel investors, co-founders");
+    expect(template.systemPrompt).toContain("avatarUrl");
+    expect(template.systemPrompt).toContain("Bot & Clone Gate");
+
+    const config = JSON.parse(template.config ?? "{}") as {
+      _seedVersion?: number;
+      networkSnowball?: { version?: number };
+      focus?: string;
+      maxContacts?: number;
+      maxHops?: number;
+    };
+    expect(config._seedVersion).toBe(15);
+    expect(config.networkSnowball?.version).toBe(1);
+    expect(config.focus).toBe("investors_and_angels");
+    expect(config.maxContacts).toBe(10);
+    expect(config.maxHops).toBe(1);
+  });
+});
+
