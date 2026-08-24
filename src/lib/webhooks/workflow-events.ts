@@ -8,6 +8,10 @@ import {
   type DispatchCascadeResult,
   type WorkflowCascadeConfig,
 } from "@/lib/workflows/chaining";
+import {
+  DEFAULT_ORCHESTRATOR_THREAD_SLUG,
+  SIGNALS_ORCHESTRATOR_THREAD_NAME,
+} from "@/lib/rtx/orchestrator-thread";
 
 export interface WorkflowCompletedEventPayload {
   event: "workflow.completed";
@@ -21,6 +25,10 @@ export interface WorkflowCompletedEventPayload {
   summary?: string;
   timestamp: number;
   cascadeConfig?: WorkflowCascadeConfig;
+  targetThread?: {
+    name: string;
+    slug?: string;
+  };
 }
 
 export interface EmitWorkflowCompletedResult {
@@ -240,6 +248,10 @@ export async function emitWorkflowCompletedEvent(
     summary: options?.summary ?? `Completed workflow run ${runId}`,
     timestamp: Math.floor(Date.now() / 1000),
     cascadeConfig,
+    targetThread: {
+      name: SIGNALS_ORCHESTRATOR_THREAD_NAME,
+      slug: process.env.SIGNALS_ORCHESTRATOR_THREAD_SLUG || DEFAULT_ORCHESTRATOR_THREAD_SLUG,
+    },
   };
 
   let cascadeResult: DispatchCascadeResult | undefined;
