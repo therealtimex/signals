@@ -23,7 +23,9 @@ import {
 } from "@/lib/rtx/workspace-brief-files";
 import { getSignalsRtxWorkspaceSlug } from "@/lib/rtx/cli-provisioning";
 import { dispatchTerminalAgentViaSendMessage } from "@/lib/rtx/runtime-sessions";
-import { getRtxRefsFromRunConfig } from "@/lib/agents/run-template-via-rtx";
+import { runTemplateViaRtx, getRtxRefsFromRunConfig } from "@/lib/agents/run-template-via-rtx";
+import { isRtxEmbedded } from "@/lib/rtx/env";
+import { getWorkflowRun } from "@/lib/db/queries/workflows";
 
 export interface WorkflowCompletedEventPayload {
   event: "workflow.completed";
@@ -286,6 +288,24 @@ export async function emitWorkflowCompletedEvent(
       createdContactIds,
       overrideActions: cascadeConfig.followOnActions,
     });
+
+    if (cascadeResult.triggered && cascadeResult.childRunIds && isRtxEmbedded()) {
+      for (const childRunId of cascadeResult.childRunIds) {
+        try {
+          const childRun = getWorkflowRun(childRunId);
+          if (childRun && childRun.templateId) {
+            const childConfig = JSON.parse(childRun.config ?? "{}") as Record<string, unknown>;
+            await runTemplateViaRtx({
+              templateId: childRun.templateId,
+              config: childConfig,
+              existingRunId: childRun.id,
+            });
+          }
+        } catch (err) {
+          console.warn(`[emitWorkflowCompletedEvent] Failed to launch RTX child workflow ${childRunId}:`, err);
+        }
+      }
+    }
   }
 
   // 1. Generate and write the structured Markdown brief file (@orchestrator-events/<runId>/brief.md)
@@ -331,7 +351,12 @@ export async function emitWorkflowCompletedEvent(
   }
 
   // Outbound Webhook dispatch (RealTimeX Webhook Ingress, n8n, Zapier, custom URL)
-  const defaultRtxWebhookUrl = "http://127.0.0.1:3001/api/v1/webhook-ingress/inbound/signals-orchestrator";
+  // Default loopback webhook is ONLY fired when Smart Agentic Routing is requested
+  const isAgenticRouter = cascadeConfig.followOnActions.includes("agentic_router");
+  const defaultRtxWebhookUrl = isAgenticRouter
+    ? "http://127.0.0.1:3001/api/v1/webhook-ingress/inbound/signals-orchestrator"
+    : undefined;
+
   const targetWebhookUrl =
     options?.webhookUrl ??
     process.env.REALTIMEX_WEBHOOK_URL ??
