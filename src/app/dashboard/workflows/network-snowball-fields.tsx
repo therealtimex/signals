@@ -23,7 +23,7 @@ import {
 import {
   FOLLOW_ON_ACTION_OPTIONS,
   type FollowOnActionType,
-} from "@/lib/workflows/chaining";
+} from "@/lib/workflows/cascade-types";
 
 interface NetworkSnowballFieldsProps {
   value: NetworkSnowballConfig;

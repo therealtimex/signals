@@ -16,7 +16,7 @@ import {
   CASCADE_CONFIG_KEY,
   readWorkflowCascadeConfig,
   type FollowOnActionType,
-} from "@/lib/workflows/chaining";
+} from "@/lib/workflows/cascade-types";
 
 export const NETWORK_SNOWBALL_TEMPLATE_NAME = "Network Snowball";
 
