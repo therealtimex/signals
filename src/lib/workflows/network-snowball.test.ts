@@ -114,5 +114,6 @@ describe("buildNetworkSnowballBriefSection", () => {
     expect(brief).toContain("Identity-First Avatar Extraction");
     expect(brief).toContain("workflow-runs/run_snow_1/contacts.csv");
     expect(brief).toContain("signals-pp-cli import contacts");
+    expect(brief).toContain("Terminate Spawned Browser Sessions");
   });
 });

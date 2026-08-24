@@ -161,6 +161,9 @@ export function buildNetworkSnowballBriefSection(input: {
       ? `S5. Approval & Write Back: Candidate roster must be presented in this thread for operator review before bulk committing. Once confirmed, stage workflow-runs/${input.workflowRunId}/contacts.csv and commit with:\n    signals-pp-cli import contacts --file workflow-runs/${input.workflowRunId}/contacts.csv --dedupe\n    In the notes field, explicitly record the causal relationship (e.g., 'role: Lead Investor in Acme Seed round' or 'role: Co-Founder & CTO').`
       : `S5. Write Back & Graph Edge Linking: Stage workflow-runs/${input.workflowRunId}/contacts.csv (header: name,company,title,email,platform,platform_handle,profile_url,avatar_url,notes) and commit with:\n    signals-pp-cli import contacts --file workflow-runs/${input.workflowRunId}/contacts.csv --dedupe\n    In the notes field, explicitly record the causal relationship (e.g., 'role: Lead Investor in Acme Seed round' or 'role: Co-Founder & CTO').`,
     "S6. Report Progress: Provide a concise summary table in this thread listing discovered contacts, their roles, avatar URLs, and platform links.",
+    "S7. Teardown & Resource Release:",
+    "    - Terminate Spawned Browser Sessions: Immediately stop/close any browser sessions opened during this run (agent-browser close / realtimex-pp-cli browser-session stop) to release Chromium RAM and CPU.",
+    "    - Terminate Agent Session: Conclude the run cleanly so no zombie terminal processes or background threads persist in RealTimeX.",
   ];
 
   return lines.join("\n");

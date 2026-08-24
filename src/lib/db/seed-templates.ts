@@ -21,7 +21,7 @@ import {
 } from "@/lib/workflows/network-snowball";
 
 /** Bump this when seed template prompts change to trigger updates on existing installs. */
-const SEED_VERSION = 17;
+const SEED_VERSION = 18;
 
 export const CONTACT_PROFILE_PIPELINE_TEMPLATE_NAME = "Contact profile pipeline";
 
@@ -565,11 +565,13 @@ Follow the numbered "Network Snowball execution contract" below.
 5. Ingest contacts via signals-pp-cli import contacts --file workflow-runs/<runId>/contacts.csv --dedupe.
 6. In the notes column, clearly record the causal anchor (e.g. "role: Lead Investor in Acme Seed round").
 7. Report the mapped ecosystem cluster with links in this thread.
+8. Teardown & Resource Release: Terminate all spawned browser sessions and conclude the agent run cleanly to release memory and CPU immediately.
 
 ## Rules
 - Focus on real human decision-makers. Apply the 'Engage for visibility, skip for contacts' bot rule.
 - Never guess vanity profile links — verify handles against authentic source links or leave blank.
 - Always capture real, working avatarUrl (HTTP 200 image URL) so profiles render with real photos across the CRM.
+- Always release spawned browser sessions and exit cleanly upon run completion to prevent memory leaks and zombie processes.
 - Keep within the maxContacts and maxHops limits in the runtime config.`,
     config: buildNetworkSnowballTemplateConfig(),
   },
