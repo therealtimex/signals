@@ -7,7 +7,15 @@ import { ExploreMapCanvas } from "@/components/explore/explore-map-force-graph";
 import { ExploreContactDrawer } from "@/components/explore/explore-contact-drawer";
 import { ExploreOwnerChip } from "@/components/explore/explore-owner-chip";
 import { ExploreSelfPicker } from "@/components/explore/explore-self-picker";
-import { formatExploreMapBadge } from "@/components/explore/explore-map-utils";
+import {
+  EXPLORE_MAP_DEFAULT_LAYERS,
+  formatExploreMapBadge,
+  listExploreMapNiches,
+  type ExploreMapLayerVisibility,
+} from "@/components/explore/explore-map-utils";
+import {
+  ExploreMapToolbar,
+} from "@/components/explore/explore-map-toolbar";
 import { AddContactDialog } from "@/components/add-contact-dialog";
 import { EmptyState } from "@/components/empty-state";
 import { Badge } from "@/components/ui/badge";
@@ -23,6 +31,8 @@ export function ExploreMapView() {
   const [selectedContactId, setSelectedContactId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [selectedNicheId, setSelectedNicheId] = useState<string | null>(null);
+  const [layers, setLayers] = useState<ExploreMapLayerVisibility>(EXPLORE_MAP_DEFAULT_LAYERS);
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -116,6 +126,7 @@ export function ExploreMapView() {
 
   const { data, hasContactCandidates } = loadState;
   const ownerName = data.meta.owner?.name ?? "You";
+  const mapNiches = listExploreMapNiches(data.nodes);
 
   const picker = (
     <ExploreSelfPicker
@@ -217,10 +228,19 @@ export function ExploreMapView() {
             edges={data.edges}
             width={containerSize.width}
             height={containerSize.height}
+            selectedNicheId={selectedNicheId}
+            layers={layers}
             onContactClick={handleContactClick}
           />
         ) : null}
       </div>
+      <ExploreMapToolbar
+        niches={mapNiches}
+        selectedNicheId={selectedNicheId}
+        onSelectedNicheIdChange={setSelectedNicheId}
+        layers={layers}
+        onLayersChange={setLayers}
+      />
       <ExploreContactDrawer
         contactId={selectedContactId}
         open={drawerOpen}

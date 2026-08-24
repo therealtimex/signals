@@ -1,3 +1,10 @@
+import type {
+  ExploreMapContactNode,
+  ExploreMapEdge,
+  ExploreMapNode,
+  ExploreMapNicheNode,
+} from "@/lib/db/queries/explore-map";
+
 const CHART_COLORS = [
   "var(--chart-1)",
   "var(--chart-2)",
@@ -47,4 +54,98 @@ export function formatExploreMapBadge(meta: {
     ? `Showing ${meta.shownContacts} of ${meta.totalContacts} people`
     : `${meta.totalContacts} people`;
   return `${peopleLabel} · ${nicheCount} niches`;
+}
+
+export type ExploreMapLayerVisibility = {
+  showFollows: boolean;
+  showNiches: boolean;
+};
+
+export const EXPLORE_MAP_DEFAULT_LAYERS: ExploreMapLayerVisibility = {
+  showFollows: true,
+  showNiches: true,
+};
+
+/** Minimum zoom before audience contact labels render on-canvas. */
+export const EXPLORE_MAP_CONTACT_LABEL_MIN_SCALE = 2.5;
+
+export function filterExploreMapEdges(
+  edges: ExploreMapEdge[],
+  layers: ExploreMapLayerVisibility,
+): ExploreMapEdge[] {
+  return edges.filter((edge) => {
+    if (edge.kind === "belongs_to_niche") return layers.showNiches;
+    return layers.showFollows;
+  });
+}
+
+export function listExploreMapNiches(nodes: ExploreMapNode[]): ExploreMapNicheNode[] {
+  return nodes
+    .filter((node): node is ExploreMapNicheNode => node.kind === "niche")
+    .sort(
+      (left, right) =>
+        right.memberCount - left.memberCount || left.label.localeCompare(right.label),
+    );
+}
+
+export function contactMatchesNicheFilter(
+  node: ExploreMapContactNode,
+  selectedNicheId: string | null,
+): boolean {
+  if (!selectedNicheId) return true;
+  if (node.isOwner) return true;
+  return node.nicheIds.includes(selectedNicheId);
+}
+
+export function exploreMapNodeOpacity(
+  node: ExploreMapNode,
+  opts: {
+    selectedNicheId: string | null;
+    hoveredNodeId: string | null;
+  },
+): number {
+  const { selectedNicheId, hoveredNodeId } = opts;
+
+  if (hoveredNodeId === node.id) return 1;
+  if (node.kind === "contact" && node.isOwner) return 1;
+
+  if (selectedNicheId) {
+    if (node.kind === "niche") {
+      return node.entityId === selectedNicheId ? 1 : 0.35;
+    }
+    return contactMatchesNicheFilter(node, selectedNicheId) ? 1 : 0.2;
+  }
+
+  if (hoveredNodeId) return 0.55;
+
+  return 1;
+}
+
+export function shouldRenderExploreNodeLabel(
+  node: ExploreMapNode,
+  opts: {
+    hoveredNodeId: string | null;
+    globalScale: number;
+  },
+): boolean {
+  const { hoveredNodeId, globalScale } = opts;
+
+  if (node.kind === "niche") return true;
+  if (node.kind === "contact" && node.isOwner) return true;
+  if (hoveredNodeId === node.id) return true;
+  if (node.kind === "contact" && globalScale >= EXPLORE_MAP_CONTACT_LABEL_MIN_SCALE) {
+    return true;
+  }
+  return false;
+}
+
+export function exploreMapNodeTooltip(
+  node: ExploreMapNode,
+  hoveredNodeId: string | null,
+): string {
+  if (hoveredNodeId !== node.id) return "";
+  if (node.kind === "niche") {
+    return `${node.label} · ${node.memberCount} people`;
+  }
+  return node.label;
 }

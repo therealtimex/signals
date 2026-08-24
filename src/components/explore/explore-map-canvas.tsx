@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import ForceGraph2D, {
   type ForceGraphMethods,
   type NodeObject,
@@ -9,9 +9,18 @@ import type { ExploreMapEdge, ExploreMapNode } from "@/lib/db/queries/explore-ma
 import {
   buildExploreMapLinkColor,
   nicheTypeResolvedColor,
+  withAlpha,
   type ExploreMapThemeColors,
 } from "@/components/explore/explore-map-colors";
-import { contactNodeVal, nicheNodeVal } from "@/components/explore/explore-map-utils";
+import {
+  contactNodeVal,
+  exploreMapNodeOpacity,
+  exploreMapNodeTooltip,
+  filterExploreMapEdges,
+  nicheNodeVal,
+  shouldRenderExploreNodeLabel,
+  type ExploreMapLayerVisibility,
+} from "@/components/explore/explore-map-utils";
 import { useExploreMapThemeColors } from "@/components/explore/use-explore-map-theme-colors";
 
 type GraphNode = ExploreMapNode & {
@@ -32,6 +41,8 @@ type ExploreMapCanvasProps = {
   edges: ExploreMapEdge[];
   width: number;
   height: number;
+  selectedNicheId: string | null;
+  layers: ExploreMapLayerVisibility;
   onContactClick: (contactId: string) => void;
 };
 
@@ -39,19 +50,30 @@ export function buildExploreMapGraphData(
   nodes: ExploreMapNode[],
   edges: ExploreMapEdge[],
   theme: ExploreMapThemeColors,
+  opts?: {
+    selectedNicheId?: string | null;
+    hoveredNodeId?: string | null;
+  },
 ): { nodes: GraphNode[]; links: GraphLink[] } {
+  const selectedNicheId = opts?.selectedNicheId ?? null;
+  const hoveredNodeId = opts?.hoveredNodeId ?? null;
+
   const graphNodes: GraphNode[] = nodes.map((node) => {
-    if (node.kind === "contact") {
-      return {
-        ...node,
-        val: contactNodeVal(node.followersCount, node.isOwner),
-        color: node.isOwner ? theme.primary : theme.mutedForeground,
-      };
-    }
+    const baseColor =
+      node.kind === "contact"
+        ? node.isOwner
+          ? theme.primary
+          : theme.mutedForeground
+        : nicheTypeResolvedColor(node.nicheType, theme);
+    const opacity = exploreMapNodeOpacity(node, { selectedNicheId, hoveredNodeId });
+
     return {
       ...node,
-      val: nicheNodeVal(node.memberCount),
-      color: nicheTypeResolvedColor(node.nicheType, theme),
+      val:
+        node.kind === "contact"
+          ? contactNodeVal(node.followersCount, node.isOwner)
+          : nicheNodeVal(node.memberCount),
+      color: withAlpha(baseColor, opacity),
     };
   });
 
@@ -71,16 +93,28 @@ export function ExploreMapCanvas({
   edges,
   width,
   height,
+  selectedNicheId,
+  layers,
   onContactClick,
 }: ExploreMapCanvasProps) {
   const theme = useExploreMapThemeColors();
   const graphRef = useRef<ForceGraphMethods<NodeObject<GraphNode>, GraphLink> | undefined>(
     undefined,
   );
+  const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
+
+  const visibleEdges = useMemo(
+    () => filterExploreMapEdges(edges, layers),
+    [edges, layers],
+  );
 
   const graphData = useMemo(
-    () => buildExploreMapGraphData(nodes, edges, theme),
-    [nodes, edges, theme],
+    () =>
+      buildExploreMapGraphData(nodes, visibleEdges, theme, {
+        selectedNicheId,
+        hoveredNodeId,
+      }),
+    [nodes, visibleEdges, theme, selectedNicheId, hoveredNodeId],
   );
 
   useEffect(() => {
@@ -98,7 +132,7 @@ export function ExploreMapCanvas({
       height={height}
       graphData={graphData}
       nodeId="id"
-      nodeLabel="label"
+      nodeLabel={(node) => exploreMapNodeTooltip(node as GraphNode, hoveredNodeId)}
       nodeVal="val"
       nodeColor="color"
       linkColor="color"
@@ -110,10 +144,21 @@ export function ExploreMapCanvas({
           onContactClick(graphNode.entityId);
         }
       }}
+      onNodeHover={(node) => {
+        setHoveredNodeId(node ? (node as GraphNode).id : null);
+      }}
       nodeCanvasObjectMode={() => "after"}
       nodeCanvasObject={(node, ctx, globalScale) => {
-        if (globalScale < 1.5) return;
         const graphNode = node as NodeObject<GraphNode>;
+        if (
+          !shouldRenderExploreNodeLabel(graphNode, {
+            hoveredNodeId,
+            globalScale,
+          })
+        ) {
+          return;
+        }
+
         const label = graphNode.label ?? "";
         const fontSize = 12 / globalScale;
         ctx.font = `${fontSize}px sans-serif`;
