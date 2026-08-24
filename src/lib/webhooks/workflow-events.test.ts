@@ -125,4 +125,36 @@ describe("Workflow Events & Agentic Router", () => {
     expect(result.routingRecommendation?.suggestedAction).toBe("nurture");
     expect(result.cascadeResult?.followOnAction).toBe("agentic_router");
   });
+
+  it("dispatches outbound HTTP POST to configured webhook destination", async () => {
+    const template = createTemplate({
+      name: "Network Snowball",
+      templateType: "prospecting",
+      status: "active",
+    });
+
+    const parentRun = createWorkflowRun({
+      templateId: template.id,
+      workflowType: "search",
+      status: "completed",
+      trigger: "template",
+    });
+
+    let sentUrl = "";
+    let sentBody = "";
+    const mockFetch = (async (url: string, init?: RequestInit) => {
+      sentUrl = url;
+      sentBody = (init?.body as string) ?? "";
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const result = await emitWorkflowCompletedEvent(parentRun.id, {
+      webhookUrl: "https://realtimex.ai/api/webhooks/orchestrator",
+      fetchImpl: mockFetch,
+    });
+
+    expect(result.emitted).toBe(true);
+    expect(sentUrl).toBe("https://realtimex.ai/api/webhooks/orchestrator");
+    expect(sentBody).toContain('"event":"workflow.completed"');
+  });
 });

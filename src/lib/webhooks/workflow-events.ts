@@ -119,6 +119,8 @@ export async function emitWorkflowCompletedEvent(
   options?: {
     summary?: string;
     createdContactIds?: string[];
+    webhookUrl?: string;
+    fetchImpl?: typeof fetch;
   }
 ): Promise<EmitWorkflowCompletedResult> {
   const run = db.select().from(workflowRuns).where(eq(workflowRuns.id, runId)).get();
@@ -166,6 +168,28 @@ export async function emitWorkflowCompletedEvent(
       createdContactIds,
       overrideActions: cascadeConfig.followOnActions,
     });
+  }
+
+  // Outbound Webhook dispatch (RealTimeX, n8n, Zapier, custom URL)
+  const targetWebhookUrl =
+    options?.webhookUrl ??
+    process.env.SIGNALS_WEBHOOK_URL ??
+    process.env.REALTIMEX_WEBHOOK_URL;
+
+  if (targetWebhookUrl) {
+    try {
+      const fetcher = options?.fetchImpl ?? fetch;
+      await fetcher(targetWebhookUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...eventPayload,
+          routingRecommendation,
+        }),
+      });
+    } catch {
+      // Non-blocking outbound delivery
+    }
   }
 
   return {
