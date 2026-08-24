@@ -11,6 +11,10 @@ export function publishJobBriefRelativePath(jobId: string): string {
   return `publish-jobs/${jobId}/brief.md`;
 }
 
+export function orchestratorEventBriefRelativePath(runId: string): string {
+  return `orchestrator-events/${runId}/brief.md`;
+}
+
 export interface WorkflowRunBriefRoutingInput {
   runId: string;
   templateName?: string | null;
@@ -22,6 +26,14 @@ export interface PublishJobBriefRoutingInput {
   jobId: string;
   title?: string | null;
   platforms?: string[];
+  absolutePath?: string;
+}
+
+export interface OrchestratorBriefRoutingInput {
+  runId: string;
+  templateName?: string | null;
+  eventType?: string | null;
+  suggestedAction?: string | null;
   absolutePath?: string;
 }
 
@@ -82,6 +94,41 @@ export function buildPublishJobBriefRoutingMessage(
     platformList ? `Platforms: ${platformList}` : null,
     "State: ready",
     "Type: publish-brief",
+    "Context: Follow workspace guidelines and operating model in AGENTS.md.",
+    "Required: Read the brief file before acting and follow its instructions.",
+    `File: ${targetPath}`,
+  ].filter(Boolean) as string[];
+
+  return lines.join("\n");
+}
+
+export function buildOrchestratorBriefRoutingMessage(
+  runIdOrInput: string | OrchestratorBriefRoutingInput
+): string {
+  if (typeof runIdOrInput === "string") {
+    return [
+      "Signals orchestrator handoff",
+      `Run: ${runIdOrInput}`,
+      "Event: workflow.completed",
+      "State: ready",
+      "Type: orchestrator-brief",
+      "Context: Follow workspace guidelines and operating model in AGENTS.md.",
+      "Required: Read the brief file before acting and follow its instructions.",
+      `File: @orchestrator-events/${runIdOrInput}/brief.md`,
+    ].join("\n");
+  }
+
+  const { runId, templateName, eventType, suggestedAction, absolutePath } = runIdOrInput;
+  const targetPath = absolutePath ? `@${absolutePath}` : `@orchestrator-events/${runId}/brief.md`;
+  const name = templateName?.trim() || "Workflow";
+  const event = eventType?.trim() || "workflow.completed";
+
+  const lines = [
+    `Signals orchestrator handoff -> ${name} (${runId})`,
+    `Event: ${event}`,
+    suggestedAction ? `Recommendation: ${suggestedAction}` : null,
+    "State: ready",
+    "Type: orchestrator-brief",
     "Context: Follow workspace guidelines and operating model in AGENTS.md.",
     "Required: Read the brief file before acting and follow its instructions.",
     `File: ${targetPath}`,

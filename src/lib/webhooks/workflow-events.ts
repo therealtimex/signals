@@ -11,7 +11,18 @@ import {
 import {
   DEFAULT_ORCHESTRATOR_THREAD_SLUG,
   SIGNALS_ORCHESTRATOR_THREAD_NAME,
+  getOrCreateOrchestratorThread,
 } from "@/lib/rtx/orchestrator-thread";
+import {
+  buildOrchestratorBriefMarkdown,
+  writeOrchestratorBriefFile,
+} from "@/lib/rtx/orchestrator-brief";
+import {
+  buildOrchestratorBriefRoutingMessage,
+  orchestratorEventBriefRelativePath,
+} from "@/lib/rtx/workspace-brief-files";
+import { getSignalsRtxWorkspaceSlug } from "@/lib/rtx/cli-provisioning";
+import { dispatchTerminalAgentViaSendMessage } from "@/lib/rtx/runtime-sessions";
 
 export interface WorkflowCompletedEventPayload {
   event: "workflow.completed";
@@ -277,6 +288,45 @@ export async function emitWorkflowCompletedEvent(
       createdContactIds,
       overrideActions: cascadeConfig.followOnActions,
     });
+  }
+
+  // 1. Generate and write the structured Markdown brief file (@orchestrator-events/<runId>/brief.md)
+  const workspaceSlug = getSignalsRtxWorkspaceSlug();
+  const briefMarkdown = buildOrchestratorBriefMarkdown({
+    eventPayload,
+    routingRecommendation,
+  });
+
+  await writeOrchestratorBriefFile(workspaceSlug, runId, briefMarkdown);
+
+  // 2. If agentic_router is active, dispatch the file-based brief message to the Signals Orchestrator thread
+  if (cascadeConfig.followOnActions.includes("agentic_router")) {
+    try {
+      const orchestratorThread = await getOrCreateOrchestratorThread(
+        { workspaceSlug },
+        process.env,
+        options?.fetchImpl ?? fetch
+      );
+      const routingMessage = buildOrchestratorBriefRoutingMessage({
+        runId,
+        templateName: eventPayload.templateName,
+        eventType: eventPayload.event,
+        suggestedAction: routingRecommendation?.suggestedAction,
+      });
+
+      await dispatchTerminalAgentViaSendMessage(
+        {
+          workspaceSlug: orchestratorThread.workspaceSlug,
+          threadSlug: orchestratorThread.threadSlug,
+          message: routingMessage,
+          reason: `Orchestrator handoff for run ${runId}`,
+        },
+        process.env,
+        options?.fetchImpl ?? fetch
+      );
+    } catch {
+      // Non-blocking thread dispatch
+    }
   }
 
   // Outbound Webhook dispatch (RealTimeX Webhook Ingress, n8n, Zapier, custom URL)
