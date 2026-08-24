@@ -23,6 +23,7 @@ import {
 } from "@/lib/rtx/workspace-brief-files";
 import { getSignalsRtxWorkspaceSlug } from "@/lib/rtx/cli-provisioning";
 import { dispatchTerminalAgentViaSendMessage } from "@/lib/rtx/runtime-sessions";
+import { getRtxRefsFromRunConfig } from "@/lib/agents/run-template-via-rtx";
 
 export interface WorkflowCompletedEventPayload {
   event: "workflow.completed";
@@ -291,7 +292,8 @@ export async function emitWorkflowCompletedEvent(
   }
 
   // 1. Generate and write the structured Markdown brief file (@orchestrator-events/<runId>/brief.md)
-  const workspaceSlug = getSignalsRtxWorkspaceSlug();
+  const rtxRefs = getRtxRefsFromRunConfig(run.config);
+  const workspaceSlug = rtxRefs.workspaceSlug || getSignalsRtxWorkspaceSlug();
   const briefMarkdown = buildOrchestratorBriefMarkdown({
     eventPayload,
     routingRecommendation,
