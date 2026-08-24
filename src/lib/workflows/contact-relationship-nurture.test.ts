@@ -79,6 +79,8 @@ describe("buildContactNurtureBriefSection", () => {
     expect(brief).toContain("repost_amplification");
     expect(brief).toContain("35s");
     expect(brief).toContain("Approval gate is ON");
+    expect(brief).toContain("Submission & Verification");
+    expect(brief).toContain("take a DOM snapshot to verify");
     expect(brief).toContain("MANDATORY WRITE-BACK TO SIGNALS");
     expect(brief).toContain("/api/content");
     expect(brief).toContain("log_interaction");

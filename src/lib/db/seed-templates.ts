@@ -17,7 +17,7 @@ import {
 } from "@/lib/workflows/contact-relationship-nurture";
 
 /** Bump this when seed template prompts change to trigger updates on existing installs. */
-const SEED_VERSION = 11;
+const SEED_VERSION = 12;
 
 export const CONTACT_PROFILE_PIPELINE_TEMPLATE_NAME = "Contact profile pipeline";
 
@@ -510,6 +510,10 @@ Progress relationships with high-value CRM contacts by executing personalized, p
 - Apply a salted sleep delay (20s–45s) between consecutive interactions to protect account health.
 - Never exceed maxActionsPerRun.
 - If requireApproval is true, present batches of 3–5 drafts for operator approval before publishing.
+
+## Execution & Post-Submission Verification
+- Native Submit: On web editors (Facebook, LinkedIn, X), locate and click the native submit button element (e.g. "Post comment", "Comment", "Reply", "Send") rather than relying on synthetic Enter keys.
+- Verification Gate: Always verify submission success by taking a DOM snapshot to confirm the input box is cleared and the comment appears in the live comment stream BEFORE writing back to Signals CRM.
 
 ## Mandatory Write-Back to Signals CRM
 After executing any action:
