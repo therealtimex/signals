@@ -280,10 +280,18 @@ export async function emitWorkflowCompletedEvent(
   }
 
   // Outbound Webhook dispatch (RealTimeX Webhook Ingress, n8n, Zapier, custom URL)
+  const defaultRtxWebhookUrl = "http://127.0.0.1:3001/api/v1/webhook-ingress/inbound/signals-orchestrator";
   const targetWebhookUrl =
     options?.webhookUrl ??
     process.env.REALTIMEX_WEBHOOK_URL ??
-    process.env.SIGNALS_WEBHOOK_URL;
+    process.env.SIGNALS_WEBHOOK_URL ??
+    defaultRtxWebhookUrl;
+
+  const targetSecret =
+    options?.secret ??
+    process.env.REALTIMEX_WEBHOOK_SECRET ??
+    process.env.SIGNALS_WEBHOOK_SECRET ??
+    "signals_secret_rtx_2026";
 
   let outboundDelivered = false;
   if (targetWebhookUrl) {
@@ -295,7 +303,7 @@ export async function emitWorkflowCompletedEvent(
       });
 
       const headers = buildSignedWebhookHeaders(rawBody, {
-        secret: options?.secret,
+        secret: targetSecret,
         eventType: "workflow.completed",
         source: "com.realtimex.signals",
       });
