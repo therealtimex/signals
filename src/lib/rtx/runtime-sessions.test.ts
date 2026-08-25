@@ -2,9 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 import {
   appendRtxThreadMessage,
   dispatchTerminalAgentViaSendMessage,
+  isTerminalRuntimeSessionBusy,
   launchTerminalCliAgent,
   readRtxJsonBody,
   terminateTerminalRuntimeSession,
+  waitForTerminalSessionIdle,
 } from "@/lib/rtx/runtime-sessions";
 
 describe("readRtxJsonBody", () => {
@@ -274,5 +276,90 @@ describe("terminateTerminalRuntimeSession", () => {
         fetchImpl
       )
     ).resolves.toEqual({ success: true, terminated: true });
+  });
+});
+
+describe("terminal session idle helpers", () => {
+  it("treats capturing chat-linked turns as busy", () => {
+    expect(
+      isTerminalRuntimeSessionBusy({
+        id: "cli-agent:session-1",
+        chatLinkedTurnStateKnown: true,
+        chatLinkedPendingTurn: { id: "turn-1", state: "capturing" },
+      })
+    ).toBe(true);
+    expect(
+      isTerminalRuntimeSessionBusy({
+        id: "cli-agent:session-1",
+        chatLinkedTurnStateKnown: true,
+        chatLinkedPendingTurn: null,
+      })
+    ).toBe(false);
+  });
+
+  it("waits until the chat-linked turn clears before reporting idle", async () => {
+    vi.useFakeTimers();
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            success: true,
+            results: {
+              workspaces: [
+                {
+                  threads: [
+                    {
+                      sessions: [
+                        {
+                          id: "cli-agent:session-1",
+                          chatLinkedTurnStateKnown: true,
+                          chatLinkedPendingTurn: { id: "turn-1", state: "capturing" },
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+          }),
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            success: true,
+            results: {
+              workspaces: [
+                {
+                  threads: [
+                    {
+                      sessions: [
+                        {
+                          id: "cli-agent:session-1",
+                          chatLinkedTurnStateKnown: true,
+                          chatLinkedPendingTurn: null,
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+          }),
+          { status: 200 }
+        )
+      );
+
+    const idlePromise = waitForTerminalSessionIdle("cli-agent:session-1", {
+      retryDelaysMs: [10],
+      env: { RTX_APP_ID: "app-1", RTX_API_BASE_URL: "http://127.0.0.1:3001" },
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+
+    await vi.advanceTimersByTimeAsync(10);
+    await expect(idlePromise).resolves.toEqual({ idle: true });
+    vi.useRealTimers();
   });
 });

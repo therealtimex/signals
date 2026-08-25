@@ -571,7 +571,7 @@ Follow the numbered "Network Snowball execution contract" below.
 - Focus on real human decision-makers. Apply the 'Engage for visibility, skip for contacts' bot rule.
 - Never guess vanity profile links — verify handles against authentic source links or leave blank.
 - Always capture real, working avatarUrl (HTTP 200 image URL) so profiles render with real photos across the CRM.
-- Always call complete_workflow_run when finished; Signals stops running browser sessions and terminates the linked terminal session on completion.
+- Always call complete_workflow_run when finished; Signals stops browser sessions immediately and schedules linked terminal session release after the chat-linked turn finishes.
 - Keep within the maxContacts and maxHops limits in the runtime config.`,
     config: buildNetworkSnowballTemplateConfig(),
   },

@@ -28,7 +28,7 @@ describe("complete_workflow_run terminal teardown", () => {
     vi.restoreAllMocks();
   });
 
-  it("terminates the linked RTX runtime session after completion", async () => {
+  it("schedules terminal release after stopping browsers on completion", async () => {
     const template = createTemplate({
       name: "Network Snowball",
       templateType: "prospecting",
@@ -49,10 +49,13 @@ describe("complete_workflow_run terminal teardown", () => {
       mockWorkflowCompletedEvent
     );
 
-    const releaseSpy = vi.spyOn(resourceTeardown, "releaseAgentLaneResources").mockResolvedValue({
-      terminal: { success: true, terminated: true },
-      browser: { stopped: ["network-snowball"], failed: [] },
+    const browserSpy = vi.spyOn(resourceTeardown, "stopRunningRtxBrowserSessions").mockResolvedValue({
+      stopped: ["network-snowball"],
+      failed: [],
     });
+    const scheduleSpy = vi
+      .spyOn(resourceTeardown, "scheduleTerminalSessionRelease")
+      .mockReturnValue({ scheduled: true, sessionId: "cli-agent:session-abc" });
 
     const result = await handleCompleteWorkflowRun({
       runId: run.id,
@@ -61,20 +64,21 @@ describe("complete_workflow_run terminal teardown", () => {
     });
 
     expect(result.success).toBe(true);
-    expect(releaseSpy).toHaveBeenCalledWith({
-      terminalSessionId: "cli-agent:session-abc",
-      stopAllRunningBrowserSessions: true,
+    expect(browserSpy).toHaveBeenCalledWith({ stopAllRunning: true });
+    expect(scheduleSpy).toHaveBeenCalledWith("cli-agent:session-abc");
+    expect(result.terminalSessionTeardown).toEqual({
+      scheduled: true,
+      sessionId: "cli-agent:session-abc",
     });
-    expect(result.terminalSessionTeardown).toEqual({ terminated: true });
     expect(result.browserSessionTeardown).toEqual({
       stopped: ["network-snowball"],
       failed: [],
     });
-    expect(result.message).toContain("Terminal session released.");
+    expect(result.message).toContain("Terminal session release scheduled.");
     expect(result.message).toContain("Browser sessions stopped: network-snowball.");
   });
 
-  it("still completes the workflow when terminal teardown fails", async () => {
+  it("still completes the workflow when no runtime session is stored", async () => {
     const template = createTemplate({
       name: "Network Snowball",
       templateType: "prospecting",
@@ -87,25 +91,21 @@ describe("complete_workflow_run terminal teardown", () => {
         workflowType: "search",
         status: "running",
         trigger: "template",
-        config: JSON.stringify({
-          rtxRuntimeSessionId: "cli-agent:missing",
-        }),
+        config: JSON.stringify({}),
       }).id,
       {
-        config: JSON.stringify({
-          rtxRuntimeSessionId: "cli-agent:missing",
-        }),
+        config: JSON.stringify({}),
       }
     )!;
 
     vi.spyOn(workflowEvents, "emitWorkflowCompletedEvent").mockResolvedValue(
       mockWorkflowCompletedEvent
     );
-
-    vi.spyOn(resourceTeardown, "releaseAgentLaneResources").mockResolvedValue({
-      terminal: { success: false, error: "session not found" },
-      browser: { stopped: [], failed: [] },
+    vi.spyOn(resourceTeardown, "stopRunningRtxBrowserSessions").mockResolvedValue({
+      stopped: [],
+      failed: [],
     });
+    const scheduleSpy = vi.spyOn(resourceTeardown, "scheduleTerminalSessionRelease");
 
     const result = await handleCompleteWorkflowRun({
       runId: run.id,
@@ -114,7 +114,7 @@ describe("complete_workflow_run terminal teardown", () => {
     });
 
     expect(result.success).toBe(true);
-    expect(result.terminalSessionTeardown).toEqual({ error: "session not found" });
-    expect(result.message).toContain("Terminal session teardown failed");
+    expect(scheduleSpy).toHaveBeenCalledWith(null);
+    expect(result.terminalSessionTeardown).toEqual({ scheduled: false });
   });
 });

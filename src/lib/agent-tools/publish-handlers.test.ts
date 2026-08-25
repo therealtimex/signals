@@ -56,12 +56,15 @@ describe("publish agent-tool handlers", () => {
     vi.restoreAllMocks();
   });
 
-  it("releases browser and terminal resources when the publish job reaches a terminal state", async () => {
+  it("schedules terminal release and stops browsers when the publish job reaches a terminal state", async () => {
     const { job } = seedDraftAndJob();
-    const releaseSpy = vi.spyOn(resourceTeardown, "releaseAgentLaneResources").mockResolvedValue({
-      terminal: { success: true, terminated: true },
-      browser: { stopped: ["signals-publish"], failed: [] },
+    const browserSpy = vi.spyOn(resourceTeardown, "stopRunningRtxBrowserSessions").mockResolvedValue({
+      stopped: ["signals-publish"],
+      failed: [],
     });
+    const scheduleSpy = vi
+      .spyOn(resourceTeardown, "scheduleTerminalSessionRelease")
+      .mockReturnValue({ scheduled: true, sessionId: null });
 
     const result = await handleCompletePublish({
       jobId: job.id,
@@ -72,14 +75,14 @@ describe("publish agent-tool handlers", () => {
       platformUrl: "https://x.com/user/status/123",
     });
 
-    expect(releaseSpy).toHaveBeenCalledWith({
-      terminalSessionId: null,
-      browserSessionNames: ["signals-publish"],
-      stopAllRunningBrowserSessions: true,
+    expect(browserSpy).toHaveBeenCalledWith({
+      sessionNames: ["signals-publish"],
+      stopAllRunning: true,
     });
+    expect(scheduleSpy).toHaveBeenCalledWith(null);
     expect(result).toMatchObject({
       browserSessionTeardown: { stopped: ["signals-publish"], failed: [] },
-      terminalSessionTeardown: { terminated: true },
+      terminalSessionTeardown: { scheduled: false },
     });
   });
 

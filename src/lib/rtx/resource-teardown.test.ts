@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   formatAgentLaneTeardownNote,
   releaseAgentLaneResources,
+  scheduleTerminalSessionRelease,
   stopRunningRtxBrowserSessions,
 } from "@/lib/rtx/resource-teardown";
 import * as browserSessions from "@/lib/rtx/browser-sessions";
@@ -88,5 +89,31 @@ describe("formatAgentLaneTeardownNote", () => {
         browser: { stopped: ["network-snowball"], failed: [] },
       })
     ).toContain("Browser sessions stopped: network-snowball.");
+  });
+});
+
+describe("scheduleTerminalSessionRelease", () => {
+  it("waits for idle before terminating on the next tick", async () => {
+    vi.useFakeTimers();
+    const waitSpy = vi
+      .spyOn(runtimeSessions, "waitForTerminalSessionIdle")
+      .mockResolvedValue({ idle: true });
+    const terminateSpy = vi
+      .spyOn(runtimeSessions, "terminateTerminalRuntimeSession")
+      .mockResolvedValue({ success: true, terminated: true });
+
+    const scheduled = scheduleTerminalSessionRelease("cli-agent:session-1");
+    expect(scheduled).toEqual({ scheduled: true, sessionId: "cli-agent:session-1" });
+    expect(terminateSpy).not.toHaveBeenCalled();
+
+    await Promise.resolve();
+    await vi.runAllTimersAsync();
+
+    expect(waitSpy).toHaveBeenCalledWith("cli-agent:session-1", {
+      env: process.env,
+      fetchImpl: fetch,
+    });
+    expect(terminateSpy).toHaveBeenCalledWith("cli-agent:session-1", process.env, fetch);
+    vi.useRealTimers();
   });
 });

@@ -6,6 +6,7 @@ import {
 import type { EnvLike } from "@/lib/rtx/env";
 import {
   terminateTerminalRuntimeSession,
+  waitForTerminalSessionIdle,
   type TerminateTerminalSessionResult,
 } from "@/lib/rtx/runtime-sessions";
 
@@ -104,6 +105,66 @@ export async function releaseAgentLaneResources(
   ]);
 
   return { terminal, browser };
+}
+
+export type ScheduledTerminalSessionRelease = {
+  scheduled: true;
+  sessionId: string | null;
+};
+
+export function scheduleTerminalSessionRelease(
+  terminalSessionId: string | null | undefined,
+  env: EnvLike = process.env,
+  fetchImpl: typeof fetch = fetch
+): ScheduledTerminalSessionRelease {
+  const sessionId = terminalSessionId?.trim() || null;
+  if (!sessionId) {
+    return { scheduled: true, sessionId: null };
+  }
+
+  setImmediate(() => {
+    void (async () => {
+      const idle = await waitForTerminalSessionIdle(sessionId, { env, fetchImpl });
+      if (!idle.idle) {
+        console.warn(
+          `[scheduleTerminalSessionRelease] ${sessionId}: ${idle.reason} Terminating anyway.`
+        );
+      }
+
+      const result = await terminateTerminalRuntimeSession(sessionId, env, fetchImpl);
+      if (!result.success) {
+        console.warn(
+          `[scheduleTerminalSessionRelease] Failed for ${sessionId}: ${result.error}`
+        );
+      }
+    })();
+  });
+
+  return { scheduled: true, sessionId };
+}
+
+export function formatDeferredTerminalTeardownNote(input: {
+  terminal: ScheduledTerminalSessionRelease;
+  browser: BrowserSessionTeardownResult;
+}): string {
+  const parts: string[] = [];
+
+  if (input.terminal.sessionId) {
+    parts.push("Terminal session release scheduled.");
+  }
+
+  if (input.browser.stopped.length > 0) {
+    parts.push(`Browser sessions stopped: ${input.browser.stopped.join(", ")}.`);
+  }
+
+  if (input.browser.failed.length > 0) {
+    const summary = input.browser.failed
+      .map((failure) => `${failure.sessionName} (${failure.error})`)
+      .join("; ");
+    parts.push(`Browser session teardown issues: ${summary}.`);
+  }
+
+  return parts.length > 0 ? ` ${parts.join(" ")}` : "";
 }
 
 export function formatAgentLaneTeardownNote(result: AgentLaneResourceTeardownResult): string {

@@ -16,7 +16,7 @@ This workspace is provisioned by the **Signals** RealtimeX plugin (`com.realtime
 2. Load the `realtimex-signals` skill and run `scripts/resolve-base-url.sh` before any CRM calls.
 3. For enrichment or publish, use **agent-browser** / RealTimeX Browser — then write results back via agent-tools.
 4. Do not use deprecated in-app chat (`/api/chat`); intelligence stays in the terminal agent.
-5. **Resource Teardown Protocol:** Workflow agents — call `complete_workflow_run` when finished (Signals stops running browser sessions and terminates the linked terminal session). Publish agents — call `complete_publish` for each platform; Signals releases browser and terminal sessions when the job finishes. Orchestrator/handoff agents — stop browser sessions and `realtimex-pp-cli terminate-terminal-session <sessionId>` manually. Do not use `process.exit(0)`; it does not release the RTX terminal runtime.
+5. **Resource Teardown Protocol:** Workflow agents — call `complete_workflow_run` when finished (Signals stops browser sessions immediately and schedules terminal session release after the chat-linked turn finishes). Publish agents — call `complete_publish` for each platform; Signals uses the same deferred terminal release when the job finishes. Orchestrator/handoff agents — after a successful `dispatch_follow_on_workflow`, Signals schedules orchestrator terminal release automatically; otherwise stop browser sessions and `realtimex-pp-cli terminate-terminal-session <sessionId>` manually. Do not use `process.exit(0)`; it does not release the RTX terminal runtime.
 
 ## Data and privacy
 

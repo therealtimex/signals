@@ -23,9 +23,12 @@ import { dispatchWorkflowCascade } from "@/lib/workflows/chaining";
 import { emitWorkflowCompletedEvent } from "@/lib/webhooks/workflow-events";
 import { runTemplateViaRtx, getRtxRuntimeSessionIdFromRunConfig } from "@/lib/agents/run-template-via-rtx";
 import { isRtxEmbedded } from "@/lib/rtx/env";
+import { getOrCreateOrchestratorThread } from "@/lib/rtx/orchestrator-thread";
+import { resolveActiveTerminalSessionIdForThread } from "@/lib/rtx/runtime-sessions";
 import {
-  formatAgentLaneTeardownNote,
-  releaseAgentLaneResources,
+  formatDeferredTerminalTeardownNote,
+  scheduleTerminalSessionRelease,
+  stopRunningRtxBrowserSessions,
 } from "@/lib/rtx/resource-teardown";
 import type { WorkflowType } from "@/lib/workflows/types";
 import type {
@@ -755,6 +758,20 @@ export async function handleDispatchFollowOnWorkflow(
         console.warn(`[handleDispatchFollowOnWorkflow] Failed to launch RTX agent for child run ${childRunId}:`, err);
       }
     }
+
+    try {
+      const orchestratorThread = await getOrCreateOrchestratorThread();
+      const orchestratorSessionId = await resolveActiveTerminalSessionIdForThread(
+        orchestratorThread.workspaceSlug,
+        orchestratorThread.threadSlug
+      );
+      scheduleTerminalSessionRelease(orchestratorSessionId);
+    } catch (err) {
+      console.warn(
+        "[handleDispatchFollowOnWorkflow] Failed to schedule orchestrator terminal teardown:",
+        err
+      );
+    }
   }
 
   return {
@@ -943,12 +960,14 @@ export async function handleCompleteWorkflowRun(input: z.infer<typeof completeWo
   });
 
   const runtimeSessionId = getRtxRuntimeSessionIdFromRunConfig(run.config);
-  const resourceTeardown = await releaseAgentLaneResources({
-    terminalSessionId: runtimeSessionId,
-    stopAllRunningBrowserSessions: true,
+  const browserSessionTeardown = await stopRunningRtxBrowserSessions({
+    stopAllRunning: true,
   });
-
-  const teardownNote = formatAgentLaneTeardownNote(resourceTeardown);
+  const terminalSessionTeardown = scheduleTerminalSessionRelease(runtimeSessionId);
+  const teardownNote = formatDeferredTerminalTeardownNote({
+    terminal: terminalSessionTeardown,
+    browser: browserSessionTeardown,
+  });
 
   return {
     success: true,
@@ -958,10 +977,10 @@ export async function handleCompleteWorkflowRun(input: z.infer<typeof completeWo
     processedItems: updatedRun?.processedItems ?? input.processedItems ?? 0,
     cascadeResult: eventResult.cascadeResult,
     routingRecommendation: eventResult.routingRecommendation,
-    terminalSessionTeardown: resourceTeardown.terminal.success
-      ? { terminated: resourceTeardown.terminal.terminated }
-      : { error: resourceTeardown.terminal.error },
-    browserSessionTeardown: resourceTeardown.browser,
+    terminalSessionTeardown: terminalSessionTeardown.sessionId
+      ? { scheduled: true, sessionId: terminalSessionTeardown.sessionId }
+      : { scheduled: false },
+    browserSessionTeardown,
     message: `Workflow run ${input.runId} marked as ${input.status}. Follow-on cascades and webhook dispatch completed.${teardownNote}`,
   };
 }

@@ -45,8 +45,8 @@ describe("orchestrator-brief", () => {
     expect(markdown).toContain("Recommended Next Action:** `patrol`");
     expect(markdown).toContain("Discovered active founders. Deploy Social Patrol.");
     expect(markdown).toContain("TEARDOWN & RESOURCE RELEASE PROTOCOL");
-    expect(markdown).toContain("terminate-terminal-session");
-    expect(markdown).toContain("Do not use `process.exit(0)`");
+    expect(markdown).toContain("dispatch_follow_on_workflow");
+    expect(markdown).toContain("schedules release of this orchestrator terminal session");
   });
 
   it("formats relative brief path correctly", () => {

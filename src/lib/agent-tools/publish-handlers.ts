@@ -30,8 +30,9 @@ import { PUBLISH_PLATFORM_TARGETS } from "@/lib/publish/payload";
 import type { PublishJobStatus, PublishJobTarget, PublishPlatformTarget } from "@/lib/publish/types";
 import type { PublishErrorCode } from "@/lib/browser/publishers/types";
 import {
-  formatAgentLaneTeardownNote,
-  releaseAgentLaneResources,
+  formatDeferredTerminalTeardownNote,
+  scheduleTerminalSessionRelease,
+  stopRunningRtxBrowserSessions,
 } from "@/lib/rtx/resource-teardown";
 
 export const getPublishJobSchema = z.object({
@@ -391,17 +392,27 @@ export async function handleCompletePublish(input: z.infer<typeof completePublis
   const updated = persistJobTargets(job.id, targets, recordOnly);
 
   let resourceTeardownNote = "";
-  let resourceTeardown:
-    | Awaited<ReturnType<typeof releaseAgentLaneResources>>
+  let terminalSessionTeardown:
+    | { scheduled: true; sessionId: string }
+    | { scheduled: false }
+    | undefined;
+  let browserSessionTeardown:
+    | Awaited<ReturnType<typeof stopRunningRtxBrowserSessions>>
     | undefined;
 
   if (updated && !recordOnly && isTerminalPublishJob(updated.status as PublishJobStatus)) {
-    resourceTeardown = await releaseAgentLaneResources({
-      terminalSessionId: updated.rtxRuntimeSessionId,
-      browserSessionNames: collectPublishBrowserSessionNames(updated.targetsParsed),
-      stopAllRunningBrowserSessions: true,
+    browserSessionTeardown = await stopRunningRtxBrowserSessions({
+      sessionNames: collectPublishBrowserSessionNames(updated.targetsParsed),
+      stopAllRunning: true,
     });
-    resourceTeardownNote = formatAgentLaneTeardownNote(resourceTeardown);
+    const scheduled = scheduleTerminalSessionRelease(updated.rtxRuntimeSessionId);
+    terminalSessionTeardown = scheduled.sessionId
+      ? { scheduled: true, sessionId: scheduled.sessionId }
+      : { scheduled: false };
+    resourceTeardownNote = formatDeferredTerminalTeardownNote({
+      terminal: scheduled,
+      browser: browserSessionTeardown,
+    });
   }
 
   return updated
@@ -409,14 +420,8 @@ export async function handleCompletePublish(input: z.infer<typeof completePublis
         jobId: updated.id,
         status: updated.status,
         targets: updated.targetsParsed,
-        ...(resourceTeardown
-          ? {
-              terminalSessionTeardown: resourceTeardown.terminal.success
-                ? { terminated: resourceTeardown.terminal.terminated }
-                : { error: resourceTeardown.terminal.error },
-              browserSessionTeardown: resourceTeardown.browser,
-            }
-          : {}),
+        ...(terminalSessionTeardown ? { terminalSessionTeardown } : {}),
+        ...(browserSessionTeardown ? { browserSessionTeardown } : {}),
         ...(resourceTeardownNote ? { message: resourceTeardownNote.trim() } : {}),
         ...(recordOnly ? { superseded: true, recorded: true } : {}),
         ...(leaseStale ? { leaseStale: true } : {}),
