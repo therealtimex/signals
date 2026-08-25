@@ -19,9 +19,13 @@ import {
   NETWORK_SNOWBALL_TEMPLATE_NAME,
   buildNetworkSnowballTemplateConfig,
 } from "@/lib/workflows/network-snowball";
+import {
+  SNOWBALL_SEED_SCOUT_TEMPLATE_NAME,
+  buildSnowballSeedScoutTemplateConfig,
+} from "@/lib/workflows/snowball-seed-scout";
 
 /** Bump this when seed template prompts change to trigger updates on existing installs. */
-const SEED_VERSION = 18;
+const SEED_VERSION = 19;
 
 export const CONTACT_PROFILE_PIPELINE_TEMPLATE_NAME = "Contact profile pipeline";
 
@@ -535,6 +539,19 @@ After executing any action:
    POST $SIGNALS_BASE_URL/api/agent-tools/invoke with JSON:
    { "tool": "update_contact", "input": { "contactId": "<contactId>", "relationshipGoalStatus": "in_progress" (or "achieved") } }`,
     config: buildContactNurtureTemplateConfig(),
+  },
+  {
+    name: SNOWBALL_SEED_SCOUT_TEMPLATE_NAME,
+    description:
+      "Deploy a deterministic heartbeat scout that harvests high-signal post URLs and queues Network Snowball runs on the RealTimeX calendar with salted delays.",
+    templateType: "prospecting",
+    targetPersona:
+      "Public posts announcing funding, launches, hires, and product milestones across connected social platforms",
+    estimatedCost: 0.05,
+    systemPrompt: `Snowball Seed Scout is deployed to the RealTimeX workspace heartbeat — not executed as a terminal-agent run from this template.
+
+Use Deploy to provision scripts/snowball-seed-scout/scout.json and a HEARTBEAT.md shell task. The scout runs on the configured interval, connects via agent-browser over CDP, harvests candidate post URLs, and enqueues calendar events for Network Snowball.`,
+    config: buildSnowballSeedScoutTemplateConfig(),
   },
   {
     name: NETWORK_SNOWBALL_TEMPLATE_NAME,

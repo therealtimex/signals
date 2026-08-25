@@ -37,8 +37,10 @@ import {
   MessageSquare,
   MoreHorizontal,
   Users,
+  Rocket,
 } from "lucide-react";
 import { ActivateDialog } from "./activate-dialog";
+import { DeployDialog, isSnowballSeedScoutTemplate } from "./deploy-dialog";
 import { TemplateBuilder } from "./template-builder";
 import { DedupeReviewDialog } from "./dedupe-review-dialog";
 import { isDedupeTemplateConfig } from "@/lib/workflows/dedupe-template";
@@ -170,6 +172,7 @@ export function TemplateGallery() {
   const [editTemplate, setEditTemplate] = useState<Template | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Template | null>(null);
   const [reviewTemplate, setReviewTemplate] = useState<Template | null>(null);
+  const [deployTemplate, setDeployTemplate] = useState<Template | null>(null);
   const [builderOpen, setBuilderOpen] = useState(false);
   const [filter, setFilter] = useState<string>("all");
   const [duplicating, setDuplicating] = useState<string | null>(null);
@@ -269,6 +272,7 @@ export function TemplateGallery() {
             const isSystem = template.isSystem === 1;
             const isPipeline = isPipelineTemplateConfig(template.config);
             const isDedupe = isDedupeTemplate(template);
+            const isSeedScout = isSnowballSeedScoutTemplate(template);
 
             return (
               <Card
@@ -318,21 +322,30 @@ export function TemplateGallery() {
                         Pipeline
                       </Badge>
                     )}
+                    {isSeedScout && (
+                      <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                        Heartbeat
+                      </Badge>
+                    )}
                   </div>
                   <div className="flex gap-2">
                     <Button
                       size="sm"
                       className="flex-1 h-8"
-                      onClick={() =>
-                        isDedupe ? setReviewTemplate(template) : setActiveTemplate(template)
-                      }
+                      onClick={() => {
+                        if (isDedupe) setReviewTemplate(template);
+                        else if (isSeedScout) setDeployTemplate(template);
+                        else setActiveTemplate(template);
+                      }}
                     >
                       {isDedupe ? (
                         <Users className="mr-1.5 h-3 w-3" />
+                      ) : isSeedScout ? (
+                        <Rocket className="mr-1.5 h-3 w-3" />
                       ) : (
                         <Play className="mr-1.5 h-3 w-3" />
                       )}
-                      Run
+                      {isSeedScout ? "Deploy" : "Run"}
                     </Button>
                     {isSystem ? (
                       <DropdownMenu>
@@ -387,6 +400,14 @@ export function TemplateGallery() {
           templateId={reviewTemplate.id}
           templateName={reviewTemplate.name}
           onClose={() => setReviewTemplate(null)}
+        />
+      )}
+
+      {deployTemplate && (
+        <DeployDialog
+          template={deployTemplate}
+          open={!!deployTemplate}
+          onClose={() => setDeployTemplate(null)}
         />
       )}
 

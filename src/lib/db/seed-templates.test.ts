@@ -33,7 +33,7 @@ describe("Contact profile pipeline seed", () => {
       pipeline?: { version?: number; steps?: Array<{ id: string; handler: string }> };
     };
 
-    expect(config._seedVersion).toBe(18);
+    expect(config._seedVersion).toBe(19);
     expect(config.pipeline?.version).toBe(2);
     expect(config.pipeline?.steps).toEqual([
       { id: "hydrate", executor: "code", handler: "hydrate_x_profiles" },
@@ -77,7 +77,7 @@ describe("Contact profile pipeline seed", () => {
       };
     };
     expect(config).toMatchObject({
-      _seedVersion: 18,
+      _seedVersion: 19,
       customTopLevel: true,
       pipeline: {
         version: 2,
@@ -191,7 +191,7 @@ describe("Social Intent Patrol seed", () => {
 
     expect(config).not.toHaveProperty("maxPosts");
     expect(config).not.toHaveProperty("durationMinutes");
-    expect(config._seedVersion).toBe(18);
+    expect(config._seedVersion).toBe(19);
     expect(config.maxComments).toBe(8);
     // The card copy is structural — an existing install must not keep describing a shift that
     // still posts to your own timeline.
@@ -266,6 +266,30 @@ describe("Contact Relationship Nurture seed", () => {
   });
 });
 
+describe("Snowball Seed Scout seed", () => {
+  beforeEach(() => {
+    resetCoreTables();
+  });
+
+  it("seeds heartbeat deploy template with scout defaults", () => {
+    seedTemplates();
+    const template = getSystemTemplateByName("Snowball Seed Scout")!;
+
+    expect(template).toBeDefined();
+    expect(template.templateType).toBe("prospecting");
+    expect(template.systemPrompt).toContain("heartbeat");
+
+    const config = JSON.parse(template.config ?? "{}") as {
+      _seedVersion?: number;
+      snowballSeedScout?: { version?: number; executionKind?: string };
+      maxLinksPerRun?: number;
+    };
+    expect(config._seedVersion).toBe(19);
+    expect(config.snowballSeedScout?.executionKind).toBe("heartbeat_shell");
+    expect(config.maxLinksPerRun).toBe(5);
+  });
+});
+
 describe("Network Snowball seed", () => {
   beforeEach(() => {
     resetCoreTables();
@@ -289,7 +313,7 @@ describe("Network Snowball seed", () => {
       maxContacts?: number;
       maxHops?: number;
     };
-    expect(config._seedVersion).toBe(18);
+    expect(config._seedVersion).toBe(19);
     expect(config.networkSnowball?.version).toBe(1);
     expect(config.focus).toBe("investors_and_angels");
     expect(config.maxContacts).toBe(10);
