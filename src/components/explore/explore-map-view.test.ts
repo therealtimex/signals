@@ -32,6 +32,20 @@ vi.mock("next/link", () => ({
   }) => createElement("a", { href, className }, children),
 }));
 
+vi.mock("@/components/explore/use-explore-map-theme-colors", () => ({
+  useExploreMapThemeColors: () => ({
+    primary: "rgb(59, 130, 246)",
+    mutedForeground: "rgb(113, 113, 122)",
+    foreground: "rgb(24, 24, 27)",
+    chart: [
+      "rgb(59, 130, 246)",
+      "rgb(16, 185, 129)",
+      "rgb(245, 158, 11)",
+      "rgb(236, 72, 153)",
+    ],
+  }),
+}));
+
 vi.mock("@/components/ui/sidebar", () => ({
   Sidebar: ({ children }: { children: React.ReactNode }) => createElement("aside", null, children),
   SidebarHeader: ({
