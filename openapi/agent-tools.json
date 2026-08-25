@@ -1024,12 +1024,123 @@
                               "search",
                               "enrich",
                               "prune",
-                              "agent"
+                              "agent",
+                              "nurture",
+                              "content",
+                              "sync"
                             ]
+                          },
+                          "config": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "object"
+                            }
+                          },
+                          "parentWorkflowId": {
+                            "type": "string"
+                          },
+                          "targetContactIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
                           }
                         },
                         "required": [
                           "templateId"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "dispatch_follow_on_workflow"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "parentWorkflowRunId": {
+                            "type": "string"
+                          },
+                          "followOnAction": {
+                            "type": "string",
+                            "enum": [
+                              "profile_pipeline",
+                              "contact_nurture",
+                              "social_patrol",
+                              "agentic_router"
+                            ]
+                          },
+                          "contactIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "required": [
+                          "parentWorkflowRunId",
+                          "followOnAction"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "complete_workflow_run"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "runId": {
+                            "type": "string",
+                            "description": "The workflow run ID to mark completed"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "completed",
+                              "failed"
+                            ]
+                          },
+                          "processedItems": {
+                            "type": "number"
+                          },
+                          "successItems": {
+                            "type": "number"
+                          },
+                          "createdContactIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "summary": {
+                            "type": "string"
+                          },
+                          "errors": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "required": [
+                          "runId"
                         ],
                         "additionalProperties": false
                       }
@@ -2659,6 +2770,8 @@
                       "query_workflows",
                       "list_workflow_templates",
                       "start_workflow",
+                      "dispatch_follow_on_workflow",
+                      "complete_workflow_run",
                       "query_content",
                       "query_goals",
                       "create_task",
@@ -2837,6 +2950,6 @@
   ],
   "x-signals-agent-tools": {
     "manifestVersion": "1",
-    "toolCount": 46
+    "toolCount": 48
   }
 }
