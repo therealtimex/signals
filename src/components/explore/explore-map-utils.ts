@@ -69,8 +69,26 @@ export const EXPLORE_MAP_DEFAULT_LAYERS: ExploreMapLayerVisibility = {
   showNiches: true,
 };
 
-/** Show follower avatars when zoomed in, filtering, or hovering. */
-export const EXPLORE_MAP_AVATAR_MIN_SCALE = 1.35;
+/** Target on-screen avatar radius in px at default zoom. */
+export const EXPLORE_MAP_AVATAR_SCREEN_RADIUS = 5;
+export const EXPLORE_MAP_AVATAR_HOVER_SCREEN_RADIUS = 9;
+export const EXPLORE_MAP_OWNER_AVATAR_SCREEN_RADIUS = 10;
+
+export function exploreMapContactScreenRadius(
+  globalScale: number,
+  opts: { isOwner: boolean; isHovered: boolean },
+): number {
+  const screenRadius = opts.isOwner
+    ? EXPLORE_MAP_OWNER_AVATAR_SCREEN_RADIUS
+    : opts.isHovered
+      ? EXPLORE_MAP_AVATAR_HOVER_SCREEN_RADIUS
+      : EXPLORE_MAP_AVATAR_SCREEN_RADIUS;
+  return screenRadius / Math.max(globalScale, 0.05);
+}
+
+export function shouldShowExploreContactAvatar(_node: ExploreMapContactNode): boolean {
+  return true;
+}
 
 export function buildExploreNicheColorMap(
   nodes: ExploreMapNode[],
@@ -102,18 +120,6 @@ export function contactNodeBaseColor(
     return nicheColorMap.get(nicheId)!;
   }
   return theme.mutedForeground;
-}
-
-export function shouldShowExploreContactAvatar(
-  globalScale: number,
-  selectedNicheId: string | null,
-  isHovered: boolean,
-  node: ExploreMapContactNode,
-): boolean {
-  if (node.isOwner) return true;
-  if (isHovered) return true;
-  if (selectedNicheId && contactMatchesNicheFilter(node, selectedNicheId)) return true;
-  return globalScale >= EXPLORE_MAP_AVATAR_MIN_SCALE;
 }
 
 export function exploreContactInitials(label: string): string {

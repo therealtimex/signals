@@ -20,12 +20,12 @@ import {
   contactNodeBaseColor,
   contactNodeVal,
   exploreContactInitials,
+  exploreMapContactScreenRadius,
   exploreMapNodeOpacity,
   exploreMapNodeTooltip,
   filterExploreMapEdges,
   nicheNodeVal,
   shouldRenderExploreNodeLabel,
-  shouldShowExploreContactAvatar,
   type ExploreMapLayerVisibility,
 } from "@/components/explore/explore-map-utils";
 import { useExploreMapThemeColors } from "@/components/explore/use-explore-map-theme-colors";
@@ -114,19 +114,6 @@ export function exploreMapLayoutSignature(
     layers.showFollows,
     layers.showNiches,
   ].join("|");
-}
-
-function drawCircleNode(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  radius: number,
-  color: string,
-) {
-  ctx.beginPath();
-  ctx.arc(x, y, radius, 0, 2 * Math.PI, false);
-  ctx.fillStyle = color;
-  ctx.fill();
 }
 
 function drawAvatarNode(
@@ -389,13 +376,12 @@ export function ExploreMapCanvas({
         }
 
         const isHovered = hoveredNodeId === graphNode.id;
-        const radius = Math.max((graphNode.val ?? 4) / globalScale, isHovered ? 7 / globalScale : 2.5 / globalScale);
-        const showAvatar =
-          graphNode.kind === "contact" &&
-          shouldShowExploreContactAvatar(globalScale, selectedNicheId, isHovered, graphNode);
+        const radius = exploreMapContactScreenRadius(globalScale, {
+          isOwner: graphNode.isOwner,
+          isHovered,
+        });
 
-        if (showAvatar) {
-          drawAvatarNode(
+        drawAvatarNode(
             ctx,
             x,
             y,
@@ -403,10 +389,7 @@ export function ExploreMapCanvas({
             color,
             graphNode.avatarUrl,
             graphNode.label,
-          );
-        } else {
-          drawCircleNode(ctx, x, y, radius, color);
-        }
+        );
 
         if (shouldRenderExploreNodeLabel(graphNode, hoveredNodeId)) {
           const label = graphNode.label ?? "";

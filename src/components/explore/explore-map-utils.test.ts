@@ -6,6 +6,7 @@ import {
   contactNodeVal,
   EXPLORE_MAP_AUDIENCE_NODE_VAL_MAX,
   EXPLORE_MAP_OWNER_NODE_VAL,
+  exploreMapContactScreenRadius,
   exploreMapNodeOpacity,
   exploreMapNodeTooltip,
   filterExploreMapEdges,
@@ -133,7 +134,7 @@ describe("explore map legibility helpers", () => {
     expect(contactMatchesNicheFilter(ownerContact, "niche-other")).toBe(true);
   });
 
-  it("assigns stable niche colors and avatar visibility rules", () => {
+  it("assigns stable niche colors and always renders contact avatars", () => {
     const theme = {
       primary: "rgb(1, 2, 3)",
       mutedForeground: "rgb(4, 5, 6)",
@@ -155,7 +156,9 @@ describe("explore map legibility helpers", () => {
     );
     expect(colors.get("a")).toBe("rgb(10, 11, 12)");
     expect(primaryNicheIdForContact(audienceContact)).toBe("niche-ai");
-    expect(shouldShowExploreContactAvatar(1, null, false, audienceContact)).toBe(false);
-    expect(shouldShowExploreContactAvatar(1, null, true, audienceContact)).toBe(true);
+    expect(shouldShowExploreContactAvatar(audienceContact)).toBe(true);
+    expect(
+      exploreMapContactScreenRadius(1, { isOwner: false, isHovered: false }),
+    ).toBe(5);
   });
 });
