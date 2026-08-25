@@ -4,7 +4,7 @@ import { createWorkflowRun, updateWorkflowRun } from "@/lib/db/queries/workflows
 import { createTemplate } from "@/lib/db/queries/workflow-templates";
 import { handleCompleteWorkflowRun } from "@/lib/agent-tools/handlers";
 import * as workflowEvents from "@/lib/webhooks/workflow-events";
-import * as runtimeSessions from "@/lib/rtx/runtime-sessions";
+import * as resourceTeardown from "@/lib/rtx/resource-teardown";
 
 const mockWorkflowCompletedEvent: workflowEvents.EmitWorkflowCompletedResult = {
   emitted: true,
@@ -49,9 +49,10 @@ describe("complete_workflow_run terminal teardown", () => {
       mockWorkflowCompletedEvent
     );
 
-    const terminateSpy = vi
-      .spyOn(runtimeSessions, "terminateTerminalRuntimeSession")
-      .mockResolvedValue({ success: true, terminated: true });
+    const releaseSpy = vi.spyOn(resourceTeardown, "releaseAgentLaneResources").mockResolvedValue({
+      terminal: { success: true, terminated: true },
+      browser: { stopped: ["network-snowball"], failed: [] },
+    });
 
     const result = await handleCompleteWorkflowRun({
       runId: run.id,
@@ -60,9 +61,17 @@ describe("complete_workflow_run terminal teardown", () => {
     });
 
     expect(result.success).toBe(true);
-    expect(terminateSpy).toHaveBeenCalledWith("cli-agent:session-abc");
+    expect(releaseSpy).toHaveBeenCalledWith({
+      terminalSessionId: "cli-agent:session-abc",
+      stopAllRunningBrowserSessions: true,
+    });
     expect(result.terminalSessionTeardown).toEqual({ terminated: true });
+    expect(result.browserSessionTeardown).toEqual({
+      stopped: ["network-snowball"],
+      failed: [],
+    });
     expect(result.message).toContain("Terminal session released.");
+    expect(result.message).toContain("Browser sessions stopped: network-snowball.");
   });
 
   it("still completes the workflow when terminal teardown fails", async () => {
@@ -93,9 +102,9 @@ describe("complete_workflow_run terminal teardown", () => {
       mockWorkflowCompletedEvent
     );
 
-    vi.spyOn(runtimeSessions, "terminateTerminalRuntimeSession").mockResolvedValue({
-      success: false,
-      error: "session not found",
+    vi.spyOn(resourceTeardown, "releaseAgentLaneResources").mockResolvedValue({
+      terminal: { success: false, error: "session not found" },
+      browser: { stopped: [], failed: [] },
     });
 
     const result = await handleCompleteWorkflowRun({

@@ -23,7 +23,10 @@ import { dispatchWorkflowCascade } from "@/lib/workflows/chaining";
 import { emitWorkflowCompletedEvent } from "@/lib/webhooks/workflow-events";
 import { runTemplateViaRtx, getRtxRuntimeSessionIdFromRunConfig } from "@/lib/agents/run-template-via-rtx";
 import { isRtxEmbedded } from "@/lib/rtx/env";
-import { terminateTerminalRuntimeSession } from "@/lib/rtx/runtime-sessions";
+import {
+  formatAgentLaneTeardownNote,
+  releaseAgentLaneResources,
+} from "@/lib/rtx/resource-teardown";
 import type { WorkflowType } from "@/lib/workflows/types";
 import type {
   archiveContactSchema,
@@ -940,13 +943,12 @@ export async function handleCompleteWorkflowRun(input: z.infer<typeof completeWo
   });
 
   const runtimeSessionId = getRtxRuntimeSessionIdFromRunConfig(run.config);
-  const terminalTeardown = await terminateTerminalRuntimeSession(runtimeSessionId);
+  const resourceTeardown = await releaseAgentLaneResources({
+    terminalSessionId: runtimeSessionId,
+    stopAllRunningBrowserSessions: true,
+  });
 
-  const teardownNote = terminalTeardown.success
-    ? terminalTeardown.terminated
-      ? " Terminal session released."
-      : ""
-    : ` Terminal session teardown failed: ${terminalTeardown.error}.`;
+  const teardownNote = formatAgentLaneTeardownNote(resourceTeardown);
 
   return {
     success: true,
@@ -956,9 +958,10 @@ export async function handleCompleteWorkflowRun(input: z.infer<typeof completeWo
     processedItems: updatedRun?.processedItems ?? input.processedItems ?? 0,
     cascadeResult: eventResult.cascadeResult,
     routingRecommendation: eventResult.routingRecommendation,
-    terminalSessionTeardown: terminalTeardown.success
-      ? { terminated: terminalTeardown.terminated }
-      : { error: terminalTeardown.error },
+    terminalSessionTeardown: resourceTeardown.terminal.success
+      ? { terminated: resourceTeardown.terminal.terminated }
+      : { error: resourceTeardown.terminal.error },
+    browserSessionTeardown: resourceTeardown.browser,
     message: `Workflow run ${input.runId} marked as ${input.status}. Follow-on cascades and webhook dispatch completed.${teardownNote}`,
   };
 }

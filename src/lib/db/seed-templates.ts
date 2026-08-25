@@ -565,13 +565,13 @@ Follow the numbered "Network Snowball execution contract" below.
 5. Ingest contacts via signals-pp-cli import contacts --file workflow-runs/<runId>/contacts.csv --dedupe.
 6. In the notes column, clearly record the causal anchor (e.g. "role: Lead Investor in Acme Seed round").
 7. Report the mapped ecosystem cluster with links in this thread.
-8. Teardown & Resource Release: Stop browser sessions, call complete_workflow_run (Signals releases the terminal session automatically), and do not continue in this thread.
+8. Teardown & Resource Release: Call complete_workflow_run when finished (Signals stops running browser sessions and releases the terminal session automatically), and do not continue in this thread.
 
 ## Rules
 - Focus on real human decision-makers. Apply the 'Engage for visibility, skip for contacts' bot rule.
 - Never guess vanity profile links — verify handles against authentic source links or leave blank.
 - Always capture real, working avatarUrl (HTTP 200 image URL) so profiles render with real photos across the CRM.
-- Always release spawned browser sessions before calling complete_workflow_run; Signals terminates the linked terminal session on completion.
+- Always call complete_workflow_run when finished; Signals stops running browser sessions and terminates the linked terminal session on completion.
 - Keep within the maxContacts and maxHops limits in the runtime config.`,
     config: buildNetworkSnowballTemplateConfig(),
   },

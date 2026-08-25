@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createContentItem, getContentItem } from "@/lib/db/queries/content";
 import {
   createPublishJob,
@@ -22,6 +22,7 @@ import {
   getSessionLease,
   releaseSessionLease,
 } from "@/lib/leases/session-lease";
+import * as resourceTeardown from "@/lib/rtx/resource-teardown";
 
 function seedDraftAndJob() {
   const item = createContentItem({
@@ -52,6 +53,34 @@ function seedDraftAndJob() {
 describe("publish agent-tool handlers", () => {
   beforeEach(() => {
     resetCoreTables();
+    vi.restoreAllMocks();
+  });
+
+  it("releases browser and terminal resources when the publish job reaches a terminal state", async () => {
+    const { job } = seedDraftAndJob();
+    const releaseSpy = vi.spyOn(resourceTeardown, "releaseAgentLaneResources").mockResolvedValue({
+      terminal: { success: true, terminated: true },
+      browser: { stopped: ["signals-publish"], failed: [] },
+    });
+
+    const result = await handleCompletePublish({
+      jobId: job.id,
+      platform: "x",
+      success: true,
+      handle: "@user",
+      platformPostId: "123",
+      platformUrl: "https://x.com/user/status/123",
+    });
+
+    expect(releaseSpy).toHaveBeenCalledWith({
+      terminalSessionId: null,
+      browserSessionNames: ["signals-publish"],
+      stopAllRunningBrowserSessions: true,
+    });
+    expect(result).toMatchObject({
+      browserSessionTeardown: { stopped: ["signals-publish"], failed: [] },
+      terminalSessionTeardown: { terminated: true },
+    });
   });
 
   it("does not regress terminal targets on duplicate update_publish_job", async () => {

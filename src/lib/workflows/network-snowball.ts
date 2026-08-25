@@ -186,7 +186,7 @@ export function buildNetworkSnowballBriefSection(input: {
     "S6. Report Progress: Provide a concise summary table in this thread listing discovered contacts, their roles, avatar URLs, and platform links.",
     "S7. Teardown & Resource Release:",
     "    - Terminate Spawned Browser Sessions: Immediately stop/close any browser sessions opened during this run (agent-browser close / realtimex-pp-cli browser-session stop) to release Chromium RAM and CPU.",
-    "    - Terminate Agent Session: Call complete_workflow_run (step 10) only after browser sessions are stopped. Signals automatically terminates this workflow's linked terminal session — do not send further messages in this thread after completion.",
+    "    - Terminate Agent Session: Call complete_workflow_run (step 10) when finished. Signals automatically stops running browser sessions and terminates this workflow's linked terminal session — do not send further messages in this thread after completion.",
   ];
 
   return lines.join("\n");
