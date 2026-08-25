@@ -4,6 +4,7 @@ import {
   getRtxThreadPresence,
 } from "@/lib/rtx/cli-provisioning";
 import type { EnvLike } from "@/lib/rtx/env";
+import { MANUAL_TERMINAL_TEARDOWN_INSTRUCTION } from "@/lib/rtx/teardown";
 
 export const SIGNALS_ORCHESTRATOR_THREAD_NAME = "Signals Orchestrator";
 export const DEFAULT_ORCHESTRATOR_THREAD_SLUG = "signals-orchestrator";
@@ -84,6 +85,6 @@ export function buildOrchestratorHandoffInstruction(): string {
     "1. Review incoming workflow completion events, newly mapped contact cohorts, and routing recommendations.",
     "2. If cascade policy is immediate and action is approved: invoke `dispatch_follow_on_workflow` or `start_workflow` via Signals agent tools.",
     "3. If cascade policy is supervised: post the cohort analysis and suggested follow-on actions for the operator to approve in this thread.",
-    "4. TEARDOWN & RESOURCE RELEASE PROTOCOL: Once the handoff or dispatch is completed, terminate all spawned browser sessions and exit cleanly (process.exit(0)) to immediately release RAM and CPU resources in RealTimeX.",
+    `4. TEARDOWN & RESOURCE RELEASE PROTOCOL: ${MANUAL_TERMINAL_TEARDOWN_INSTRUCTION}`,
   ].join("\n");
 }

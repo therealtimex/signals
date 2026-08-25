@@ -21,8 +21,9 @@ import { MergeContactsError, mergeContacts } from "@/lib/contacts/dedupe/merge";
 import { personNameKey, orgNameKey } from "@/lib/contacts/dedupe/normalize";
 import { dispatchWorkflowCascade } from "@/lib/workflows/chaining";
 import { emitWorkflowCompletedEvent } from "@/lib/webhooks/workflow-events";
-import { runTemplateViaRtx } from "@/lib/agents/run-template-via-rtx";
+import { runTemplateViaRtx, getRtxRuntimeSessionIdFromRunConfig } from "@/lib/agents/run-template-via-rtx";
 import { isRtxEmbedded } from "@/lib/rtx/env";
+import { terminateTerminalRuntimeSession } from "@/lib/rtx/runtime-sessions";
 import type { WorkflowType } from "@/lib/workflows/types";
 import type {
   archiveContactSchema,
@@ -938,6 +939,15 @@ export async function handleCompleteWorkflowRun(input: z.infer<typeof completeWo
     createdContactIds: input.createdContactIds,
   });
 
+  const runtimeSessionId = getRtxRuntimeSessionIdFromRunConfig(run.config);
+  const terminalTeardown = await terminateTerminalRuntimeSession(runtimeSessionId);
+
+  const teardownNote = terminalTeardown.success
+    ? terminalTeardown.terminated
+      ? " Terminal session released."
+      : ""
+    : ` Terminal session teardown failed: ${terminalTeardown.error}.`;
+
   return {
     success: true,
     runId: updatedRun?.id ?? input.runId,
@@ -946,6 +956,9 @@ export async function handleCompleteWorkflowRun(input: z.infer<typeof completeWo
     processedItems: updatedRun?.processedItems ?? input.processedItems ?? 0,
     cascadeResult: eventResult.cascadeResult,
     routingRecommendation: eventResult.routingRecommendation,
-    message: `Workflow run ${input.runId} marked as ${input.status}. Follow-on cascades and webhook dispatch completed.`,
+    terminalSessionTeardown: terminalTeardown.success
+      ? { terminated: terminalTeardown.terminated }
+      : { error: terminalTeardown.error },
+    message: `Workflow run ${input.runId} marked as ${input.status}. Follow-on cascades and webhook dispatch completed.${teardownNote}`,
   };
 }

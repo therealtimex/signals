@@ -4,6 +4,7 @@ import {
   dispatchTerminalAgentViaSendMessage,
   launchTerminalCliAgent,
   readRtxJsonBody,
+  terminateTerminalRuntimeSession,
 } from "@/lib/rtx/runtime-sessions";
 
 describe("readRtxJsonBody", () => {
@@ -241,5 +242,37 @@ describe("appendRtxThreadMessage", () => {
 
     expect(result).toEqual({ success: true });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("terminateTerminalRuntimeSession", () => {
+  it("skips when no session id is stored", async () => {
+    const fetchImpl = vi.fn();
+    await expect(
+      terminateTerminalRuntimeSession(null, { RTX_APP_ID: "app-1" }, fetchImpl)
+    ).resolves.toEqual({ success: true, terminated: false });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("posts to the RTX terminate endpoint for a stored session id", async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      expect(url).toBe(
+        "http://127.0.0.1:3001/cli/terminate-terminal-session/cli-agent%3Asession-1"
+      );
+      expect(init?.method).toBe("POST");
+      return new Response(JSON.stringify({ success: true }), { status: 200 });
+    });
+
+    await expect(
+      terminateTerminalRuntimeSession(
+        "cli-agent:session-1",
+        {
+          RTX_APP_ID: "app-1",
+          RTX_API_BASE_URL: "http://127.0.0.1:3001",
+        },
+        fetchImpl
+      )
+    ).resolves.toEqual({ success: true, terminated: true });
   });
 });

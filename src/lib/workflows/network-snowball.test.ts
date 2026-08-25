@@ -122,5 +122,6 @@ describe("buildNetworkSnowballBriefSection", () => {
     expect(brief).toContain("workflow-runs/run_snow_1/contacts.csv");
     expect(brief).toContain("signals-pp-cli import contacts");
     expect(brief).toContain("Terminate Spawned Browser Sessions");
+    expect(brief).toContain("automatically terminates this workflow's linked terminal session");
   });
 });

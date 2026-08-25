@@ -1,3 +1,4 @@
+import { MANUAL_TERMINAL_TEARDOWN_INSTRUCTION } from "@/lib/rtx/teardown";
 import type { WorkflowCompletedEventPayload } from "@/lib/webhooks/workflow-events";
 import { resolveSignalsBaseUrlFromEnv } from "@/lib/rtx/resolve-signals-base-url";
 import { writeRtxWorkspaceBriefFile, orchestratorEventBriefRelativePath } from "@/lib/rtx/workspace-brief-files";
@@ -86,7 +87,7 @@ export function buildOrchestratorBriefMarkdown(options: BuildOrchestratorBriefOp
     `   POST ${baseUrl}/api/agent-tools/invoke with JSON:`,
     `   \`{ "tool": "dispatch_follow_on_workflow", "input": { "parentRunId": "${eventPayload.runId}", "overrideAction": "${suggestedAction === "patrol" ? "social_patrol" : suggestedAction === "nurture" ? "contact_nurture" : "profile_pipeline"}" } }\``,
     `4. Report a concise summary in this thread describing the follow-on workflows triggered.`,
-    `5. TEARDOWN & RESOURCE RELEASE PROTOCOL: When the handoff or dispatch is completed, terminate all spawned browser sessions and exit cleanly (\`process.exit(0)\`) to immediately release RAM and CPU resources in RealTimeX.`,
+    `5. TEARDOWN & RESOURCE RELEASE PROTOCOL: ${MANUAL_TERMINAL_TEARDOWN_INSTRUCTION}`,
   ];
 
   return lines.join("\n");

@@ -104,6 +104,19 @@ export function getRtxRefsFromRunConfig(config: string | null | undefined): {
   }
 }
 
+export function getRtxRuntimeSessionIdFromRunConfig(
+  config: string | null | undefined
+): string | null {
+  try {
+    const parsed = JSON.parse(config ?? "{}") as Record<string, unknown>;
+    return typeof parsed.rtxRuntimeSessionId === "string"
+      ? parsed.rtxRuntimeSessionId
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 async function verifySignalsHealth(
   signalsBaseUrl: string,
   fetchImpl: typeof fetch
