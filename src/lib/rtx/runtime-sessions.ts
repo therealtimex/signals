@@ -420,6 +420,201 @@ export type TerminateTerminalSessionResult =
   | { success: true; terminated: boolean }
   | { success: false; error: string };
 
+const BUSY_CHAT_LINKED_TURN_STATES = new Set([
+  "queued",
+  "dispatching",
+  "dispatched",
+  "capturing",
+]);
+
+const ACTIVE_TERMINAL_SESSION_STATUSES = new Set(["running", "active", "started"]);
+
+export type TerminalRuntimeSessionSnapshot = {
+  id: string;
+  status?: string;
+  chatLinkedTurnStateKnown?: boolean;
+  chatLinkedPendingTurn?: { id?: string; state?: string } | null;
+  chatLinkedBackgroundActivity?: { status?: string };
+};
+
+function flattenTerminalRuntimeSessions(body: Record<string, unknown>): TerminalRuntimeSessionSnapshot[] {
+  const sessions: TerminalRuntimeSessionSnapshot[] = [];
+
+  const pushSession = (raw: unknown) => {
+    if (!raw || typeof raw !== "object") return;
+    const session = raw as Record<string, unknown>;
+    const id =
+      (typeof session.id === "string" && session.id.trim()) ||
+      (typeof session.sessionId === "string" && session.sessionId.trim()) ||
+      "";
+    if (!id) return;
+
+    const pendingTurn =
+      session.chatLinkedPendingTurn && typeof session.chatLinkedPendingTurn === "object"
+        ? (session.chatLinkedPendingTurn as TerminalRuntimeSessionSnapshot["chatLinkedPendingTurn"])
+        : null;
+    const backgroundActivity =
+      session.chatLinkedBackgroundActivity &&
+      typeof session.chatLinkedBackgroundActivity === "object"
+        ? (session.chatLinkedBackgroundActivity as TerminalRuntimeSessionSnapshot["chatLinkedBackgroundActivity"])
+        : undefined;
+
+    sessions.push({
+      id,
+      status: typeof session.status === "string" ? session.status : undefined,
+      chatLinkedTurnStateKnown:
+        typeof session.chatLinkedTurnStateKnown === "boolean"
+          ? session.chatLinkedTurnStateKnown
+          : undefined,
+      chatLinkedPendingTurn: pendingTurn,
+      chatLinkedBackgroundActivity: backgroundActivity,
+    });
+  };
+
+  const results = body.results;
+  if (results && typeof results === "object") {
+    const workspaces = (results as Record<string, unknown>).workspaces;
+    if (Array.isArray(workspaces)) {
+      for (const workspace of workspaces) {
+        if (!workspace || typeof workspace !== "object") continue;
+        const threads = (workspace as Record<string, unknown>).threads;
+        if (!Array.isArray(threads)) continue;
+        for (const thread of threads) {
+          if (!thread || typeof thread !== "object") continue;
+          const threadSessions = (thread as Record<string, unknown>).sessions;
+          if (!Array.isArray(threadSessions)) continue;
+          for (const session of threadSessions) pushSession(session);
+        }
+      }
+    }
+  }
+
+  const topLevelSessions = body.sessions;
+  if (Array.isArray(topLevelSessions)) {
+    for (const session of topLevelSessions) pushSession(session);
+  }
+
+  return sessions;
+}
+
+export async function listTerminalRuntimeSessions(
+  input: {
+    workspaceSlug?: string;
+    threadSlug?: string;
+    includeClosed?: boolean;
+  } = {},
+  env: EnvLike = process.env,
+  fetchImpl: typeof fetch = fetch
+): Promise<TerminalRuntimeSessionSnapshot[]> {
+  const appId = getRtxAppId(env);
+  const apiBase = resolveRtxApiBase(env);
+  if (!appId || !apiBase) return [];
+
+  const params = new URLSearchParams();
+  if (input.workspaceSlug?.trim()) params.set("workspaceSlug", input.workspaceSlug.trim());
+  if (input.threadSlug?.trim()) params.set("threadSlug", input.threadSlug.trim());
+  if (input.includeClosed === false) params.set("includeClosed", "false");
+  if (input.workspaceSlug?.trim() && input.threadSlug?.trim()) params.set("limit", "0");
+
+  const query = params.toString();
+  const response = await fetchImpl(
+    `${apiBase}/cli/list-terminal-sessions${query ? `?${query}` : ""}`,
+    {
+      method: "GET",
+      headers: buildAppHeaders(appId),
+    }
+  );
+  const body = await readRtxJsonBody(response);
+  if (!response.ok || body.success === false) return [];
+  return flattenTerminalRuntimeSessions(body);
+}
+
+export function isTerminalRuntimeSessionBusy(
+  session: TerminalRuntimeSessionSnapshot | null | undefined
+): boolean {
+  if (!session) return false;
+
+  const backgroundStatus = session.chatLinkedBackgroundActivity?.status
+    ?.trim()
+    .toLowerCase();
+  if (backgroundStatus === "running") return true;
+
+  const pendingTurn = session.chatLinkedPendingTurn;
+  if (!pendingTurn) return false;
+
+  const pendingState = pendingTurn.state?.trim().toLowerCase();
+  if (!pendingState) {
+    return session.chatLinkedTurnStateKnown === true;
+  }
+
+  return BUSY_CHAT_LINKED_TURN_STATES.has(pendingState);
+}
+
+export async function findTerminalRuntimeSessionById(
+  sessionId: string,
+  env: EnvLike = process.env,
+  fetchImpl: typeof fetch = fetch
+): Promise<TerminalRuntimeSessionSnapshot | null> {
+  const id = sessionId.trim();
+  if (!id) return null;
+
+  const sessions = await listTerminalRuntimeSessions({ includeClosed: true }, env, fetchImpl);
+  return sessions.find((session) => session.id === id) ?? null;
+}
+
+export async function waitForTerminalSessionIdle(
+  sessionId: string,
+  options: {
+    retryDelaysMs?: number[];
+    env?: EnvLike;
+    fetchImpl?: typeof fetch;
+  } = {}
+): Promise<{ idle: true } | { idle: false; reason: string }> {
+  const id = sessionId.trim();
+  if (!id) return { idle: true };
+
+  const env = options.env ?? process.env;
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const retryDelaysMs = options.retryDelaysMs ?? [250, 500, 1_000, 2_000, 4_000, 8_000, 14_000];
+
+  for (let attempt = 0; attempt <= retryDelaysMs.length; attempt += 1) {
+    const session = await findTerminalRuntimeSessionById(id, env, fetchImpl);
+    if (!session) return { idle: true };
+    if (!isTerminalRuntimeSessionBusy(session)) return { idle: true };
+
+    if (attempt < retryDelaysMs.length) {
+      await new Promise((resolve) => setTimeout(resolve, retryDelaysMs[attempt]));
+    }
+  }
+
+  const session = await findTerminalRuntimeSessionById(id, env, fetchImpl);
+  const pendingState = session?.chatLinkedPendingTurn?.state?.trim() || "unknown";
+  return {
+    idle: false,
+    reason: `Chat-linked turn remained busy (${pendingState}).`,
+  };
+}
+
+export async function resolveActiveTerminalSessionIdForThread(
+  workspaceSlug: string,
+  threadSlug: string,
+  env: EnvLike = process.env,
+  fetchImpl: typeof fetch = fetch
+): Promise<string | null> {
+  const sessions = await listTerminalRuntimeSessions(
+    { workspaceSlug, threadSlug, includeClosed: false },
+    env,
+    fetchImpl
+  );
+
+  const active = sessions.filter((session) => {
+    const status = session.status?.trim().toLowerCase();
+    return status ? ACTIVE_TERMINAL_SESSION_STATUSES.has(status) : true;
+  });
+
+  return active[0]?.id ?? sessions[0]?.id ?? null;
+}
+
 export async function terminateTerminalRuntimeSession(
   sessionId: string | null | undefined,
   env: EnvLike = process.env,

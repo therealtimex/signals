@@ -161,18 +161,28 @@ const rtxBaseUrl =
   process.env.REALTIMEX_BASE_URL?.trim() ||
   `http://127.0.0.1:${rtxServerPort}/cli`;
 
+const npmExecutable = join(
+  nodeBinDir,
+  process.platform === "win32" ? "npm.cmd" : "npm"
+);
+
+const devQaPort =
+  process.env.SIGNALS_DEV_PORT?.trim() ||
+  process.env.RTX_PORT?.trim() ||
+  "3010";
+
 const config = JSON.stringify({
-  command: nodeExecutable,
-  args: [
-    join(REPO_ROOT, "node_modules/next/dist/bin/next"),
-    "dev",
-    "-p",
-    "{port}",
-  ],
+  // Use npm run dev so RTX-injected RTX_PORT is honored via package.json.
+  // Passing "-p", "{port}" in args fails when RTX does not substitute argv placeholders.
+  command: npmExecutable,
+  args: ["run", "dev"],
   working_dir: REPO_ROOT,
-  home_url: "http://localhost:{port}/dashboard",
+  // Pin dev QA port so RTX, workspace briefs, and resolve-base-url.sh stay aligned.
+  port: Number(devQaPort),
+  home_url: `http://localhost:${devQaPort}/dashboard`,
   env: {
     HOSTNAME: "127.0.0.1",
+    PORT: devQaPort,
     SIGNALS_DATA_DIR: "~/.signals",
     REALTIMEX_BASE_URL: rtxBaseUrl,
     // Keep Turbopack and child processes on the same ABI as better-sqlite3.
