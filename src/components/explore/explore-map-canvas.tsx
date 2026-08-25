@@ -101,6 +101,37 @@ export function buildExploreMapGraphData(
   return { nodes: graphNodes, links: graphLinks, nicheColorMap };
 }
 
+export function applyExploreMapLayoutPins(
+  nodes: GraphNode[],
+  width: number,
+  height: number,
+): GraphNode[] {
+  if (width <= 0 || height <= 0) return nodes;
+
+  const ring = Math.min(width, height) * 0.36;
+  const niches = nodes.filter((node) => node.kind === "niche");
+  const nicheIndex = new Map(niches.map((niche, index) => [niche.id, index]));
+
+  return nodes.map((node) => {
+    if (node.kind === "contact" && node.isOwner) {
+      return { ...node, fx: 0, fy: 0 };
+    }
+    if (node.kind === "niche") {
+      const index = nicheIndex.get(node.id) ?? 0;
+      const angle = (2 * Math.PI * index) / Math.max(niches.length, 1) - Math.PI / 2;
+      return {
+        ...node,
+        fx: Math.cos(angle) * ring,
+        fy: Math.sin(angle) * ring,
+      };
+    }
+    if (node.kind === "contact") {
+      return { ...node, fx: undefined, fy: undefined };
+    }
+    return node;
+  });
+}
+
 export function exploreMapLayoutSignature(
   nodes: ExploreMapNode[],
   edges: ExploreMapEdge[],
@@ -221,10 +252,13 @@ export function ExploreMapCanvas({
     [edges, layers],
   );
 
-  const graphBundle = useMemo(
-    () => buildExploreMapGraphData(nodes, visibleEdges, theme),
-    [nodes, visibleEdges, theme],
-  );
+  const graphBundle = useMemo(() => {
+    const base = buildExploreMapGraphData(nodes, visibleEdges, theme);
+    return {
+      ...base,
+      nodes: applyExploreMapLayoutPins(base.nodes, width, height),
+    };
+  }, [nodes, visibleEdges, theme, width, height]);
   const graphData = useMemo(
     () => ({ nodes: graphBundle.nodes, links: graphBundle.links }),
     [graphBundle],
@@ -243,34 +277,9 @@ export function ExploreMapCanvas({
 
   useEffect(() => {
     if (!graphRef.current || graphData.nodes.length === 0) return;
-
-    const owner = graphData.nodes.find(
-      (node) => node.kind === "contact" && node.isOwner,
-    );
-    const niches = graphData.nodes.filter((node) => node.kind === "niche");
-    const ring = Math.min(width, height) * 0.36;
-
-    if (owner) {
-      owner.fx = 0;
-      owner.fy = 0;
-    }
-
-    for (const [index, niche] of niches.entries()) {
-      const angle = (2 * Math.PI * index) / niches.length - Math.PI / 2;
-      niche.fx = Math.cos(angle) * ring;
-      niche.fy = Math.sin(angle) * ring;
-    }
-
-    for (const node of graphData.nodes) {
-      if (node.kind === "contact" && !node.isOwner) {
-        node.fx = undefined;
-        node.fy = undefined;
-      }
-    }
-
     graphRef.current.resumeAnimation();
     graphRef.current.d3ReheatSimulation();
-  }, [graphData, width, height, layoutSignature]);
+  }, [graphData, layoutSignature]);
 
   useEffect(() => {
     if (!graphRef.current || graphData.nodes.length === 0) return;
