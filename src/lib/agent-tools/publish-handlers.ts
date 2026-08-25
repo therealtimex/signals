@@ -27,8 +27,12 @@ import { buildPlatformPostUrl } from "@/lib/platforms/content-platform";
 import { RTX_PUBLISH_SESSION_NAME } from "@/lib/publish/constants";
 import { normalizePublishJobKind, resolveSourcePostUrl } from "@/lib/publish/payload";
 import { PUBLISH_PLATFORM_TARGETS } from "@/lib/publish/payload";
-import type { PublishJobTarget, PublishPlatformTarget } from "@/lib/publish/types";
+import type { PublishJobStatus, PublishJobTarget, PublishPlatformTarget } from "@/lib/publish/types";
 import type { PublishErrorCode } from "@/lib/browser/publishers/types";
+import {
+  formatAgentLaneTeardownNote,
+  releaseAgentLaneResources,
+} from "@/lib/rtx/resource-teardown";
 
 export const getPublishJobSchema = z.object({
   jobId: z.string().min(1),
@@ -69,6 +73,19 @@ export const completePublishSchema = z.object({
 
 function isTerminalTarget(status: PublishJobTarget["status"]): boolean {
   return status === "published" || status === "failed" || status === "skipped";
+}
+
+function isTerminalPublishJob(status: PublishJobStatus): boolean {
+  return status === "completed" || status === "partial" || status === "failed";
+}
+
+function collectPublishBrowserSessionNames(targets: PublishJobTarget[]): string[] {
+  const names = new Set<string>([RTX_PUBLISH_SESSION_NAME]);
+  for (const target of targets) {
+    const sessionName = target.sessionName?.trim();
+    if (sessionName) names.add(sessionName);
+  }
+  return [...names];
 }
 
 type CompletePublishInput = z.infer<typeof completePublishSchema>;
@@ -373,11 +390,34 @@ export async function handleCompletePublish(input: z.infer<typeof completePublis
 
   const updated = persistJobTargets(job.id, targets, recordOnly);
 
+  let resourceTeardownNote = "";
+  let resourceTeardown:
+    | Awaited<ReturnType<typeof releaseAgentLaneResources>>
+    | undefined;
+
+  if (updated && !recordOnly && isTerminalPublishJob(updated.status as PublishJobStatus)) {
+    resourceTeardown = await releaseAgentLaneResources({
+      terminalSessionId: updated.rtxRuntimeSessionId,
+      browserSessionNames: collectPublishBrowserSessionNames(updated.targetsParsed),
+      stopAllRunningBrowserSessions: true,
+    });
+    resourceTeardownNote = formatAgentLaneTeardownNote(resourceTeardown);
+  }
+
   return updated
     ? {
         jobId: updated.id,
         status: updated.status,
         targets: updated.targetsParsed,
+        ...(resourceTeardown
+          ? {
+              terminalSessionTeardown: resourceTeardown.terminal.success
+                ? { terminated: resourceTeardown.terminal.terminated }
+                : { error: resourceTeardown.terminal.error },
+              browserSessionTeardown: resourceTeardown.browser,
+            }
+          : {}),
+        ...(resourceTeardownNote ? { message: resourceTeardownNote.trim() } : {}),
         ...(recordOnly ? { superseded: true, recorded: true } : {}),
         ...(leaseStale ? { leaseStale: true } : {}),
       }

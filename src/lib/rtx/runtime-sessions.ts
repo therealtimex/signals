@@ -416,6 +416,56 @@ export async function launchTerminalCliAgent(
   }
 }
 
+export type TerminateTerminalSessionResult =
+  | { success: true; terminated: boolean }
+  | { success: false; error: string };
+
+export async function terminateTerminalRuntimeSession(
+  sessionId: string | null | undefined,
+  env: EnvLike = process.env,
+  fetchImpl: typeof fetch = fetch
+): Promise<TerminateTerminalSessionResult> {
+  const id = sessionId?.trim();
+  if (!id) {
+    return { success: true, terminated: false };
+  }
+
+  const appId = getRtxAppId(env);
+  const apiBase = resolveRtxApiBase(env);
+  if (!appId || !apiBase) {
+    return { success: true, terminated: false };
+  }
+
+  try {
+    const response = await fetchImpl(
+      `${apiBase}/cli/terminate-terminal-session/${encodeURIComponent(id)}`,
+      {
+        method: "POST",
+        headers: buildAppHeaders(appId),
+        body: JSON.stringify({}),
+      }
+    );
+
+    const body = await readRtxJsonBody(response);
+    if (!response.ok || body.success === false) {
+      return {
+        success: false,
+        error:
+          typeof body.error === "string"
+            ? body.error
+            : `Failed to terminate terminal session (${response.status})`,
+      };
+    }
+
+    return { success: true, terminated: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Terminate request failed",
+    };
+  }
+}
+
 export async function openRtxRuntimeLauncher(
   input: { workspaceSlug: string; threadSlug: string; reason?: string },
   env: EnvLike = process.env,

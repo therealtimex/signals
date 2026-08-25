@@ -17,6 +17,7 @@ import {
   buildNetworkSnowballBriefSection,
   isNetworkSnowballTemplateConfig,
 } from "@/lib/workflows/network-snowball";
+import { WORKFLOW_TERMINAL_TEARDOWN_AFTER_COMPLETE } from "@/lib/rtx/teardown";
 
 const CATEGORY_LABELS: Record<string, string> = {
   prospecting: "Search",
@@ -163,7 +164,7 @@ export function buildAgentWorkflowBrief(input: {
     `8. For single-record edits, invoke tools (${tools}) via POST ${input.signalsBaseUrl}/api/agent-tools/invoke with JSON { \"tool\": \"...\", \"input\": { ... } }.`,
     "9. Perform web search and browser work in RealTimeX (not via agent-tools).",
     `10. FINALIZATION: When finished, call complete_workflow_run via POST ${input.signalsBaseUrl}/api/agent-tools/invoke with { "tool": "complete_workflow_run", "input": { "runId": "${input.workflowRunId}", "status": "completed", "summary": "..." } } to trigger automated follow-on cascades and webhook dispatch.`,
-    "11. TEARDOWN & RESOURCE RELEASE: When the task or handoff completes, terminate all spawned browser sessions and exit cleanly (process.exit(0)) to immediately release RAM and CPU resources.",
+    `11. TEARDOWN & RESOURCE RELEASE: ${WORKFLOW_TERMINAL_TEARDOWN_AFTER_COMPLETE}`,
     "",
     patrolContract,
     publishContract,
