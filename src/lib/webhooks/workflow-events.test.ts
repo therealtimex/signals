@@ -157,4 +157,49 @@ describe("Workflow Events & Agentic Router", () => {
     expect(sentUrl).toBe("https://realtimex.ai/api/webhooks/orchestrator");
     expect(sentBody).toContain('"event":"workflow.completed"');
   });
+
+  it("resolves agentic router webhook URL from REALTIMEX_BASE_URL", async () => {
+    const previousBaseUrl = process.env.REALTIMEX_BASE_URL;
+    process.env.REALTIMEX_BASE_URL = "http://127.0.0.1:3101/cli";
+
+    try {
+      const template = createTemplate({
+        name: "Network Snowball",
+        templateType: "prospecting",
+        status: "active",
+      });
+
+      const parentRun = createWorkflowRun({
+        templateId: template.id,
+        workflowType: "search",
+        status: "completed",
+        trigger: "template",
+        config: JSON.stringify({
+          cascadeConfig: buildWorkflowCascadeConfig({
+            followOnActions: ["agentic_router"],
+          }),
+        }),
+      });
+
+      let sentUrl = "";
+      const mockFetch = (async (url: string) => {
+        sentUrl = url;
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }) as unknown as typeof fetch;
+
+      await emitWorkflowCompletedEvent(parentRun.id, {
+        fetchImpl: mockFetch,
+      });
+
+      expect(sentUrl).toBe(
+        "http://127.0.0.1:3101/api/v1/webhook-ingress/inbound/signals-orchestrator"
+      );
+    } finally {
+      if (previousBaseUrl === undefined) {
+        delete process.env.REALTIMEX_BASE_URL;
+      } else {
+        process.env.REALTIMEX_BASE_URL = previousBaseUrl;
+      }
+    }
+  });
 });

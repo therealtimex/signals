@@ -26,6 +26,7 @@ import { dispatchTerminalAgentViaSendMessage } from "@/lib/rtx/runtime-sessions"
 import { runTemplateViaRtx, getRtxRefsFromRunConfig } from "@/lib/agents/run-template-via-rtx";
 import { isRtxEmbedded } from "@/lib/rtx/env";
 import { getWorkflowRun } from "@/lib/db/queries/workflows";
+import { resolveOutboundWorkflowWebhookUrl } from "@/lib/webhooks/rtx-webhook-url";
 
 export interface WorkflowCompletedEventPayload {
   event: "workflow.completed";
@@ -351,17 +352,12 @@ export async function emitWorkflowCompletedEvent(
   }
 
   // Outbound Webhook dispatch (RealTimeX Webhook Ingress, n8n, Zapier, custom URL)
-  // Default loopback webhook is ONLY fired when Smart Agentic Routing is requested
+  // Default loopback webhook is ONLY fired when Smart Agentic Routing is requested.
+  // Resolve from the active RTX server origin (REALTIMEX_BASE_URL / SERVER_URL), not a hardcoded port.
   const isAgenticRouter = cascadeConfig.followOnActions.includes("agentic_router");
-  const defaultRtxWebhookUrl = isAgenticRouter
-    ? "http://127.0.0.1:3001/api/v1/webhook-ingress/inbound/signals-orchestrator"
-    : undefined;
-
   const targetWebhookUrl =
     options?.webhookUrl ??
-    process.env.REALTIMEX_WEBHOOK_URL ??
-    process.env.SIGNALS_WEBHOOK_URL ??
-    defaultRtxWebhookUrl;
+    resolveOutboundWorkflowWebhookUrl(process.env, { agenticRouter: isAgenticRouter });
 
   const targetSecret =
     options?.secret ??
