@@ -30,6 +30,15 @@ See [`rtx-local-app.example.json`](../rtx-local-app.example.json) for the market
 
 Inherited from the desktop runtime when available: `SERVER_PORT`, `REALTIMEX_USER_DATA_PATH`, etc.
 
+### Workflow webhook egress
+
+When a workflow completes with **agentic router** enabled, Signals POSTs a signed `workflow.completed` event to the RealTimeX webhook ingress. The destination is resolved in this order:
+
+1. `REALTIMEX_WEBHOOK_URL` or `SIGNALS_WEBHOOK_URL` (explicit override)
+2. `{RTX server origin}/api/v1/webhook-ingress/inbound/signals-orchestrator`, where the server origin is derived from `SERVER_URL` / `REALTIMEX_BASE_URL` / `RTX_API_BASE_URL` (stripping a trailing `/cli` segment)
+
+Dev desktops typically use `REALTIMEX_BASE_URL=http://127.0.0.1:3101/cli`, so deliveries land in the same RTX database that **Settings → Webhooks & Events** reads. Override with `REALTIMEX_WEBHOOK_URL` when ingress is hosted elsewhere.
+
 ## SDK bootstrap
 
 On server start (`instrumentation.ts`), when `RTX_APP_ID` is set Signals:

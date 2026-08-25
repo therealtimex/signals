@@ -146,6 +146,21 @@ if (process.argv.includes("--deploy-instructions")) {
 const nodeExecutable = resolveManagedNodeExecutable();
 const nodeBinDir = dirname(nodeExecutable);
 
+const dbPath = parseDbArg();
+if (!existsSync(dbPath)) {
+  console.error(`RTX database not found: ${dbPath}`);
+  console.error("Pass --db /path/to/realtimex.db or set RTX_DB_PATH.");
+  process.exit(1);
+}
+
+const storageRoot =
+  process.env.REALTIMEX_STORAGE_ROOT?.trim() ||
+  (process.env.REALTIMEX_RUNTIME === "dev" ? "dev" : "app");
+const rtxServerPort = storageRoot === "dev" ? "3101" : "3001";
+const rtxBaseUrl =
+  process.env.REALTIMEX_BASE_URL?.trim() ||
+  `http://127.0.0.1:${rtxServerPort}/cli`;
+
 const config = JSON.stringify({
   command: nodeExecutable,
   args: [
@@ -159,6 +174,7 @@ const config = JSON.stringify({
   env: {
     HOSTNAME: "127.0.0.1",
     SIGNALS_DATA_DIR: "~/.signals",
+    REALTIMEX_BASE_URL: rtxBaseUrl,
     // Keep Turbopack and child processes on the same ABI as better-sqlite3.
     PATH: `${nodeBinDir}${delimiter}${process.env.PATH || ""}`,
   },
@@ -170,13 +186,6 @@ const metadata = JSON.stringify({
     denied: [],
   },
 });
-
-const dbPath = parseDbArg();
-if (!existsSync(dbPath)) {
-  console.error(`RTX database not found: ${dbPath}`);
-  console.error("Pass --db /path/to/realtimex.db or set RTX_DB_PATH.");
-  process.exit(1);
-}
 
 const existing = runSqlite(
   dbPath,
