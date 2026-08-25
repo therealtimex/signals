@@ -4,7 +4,6 @@ import {
   contactMatchesNicheFilter,
   contactNodeVal,
   EXPLORE_MAP_AUDIENCE_NODE_VAL_MAX,
-  EXPLORE_MAP_CONTACT_LABEL_MIN_SCALE,
   EXPLORE_MAP_OWNER_NODE_VAL,
   exploreMapNodeOpacity,
   exploreMapNodeTooltip,
@@ -114,25 +113,10 @@ describe("explore map legibility helpers", () => {
     );
   });
 
-  it("shows contact labels only when zoomed or hovered", () => {
-    expect(
-      shouldRenderExploreNodeLabel(audienceContact, {
-        hoveredNodeId: null,
-        globalScale: EXPLORE_MAP_CONTACT_LABEL_MIN_SCALE - 0.1,
-      }),
-    ).toBe(false);
-    expect(
-      shouldRenderExploreNodeLabel(audienceContact, {
-        hoveredNodeId: audienceContact.id,
-        globalScale: 1,
-      }),
-    ).toBe(true);
-    expect(
-      shouldRenderExploreNodeLabel(ownerContact, {
-        hoveredNodeId: null,
-        globalScale: 1,
-      }),
-    ).toBe(true);
+  it("shows contact labels only when hovered", () => {
+    expect(shouldRenderExploreNodeLabel(audienceContact, null)).toBe(false);
+    expect(shouldRenderExploreNodeLabel(audienceContact, audienceContact.id)).toBe(true);
+    expect(shouldRenderExploreNodeLabel(ownerContact, null)).toBe(true);
   });
 
   it("limits tooltips to the hovered node", () => {

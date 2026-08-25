@@ -110,8 +110,8 @@ describe("explore-map-colors", () => {
     );
 
     for (const node of graph.nodes) {
-      expect(node.color).not.toContain("var(");
-      expect(node.color).not.toContain("color-mix");
+      expect(node.baseColor).not.toContain("var(");
+      expect(node.baseColor).not.toContain("color-mix");
     }
     for (const link of graph.links) {
       expect(link.color).not.toContain("var(");
@@ -119,7 +119,7 @@ describe("explore-map-colors", () => {
       expect(link.color).toMatch(/rgba?\(/i);
     }
 
-    expect(graph.nodes[0]?.color).not.toBe(graph.nodes[1]?.color);
+    expect(graph.nodes[0]?.baseColor).not.toBe(graph.nodes[1]?.baseColor);
     expect(buildExploreMapLinkColor("follows", true, theme)).toBe(
       withAlpha(theme.foreground, 0.45),
     );

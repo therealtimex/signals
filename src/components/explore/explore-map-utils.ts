@@ -66,9 +66,6 @@ export const EXPLORE_MAP_DEFAULT_LAYERS: ExploreMapLayerVisibility = {
   showNiches: true,
 };
 
-/** Minimum zoom before audience contact labels render on-canvas. */
-export const EXPLORE_MAP_CONTACT_LABEL_MIN_SCALE = 2.5;
-
 export function filterExploreMapEdges(
   edges: ExploreMapEdge[],
   layers: ExploreMapLayerVisibility,
@@ -123,20 +120,11 @@ export function exploreMapNodeOpacity(
 
 export function shouldRenderExploreNodeLabel(
   node: ExploreMapNode,
-  opts: {
-    hoveredNodeId: string | null;
-    globalScale: number;
-  },
+  hoveredNodeId: string | null,
 ): boolean {
-  const { hoveredNodeId, globalScale } = opts;
-
   if (node.kind === "niche") return true;
   if (node.kind === "contact" && node.isOwner) return true;
-  if (hoveredNodeId === node.id) return true;
-  if (node.kind === "contact" && globalScale >= EXPLORE_MAP_CONTACT_LABEL_MIN_SCALE) {
-    return true;
-  }
-  return false;
+  return hoveredNodeId === node.id;
 }
 
 export function exploreMapNodeTooltip(

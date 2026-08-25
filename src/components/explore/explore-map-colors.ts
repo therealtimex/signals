@@ -90,6 +90,23 @@ function parseCssColorToRgb(color: string): { r: number; g: number; b: number } 
   return null;
 }
 
+/** Fast opacity for resolved rgb/rgba canvas colors — avoids DOM probes per frame. */
+export function applyResolvedColorOpacity(color: string, alpha: number): string {
+  const clamped = Math.min(Math.max(alpha, 0), 1);
+  if (clamped >= 1) return color;
+
+  const rgb = parseCssColorToRgb(color);
+  if (rgb) {
+    return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${clamped})`;
+  }
+
+  if (/^oklch\(/i.test(color.trim())) {
+    return withAlpha(color, clamped);
+  }
+
+  return color;
+}
+
 function appendOklchAlpha(oklchColor: string, alpha: number): string {
   const match = oklchColor.match(/^oklch\(\s*(.+)\s*\)$/i);
   if (!match) return oklchColor;

@@ -7,9 +7,9 @@ import ForceGraph2D, {
 } from "react-force-graph-2d";
 import type { ExploreMapEdge, ExploreMapNode } from "@/lib/db/queries/explore-map";
 import {
+  applyResolvedColorOpacity,
   buildExploreMapLinkColor,
   nicheTypeResolvedColor,
-  withAlpha,
   type ExploreMapThemeColors,
 } from "@/components/explore/explore-map-colors";
 import {
@@ -25,7 +25,7 @@ import { useExploreMapThemeColors } from "@/components/explore/use-explore-map-t
 
 type GraphNode = ExploreMapNode & {
   val: number;
-  color: string;
+  baseColor: string;
 };
 
 type GraphLink = {
@@ -50,32 +50,20 @@ export function buildExploreMapGraphData(
   nodes: ExploreMapNode[],
   edges: ExploreMapEdge[],
   theme: ExploreMapThemeColors,
-  opts?: {
-    selectedNicheId?: string | null;
-    hoveredNodeId?: string | null;
-  },
 ): { nodes: GraphNode[]; links: GraphLink[] } {
-  const selectedNicheId = opts?.selectedNicheId ?? null;
-  const hoveredNodeId = opts?.hoveredNodeId ?? null;
-
-  const graphNodes: GraphNode[] = nodes.map((node) => {
-    const baseColor =
+  const graphNodes: GraphNode[] = nodes.map((node) => ({
+    ...node,
+    val:
+      node.kind === "contact"
+        ? contactNodeVal(node.followersCount, node.isOwner)
+        : nicheNodeVal(node.memberCount),
+    baseColor:
       node.kind === "contact"
         ? node.isOwner
           ? theme.primary
           : theme.mutedForeground
-        : nicheTypeResolvedColor(node.nicheType, theme);
-    const opacity = exploreMapNodeOpacity(node, { selectedNicheId, hoveredNodeId });
-
-    return {
-      ...node,
-      val:
-        node.kind === "contact"
-          ? contactNodeVal(node.followersCount, node.isOwner)
-          : nicheNodeVal(node.memberCount),
-      color: withAlpha(baseColor, opacity),
-    };
-  });
+        : nicheTypeResolvedColor(node.nicheType, theme),
+  }));
 
   const graphLinks: GraphLink[] = edges.map((edge) => ({
     source: edge.source,
@@ -86,6 +74,21 @@ export function buildExploreMapGraphData(
   }));
 
   return { nodes: graphNodes, links: graphLinks };
+}
+
+export function exploreMapLayoutSignature(
+  nodes: ExploreMapNode[],
+  edges: ExploreMapEdge[],
+  selectedNicheId: string | null,
+  layers: ExploreMapLayerVisibility,
+): string {
+  return [
+    nodes.length,
+    edges.length,
+    selectedNicheId ?? "",
+    layers.showFollows,
+    layers.showNiches,
+  ].join("|");
 }
 
 export function ExploreMapCanvas({
@@ -101,7 +104,9 @@ export function ExploreMapCanvas({
   const graphRef = useRef<ForceGraphMethods<NodeObject<GraphNode>, GraphLink> | undefined>(
     undefined,
   );
+  const hoveredNodeIdRef = useRef<string | null>(null);
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
+  const hasFitRef = useRef(false);
 
   const visibleEdges = useMemo(
     () => filterExploreMapEdges(edges, layers),
@@ -109,21 +114,36 @@ export function ExploreMapCanvas({
   );
 
   const graphData = useMemo(
-    () =>
-      buildExploreMapGraphData(nodes, visibleEdges, theme, {
-        selectedNicheId,
-        hoveredNodeId,
-      }),
-    [nodes, visibleEdges, theme, selectedNicheId, hoveredNodeId],
+    () => buildExploreMapGraphData(nodes, visibleEdges, theme),
+    [nodes, visibleEdges, theme],
+  );
+
+  const layoutSignature = useMemo(
+    () => exploreMapLayoutSignature(nodes, visibleEdges, selectedNicheId, layers),
+    [nodes, visibleEdges, selectedNicheId, layers],
   );
 
   useEffect(() => {
-    if (!graphRef.current || graphData.nodes.length === 0) return;
+    hasFitRef.current = false;
+  }, [layoutSignature]);
+
+  useEffect(() => {
+    if (!graphRef.current || graphData.nodes.length === 0 || hasFitRef.current) return;
+    hasFitRef.current = true;
     const timer = window.setTimeout(() => {
       graphRef.current?.zoomToFit(400, 48);
     }, 250);
     return () => window.clearTimeout(timer);
-  }, [graphData]);
+  }, [graphData.nodes.length, layoutSignature]);
+
+  const resolveNodeColor = (node: GraphNode) =>
+    applyResolvedColorOpacity(
+      node.baseColor,
+      exploreMapNodeOpacity(node, {
+        selectedNicheId,
+        hoveredNodeId,
+      }),
+    );
 
   return (
     <ForceGraph2D
@@ -134,10 +154,15 @@ export function ExploreMapCanvas({
       nodeId="id"
       nodeLabel={(node) => exploreMapNodeTooltip(node as GraphNode, hoveredNodeId)}
       nodeVal="val"
-      nodeColor="color"
+      nodeColor={(node) => resolveNodeColor(node as GraphNode)}
       linkColor="color"
       linkWidth="lineWidth"
       linkLineDash="lineDash"
+      cooldownTicks={80}
+      d3AlphaDecay={0.05}
+      onEngineStop={() => {
+        graphRef.current?.pauseAnimation();
+      }}
       onNodeClick={(node) => {
         const graphNode = node as GraphNode;
         if (graphNode.kind === "contact") {
@@ -145,17 +170,15 @@ export function ExploreMapCanvas({
         }
       }}
       onNodeHover={(node) => {
-        setHoveredNodeId(node ? (node as GraphNode).id : null);
+        const nextId = node ? (node as GraphNode).id : null;
+        if (nextId === hoveredNodeIdRef.current) return;
+        hoveredNodeIdRef.current = nextId;
+        setHoveredNodeId(nextId);
       }}
       nodeCanvasObjectMode={() => "after"}
       nodeCanvasObject={(node, ctx, globalScale) => {
         const graphNode = node as NodeObject<GraphNode>;
-        if (
-          !shouldRenderExploreNodeLabel(graphNode, {
-            hoveredNodeId,
-            globalScale,
-          })
-        ) {
+        if (!shouldRenderExploreNodeLabel(graphNode, hoveredNodeId)) {
           return;
         }
 
