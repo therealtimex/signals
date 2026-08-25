@@ -72,25 +72,28 @@ export function SnowballSeedScoutFields({
       </div>
 
       <TagListField
+        id="scout-communities"
         label="Communities / feed URLs"
         placeholder="Add group URL or feed link"
-        values={value.communities}
+        tags={value.communities}
         onChange={(communities) => onChange({ ...value, communities })}
         disabled={disabled}
       />
 
       <TagListField
+        id="scout-search-queries"
         label="Search queries (optional)"
         placeholder="Add search phrase"
-        values={value.searchQueries}
+        tags={value.searchQueries}
         onChange={(searchQueries) => onChange({ ...value, searchQueries })}
         disabled={disabled}
       />
 
       <TagListField
+        id="scout-intent-keywords"
         label="Intent keywords"
         placeholder="funding, launch, seed round"
-        values={value.intentKeywords}
+        tags={value.intentKeywords}
         onChange={(intentKeywords) => onChange({ ...value, intentKeywords })}
         disabled={disabled}
       />

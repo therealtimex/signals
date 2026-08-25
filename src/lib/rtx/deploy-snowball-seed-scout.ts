@@ -4,6 +4,7 @@ import type { EnvLike } from "@/lib/rtx/env";
 import { ensureRtxWorkspace, getSignalsRtxWorkspaceSlug } from "@/lib/rtx/cli-provisioning";
 import {
   defaultHeartbeatSkeleton,
+  HEARTBEAT_FILENAME,
   upsertHeartbeatShellTask,
   type HeartbeatShellTask,
 } from "@/lib/rtx/heartbeat-task-block";
@@ -109,7 +110,7 @@ export async function deploySnowballSeedScout(
   const workspaceSlug = getSignalsRtxWorkspaceSlug(env);
 
   try {
-    await ensureRtxWorkspace(workspaceSlug, env);
+    await ensureRtxWorkspace(workspaceSlug, "Signals", env);
   } catch (error) {
     return {
       success: false,

@@ -8,6 +8,8 @@ export interface HeartbeatShellTask {
   timeout?: string | number | null;
 }
 
+export const HEARTBEAT_FILENAME = "HEARTBEAT.md";
+
 const TASKS_HEADER = "tasks:";
 
 function unquoteScalar(value: string): string {
