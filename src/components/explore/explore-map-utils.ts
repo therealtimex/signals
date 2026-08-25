@@ -4,6 +4,9 @@ import type {
   ExploreMapNode,
   ExploreMapNicheNode,
 } from "@/lib/db/queries/explore-map";
+import type { ExploreMapThemeColors } from "@/components/explore/explore-map-colors";
+import { nicheTypeResolvedColor } from "@/components/explore/explore-map-colors";
+import { contactDisplayInitials } from "@/lib/contact-avatar-client";
 
 const CHART_COLORS = [
   "var(--chart-1)",
@@ -65,6 +68,57 @@ export const EXPLORE_MAP_DEFAULT_LAYERS: ExploreMapLayerVisibility = {
   showFollows: true,
   showNiches: true,
 };
+
+/** Show follower avatars when zoomed in, filtering, or hovering. */
+export const EXPLORE_MAP_AVATAR_MIN_SCALE = 1.35;
+
+export function buildExploreNicheColorMap(
+  nodes: ExploreMapNode[],
+  theme: ExploreMapThemeColors,
+): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const [index, niche] of listExploreMapNiches(nodes).entries()) {
+    map.set(
+      niche.entityId,
+      theme.chart[index % theme.chart.length] ??
+        nicheTypeResolvedColor(niche.nicheType, theme),
+    );
+  }
+  return map;
+}
+
+export function primaryNicheIdForContact(node: ExploreMapContactNode): string | null {
+  return node.nicheIds[0] ?? null;
+}
+
+export function contactNodeBaseColor(
+  node: ExploreMapContactNode,
+  nicheColorMap: Map<string, string>,
+  theme: ExploreMapThemeColors,
+): string {
+  if (node.isOwner) return theme.primary;
+  const nicheId = primaryNicheIdForContact(node);
+  if (nicheId && nicheColorMap.has(nicheId)) {
+    return nicheColorMap.get(nicheId)!;
+  }
+  return theme.mutedForeground;
+}
+
+export function shouldShowExploreContactAvatar(
+  globalScale: number,
+  selectedNicheId: string | null,
+  isHovered: boolean,
+  node: ExploreMapContactNode,
+): boolean {
+  if (node.isOwner) return true;
+  if (isHovered) return true;
+  if (selectedNicheId && contactMatchesNicheFilter(node, selectedNicheId)) return true;
+  return globalScale >= EXPLORE_MAP_AVATAR_MIN_SCALE;
+}
+
+export function exploreContactInitials(label: string): string {
+  return contactDisplayInitials({ name: label });
+}
 
 export function filterExploreMapEdges(
   edges: ExploreMapEdge[],

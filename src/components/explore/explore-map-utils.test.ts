@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ExploreMapContactNode, ExploreMapEdge } from "@/lib/db/queries/explore-map";
 import {
+  buildExploreNicheColorMap,
   contactMatchesNicheFilter,
   contactNodeVal,
   EXPLORE_MAP_AUDIENCE_NODE_VAL_MAX,
@@ -11,7 +12,9 @@ import {
   listExploreMapNiches,
   nicheNodeVal,
   nicheTypeColor,
+  primaryNicheIdForContact,
   shouldRenderExploreNodeLabel,
+  shouldShowExploreContactAvatar,
 } from "@/components/explore/explore-map-utils";
 
 const audienceContact: ExploreMapContactNode = {
@@ -128,5 +131,31 @@ describe("explore map legibility helpers", () => {
     expect(contactMatchesNicheFilter(audienceContact, "niche-ai")).toBe(true);
     expect(contactMatchesNicheFilter(audienceContact, "niche-other")).toBe(false);
     expect(contactMatchesNicheFilter(ownerContact, "niche-other")).toBe(true);
+  });
+
+  it("assigns stable niche colors and avatar visibility rules", () => {
+    const theme = {
+      primary: "rgb(1, 2, 3)",
+      mutedForeground: "rgb(4, 5, 6)",
+      foreground: "rgb(7, 8, 9)",
+      chart: ["rgb(10, 11, 12)", "rgb(13, 14, 15)"],
+    };
+    const colors = buildExploreNicheColorMap(
+      [
+        {
+          id: "niche:a",
+          kind: "niche",
+          entityId: "a",
+          label: "Alpha",
+          nicheType: "interest",
+          memberCount: 3,
+        },
+      ],
+      theme,
+    );
+    expect(colors.get("a")).toBe("rgb(10, 11, 12)");
+    expect(primaryNicheIdForContact(audienceContact)).toBe("niche-ai");
+    expect(shouldShowExploreContactAvatar(1, null, false, audienceContact)).toBe(false);
+    expect(shouldShowExploreContactAvatar(1, null, true, audienceContact)).toBe(true);
   });
 });

@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 
 type ExploreMapToolbarProps = {
   niches: ExploreMapNicheNode[];
+  nicheColors: Map<string, string>;
   selectedNicheId: string | null;
   onSelectedNicheIdChange: (nicheId: string | null) => void;
   layers: ExploreMapLayerVisibility;
@@ -19,50 +20,55 @@ type ExploreMapToolbarProps = {
 
 export function ExploreMapToolbar({
   niches,
+  nicheColors,
   selectedNicheId,
   onSelectedNicheIdChange,
   layers,
   onLayersChange,
 }: ExploreMapToolbarProps) {
-  if (niches.length === 0) {
-    return (
-      <div className="absolute bottom-4 right-4 z-10">
+  return (
+    <>
+      {niches.length > 0 ? (
+        <div
+          className="absolute left-4 top-20 z-10 flex max-h-[calc(100%-10rem)] w-56 flex-col gap-1 overflow-y-auto rounded-xl border border-border/60 bg-background/90 p-2 shadow-sm backdrop-blur-md"
+          data-testid="explore-map-niche-filters"
+        >
+          {niches.map((niche) => {
+            const selected = selectedNicheId === niche.entityId;
+            const dotColor = nicheColors.get(niche.entityId) ?? "var(--primary)";
+            return (
+              <button
+                key={niche.entityId}
+                type="button"
+                aria-pressed={selected}
+                onClick={() =>
+                  onSelectedNicheIdChange(selected ? null : niche.entityId)
+                }
+                className={cn(
+                  "flex items-center gap-2 rounded-full px-3 py-2 text-left text-xs transition-colors",
+                  selected
+                    ? "bg-primary/10 text-primary ring-1 ring-primary/30"
+                    : "hover:bg-muted/80",
+                )}
+              >
+                <span
+                  className="h-2 w-2 shrink-0 rounded-full"
+                  style={{ backgroundColor: dotColor }}
+                />
+                <span className="min-w-0 flex-1 truncate font-medium">{niche.label}</span>
+                <span className="shrink-0 tabular-nums text-muted-foreground">
+                  {niche.memberCount}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+
+      <div className="absolute bottom-16 right-4 z-10">
         <LayerToggleRow layers={layers} onLayersChange={onLayersChange} />
       </div>
-    );
-  }
-
-  return (
-    <div className="absolute bottom-4 left-4 right-4 z-10 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-      <div
-        className="flex max-h-24 flex-wrap gap-1.5 overflow-y-auto rounded-md border border-border bg-background/90 p-2 backdrop-blur-sm"
-        data-testid="explore-map-niche-filters"
-      >
-        {niches.map((niche) => {
-          const selected = selectedNicheId === niche.entityId;
-          return (
-            <button
-              key={niche.entityId}
-              type="button"
-              aria-pressed={selected}
-              onClick={() =>
-                onSelectedNicheIdChange(selected ? null : niche.entityId)
-              }
-              className={cn(
-                "inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs transition-colors",
-                selected
-                  ? "border-primary bg-primary/10 text-primary"
-                  : "border-border hover:bg-muted",
-              )}
-            >
-              <span>{niche.label}</span>
-              <span className="text-muted-foreground">{niche.memberCount}</span>
-            </button>
-          );
-        })}
-      </div>
-      <LayerToggleRow layers={layers} onLayersChange={onLayersChange} />
-    </div>
+    </>
   );
 }
 
@@ -75,7 +81,7 @@ function LayerToggleRow({
 }) {
   return (
     <div
-      className="flex shrink-0 items-center gap-4 rounded-md border border-border bg-background/90 px-3 py-2 backdrop-blur-sm"
+      className="flex shrink-0 items-center gap-4 rounded-xl border border-border/60 bg-background/90 px-3 py-2 shadow-sm backdrop-blur-md"
       data-testid="explore-map-layer-toggles"
     >
       <div className="flex items-center gap-2">

@@ -418,6 +418,7 @@ describe("ExploreMapView", () => {
     expect(container.textContent).toContain("AI agents");
     expect(container.textContent).toContain("Follows");
     expect(container.textContent).toContain("Niches");
+    expect(container.querySelector('[data-testid="explore-map-hint"]')).toBeTruthy();
   });
 });
 
