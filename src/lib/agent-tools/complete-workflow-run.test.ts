@@ -6,6 +6,22 @@ import { handleCompleteWorkflowRun } from "@/lib/agent-tools/handlers";
 import * as workflowEvents from "@/lib/webhooks/workflow-events";
 import * as runtimeSessions from "@/lib/rtx/runtime-sessions";
 
+const mockWorkflowCompletedEvent: workflowEvents.EmitWorkflowCompletedResult = {
+  emitted: true,
+  event: {
+    event: "workflow.completed",
+    runId: "run_test",
+    templateId: "tpl_test",
+    templateName: "Network Snowball",
+    templateType: "search",
+    status: "completed",
+    createdContactIds: [],
+    totalProcessed: 0,
+    timestamp: 1,
+  },
+  routingRecommendation: { suggestedAction: "review", rationale: "test" },
+};
+
 describe("complete_workflow_run terminal teardown", () => {
   beforeEach(() => {
     resetCoreTables();
@@ -29,11 +45,9 @@ describe("complete_workflow_run terminal teardown", () => {
       }),
     });
 
-    vi.spyOn(workflowEvents, "emitWorkflowCompletedEvent").mockResolvedValue({
-      emitted: true,
-      cascadeResult: null,
-      routingRecommendation: { suggestedAction: "review", rationale: "test" },
-    });
+    vi.spyOn(workflowEvents, "emitWorkflowCompletedEvent").mockResolvedValue(
+      mockWorkflowCompletedEvent
+    );
 
     const terminateSpy = vi
       .spyOn(runtimeSessions, "terminateTerminalRuntimeSession")
@@ -75,11 +89,9 @@ describe("complete_workflow_run terminal teardown", () => {
       }
     )!;
 
-    vi.spyOn(workflowEvents, "emitWorkflowCompletedEvent").mockResolvedValue({
-      emitted: true,
-      cascadeResult: null,
-      routingRecommendation: { suggestedAction: "review", rationale: "test" },
-    });
+    vi.spyOn(workflowEvents, "emitWorkflowCompletedEvent").mockResolvedValue(
+      mockWorkflowCompletedEvent
+    );
 
     vi.spyOn(runtimeSessions, "terminateTerminalRuntimeSession").mockResolvedValue({
       success: false,
