@@ -50,11 +50,11 @@ export async function stopRunningRtxBrowserSessions(
     return result;
   }
 
-  const requestedNames = new Set(
-    (input.sessionNames ?? [])
-      .map((name) => name.trim().toLowerCase())
-      .filter(Boolean)
-  );
+  const requestedNames = new Set<string>();
+  for (const name of input.sessionNames ?? []) {
+    const trimmed = name.trim().toLowerCase();
+    if (trimmed) requestedNames.add(trimmed);
+  }
 
   const targets = sessions.filter((entry) => {
     if (!entry.sessionName?.trim() || !isBrowserSessionRunning(entry)) return false;
