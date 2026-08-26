@@ -41,6 +41,8 @@
     "generate:agent-tools-openapi": "node scripts/generate-agent-tools-openapi.mjs",
     "check:agent-tools-openapi": "node scripts/check-agent-tools-openapi.mjs",
     "contract:heartbeat": "SIGNALS_CONTRACT_PROBES=1 vitest run --project contract",
+    "automation:check-target": "node scripts/app-automation/scripts/check-signals-target.mjs",
+    "automation:test": "node --test \"scripts/app-automation/**/*.test.mjs\"",
     "build:signals-pp-cli": "node scripts/build-signals-pp-cli.mjs",
     "gate": "npm run check",
     "prepublishOnly": "npm run build:cli",
