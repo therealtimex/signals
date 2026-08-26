@@ -72,4 +72,24 @@ describe("snowball seed scout resolve.py", () => {
     expect(["x", "linkedin"]).toContain(result.stdout.trim());
     expect(result.stdout.trim()).not.toBe("facebook");
   });
+
+  it("returns no platform when only facebook is enabled without harvest targets", () => {
+    const config = {
+      platforms: ["facebook"],
+      inheritAuthenticatedSession: true,
+      browserSessionName: "signals-publish",
+      communities: [],
+      searchQueries: [],
+      intentKeywords: [],
+    };
+    const result = spawnSync(
+      "python3",
+      [RESOLVE_SCRIPT, "pick-platform", JSON.stringify(config)],
+      { encoding: "utf8" },
+    );
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stderr).toContain("facebook skipped");
+    expect(result.stdout.trim()).toBe("");
+  });
 });

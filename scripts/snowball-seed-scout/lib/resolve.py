@@ -298,7 +298,7 @@ def platform_skip_reason(platform: str, config: dict) -> str:
 def pick_scout_platform(config: dict, *, day_seed: str | None = None) -> str:
     eligible = eligible_platforms(config)
     if not eligible:
-        return configured_platforms(config)[0]
+        return ""
     seed = day_seed or datetime.now(UTC).strftime("%Y-%m-%d")
     idx = int(hashlib.sha256(seed.encode()).hexdigest(), 16) % len(eligible)
     return eligible[idx]
@@ -1158,6 +1158,18 @@ class ResolveTests(unittest.TestCase):
         picked = pick_scout_platform(config, day_seed="2026-08-26")
         self.assertIn(picked, {"x", "linkedin"})
         self.assertNotEqual(picked, "facebook")
+
+    def test_pick_scout_platform_empty_when_no_platforms_eligible(self) -> None:
+        config = {
+            "platforms": ["facebook"],
+            "inheritAuthenticatedSession": True,
+            "browserSessionName": "signals-publish",
+            "communities": [],
+            "searchQueries": [],
+            "intentKeywords": [],
+        }
+        self.assertEqual(pick_scout_platform(config), "")
+        self.assertEqual(eligible_platforms(config), [])
 
     def test_platform_skip_reason_for_facebook(self) -> None:
         config = {
