@@ -33,6 +33,16 @@ export SIGNALS_BASE_URL
 PRODUCER_RUN_ID="scout-$(date -u +%Y%m%dT%H%M%SZ)-$$"
 
 PLATFORM="$(scout_pick_platform "${CONFIG_JSON}")"
+
+if [[ -z "${PLATFORM}" ]]; then
+  DRY_RUN_FLAG="false"
+  if [[ "${DRY_RUN}" -eq 1 ]]; then
+    DRY_RUN_FLAG="true"
+  fi
+  echo "{\"queued\":0,\"platform\":null,\"dryRun\":${DRY_RUN_FLAG},\"candidates\":[],\"message\":\"no eligible platforms — configure harvest targets for at least one enabled platform\"}"
+  exit 0
+fi
+
 URLS="$(scout_extract_urls "${CONFIG_JSON}" "${PLATFORM}")"
 
 if [[ -z "${URLS}" ]]; then

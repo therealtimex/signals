@@ -150,6 +150,9 @@ export function SnowballSeedScoutFields({
         onChange={(searchQueries) => onChange({ ...value, searchQueries })}
         disabled={disabled}
       />
+      <p className="-mt-2 text-xs text-muted-foreground">
+        Applied on every platform rotation day. Leave empty to keep X and LinkedIn on home feed only.
+      </p>
 
       <TagListField
         id="scout-intent-keywords"
@@ -159,6 +162,12 @@ export function SnowballSeedScoutFields({
         onChange={(intentKeywords) => onChange({ ...value, intentKeywords })}
         disabled={disabled}
       />
+      {value.platforms.includes("facebook") && (
+        <p className="-mt-2 text-xs text-muted-foreground">
+          On Facebook rotation days, these keywords also become the default post search when no
+          communities or search queries are set. With no keywords, Facebook is skipped in rotation.
+        </p>
+      )}
 
       <div className="space-y-3 rounded-lg bg-muted/50 p-3">
         <p className="text-xs font-medium text-muted-foreground">Harvest & queue</p>
@@ -208,7 +217,8 @@ export function SnowballSeedScoutFields({
         <div>
           <Label htmlFor="scout-auth-feed">Use authenticated home feed</Label>
           <p className="text-xs text-muted-foreground">
-            Visit your logged-in home/feed before community search targets.
+            Visit your logged-in home/feed before community search targets. Facebook uses post
+            search instead — home feed posts do not expose copy-link controls.
           </p>
         </div>
         <Switch

@@ -51,4 +51,45 @@ describe("snowball seed scout resolve.py", () => {
     // Snowball a seed with no author to expand.
     expect(result.stdout.trim()).toBe("");
   });
+
+  it("skips facebook in daily rotation when it has no harvest targets", () => {
+    const config = {
+      platforms: ["x", "linkedin", "facebook"],
+      inheritAuthenticatedSession: true,
+      browserSessionName: "signals-publish",
+      communities: [],
+      searchQueries: [],
+      intentKeywords: [],
+    };
+    const result = spawnSync(
+      "python3",
+      [RESOLVE_SCRIPT, "pick-platform", JSON.stringify(config)],
+      { encoding: "utf8" },
+    );
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stderr).toContain("facebook skipped");
+    expect(["x", "linkedin"]).toContain(result.stdout.trim());
+    expect(result.stdout.trim()).not.toBe("facebook");
+  });
+
+  it("returns no platform when only facebook is enabled without harvest targets", () => {
+    const config = {
+      platforms: ["facebook"],
+      inheritAuthenticatedSession: true,
+      browserSessionName: "signals-publish",
+      communities: [],
+      searchQueries: [],
+      intentKeywords: [],
+    };
+    const result = spawnSync(
+      "python3",
+      [RESOLVE_SCRIPT, "pick-platform", JSON.stringify(config)],
+      { encoding: "utf8" },
+    );
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stderr).toContain("facebook skipped");
+    expect(result.stdout.trim()).toBe("");
+  });
 });

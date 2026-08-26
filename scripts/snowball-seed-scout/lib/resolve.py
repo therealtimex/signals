@@ -3,12 +3,14 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import sys
 import unittest
 import urllib.error
 import urllib.request
+from datetime import UTC, datetime
 from urllib.parse import quote_plus
 
 DEFAULT_BROWSER_SESSION = "signals-publish"
@@ -188,6 +190,18 @@ def resolve_community(platform: str, name: str) -> str:
     return ""
 
 
+def resolve_facebook_intent_search(intent_keywords: list[str]) -> str:
+    """Facebook-only harvest fallback when home feed is unusable and no explicit targets exist.
+
+    Intent keywords already filter harvested posts; reusing them as a search query keeps
+    X/LinkedIn on home-feed rotation without adding global searchQueries entries.
+    """
+    terms = [str(keyword).strip() for keyword in intent_keywords if str(keyword).strip()]
+    if not terms:
+        return ""
+    return f"https://www.facebook.com/search/posts?q={quote_plus(' '.join(terms))}"
+
+
 def resolve_search(platform: str, query: str, intent_keywords: list[str]) -> str:
     entry = str(query).strip()
     if not entry:
@@ -244,7 +258,50 @@ def resolve_targets(config: dict, platform: str) -> list[str]:
             seen.add(url)
             targets.append(url)
 
+    if platform == "facebook" and not targets and keywords:
+        url = resolve_facebook_intent_search(keywords)
+        if url and url not in seen:
+            seen.add(url)
+            targets.append(url)
+
     return targets
+
+
+def configured_platforms(config: dict) -> list[str]:
+    platforms = [
+        str(platform).strip()
+        for platform in (config.get("platforms") or ["x", "linkedin"])
+        if str(platform).strip()
+    ]
+    return platforms or ["x"]
+
+
+def eligible_platforms(config: dict) -> list[str]:
+    return [
+        platform
+        for platform in configured_platforms(config)
+        if resolve_targets(config, platform)
+    ]
+
+
+def platform_skip_reason(platform: str, config: dict) -> str:
+    if resolve_targets(config, platform):
+        return ""
+    if platform == "facebook":
+        return (
+            "snowball-seed-scout: facebook skipped — no harvest targets "
+            "(add intent keywords, a group URL, or a search query)"
+        )
+    return f"snowball-seed-scout: {platform} skipped — no harvest targets configured"
+
+
+def pick_scout_platform(config: dict, *, day_seed: str | None = None) -> str:
+    eligible = eligible_platforms(config)
+    if not eligible:
+        return ""
+    seed = day_seed or datetime.now(UTC).strftime("%Y-%m-%d")
+    idx = int(hashlib.sha256(seed.encode()).hexdigest(), 16) % len(eligible)
+    return eligible[idx]
 
 
 def is_navigation_url(url: str, platform: str) -> bool:
@@ -826,7 +883,7 @@ def pick_content_tab_id(tabs_payload: dict, platform: str = "") -> str:
 
 def main() -> int:
     if len(sys.argv) < 2:
-        print("usage: resolve.py <targets|fallback|extract-posts|pick-tab> ...", file=sys.stderr)
+        print("usage: resolve.py <targets|pick-platform|eligible-platforms|fallback|extract-posts|pick-tab> ...", file=sys.stderr)
         return 2
 
     command = sys.argv[1]
@@ -852,6 +909,21 @@ def main() -> int:
         platform = sys.argv[3]
         for url in resolve_targets(config, platform):
             print(url)
+        return 0
+
+    if command == "eligible-platforms":
+        config = json.loads(sys.argv[2])
+        for platform in eligible_platforms(config):
+            print(platform)
+        return 0
+
+    if command == "pick-platform":
+        config = json.loads(sys.argv[2])
+        for platform in configured_platforms(config):
+            reason = platform_skip_reason(platform, config)
+            if reason:
+                print(reason, file=sys.stderr)
+        print(pick_scout_platform(config))
         return 0
 
     if command == "fallback":
@@ -1015,6 +1087,100 @@ class ResolveTests(unittest.TestCase):
         }
         urls = resolve_targets(config, "linkedin")
         self.assertEqual(urls[0], "https://www.linkedin.com/feed/")
+
+    def test_facebook_falls_back_to_intent_keyword_search(self) -> None:
+        config = {
+            "inheritAuthenticatedSession": True,
+            "browserSessionName": "signals-publish",
+            "communities": [],
+            "searchQueries": [],
+            "intentKeywords": ["funding", "founder"],
+        }
+        urls = resolve_targets(config, "facebook")
+        self.assertEqual(
+            urls,
+            ["https://www.facebook.com/search/posts?q=funding+founder"],
+        )
+
+    def test_facebook_intent_fallback_skipped_when_explicit_targets_exist(self) -> None:
+        config = {
+            "inheritAuthenticatedSession": True,
+            "browserSessionName": "signals-publish",
+            "communities": ["https://www.facebook.com/groups/acme"],
+            "searchQueries": [],
+            "intentKeywords": ["funding"],
+        }
+        urls = resolve_targets(config, "facebook")
+        self.assertEqual(urls, ["https://www.facebook.com/groups/acme"])
+
+    def test_intent_keywords_do_not_add_x_search_targets(self) -> None:
+        config = {
+            "inheritAuthenticatedSession": True,
+            "browserSessionName": "signals-publish",
+            "communities": [],
+            "searchQueries": [],
+            "intentKeywords": ["funding", "founder"],
+        }
+        urls = resolve_targets(config, "x")
+        self.assertEqual(urls, ["https://x.com/home"])
+
+    def test_facebook_excluded_from_eligible_platforms_without_targets(self) -> None:
+        config = {
+            "platforms": ["x", "linkedin", "facebook"],
+            "inheritAuthenticatedSession": True,
+            "browserSessionName": "signals-publish",
+            "communities": [],
+            "searchQueries": [],
+            "intentKeywords": [],
+        }
+        self.assertEqual(eligible_platforms(config), ["x", "linkedin"])
+
+    def test_facebook_eligible_with_intent_keywords_only(self) -> None:
+        config = {
+            "platforms": ["x", "linkedin", "facebook"],
+            "inheritAuthenticatedSession": True,
+            "browserSessionName": "signals-publish",
+            "communities": [],
+            "searchQueries": [],
+            "intentKeywords": ["funding"],
+        }
+        self.assertEqual(eligible_platforms(config), ["x", "linkedin", "facebook"])
+
+    def test_pick_scout_platform_skips_ineligible_facebook(self) -> None:
+        config = {
+            "platforms": ["x", "linkedin", "facebook"],
+            "inheritAuthenticatedSession": True,
+            "browserSessionName": "signals-publish",
+            "communities": [],
+            "searchQueries": [],
+            "intentKeywords": [],
+        }
+        picked = pick_scout_platform(config, day_seed="2026-08-26")
+        self.assertIn(picked, {"x", "linkedin"})
+        self.assertNotEqual(picked, "facebook")
+
+    def test_pick_scout_platform_empty_when_no_platforms_eligible(self) -> None:
+        config = {
+            "platforms": ["facebook"],
+            "inheritAuthenticatedSession": True,
+            "browserSessionName": "signals-publish",
+            "communities": [],
+            "searchQueries": [],
+            "intentKeywords": [],
+        }
+        self.assertEqual(pick_scout_platform(config), "")
+        self.assertEqual(eligible_platforms(config), [])
+
+    def test_platform_skip_reason_for_facebook(self) -> None:
+        config = {
+            "platforms": ["facebook"],
+            "communities": [],
+            "searchQueries": [],
+            "intentKeywords": [],
+        }
+        reason = platform_skip_reason("facebook", config)
+        self.assertIn("facebook skipped", reason)
+        self.assertIn("intent keywords", reason)
 
     def test_resolve_browser_session_defaults_to_publish(self) -> None:
         self.assertEqual(resolve_browser_session_name({}, ""), "signals-publish")
