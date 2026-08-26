@@ -56,11 +56,16 @@ export default defineConfig({
       {
         extends: true,
         test: {
-          // Contract probes assert against a *sibling repo's* runtime code, so the
-          // default gate must never depend on whether that checkout exists or what
-          // state it is in. Opt-in only: `npm run contract:heartbeat`.
+          // Contract probes assert against a *sibling repo's* runtime code, so no
+          // default invocation may depend on whether that checkout exists or what
+          // state it is in. `--project` is not enough: a bare `vitest run` executes
+          // every configured project, so the include itself is gated on an explicit
+          // opt-in. Without it this project matches nothing.
           name: "contract",
-          include: ["src/**/*.contract.test.ts"],
+          include:
+            process.env.SIGNALS_CONTRACT_PROBES === "1"
+              ? ["src/**/*.contract.test.ts"]
+              : [],
           exclude: ["**/node_modules/**"],
         },
       },
