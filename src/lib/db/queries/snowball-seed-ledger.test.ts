@@ -3,10 +3,13 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { snowballSeedLedger } from "@/lib/db/schema";
 import {
+  SNOWBALL_SEED_CLAIM_TTL_MS,
   SNOWBALL_SEED_DEDUPE_WINDOW_MS,
+  claimSeed,
+  confirmSeed,
   findRecentlyQueuedSeedHashes,
   pruneSnowballSeedLedger,
-  recordQueuedSeed,
+  releaseSeedClaim,
 } from "@/lib/db/queries/snowball-seed-ledger";
 import { resetCoreTables } from "@/test/db";
 
@@ -19,62 +22,95 @@ function ageSeed(urlHash: string, ageMs: number): void {
     .run();
 }
 
+function seed(urlHash: string) {
+  return { urlHash, url: `https://x.com/a/status/${urlHash}` };
+}
+
 describe("snowball seed ledger", () => {
   beforeEach(() => {
     resetCoreTables();
   });
 
-  it("reports a freshly queued seed as recently queued", () => {
-    recordQueuedSeed({ urlHash: "hash-a", url: "https://x.com/a/status/1" });
-
-    expect(findRecentlyQueuedSeedHashes(["hash-a"])).toEqual(new Set(["hash-a"]));
-    expect(findRecentlyQueuedSeedHashes(["hash-b"]).size).toBe(0);
+  it("grants a claim on a URL never seen before", () => {
+    expect(claimSeed(seed("hash-a"))).toBe(true);
   });
 
-  it("lets a seed past the dedupe window be queued again", () => {
-    recordQueuedSeed({ urlHash: "hash-old", url: "https://x.com/a/status/2" });
-    ageSeed("hash-old", SNOWBALL_SEED_DEDUPE_WINDOW_MS + 60_000);
-
-    expect(findRecentlyQueuedSeedHashes(["hash-old"]).size).toBe(0);
+  it("refuses a second concurrent claim on the same URL", () => {
+    expect(claimSeed(seed("hash-race"))).toBe(true);
+    // The competing run has not confirmed yet, but must still be locked out —
+    // otherwise both POST and the calendar gets duplicate events.
+    expect(claimSeed(seed("hash-race"))).toBe(false);
   });
 
-  it("keeps a seed inside the window blocked", () => {
-    recordQueuedSeed({ urlHash: "hash-recent", url: "https://x.com/a/status/3" });
-    ageSeed("hash-recent", SNOWBALL_SEED_DEDUPE_WINDOW_MS - 60_000);
+  it("blocks a confirmed seed for the dedupe window", () => {
+    claimSeed(seed("hash-done"));
+    confirmSeed("hash-done", "evt-1");
 
-    expect(findRecentlyQueuedSeedHashes(["hash-recent"])).toEqual(
-      new Set(["hash-recent"]),
+    expect(claimSeed(seed("hash-done"))).toBe(false);
+    expect(findRecentlyQueuedSeedHashes(["hash-done"])).toEqual(
+      new Set(["hash-done"]),
     );
   });
 
-  it("refreshes rather than duplicating an existing hash", () => {
-    recordQueuedSeed({ urlHash: "hash-dup", url: "https://x.com/a/status/4" });
-    ageSeed("hash-dup", SNOWBALL_SEED_DEDUPE_WINDOW_MS + 60_000);
-    recordQueuedSeed({
-      urlHash: "hash-dup",
-      url: "https://x.com/a/status/4",
-      calendarEventUuid: "evt-9",
-    });
+  it("allows a confirmed seed past the dedupe window", () => {
+    claimSeed(seed("hash-old"));
+    confirmSeed("hash-old", "evt-2");
+    ageSeed("hash-old", SNOWBALL_SEED_DEDUPE_WINDOW_MS + 60_000);
 
+    expect(findRecentlyQueuedSeedHashes(["hash-old"]).size).toBe(0);
+    expect(claimSeed(seed("hash-old"))).toBe(true);
+  });
+
+  it("reclaims a stale pending claim left by a crashed run", () => {
+    claimSeed(seed("hash-stale"));
+    ageSeed("hash-stale", SNOWBALL_SEED_CLAIM_TTL_MS + 60_000);
+
+    // A crash between claim and confirm must not wedge the URL for a week.
+    expect(claimSeed(seed("hash-stale"))).toBe(true);
     const rows = db
       .select()
       .from(snowballSeedLedger)
-      .where(eq(snowballSeedLedger.urlHash, "hash-dup"))
+      .where(eq(snowballSeedLedger.urlHash, "hash-stale"))
       .all();
     expect(rows).toHaveLength(1);
-    expect(rows[0]?.calendarEventUuid).toBe("evt-9");
-    // The refreshed timestamp blocks it again.
-    expect(findRecentlyQueuedSeedHashes(["hash-dup"]).size).toBe(1);
+    expect(rows[0]?.status).toBe("pending");
+  });
+
+  it("keeps a fresh pending claim locked", () => {
+    claimSeed(seed("hash-fresh"));
+    ageSeed("hash-fresh", SNOWBALL_SEED_CLAIM_TTL_MS - 60_000);
+
+    expect(claimSeed(seed("hash-fresh"))).toBe(false);
+  });
+
+  it("frees a released claim immediately", () => {
+    claimSeed(seed("hash-fail"));
+    releaseSeedClaim("hash-fail");
+
+    expect(db.select().from(snowballSeedLedger).all()).toHaveLength(0);
+    expect(claimSeed(seed("hash-fail"))).toBe(true);
+  });
+
+  it("does not release a confirmed seed", () => {
+    claimSeed(seed("hash-safe"));
+    confirmSeed("hash-safe", "evt-3");
+    releaseSeedClaim("hash-safe");
+
+    expect(db.select().from(snowballSeedLedger).all()).toHaveLength(1);
+    expect(claimSeed(seed("hash-safe"))).toBe(false);
   });
 
   it("prunes only rows past the window", () => {
-    recordQueuedSeed({ urlHash: "hash-keep", url: "https://x.com/a/status/5" });
-    recordQueuedSeed({ urlHash: "hash-drop", url: "https://x.com/a/status/6" });
+    claimSeed(seed("hash-keep"));
+    confirmSeed("hash-keep", "evt-4");
+    claimSeed(seed("hash-drop"));
+    confirmSeed("hash-drop", "evt-5");
     ageSeed("hash-drop", SNOWBALL_SEED_DEDUPE_WINDOW_MS + 60_000);
 
     expect(pruneSnowballSeedLedger()).toBe(1);
-    const remaining = db.select().from(snowballSeedLedger).all();
-    expect(remaining.map((row) => row.urlHash)).toEqual(["hash-keep"]);
+    expect(db.select().from(snowballSeedLedger).all().map((r) => r.urlHash)).toEqual([
+      "hash-keep",
+    ]);
   });
 
   it("handles an empty lookup without querying", () => {

@@ -1,4 +1,4 @@
-import { and, gte, inArray, lt } from "drizzle-orm";
+import { and, eq, gte, inArray, lt, or } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db/client";
 import { snowballSeedLedger } from "@/lib/db/schema";
@@ -13,11 +13,19 @@ import { snowballSeedLedger } from "@/lib/db/schema";
  */
 export const SNOWBALL_SEED_DEDUPE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
+/**
+ * How long an unconfirmed claim blocks a retry.
+ *
+ * A `pending` row means some run is mid-POST. If that process dies before it can
+ * confirm or release, the claim must not wedge the URL for the full dedupe
+ * window — this bounds it to a little over the scout's 900s heartbeat timeout.
+ */
+export const SNOWBALL_SEED_CLAIM_TTL_MS = 20 * 60 * 1000;
+
 export interface SnowballSeedLedgerEntry {
   urlHash: string;
   url: string;
   platform?: string | null;
-  calendarEventUuid?: string | null;
   producerRunId?: string | null;
 }
 
@@ -27,8 +35,26 @@ function nowSeconds(): number {
 }
 
 /**
- * Return the subset of `urlHashes` queued within the dedupe window.
+ * Rows a previous run has already dealt with: confirmed on the calendar inside
+ * the dedupe window, or claimed by a run still in flight.
  */
+function liveLedgerRow(now: number, windowMs: number) {
+  return or(
+    and(
+      eq(snowballSeedLedger.status, "queued"),
+      gte(snowballSeedLedger.enqueuedAt, now - Math.floor(windowMs / 1000)),
+    ),
+    and(
+      eq(snowballSeedLedger.status, "pending"),
+      gte(
+        snowballSeedLedger.enqueuedAt,
+        now - Math.floor(SNOWBALL_SEED_CLAIM_TTL_MS / 1000),
+      ),
+    ),
+  );
+}
+
+/** Return the subset of `urlHashes` that must not be queued again right now. */
 export function findRecentlyQueuedSeedHashes(
   urlHashes: string[],
   windowMs: number = SNOWBALL_SEED_DEDUPE_WINDOW_MS,
@@ -36,14 +62,13 @@ export function findRecentlyQueuedSeedHashes(
   const unique = [...new Set(urlHashes.filter(Boolean))];
   if (unique.length === 0) return new Set();
 
-  const cutoff = nowSeconds() - Math.floor(windowMs / 1000);
   const rows = db
     .select({ urlHash: snowballSeedLedger.urlHash })
     .from(snowballSeedLedger)
     .where(
       and(
         inArray(snowballSeedLedger.urlHash, unique),
-        gte(snowballSeedLedger.enqueuedAt, cutoff),
+        liveLedgerRow(nowSeconds(), windowMs),
       ),
     )
     .all();
@@ -52,36 +77,100 @@ export function findRecentlyQueuedSeedHashes(
 }
 
 /**
- * Record a seed as queued. Idempotent: a duplicate hash refreshes the row
- * rather than failing the enqueue that already succeeded.
+ * Atomically claim a URL before the calendar POST.
+ *
+ * The unique index on `url_hash` is the lock: two concurrent runs cannot both
+ * insert, so exactly one wins and the loser treats the seed as already handled.
+ * A stale `pending` row left by a crashed run is taken over rather than blocking
+ * the URL for the full dedupe window.
+ *
+ * @returns true when this caller owns the claim and should POST.
  */
-export function recordQueuedSeed(entry: SnowballSeedLedgerEntry): void {
-  const enqueuedAt = nowSeconds();
-  db.insert(snowballSeedLedger)
+export function claimSeed(
+  entry: SnowballSeedLedgerEntry,
+  windowMs: number = SNOWBALL_SEED_DEDUPE_WINDOW_MS,
+): boolean {
+  const now = nowSeconds();
+  const inserted = db
+    .insert(snowballSeedLedger)
     .values({
       id: nanoid(),
       urlHash: entry.urlHash,
       url: entry.url,
       platform: entry.platform ?? null,
-      calendarEventUuid: entry.calendarEventUuid ?? null,
       producerRunId: entry.producerRunId ?? null,
-      enqueuedAt,
+      status: "pending",
+      enqueuedAt: now,
     })
-    .onConflictDoUpdate({
-      target: snowballSeedLedger.urlHash,
-      set: {
-        enqueuedAt,
-        url: entry.url,
-        platform: entry.platform ?? null,
-        calendarEventUuid: entry.calendarEventUuid ?? null,
-        producerRunId: entry.producerRunId ?? null,
-        updatedAt: enqueuedAt,
-      },
+    .onConflictDoNothing({ target: snowballSeedLedger.urlHash })
+    .run();
+
+  if ((inserted.changes ?? 0) > 0) return true;
+
+  // A row already exists. Take it over only when it is no longer live: a stale
+  // claim, or a confirmed entry past the dedupe window.
+  const takeover = db
+    .update(snowballSeedLedger)
+    .set({
+      url: entry.url,
+      platform: entry.platform ?? null,
+      producerRunId: entry.producerRunId ?? null,
+      calendarEventUuid: null,
+      status: "pending",
+      enqueuedAt: now,
+      updatedAt: now,
     })
+    .where(
+      and(
+        eq(snowballSeedLedger.urlHash, entry.urlHash),
+        or(
+          and(
+            eq(snowballSeedLedger.status, "pending"),
+            lt(
+              snowballSeedLedger.enqueuedAt,
+              now - Math.floor(SNOWBALL_SEED_CLAIM_TTL_MS / 1000),
+            ),
+          ),
+          and(
+            eq(snowballSeedLedger.status, "queued"),
+            lt(snowballSeedLedger.enqueuedAt, now - Math.floor(windowMs / 1000)),
+          ),
+        ),
+      ),
+    )
+    .run();
+
+  return (takeover.changes ?? 0) > 0;
+}
+
+/** Promote a claim to confirmed once the calendar has accepted the event. */
+export function confirmSeed(
+  urlHash: string,
+  calendarEventUuid: string | null,
+): void {
+  const now = nowSeconds();
+  db.update(snowballSeedLedger)
+    .set({ status: "queued", calendarEventUuid, enqueuedAt: now, updatedAt: now })
+    .where(eq(snowballSeedLedger.urlHash, urlHash))
     .run();
 }
 
-/** Drop ledger rows older than the dedupe window so the table stays bounded. */
+/**
+ * Drop a claim whose calendar POST failed, so the seed stays retryable on the
+ * next tick instead of being blocked for the full dedupe window.
+ */
+export function releaseSeedClaim(urlHash: string): void {
+  db.delete(snowballSeedLedger)
+    .where(
+      and(
+        eq(snowballSeedLedger.urlHash, urlHash),
+        eq(snowballSeedLedger.status, "pending"),
+      ),
+    )
+    .run();
+}
+
+/** Drop ledger rows past the dedupe window so the table stays bounded. */
 export function pruneSnowballSeedLedger(
   windowMs: number = SNOWBALL_SEED_DEDUPE_WINDOW_MS,
 ): number {

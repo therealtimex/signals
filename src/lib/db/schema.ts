@@ -719,6 +719,14 @@ export const snowballSeedLedger = sqliteTable(
     platform: text("platform"),
     calendarEventUuid: text("calendar_event_uuid"),
     producerRunId: text("producer_run_id"),
+    /**
+     * `pending` is a claim taken before the calendar POST so concurrent runs
+     * cannot both queue the same URL; `queued` means the calendar accepted it.
+     * A `pending` row left behind by a crash goes stale and can be reclaimed.
+     */
+    status: text("status", { enum: ["pending", "queued"] })
+      .notNull()
+      .default("pending"),
     enqueuedAt: integer("enqueued_at").notNull(),
     ...timestamps,
   },

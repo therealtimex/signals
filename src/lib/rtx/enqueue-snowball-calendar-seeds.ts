@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
 import { resolveSignalsRtxWorkspaceSlug } from "@/lib/rtx/cli-provisioning";
 import {
-  findRecentlyQueuedSeedHashes,
+  claimSeed,
+  confirmSeed,
   pruneSnowballSeedLedger,
-  recordQueuedSeed,
+  releaseSeedClaim,
 } from "@/lib/db/queries/snowball-seed-ledger";
 import { resolveRtxApiBase, type EnvLike } from "@/lib/rtx/env";
 import { NETWORK_SNOWBALL_TEMPLATE_NAME } from "@/lib/workflows/network-snowball";
@@ -107,16 +108,6 @@ export async function enqueueSnowballCalendarSeeds(
   // the ledger bounded without needing a separate sweeper.
   pruneSnowballSeedLedger();
 
-  // Signals owns "which seeds exist", so a post already queued must not be sent
-  // again: the scout has no memory across ticks and the calendar ingest path we
-  // use does not enforce queueMeta.dedupeKey.
-  const alreadyQueued = findRecentlyQueuedSeedHashes(
-    seeds.flatMap((seed) => {
-      const url = String(seed.url || "").trim();
-      return url ? [hashUrl(url)] : [];
-    }),
-  );
-
   for (const seed of seeds) {
     const url = String(seed.url || "").trim();
     if (!url) {
@@ -124,8 +115,19 @@ export async function enqueueSnowballCalendarSeeds(
       continue;
     }
 
+    // Signals owns "which seeds exist", so a post already queued must not be sent
+    // again: the scout has no memory across ticks and the calendar ingest path we
+    // use does not enforce queueMeta.dedupeKey. Claim before the POST so two
+    // overlapping runs cannot both queue the same URL.
     const dedupeKey = hashUrl(url);
-    if (alreadyQueued.has(dedupeKey)) {
+    if (
+      !claimSeed({
+        urlHash: dedupeKey,
+        url,
+        platform: seed.platform ?? null,
+        producerRunId: seed.producerRunId ?? null,
+      })
+    ) {
       deduped.push(url);
       continue;
     }
@@ -186,6 +188,8 @@ export async function enqueueSnowballCalendarSeeds(
       };
 
       if (!response.ok) {
+        // Release so the seed stays retryable rather than blocked by our own claim.
+        releaseSeedClaim(dedupeKey);
         failed.push({
           url,
           reason: payload.error || `calendar API responded ${response.status}`,
@@ -194,18 +198,10 @@ export async function enqueueSnowballCalendarSeeds(
       }
 
       const calendarEventUuid = payload.event?.uuid ?? null;
-      recordQueuedSeed({
-        urlHash: dedupeKey,
-        url,
-        platform: seed.platform ?? null,
-        calendarEventUuid,
-        producerRunId: seed.producerRunId ?? null,
-      });
-      // Guard within this batch too: the same URL can be harvested twice in one run.
-      alreadyQueued.add(dedupeKey);
-
+      confirmSeed(dedupeKey, calendarEventUuid);
       queued.push({ url, calendarEventUuid, scheduledAt });
     } catch (error) {
+      releaseSeedClaim(dedupeKey);
       failed.push({
         url,
         reason: error instanceof Error ? error.message : "calendar request failed",

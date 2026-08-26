@@ -1,0 +1,1 @@
+ALTER TABLE `snowball_seed_ledger` ADD `status` text DEFAULT 'pending' NOT NULL;
