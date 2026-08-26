@@ -19,8 +19,8 @@ import {
 import {
   formatDeployedAt,
   isSnowballSeedScoutTemplate,
-  parseDeployTemplateConfig,
 } from "@/app/dashboard/workflows/deploy-dialog.utils";
+import { parseTemplateConfig } from "@/lib/workflows/template-config";
 import { useSnowballDeployment } from "@/app/dashboard/workflows/use-snowball-deployment";
 
 interface Template {
@@ -59,7 +59,7 @@ type DialogAction =
     };
 
 function initState(template: Template): DialogState {
-  const config = parseDeployTemplateConfig(template.config);
+  const config = parseTemplateConfig(template.config);
   return {
     loading: false,
     saving: false,

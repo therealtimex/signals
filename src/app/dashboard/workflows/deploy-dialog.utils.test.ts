@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   formatDeployedAt,
   isSnowballSeedScoutTemplate,
-  parseDeployTemplateConfig,
 } from "@/app/dashboard/workflows/deploy-dialog.utils";
 import { buildSnowballSeedScoutTemplateConfig } from "@/lib/workflows/snowball-seed-scout";
 
@@ -19,10 +18,22 @@ describe("formatDeployedAt", () => {
   });
 });
 
-describe("parseDeployTemplateConfig", () => {
-  it("treats malformed config as empty rather than throwing", () => {
-    expect(parseDeployTemplateConfig("{oops")).toEqual({});
-    expect(parseDeployTemplateConfig("")).toEqual({});
+describe("isSnowballSeedScoutTemplate config parsing", () => {
+  it("does not throw on configs that are not objects", () => {
+    // JSON.parse("null") is valid but not an object; dereferencing it would throw.
+    for (const config of ["null", "{oops", "", "42", '"a string"']) {
+      expect(() =>
+        isSnowballSeedScoutTemplate({
+          id: "t",
+          name: "n",
+          description: null,
+          config,
+        }),
+      ).not.toThrow();
+      expect(
+        isSnowballSeedScoutTemplate({ id: "t", name: "n", description: null, config }),
+      ).toBe(false);
+    }
   });
 });
 

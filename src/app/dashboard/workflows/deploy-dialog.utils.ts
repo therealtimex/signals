@@ -1,4 +1,5 @@
 import { isSnowballSeedScoutTemplateConfig } from "@/lib/workflows/snowball-seed-scout";
+import { parseTemplateConfig } from "@/lib/workflows/template-config";
 
 export interface DeployableTemplate {
   id: string;
@@ -7,20 +8,9 @@ export interface DeployableTemplate {
   config: string;
 }
 
-/** Template config is stored as a JSON string; a malformed one is simply not deployable. */
-export function parseDeployTemplateConfig(config: string): Record<string, unknown> {
-  try {
-    return JSON.parse(config || "{}") as Record<string, unknown>;
-  } catch {
-    return {};
-  }
-}
-
 /** Whether the gallery should offer Deploy instead of Run for this template. */
 export function isSnowballSeedScoutTemplate(template: DeployableTemplate): boolean {
-  return isSnowballSeedScoutTemplateConfig(
-    parseDeployTemplateConfig(template.config),
-  );
+  return isSnowballSeedScoutTemplateConfig(parseTemplateConfig(template.config));
 }
 
 /**
