@@ -143,6 +143,33 @@ interface HeartbeatTaskSection {
 }
 
 /**
+ * Whether this line ends the tasks section.
+ *
+ * `#` is ambiguous in a HEARTBEAT.md: it opens a YAML comment inside the block
+ * and a markdown heading after it. Treat it as a comment only when another task
+ * item still follows — ending the section early would strand later tasks in the
+ * trailing content and let the upsert append a duplicate.
+ */
+function endsTaskSection(lines: string[], index: number): boolean {
+  const line = lines[index];
+  if (line.trim() === "") return false;
+  // Indented lines and list items are part of the block.
+  if (/^\s/.test(line) || /^-\s/.test(line)) return false;
+
+  if (line.startsWith("#")) {
+    for (let probe = index + 1; probe < lines.length; probe += 1) {
+      const next = lines[probe];
+      if (next.trim() === "" || next.startsWith("#")) continue;
+      return !/^\s*-\s*name:/.test(next);
+    }
+    return true;
+  }
+
+  // Any other unindented content is a new top-level key or prose.
+  return true;
+}
+
+/**
  * Split the tasks section into raw item blocks.
  *
  * The blocks are kept as text rather than parsed structures: HEARTBEAT.md holds
@@ -157,12 +184,8 @@ function splitHeartbeatTaskSection(content: string): HeartbeatTaskSection {
     return { before: content.trimEnd(), blocks: [], after: "", indent: "" };
   }
 
-  // The section runs until a line that is clearly outside it: non-blank, at
-  // column 0, and not a list item (a new top-level key or a markdown heading).
   let sectionEnd = tasksIndex + 1;
-  while (sectionEnd < lines.length) {
-    const line = lines[sectionEnd];
-    if (line.trim() !== "" && !/^\s/.test(line) && !/^-\s/.test(line)) break;
+  while (sectionEnd < lines.length && !endsTaskSection(lines, sectionEnd)) {
     sectionEnd += 1;
   }
 
@@ -206,15 +229,23 @@ export function upsertHeartbeatShellTask(
   const section = splitHeartbeatTaskSection(content);
   const serialized = serializeTask(task, section.indent);
 
-  const existingIndex = section.blocks.findIndex(
-    (block) => taskBlockName(block) === task.name,
-  );
-
-  const blocks = [...section.blocks];
-  if (existingIndex >= 0) {
-    // Replace in place so ordering — and every sibling block — is preserved.
-    blocks[existingIndex] = serialized;
-  } else {
+  // Replace the first block with this name in place so ordering — and every
+  // sibling block — is preserved, and drop any further blocks sharing the name.
+  // A file can already hold duplicates (an earlier revision of this function
+  // produced them), and leaving the extras behind keeps them scheduled.
+  const blocks: string[] = [];
+  let replaced = false;
+  for (const block of section.blocks) {
+    if (taskBlockName(block) === task.name) {
+      if (!replaced) {
+        blocks.push(serialized);
+        replaced = true;
+      }
+      continue;
+    }
+    blocks.push(block);
+  }
+  if (!replaced) {
     blocks.push(serialized);
   }
 

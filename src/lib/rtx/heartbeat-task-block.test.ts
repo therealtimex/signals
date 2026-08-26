@@ -223,6 +223,98 @@ describe("heartbeat task block", () => {
     expect(next.match(/- name: nightly-agent/g)).toHaveLength(1);
   });
 
+  it("keeps scanning past a YAML comment between task items", () => {
+    const initial = `${defaultHeartbeatSkeleton()}
+- name: first-task
+  executor: shell
+  command: echo first
+  interval: 1h
+
+# managed by Signals — do not edit below
+- name: snowball-seed-scout
+  executor: shell
+  command: bash ./old.sh
+  interval: 1h
+`;
+
+    const next = upsertHeartbeatShellTask(initial, {
+      name: "snowball-seed-scout",
+      executor: "shell",
+      command: "bash ./scripts/snowball-seed-scout/scout.sh",
+      interval: "4h",
+      timeout: 900,
+    });
+
+    // Stopping at the comment would strand the scout task in trailing content
+    // and append a second copy.
+    expect(next.match(/- name: snowball-seed-scout/g)).toHaveLength(1);
+    expect(next).toContain("bash ./scripts/snowball-seed-scout/scout.sh");
+    expect(next).not.toContain("bash ./old.sh");
+    expect(next).toContain("# managed by Signals");
+  });
+
+  it("still treats a markdown heading as the end of the section", () => {
+    const initial = `${defaultHeartbeatSkeleton()}
+- name: first-task
+  executor: shell
+  command: echo first
+  interval: 1h
+
+## Notes
+
+Prose that happens to mention tasks.
+`;
+
+    const next = upsertHeartbeatShellTask(initial, {
+      name: "snowball-seed-scout",
+      executor: "shell",
+      command: "bash ./scripts/snowball-seed-scout/scout.sh",
+      interval: "4h",
+      timeout: 900,
+    });
+
+    expect(next).toContain("## Notes");
+    expect(next).toContain("Prose that happens to mention tasks.");
+    expect(next.match(/- name: first-task/g)).toHaveLength(1);
+    expect(next).toContain("- name: snowball-seed-scout");
+  });
+
+  it("collapses pre-existing duplicate task names to a single entry", () => {
+    // An earlier revision of this function could emit duplicates, so a real
+    // HEARTBEAT.md may already contain them. Deploy must restore the invariant.
+    const initial = `${defaultHeartbeatSkeleton()}
+- name: snowball-seed-scout
+  executor: shell
+  command: bash ./old-a.sh
+  interval: 1h
+
+- name: keep-me
+  executor: shell
+  command: echo keep
+  interval: 2h
+
+- name: snowball-seed-scout
+  executor: shell
+  command: bash ./old-b.sh
+  interval: 3h
+`;
+
+    const next = upsertHeartbeatShellTask(initial, {
+      name: "snowball-seed-scout",
+      executor: "shell",
+      command: "bash ./scripts/snowball-seed-scout/scout.sh",
+      interval: "4h",
+      timeout: 900,
+    });
+
+    expect(next.match(/- name: snowball-seed-scout/g)).toHaveLength(1);
+    expect(next).not.toContain("old-a.sh");
+    expect(next).not.toContain("old-b.sh");
+    expect(next).toContain("- name: keep-me");
+    // The survivor keeps the first occurrence's position.
+    expect(next.indexOf("snowball-seed-scout")).toBeLessThan(next.indexOf("keep-me"));
+  });
+
   it("preserves content that follows the tasks section", () => {
     const initial = `${defaultHeartbeatSkeleton()}
 - name: first-task
