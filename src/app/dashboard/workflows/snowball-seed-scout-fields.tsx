@@ -32,6 +32,9 @@ interface SnowballSeedScoutFieldsProps {
   disabled?: boolean;
 }
 
+/** Sentinel value: Radix Select cannot hold an empty-string item value. */
+const SHARED_SESSION_OPTION = "__shared__";
+
 export function SnowballSeedScoutFields({
   value,
   onChange,
@@ -62,9 +65,14 @@ export function SnowballSeedScoutFields({
       <div className="space-y-2">
         <Label htmlFor="scout-target">Acting profile</Label>
         <Select
-          value={value.targetId ?? ""}
-          onValueChange={(next) => onChange({ ...value, targetId: next })}
-          disabled={disabled || !targets?.length}
+          value={value.targetId ?? SHARED_SESSION_OPTION}
+          onValueChange={(next) =>
+            onChange({
+              ...value,
+              targetId: next === SHARED_SESSION_OPTION ? null : next,
+            })
+          }
+          disabled={disabled || targets === null}
         >
           <SelectTrigger id="scout-target">
             <SelectValue
@@ -72,6 +80,11 @@ export function SnowballSeedScoutFields({
             />
           </SelectTrigger>
           <SelectContent>
+            {/* Without an explicit entry the advertised default is unreachable
+                once a profile has been picked. */}
+            <SelectItem value={SHARED_SESSION_OPTION}>
+              Use shared signals-publish session
+            </SelectItem>
             {(targets ?? []).map((target) => (
               <SelectItem key={target.id} value={target.id}>
                 {actingTargetLabel(target)}

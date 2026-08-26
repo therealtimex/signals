@@ -59,4 +59,20 @@ if ! RESULT="$(scout_enqueue_urls "${CONFIG_JSON}" "${URLS}" "${PLATFORM}" "${PR
   exit 1
 fi
 
+# Partial failures are reported, not retried. Signals posts to /api/calendar-events,
+# which does NOT apply the queueMeta.dedupeKey check, so exiting nonzero here would
+# have the heartbeat re-run the whole batch and duplicate the seeds that succeeded.
+# Surface the detail on stderr instead; a total failure already exits 1 above.
+FAILED_COUNT="$(printf '%s' "${RESULT}" | python3 -c '
+import json, sys
+try:
+    print(int(json.load(sys.stdin).get("failed") or 0))
+except Exception:
+    print(0)
+' 2>/dev/null || echo 0)"
+
+if [[ "${FAILED_COUNT}" != "0" ]]; then
+  echo "snowball-seed-scout: ${FAILED_COUNT} seed(s) failed to enqueue: ${RESULT}" >&2
+fi
+
 echo "${RESULT}"

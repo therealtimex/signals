@@ -153,10 +153,23 @@ function splitHeartbeatContent(content: string): {
     if (blockStart >= lines.length || !lines[blockStart].startsWith("- name:")) {
       break;
     }
-    afterIndex = blockStart;
-    while (afterIndex < lines.length && lines[afterIndex].trim() !== "") {
-      afterIndex += 1;
+
+    let blockEnd = blockStart;
+    while (blockEnd < lines.length && lines[blockEnd].trim() !== "") {
+      blockEnd += 1;
     }
+
+    // Trailing prose can legitimately start with a `- name:` bullet. Only treat
+    // the block as a task if it carries task fields, so documentation after the
+    // tasks section is preserved rather than swallowed.
+    const isTaskBlock = lines
+      .slice(blockStart + 1, blockEnd)
+      .some((line) => /^\s+(executor|command|interval|cron):/.test(line));
+    if (!isTaskBlock) {
+      break;
+    }
+
+    afterIndex = blockEnd;
   }
 
   return {

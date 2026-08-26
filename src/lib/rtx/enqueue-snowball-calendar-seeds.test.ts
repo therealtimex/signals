@@ -108,7 +108,7 @@ describe("enqueueSnowballCalendarSeeds", () => {
     ]);
   });
 
-  it("does not truncate long facebook pfbid urls in metadata or prompt", () => {
+  it("does not truncate long facebook pfbid urls in the calendar title", () => {
     const longUrl =
       "https://www.facebook.com/saritasym/posts/pfbid0AVUoH55Pnb4cxmX8Gt5yjEYJmuy8cS3cvm8iWRUyLyyuxg5MzDSt5NwNpLY6xpvrl";
     expect(formatSnowballCalendarTitle(longUrl)).toBe(

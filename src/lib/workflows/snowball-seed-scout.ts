@@ -51,10 +51,6 @@ export const SNOWBALL_SEED_SCOUT_SLIDERS: Record<
   heartbeatIntervalHours: { min: 1, max: 168, step: 1, fallback: 4 },
 };
 
-export const SNOWBALL_SEED_SCOUT_SHARED_BROWSER_SESSIONS = [
-  RTX_PUBLISH_SESSION_NAME,
-] as const;
-
 export interface SnowballSeedScoutConfig {
   /** Acting profile from Platform Connections; resolves the inherited browser session at runtime. */
   targetId: string | null;
@@ -215,13 +211,6 @@ export function toDeploymentState(
     heartbeatTaskName: SNOWBALL_SEED_SCOUT_HEARTBEAT_TASK_NAME,
     ...config,
   };
-}
-
-export function isSharedScoutBrowserSession(sessionName: string): boolean {
-  const normalized = sessionName.trim();
-  return SNOWBALL_SEED_SCOUT_SHARED_BROWSER_SESSIONS.some(
-    (shared) => shared === normalized,
-  );
 }
 
 export function scoutConfigRelativePath(): string {

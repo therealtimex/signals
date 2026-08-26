@@ -51,9 +51,11 @@ scout_harvest_page_posts() {
 
   if [[ "${platform}" == "facebook" ]]; then
     local harvested=""
-    harvested="$(scout_harvest_copy_links "facebook" "${config_json}" "${max_links}" "${session_name}" "${lib_dir}" "${relaxed_config}")"
+    # Honor configured intentKeywords first; only widen to the relaxed config
+    # when the keyword-filtered pass finds nothing.
+    harvested="$(scout_harvest_copy_links "facebook" "${config_json}" "${max_links}" "${session_name}" "${lib_dir}")"
     if [[ -z "${harvested}" ]]; then
-      harvested="$(scout_harvest_copy_links "facebook" "${config_json}" "${max_links}" "${session_name}" "${lib_dir}")"
+      harvested="$(scout_harvest_copy_links "facebook" "${config_json}" "${max_links}" "${session_name}" "${lib_dir}" "${relaxed_config}")"
     fi
     if [[ -n "${harvested}" ]]; then
       printf '%s\n' "${harvested}"
@@ -63,9 +65,9 @@ scout_harvest_page_posts() {
 
   if [[ "${platform}" == "linkedin" ]]; then
     local harvested=""
-    harvested="$(scout_harvest_copy_links "linkedin" "${config_json}" "${max_links}" "${session_name}" "${lib_dir}" "${relaxed_config}")"
+    harvested="$(scout_harvest_copy_links "linkedin" "${config_json}" "${max_links}" "${session_name}" "${lib_dir}")"
     if [[ -z "${harvested}" ]]; then
-      harvested="$(scout_harvest_copy_links "linkedin" "${config_json}" "${max_links}" "${session_name}" "${lib_dir}")"
+      harvested="$(scout_harvest_copy_links "linkedin" "${config_json}" "${max_links}" "${session_name}" "${lib_dir}" "${relaxed_config}")"
     fi
     if [[ -n "${harvested}" ]]; then
       printf '%s\n' "${harvested}"
@@ -91,9 +93,9 @@ scout_harvest_page_posts() {
       printf '%s\n' "${harvested}"
       return 0
     fi
-    harvested="$(scout_harvest_copy_links "x" "${config_json}" "${max_links}" "${session_name}" "${lib_dir}" "${relaxed_config}")"
+    harvested="$(scout_harvest_copy_links "x" "${config_json}" "${max_links}" "${session_name}" "${lib_dir}")"
     if [[ -z "${harvested}" ]]; then
-      harvested="$(scout_harvest_copy_links "x" "${config_json}" "${max_links}" "${session_name}" "${lib_dir}")"
+      harvested="$(scout_harvest_copy_links "x" "${config_json}" "${max_links}" "${session_name}" "${lib_dir}" "${relaxed_config}")"
     fi
     if [[ -n "${harvested}" ]]; then
       printf '%s\n' "${harvested}"

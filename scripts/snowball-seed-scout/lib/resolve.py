@@ -58,6 +58,23 @@ def authenticated_feed_url(platform: str) -> str:
     return AUTHENTICATED_FEED_URLS.get(platform, "")
 
 
+def session_name_from_invoke_body(body: dict) -> str:
+    """Read connection.sessionName out of an /api/agent-tools/invoke response.
+
+    The endpoint wraps handler output as {success, tool, result}, so the
+    connection lives under `result`, not at the top level.
+    """
+    if not isinstance(body, dict):
+        return ""
+    result = body.get("result")
+    if not isinstance(result, dict):
+        result = body
+    connection = result.get("connection")
+    if not isinstance(connection, dict):
+        return ""
+    return str(connection.get("sessionName") or "").strip()
+
+
 def fetch_target_session_name(signals_base: str, target_id: str) -> str:
     if not signals_base or not target_id:
         return ""
@@ -76,13 +93,15 @@ def fetch_target_session_name(signals_base: str, target_id: str) -> str:
     except (urllib.error.URLError, json.JSONDecodeError, TimeoutError):
         return ""
 
-    connection = body.get("connection") or {}
-    return str(connection.get("sessionName") or "").strip()
+    return session_name_from_invoke_body(body)
 
 
 def resolve_browser_session_name(config: dict, signals_base: str) -> str:
+    # `browserSessionName` is always populated (it defaults to the shared publish
+    # session), so treating any value as an override would make the acting-profile
+    # selection dead. Only a genuinely custom name outranks `targetId`.
     explicit = str(config.get("browserSessionName") or "").strip()
-    if explicit:
+    if explicit and explicit != DEFAULT_BROWSER_SESSION:
         return explicit
 
     target_id = str(config.get("targetId") or "").strip()
@@ -91,7 +110,7 @@ def resolve_browser_session_name(config: dict, signals_base: str) -> str:
         if resolved:
             return resolved
 
-    return DEFAULT_BROWSER_SESSION
+    return explicit or DEFAULT_BROWSER_SESSION
 
 
 def should_stop_browser_session(session_name: str) -> bool:
@@ -253,8 +272,16 @@ def extract_post_url_from_share_href(href: str) -> str | None:
             text = (parse_qs(parsed.query).get("text") or [None])[0]
             if text:
                 return extract_post_url_from_share_href(text)
-        if "facebook.com" in parsed.netloc and "/posts/pfbid" in parsed.path:
-            return f"{parsed.scheme}://{parsed.netloc}{parsed.path.rstrip('/')}"
+        if "facebook.com" in parsed.netloc:
+            # Accept the same post forms POST_PATTERNS does, not just pfbid.
+            rebuilt = f"{parsed.scheme}://{parsed.netloc}{parsed.path.rstrip('/')}"
+            if parsed.query and "fbid=" in parsed.query:
+                rebuilt = f"{rebuilt}?{parsed.query}"
+            # Match POST_PATTERNS here (the share dialog yields canonical URLs);
+            # the pfbid truncation guard is enforced downstream in filter_post_urls.
+            pattern = POST_PATTERNS.get("facebook")
+            if pattern and pattern.search(rebuilt):
+                return rebuilt
     except (ValueError, TypeError):
         return None
     return None
@@ -535,7 +562,9 @@ def filter_post_urls(
 
     for raw in urls:
         cleaned = normalize_post_url(str(raw).strip(), platform)
-        if not pattern.search(cleaned) or cleaned in seen:
+        # looks_like_post_url, not the bare pattern: a truncated facebook pfbid
+        # token still matches the regex but is a dead link once dispatched.
+        if not looks_like_post_url(cleaned, platform) or cleaned in seen:
             continue
         if require_keywords and lowered_keywords:
             haystack = cleaned.lower()
@@ -701,8 +730,8 @@ def extract_posts_from_snapshot(
             continue
 
         for token in re.findall(r"https?://\S+", text):
-            cleaned = token.rstrip(".,)\"'")
-            if pattern.search(cleaned) and cleaned not in seen:
+            cleaned = normalize_post_url(token.rstrip(".,)\"'"), platform)
+            if looks_like_post_url(cleaned, platform) and cleaned not in seen:
                 seen.add(cleaned)
                 urls.append(cleaned)
                 if len(urls) >= max_links:
@@ -965,6 +994,75 @@ class ResolveTests(unittest.TestCase):
         )
         self.assertFalse(looks_like_post_url(truncated, "facebook"))
         self.assertTrue(looks_like_post_url(full, "facebook"))
+
+    def test_filter_post_urls_rejects_truncated_pfbid(self) -> None:
+        truncated = "https://www.facebook.com/saritasym/posts/pfbid0AVUoH55Pnb4cxmX8Gt5yjEYJm"
+        full = (
+            "https://www.facebook.com/saritasym/posts/"
+            "pfbid0AVUoH55Pnb4cxmX8Gt5yjEYJmuy8cS3cvm8iWRUyLyyuxg5MzDSt5NwNpLY6xpvrl"
+        )
+        # The harvest path, not just the standalone predicate, must drop it.
+        self.assertEqual(
+            filter_post_urls([truncated, full], "facebook", [], 5),
+            [full],
+        )
+
+    def test_snapshot_extractor_rejects_truncated_pfbid(self) -> None:
+        truncated = "https://www.facebook.com/saritasym/posts/pfbid0AVUoH55Pnb4cxmX8Gt5yjEYJm"
+        snapshot = {"refs": [{"href": truncated}]}
+        self.assertEqual(
+            extract_posts_from_snapshot({}, "facebook", 5, snapshot),
+            [],
+        )
+
+    def test_target_id_resolves_over_defaulted_session_name(self) -> None:
+        calls: list[tuple[str, str]] = []
+
+        def fake_fetch(base: str, target_id: str) -> str:
+            calls.append((base, target_id))
+            return "signals-acme"
+
+        original = globals()["fetch_target_session_name"]
+        globals()["fetch_target_session_name"] = fake_fetch
+        try:
+            # browserSessionName is always populated with the default, so the
+            # selected acting profile must still win.
+            name = resolve_browser_session_name(
+                {"browserSessionName": DEFAULT_BROWSER_SESSION, "targetId": "tgt-1"},
+                "http://127.0.0.1:3010",
+            )
+        finally:
+            globals()["fetch_target_session_name"] = original
+
+        self.assertEqual(name, "signals-acme")
+        self.assertEqual(calls, [("http://127.0.0.1:3010", "tgt-1")])
+
+    def test_custom_session_name_still_overrides_target_id(self) -> None:
+        name = resolve_browser_session_name(
+            {"browserSessionName": "my-own-session", "targetId": "tgt-1"},
+            "http://127.0.0.1:3010",
+        )
+        self.assertEqual(name, "my-own-session")
+
+    def test_session_name_read_from_invoke_result_envelope(self) -> None:
+        body = {
+            "success": True,
+            "tool": "get_platform_target",
+            "result": {"connection": {"sessionName": "signals-acme"}},
+        }
+        self.assertEqual(session_name_from_invoke_body(body), "signals-acme")
+        # A bare top-level connection (older shape) still works.
+        self.assertEqual(
+            session_name_from_invoke_body({"connection": {"sessionName": "legacy"}}),
+            "legacy",
+        )
+        self.assertEqual(session_name_from_invoke_body({"result": {}}), "")
+
+    def test_facebook_share_href_accepts_numeric_post_ids(self) -> None:
+        url = extract_post_url_from_share_href(
+            "https://www.facebook.com/acme/posts/1234567890"
+        )
+        self.assertEqual(url, "https://www.facebook.com/acme/posts/1234567890")
 
     def test_linkedin_short_urls_are_enqueueable(self) -> None:
         url = "https://lnkd.in/p/g8t6zZDV"

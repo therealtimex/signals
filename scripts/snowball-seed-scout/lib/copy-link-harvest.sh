@@ -42,7 +42,17 @@ scout_harvest_copy_links() {
     consecutive_none=0
 
     sleep 1
-    agent-browser --session "${session_name}" eval "$(python3 "${lib_dir}/resolve.py" "${platform}-click-copy-link")" >/dev/null 2>&1 || true
+    # The extractors read the most recently captured clipboard link. If the copy
+    # click silently fails, that value still belongs to the previous post, so a
+    # stale URL would be attributed to this one. Only extract on a real click.
+    local clicked=""
+    clicked="$(agent-browser --session "${session_name}" eval "$(python3 "${lib_dir}/resolve.py" "${platform}-click-copy-link")" 2>/dev/null || true)"
+    if [[ "${clicked}" != *"copy-clicked"* ]]; then
+      agent-browser --session "${session_name}" eval "$(python3 "${lib_dir}/resolve.py" "${platform}-close-menu")" >/dev/null 2>&1 || true
+      agent-browser --session "${session_name}" eval "window.scrollBy(0, 700)" >/dev/null 2>&1 || true
+      sleep 1
+      continue
+    fi
     sleep 1
 
     local raw_urls=""

@@ -40,7 +40,13 @@ results = data.get("results") or data
 def port_from_session(session):
     if not isinstance(session, dict):
         return ""
-    return str(session.get("remoteDebugPort") or session.get("port") or "")
+    port = session.get("remoteDebugPort") or session.get("port")
+    if not port:
+        # Some RTX responses nest the live port under the session runtime.
+        runtime = session.get("runtime")
+        if isinstance(runtime, dict):
+            port = runtime.get("remoteDebugPort") or runtime.get("port")
+    return str(port or "")
 
 for key in ("runtime", "session"):
     port = port_from_session(results.get(key))
