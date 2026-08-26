@@ -330,6 +330,76 @@ describe("enqueueSnowballCalendarSeeds", () => {
     expect(second.queued).toHaveLength(1);
   });
 
+  it("posts concurrently but never exceeds the concurrency bound", async () => {
+    let inFlight = 0;
+    let peakInFlight = 0;
+    const fetchImpl = vi.fn(async () => {
+      inFlight += 1;
+      peakInFlight = Math.max(peakInFlight, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      inFlight -= 1;
+      return {
+        ok: true,
+        json: async () => ({ event: { uuid: "evt" } }),
+      };
+    });
+
+    const scoutConfig = readSnowballSeedScoutConfig(buildSnowballSeedScoutTemplateConfig());
+    const seeds = Array.from({ length: 12 }, (_, index) => ({
+      url: `https://x.com/acme/status/${index}`,
+      platform: "x",
+    }));
+
+    const result = await enqueueSnowballCalendarSeeds(
+      seeds,
+      scoutConfig,
+      {
+        RTX_API_BASE_URL: "http://127.0.0.1:3101",
+        SIGNALS_RTX_WORKSPACE_SLUG: "signals",
+      },
+      fetchImpl as unknown as typeof fetch,
+    );
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.queued).toHaveLength(12);
+    // More than one at a time, so a slow calendar cannot serialize the batch past
+    // the caller's deadline...
+    expect(peakInFlight).toBeGreaterThan(1);
+    // ...but the burst stays bounded regardless of how many seeds arrive.
+    expect(peakInFlight).toBeLessThanOrEqual(4);
+  });
+
+  it("still collapses duplicates when they run concurrently", async () => {
+    const fetchImpl = vi.fn(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return { ok: true, json: async () => ({ event: { uuid: "evt" } }) };
+    });
+
+    const scoutConfig = readSnowballSeedScoutConfig(buildSnowballSeedScoutTemplateConfig());
+    const seeds = Array.from({ length: 4 }, () => ({
+      url: "https://x.com/acme/status/same",
+      platform: "x",
+    }));
+
+    const result = await enqueueSnowballCalendarSeeds(
+      seeds,
+      scoutConfig,
+      {
+        RTX_API_BASE_URL: "http://127.0.0.1:3101",
+        SIGNALS_RTX_WORKSPACE_SLUG: "signals",
+      },
+      fetchImpl as unknown as typeof fetch,
+    );
+
+    // The claim is synchronous, so overlapping workers cannot both win it.
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.queued).toHaveLength(1);
+    expect(result.deduped).toHaveLength(3);
+  });
+
   it("does not truncate long facebook pfbid urls in the calendar title", () => {
     const longUrl =
       "https://www.facebook.com/saritasym/posts/pfbid0AVUoH55Pnb4cxmX8Gt5yjEYJmuy8cS3cvm8iWRUyLyyuxg5MzDSt5NwNpLY6xpvrl";

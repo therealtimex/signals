@@ -49,6 +49,16 @@ const ENQUEUE_BATCH_BUDGET_MS = 90_000;
 /** Below this there is not enough budget left to be worth starting a POST. */
 const MIN_POST_BUDGET_MS = 5_000;
 
+/**
+ * How many calendar POSTs may be in flight at once.
+ *
+ * Sequential posting made a slow calendar defer most of the batch: 20 seeds at a
+ * 60s ceiling cannot fit the caller's 120s deadline. Running a few concurrently
+ * keeps wall time near a single request while still bounding the burst — the
+ * route accepts a caller-supplied list, so this must not scale with input size.
+ */
+const CALENDAR_POST_CONCURRENCY = 4;
+
 function hashUrl(url: string): string {
   return createHash("sha256").update(url.trim()).digest("hex");
 }
@@ -129,11 +139,11 @@ export async function enqueueSnowballCalendarSeeds(
   // the ledger bounded without needing a separate sweeper.
   pruneSnowballSeedLedger();
 
-  for (const seed of seeds) {
+  const processSeed = async (seed: EnqueueSnowballSeedInput): Promise<void> => {
     const url = String(seed.url || "").trim();
     if (!url) {
       skipped.push(url);
-      continue;
+      return;
     }
 
     const remainingBudget = batchDeadline - Date.now();
@@ -141,7 +151,7 @@ export async function enqueueSnowballCalendarSeeds(
       // Stop cleanly rather than overrunning the caller's deadline. Nothing has
       // been claimed for this seed yet, so the next tick picks it up untouched.
       deferred.push(url);
-      continue;
+      return;
     }
 
     // Signals owns "which seeds exist", so a post already queued must not be sent
@@ -157,7 +167,7 @@ export async function enqueueSnowballCalendarSeeds(
     });
     if (!claimToken) {
       deduped.push(url);
-      continue;
+      return;
     }
 
     const scheduledAt = scheduledStartIso(
@@ -227,7 +237,7 @@ export async function enqueueSnowballCalendarSeeds(
           url,
           reason: payload.error || `calendar API responded ${response.status}`,
         });
-        continue;
+        return;
       }
 
       const calendarEventUuid = payload.event?.uuid ?? null;
@@ -248,7 +258,24 @@ export async function enqueueSnowballCalendarSeeds(
         )}m claim expiry`,
       });
     }
-  }
+  };
+
+  // Drain a shared queue from a fixed number of workers. Recursive rather than a
+  // `while` loop so each worker awaits one request at a time without serializing
+  // the whole batch behind a single chain.
+  const pending = [...seeds];
+  const drain = async (): Promise<void> => {
+    const seed = pending.shift();
+    if (!seed) return;
+    await processSeed(seed);
+    return drain();
+  };
+
+  await Promise.all(
+    Array.from({ length: Math.min(CALENDAR_POST_CONCURRENCY, pending.length) }, () =>
+      drain(),
+    ),
+  );
 
   return { success: true, queued, skipped, deduped, failed, deferred };
 }

@@ -3,8 +3,14 @@ import { z } from "zod";
 import { readSnowballSeedScoutDeployment } from "@/lib/rtx/deploy-snowball-seed-scout";
 import { enqueueSnowballCalendarSeeds } from "@/lib/rtx/enqueue-snowball-calendar-seeds";
 
+/** Generous headroom over the scout's own 20-link ceiling. */
+const MAX_ENQUEUE_URLS = 50;
+
 const enqueueSchema = z.object({
-  urls: z.array(z.string().min(1)).min(1),
+  // The scout is slider-capped at 20 links per run. This route is
+  // unauthenticated, so bound the list rather than letting a caller size the
+  // batch — and the work it fans out into.
+  urls: z.array(z.string().min(1)).min(1).max(MAX_ENQUEUE_URLS),
   platform: z.string().optional(),
   producerRunId: z.string().optional(),
 });
