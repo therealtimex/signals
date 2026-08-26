@@ -4,6 +4,7 @@ import type { EnvLike } from "@/lib/rtx/env";
 import { ensureRtxWorkspace, getSignalsRtxWorkspaceSlug, resolveSignalsRtxWorkspaceSlug } from "@/lib/rtx/cli-provisioning";
 import {
   defaultHeartbeatSkeleton,
+  findUnsupportedTasksRepresentation,
   HEARTBEAT_FILENAME,
   upsertHeartbeatShellTask,
   type HeartbeatShellTask,
@@ -38,7 +39,11 @@ export type DeploySnowballSeedScoutResult =
       scoutConfigPath: string;
       deployment: ReturnType<typeof toDeploymentState>;
     }
-  | { success: false; error: string; errorCode?: "not_deployed" };
+  | {
+      success: false;
+      error: string;
+      errorCode?: "not_deployed" | "unsupported_heartbeat";
+    };
 
 async function readWorkspaceFile(
   workspaceDir: string,
@@ -139,6 +144,22 @@ export async function deploySnowballSeedScout(
     };
   }
 
+  // Read and validate the heartbeat before writing anything. A representation we
+  // cannot edit must abort the whole deploy, not surface after the scripts and
+  // scout.json have already landed and left a half-provisioned workspace.
+  const existingHeartbeat =
+    (await readWorkspaceFile(workspaceDir, HEARTBEAT_FILENAME)) ??
+    defaultHeartbeatSkeleton();
+  const unsupportedHeartbeat =
+    findUnsupportedTasksRepresentation(existingHeartbeat);
+  if (unsupportedHeartbeat) {
+    return {
+      success: false,
+      error: unsupportedHeartbeat,
+      errorCode: "unsupported_heartbeat",
+    };
+  }
+
   const scriptCopy = await copyBundledScoutScripts(workspaceSlug, env);
   if (!scriptCopy.success) {
     return scriptCopy;
@@ -161,9 +182,6 @@ export async function deploySnowballSeedScout(
     return { success: false, error: scoutConfigWrite.error };
   }
 
-  const existingHeartbeat =
-    (await readWorkspaceFile(workspaceDir, HEARTBEAT_FILENAME)) ??
-    defaultHeartbeatSkeleton();
   const nextHeartbeat = upsertHeartbeatShellTask(
     existingHeartbeat,
     buildHeartbeatTask(scoutConfig),

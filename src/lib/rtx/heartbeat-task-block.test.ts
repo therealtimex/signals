@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   defaultHeartbeatSkeleton,
+  findUnsupportedTasksRepresentation,
   parseHeartbeatShellTasks,
   upsertHeartbeatShellTask,
 } from "@/lib/rtx/heartbeat-task-block";
@@ -139,6 +140,66 @@ Trailing prose.
 
     expect(twice).toBe(once);
     expect(tasksVisibleToRealtimeX(twice)).toEqual(["snowball-seed-scout"]);
+  });
+
+  it("refuses a populated inline task array rather than appending a second key", () => {
+    // Loose markdown: appending a bare `tasks:` would win the locator and drop
+    // the user's existing task entirely.
+    const initial = `# Heartbeat
+
+tasks: [{ name: morning-brief, agent: claude, prompt: keep-me, interval: 24h }]
+
+## Check for
+`;
+
+    expect(findUnsupportedTasksRepresentation(initial)).toContain("inline list");
+    expect(() =>
+      upsertHeartbeatShellTask(initial, {
+        name: "snowball-seed-scout",
+        executor: "shell",
+        command: "bash ./scripts/snowball-seed-scout/scout.sh",
+        interval: "4h",
+        timeout: 900,
+      }),
+    ).toThrow(/inline list/);
+  });
+
+  it("refuses a populated inline array inside YAML front matter", () => {
+    // Front matter wins over the markdown body, so an appended key would leave
+    // the scout silently unscheduled while deploy reported success.
+    const initial = `---
+tasks: [{ name: morning-brief, agent: claude, prompt: keep-me, interval: 24h }]
+---
+
+# Heartbeat
+`;
+
+    expect(findUnsupportedTasksRepresentation(initial)).toContain("inline list");
+    expect(() =>
+      upsertHeartbeatShellTask(initial, {
+        name: "snowball-seed-scout",
+        executor: "shell",
+        command: "bash ./scripts/snowball-seed-scout/scout.sh",
+        interval: "4h",
+        timeout: 900,
+      }),
+    ).toThrow(/inline list/);
+  });
+
+  it("accepts every representation it can round-trip", () => {
+    // Guard against the refusal over-reaching: these must stay deployable.
+    const supported = [
+      "tasks:\n\n- name: a\n  executor: shell\n  command: echo a\n",
+      "tasks: []\n",
+      "---\ntasks:\n  - name: a\n    agent: claude\n    prompt: p\n---\n",
+      "# Heartbeat\n\nNothing scheduled.\n",
+      "heartbeat:\n  enabled: true\ntasks:\n  - name: a\n    agent: claude\n    prompt: p\n",
+      // A `tasks:` mention inside an indented block scalar is not a key.
+      "tasks:\n\n- name: a\n  agent: claude\n  prompt: |\n    tasks: [not, a, key]\n",
+    ];
+    for (const content of supported) {
+      expect(findUnsupportedTasksRepresentation(content)).toBeNull();
+    }
   });
 
   it("inserts tasks section when missing", () => {

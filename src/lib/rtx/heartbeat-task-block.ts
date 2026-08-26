@@ -27,6 +27,32 @@ function isExpandableTasksValue(value: string): boolean {
   return trimmed === "" || trimmed === "[]";
 }
 
+/**
+ * Describe a `tasks:` representation this module must not edit, or null when the
+ * file is safe to write.
+ *
+ * A populated inline flow sequence (`tasks: [{ name: ... }]`) cannot be merged
+ * into without a YAML round-trip. Treating it as "no key present" is not a safe
+ * fallback: appending a second `tasks:` key makes RealTimeX resolve only one of
+ * them, which either drops the user's existing task (loose markdown, where the
+ * appended key wins) or silently fails to schedule the scout (front matter,
+ * where the original wins). Refusing to write is the only outcome that loses
+ * nothing.
+ *
+ * Matching is anchored to column 0, mirroring RealTimeX's own locator, so a
+ * `tasks:` line inside an indented prompt block scalar is not mistaken for a key.
+ */
+export function findUnsupportedTasksRepresentation(
+  content: string,
+): string | null {
+  for (const line of content.split("\n")) {
+    const match = line.match(TASKS_KEY_PATTERN);
+    if (!match || isExpandableTasksValue(match[1])) continue;
+    return `HEARTBEAT.md declares tasks as an inline list (\`tasks: ${match[1].trim()}\`), which cannot be edited safely. Rewrite it as an indented block list (\`tasks:\` on its own line, one \`- name:\` item per task) and deploy again.`;
+  }
+  return null;
+}
+
 function unquoteScalar(value: string): string {
   const trimmed = value.trim();
   if (
@@ -258,6 +284,13 @@ export function upsertHeartbeatShellTask(
   content: string,
   task: HeartbeatShellTask,
 ): string {
+  // Guard here as well as at the caller: silently appending a second `tasks:`
+  // key is worse than refusing, so no caller may reach that path by accident.
+  const unsupported = findUnsupportedTasksRepresentation(content);
+  if (unsupported) {
+    throw new Error(unsupported);
+  }
+
   const section = splitHeartbeatTaskSection(content);
   const serialized = serializeTask(task, section.indent);
 
