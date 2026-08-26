@@ -378,10 +378,12 @@ export async function resolveNetworkSnowballDispatchThread(
 
   // Pick deterministically when several exist, so concurrent resolvers that each
   // created one still converge on the same target rather than splitting history.
-  const pickStable = (matches: Array<{ slug: string; name: string }>) =>
-    matches.length === 0
+  const pickStable = (matches: Array<{ slug: string; name: string }>) => {
+    const usable = matches.filter((thread) => thread.slug.trim());
+    return usable.length === 0
       ? null
-      : [...matches].sort((a, b) => a.slug.localeCompare(b.slug))[0].slug;
+      : [...usable].sort((a, b) => a.slug.localeCompare(b.slug))[0].slug;
+  };
 
   if (threads !== null) {
     const exact = pickStable(
@@ -414,7 +416,7 @@ export async function resolveNetworkSnowballDispatchThread(
             thread.name.toLowerCase().includes("network snowball"),
           ),
         );
-  if (fallback) return fallback;
+  if (fallback !== null) return fallback;
 
   return NETWORK_SNOWBALL_DISPATCH_THREAD_SLUG;
 }

@@ -68,13 +68,26 @@ export function findUnsupportedTasksRepresentation(
   // scalar open a phantom fence that swallows the real key below it, and
   // toggling on the other delimiter would do the same — both fall through to the
   // duplicate-key append this guard exists to prevent.
-  let fence: "`" | "~" | null = null;
+  let fence: { delimiter: string; length: number } | null = null;
   for (const line of toLf(content).split("\n")) {
-    const marker = line.match(/^(`{3,}|~{3,})/);
+    const marker = line.match(/^(`{3,}|~{3,})(.*)$/);
     if (marker) {
-      const delimiter = marker[1][0] === "`" ? "`" : "~";
-      if (fence === null) fence = delimiter;
-      else if (fence === delimiter) fence = null;
+      const delimiter = marker[1][0];
+      const length = marker[1].length;
+      const info = marker[2].trim();
+      if (fence === null) {
+        fence = { delimiter, length };
+      } else if (
+        // CommonMark: a fence closes only on its own delimiter, a run at least
+        // as long as the opening one, and no info string. Closing on a shorter
+        // run would end a ```` block at a nested ```, dropping back out of the
+        // fence and skipping a real key below it.
+        delimiter === fence.delimiter &&
+        length >= fence.length &&
+        info === ""
+      ) {
+        fence = null;
+      }
       continue;
     }
     // A fenced example is documentation, not a key. RealTimeX's own locator only

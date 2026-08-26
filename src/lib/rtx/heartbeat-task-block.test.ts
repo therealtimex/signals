@@ -251,6 +251,28 @@ tasks: [{ name: morning-brief, agent: claude }]
     expect(findUnsupportedTasksRepresentation(tildes)).toContain("inline list");
   });
 
+  it("does not close a longer fence on a shorter nested one", () => {
+    // CommonMark: ```` is not closed by ```. Closing early would drop out of the
+    // fence and skip the real key below, falling through to the append.
+    const content =
+      "# h\n\n````markdown\n```yaml\ntasks: [{ name: ex }]\n```\n````\n\ntasks: [{ name: real }]\n";
+    expect(findUnsupportedTasksRepresentation(content)).toContain("inline list");
+  });
+
+  it("does not treat an info-string line as a closing fence", () => {
+    // A closing fence carries no info string, so ```yaml cannot close ```.
+    const content =
+      "# h\n\n```\n```yaml\ntasks: [{ name: ex }]\n```\n\ntasks: [{ name: real }]\n";
+    expect(findUnsupportedTasksRepresentation(content)).toContain("inline list");
+  });
+
+  it("closes a fence on an equal or longer run of the same delimiter", () => {
+    // The nested example is documentation and must not block the deploy.
+    const content =
+      "# h\n\n````markdown\n```yaml\ntasks: [{ name: ex }]\n```\n````\n\ntasks:\n\n- name: b\n  agent: c\n  prompt: p\n";
+    expect(findUnsupportedTasksRepresentation(content)).toBeNull();
+  });
+
   it("still ignores a genuine top-level fenced example", () => {
     const content = "# h\n\n```yaml\ntasks: [{ name: ex }]\n```\n\ntasks:\n\n- name: b\n  agent: c\n  prompt: p\n";
     expect(findUnsupportedTasksRepresentation(content)).toBeNull();
