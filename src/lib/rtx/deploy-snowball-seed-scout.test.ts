@@ -1,8 +1,9 @@
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  deploySnowballSeedScout,
   readSnowballSeedScoutDeployment,
   saveSnowballSeedScoutSettings,
 } from "@/lib/rtx/deploy-snowball-seed-scout";
@@ -77,6 +78,38 @@ describe("readSnowballSeedScoutDeployment", () => {
     if (!result.success) return;
     expect(result.deployment?.deployedAt).toBeNull();
     expect(result.deployment?.platforms).toEqual(["x", "linkedin"]);
+  });
+});
+
+describe("deploySnowballSeedScout heartbeat guard", () => {
+  it("writes nothing when HEARTBEAT.md uses a populated inline task array", async () => {
+    const storageDir = await mkdtemp(join(tmpdir(), "signals-scout-guard-"));
+    const workspaceDir = join(storageDir, "working-data", "signals");
+    await mkdir(workspaceDir, { recursive: true });
+
+    const heartbeat = `# Heartbeat
+
+tasks: [{ name: morning-brief, agent: claude, prompt: keep-me, interval: 24h }]
+`;
+    await writeFile(join(workspaceDir, "HEARTBEAT.md"), heartbeat, "utf8");
+
+    const scoutConfig = readSnowballSeedScoutConfig(
+      buildSnowballSeedScoutTemplateConfig(),
+    );
+    const result = await deploySnowballSeedScout(
+      { templateId: "tpl-1", config: buildSnowballSeedScoutDeployConfig(scoutConfig) },
+      { STORAGE_DIR: storageDir, SIGNALS_RTX_WORKSPACE_SLUG: "signals" },
+    );
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.errorCode).toBe("unsupported_heartbeat");
+    expect(result.error).toContain("inline list");
+
+    // The rejection must precede every write: no scripts, no scout.json, and the
+    // user's heartbeat byte-for-byte untouched.
+    expect(await readFile(join(workspaceDir, "HEARTBEAT.md"), "utf8")).toBe(heartbeat);
+    expect(await readdir(workspaceDir)).toEqual(["HEARTBEAT.md"]);
   });
 });
 

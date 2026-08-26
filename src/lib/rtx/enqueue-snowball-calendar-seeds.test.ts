@@ -8,7 +8,11 @@ import { readSnowballSeedScoutConfig } from "@/lib/workflows/snowball-seed-scout
 import { buildSnowballSeedScoutTemplateConfig } from "@/lib/workflows/snowball-seed-scout";
 
 vi.mock("@/lib/rtx/cli-provisioning", () => ({
+  NETWORK_SNOWBALL_DISPATCH_THREAD_SLUG: "network-snowball",
   resolveSignalsRtxWorkspaceSlug: vi.fn(async () => "f3a8c2e1-4d5b-4a7c-8e9f-0a1b2c3d4e5f"),
+  resolveNetworkSnowballDispatchThread: vi.fn(
+    async () => "f0238db7-6620-4452-9a91-bcdb9dd23fdd",
+  ),
 }));
 
 describe("enqueueSnowballCalendarSeeds", () => {
@@ -48,6 +52,9 @@ describe("enqueueSnowballCalendarSeeds", () => {
     expect(body.description).toContain("https://x.com/acme/status/1");
     expect(body.metadata.agentHandlers[0].workspace).toBe(
       "f3a8c2e1-4d5b-4a7c-8e9f-0a1b2c3d4e5f",
+    );
+    expect(body.metadata.agentHandlers[0].thread).toBe(
+      "f0238db7-6620-4452-9a91-bcdb9dd23fdd",
     );
     expect(body.metadata.agentHandlers[0].prompt).toContain("https://x.com/acme/status/1");
   });

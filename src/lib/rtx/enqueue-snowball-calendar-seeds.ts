@@ -1,5 +1,9 @@
 import { createHash } from "node:crypto";
-import { resolveSignalsRtxWorkspaceSlug } from "@/lib/rtx/cli-provisioning";
+import {
+  NETWORK_SNOWBALL_DISPATCH_THREAD_SLUG,
+  resolveNetworkSnowballDispatchThread,
+  resolveSignalsRtxWorkspaceSlug,
+} from "@/lib/rtx/cli-provisioning";
 import {
   SNOWBALL_SEED_CLAIM_TTL_MS,
   claimSeed,
@@ -135,6 +139,27 @@ export async function enqueueSnowballCalendarSeeds(
     // Fall back to configured slug when RTX CLI resolution is unavailable.
   }
 
+  // Resolve the handoff target before any seed is claimed. A thread we cannot
+  // resolve must abort the batch: queueing against a known-bad thread would claim
+  // and confirm the seeds, deduping them permanently against a dispatch that can
+  // never succeed. Failing here leaves every seed retryable on the next tick.
+  let dispatchThreadSlug: string;
+  try {
+    dispatchThreadSlug = await resolveNetworkSnowballDispatchThread(
+      workspaceSlug,
+      env,
+      fetchImpl,
+    );
+  } catch (error) {
+    return {
+      success: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : "Could not resolve the Network Snowball dispatch thread",
+    };
+  }
+
   // Rows past the dedupe window can never match again; dropping them here keeps
   // the ledger bounded without needing a separate sweeper.
   pruneSnowballSeedLedger();
@@ -202,7 +227,7 @@ export async function enqueueSnowballCalendarSeeds(
             agent: "cursor",
             agentName: "cursor",
             workspace: workspaceSlug,
-            thread: "network-snowball",
+            thread: dispatchThreadSlug,
             prompt: snowballDispatchPrompt(url, templateName),
           },
         ],

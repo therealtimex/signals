@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   defaultHeartbeatSkeleton,
+  findUnsupportedTasksRepresentation,
   parseHeartbeatShellTasks,
   upsertHeartbeatShellTask,
 } from "@/lib/rtx/heartbeat-task-block";
@@ -139,6 +140,139 @@ Trailing prose.
 
     expect(twice).toBe(once);
     expect(tasksVisibleToRealtimeX(twice)).toEqual(["snowball-seed-scout"]);
+  });
+
+  it("refuses a populated inline task array rather than appending a second key", () => {
+    // Loose markdown: appending a bare `tasks:` would win the locator and drop
+    // the user's existing task entirely.
+    const initial = `# Heartbeat
+
+tasks: [{ name: morning-brief, agent: claude, prompt: keep-me, interval: 24h }]
+
+## Check for
+`;
+
+    expect(findUnsupportedTasksRepresentation(initial)).toContain("inline list");
+    expect(() =>
+      upsertHeartbeatShellTask(initial, {
+        name: "snowball-seed-scout",
+        executor: "shell",
+        command: "bash ./scripts/snowball-seed-scout/scout.sh",
+        interval: "4h",
+        timeout: 900,
+      }),
+    ).toThrow(/inline list/);
+  });
+
+  it("refuses a populated inline array inside YAML front matter", () => {
+    // Front matter wins over the markdown body, so an appended key would leave
+    // the scout silently unscheduled while deploy reported success.
+    const initial = `---
+tasks: [{ name: morning-brief, agent: claude, prompt: keep-me, interval: 24h }]
+---
+
+# Heartbeat
+`;
+
+    expect(findUnsupportedTasksRepresentation(initial)).toContain("inline list");
+    expect(() =>
+      upsertHeartbeatShellTask(initial, {
+        name: "snowball-seed-scout",
+        executor: "shell",
+        command: "bash ./scripts/snowball-seed-scout/scout.sh",
+        interval: "4h",
+        timeout: 900,
+      }),
+    ).toThrow(/inline list/);
+  });
+
+  it("detects a populated inline array in a CRLF file", () => {
+    // `.` never matches `\r` in JS, so a naive per-line regex silently fails to
+    // match and falls through to the duplicate-key append this guard prevents.
+    const lf = `# Heartbeat\n\ntasks: [{ name: morning-brief, agent: claude, prompt: keep-me }]\n`;
+    const crlf = lf.replace(/\n/g, "\r\n");
+
+    expect(findUnsupportedTasksRepresentation(crlf)).toContain("inline list");
+    expect(() =>
+      upsertHeartbeatShellTask(crlf, {
+        name: "snowball-seed-scout",
+        executor: "shell",
+        command: "bash ./s.sh",
+        interval: "4h",
+        timeout: 900,
+      }),
+    ).toThrow(/inline list/);
+  });
+
+  it("preserves CRLF line endings when it does write", () => {
+    const crlf = `# Heartbeat\r\n\r\ntasks:\r\n\r\n- name: morning-brief\r\n  agent: claude\r\n  prompt: keep-me\r\n`;
+    const next = upsertHeartbeatShellTask(crlf, {
+      name: "snowball-seed-scout",
+      executor: "shell",
+      command: "bash ./s.sh",
+      interval: "4h",
+      timeout: 900,
+    });
+
+    expect(next).toContain("\r\n");
+    expect(next.split("\n").every((l) => l === "" || l.endsWith("\r"))).toBe(true);
+    expect(next).toContain("- name: morning-brief");
+    expect(next).toContain("- name: snowball-seed-scout");
+    // Exactly one key, and it still matches RealTimeX's locator with the \r.
+    expect(
+      next.split("\n").filter((l) => /^tasks\s*:\s*$/.test(l)),
+    ).toHaveLength(1);
+  });
+
+  it("refuses a key that any fence arrangement previously hid", () => {
+    // Unbalanced, mismatched and nested fences each hid a real key in turn.
+    // With no fence state at all, every one of them refuses.
+    const arrangements = [
+      "tasks:\n\n- name: b\n  prompt: |\n    ```\n    code\n\ntasks: [{ name: real }]\n",
+      "# h\n\n```\n~~~\n```\n\ntasks: [{ name: real }]\n",
+      "# h\n\n````markdown\n```yaml\nx\n```\n````\n\ntasks: [{ name: real }]\n",
+      "# h\n\n```\n```yaml\nx\n```\n\ntasks: [{ name: real }]\n",
+    ];
+    for (const content of arrangements) {
+      expect(findUnsupportedTasksRepresentation(content)).toContain("inline list");
+    }
+  });
+
+  it("refuses a fenced example, because RealTimeX reads it as a key", () => {
+    // RTX's parseTaskBlock ignores fences entirely, so a fenced column-zero key
+    // is live to the runtime. Skipping it here is what hid real keys four times.
+    const content =
+      "# h\n\n```yaml\ntasks: [{ name: ex }]\n```\n\ntasks:\n\n- name: b\n  agent: c\n  prompt: p\n";
+    expect(findUnsupportedTasksRepresentation(content)).toContain("inline list");
+  });
+
+  it("accepts an indented example, which the runtime does not read as a key", () => {
+    // Indentation is what actually makes a line inert to RTX's locator.
+    const content =
+      "# h\n\nExample:\n\n    tasks: [{ name: ex }]\n\ntasks:\n\n- name: b\n  agent: c\n  prompt: p\n";
+    expect(findUnsupportedTasksRepresentation(content)).toBeNull();
+  });
+
+  it("accepts every spelling of an empty task list", () => {
+    for (const value of ["tasks: []", "tasks: [ ]", "tasks: []   # none yet", "tasks:   [  ]  "]) {
+      expect(findUnsupportedTasksRepresentation(`# h\n\n${value}\n`)).toBeNull();
+    }
+  });
+
+  it("accepts every representation it can round-trip", () => {
+    // Guard against the refusal over-reaching: these must stay deployable.
+    const supported = [
+      "tasks:\n\n- name: a\n  executor: shell\n  command: echo a\n",
+      "tasks: []\n",
+      "---\ntasks:\n  - name: a\n    agent: claude\n    prompt: p\n---\n",
+      "# Heartbeat\n\nNothing scheduled.\n",
+      "heartbeat:\n  enabled: true\ntasks:\n  - name: a\n    agent: claude\n    prompt: p\n",
+      // A `tasks:` mention inside an indented block scalar is not a key.
+      "tasks:\n\n- name: a\n  agent: claude\n  prompt: |\n    tasks: [not, a, key]\n",
+    ];
+    for (const content of supported) {
+      expect(findUnsupportedTasksRepresentation(content)).toBeNull();
+    }
   });
 
   it("inserts tasks section when missing", () => {

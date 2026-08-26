@@ -4,6 +4,7 @@ import type { EnvLike } from "@/lib/rtx/env";
 import { ensureRtxWorkspace, getSignalsRtxWorkspaceSlug, resolveSignalsRtxWorkspaceSlug } from "@/lib/rtx/cli-provisioning";
 import {
   defaultHeartbeatSkeleton,
+  findUnsupportedTasksRepresentation,
   HEARTBEAT_FILENAME,
   upsertHeartbeatShellTask,
   type HeartbeatShellTask,
@@ -38,7 +39,11 @@ export type DeploySnowballSeedScoutResult =
       scoutConfigPath: string;
       deployment: ReturnType<typeof toDeploymentState>;
     }
-  | { success: false; error: string; errorCode?: "not_deployed" };
+  | {
+      success: false;
+      error: string;
+      errorCode?: "not_deployed" | "unsupported_heartbeat";
+    };
 
 async function readWorkspaceFile(
   workspaceDir: string,
@@ -117,6 +122,37 @@ export async function deploySnowballSeedScout(
   const scoutConfig = readSnowballSeedScoutConfig(input.config);
   const preferredSlug = getSignalsRtxWorkspaceSlug(env);
 
+  // Refuse an uneditable heartbeat before `ensureRtxWorkspace`, which would
+  // otherwise create a remote workspace for a deploy that cannot proceed. The
+  // check repeats after slug resolution, since the resolved slug may differ.
+  //
+  // Resolve non-creatingly first: if the workspace actually lives under another
+  // slug, a stale file at the preferred path is not the heartbeat we would edit
+  // and must not block the deploy.
+  let preflightSlug = preferredSlug;
+  try {
+    preflightSlug = await resolveSignalsRtxWorkspaceSlug(env);
+  } catch {
+    // Fall back to the configured slug when RTX cannot be reached.
+  }
+  const preflightDir = resolveRtxWorkspaceWorkingDir(preflightSlug, env);
+  if (preflightDir) {
+    const preflightHeartbeat = await readWorkspaceFile(
+      preflightDir,
+      HEARTBEAT_FILENAME,
+    );
+    const preflightUnsupported = preflightHeartbeat
+      ? findUnsupportedTasksRepresentation(preflightHeartbeat)
+      : null;
+    if (preflightUnsupported) {
+      return {
+        success: false,
+        error: preflightUnsupported,
+        errorCode: "unsupported_heartbeat",
+      };
+    }
+  }
+
   let workspaceSlug: string;
   try {
     workspaceSlug = await ensureRtxWorkspace(preferredSlug, "Signals", env);
@@ -136,6 +172,22 @@ export async function deploySnowballSeedScout(
       success: false,
       error:
         "Cannot resolve RealTimeX workspace directory. Set STORAGE_DIR or REALTIMEX_USER_DATA_PATH.",
+    };
+  }
+
+  // Read and validate the heartbeat before writing anything. A representation we
+  // cannot edit must abort the whole deploy, not surface after the scripts and
+  // scout.json have already landed and left a half-provisioned workspace.
+  const existingHeartbeat =
+    (await readWorkspaceFile(workspaceDir, HEARTBEAT_FILENAME)) ??
+    defaultHeartbeatSkeleton();
+  const unsupportedHeartbeat =
+    findUnsupportedTasksRepresentation(existingHeartbeat);
+  if (unsupportedHeartbeat) {
+    return {
+      success: false,
+      error: unsupportedHeartbeat,
+      errorCode: "unsupported_heartbeat",
     };
   }
 
@@ -161,9 +213,6 @@ export async function deploySnowballSeedScout(
     return { success: false, error: scoutConfigWrite.error };
   }
 
-  const existingHeartbeat =
-    (await readWorkspaceFile(workspaceDir, HEARTBEAT_FILENAME)) ??
-    defaultHeartbeatSkeleton();
   const nextHeartbeat = upsertHeartbeatShellTask(
     existingHeartbeat,
     buildHeartbeatTask(scoutConfig),

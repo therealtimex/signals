@@ -21,10 +21,68 @@ const TASKS_HEADER = "tasks:";
  */
 const TASKS_KEY_PATTERN = /^tasks\s*:\s*(.*)$/;
 
-/** Inline values we can safely expand into a block list. */
+/** Strip a trailing YAML comment so `tasks: [] # none` reads as an empty list. */
+function stripInlineComment(value: string): string {
+  return value.replace(/(^|\s)#.*$/, "$1").trim();
+}
+
+/**
+ * Inline values we can safely expand into a block list: absent, or any spelling
+ * of an empty flow sequence (`[]`, `[ ]`, with or without a trailing comment).
+ */
 function isExpandableTasksValue(value: string): boolean {
-  const trimmed = value.trim();
-  return trimmed === "" || trimmed === "[]";
+  const trimmed = stripInlineComment(value);
+  return trimmed === "" || /^\[\s*\]$/.test(trimmed);
+}
+
+/** CRLF files must parse identically; `.` never matches `\r` in JS. */
+function toLf(content: string): string {
+  return content.replace(/\r\n/g, "\n");
+}
+
+/** Preserve the file's existing newline style on write. */
+function detectEol(content: string): string {
+  return content.includes("\r\n") ? "\r\n" : "\n";
+}
+
+/**
+ * Describe a `tasks:` representation this module must not edit, or null when the
+ * file is safe to write.
+ *
+ * A populated inline flow sequence (`tasks: [{ name: ... }]`) cannot be merged
+ * into without a YAML round-trip. Treating it as "no key present" is not a safe
+ * fallback: appending a second `tasks:` key makes RealTimeX resolve only one of
+ * them, which either drops the user's existing task (loose markdown, where the
+ * appended key wins) or silently fails to schedule the scout (front matter,
+ * where the original wins). Refusing to write is the only outcome that loses
+ * nothing.
+ *
+ * Matching is anchored to column 0, mirroring RealTimeX's own locator, so a
+ * `tasks:` line inside an indented prompt block scalar is not mistaken for a key.
+ * Indentation is the only thing that makes a line inert — fences do not.
+ */
+export function findUnsupportedTasksRepresentation(
+  content: string,
+): string | null {
+  // Deliberately no markdown-fence awareness.
+  //
+  // RealTimeX's `parseTaskBlock` does not apply fence state — its loose YAML
+  // extraction starts at the `tasks` line regardless of any surrounding fence.
+  // Any fence tracking here therefore diverges from the parser this guard exists
+  // to protect, and every attempt at it produced the same failure: an unclosed,
+  // mismatched, or nested fence hid a runtime-visible key, the guard returned
+  // null, and the upsert appended a second `tasks:` key that dropped the user's
+  // scheduled task.
+  //
+  // A fenced example in documentation is therefore refused too. Refusing a safe
+  // deploy is visible and recoverable; skipping a real key silently destroys a
+  // task, so the guard errs toward refusal and stays aligned with the parser.
+  for (const line of toLf(content).split("\n")) {
+    const match = line.match(TASKS_KEY_PATTERN);
+    if (!match || isExpandableTasksValue(match[1])) continue;
+    return `HEARTBEAT.md declares tasks as an inline list (\`tasks: ${stripInlineComment(match[1])}\`), which cannot be edited safely — including inside a fenced example, because RealTimeX reads the key regardless of fences. Rewrite it as an indented block list (\`tasks:\` on its own line, one \`- name:\` item per task), or indent the example so it is not a column-zero key, and deploy again.`;
+  }
+  return null;
 }
 
 function unquoteScalar(value: string): string {
@@ -195,7 +253,7 @@ function endsTaskSection(lines: string[], index: number): boolean {
  * of it. Only the block being upserted is ever rewritten.
  */
 function splitHeartbeatTaskSection(content: string): HeartbeatTaskSection {
-  const lines = content.split("\n");
+  const lines = toLf(content).split("\n");
   const tasksIndex = lines.findIndex((line) => {
     const match = line.match(TASKS_KEY_PATTERN);
     return match ? isExpandableTasksValue(match[1]) : false;
@@ -258,6 +316,14 @@ export function upsertHeartbeatShellTask(
   content: string,
   task: HeartbeatShellTask,
 ): string {
+  // Guard here as well as at the caller: silently appending a second `tasks:`
+  // key is worse than refusing, so no caller may reach that path by accident.
+  const unsupported = findUnsupportedTasksRepresentation(content);
+  if (unsupported) {
+    throw new Error(unsupported);
+  }
+
+  const eol = detectEol(content);
   const section = splitHeartbeatTaskSection(content);
   const serialized = serializeTask(task, section.indent);
 
@@ -295,7 +361,8 @@ export function upsertHeartbeatShellTask(
   if (section.after) {
     parts.push("", section.after);
   }
-  return `${parts.join("\n")}\n`;
+  const next = `${parts.join("\n")}\n`;
+  return eol === "\n" ? next : next.replace(/\n/g, eol);
 }
 
 export function defaultHeartbeatSkeleton(): string {
