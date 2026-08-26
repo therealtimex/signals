@@ -109,6 +109,9 @@ async function evaluateHref(webSocketDebuggerUrl) {
     await new Promise((resolve, reject) => {
       // A stalled handshake fires neither `open` nor `error`, so without this the
       // CLI waits forever. Every other wait here is bounded; this one must be too.
+      // `timer` is declared before `cleanup` so the reference is valid whenever a
+      // handler runs, rather than relying on handlers always being asynchronous.
+      let timer;
       const cleanup = () => {
         clearTimeout(timer);
         socket.removeEventListener("open", onOpen);
@@ -122,7 +125,7 @@ async function evaluateHref(webSocketDebuggerUrl) {
         cleanup();
         reject(new Error("CDP socket failed to open"));
       };
-      const timer = setTimeout(() => {
+      timer = setTimeout(() => {
         cleanup();
         reject(new Error("CDP socket handshake timed out"));
       }, 10_000);
@@ -141,7 +144,9 @@ async function evaluateHref(webSocketDebuggerUrl) {
     return await new Promise((resolve, reject) => {
       // Every exit path clears the timer. Leaving it pending on the error path
       // keeps the event loop alive and hangs the CLI for the full timeout after
-      // a failure that was already known.
+      // a failure that was already known. Declared before `cleanup` for the same
+      // reason as the open phase.
+      let timer;
       const cleanup = () => {
         clearTimeout(timer);
         socket.removeEventListener("message", onMessage);
@@ -163,7 +168,7 @@ async function evaluateHref(webSocketDebuggerUrl) {
         cleanup();
         reject(new Error("CDP socket error while evaluating"));
       };
-      const timer = setTimeout(() => {
+      timer = setTimeout(() => {
         cleanup();
         reject(new Error("CDP evaluate timed out"));
       }, 10_000);
