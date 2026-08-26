@@ -345,14 +345,14 @@ window.scoutExtractPostUrl = function(href) {
     if (url.hostname.includes('facebook.com')) {
       // Keep in parity with POST_PATTERNS['facebook'] in resolve.py: pfbid and
       // numeric /posts/<id>, /photo?fbid=<id>, and group permalinks.
-      const path = url.pathname.replace(/\/+$/, '');
-      if (/^\/[^/]+\/posts\/[^/]+$/.test(path)) {
+      const path = url.pathname.replace(/\\/+$/, '');
+      if (/^\\/[^/]+\\/posts\\/[^/]+$/.test(path)) {
         return `${url.origin}${path}`;
       }
-      if (/^\/groups\/[^/]+\/permalink\/\d+$/.test(path)) {
+      if (/^\\/groups\\/[^/]+\\/permalink\\/\\d+$/.test(path)) {
         return `${url.origin}${path}`;
       }
-      if (path === '/photo' && /^\d+$/.test(url.searchParams.get('fbid') || '')) {
+      if (path === '/photo' && /^\\d+$/.test(url.searchParams.get('fbid') || '')) {
         return `${url.origin}${path}?fbid=${url.searchParams.get('fbid')}`;
       }
     }

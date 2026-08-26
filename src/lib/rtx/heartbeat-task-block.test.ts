@@ -5,7 +5,142 @@ import {
   upsertHeartbeatShellTask,
 } from "@/lib/rtx/heartbeat-task-block";
 
+
+/**
+ * RealTimeX's `parseFromMarkdownBody` locator, replicated exactly: find a line
+ * matching `/^tasks\s*:\s*$/` and read until the next markdown heading. Asserting
+ * against this is the point — a file that looks right but misses this regex
+ * schedules nothing while Deploy reports success.
+ */
+function tasksVisibleToRealtimeX(content: string): string[] {
+  const lines = content.split("\n");
+  const tasksIdx = lines.findIndex((l) => /^tasks\s*:\s*$/.test(l));
+  if (tasksIdx === -1) return [];
+
+  const blockLines: string[] = [];
+  for (let i = tasksIdx + 1; i < lines.length; i += 1) {
+    if (/^#{1,6}\s/.test(lines[i])) break;
+    blockLines.push(lines[i]);
+  }
+  return blockLines
+    .filter((line) => /^\s*-\s*name:/.test(line))
+    .map((line) => line.replace(/^\s*-\s*name:\s*/, "").trim());
+}
+
+/** The provisioned RealTimeX starter, verbatim in shape. */
+const REALTIMEX_STARTER = `# Heartbeat Instructions
+
+## Mission
+
+Describe the ambient agent's standing responsibility.
+
+## Tasks
+
+The scheduler evaluates this \`tasks:\` block on every heartbeat tick and runs only tasks that are due.
+
+tasks: []
+
+## Check for
+
+- Pending tasks that require follow-up
+
+## When action is needed
+
+Do the thing.
+`;
+
 describe("heartbeat task block", () => {
+  it("schedules the scout in the RealTimeX starter's `tasks: []` heartbeat", () => {
+    const next = upsertHeartbeatShellTask(REALTIMEX_STARTER, {
+      name: "snowball-seed-scout",
+      executor: "shell",
+      command: "bash ./scripts/snowball-seed-scout/scout.sh",
+      interval: "4h",
+      timeout: 900,
+    });
+
+    // The whole point: the runtime must actually see the task.
+    expect(tasksVisibleToRealtimeX(next)).toEqual(["snowball-seed-scout"]);
+    // Exactly one usable key, and the empty inline sequence is gone.
+    expect(next.split("\n").filter((l) => /^tasks\s*:\s*$/.test(l))).toHaveLength(1);
+    expect(next).not.toContain("tasks: []");
+    // Surrounding document is preserved.
+    expect(next).toContain("## Mission");
+    expect(next).toContain("## Check for");
+    expect(next).toContain("Do the thing.");
+  });
+
+  it("inserts a tasks key into a nonempty file that has none", () => {
+    const initial = `# Heartbeat Instructions
+
+## Mission
+
+Nothing scheduled yet.
+`;
+
+    const next = upsertHeartbeatShellTask(initial, {
+      name: "snowball-seed-scout",
+      executor: "shell",
+      command: "bash ./scripts/snowball-seed-scout/scout.sh",
+      interval: "4h",
+      timeout: 900,
+    });
+
+    expect(tasksVisibleToRealtimeX(next)).toEqual(["snowball-seed-scout"]);
+    expect(next.split("\n").filter((l) => /^tasks\s*:\s*$/.test(l))).toHaveLength(1);
+    expect(next).toContain("Nothing scheduled yet.");
+  });
+
+  it("keeps the scout visible to the runtime alongside an existing agent task", () => {
+    const initial = `# Heartbeat Instructions
+
+tasks:
+
+- name: morning-brief
+  agent: claude
+  prompt: Summarise overnight activity
+  interval: 24h
+
+## Notes
+
+Trailing prose.
+`;
+
+    const next = upsertHeartbeatShellTask(initial, {
+      name: "snowball-seed-scout",
+      executor: "shell",
+      command: "bash ./scripts/snowball-seed-scout/scout.sh",
+      interval: "4h",
+      timeout: 900,
+    });
+
+    expect(tasksVisibleToRealtimeX(next)).toEqual([
+      "morning-brief",
+      "snowball-seed-scout",
+    ]);
+    expect(next).toContain("Trailing prose.");
+  });
+
+  it("re-deploys idempotently against the starter shape", () => {
+    const once = upsertHeartbeatShellTask(REALTIMEX_STARTER, {
+      name: "snowball-seed-scout",
+      executor: "shell",
+      command: "bash ./scripts/snowball-seed-scout/scout.sh",
+      interval: "4h",
+      timeout: 900,
+    });
+    const twice = upsertHeartbeatShellTask(once, {
+      name: "snowball-seed-scout",
+      executor: "shell",
+      command: "bash ./scripts/snowball-seed-scout/scout.sh",
+      interval: "4h",
+      timeout: 900,
+    });
+
+    expect(twice).toBe(once);
+    expect(tasksVisibleToRealtimeX(twice)).toEqual(["snowball-seed-scout"]);
+  });
+
   it("inserts tasks section when missing", () => {
     const next = upsertHeartbeatShellTask("", {
       name: "snowball-seed-scout",

@@ -12,6 +12,21 @@ export const HEARTBEAT_FILENAME = "HEARTBEAT.md";
 
 const TASKS_HEADER = "tasks:";
 
+/**
+ * RealTimeX locates the block with `/^tasks\s*:\s*$/` and reads until the next
+ * markdown heading, so the emitted key must sit at column 0 with nothing after
+ * the colon. `tasks: []` — the shape in the provisioned starter — does not match
+ * it, and a file with no key at all matches nothing, so both have to be
+ * normalized into a real list or Deploy reports success while scheduling nothing.
+ */
+const TASKS_KEY_PATTERN = /^tasks\s*:\s*(.*)$/;
+
+/** Inline values we can safely expand into a block list. */
+function isExpandableTasksValue(value: string): boolean {
+  const trimmed = value.trim();
+  return trimmed === "" || trimmed === "[]";
+}
+
 function unquoteScalar(value: string): string {
   const trimmed = value.trim();
   if (
@@ -140,6 +155,8 @@ interface HeartbeatTaskSection {
   after: string;
   /** Indentation of the list items, so re-serialization matches the file. */
   indent: string;
+  /** False when the file has no usable `tasks:` key and one must be inserted. */
+  hasHeader: boolean;
 }
 
 /**
@@ -179,10 +196,24 @@ function endsTaskSection(lines: string[], index: number): boolean {
  */
 function splitHeartbeatTaskSection(content: string): HeartbeatTaskSection {
   const lines = content.split("\n");
-  const tasksIndex = lines.findIndex((line) => line.trim() === TASKS_HEADER);
+  const tasksIndex = lines.findIndex((line) => {
+    const match = line.match(TASKS_KEY_PATTERN);
+    return match ? isExpandableTasksValue(match[1]) : false;
+  });
   if (tasksIndex < 0) {
-    return { before: content.trimEnd(), blocks: [], after: "", indent: "" };
+    // No usable key. Preserve the file verbatim; the caller inserts one.
+    return {
+      before: content.trimEnd(),
+      blocks: [],
+      after: "",
+      indent: "",
+      hasHeader: false,
+    };
   }
+
+  // Normalize `tasks: []` to a bare key so the emitted file matches the locator.
+  const headerLines = lines.slice(0, tasksIndex + 1);
+  headerLines[tasksIndex] = TASKS_HEADER;
 
   let sectionEnd = tasksIndex + 1;
   while (sectionEnd < lines.length && !endsTaskSection(lines, sectionEnd)) {
@@ -209,10 +240,11 @@ function splitHeartbeatTaskSection(content: string): HeartbeatTaskSection {
   if (current) blocks.push(current.join("\n").trimEnd());
 
   return {
-    before: lines.slice(0, tasksIndex + 1).join("\n").trimEnd(),
+    before: headerLines.join("\n").trimEnd(),
     blocks,
     after: lines.slice(sectionEnd).join("\n").trim(),
     indent,
+    hasHeader: true,
   };
 }
 
@@ -249,7 +281,17 @@ export function upsertHeartbeatShellTask(
     blocks.push(serialized);
   }
 
-  const parts = [section.before || TASKS_HEADER, "", blocks.join("\n\n")];
+  const parts: string[] = [];
+  if (section.hasHeader) {
+    parts.push(section.before || TASKS_HEADER);
+  } else if (section.before) {
+    // Append the key after the existing document rather than guessing a spot
+    // inside it; nothing follows, so the block cannot be cut short by a heading.
+    parts.push(section.before, "", TASKS_HEADER);
+  } else {
+    parts.push(TASKS_HEADER);
+  }
+  parts.push("", blocks.join("\n\n"));
   if (section.after) {
     parts.push("", section.after);
   }
