@@ -49,12 +49,6 @@ const ENQUEUE_BATCH_BUDGET_MS = 90_000;
 /** Below this there is not enough budget left to be worth starting a POST. */
 const MIN_POST_BUDGET_MS = 5_000;
 
-/** A timeout leaves it unknown whether the calendar committed the event. */
-function isAmbiguousFailure(error: unknown): boolean {
-  const name = (error as { name?: string } | null)?.name;
-  return name === "TimeoutError" || name === "AbortError";
-}
-
 function hashUrl(url: string): string {
   return createHash("sha256").update(url.trim()).digest("hex");
 }
@@ -240,22 +234,18 @@ export async function enqueueSnowballCalendarSeeds(
       confirmSeed(dedupeKey, claimToken, calendarEventUuid);
       queued.push({ url, calendarEventUuid, scheduledAt });
     } catch (error) {
-      // Releasing is only safe when the calendar definitely did not commit. A
-      // timeout is ambiguous, so the claim is left pending: it expires with the
-      // claim TTL rather than being retried immediately into a duplicate.
-      const ambiguous = isAmbiguousFailure(error);
-      if (!ambiguous) {
-        releaseSeedClaim(dedupeKey, claimToken);
-      }
+      // Every thrown request error is ambiguous. A timeout, a connection reset,
+      // and a bare `fetch failed` can all occur after the server committed but
+      // before the response arrived, so none of them prove the event was not
+      // created. Only a non-OK HTTP response does, and that path is handled
+      // above. Keep the claim and let it lapse with the claim TTL rather than
+      // retrying straight into a duplicate.
+      const detail = error instanceof Error ? error.message : "request failed";
       failed.push({
         url,
-        reason: ambiguous
-          ? `calendar request timed out; outcome unknown, retry deferred to ${Math.round(
-              SNOWBALL_SEED_CLAIM_TTL_MS / 60_000,
-            )}m claim expiry`
-          : error instanceof Error
-            ? error.message
-            : "calendar request failed",
+        reason: `calendar request failed before a response (${detail}); outcome unknown, retry deferred to ${Math.round(
+          SNOWBALL_SEED_CLAIM_TTL_MS / 60_000,
+        )}m claim expiry`,
       });
     }
   }

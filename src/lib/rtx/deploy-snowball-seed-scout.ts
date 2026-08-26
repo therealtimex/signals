@@ -105,6 +105,12 @@ export async function deploySnowballSeedScout(
     templateId: string;
     config: Record<string, unknown>;
     preserveDeployedAt?: string | null;
+    /**
+     * Persist the scout as undeployed. `enabled: false` alone means paused — the
+     * deploy files stay and settings remain editable — so undeploy needs its own
+     * marker rather than being inferred from the run toggle.
+     */
+    markUndeployed?: boolean;
   },
   env: EnvLike = process.env,
 ): Promise<DeploySnowballSeedScoutResult> {
@@ -139,7 +145,9 @@ export async function deploySnowballSeedScout(
   }
 
   const deployment = toDeploymentState(scoutConfig, {
-    deployedAt: input.preserveDeployedAt ?? new Date().toISOString(),
+    deployedAt: input.markUndeployed
+      ? null
+      : (input.preserveDeployedAt ?? new Date().toISOString()),
     templateId: input.templateId,
   });
 
@@ -197,6 +205,7 @@ export async function undeploySnowballSeedScout(
           ? input.config.templateId
           : "",
       config: scoutConfig as unknown as Record<string, unknown>,
+      markUndeployed: true,
     },
     env,
   );
@@ -234,14 +243,11 @@ export async function readSnowballSeedScoutDeployment(
     return {
       success: true,
       deployment: toDeploymentState(config, {
-        // Undeploy rewrites scout.json with `enabled: false` rather than deleting
-        // it, so the saved settings survive. Such a config is not a live
-        // deployment: clear `deployedAt` so dialog reloads, settings saves, and
-        // enqueue requests all honor the undeploy.
+        // `deployedAt` records whether the scout is deployed; `enabled` records
+        // whether it is running. A paused scout keeps its deployedAt so settings
+        // stay editable and it can be resumed. Undeploy persists deployedAt: null.
         deployedAt:
-          config.enabled && typeof parsed.deployedAt === "string"
-            ? parsed.deployedAt
-            : null,
+          typeof parsed.deployedAt === "string" ? parsed.deployedAt : null,
         templateId:
           typeof parsed.templateId === "string" ? parsed.templateId : null,
       }),

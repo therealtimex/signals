@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { saveSnowballSeedScoutSettings } from "@/lib/rtx/deploy-snowball-seed-scout";
+import { resolveSignalsBaseUrlFromRequest } from "@/lib/rtx/resolve-signals-base-url";
 import {
   buildSnowballSeedScoutDeployConfig,
   readSnowballSeedScoutConfig,
@@ -27,7 +28,11 @@ export async function PUT(req: NextRequest) {
       );
     }
     const data = settingsSchema.parse(body);
-    const scoutConfig = readSnowballSeedScoutConfig(data.config);
+    const scoutConfig = readSnowballSeedScoutConfig({
+      ...data.config,
+      // Refresh the callback URL: the Local App port can change between deploys.
+      signalsBaseUrl: resolveSignalsBaseUrlFromRequest(req),
+    });
     const deployConfig = buildSnowballSeedScoutDeployConfig(scoutConfig);
 
     const result = await saveSnowballSeedScoutSettings({

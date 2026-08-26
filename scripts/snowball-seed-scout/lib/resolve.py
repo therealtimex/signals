@@ -12,6 +12,9 @@ import urllib.request
 from urllib.parse import quote_plus
 
 DEFAULT_BROWSER_SESSION = "signals-publish"
+# Last-resort only. Deploy records the real origin in scout.json because
+# RealTimeX assigns Local App ports dynamically.
+FALLBACK_SIGNALS_BASE_URL = "http://127.0.0.1:3010"
 
 AUTHENTICATED_FEED_URLS: dict[str, str] = {
     "x": "https://x.com/home",
@@ -20,6 +23,10 @@ AUTHENTICATED_FEED_URLS: dict[str, str] = {
 }
 
 SHARED_BROWSER_SESSIONS = frozenset({DEFAULT_BROWSER_SESSION})
+
+# Only sessions the scout creates itself carry this prefix (see
+# scout_start_browser). Anything else is an operator-owned Platform Connection.
+SCOUT_OWNED_SESSION_PREFIX = "signals-scout-"
 
 POST_PATTERNS: dict[str, re.Pattern[str]] = {
     "x": re.compile(r"https?://(?:x|twitter)\.com/[^/\s?#]+/status/\d+", re.I),
@@ -113,8 +120,35 @@ def resolve_browser_session_name(config: dict, signals_base: str) -> str:
     return explicit or DEFAULT_BROWSER_SESSION
 
 
+def resolve_signals_base_url(config: dict, env_override: str = "") -> str:
+    """Base URL the scout calls Signals on.
+
+    Precedence: an explicit SIGNALS_BASE_URL override, then the origin recorded
+    at deploy time, then the legacy default. The heartbeat shell does not inherit
+    the Local App's port, so the recorded value is what makes a non-3010
+    assignment work.
+    """
+    override = str(env_override or "").strip()
+    if override:
+        return override.rstrip("/")
+    recorded = str((config or {}).get("signalsBaseUrl") or "").strip()
+    if recorded:
+        return recorded.rstrip("/")
+    return FALLBACK_SIGNALS_BASE_URL
+
+
 def should_stop_browser_session(session_name: str) -> bool:
-    return session_name.strip() not in SHARED_BROWSER_SESSIONS
+    """Whether the scout may shut this browser session down on exit.
+
+    Only sessions the scout creates are its to stop. An acting profile can
+    resolve to a dedicated, already-running Platform Connection (for example
+    `signals-contention`); harvesting through it and then stopping it would take
+    the operator's own browser session away.
+    """
+    name = session_name.strip()
+    if not name or name in SHARED_BROWSER_SESSIONS:
+        return False
+    return name.startswith(SCOUT_OWNED_SESSION_PREFIX)
 
 
 def is_http_url(value: str) -> bool:
@@ -308,8 +342,19 @@ window.scoutExtractPostUrl = function(href) {
       const text = url.searchParams.get('text');
       if (text) return window.scoutExtractPostUrl(text);
     }
-    if (url.hostname.includes('facebook.com') && url.pathname.includes('/posts/pfbid')) {
-      return `${url.origin}${url.pathname}`;
+    if (url.hostname.includes('facebook.com')) {
+      // Keep in parity with POST_PATTERNS['facebook'] in resolve.py: pfbid and
+      // numeric /posts/<id>, /photo?fbid=<id>, and group permalinks.
+      const path = url.pathname.replace(/\/+$/, '');
+      if (/^\/[^/]+\/posts\/[^/]+$/.test(path)) {
+        return `${url.origin}${path}`;
+      }
+      if (/^\/groups\/[^/]+\/permalink\/\d+$/.test(path)) {
+        return `${url.origin}${path}`;
+      }
+      if (path === '/photo' && /^\d+$/.test(url.searchParams.get('fbid') || '')) {
+        return `${url.origin}${path}?fbid=${url.searchParams.get('fbid')}`;
+      }
     }
   } catch (err) {}
   return null;
@@ -484,7 +529,7 @@ for (const anchor of document.querySelectorAll('a[href]')) {
 }
 for (const input of document.querySelectorAll('input[type="text"], textarea')) {
   const value = (input.value || '').trim();
-  if (value.includes('facebook.com') && value.includes('/posts/pfbid')) {
+  if (value.includes('facebook.com')) {
     const extracted = window.scoutExtractPostUrl(value);
     if (extracted) urls.add(extracted);
   }
@@ -792,6 +837,12 @@ def main() -> int:
         print(resolve_browser_session_name(config, signals_base))
         return 0
 
+    if command == "signals-base-url":
+        config = json.loads(sys.argv[2]) if len(sys.argv) > 2 else {}
+        env_override = sys.argv[3] if len(sys.argv) > 3 else ""
+        print(resolve_signals_base_url(config, env_override))
+        return 0
+
     if command == "should-stop":
         print("1" if should_stop_browser_session(sys.argv[2]) else "0")
         return 0
@@ -1081,8 +1132,33 @@ class ResolveTests(unittest.TestCase):
         urls = parse_eval_posts({"intentKeywords": []}, "x", 5, raw)
         self.assertEqual(urls, ["https://x.com/foo/status/123"])
 
+    def test_signals_base_url_prefers_recorded_origin(self) -> None:
+        config = {"signalsBaseUrl": "http://127.0.0.1:45231"}
+        self.assertEqual(
+            resolve_signals_base_url(config), "http://127.0.0.1:45231"
+        )
+
+    def test_signals_base_url_env_override_wins(self) -> None:
+        config = {"signalsBaseUrl": "http://127.0.0.1:45231"}
+        self.assertEqual(
+            resolve_signals_base_url(config, "http://127.0.0.1:9999/"),
+            "http://127.0.0.1:9999",
+        )
+
+    def test_signals_base_url_falls_back_when_unrecorded(self) -> None:
+        self.assertEqual(resolve_signals_base_url({}), FALLBACK_SIGNALS_BASE_URL)
+
     def test_should_not_stop_shared_session(self) -> None:
         self.assertFalse(should_stop_browser_session("signals-publish"))
+
+    def test_should_not_stop_dedicated_platform_connection(self) -> None:
+        # Resolved from an acting profile; the scout did not create it.
+        self.assertFalse(should_stop_browser_session("signals-contention"))
+        self.assertFalse(should_stop_browser_session("my-linkedin-profile"))
+
+    def test_should_stop_scout_owned_session(self) -> None:
+        self.assertTrue(should_stop_browser_session("signals-scout-x"))
+        self.assertTrue(should_stop_browser_session("signals-scout-linkedin"))
 
     def test_extract_posts_filters_keywords(self) -> None:
         config = {"intentKeywords": ["funding"]}

@@ -92,7 +92,8 @@ raise SystemExit(1)
 scout_resolve_session_name() {
   local config_json="$1"
   local lib_dir="$2"
-  local signals_base="${SIGNALS_BASE_URL:-http://127.0.0.1:3010}"
+  local signals_base=""
+  signals_base="$(python3 "${lib_dir}/resolve.py" signals-base-url "${config_json}" "${SIGNALS_BASE_URL:-}")"
   python3 "${lib_dir}/resolve.py" session "${config_json}" "${signals_base}"
 }
 

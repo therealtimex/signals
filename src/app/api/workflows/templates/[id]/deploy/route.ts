@@ -6,6 +6,7 @@ import {
   undeploySnowballSeedScout,
 } from "@/lib/rtx/deploy-snowball-seed-scout";
 import { parseTemplateConfig } from "@/lib/workflows/template-config";
+import { resolveSignalsBaseUrlFromRequest } from "@/lib/rtx/resolve-signals-base-url";
 import {
   buildSnowballSeedScoutDeployConfig,
   isHeartbeatShellTemplateConfig,
@@ -45,6 +46,9 @@ export async function POST(
     const mergedConfig = {
       ...templateConfig,
       ...(data.config ?? {}),
+      // The heartbeat shell runs workspace-scoped and cannot discover the Local
+      // App's dynamic port, so record this request's origin for it to call back on.
+      signalsBaseUrl: resolveSignalsBaseUrlFromRequest(req),
     };
     const scoutConfig = readSnowballSeedScoutConfig(mergedConfig);
     const deployConfig = buildSnowballSeedScoutDeployConfig(scoutConfig);

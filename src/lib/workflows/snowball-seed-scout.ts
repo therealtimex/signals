@@ -52,6 +52,12 @@ export const SNOWBALL_SEED_SCOUT_SLIDERS: Record<
 };
 
 export interface SnowballSeedScoutConfig {
+  /**
+   * Base URL the deployed scout calls back on. Recorded at deploy time because
+   * RealTimeX assigns Local App ports dynamically and the heartbeat shell is
+   * workspace-scoped, so it does not inherit the Signals process environment.
+   */
+  signalsBaseUrl: string;
   /** Acting profile from Platform Connections; resolves the inherited browser session at runtime. */
   targetId: string | null;
   /** RealTimeX Browser session name; defaults to the shared publish session. */
@@ -116,6 +122,10 @@ export function readSnowballSeedScoutConfig(
   const saltMax = clampSnowballSeedScoutSlider("saltMaxMinutes", config.saltMaxMinutes);
 
   return {
+    signalsBaseUrl:
+      typeof config.signalsBaseUrl === "string" && config.signalsBaseUrl.trim()
+        ? config.signalsBaseUrl.trim().replace(/\/+$/, "")
+        : "",
     targetId:
       typeof config.targetId === "string" && config.targetId.trim()
         ? config.targetId.trim()
@@ -159,6 +169,7 @@ export function buildSnowballSeedScoutTemplateConfig(): Record<string, unknown> 
       executionKind: SNOWBALL_SEED_SCOUT_EXECUTION_KIND,
     },
     platforms: ["x", "linkedin"],
+    signalsBaseUrl: "",
     targetId: null,
     browserSessionName: RTX_PUBLISH_SESSION_NAME,
     inheritAuthenticatedSession: true,

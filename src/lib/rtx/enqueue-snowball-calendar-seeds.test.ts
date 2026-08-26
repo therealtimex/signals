@@ -108,9 +108,44 @@ describe("enqueueSnowballCalendarSeeds", () => {
     if (!result.success) return;
 
     expect(result.queued).toHaveLength(0);
-    expect(result.failed).toEqual([
-      { url: "https://x.com/acme/status/1", reason: "ECONNREFUSED" },
-    ]);
+    expect(result.failed).toHaveLength(1);
+    expect(result.failed[0]?.url).toBe("https://x.com/acme/status/1");
+    expect(result.failed[0]?.reason).toContain("ECONNREFUSED");
+    expect(result.failed[0]?.reason).toContain("outcome unknown");
+  });
+
+  it("keeps the claim for a generic fetch rejection, not just timeouts", async () => {
+    const scoutConfig = readSnowballSeedScoutConfig(buildSnowballSeedScoutTemplateConfig());
+    const env = {
+      RTX_API_BASE_URL: "http://127.0.0.1:3101",
+      SIGNALS_RTX_WORKSPACE_SLUG: "signals",
+    };
+
+    // A connection reset can land after the server committed, so this is just as
+    // ambiguous as a timeout even though it is a plain TypeError.
+    const reset = vi.fn().mockRejectedValue(new TypeError("fetch failed"));
+    await enqueueSnowballCalendarSeeds(
+      [{ url: "https://x.com/acme/status/reset", platform: "x" }],
+      scoutConfig,
+      env,
+      reset as unknown as typeof fetch,
+    );
+
+    const retry = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ event: { uuid: "evt-dup" } }),
+    });
+    const second = await enqueueSnowballCalendarSeeds(
+      [{ url: "https://x.com/acme/status/reset", platform: "x" }],
+      scoutConfig,
+      env,
+      retry as unknown as typeof fetch,
+    );
+
+    expect(retry).not.toHaveBeenCalled();
+    expect(second.success).toBe(true);
+    if (!second.success) return;
+    expect(second.deduped).toEqual(["https://x.com/acme/status/reset"]);
   });
 
   it("does not re-queue a seed already queued in a previous run", async () => {

@@ -26,7 +26,10 @@ if [[ ! -f "${CONFIG_PATH}" ]]; then
 fi
 
 CONFIG_JSON="$(cat "${CONFIG_PATH}")"
-SIGNALS_BASE_URL="${SIGNALS_BASE_URL:-http://127.0.0.1:3010}"
+# Deploy records the Local App origin in scout.json: RealTimeX assigns Local App
+# ports dynamically and this shell is workspace-scoped, so it cannot inherit one.
+SIGNALS_BASE_URL="$(python3 "${ROOT_DIR}/lib/resolve.py" signals-base-url "${CONFIG_JSON}" "${SIGNALS_BASE_URL:-}")"
+export SIGNALS_BASE_URL
 PRODUCER_RUN_ID="scout-$(date -u +%Y%m%dT%H%M%SZ)-$$"
 
 PLATFORM="$(scout_pick_platform "${CONFIG_JSON}")"

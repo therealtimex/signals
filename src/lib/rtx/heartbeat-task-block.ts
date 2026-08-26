@@ -108,90 +108,119 @@ export function parseHeartbeatShellTasks(content: string): HeartbeatShellTask[] 
   return tasks;
 }
 
-function serializeTask(task: HeartbeatShellTask): string {
+function serializeTask(task: HeartbeatShellTask, indent = ""): string {
   const lines = [
-    `- name: ${task.name}`,
-    `  executor: shell`,
-    `  command: ${task.command}`,
+    `${indent}- name: ${task.name}`,
+    `${indent}  executor: shell`,
+    `${indent}  command: ${task.command}`,
   ];
 
   if (task.interval) {
-    lines.push(`  interval: ${task.interval}`);
+    lines.push(`${indent}  interval: ${task.interval}`);
   }
   if (task.cron) {
-    lines.push(`  cron: ${task.cron}`);
+    lines.push(`${indent}  cron: ${task.cron}`);
   }
   if (task.cwd) {
-    lines.push(`  cwd: ${task.cwd}`);
+    lines.push(`${indent}  cwd: ${task.cwd}`);
   }
   if (task.timeout != null && String(task.timeout).trim()) {
-    lines.push(`  timeout: ${task.timeout}`);
+    lines.push(`${indent}  timeout: ${task.timeout}`);
   }
 
   return lines.join("\n");
 }
 
-function splitHeartbeatContent(content: string): {
-  beforeTasks: string;
-  afterTasks: string;
-} {
+interface HeartbeatTaskSection {
+  /** Everything up to and including the `tasks:` header. */
+  before: string;
+  /** Raw text of each task item, untouched. */
+  blocks: string[];
+  /** Content following the tasks section. */
+  after: string;
+  /** Indentation of the list items, so re-serialization matches the file. */
+  indent: string;
+}
+
+/**
+ * Split the tasks section into raw item blocks.
+ *
+ * The blocks are kept as text rather than parsed structures: HEARTBEAT.md holds
+ * agent tasks, multiline prompts, and provider/model options this module does
+ * not model, and rebuilding the section from a shell-task parse would delete all
+ * of it. Only the block being upserted is ever rewritten.
+ */
+function splitHeartbeatTaskSection(content: string): HeartbeatTaskSection {
   const lines = content.split("\n");
   const tasksIndex = lines.findIndex((line) => line.trim() === TASKS_HEADER);
   if (tasksIndex < 0) {
-    return { beforeTasks: content.trimEnd(), afterTasks: "" };
+    return { before: content.trimEnd(), blocks: [], after: "", indent: "" };
   }
 
-  // Consume every consecutive task block, including the blank lines separating
-  // them, so that tasks after the first are not left behind in `afterTasks` and
-  // re-emitted alongside the serialized task list.
-  let afterIndex = tasksIndex + 1;
-  while (afterIndex < lines.length) {
-    let blockStart = afterIndex;
-    while (blockStart < lines.length && lines[blockStart].trim() === "") {
-      blockStart += 1;
-    }
-    if (blockStart >= lines.length || !lines[blockStart].startsWith("- name:")) {
-      break;
-    }
-
-    let blockEnd = blockStart;
-    while (blockEnd < lines.length && lines[blockEnd].trim() !== "") {
-      blockEnd += 1;
-    }
-
-    // Trailing prose can legitimately start with a `- name:` bullet. Only treat
-    // the block as a task if it carries task fields, so documentation after the
-    // tasks section is preserved rather than swallowed.
-    const isTaskBlock = lines
-      .slice(blockStart + 1, blockEnd)
-      .some((line) => /^\s+(executor|command|interval|cron):/.test(line));
-    if (!isTaskBlock) {
-      break;
-    }
-
-    afterIndex = blockEnd;
+  // The section runs until a line that is clearly outside it: non-blank, at
+  // column 0, and not a list item (a new top-level key or a markdown heading).
+  let sectionEnd = tasksIndex + 1;
+  while (sectionEnd < lines.length) {
+    const line = lines[sectionEnd];
+    if (line.trim() !== "" && !/^\s/.test(line) && !/^-\s/.test(line)) break;
+    sectionEnd += 1;
   }
+
+  const sectionLines = lines.slice(tasksIndex + 1, sectionEnd);
+  const firstItem = sectionLines.find((line) => /^\s*-\s/.test(line));
+  const indent = firstItem ? (firstItem.match(/^\s*/)?.[0] ?? "") : "";
+  // Anchor splits to the exact list indentation so a `- ` inside a multiline
+  // block scalar does not look like a new task.
+  const itemPattern = new RegExp(`^${indent}-\\s`);
+
+  const blocks: string[] = [];
+  let current: string[] | null = null;
+  for (const line of sectionLines) {
+    if (itemPattern.test(line)) {
+      if (current) blocks.push(current.join("\n").trimEnd());
+      current = [line];
+      continue;
+    }
+    if (current) current.push(line);
+  }
+  if (current) blocks.push(current.join("\n").trimEnd());
 
   return {
-    beforeTasks: lines.slice(0, tasksIndex + 1).join("\n").trimEnd(),
-    afterTasks: lines.slice(afterIndex).join("\n").trim(),
+    before: lines.slice(0, tasksIndex + 1).join("\n").trimEnd(),
+    blocks,
+    after: lines.slice(sectionEnd).join("\n").trim(),
+    indent,
   };
+}
+
+/** Name of a raw task block, or null when the block has no `- name:` line. */
+function taskBlockName(block: string): string | null {
+  const match = block.split("\n")[0]?.match(/^\s*-\s*name:\s*(.*)$/);
+  return match ? unquoteScalar(match[1]) : null;
 }
 
 export function upsertHeartbeatShellTask(
   content: string,
   task: HeartbeatShellTask,
 ): string {
-  const { beforeTasks, afterTasks } = splitHeartbeatContent(content);
-  const existingTasks = content.trim() ? parseHeartbeatShellTasks(content) : [];
-  const taskMap = new Map(existingTasks.map((entry) => [entry.name, entry]));
-  taskMap.set(task.name, task);
-  const nextTasks = [...taskMap.values()];
+  const section = splitHeartbeatTaskSection(content);
+  const serialized = serializeTask(task, section.indent);
 
-  const taskBlock = nextTasks.map((entry) => serializeTask(entry)).join("\n\n");
-  const parts = [beforeTasks || TASKS_HEADER, "", taskBlock];
-  if (afterTasks) {
-    parts.push("", afterTasks);
+  const existingIndex = section.blocks.findIndex(
+    (block) => taskBlockName(block) === task.name,
+  );
+
+  const blocks = [...section.blocks];
+  if (existingIndex >= 0) {
+    // Replace in place so ordering — and every sibling block — is preserved.
+    blocks[existingIndex] = serialized;
+  } else {
+    blocks.push(serialized);
+  }
+
+  const parts = [section.before || TASKS_HEADER, "", blocks.join("\n\n")];
+  if (section.after) {
+    parts.push("", section.after);
   }
   return `${parts.join("\n")}\n`;
 }

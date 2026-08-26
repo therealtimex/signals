@@ -96,6 +96,133 @@ describe("heartbeat task block", () => {
     ]);
   });
 
+  it("preserves an existing agent task that has no shell command", () => {
+    const initial = `${defaultHeartbeatSkeleton()}
+- name: morning-brief
+  agent: claude
+  prompt: Summarise overnight activity
+  interval: 24h
+`;
+
+    const next = upsertHeartbeatShellTask(initial, {
+      name: "snowball-seed-scout",
+      executor: "shell",
+      command: "bash ./scripts/snowball-seed-scout/scout.sh",
+      interval: "4h",
+      timeout: 900,
+    });
+
+    // Agent tasks are not shell tasks, so they are invisible to the parser. They
+    // must survive verbatim regardless — dropping them is workspace data loss.
+    expect(next).toContain("- name: morning-brief");
+    expect(next).toContain("agent: claude");
+    expect(next).toContain("prompt: Summarise overnight activity");
+    expect(next).toContain("interval: 24h");
+    expect(next).toContain("- name: snowball-seed-scout");
+  });
+
+  it("preserves a multiline prompt block scalar", () => {
+    const initial = `${defaultHeartbeatSkeleton()}
+- name: digest
+  agent: claude
+  prompt: |
+    First line.
+
+    Second line after a blank.
+  model: claude-opus-5
+  interval: 12h
+`;
+
+    const next = upsertHeartbeatShellTask(initial, {
+      name: "snowball-seed-scout",
+      executor: "shell",
+      command: "bash ./scripts/snowball-seed-scout/scout.sh",
+      interval: "4h",
+      timeout: 900,
+    });
+
+    expect(next).toContain("First line.");
+    expect(next).toContain("Second line after a blank.");
+    expect(next).toContain("model: claude-opus-5");
+    expect(next.match(/- name: digest/g)).toHaveLength(1);
+  });
+
+  it("preserves unmodelled keys on the task being replaced's siblings", () => {
+    const initial = `${defaultHeartbeatSkeleton()}
+- name: other
+  executor: shell
+  command: echo hi
+  interval: 1h
+  provider: local
+  skills:
+    - alpha
+    - beta
+`;
+
+    const next = upsertHeartbeatShellTask(initial, {
+      name: "snowball-seed-scout",
+      executor: "shell",
+      command: "bash ./scripts/snowball-seed-scout/scout.sh",
+      interval: "4h",
+      timeout: 900,
+    });
+
+    expect(next).toContain("provider: local");
+    expect(next).toContain("- alpha");
+    expect(next).toContain("- beta");
+  });
+
+  it("round-trips a YAML-indented task list", () => {
+    const initial = `${defaultHeartbeatSkeleton()}
+  - name: existing
+    agent: claude
+    prompt: keep me
+    interval: 6h
+`;
+
+    const next = upsertHeartbeatShellTask(initial, {
+      name: "snowball-seed-scout",
+      executor: "shell",
+      command: "bash ./scripts/snowball-seed-scout/scout.sh",
+      interval: "4h",
+      timeout: 900,
+    });
+
+    expect(next).toContain("  - name: existing");
+    expect(next).toContain("prompt: keep me");
+    // The new task adopts the file's existing indentation.
+    expect(next).toContain("  - name: snowball-seed-scout");
+    expect(next).toContain("    command: bash ./scripts/snowball-seed-scout/scout.sh");
+  });
+
+  it("replaces the scout task without disturbing an adjacent agent task", () => {
+    const initial = `${defaultHeartbeatSkeleton()}
+- name: snowball-seed-scout
+  executor: shell
+  command: bash ./old.sh
+  interval: 1h
+
+- name: nightly-agent
+  agent: claude
+  prompt: do the thing
+  interval: 24h
+`;
+
+    const next = upsertHeartbeatShellTask(initial, {
+      name: "snowball-seed-scout",
+      executor: "shell",
+      command: "bash ./scripts/snowball-seed-scout/scout.sh",
+      interval: "6h",
+      timeout: 900,
+    });
+
+    expect(next).toContain("command: bash ./scripts/snowball-seed-scout/scout.sh");
+    expect(next).not.toContain("bash ./old.sh");
+    expect(next).toContain("- name: nightly-agent");
+    expect(next).toContain("prompt: do the thing");
+    expect(next.match(/- name: nightly-agent/g)).toHaveLength(1);
+  });
+
   it("preserves content that follows the tasks section", () => {
     const initial = `${defaultHeartbeatSkeleton()}
 - name: first-task
