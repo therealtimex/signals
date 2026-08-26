@@ -40,7 +40,8 @@ import {
   Rocket,
 } from "lucide-react";
 import { ActivateDialog } from "./activate-dialog";
-import { DeployDialog, isSnowballSeedScoutTemplate } from "./deploy-dialog";
+import { DeployDialog } from "./deploy-dialog";
+import { isSnowballSeedScoutTemplate } from "./deploy-dialog.utils";
 import { TemplateBuilder } from "./template-builder";
 import { DedupeReviewDialog } from "./dedupe-review-dialog";
 import { isDedupeTemplateConfig } from "@/lib/workflows/dedupe-template";

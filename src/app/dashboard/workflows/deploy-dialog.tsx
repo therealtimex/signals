@@ -14,9 +14,14 @@ import { Loader2, Rocket, Save, X } from "lucide-react";
 import { SnowballSeedScoutFields } from "@/app/dashboard/workflows/snowball-seed-scout-fields";
 import {
   buildSnowballSeedScoutDeployConfig,
-  isSnowballSeedScoutTemplateConfig,
   readSnowballSeedScoutConfig,
 } from "@/lib/workflows/snowball-seed-scout";
+import {
+  formatDeployedAt,
+  isSnowballSeedScoutTemplate,
+  parseDeployTemplateConfig,
+} from "@/app/dashboard/workflows/deploy-dialog.utils";
+import { useSnowballDeployment } from "@/app/dashboard/workflows/use-snowball-deployment";
 
 interface Template {
   id: string;
@@ -53,16 +58,8 @@ type DialogAction =
       workspaceSlug: string;
     };
 
-function parseTemplateConfig(config: string): Record<string, unknown> {
-  try {
-    return JSON.parse(config || "{}") as Record<string, unknown>;
-  } catch {
-    return {};
-  }
-}
-
 function initState(template: Template): DialogState {
-  const config = parseTemplateConfig(template.config);
+  const config = parseDeployTemplateConfig(template.config);
   return {
     loading: false,
     saving: false,
@@ -108,36 +105,29 @@ function DeployDialogContent({
   const [state, dispatch] = useReducer(reducer, template, initState);
   const isDeployed = Boolean(state.deployedAt);
 
+  const deploymentLoad = useSnowballDeployment(template.id);
+
   useEffect(() => {
-    dispatch({ type: "SET_LOADING", loading: true });
-    fetch("/api/snowball-seed-scout/deployment")
-      .then((res) => {
-        if (!res.ok) {
-          throw new Error(`Deployment lookup failed (${res.status})`);
-        }
-        return res.json();
-      })
-      .then((payload) => {
-        const deployment = payload.deployment as Record<string, unknown> | null;
-        if (deployment) {
-          dispatch({
-            type: "SET_SCOUT",
-            scout: readSnowballSeedScoutConfig(deployment),
-          });
-          if (typeof deployment.deployedAt === "string") {
-            dispatch({
-              type: "DEPLOY_SUCCESS",
-              deployedAt: deployment.deployedAt,
-              workspaceSlug: "signals",
-            });
-          }
-        }
-      })
-      .catch(() => {
-        dispatch({ type: "SET_ERROR", error: "Failed to load deployment status" });
-      })
-      .finally(() => dispatch({ type: "SET_LOADING", loading: false }));
-  }, [template.id]);
+    dispatch({ type: "SET_LOADING", loading: deploymentLoad.status === "loading" });
+    if (deploymentLoad.status === "error") {
+      dispatch({ type: "SET_ERROR", error: deploymentLoad.error });
+      return;
+    }
+    if (deploymentLoad.status !== "ready" || !deploymentLoad.deployment) return;
+
+    const deployment = deploymentLoad.deployment;
+    dispatch({
+      type: "SET_SCOUT",
+      scout: readSnowballSeedScoutConfig(deployment),
+    });
+    if (typeof deployment.deployedAt === "string") {
+      dispatch({
+        type: "DEPLOY_SUCCESS",
+        deployedAt: deployment.deployedAt,
+        workspaceSlug: "signals",
+      });
+    }
+  }, [deploymentLoad]);
 
   const deployConfig = buildSnowballSeedScoutDeployConfig(state.scout);
 
@@ -240,7 +230,7 @@ function DeployDialogContent({
         {isDeployed && (
           <p className="text-xs text-muted-foreground">
             Deployed
-            {state.deployedAt ? ` ${new Date(state.deployedAt).toLocaleString()}` : ""}
+            {state.deployedAt ? ` ${formatDeployedAt(state.deployedAt)}` : ""}
             {state.workspaceSlug ? ` · workspace ${state.workspaceSlug}` : ""}
           </p>
         )}
@@ -302,8 +292,7 @@ function DeployDialogContent({
 }
 
 export function DeployDialog({ template, open, onClose }: DeployDialogProps) {
-  const config = parseTemplateConfig(template.config);
-  if (!isSnowballSeedScoutTemplateConfig(config)) {
+  if (!isSnowballSeedScoutTemplate(template)) {
     return null;
   }
 
@@ -314,8 +303,4 @@ export function DeployDialog({ template, open, onClose }: DeployDialogProps) {
       </DialogContent>
     </Dialog>
   );
-}
-
-export function isSnowballSeedScoutTemplate(template: Template): boolean {
-  return isSnowballSeedScoutTemplateConfig(parseTemplateConfig(template.config));
 }
