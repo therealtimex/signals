@@ -2,20 +2,9 @@
 
 scout_pick_platform() {
   local config_json="$1"
-  python3 - <<'PY' "${config_json}"
-import hashlib
-import json
-import sys
-from datetime import UTC, datetime
-
-config = json.loads(sys.argv[1])
-platforms = config.get("platforms") or ["x", "linkedin"]
-if not platforms:
-    platforms = ["x"]
-seed = datetime.now(UTC).strftime("%Y-%m-%d")
-idx = int(hashlib.sha256(seed.encode()).hexdigest(), 16) % len(platforms)
-print(platforms[idx])
-PY
+  local lib_dir
+  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  python3 "${lib_dir}/resolve.py" pick-platform "${config_json}"
 }
 
 scout_pp_cli_json() {
