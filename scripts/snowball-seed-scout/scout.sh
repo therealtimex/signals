@@ -71,6 +71,20 @@ except Exception:
     print(0)
 ' 2>/dev/null || echo 0)"
 
+# Deduped seeds are the expected steady state once a feed stops producing new
+# posts, so report them without treating the run as degraded.
+DEDUPED_COUNT="$(printf '%s' "${RESULT}" | python3 -c '
+import json, sys
+try:
+    print(int(json.load(sys.stdin).get("deduped") or 0))
+except Exception:
+    print(0)
+' 2>/dev/null || echo 0)"
+
+if [[ "${DEDUPED_COUNT}" != "0" ]]; then
+  echo "snowball-seed-scout: ${DEDUPED_COUNT} seed(s) already queued, skipped" >&2
+fi
+
 if [[ "${FAILED_COUNT}" != "0" ]]; then
   echo "snowball-seed-scout: ${FAILED_COUNT} seed(s) failed to enqueue: ${RESULT}" >&2
 fi

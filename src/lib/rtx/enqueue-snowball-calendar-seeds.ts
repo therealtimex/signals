@@ -1,5 +1,10 @@
 import { createHash } from "node:crypto";
 import { resolveSignalsRtxWorkspaceSlug } from "@/lib/rtx/cli-provisioning";
+import {
+  findRecentlyQueuedSeedHashes,
+  pruneSnowballSeedLedger,
+  recordQueuedSeed,
+} from "@/lib/db/queries/snowball-seed-ledger";
 import { resolveRtxApiBase, type EnvLike } from "@/lib/rtx/env";
 import { NETWORK_SNOWBALL_TEMPLATE_NAME } from "@/lib/workflows/network-snowball";
 import type { SnowballSeedScoutConfig } from "@/lib/workflows/snowball-seed-scout";
@@ -17,6 +22,8 @@ export type EnqueueSnowballSeedsResult =
       queued: Array<{ url: string; calendarEventUuid: string | null; scheduledAt: string }>;
       /** Seeds intentionally not queued (blank URL) — not an error. */
       skipped: string[];
+      /** Seeds already queued inside the dedupe window — not an error. */
+      deduped: string[];
       /** Seeds the calendar API rejected; the caller must surface these as failures. */
       failed: Array<{ url: string; reason: string }>;
     }
@@ -87,6 +94,7 @@ export async function enqueueSnowballCalendarSeeds(
     scheduledAt: string;
   }> = [];
   const skipped: string[] = [];
+  const deduped: string[] = [];
   const failed: Array<{ url: string; reason: string }> = [];
   let workspaceSlug = env.SIGNALS_RTX_WORKSPACE_SLUG?.trim() || "signals";
   try {
@@ -95,10 +103,30 @@ export async function enqueueSnowballCalendarSeeds(
     // Fall back to configured slug when RTX CLI resolution is unavailable.
   }
 
+  // Rows past the dedupe window can never match again; dropping them here keeps
+  // the ledger bounded without needing a separate sweeper.
+  pruneSnowballSeedLedger();
+
+  // Signals owns "which seeds exist", so a post already queued must not be sent
+  // again: the scout has no memory across ticks and the calendar ingest path we
+  // use does not enforce queueMeta.dedupeKey.
+  const alreadyQueued = findRecentlyQueuedSeedHashes(
+    seeds
+      .map((seed) => String(seed.url || "").trim())
+      .filter(Boolean)
+      .map((url) => hashUrl(url)),
+  );
+
   for (const seed of seeds) {
     const url = String(seed.url || "").trim();
     if (!url) {
       skipped.push(url);
+      continue;
+    }
+
+    const dedupeKey = hashUrl(url);
+    if (alreadyQueued.has(dedupeKey)) {
+      deduped.push(url);
       continue;
     }
 
@@ -141,7 +169,7 @@ export async function enqueueSnowballCalendarSeeds(
         queueMeta: {
           producerRunId: seed.producerRunId ?? null,
           platform: seed.platform ?? null,
-          dedupeKey: hashUrl(url),
+          dedupeKey,
         },
       },
     };
@@ -165,11 +193,18 @@ export async function enqueueSnowballCalendarSeeds(
         continue;
       }
 
-      queued.push({
+      const calendarEventUuid = payload.event?.uuid ?? null;
+      recordQueuedSeed({
+        urlHash: dedupeKey,
         url,
-        calendarEventUuid: payload.event?.uuid ?? null,
-        scheduledAt,
+        platform: seed.platform ?? null,
+        calendarEventUuid,
+        producerRunId: seed.producerRunId ?? null,
       });
+      // Guard within this batch too: the same URL can be harvested twice in one run.
+      alreadyQueued.add(dedupeKey);
+
+      queued.push({ url, calendarEventUuid, scheduledAt });
     } catch (error) {
       failed.push({
         url,
@@ -178,5 +213,5 @@ export async function enqueueSnowballCalendarSeeds(
     }
   }
 
-  return { success: true, queued, skipped, failed };
+  return { success: true, queued, skipped, deduped, failed };
 }

@@ -1,8 +1,9 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   enqueueSnowballCalendarSeeds,
   formatSnowballCalendarTitle,
 } from "@/lib/rtx/enqueue-snowball-calendar-seeds";
+import { resetCoreTables } from "@/test/db";
 import { readSnowballSeedScoutConfig } from "@/lib/workflows/snowball-seed-scout";
 import { buildSnowballSeedScoutTemplateConfig } from "@/lib/workflows/snowball-seed-scout";
 
@@ -11,6 +12,10 @@ vi.mock("@/lib/rtx/cli-provisioning", () => ({
 }));
 
 describe("enqueueSnowballCalendarSeeds", () => {
+  beforeEach(() => {
+    resetCoreTables();
+  });
+
   it("posts calendar events with snowball metadata", async () => {
     const fetchImpl = vi.fn().mockResolvedValue({
       ok: true,
@@ -106,6 +111,109 @@ describe("enqueueSnowballCalendarSeeds", () => {
     expect(result.failed).toEqual([
       { url: "https://x.com/acme/status/1", reason: "ECONNREFUSED" },
     ]);
+  });
+
+  it("does not re-queue a seed already queued in a previous run", async () => {
+    const scoutConfig = readSnowballSeedScoutConfig(buildSnowballSeedScoutTemplateConfig());
+    const env = {
+      RTX_API_BASE_URL: "http://127.0.0.1:3101",
+      SIGNALS_RTX_WORKSPACE_SLUG: "signals",
+    };
+    const okFetch = () =>
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ event: { uuid: "evt-1" } }),
+      });
+
+    const first = okFetch();
+    await enqueueSnowballCalendarSeeds(
+      [{ url: "https://x.com/acme/status/99", platform: "x" }],
+      scoutConfig,
+      env,
+      first as unknown as typeof fetch,
+    );
+    expect(first).toHaveBeenCalledTimes(1);
+
+    // A popular post stays in the feed, so the next heartbeat tick harvests it
+    // again. It must not reach the calendar a second time.
+    const second = okFetch();
+    const result = await enqueueSnowballCalendarSeeds(
+      [{ url: "https://x.com/acme/status/99", platform: "x" }],
+      scoutConfig,
+      env,
+      second as unknown as typeof fetch,
+    );
+
+    expect(second).not.toHaveBeenCalled();
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.queued).toHaveLength(0);
+    expect(result.deduped).toEqual(["https://x.com/acme/status/99"]);
+    expect(result.failed).toHaveLength(0);
+  });
+
+  it("collapses a url harvested twice within one batch", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ event: { uuid: "evt-1" } }),
+    });
+
+    const scoutConfig = readSnowballSeedScoutConfig(buildSnowballSeedScoutTemplateConfig());
+    const result = await enqueueSnowballCalendarSeeds(
+      [
+        { url: "https://x.com/acme/status/7", platform: "x" },
+        { url: "https://x.com/acme/status/7", platform: "x" },
+      ],
+      scoutConfig,
+      {
+        RTX_API_BASE_URL: "http://127.0.0.1:3101",
+        SIGNALS_RTX_WORKSPACE_SLUG: "signals",
+      },
+      fetchImpl as unknown as typeof fetch,
+    );
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.queued).toHaveLength(1);
+    expect(result.deduped).toHaveLength(1);
+  });
+
+  it("does not record a seed the calendar rejected", async () => {
+    const scoutConfig = readSnowballSeedScoutConfig(buildSnowballSeedScoutTemplateConfig());
+    const env = {
+      RTX_API_BASE_URL: "http://127.0.0.1:3101",
+      SIGNALS_RTX_WORKSPACE_SLUG: "signals",
+    };
+
+    const failing = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+      json: async () => ({ error: "calendar unavailable" }),
+    });
+    await enqueueSnowballCalendarSeeds(
+      [{ url: "https://x.com/acme/status/500", platform: "x" }],
+      scoutConfig,
+      env,
+      failing as unknown as typeof fetch,
+    );
+
+    // A failed enqueue must stay retryable on the next tick.
+    const retry = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ event: { uuid: "evt-2" } }),
+    });
+    const result = await enqueueSnowballCalendarSeeds(
+      [{ url: "https://x.com/acme/status/500", platform: "x" }],
+      scoutConfig,
+      env,
+      retry as unknown as typeof fetch,
+    );
+
+    expect(retry).toHaveBeenCalledTimes(1);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.queued).toHaveLength(1);
   });
 
   it("does not truncate long facebook pfbid urls in the calendar title", () => {

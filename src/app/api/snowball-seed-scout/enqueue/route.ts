@@ -48,9 +48,11 @@ export async function POST(req: NextRequest) {
     const payload = {
       queued: result.queued.length,
       skipped: result.skipped.length,
+      deduped: result.deduped.length,
       failed: result.failed.length,
       items: result.queued,
       skippedUrls: result.skipped,
+      dedupedUrls: result.deduped,
       failures: result.failed,
     };
 

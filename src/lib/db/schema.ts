@@ -698,6 +698,36 @@ export const chatConversations = sqliteTable("chat_conversations", {
   ...timestamps,
 });
 
+// --- Snowball Seed Ledger ---
+
+/**
+ * Post URLs the Snowball Seed Scout has already queued.
+ *
+ * Signals is the source of truth for which seeds exist, so it must not emit the
+ * same post twice — the scout has no memory across heartbeat ticks and a popular
+ * post stays in a feed for hours. RTX dedupes on `queueMeta.dedupeKey`, but only
+ * on the `/calendar-events/schedule-agent` ingest path, so that guard cannot be
+ * relied on here.
+ */
+export const snowballSeedLedger = sqliteTable(
+  "snowball_seed_ledger",
+  {
+    id: text("id").primaryKey(),
+    /** sha256 of the normalized post URL — matches the dedupeKey sent to RTX. */
+    urlHash: text("url_hash").notNull(),
+    url: text("url").notNull(),
+    platform: text("platform"),
+    calendarEventUuid: text("calendar_event_uuid"),
+    producerRunId: text("producer_run_id"),
+    enqueuedAt: integer("enqueued_at").notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("idx_snowball_seed_ledger_url_hash").on(table.urlHash),
+    index("idx_snowball_seed_ledger_enqueued_at").on(table.enqueuedAt),
+  ],
+);
+
 // --- Scheduled Jobs ---
 
 export const scheduledJobs = sqliteTable("scheduled_jobs", {
