@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  assignSequentialScheduledTimes,
   enqueueSnowballCalendarSeeds,
   formatSnowballCalendarTitle,
 } from "@/lib/rtx/enqueue-snowball-calendar-seeds";
@@ -413,5 +414,68 @@ describe("enqueueSnowballCalendarSeeds", () => {
     expect(formatSnowballCalendarTitle(longUrl)).toBe(
       "[Signals] Snowball: facebook.com/saritasym/posts",
     );
+  });
+
+  it("spaces queued seeds by salt delay from the previous calendar task", async () => {
+    const now = 1_700_000_000_000;
+    vi.spyOn(Date, "now").mockReturnValue(now);
+    vi.spyOn(Math, "random").mockReturnValue(0);
+
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ event: { uuid: "evt" } }),
+    });
+
+    const scoutConfig = readSnowballSeedScoutConfig({
+      ...buildSnowballSeedScoutTemplateConfig(),
+      saltMinMinutes: 10,
+      saltMaxMinutes: 15,
+    });
+
+    await enqueueSnowballCalendarSeeds(
+      [
+        { url: "https://x.com/acme/status/1", platform: "x" },
+        { url: "https://x.com/acme/status/2", platform: "x" },
+        { url: "https://x.com/acme/status/3", platform: "x" },
+      ],
+      scoutConfig,
+      {
+        RTX_API_BASE_URL: "http://127.0.0.1:3101",
+        SIGNALS_RTX_WORKSPACE_SLUG: "signals",
+      },
+      fetchImpl as unknown as typeof fetch,
+    );
+
+    const starts = fetchImpl.mock.calls
+      .map(([, init]) => {
+        const body = JSON.parse(String(init?.body));
+        return new Date(body.startDate).getTime();
+      })
+      .sort((a, b) => a - b);
+
+    const minGapMs = 10 * 60_000;
+    expect(starts).toHaveLength(3);
+    expect(starts[0]).toBe(now + minGapMs);
+    expect(starts[1]).toBe(starts[0] + minGapMs);
+    expect(starts[2]).toBe(starts[1] + minGapMs);
+  });
+});
+
+describe("assignSequentialScheduledTimes", () => {
+  it("chains each seed after the previous scheduled time", () => {
+    const now = 1_700_000_000_000;
+    vi.spyOn(Math, "random").mockReturnValue(0);
+
+    const scheduled = assignSequentialScheduledTimes(
+      [{ url: "https://x.com/a/1" }, { url: "https://x.com/a/2" }],
+      10,
+      15,
+      now,
+    );
+
+    const first = new Date(scheduled[0]?.scheduledAt ?? "").getTime();
+    const second = new Date(scheduled[1]?.scheduledAt ?? "").getTime();
+    expect(first).toBe(now + 10 * 60_000);
+    expect(second).toBe(first + 10 * 60_000);
   });
 });
