@@ -379,10 +379,14 @@ export async function resolveNetworkSnowballDispatchThread(
   // Pick deterministically when several exist, so concurrent resolvers that each
   // created one still converge on the same target rather than splitting history.
   const pickStable = (matches: Array<{ slug: string; name: string }>) => {
-    const usable = matches.filter((thread) => thread.slug.trim());
+    // Filter and return on the same trimmed value: selecting on the trimmed slug
+    // but returning the padded one hands back a slug that will not resolve.
+    const usable = matches
+      .map((thread) => thread.slug.trim())
+      .filter((slug) => slug.length > 0);
     return usable.length === 0
       ? null
-      : [...usable].sort((a, b) => a.slug.localeCompare(b.slug))[0].slug;
+      : [...usable].sort((a, b) => a.localeCompare(b))[0];
   };
 
   if (threads !== null) {

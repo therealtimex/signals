@@ -269,4 +269,67 @@ describe("resolveNetworkSnowballDispatchThread", () => {
       ),
     ).resolves.toBe("f0238db7-6620-4452-9a91-bcdb9dd23fdd");
   });
+
+  it("returns a trimmed slug and never creates on a failed listing", async () => {
+    const created: string[] = [];
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes("/cli/get-thread/signals/network-snowball")) {
+        return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
+      }
+      if (url.endsWith("/cli/list-threads/signals")) {
+        return new Response(
+          JSON.stringify({
+            threads: [{ slug: "  f0238db7-padded  ", name: "Network Snowball" }],
+          }),
+          { status: 200 },
+        );
+      }
+      if (url.includes("/cli/new-thread")) {
+        created.push(url);
+        return new Response(JSON.stringify({ thread: { slug: "created" } }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ error: "unexpected" }), { status: 500 });
+    });
+
+    const { resolveNetworkSnowballDispatchThread } = await import("@/lib/rtx/cli-provisioning");
+    // A padded slug must come back usable, not with its whitespace intact.
+    await expect(
+      resolveNetworkSnowballDispatchThread(
+        "signals",
+        { RTX_APP_ID: "app-1", SERVER_URL: "http://127.0.0.1:3101" },
+        fetchImpl,
+      ),
+    ).resolves.toBe("f0238db7-padded");
+    expect(created).toHaveLength(0);
+  });
+
+  it("does not create a thread when the listing itself fails", async () => {
+    const created: string[] = [];
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes("/cli/get-thread/signals/network-snowball")) {
+        return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
+      }
+      if (url.endsWith("/cli/list-threads/signals")) {
+        // Unknown, not empty — creating here is how duplicate threads appear.
+        return new Response(JSON.stringify({ error: "boom" }), { status: 500 });
+      }
+      if (url.includes("/cli/new-thread")) {
+        created.push(url);
+        return new Response(JSON.stringify({ thread: { slug: "created" } }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ error: "unexpected" }), { status: 500 });
+    });
+
+    const { resolveNetworkSnowballDispatchThread } = await import("@/lib/rtx/cli-provisioning");
+    await expect(
+      resolveNetworkSnowballDispatchThread(
+        "signals",
+        { RTX_APP_ID: "app-1", SERVER_URL: "http://127.0.0.1:3101" },
+        fetchImpl,
+      ),
+    ).resolves.toBe("network-snowball");
+    expect(created).toHaveLength(0);
+  });
 });
