@@ -8,6 +8,7 @@ import { readSnowballSeedScoutConfig } from "@/lib/workflows/snowball-seed-scout
 import { buildSnowballSeedScoutTemplateConfig } from "@/lib/workflows/snowball-seed-scout";
 
 vi.mock("@/lib/rtx/cli-provisioning", () => ({
+  NETWORK_SNOWBALL_DISPATCH_THREAD_SLUG: "network-snowball",
   resolveSignalsRtxWorkspaceSlug: vi.fn(async () => "f3a8c2e1-4d5b-4a7c-8e9f-0a1b2c3d4e5f"),
   resolveNetworkSnowballDispatchThread: vi.fn(
     async () => "f0238db7-6620-4452-9a91-bcdb9dd23fdd",

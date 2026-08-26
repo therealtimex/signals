@@ -125,7 +125,17 @@ export async function deploySnowballSeedScout(
   // Refuse an uneditable heartbeat before `ensureRtxWorkspace`, which would
   // otherwise create a remote workspace for a deploy that cannot proceed. The
   // check repeats after slug resolution, since the resolved slug may differ.
-  const preflightDir = resolveRtxWorkspaceWorkingDir(preferredSlug, env);
+  //
+  // Resolve non-creatingly first: if the workspace actually lives under another
+  // slug, a stale file at the preferred path is not the heartbeat we would edit
+  // and must not block the deploy.
+  let preflightSlug = preferredSlug;
+  try {
+    preflightSlug = await resolveSignalsRtxWorkspaceSlug(env);
+  } catch {
+    // Fall back to the configured slug when RTX cannot be reached.
+  }
+  const preflightDir = resolveRtxWorkspaceWorkingDir(preflightSlug, env);
   if (preflightDir) {
     const preflightHeartbeat = await readWorkspaceFile(
       preflightDir,

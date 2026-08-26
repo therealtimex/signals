@@ -321,9 +321,9 @@ export async function listRtxWorkspaceThreads(
   workspaceSlug: string,
   env: EnvLike = process.env,
   fetchImpl: typeof fetch = fetch,
-): Promise<Array<{ slug: string; name: string }>> {
+): Promise<Array<{ slug: string; name: string }> | null> {
   const slug = workspaceSlug.trim();
-  if (!slug) return [];
+  if (!slug) return null;
 
   try {
     const body = await rtxCliRequestOk(
@@ -342,7 +342,9 @@ export async function listRtxWorkspaceThreads(
       return [{ slug: thread.slug, name: thread.name }];
     });
   } catch {
-    return [];
+    // null means "unknown", not "none". Collapsing the two would let a transient
+    // listing failure look like an empty workspace and create a duplicate thread.
+    return null;
   }
 }
 
@@ -373,14 +375,27 @@ export async function resolveNetworkSnowballDispatchThread(
   }
 
   const threads = await listRtxWorkspaceThreads(workspace, env, fetchImpl);
-  const existing = threads.find(
-    (thread) => thread.name === NETWORK_SNOWBALL_DISPATCH_THREAD_NAME,
-  );
-  if (existing) {
-    return existing.slug;
+
+  // Pick deterministically when several exist, so concurrent resolvers that each
+  // created one still converge on the same target rather than splitting history.
+  const pickStable = (matches: Array<{ slug: string; name: string }>) =>
+    matches.length === 0
+      ? null
+      : [...matches].sort((a, b) => a.slug.localeCompare(b.slug))[0].slug;
+
+  if (threads !== null) {
+    const exact = pickStable(
+      threads.filter(
+        (thread) => thread.name === NETWORK_SNOWBALL_DISPATCH_THREAD_NAME,
+      ),
+    );
+    if (exact) return exact;
   }
 
-  if (preferredPresence === "missing") {
+  // Only create when RTX confirmed the legacy slug is absent *and* the listing
+  // succeeded. A failed listing is unknown, not empty, and creating on unknown is
+  // how duplicate threads appear.
+  if (preferredPresence === "missing" && threads !== null) {
     return createRtxPublishThread(
       workspace,
       NETWORK_SNOWBALL_DISPATCH_THREAD_NAME,
@@ -389,11 +404,17 @@ export async function resolveNetworkSnowballDispatchThread(
     );
   }
 
-  // RTX could not confirm thread presence; avoid creating duplicates blindly.
-  const fallback = threads.find((thread) =>
-    thread.name.toLowerCase().includes("network snowball"),
-  );
-  if (fallback) return fallback.slug;
+  // Presence or listing could not be confirmed; reuse anything plausible rather
+  // than creating blindly.
+  const fallback =
+    threads === null
+      ? null
+      : pickStable(
+          threads.filter((thread) =>
+            thread.name.toLowerCase().includes("network snowball"),
+          ),
+        );
+  if (fallback) return fallback;
 
   return NETWORK_SNOWBALL_DISPATCH_THREAD_SLUG;
 }

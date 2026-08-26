@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import {
+  NETWORK_SNOWBALL_DISPATCH_THREAD_SLUG,
   resolveNetworkSnowballDispatchThread,
   resolveSignalsRtxWorkspaceSlug,
 } from "@/lib/rtx/cli-provisioning";
@@ -138,7 +139,7 @@ export async function enqueueSnowballCalendarSeeds(
     // Fall back to configured slug when RTX CLI resolution is unavailable.
   }
 
-  let dispatchThreadSlug = "network-snowball";
+  let dispatchThreadSlug = NETWORK_SNOWBALL_DISPATCH_THREAD_SLUG;
   try {
     dispatchThreadSlug = await resolveNetworkSnowballDispatchThread(
       workspaceSlug,

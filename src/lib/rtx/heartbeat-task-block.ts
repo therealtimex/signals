@@ -63,16 +63,24 @@ function detectEol(content: string): string {
 export function findUnsupportedTasksRepresentation(
   content: string,
 ): string | null {
-  let inFence = false;
+  // Only a column-0 marker opens a markdown fence, and only its own delimiter
+  // closes it. Matching indented markers would let a ``` inside a prompt block
+  // scalar open a phantom fence that swallows the real key below it, and
+  // toggling on the other delimiter would do the same — both fall through to the
+  // duplicate-key append this guard exists to prevent.
+  let fence: "`" | "~" | null = null;
   for (const line of toLf(content).split("\n")) {
-    // A ``` example is documentation, not a key. RealTimeX's own locator only
-    // accepts an empty value, so a fenced populated array is inert to it too —
-    // refusing on one would block a deploy that is perfectly safe.
-    if (/^\s*(```|~~~)/.test(line)) {
-      inFence = !inFence;
+    const marker = line.match(/^(`{3,}|~{3,})/);
+    if (marker) {
+      const delimiter = marker[1][0] === "`" ? "`" : "~";
+      if (fence === null) fence = delimiter;
+      else if (fence === delimiter) fence = null;
       continue;
     }
-    if (inFence) continue;
+    // A fenced example is documentation, not a key. RealTimeX's own locator only
+    // accepts an empty value, so a fenced populated array is inert to it too —
+    // refusing on one would block a deploy that is perfectly safe.
+    if (fence) continue;
 
     const match = line.match(TASKS_KEY_PATTERN);
     if (!match || isExpandableTasksValue(match[1])) continue;

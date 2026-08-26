@@ -224,6 +224,38 @@ tasks: [{ name: morning-brief, agent: claude, prompt: keep-me, interval: 24h }]
     ).toHaveLength(1);
   });
 
+  it("does not let an unbalanced fence inside a prompt hide a real key", () => {
+    // A lone ``` in a block scalar is not a markdown fence. Treating it as one
+    // opened a phantom fence that swallowed the real key and fell through to the
+    // duplicate-key append.
+    const content = `tasks:
+
+- name: brief
+  agent: claude
+  prompt: |
+    \`\`\`
+    code
+
+tasks: [{ name: morning-brief, agent: claude }]
+`;
+
+    expect(findUnsupportedTasksRepresentation(content)).toContain("inline list");
+  });
+
+  it("closes a fence only on its own delimiter", () => {
+    // A ~~~ inside a ``` block must not close it, and vice versa.
+    const backticks = "# h\n\n```\n~~~\n```\n\ntasks: [{ name: a }]\n";
+    const tildes = "# h\n\n~~~\n```\n~~~\n\ntasks: [{ name: a }]\n";
+
+    expect(findUnsupportedTasksRepresentation(backticks)).toContain("inline list");
+    expect(findUnsupportedTasksRepresentation(tildes)).toContain("inline list");
+  });
+
+  it("still ignores a genuine top-level fenced example", () => {
+    const content = "# h\n\n```yaml\ntasks: [{ name: ex }]\n```\n\ntasks:\n\n- name: b\n  agent: c\n  prompt: p\n";
+    expect(findUnsupportedTasksRepresentation(content)).toBeNull();
+  });
+
   it("accepts every spelling of an empty task list", () => {
     for (const value of ["tasks: []", "tasks: [ ]", "tasks: []   # none yet", "tasks:   [  ]  "]) {
       expect(findUnsupportedTasksRepresentation(`# h\n\n${value}\n`)).toBeNull();
