@@ -381,9 +381,10 @@ export async function resolveNetworkSnowballDispatchThread(
   const pickStable = (matches: Array<{ slug: string; name: string }>) => {
     // Filter and return on the same trimmed value: selecting on the trimmed slug
     // but returning the padded one hands back a slug that will not resolve.
-    const usable = matches
-      .map((thread) => thread.slug.trim())
-      .filter((slug) => slug.length > 0);
+    const usable = matches.flatMap((thread) => {
+      const slug = thread.slug.trim();
+      return slug ? [slug] : [];
+    });
     return usable.length === 0
       ? null
       : [...usable].sort((a, b) => a.localeCompare(b))[0];
