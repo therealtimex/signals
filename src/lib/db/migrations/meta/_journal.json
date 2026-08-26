@@ -218,6 +218,20 @@
       "when": 1787471822432,
       "tag": "0030_lame_puma",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "6",
+      "when": 1787721876936,
+      "tag": "0031_curly_quasimodo",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1787722533987,
+      "tag": "0032_faulty_iron_fist",
+      "breakpoints": true
     }
   ]
 }

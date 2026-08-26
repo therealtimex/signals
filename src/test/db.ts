@@ -35,11 +35,13 @@ import {
   browserConnections,
   browserSessionLeases,
   platformTargets,
+  snowballSeedLedger,
   tasks,
 } from "@/lib/db/schema";
 
 /** Clear core tables used by unit tests (child rows first). */
 export function resetCoreTables(): void {
+  db.delete(snowballSeedLedger).run();
   db.delete(tasks).run();
   db.delete(browserSessionLeases).run();
   db.delete(workflowSteps).run();

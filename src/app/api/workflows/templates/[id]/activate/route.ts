@@ -3,6 +3,8 @@ import { z } from "zod";
 import { getTemplate } from "@/lib/db/queries/workflow-templates";
 import { runTemplateViaRtx } from "@/lib/agents/run-template-via-rtx";
 import { resolveSignalsBaseUrlFromRequest } from "@/lib/rtx/resolve-signals-base-url";
+import { parseTemplateConfig } from "@/lib/workflows/template-config";
+import { isHeartbeatShellTemplateConfig } from "@/lib/workflows/snowball-seed-scout";
 
 const activateSchema = z.object({
   config: z.record(z.unknown()).optional(),
@@ -24,6 +26,19 @@ export async function POST(
   const template = getTemplate(id);
   if (!template) {
     return NextResponse.json({ error: "Template not found" }, { status: 404 });
+  }
+
+  // Heartbeat-shell templates are provisioned via Deploy, not launched as a
+  // terminal-agent run.
+  if (isHeartbeatShellTemplateConfig(parseTemplateConfig(template.config))) {
+    return NextResponse.json(
+      {
+        error:
+          "This template is deployed to the RealTimeX workspace heartbeat and cannot be run directly. Use Deploy instead.",
+        errorCode: "deploy_only_template",
+      },
+      { status: 400 },
+    );
   }
 
   try {

@@ -5,6 +5,7 @@ import { runTemplateViaRtx } from "@/lib/agents/run-template-via-rtx";
 import { resolveSignalsBaseUrlFromRequest } from "@/lib/rtx/resolve-signals-base-url";
 import { parseTemplateConfig } from "@/lib/workflows/template-config";
 import { runPipelineTemplate } from "@/lib/workflows/pipeline/run-pipeline-template";
+import { isHeartbeatShellTemplateConfig } from "@/lib/workflows/snowball-seed-scout";
 
 const runSchema = z.object({
   config: z.record(z.unknown()).optional(),
@@ -36,6 +37,19 @@ export async function POST(
     }
 
     const templateConfig = parseTemplateConfig(template.config);
+    // Heartbeat-shell templates are provisioned via Deploy, not launched as a
+    // terminal-agent run. Running one through RTX would do nothing useful.
+    if (isHeartbeatShellTemplateConfig(templateConfig)) {
+      return NextResponse.json(
+        {
+          error:
+            "This template is deployed to the RealTimeX workspace heartbeat and cannot be run directly. Use Deploy instead.",
+          errorCode: "deploy_only_template",
+        },
+        { status: 400 },
+      );
+    }
+
     if (templateConfig.pipeline) {
       const result = await runPipelineTemplate({
         templateId: id,
