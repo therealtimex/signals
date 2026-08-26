@@ -111,10 +111,10 @@ export async function enqueueSnowballCalendarSeeds(
   // again: the scout has no memory across ticks and the calendar ingest path we
   // use does not enforce queueMeta.dedupeKey.
   const alreadyQueued = findRecentlyQueuedSeedHashes(
-    seeds
-      .map((seed) => String(seed.url || "").trim())
-      .filter(Boolean)
-      .map((url) => hashUrl(url)),
+    seeds.flatMap((seed) => {
+      const url = String(seed.url || "").trim();
+      return url ? [hashUrl(url)] : [];
+    }),
   );
 
   for (const seed of seeds) {

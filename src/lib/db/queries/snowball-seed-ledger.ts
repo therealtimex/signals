@@ -1,4 +1,4 @@
-import { inArray, lt } from "drizzle-orm";
+import { and, gte, inArray, lt } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db/client";
 import { snowballSeedLedger } from "@/lib/db/schema";
@@ -38,17 +38,17 @@ export function findRecentlyQueuedSeedHashes(
 
   const cutoff = nowSeconds() - Math.floor(windowMs / 1000);
   const rows = db
-    .select({
-      urlHash: snowballSeedLedger.urlHash,
-      enqueuedAt: snowballSeedLedger.enqueuedAt,
-    })
+    .select({ urlHash: snowballSeedLedger.urlHash })
     .from(snowballSeedLedger)
-    .where(inArray(snowballSeedLedger.urlHash, unique))
+    .where(
+      and(
+        inArray(snowballSeedLedger.urlHash, unique),
+        gte(snowballSeedLedger.enqueuedAt, cutoff),
+      ),
+    )
     .all();
 
-  return new Set(
-    rows.filter((row) => row.enqueuedAt >= cutoff).map((row) => row.urlHash),
-  );
+  return new Set(rows.map((row) => row.urlHash));
 }
 
 /**
