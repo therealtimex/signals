@@ -8,6 +8,7 @@ import {
   SNOWBALL_SEED_CLAIM_TTL_MS,
   claimSeed,
   confirmSeed,
+  getLatestQueuedSeedScheduledAtMs,
   pruneSnowballSeedLedger,
   releaseSeedClaim,
 } from "@/lib/db/queries/snowball-seed-ledger";
@@ -106,18 +107,28 @@ function scheduledStartIso(explicit?: string | null): string {
   return new Date().toISOString();
 }
 
+export interface AssignSequentialScheduledTimesOptions {
+  nowMs?: number;
+  /** Calendar start time of the most recently queued seed, if any. */
+  lastSeedScheduledAtMs?: number | null;
+}
+
 /**
  * Queue delay is the gap *between* calendar tasks, not an independent offset from
  * workflow start. Pre-assign times sequentially so concurrent POST workers cannot
- * collapse every seed onto the same minute.
+ * collapse every seed onto the same minute. When a previous run already queued
+ * seeds, the first new seed only waits for the remaining gap — it can start now
+ * if enough time has already passed.
  */
 export function assignSequentialScheduledTimes(
   seeds: EnqueueSnowballSeedInput[],
   saltMinMinutes: number,
   saltMaxMinutes: number,
-  nowMs: number = Date.now(),
+  options: AssignSequentialScheduledTimesOptions = {},
 ): EnqueueSnowballSeedInput[] {
-  let cursorMs = nowMs;
+  const nowMs = options.nowMs ?? Date.now();
+  let cursorMs =
+    options.lastSeedScheduledAtMs != null ? options.lastSeedScheduledAtMs : nowMs;
 
   return seeds.map((seed) => {
     if (seed.scheduledAt) {
@@ -130,7 +141,9 @@ export function assignSequentialScheduledTimes(
 
     const delayMinutes = randomSaltMinutes(saltMinMinutes, saltMaxMinutes);
     cursorMs += delayMinutes * 60_000;
-    return { ...seed, scheduledAt: new Date(cursorMs).toISOString() };
+    const scheduledMs = Math.max(nowMs, cursorMs);
+    cursorMs = scheduledMs;
+    return { ...seed, scheduledAt: new Date(scheduledMs).toISOString() };
   });
 }
 
@@ -191,6 +204,7 @@ export async function enqueueSnowballCalendarSeeds(
     seeds,
     scoutConfig.saltMinMinutes,
     scoutConfig.saltMaxMinutes,
+    { lastSeedScheduledAtMs: getLatestQueuedSeedScheduledAtMs() },
   );
 
   const processSeed = async (seed: EnqueueSnowballSeedInput): Promise<void> => {
@@ -291,7 +305,7 @@ export async function enqueueSnowballCalendarSeeds(
       }
 
       const calendarEventUuid = payload.event?.uuid ?? null;
-      confirmSeed(dedupeKey, claimToken, calendarEventUuid);
+      confirmSeed(dedupeKey, claimToken, calendarEventUuid, scheduledAt);
       queued.push({ url, calendarEventUuid, scheduledAt });
     } catch (error) {
       // Every thrown request error is ambiguous. A timeout, a connection reset,

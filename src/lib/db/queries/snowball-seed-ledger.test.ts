@@ -8,6 +8,7 @@ import {
   claimSeed,
   confirmSeed,
   findRecentlyQueuedSeedHashes,
+  getLatestQueuedSeedScheduledAtMs,
   pruneSnowballSeedLedger,
   releaseSeedClaim,
 } from "@/lib/db/queries/snowball-seed-ledger";
@@ -144,5 +145,24 @@ describe("snowball seed ledger", () => {
 
   it("handles an empty lookup without querying", () => {
     expect(findRecentlyQueuedSeedHashes([]).size).toBe(0);
+  });
+
+  it("returns the latest queued seed calendar start time", () => {
+    const earlier = new Date("2026-01-01T10:00:00Z");
+    const later = new Date("2026-01-01T11:00:00Z");
+    confirmSeed(
+      "hash-a",
+      claimSeed(seed("hash-a"))!,
+      "evt-a",
+      earlier.toISOString(),
+    );
+    confirmSeed(
+      "hash-b",
+      claimSeed(seed("hash-b"))!,
+      "evt-b",
+      later.toISOString(),
+    );
+
+    expect(getLatestQueuedSeedScheduledAtMs()).toBe(later.getTime());
   });
 });

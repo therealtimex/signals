@@ -459,6 +459,51 @@ describe("enqueueSnowballCalendarSeeds", () => {
     expect(starts[1]).toBe(starts[0] + minGapMs);
     expect(starts[2]).toBe(starts[1] + minGapMs);
   });
+
+  it("starts immediately when the previous run's last seed is already past the min gap", async () => {
+    const now = 1_700_000_000_000;
+    vi.spyOn(Date, "now").mockReturnValue(now);
+    vi.spyOn(Math, "random").mockReturnValue(0);
+
+    const scoutConfig = readSnowballSeedScoutConfig({
+      ...buildSnowballSeedScoutTemplateConfig(),
+      saltMinMinutes: 10,
+      saltMaxMinutes: 15,
+    });
+    const env = {
+      RTX_API_BASE_URL: "http://127.0.0.1:3101",
+      SIGNALS_RTX_WORKSPACE_SLUG: "signals",
+    };
+
+    const firstRunFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ event: { uuid: "evt-prev" } }),
+    });
+    await enqueueSnowballCalendarSeeds(
+      [{ url: "https://x.com/acme/status/prev", platform: "x" }],
+      scoutConfig,
+      env,
+      firstRunFetch as unknown as typeof fetch,
+    );
+
+    const twentyMinutesLater = now + 20 * 60_000;
+    vi.spyOn(Date, "now").mockReturnValue(twentyMinutesLater);
+
+    const secondRunFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ event: { uuid: "evt-next" } }),
+    });
+    await enqueueSnowballCalendarSeeds(
+      [{ url: "https://x.com/acme/status/next", platform: "x" }],
+      scoutConfig,
+      env,
+      secondRunFetch as unknown as typeof fetch,
+    );
+
+    const [, init] = secondRunFetch.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(String(init?.body));
+    expect(new Date(body.startDate).getTime()).toBe(twentyMinutesLater);
+  });
 });
 
 describe("assignSequentialScheduledTimes", () => {
@@ -470,12 +515,44 @@ describe("assignSequentialScheduledTimes", () => {
       [{ url: "https://x.com/a/1" }, { url: "https://x.com/a/2" }],
       10,
       15,
-      now,
+      { nowMs: now },
     );
 
     const first = new Date(scheduled[0]?.scheduledAt ?? "").getTime();
     const second = new Date(scheduled[1]?.scheduledAt ?? "").getTime();
     expect(first).toBe(now + 10 * 60_000);
     expect(second).toBe(first + 10 * 60_000);
+  });
+
+  it("starts the first seed now when the previous run's last seed is old enough", () => {
+    const now = 1_700_000_000_000;
+    const twentyMinutesAgo = now - 20 * 60_000;
+    vi.spyOn(Math, "random").mockReturnValue(0);
+
+    const scheduled = assignSequentialScheduledTimes(
+      [{ url: "https://x.com/a/1" }],
+      10,
+      15,
+      { nowMs: now, lastSeedScheduledAtMs: twentyMinutesAgo },
+    );
+
+    expect(new Date(scheduled[0]?.scheduledAt ?? "").getTime()).toBe(now);
+  });
+
+  it("waits only for the remaining gap when the previous run's last seed is recent", () => {
+    const now = 1_700_000_000_000;
+    const fiveMinutesAgo = now - 5 * 60_000;
+    vi.spyOn(Math, "random").mockReturnValue(0);
+
+    const scheduled = assignSequentialScheduledTimes(
+      [{ url: "https://x.com/a/1" }],
+      10,
+      15,
+      { nowMs: now, lastSeedScheduledAtMs: fiveMinutesAgo },
+    );
+
+    expect(new Date(scheduled[0]?.scheduledAt ?? "").getTime()).toBe(
+      now + 5 * 60_000,
+    );
   });
 });

@@ -1,0 +1,1 @@
+ALTER TABLE `snowball_seed_ledger` ADD `scheduled_at` integer;

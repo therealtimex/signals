@@ -1,4 +1,4 @@
-import { and, eq, gte, inArray, lt, or } from "drizzle-orm";
+import { and, eq, gte, inArray, lt, or, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db/client";
 import { snowballSeedLedger } from "@/lib/db/schema";
@@ -156,15 +156,51 @@ export function claimSeed(
  * @returns false when the claim was taken over meanwhile, so this caller's
  * response no longer owns the row and must not overwrite it.
  */
+/** Latest calendar start time among seeds still inside the dedupe window. */
+export function getLatestQueuedSeedScheduledAtMs(
+  windowMs: number = SNOWBALL_SEED_DEDUPE_WINDOW_MS,
+): number | null {
+  const cutoff = nowSeconds() - Math.floor(windowMs / 1000);
+  const row = db
+    .select({
+      scheduledAtMs: sql<number>`max(coalesce(${snowballSeedLedger.scheduledAt}, ${snowballSeedLedger.enqueuedAt})) * 1000`,
+    })
+    .from(snowballSeedLedger)
+    .where(
+      and(
+        eq(snowballSeedLedger.status, "queued"),
+        gte(snowballSeedLedger.enqueuedAt, cutoff),
+      ),
+    )
+    .get();
+
+  const scheduledAtMs = row?.scheduledAtMs;
+  return scheduledAtMs != null && scheduledAtMs > 0 ? scheduledAtMs : null;
+}
+
 export function confirmSeed(
   urlHash: string,
   claimToken: string,
   calendarEventUuid: string | null,
+  scheduledAtIso?: string | null,
 ): boolean {
   const now = nowSeconds();
+  let scheduledAt: number | null = null;
+  if (scheduledAtIso) {
+    const parsed = new Date(scheduledAtIso);
+    if (!Number.isNaN(parsed.getTime())) {
+      scheduledAt = Math.floor(parsed.getTime() / 1000);
+    }
+  }
   const result = db
     .update(snowballSeedLedger)
-    .set({ status: "queued", calendarEventUuid, enqueuedAt: now, updatedAt: now })
+    .set({
+      status: "queued",
+      calendarEventUuid,
+      enqueuedAt: now,
+      scheduledAt,
+      updatedAt: now,
+    })
     .where(
       and(
         eq(snowballSeedLedger.urlHash, urlHash),

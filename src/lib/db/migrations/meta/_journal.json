@@ -232,6 +232,13 @@
       "when": 1787722533987,
       "tag": "0032_faulty_iron_fist",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1787767687982,
+      "tag": "0033_same_microchip",
+      "breakpoints": true
     }
   ]
 }
