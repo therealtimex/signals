@@ -69,15 +69,26 @@ export function classifySignalsTarget({
         "The Local App is serving a stale document; restart it rather than trusting the UI.",
     };
   }
-  if (healthApp !== "signals" || healthState !== "ok") {
-    // A 200 only proves *something* is on this port. Local App ports get
-    // reassigned, so confirm Signals itself is answering before trusting the UI.
+  if (healthApp !== "signals") {
+    // Wrong app on this port. Local App ports get reassigned, so a 200 only
+    // proves *something* is listening — the remedy is to re-resolve the port.
     return {
       ok: false,
       code: "not_signals",
       message:
-        `/api/health answered 200 but reported app="${healthApp ?? "none"}" status="${healthState ?? "none"}". ` +
+        `/api/health answered 200 but reported app="${healthApp ?? "none"}". ` +
         "Something other than Signals is serving this port; re-resolve the Local App port before asserting.",
+    };
+  }
+  if (healthState !== "ok") {
+    // Signals *is* answering, just not healthy. Sending the operator to
+    // re-resolve the port here would be actively misleading.
+    return {
+      ok: false,
+      code: "server_unhealthy",
+      message:
+        `Signals answered /api/health with status="${healthState ?? "none"}". ` +
+        "The right app is on this port but reports itself unhealthy; restart it before asserting.",
     };
   }
   return { ok: true, code: "ready", message: "Signals Local App is loaded and healthy." };
@@ -96,7 +107,10 @@ async function evaluateHref(webSocketDebuggerUrl) {
   const socket = new WebSocket(webSocketDebuggerUrl);
   try {
     await new Promise((resolve, reject) => {
+      // A stalled handshake fires neither `open` nor `error`, so without this the
+      // CLI waits forever. Every other wait here is bounded; this one must be too.
       const cleanup = () => {
+        clearTimeout(timer);
         socket.removeEventListener("open", onOpen);
         socket.removeEventListener("error", onError);
       };
@@ -108,6 +122,10 @@ async function evaluateHref(webSocketDebuggerUrl) {
         cleanup();
         reject(new Error("CDP socket failed to open"));
       };
+      const timer = setTimeout(() => {
+        cleanup();
+        reject(new Error("CDP socket handshake timed out"));
+      }, 10_000);
       socket.addEventListener("open", onOpen);
       socket.addEventListener("error", onError);
     });

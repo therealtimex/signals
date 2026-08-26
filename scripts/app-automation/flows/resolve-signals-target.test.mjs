@@ -74,7 +74,12 @@ test("a 200 from something that is not Signals is not ready", () => {
   assert.equal(verdict.ok, false);
   assert.equal(verdict.code, "not_signals");
 
-  const degraded = classifySignalsTarget({
+});
+
+test("a degraded Signals is unhealthy, not a wrong-port problem", () => {
+  // Reporting not_signals here would send the operator to re-resolve the port
+  // when the right app is answering and simply unwell.
+  const verdict = classifySignalsTarget({
     cdpReachable: true,
     target: TARGET,
     documentHref: "http://localhost:3010/dashboard/workflows",
@@ -82,7 +87,9 @@ test("a 200 from something that is not Signals is not ready", () => {
     healthApp: "signals",
     healthState: "degraded",
   });
-  assert.equal(degraded.code, "not_signals");
+  assert.equal(verdict.code, "server_unhealthy");
+  assert.match(verdict.message, /unhealthy/);
+  assert.doesNotMatch(verdict.message, /re-resolve/);
 });
 
 test("only reports ready when Signals itself confirms it is ok", () => {
