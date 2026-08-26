@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { snowballSeedLedger } from "@/lib/db/schema";
@@ -6,8 +6,11 @@ import {
   SNOWBALL_SEED_CLAIM_TTL_MS,
   SNOWBALL_SEED_DEDUPE_WINDOW_MS,
   claimSeed,
+  claimSeedWithSchedule,
+  computeNextScheduledAtMs,
   confirmSeed,
   findRecentlyQueuedSeedHashes,
+  getLatestReservedScheduledAtMs,
   pruneSnowballSeedLedger,
   releaseSeedClaim,
 } from "@/lib/db/queries/snowball-seed-ledger";
@@ -144,5 +147,51 @@ describe("snowball seed ledger", () => {
 
   it("handles an empty lookup without querying", () => {
     expect(findRecentlyQueuedSeedHashes([]).size).toBe(0);
+  });
+
+  it("returns the latest queued seed calendar start time", () => {
+    const earlier = new Date("2026-01-01T10:00:00Z");
+    const later = new Date("2026-01-01T11:00:00Z");
+    confirmSeed(
+      "hash-a",
+      claimSeed(seed("hash-a"))!,
+      "evt-a",
+      earlier.toISOString(),
+    );
+    confirmSeed(
+      "hash-b",
+      claimSeed(seed("hash-b"))!,
+      "evt-b",
+      later.toISOString(),
+    );
+
+    expect(getLatestReservedScheduledAtMs()).toBe(later.getTime());
+  });
+
+  it("reserves the next slot atomically when claiming", () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const now = 1_700_000_000_000;
+    vi.spyOn(Date, "now").mockReturnValue(now);
+
+    const first = claimSeedWithSchedule(seed("hash-a"), {
+      saltMinMinutes: 10,
+      saltMaxMinutes: 15,
+    });
+    const second = claimSeedWithSchedule(seed("hash-b"), {
+      saltMinMinutes: 10,
+      saltMaxMinutes: 15,
+    });
+
+    expect(first?.scheduledAtIso).toBe(new Date(now + 10 * 60_000).toISOString());
+    expect(second?.scheduledAtIso).toBe(new Date(now + 20 * 60_000).toISOString());
+    vi.restoreAllMocks();
+  });
+
+  it("computes the next slot from the previous reservation", () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const now = 1_700_000_000_000;
+    expect(computeNextScheduledAtMs(null, now, 10, 15)).toBe(now + 10 * 60_000);
+    expect(computeNextScheduledAtMs(now - 20 * 60_000, now, 10, 15)).toBe(now);
+    vi.restoreAllMocks();
   });
 });

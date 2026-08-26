@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import {
   enqueueSnowballCalendarSeeds,
   formatSnowballCalendarTitle,
@@ -18,6 +18,10 @@ vi.mock("@/lib/rtx/cli-provisioning", () => ({
 describe("enqueueSnowballCalendarSeeds", () => {
   beforeEach(() => {
     resetCoreTables();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it("posts calendar events with snowball metadata", async () => {
@@ -413,5 +417,204 @@ describe("enqueueSnowballCalendarSeeds", () => {
     expect(formatSnowballCalendarTitle(longUrl)).toBe(
       "[Signals] Snowball: facebook.com/saritasym/posts",
     );
+  });
+
+  it("spaces queued seeds by salt delay from the previous calendar task", async () => {
+    const now = 1_700_000_000_000;
+    vi.spyOn(Date, "now").mockReturnValue(now);
+    vi.spyOn(Math, "random").mockReturnValue(0);
+
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ event: { uuid: "evt" } }),
+    });
+
+    const scoutConfig = readSnowballSeedScoutConfig({
+      ...buildSnowballSeedScoutTemplateConfig(),
+      saltMinMinutes: 10,
+      saltMaxMinutes: 15,
+    });
+
+    await enqueueSnowballCalendarSeeds(
+      [
+        { url: "https://x.com/acme/status/1", platform: "x" },
+        { url: "https://x.com/acme/status/2", platform: "x" },
+        { url: "https://x.com/acme/status/3", platform: "x" },
+      ],
+      scoutConfig,
+      {
+        RTX_API_BASE_URL: "http://127.0.0.1:3101",
+        SIGNALS_RTX_WORKSPACE_SLUG: "signals",
+      },
+      fetchImpl as unknown as typeof fetch,
+    );
+
+    const starts = fetchImpl.mock.calls
+      .map(([, init]) => {
+        const body = JSON.parse(String(init?.body));
+        return new Date(body.startDate).getTime();
+      })
+      .sort((a, b) => a - b);
+
+    const minGapMs = 10 * 60_000;
+    expect(starts).toHaveLength(3);
+    expect(starts[0]).toBe(now + minGapMs);
+    expect(starts[1]).toBe(starts[0] + minGapMs);
+    expect(starts[2]).toBe(starts[1] + minGapMs);
+  });
+
+  it("starts immediately when the previous run's last seed is already past the min gap", async () => {
+    const now = 1_700_000_000_000;
+    vi.spyOn(Date, "now").mockReturnValue(now);
+    vi.spyOn(Math, "random").mockReturnValue(0);
+
+    const scoutConfig = readSnowballSeedScoutConfig({
+      ...buildSnowballSeedScoutTemplateConfig(),
+      saltMinMinutes: 10,
+      saltMaxMinutes: 15,
+    });
+    const env = {
+      RTX_API_BASE_URL: "http://127.0.0.1:3101",
+      SIGNALS_RTX_WORKSPACE_SLUG: "signals",
+    };
+
+    const firstRunFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ event: { uuid: "evt-prev" } }),
+    });
+    await enqueueSnowballCalendarSeeds(
+      [{ url: "https://x.com/acme/status/prev", platform: "x" }],
+      scoutConfig,
+      env,
+      firstRunFetch as unknown as typeof fetch,
+    );
+
+    const twentyMinutesLater = now + 20 * 60_000;
+    vi.spyOn(Date, "now").mockReturnValue(twentyMinutesLater);
+
+    const secondRunFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ event: { uuid: "evt-next" } }),
+    });
+    await enqueueSnowballCalendarSeeds(
+      [{ url: "https://x.com/acme/status/next", platform: "x" }],
+      scoutConfig,
+      env,
+      secondRunFetch as unknown as typeof fetch,
+    );
+
+    const [, init] = secondRunFetch.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(String(init?.body));
+    expect(new Date(body.startDate).getTime()).toBe(twentyMinutesLater);
+  });
+
+  it("does not let deduped seeds consume queue delay slots", async () => {
+    const now = 1_700_000_000_000;
+    vi.spyOn(Date, "now").mockReturnValue(now);
+    vi.spyOn(Math, "random").mockReturnValue(0);
+
+    const scoutConfig = readSnowballSeedScoutConfig({
+      ...buildSnowballSeedScoutTemplateConfig(),
+      saltMinMinutes: 10,
+      saltMaxMinutes: 15,
+    });
+    const env = {
+      RTX_API_BASE_URL: "http://127.0.0.1:3101",
+      SIGNALS_RTX_WORKSPACE_SLUG: "signals",
+    };
+    const okFetch = () =>
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ event: { uuid: "evt" } }),
+      });
+
+    const existingUrls = Array.from({ length: 7 }, (_, index) => ({
+      url: `https://x.com/acme/status/existing-${index}`,
+      platform: "x",
+    }));
+
+    const firstRun = okFetch();
+    await enqueueSnowballCalendarSeeds(existingUrls, scoutConfig, env, firstRun as unknown as typeof fetch);
+    expect(firstRun).toHaveBeenCalledTimes(7);
+
+    const eightyMinutesLater = now + 80 * 60_000;
+    vi.spyOn(Date, "now").mockReturnValue(eightyMinutesLater);
+
+    const secondRun = okFetch();
+    await enqueueSnowballCalendarSeeds(
+      [...existingUrls, { url: "https://x.com/acme/status/new", platform: "x" }],
+      scoutConfig,
+      env,
+      secondRun as unknown as typeof fetch,
+    );
+
+    expect(secondRun).toHaveBeenCalledTimes(1);
+    const [, init] = secondRun.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(String(init?.body));
+    expect(new Date(body.startDate).getTime()).toBe(eightyMinutesLater);
+  });
+
+  it("reserves distinct schedule slots for overlapping enqueue batches", async () => {
+    const now = 1_700_000_000_000;
+    vi.spyOn(Date, "now").mockReturnValue(now);
+    vi.spyOn(Math, "random").mockReturnValue(0);
+
+    const scoutConfig = readSnowballSeedScoutConfig({
+      ...buildSnowballSeedScoutTemplateConfig(),
+      saltMinMinutes: 10,
+      saltMaxMinutes: 15,
+    });
+    const env = {
+      RTX_API_BASE_URL: "http://127.0.0.1:3101",
+      SIGNALS_RTX_WORKSPACE_SLUG: "signals",
+    };
+
+    let releaseFirst!: () => void;
+    const firstBlocked = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+
+    const fetchImpl = vi.fn((_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      const seedValue = body.metadata?.workflowRunConfig?.seedValue as string;
+      if (seedValue === "https://x.com/acme/status/overlap-a") {
+        return firstBlocked.then(() => ({
+          ok: true,
+          json: async () => ({ event: { uuid: "evt-a" } }),
+        }));
+      }
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({ event: { uuid: "evt-b" } }),
+      });
+    });
+
+    const firstBatch = enqueueSnowballCalendarSeeds(
+      [{ url: "https://x.com/acme/status/overlap-a", platform: "x" }],
+      scoutConfig,
+      env,
+      fetchImpl as unknown as typeof fetch,
+    );
+    const secondBatch = enqueueSnowballCalendarSeeds(
+      [{ url: "https://x.com/acme/status/overlap-b", platform: "x" }],
+      scoutConfig,
+      env,
+      fetchImpl as unknown as typeof fetch,
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    releaseFirst();
+    await Promise.all([firstBatch, secondBatch]);
+
+    const starts = fetchImpl.mock.calls
+      .map(([, init]) => {
+        const body = JSON.parse(String(init?.body));
+        return new Date(body.startDate).getTime();
+      })
+      .sort((a, b) => a - b);
+
+    expect(starts).toHaveLength(2);
+    expect(starts[0]).toBe(now + 10 * 60_000);
+    expect(starts[1]).toBe(starts[0] + 10 * 60_000);
   });
 });

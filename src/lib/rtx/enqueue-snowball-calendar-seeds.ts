@@ -6,7 +6,7 @@ import {
 } from "@/lib/rtx/cli-provisioning";
 import {
   SNOWBALL_SEED_CLAIM_TTL_MS,
-  claimSeed,
+  claimSeedWithSchedule,
   confirmSeed,
   pruneSnowballSeedLedger,
   releaseSeedClaim,
@@ -91,26 +91,6 @@ function snowballDispatchPrompt(url: string, templateName: string): string {
   ].join(" ");
 }
 
-function randomSaltMinutes(min: number, max: number): number {
-  if (max <= min) return min;
-  return min + Math.floor(Math.random() * (max - min + 1));
-}
-
-function scheduledStartIso(
-  saltMinMinutes: number,
-  saltMaxMinutes: number,
-  explicit?: string | null,
-): string {
-  if (explicit) {
-    const parsed = new Date(explicit);
-    if (!Number.isNaN(parsed.getTime())) {
-      return parsed.toISOString();
-    }
-  }
-  const delayMinutes = randomSaltMinutes(saltMinMinutes, saltMaxMinutes);
-  return new Date(Date.now() + delayMinutes * 60_000).toISOString();
-}
-
 export async function enqueueSnowballCalendarSeeds(
   seeds: EnqueueSnowballSeedInput[],
   scoutConfig: SnowballSeedScoutConfig,
@@ -184,22 +164,25 @@ export async function enqueueSnowballCalendarSeeds(
     // use does not enforce queueMeta.dedupeKey. Claim before the POST so two
     // overlapping runs cannot both queue the same URL.
     const dedupeKey = hashUrl(url);
-    const claimToken = claimSeed({
-      urlHash: dedupeKey,
-      url,
-      platform: seed.platform ?? null,
-      producerRunId: seed.producerRunId ?? null,
-    });
-    if (!claimToken) {
+    const reservation = claimSeedWithSchedule(
+      {
+        urlHash: dedupeKey,
+        url,
+        platform: seed.platform ?? null,
+        producerRunId: seed.producerRunId ?? null,
+      },
+      {
+        saltMinMinutes: scoutConfig.saltMinMinutes,
+        saltMaxMinutes: scoutConfig.saltMaxMinutes,
+        explicitScheduledAtIso: seed.scheduledAt,
+      },
+    );
+    if (!reservation) {
       deduped.push(url);
       return;
     }
 
-    const scheduledAt = scheduledStartIso(
-      scoutConfig.saltMinMinutes,
-      scoutConfig.saltMaxMinutes,
-      seed.scheduledAt,
-    );
+    const { claimToken, scheduledAtIso: scheduledAt } = reservation;
     const title = formatSnowballCalendarTitle(url);
     const templateName =
       scoutConfig.networkSnowballTemplateName || NETWORK_SNOWBALL_TEMPLATE_NAME;
@@ -266,7 +249,7 @@ export async function enqueueSnowballCalendarSeeds(
       }
 
       const calendarEventUuid = payload.event?.uuid ?? null;
-      confirmSeed(dedupeKey, claimToken, calendarEventUuid);
+      confirmSeed(dedupeKey, claimToken, calendarEventUuid, scheduledAt);
       queued.push({ url, calendarEventUuid, scheduledAt });
     } catch (error) {
       // Every thrown request error is ambiguous. A timeout, a connection reset,

@@ -728,6 +728,8 @@ export const snowballSeedLedger = sqliteTable(
       .notNull()
       .default("pending"),
     enqueuedAt: integer("enqueued_at").notNull(),
+    /** Calendar `startDate` the scout assigned when the event was queued. */
+    scheduledAt: integer("scheduled_at"),
     ...timestamps,
   },
   (table) => [
