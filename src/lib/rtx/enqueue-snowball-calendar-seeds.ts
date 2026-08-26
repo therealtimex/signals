@@ -6,9 +6,8 @@ import {
 } from "@/lib/rtx/cli-provisioning";
 import {
   SNOWBALL_SEED_CLAIM_TTL_MS,
-  claimSeed,
+  claimSeedWithSchedule,
   confirmSeed,
-  getLatestQueuedSeedScheduledAtMs,
   pruneSnowballSeedLedger,
   releaseSeedClaim,
 } from "@/lib/db/queries/snowball-seed-ledger";
@@ -92,61 +91,6 @@ function snowballDispatchPrompt(url: string, templateName: string): string {
   ].join(" ");
 }
 
-function randomSaltMinutes(min: number, max: number): number {
-  if (max <= min) return min;
-  return min + Math.floor(Math.random() * (max - min + 1));
-}
-
-function scheduledStartIso(explicit?: string | null): string {
-  if (explicit) {
-    const parsed = new Date(explicit);
-    if (!Number.isNaN(parsed.getTime())) {
-      return parsed.toISOString();
-    }
-  }
-  return new Date().toISOString();
-}
-
-export interface AssignSequentialScheduledTimesOptions {
-  nowMs?: number;
-  /** Calendar start time of the most recently queued seed, if any. */
-  lastSeedScheduledAtMs?: number | null;
-}
-
-/**
- * Queue delay is the gap *between* calendar tasks, not an independent offset from
- * workflow start. Pre-assign times sequentially so concurrent POST workers cannot
- * collapse every seed onto the same minute. When a previous run already queued
- * seeds, the first new seed only waits for the remaining gap — it can start now
- * if enough time has already passed.
- */
-export function assignSequentialScheduledTimes(
-  seeds: EnqueueSnowballSeedInput[],
-  saltMinMinutes: number,
-  saltMaxMinutes: number,
-  options: AssignSequentialScheduledTimesOptions = {},
-): EnqueueSnowballSeedInput[] {
-  const nowMs = options.nowMs ?? Date.now();
-  let cursorMs =
-    options.lastSeedScheduledAtMs != null ? options.lastSeedScheduledAtMs : nowMs;
-
-  return seeds.map((seed) => {
-    if (seed.scheduledAt) {
-      const parsed = new Date(seed.scheduledAt);
-      if (!Number.isNaN(parsed.getTime())) {
-        cursorMs = parsed.getTime();
-        return seed;
-      }
-    }
-
-    const delayMinutes = randomSaltMinutes(saltMinMinutes, saltMaxMinutes);
-    cursorMs += delayMinutes * 60_000;
-    const scheduledMs = Math.max(nowMs, cursorMs);
-    cursorMs = scheduledMs;
-    return { ...seed, scheduledAt: new Date(scheduledMs).toISOString() };
-  });
-}
-
 export async function enqueueSnowballCalendarSeeds(
   seeds: EnqueueSnowballSeedInput[],
   scoutConfig: SnowballSeedScoutConfig,
@@ -200,13 +144,6 @@ export async function enqueueSnowballCalendarSeeds(
   // the ledger bounded without needing a separate sweeper.
   pruneSnowballSeedLedger();
 
-  const scheduledSeeds = assignSequentialScheduledTimes(
-    seeds,
-    scoutConfig.saltMinMinutes,
-    scoutConfig.saltMaxMinutes,
-    { lastSeedScheduledAtMs: getLatestQueuedSeedScheduledAtMs() },
-  );
-
   const processSeed = async (seed: EnqueueSnowballSeedInput): Promise<void> => {
     const url = String(seed.url || "").trim();
     if (!url) {
@@ -227,18 +164,25 @@ export async function enqueueSnowballCalendarSeeds(
     // use does not enforce queueMeta.dedupeKey. Claim before the POST so two
     // overlapping runs cannot both queue the same URL.
     const dedupeKey = hashUrl(url);
-    const claimToken = claimSeed({
-      urlHash: dedupeKey,
-      url,
-      platform: seed.platform ?? null,
-      producerRunId: seed.producerRunId ?? null,
-    });
-    if (!claimToken) {
+    const reservation = claimSeedWithSchedule(
+      {
+        urlHash: dedupeKey,
+        url,
+        platform: seed.platform ?? null,
+        producerRunId: seed.producerRunId ?? null,
+      },
+      {
+        saltMinMinutes: scoutConfig.saltMinMinutes,
+        saltMaxMinutes: scoutConfig.saltMaxMinutes,
+        explicitScheduledAtIso: seed.scheduledAt,
+      },
+    );
+    if (!reservation) {
       deduped.push(url);
       return;
     }
 
-    const scheduledAt = scheduledStartIso(seed.scheduledAt);
+    const { claimToken, scheduledAtIso: scheduledAt } = reservation;
     const title = formatSnowballCalendarTitle(url);
     const templateName =
       scoutConfig.networkSnowballTemplateName || NETWORK_SNOWBALL_TEMPLATE_NAME;
@@ -327,7 +271,7 @@ export async function enqueueSnowballCalendarSeeds(
   // Drain a shared queue from a fixed number of workers. Recursive rather than a
   // `while` loop so each worker awaits one request at a time without serializing
   // the whole batch behind a single chain.
-  const pending = [...scheduledSeeds];
+  const pending = [...seeds];
   const drain = async (): Promise<void> => {
     const seed = pending.shift();
     if (!seed) return;

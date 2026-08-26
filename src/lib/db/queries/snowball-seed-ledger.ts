@@ -1,4 +1,4 @@
-import { and, eq, gte, inArray, lt, or, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNotNull, lt, ne, or, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db/client";
 import { snowballSeedLedger } from "@/lib/db/schema";
@@ -27,6 +27,35 @@ export interface SnowballSeedLedgerEntry {
   url: string;
   platform?: string | null;
   producerRunId?: string | null;
+}
+
+export interface ClaimSeedWithScheduleOptions {
+  saltMinMinutes: number;
+  saltMaxMinutes: number;
+  explicitScheduledAtIso?: string | null;
+  windowMs?: number;
+}
+
+export interface ClaimSeedWithScheduleResult {
+  claimToken: string;
+  scheduledAtIso: string;
+}
+
+function randomSaltMinutes(min: number, max: number): number {
+  if (max <= min) return min;
+  return min + Math.floor(Math.random() * (max - min + 1));
+}
+
+/** Next calendar start after `lastScheduledAtMs`, never before `nowMs`. */
+export function computeNextScheduledAtMs(
+  lastScheduledAtMs: number | null,
+  nowMs: number,
+  saltMinMinutes: number,
+  saltMaxMinutes: number,
+): number {
+  const cursorMs = lastScheduledAtMs ?? nowMs;
+  const delayMinutes = randomSaltMinutes(saltMinMinutes, saltMaxMinutes);
+  return Math.max(nowMs, cursorMs + delayMinutes * 60_000);
 }
 
 /** Unix seconds, matching the rest of the schema's time columns. */
@@ -150,34 +179,127 @@ export function claimSeed(
   return (takeover.changes ?? 0) > 0 ? token : null;
 }
 
-/**
- * Promote a claim to confirmed once the calendar has accepted the event.
- *
- * @returns false when the claim was taken over meanwhile, so this caller's
- * response no longer owns the row and must not overwrite it.
- */
-/** Latest calendar start time among seeds still inside the dedupe window. */
-export function getLatestQueuedSeedScheduledAtMs(
+function reservedScheduleRow(
+  now: number,
+  windowMs: number,
+  excludeUrlHash?: string,
+) {
+  const dedupeCutoff = now - Math.floor(windowMs / 1000);
+  const claimCutoff = now - Math.floor(SNOWBALL_SEED_CLAIM_TTL_MS / 1000);
+  const liveSchedule = or(
+    and(
+      eq(snowballSeedLedger.status, "queued"),
+      gte(snowballSeedLedger.enqueuedAt, dedupeCutoff),
+    ),
+    and(
+      eq(snowballSeedLedger.status, "pending"),
+      gte(snowballSeedLedger.enqueuedAt, claimCutoff),
+      isNotNull(snowballSeedLedger.scheduledAt),
+    ),
+  );
+
+  return excludeUrlHash
+    ? and(liveSchedule, ne(snowballSeedLedger.urlHash, excludeUrlHash))
+    : liveSchedule;
+}
+
+/** Latest reserved calendar start among live queued or in-flight seeds. */
+export function getLatestReservedScheduledAtMs(
+  excludeUrlHash?: string,
   windowMs: number = SNOWBALL_SEED_DEDUPE_WINDOW_MS,
 ): number | null {
-  const cutoff = nowSeconds() - Math.floor(windowMs / 1000);
+  const now = nowSeconds();
   const row = db
     .select({
       scheduledAtMs: sql<number>`max(coalesce(${snowballSeedLedger.scheduledAt}, ${snowballSeedLedger.enqueuedAt})) * 1000`,
     })
     .from(snowballSeedLedger)
-    .where(
-      and(
-        eq(snowballSeedLedger.status, "queued"),
-        gte(snowballSeedLedger.enqueuedAt, cutoff),
-      ),
-    )
+    .where(reservedScheduleRow(now, windowMs, excludeUrlHash))
     .get();
 
   const scheduledAtMs = row?.scheduledAtMs;
   return scheduledAtMs != null && scheduledAtMs > 0 ? scheduledAtMs : null;
 }
 
+/**
+ * Claim a URL and atomically reserve the next calendar slot in one transaction.
+ *
+ * Pending rows with `scheduled_at` count toward the cursor so overlapping runs
+ * cannot schedule into the same minute before their POST completes.
+ */
+export function claimSeedWithSchedule(
+  entry: SnowballSeedLedgerEntry,
+  options: ClaimSeedWithScheduleOptions,
+): ClaimSeedWithScheduleResult | null {
+  const windowMs = options.windowMs ?? SNOWBALL_SEED_DEDUPE_WINDOW_MS;
+
+  return db.transaction(() => {
+    const claimToken = claimSeed(entry, windowMs);
+    if (!claimToken) return null;
+
+    let scheduledAtSec: number;
+    if (options.explicitScheduledAtIso) {
+      const parsed = new Date(options.explicitScheduledAtIso);
+      if (!Number.isNaN(parsed.getTime())) {
+        scheduledAtSec = Math.floor(parsed.getTime() / 1000);
+      } else {
+        const nowMs = Date.now();
+        scheduledAtSec = Math.floor(
+          computeNextScheduledAtMs(
+            getLatestReservedScheduledAtMs(entry.urlHash, windowMs),
+            nowMs,
+            options.saltMinMinutes,
+            options.saltMaxMinutes,
+          ) / 1000,
+        );
+      }
+    } else {
+      const nowMs = Date.now();
+      scheduledAtSec = Math.floor(
+        computeNextScheduledAtMs(
+          getLatestReservedScheduledAtMs(entry.urlHash, windowMs),
+          nowMs,
+          options.saltMinMinutes,
+          options.saltMaxMinutes,
+        ) / 1000,
+      );
+    }
+
+    const updated = db
+      .update(snowballSeedLedger)
+      .set({ scheduledAt: scheduledAtSec, updatedAt: nowSeconds() })
+      .where(
+        and(
+          eq(snowballSeedLedger.urlHash, entry.urlHash),
+          eq(snowballSeedLedger.id, claimToken),
+        ),
+      )
+      .run();
+
+    if ((updated.changes ?? 0) === 0) return null;
+
+    return {
+      claimToken,
+      scheduledAtIso: new Date(scheduledAtSec * 1000).toISOString(),
+    };
+  });
+}
+
+/**
+ * @deprecated Use getLatestReservedScheduledAtMs — pending reservations count too.
+ */
+export function getLatestQueuedSeedScheduledAtMs(
+  windowMs: number = SNOWBALL_SEED_DEDUPE_WINDOW_MS,
+): number | null {
+  return getLatestReservedScheduledAtMs(undefined, windowMs);
+}
+
+/**
+ * Promote a claim to confirmed once the calendar has accepted the event.
+ *
+ * @returns false when the claim was taken over meanwhile, so this caller's
+ * response no longer owns the row and must not overwrite it.
+ */
 export function confirmSeed(
   urlHash: string,
   claimToken: string,
@@ -185,22 +307,27 @@ export function confirmSeed(
   scheduledAtIso?: string | null,
 ): boolean {
   const now = nowSeconds();
-  let scheduledAt: number | null = null;
+  const updates: {
+    status: "queued";
+    calendarEventUuid: string | null;
+    enqueuedAt: number;
+    updatedAt: number;
+    scheduledAt?: number;
+  } = {
+    status: "queued",
+    calendarEventUuid,
+    enqueuedAt: now,
+    updatedAt: now,
+  };
   if (scheduledAtIso) {
     const parsed = new Date(scheduledAtIso);
     if (!Number.isNaN(parsed.getTime())) {
-      scheduledAt = Math.floor(parsed.getTime() / 1000);
+      updates.scheduledAt = Math.floor(parsed.getTime() / 1000);
     }
   }
   const result = db
     .update(snowballSeedLedger)
-    .set({
-      status: "queued",
-      calendarEventUuid,
-      enqueuedAt: now,
-      scheduledAt,
-      updatedAt: now,
-    })
+    .set(updates)
     .where(
       and(
         eq(snowballSeedLedger.urlHash, urlHash),
