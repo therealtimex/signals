@@ -46,10 +46,27 @@ export default defineConfig({
             "**/node_modules/**",
             "**/e2e/**",
             "src/**/*.latency.test.ts",
+            "src/**/*.contract.test.ts",
             "src/**/*.import-safety.test.ts",
             "src/**/*.embedded.test.ts",
             "src/**/*.integration.test.ts",
           ],
+        },
+      },
+      {
+        extends: true,
+        test: {
+          // Contract probes assert against a *sibling repo's* runtime code, so no
+          // default invocation may depend on whether that checkout exists or what
+          // state it is in. `--project` is not enough: a bare `vitest run` executes
+          // every configured project, so the include itself is gated on an explicit
+          // opt-in. Without it this project matches nothing.
+          name: "contract",
+          include:
+            process.env.SIGNALS_CONTRACT_PROBES === "1"
+              ? ["src/**/*.contract.test.ts"]
+              : [],
+          exclude: ["**/node_modules/**"],
         },
       },
       {
