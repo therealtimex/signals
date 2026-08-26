@@ -85,6 +85,20 @@ if [[ "${DEDUPED_COUNT}" != "0" ]]; then
   echo "snowball-seed-scout: ${DEDUPED_COUNT} seed(s) already queued, skipped" >&2
 fi
 
+# Seeds left unattempted because the batch ran out of time. They were never
+# claimed, so the next tick picks them up untouched.
+DEFERRED_COUNT="$(printf '%s' "${RESULT}" | python3 -c '
+import json, sys
+try:
+    print(int(json.load(sys.stdin).get("deferred") or 0))
+except Exception:
+    print(0)
+' 2>/dev/null || echo 0)"
+
+if [[ "${DEFERRED_COUNT}" != "0" ]]; then
+  echo "snowball-seed-scout: ${DEFERRED_COUNT} seed(s) deferred to the next run (batch budget)" >&2
+fi
+
 if [[ "${FAILED_COUNT}" != "0" ]]; then
   echo "snowball-seed-scout: ${FAILED_COUNT} seed(s) failed to enqueue: ${RESULT}" >&2
 fi

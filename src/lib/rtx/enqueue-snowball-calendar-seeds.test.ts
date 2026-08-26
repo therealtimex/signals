@@ -216,6 +216,85 @@ describe("enqueueSnowballCalendarSeeds", () => {
     expect(result.queued).toHaveLength(1);
   });
 
+  it("keeps the claim when a calendar timeout leaves the outcome unknown", async () => {
+    const scoutConfig = readSnowballSeedScoutConfig(buildSnowballSeedScoutTemplateConfig());
+    const env = {
+      RTX_API_BASE_URL: "http://127.0.0.1:3101",
+      SIGNALS_RTX_WORKSPACE_SLUG: "signals",
+    };
+
+    const timeoutError = Object.assign(new Error("The operation was aborted"), {
+      name: "TimeoutError",
+    });
+    const timingOut = vi.fn().mockRejectedValue(timeoutError);
+    const first = await enqueueSnowballCalendarSeeds(
+      [{ url: "https://x.com/acme/status/timeout", platform: "x" }],
+      scoutConfig,
+      env,
+      timingOut as unknown as typeof fetch,
+    );
+
+    expect(first.success).toBe(true);
+    if (!first.success) return;
+    expect(first.failed).toHaveLength(1);
+    expect(first.failed[0]?.reason).toContain("outcome unknown");
+
+    // The calendar may have committed the event, so an immediate retry would
+    // risk a duplicate. The claim stays until it expires.
+    const retry = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ event: { uuid: "evt-dup" } }),
+    });
+    const second = await enqueueSnowballCalendarSeeds(
+      [{ url: "https://x.com/acme/status/timeout", platform: "x" }],
+      scoutConfig,
+      env,
+      retry as unknown as typeof fetch,
+    );
+
+    expect(retry).not.toHaveBeenCalled();
+    expect(second.success).toBe(true);
+    if (!second.success) return;
+    expect(second.deduped).toEqual(["https://x.com/acme/status/timeout"]);
+  });
+
+  it("releases the claim when the calendar definitively rejects", async () => {
+    const scoutConfig = readSnowballSeedScoutConfig(buildSnowballSeedScoutTemplateConfig());
+    const env = {
+      RTX_API_BASE_URL: "http://127.0.0.1:3101",
+      SIGNALS_RTX_WORKSPACE_SLUG: "signals",
+    };
+
+    // A response means the server decided; nothing was committed, so retry now.
+    const rejecting = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      json: async () => ({ error: "bad request" }),
+    });
+    await enqueueSnowballCalendarSeeds(
+      [{ url: "https://x.com/acme/status/reject", platform: "x" }],
+      scoutConfig,
+      env,
+      rejecting as unknown as typeof fetch,
+    );
+
+    const retry = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ event: { uuid: "evt-ok" } }),
+    });
+    const second = await enqueueSnowballCalendarSeeds(
+      [{ url: "https://x.com/acme/status/reject", platform: "x" }],
+      scoutConfig,
+      env,
+      retry as unknown as typeof fetch,
+    );
+
+    expect(retry).toHaveBeenCalledTimes(1);
+    expect(second.success).toBe(true);
+    if (!second.success) return;
+    expect(second.queued).toHaveLength(1);
+  });
+
   it("does not truncate long facebook pfbid urls in the calendar title", () => {
     const longUrl =
       "https://www.facebook.com/saritasym/posts/pfbid0AVUoH55Pnb4cxmX8Gt5yjEYJmuy8cS3cvm8iWRUyLyyuxg5MzDSt5NwNpLY6xpvrl";

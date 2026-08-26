@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { resolveSignalsRtxWorkspaceSlug } from "@/lib/rtx/cli-provisioning";
 import {
+  SNOWBALL_SEED_CLAIM_TTL_MS,
   claimSeed,
   confirmSeed,
   pruneSnowballSeedLedger,
@@ -27,6 +28,8 @@ export type EnqueueSnowballSeedsResult =
       deduped: string[];
       /** Seeds the calendar API rejected; the caller must surface these as failures. */
       failed: Array<{ url: string; reason: string }>;
+      /** Seeds left unattempted because the batch ran out of time. */
+      deferred: string[];
     }
   | { success: false; error: string };
 
@@ -35,6 +38,22 @@ export type EnqueueSnowballSeedsResult =
  * SNOWBALL_SEED_CLAIM_TTL_MS so a request cannot outlive its own claim.
  */
 const CALENDAR_POST_TIMEOUT_MS = 60_000;
+
+/**
+ * Whole-batch budget. `enqueue.sh` gives this route 120s, so a sequential batch
+ * of slow POSTs must stop short of that: blowing the caller's deadline makes the
+ * scout retry seeds that may already be on the calendar.
+ */
+const ENQUEUE_BATCH_BUDGET_MS = 90_000;
+
+/** Below this there is not enough budget left to be worth starting a POST. */
+const MIN_POST_BUDGET_MS = 5_000;
+
+/** A timeout leaves it unknown whether the calendar committed the event. */
+function isAmbiguousFailure(error: unknown): boolean {
+  const name = (error as { name?: string } | null)?.name;
+  return name === "TimeoutError" || name === "AbortError";
+}
 
 function hashUrl(url: string): string {
   return createHash("sha256").update(url.trim()).digest("hex");
@@ -103,6 +122,8 @@ export async function enqueueSnowballCalendarSeeds(
   const skipped: string[] = [];
   const deduped: string[] = [];
   const failed: Array<{ url: string; reason: string }> = [];
+  const deferred: string[] = [];
+  const batchDeadline = Date.now() + ENQUEUE_BATCH_BUDGET_MS;
   let workspaceSlug = env.SIGNALS_RTX_WORKSPACE_SLUG?.trim() || "signals";
   try {
     workspaceSlug = await resolveSignalsRtxWorkspaceSlug(env, fetchImpl);
@@ -118,6 +139,14 @@ export async function enqueueSnowballCalendarSeeds(
     const url = String(seed.url || "").trim();
     if (!url) {
       skipped.push(url);
+      continue;
+    }
+
+    const remainingBudget = batchDeadline - Date.now();
+    if (remainingBudget < MIN_POST_BUDGET_MS) {
+      // Stop cleanly rather than overrunning the caller's deadline. Nothing has
+      // been claimed for this seed yet, so the next tick picks it up untouched.
+      deferred.push(url);
       continue;
     }
 
@@ -188,7 +217,9 @@ export async function enqueueSnowballCalendarSeeds(
         body: JSON.stringify(body),
         // Bound the request well inside the claim TTL: a POST that outlived its
         // own claim could be taken over mid-flight and queue the URL twice.
-        signal: AbortSignal.timeout(CALENDAR_POST_TIMEOUT_MS),
+        signal: AbortSignal.timeout(
+          Math.min(CALENDAR_POST_TIMEOUT_MS, remainingBudget),
+        ),
       });
       const payload = (await response.json().catch(() => ({}))) as {
         event?: { uuid?: string };
@@ -209,13 +240,25 @@ export async function enqueueSnowballCalendarSeeds(
       confirmSeed(dedupeKey, claimToken, calendarEventUuid);
       queued.push({ url, calendarEventUuid, scheduledAt });
     } catch (error) {
-      releaseSeedClaim(dedupeKey, claimToken);
+      // Releasing is only safe when the calendar definitely did not commit. A
+      // timeout is ambiguous, so the claim is left pending: it expires with the
+      // claim TTL rather than being retried immediately into a duplicate.
+      const ambiguous = isAmbiguousFailure(error);
+      if (!ambiguous) {
+        releaseSeedClaim(dedupeKey, claimToken);
+      }
       failed.push({
         url,
-        reason: error instanceof Error ? error.message : "calendar request failed",
+        reason: ambiguous
+          ? `calendar request timed out; outcome unknown, retry deferred to ${Math.round(
+              SNOWBALL_SEED_CLAIM_TTL_MS / 60_000,
+            )}m claim expiry`
+          : error instanceof Error
+            ? error.message
+            : "calendar request failed",
       });
     }
   }
 
-  return { success: true, queued, skipped, deduped, failed };
+  return { success: true, queued, skipped, deduped, failed, deferred };
 }

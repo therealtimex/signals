@@ -50,13 +50,19 @@ export async function POST(req: NextRequest) {
       skipped: result.skipped.length,
       deduped: result.deduped.length,
       failed: result.failed.length,
+      deferred: result.deferred.length,
       items: result.queued,
       skippedUrls: result.skipped,
       dedupedUrls: result.deduped,
       failures: result.failed,
+      deferredUrls: result.deferred,
     };
 
-    if (result.failed.length > 0 && result.queued.length === 0) {
+    if (
+      result.failed.length > 0 &&
+      result.queued.length === 0 &&
+      result.deferred.length === 0
+    ) {
       return NextResponse.json(
         { ...payload, error: "All Snowball seeds failed to enqueue" },
         { status: 502 },
