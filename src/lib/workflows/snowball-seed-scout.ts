@@ -11,6 +11,7 @@ import {
   type SliderBounds,
 } from "@/lib/workflows/template-field-utils";
 import { NETWORK_SNOWBALL_TEMPLATE_NAME } from "@/lib/workflows/network-snowball";
+import { RTX_PUBLISH_SESSION_NAME } from "@/lib/publish/constants";
 
 export const SNOWBALL_SEED_SCOUT_TEMPLATE_NAME = "Snowball Seed Scout";
 
@@ -50,7 +51,17 @@ export const SNOWBALL_SEED_SCOUT_SLIDERS: Record<
   heartbeatIntervalHours: { min: 1, max: 168, step: 1, fallback: 4 },
 };
 
+export const SNOWBALL_SEED_SCOUT_SHARED_BROWSER_SESSIONS = [
+  RTX_PUBLISH_SESSION_NAME,
+] as const;
+
 export interface SnowballSeedScoutConfig {
+  /** Acting profile from Platform Connections; resolves the inherited browser session at runtime. */
+  targetId: string | null;
+  /** RealTimeX Browser session name; defaults to the shared publish session. */
+  browserSessionName: string;
+  /** When true, harvest starts from the authenticated home/feed before search targets. */
+  inheritAuthenticatedSession: boolean;
   platforms: SnowballSeedScoutPlatform[];
   communities: string[];
   searchQueries: string[];
@@ -109,6 +120,15 @@ export function readSnowballSeedScoutConfig(
   const saltMax = clampSnowballSeedScoutSlider("saltMaxMinutes", config.saltMaxMinutes);
 
   return {
+    targetId:
+      typeof config.targetId === "string" && config.targetId.trim()
+        ? config.targetId.trim()
+        : null,
+    browserSessionName:
+      typeof config.browserSessionName === "string" && config.browserSessionName.trim()
+        ? config.browserSessionName.trim()
+        : RTX_PUBLISH_SESSION_NAME,
+    inheritAuthenticatedSession: config.inheritAuthenticatedSession !== false,
     platforms: normalizePlatforms(config.platforms),
     communities: normalizeTagList(config.communities),
     searchQueries: normalizeTagList(config.searchQueries),
@@ -143,6 +163,9 @@ export function buildSnowballSeedScoutTemplateConfig(): Record<string, unknown> 
       executionKind: SNOWBALL_SEED_SCOUT_EXECUTION_KIND,
     },
     platforms: ["x", "linkedin"],
+    targetId: null,
+    browserSessionName: RTX_PUBLISH_SESSION_NAME,
+    inheritAuthenticatedSession: true,
     communities: [],
     searchQueries: [],
     intentKeywords: ["funding", "launch", "seed round", "raised"],
@@ -192,6 +215,13 @@ export function toDeploymentState(
     heartbeatTaskName: SNOWBALL_SEED_SCOUT_HEARTBEAT_TASK_NAME,
     ...config,
   };
+}
+
+export function isSharedScoutBrowserSession(sessionName: string): boolean {
+  const normalized = sessionName.trim();
+  return SNOWBALL_SEED_SCOUT_SHARED_BROWSER_SESSIONS.some(
+    (shared) => shared === normalized,
+  );
 }
 
 export function scoutConfigRelativePath(): string {

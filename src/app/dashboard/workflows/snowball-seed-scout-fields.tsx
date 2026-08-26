@@ -1,8 +1,18 @@
 "use client";
 
 import { useCallback } from "react";
+import Link from "next/link";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { actingTargetLabel } from "@/app/dashboard/workflows/activate-dialog.utils";
+import { useActingTargets } from "@/app/dashboard/workflows/use-acting-targets";
 import {
   BoundedSlider,
   TagListField,
@@ -27,6 +37,8 @@ export function SnowballSeedScoutFields({
   onChange,
   disabled,
 }: SnowballSeedScoutFieldsProps) {
+  const targets = useActingTargets();
+
   const setSlider = useCallback(
     (key: SnowballSeedScoutSliderKey, next: number) => {
       onChange({ ...value, [key]: clampSnowballSeedScoutSlider(key, next) });
@@ -48,6 +60,42 @@ export function SnowballSeedScoutFields({
   return (
     <div className="space-y-4">
       <div className="space-y-2">
+        <Label htmlFor="scout-target">Acting profile</Label>
+        <Select
+          value={value.targetId ?? ""}
+          onValueChange={(next) => onChange({ ...value, targetId: next })}
+          disabled={disabled || !targets?.length}
+        >
+          <SelectTrigger id="scout-target">
+            <SelectValue
+              placeholder={targets === null ? "Loading profiles…" : "Use shared signals-publish session"}
+            />
+          </SelectTrigger>
+          <SelectContent>
+            {(targets ?? []).map((target) => (
+              <SelectItem key={target.id} value={target.id}>
+                {actingTargetLabel(target)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-muted-foreground">
+          Harvest uses the logged-in RealTimeX Browser session from Platform Connections
+          (default <code className="text-[11px]">signals-publish</code>), so feeds include your
+          network, followers, and following — not an anonymous scout profile.
+        </p>
+        {targets !== null && targets.length === 0 && (
+          <p className="text-xs text-muted-foreground">
+            No acting profiles registered.{" "}
+            <Link href="/dashboard/settings" className="underline">
+              Connect a browser session in Settings
+            </Link>{" "}
+            first.
+          </p>
+        )}
+      </div>
+
+      <div className="space-y-2">
         <Label>Platforms (rotation)</Label>
         <div className="flex flex-wrap gap-2">
           {SNOWBALL_SEED_SCOUT_PLATFORMS.map((platform) => {
@@ -56,6 +104,7 @@ export function SnowballSeedScoutFields({
               <button
                 key={platform}
                 type="button"
+                aria-pressed={active}
                 disabled={disabled}
                 onClick={() => togglePlatform(platform)}
                 className={`rounded-md border px-2.5 py-1 text-xs capitalize transition-colors ${
@@ -74,7 +123,7 @@ export function SnowballSeedScoutFields({
       <TagListField
         id="scout-communities"
         label="Communities / feed URLs"
-        placeholder="Add group URL or feed link"
+        placeholder="Build in Public or https://..."
         tags={value.communities}
         onChange={(communities) => onChange({ ...value, communities })}
         disabled={disabled}
@@ -83,7 +132,7 @@ export function SnowballSeedScoutFields({
       <TagListField
         id="scout-search-queries"
         label="Search queries (optional)"
-        placeholder="Add search phrase"
+        placeholder="yc or https://..."
         tags={value.searchQueries}
         onChange={(searchQueries) => onChange({ ...value, searchQueries })}
         disabled={disabled}
@@ -139,6 +188,23 @@ export function SnowballSeedScoutFields({
           onChange={(next) => setSlider("heartbeatIntervalHours", next)}
           disabled={disabled}
           format={(v) => (v === 1 ? "Every hour" : `Every ${v} hours`)}
+        />
+      </div>
+
+      <div className="flex items-center justify-between rounded-lg border p-3">
+        <div>
+          <Label htmlFor="scout-auth-feed">Use authenticated home feed</Label>
+          <p className="text-xs text-muted-foreground">
+            Visit your logged-in home/feed before community search targets.
+          </p>
+        </div>
+        <Switch
+          id="scout-auth-feed"
+          checked={value.inheritAuthenticatedSession}
+          onCheckedChange={(inheritAuthenticatedSession) =>
+            onChange({ ...value, inheritAuthenticatedSession })
+          }
+          disabled={disabled}
         />
       </div>
 

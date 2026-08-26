@@ -3,7 +3,39 @@ import {
   ensureRtxWorkspace,
   getWorkspaceDefaultTerminalAgent,
   parseWorkspaceDefaultTerminalAgent,
+  resolveSignalsRtxWorkspaceSlug,
 } from "@/lib/rtx/cli-provisioning";
+
+describe("resolveSignalsRtxWorkspaceSlug", () => {
+  it("reuses an existing workspace by name when the preferred slug is missing", async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.endsWith("/cli/get-workspace/signals") && init?.method === "GET") {
+        return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
+      }
+      if (url.endsWith("/cli/list-workspaces") && init?.method === "GET") {
+        return new Response(
+          JSON.stringify({
+            workspaces: [
+              { slug: "signals-2", name: "Signals (2)" },
+              { slug: "f3a8c2e1-4d5b-4a7c-8e9f-0a1b2c3d4e5f", name: "Signals" },
+            ],
+          }),
+          { status: 200 }
+        );
+      }
+      return new Response(JSON.stringify({ error: "unexpected" }), { status: 500 });
+    });
+
+    const slug = await resolveSignalsRtxWorkspaceSlug(
+      { RTX_APP_ID: "app-1", SERVER_URL: "http://127.0.0.1:3101" },
+      fetchImpl
+    );
+
+    expect(slug).toBe("f3a8c2e1-4d5b-4a7c-8e9f-0a1b2c3d4e5f");
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+});
 
 describe("ensureRtxWorkspace", () => {
   it("reuses an existing workspace via get-workspace without create-workspace", async () => {

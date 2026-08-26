@@ -8,7 +8,7 @@ import {
 import { parseTemplateConfig } from "@/lib/workflows/template-config";
 import {
   buildSnowballSeedScoutDeployConfig,
-  isSnowballSeedScoutTemplateConfig,
+  isHeartbeatShellTemplateConfig,
   readSnowballSeedScoutConfig,
 } from "@/lib/workflows/snowball-seed-scout";
 
@@ -32,7 +32,7 @@ export async function POST(
   }
 
   const templateConfig = parseTemplateConfig(template.config);
-  if (!isSnowballSeedScoutTemplateConfig(templateConfig)) {
+  if (!isHeartbeatShellTemplateConfig(templateConfig)) {
     return NextResponse.json(
       { error: "Template does not support heartbeat deploy" },
       { status: 400 },
@@ -71,7 +71,8 @@ export async function POST(
         scoutConfigPath: result.scoutConfigPath,
         deployment: result.deployment,
       },
-      { status: 201 },
+      // Undeploy mutates an existing deployment rather than creating one.
+      { status: data.action === "undeploy" ? 200 : 201 },
     );
   } catch (error) {
     if (error instanceof z.ZodError) {

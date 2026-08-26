@@ -111,7 +111,12 @@ function DeployDialogContent({
   useEffect(() => {
     dispatch({ type: "SET_LOADING", loading: true });
     fetch("/api/snowball-seed-scout/deployment")
-      .then((res) => res.json())
+      .then((res) => {
+        if (!res.ok) {
+          throw new Error(`Deployment lookup failed (${res.status})`);
+        }
+        return res.json();
+      })
       .then((payload) => {
         const deployment = payload.deployment as Record<string, unknown> | null;
         if (deployment) {

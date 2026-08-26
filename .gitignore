@@ -44,3 +44,7 @@ playwright-report/
 # generated marketplace release metadata
 marketplace/release-manifest.json
 marketplace/release-manifest.sig.json
+
+# Python bytecode from bundled workspace scripts (scripts/snowball-seed-scout)
+__pycache__/
+*.pyc

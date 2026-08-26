@@ -25,7 +25,7 @@ import {
 } from "@/lib/workflows/snowball-seed-scout";
 
 /** Bump this when seed template prompts change to trigger updates on existing installs. */
-const SEED_VERSION = 19;
+const SEED_VERSION = 22;
 
 export const CONTACT_PROFILE_PIPELINE_TEMPLATE_NAME = "Contact profile pipeline";
 
@@ -550,7 +550,7 @@ After executing any action:
     estimatedCost: 0.05,
     systemPrompt: `Snowball Seed Scout is deployed to the RealTimeX workspace heartbeat — not executed as a terminal-agent run from this template.
 
-Use Deploy to provision scripts/snowball-seed-scout/scout.json and a HEARTBEAT.md shell task. The scout runs on the configured interval, connects via agent-browser over CDP, harvests candidate post URLs, and enqueues calendar events for Network Snowball.`,
+Use Deploy to provision scripts/snowball-seed-scout/scout.json and a HEARTBEAT.md shell task. The scout runs on the configured interval, inherits the logged-in RealTimeX Browser session from Platform Connections (default signals-publish), resolves community names and search phrases into platform URLs, harvests post links from your authenticated home feed and search targets via agent-browser over CDP, and enqueues calendar events for Network Snowball (falling back to resolved search URLs when browser harvest is unavailable).`,
     config: buildSnowballSeedScoutTemplateConfig(),
   },
   {

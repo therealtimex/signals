@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { EnvLike } from "@/lib/rtx/env";
-import { ensureRtxWorkspace, getSignalsRtxWorkspaceSlug } from "@/lib/rtx/cli-provisioning";
+import { ensureRtxWorkspace, getSignalsRtxWorkspaceSlug, resolveSignalsRtxWorkspaceSlug } from "@/lib/rtx/cli-provisioning";
 import {
   defaultHeartbeatSkeleton,
   HEARTBEAT_FILENAME,
@@ -26,6 +26,8 @@ const SCOUT_SCRIPT_FILES = [
   "lib/browser.sh",
   "lib/enqueue.sh",
   "lib/extract.sh",
+  "lib/copy-link-harvest.sh",
+  "lib/resolve.py",
 ] as const;
 
 export type DeploySnowballSeedScoutResult =
@@ -36,7 +38,7 @@ export type DeploySnowballSeedScoutResult =
       scoutConfigPath: string;
       deployment: ReturnType<typeof toDeploymentState>;
     }
-  | { success: false; error: string };
+  | { success: false; error: string; errorCode?: "not_deployed" };
 
 async function readWorkspaceFile(
   workspaceDir: string,
@@ -107,10 +109,11 @@ export async function deploySnowballSeedScout(
   env: EnvLike = process.env,
 ): Promise<DeploySnowballSeedScoutResult> {
   const scoutConfig = readSnowballSeedScoutConfig(input.config);
-  const workspaceSlug = getSignalsRtxWorkspaceSlug(env);
+  const preferredSlug = getSignalsRtxWorkspaceSlug(env);
 
+  let workspaceSlug: string;
   try {
-    await ensureRtxWorkspace(workspaceSlug, "Signals", env);
+    workspaceSlug = await ensureRtxWorkspace(preferredSlug, "Signals", env);
   } catch (error) {
     return {
       success: false,
@@ -205,7 +208,13 @@ export async function readSnowballSeedScoutDeployment(
   | { success: true; deployment: ReturnType<typeof toDeploymentState> | null }
   | { success: false; error: string }
 > {
-  const workspaceSlug = getSignalsRtxWorkspaceSlug(env);
+  let workspaceSlug = getSignalsRtxWorkspaceSlug(env);
+  try {
+    workspaceSlug = await resolveSignalsRtxWorkspaceSlug(env);
+  } catch {
+    // Fall back to the configured slug when RTX CLI resolution is unavailable.
+  }
+
   const workspaceDir = resolveRtxWorkspaceWorkingDir(workspaceSlug, env);
   if (!workspaceDir) {
     return {
@@ -225,8 +234,14 @@ export async function readSnowballSeedScoutDeployment(
     return {
       success: true,
       deployment: toDeploymentState(config, {
+        // Undeploy rewrites scout.json with `enabled: false` rather than deleting
+        // it, so the saved settings survive. Such a config is not a live
+        // deployment: clear `deployedAt` so dialog reloads, settings saves, and
+        // enqueue requests all honor the undeploy.
         deployedAt:
-          typeof parsed.deployedAt === "string" ? parsed.deployedAt : null,
+          config.enabled && typeof parsed.deployedAt === "string"
+            ? parsed.deployedAt
+            : null,
         templateId:
           typeof parsed.templateId === "string" ? parsed.templateId : null,
       }),
@@ -250,6 +265,17 @@ export async function saveSnowballSeedScoutSettings(
   const existing = await readSnowballSeedScoutDeployment(env);
   if (!existing.success) {
     return existing;
+  }
+
+  // Saving settings updates an existing deployment; it must never be the path
+  // that first provisions workspace scripts and a heartbeat task. Only Deploy
+  // creates automation.
+  if (!existing.deployment?.deployedAt) {
+    return {
+      success: false,
+      error: "Snowball Seed Scout is not deployed. Deploy it before saving settings.",
+      errorCode: "not_deployed",
+    };
   }
 
   return deploySnowballSeedScout(

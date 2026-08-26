@@ -24,6 +24,9 @@ describe("snowball-seed-scout config", () => {
     });
 
     expect(config.platforms).toEqual(["x", "linkedin"]);
+    expect(config.browserSessionName).toBe("signals-publish");
+    expect(config.inheritAuthenticatedSession).toBe(true);
+    expect(config.targetId).toBeNull();
     expect(config.saltMinMinutes).toBe(10);
     expect(config.saltMaxMinutes).toBe(30);
   });

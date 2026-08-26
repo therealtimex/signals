@@ -6,6 +6,9 @@ import {
   readSnowballSeedScoutConfig,
 } from "@/lib/workflows/snowball-seed-scout";
 
+/** Sentinel distinguishing an unparseable body from a legitimately null one. */
+const NOT_JSON = Symbol("not-json");
+
 const settingsSchema = z.object({
   templateId: z.string().min(1),
   config: z.record(z.unknown()),
@@ -16,7 +19,13 @@ const settingsSchema = z.object({
  */
 export async function PUT(req: NextRequest) {
   try {
-    const body = await req.json();
+    const body = await req.json().catch(() => NOT_JSON);
+    if (body === NOT_JSON) {
+      return NextResponse.json(
+        { error: "Request body must be valid JSON" },
+        { status: 400 },
+      );
+    }
     const data = settingsSchema.parse(body);
     const scoutConfig = readSnowballSeedScoutConfig(data.config);
     const deployConfig = buildSnowballSeedScoutDeployConfig(scoutConfig);
@@ -27,7 +36,10 @@ export async function PUT(req: NextRequest) {
     });
 
     if (!result.success) {
-      return NextResponse.json({ error: result.error }, { status: 500 });
+      return NextResponse.json(
+        { error: result.error, errorCode: result.errorCode },
+        { status: result.errorCode === "not_deployed" ? 409 : 500 },
+      );
     }
 
     return NextResponse.json({

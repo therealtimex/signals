@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
     if (!deploymentResult.success) {
       return NextResponse.json({ error: deploymentResult.error }, { status: 500 });
     }
-    if (!deploymentResult.deployment) {
+    if (!deploymentResult.deployment || !deploymentResult.deployment.enabled) {
       return NextResponse.json(
         { error: "Snowball Seed Scout is not deployed" },
         { status: 409 },
@@ -42,12 +42,26 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: result.error }, { status: 500 });
     }
 
-    return NextResponse.json({
+    // A seed the calendar API rejected is dropped, not retried, so the scout must
+    // not read the run as clean. Surface failures explicitly, and fail the whole
+    // request when nothing at all made it onto the calendar.
+    const payload = {
       queued: result.queued.length,
       skipped: result.skipped.length,
+      failed: result.failed.length,
       items: result.queued,
       skippedUrls: result.skipped,
-    });
+      failures: result.failed,
+    };
+
+    if (result.failed.length > 0 && result.queued.length === 0) {
+      return NextResponse.json(
+        { ...payload, error: "All Snowball seeds failed to enqueue" },
+        { status: 502 },
+      );
+    }
+
+    return NextResponse.json(payload);
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: error.errors }, { status: 400 });

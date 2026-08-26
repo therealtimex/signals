@@ -1,8 +1,115 @@
 #!/usr/bin/env bash
 
+# shellcheck source=lib/copy-link-harvest.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/copy-link-harvest.sh"
+
+scout_relaxed_config() {
+  local config_json="$1"
+  python3 - <<'PY' "${config_json}"
+import json, sys
+config = json.loads(sys.argv[1])
+config = dict(config)
+config["intentKeywords"] = []
+print(json.dumps(config))
+PY
+}
+
+scout_harvest_dom_posts() {
+  local config_json="$1"
+  local platform="$2"
+  local max_links="$3"
+  local session_name="$4"
+  local lib_dir="$5"
+  local pass_config="${6:-${config_json}}"
+
+  local harvested=""
+  harvested="$(
+    agent-browser --session "${session_name}" snapshot -i --json 2>/dev/null \
+      | python3 "${lib_dir}/resolve.py" extract-posts "${pass_config}" "${platform}" "${max_links}"
+  )"
+
+  if [[ -n "${harvested}" ]]; then
+    printf '%s\n' "${harvested}"
+    return 0
+  fi
+
+  local eval_script=""
+  eval_script="$(python3 "${lib_dir}/resolve.py" eval-script "${pass_config}" "${platform}" "${max_links}")"
+  agent-browser --session "${session_name}" eval "${eval_script}" 2>/dev/null \
+    | python3 "${lib_dir}/resolve.py" parse-eval-posts "${pass_config}" "${platform}" "${max_links}"
+}
+
+scout_harvest_page_posts() {
+  local config_json="$1"
+  local platform="$2"
+  local max_links="$3"
+  local session_name="$4"
+  local lib_dir="$5"
+
+  local relaxed_config=""
+  relaxed_config="$(scout_relaxed_config "${config_json}")"
+
+  if [[ "${platform}" == "facebook" ]]; then
+    local harvested=""
+    harvested="$(scout_harvest_copy_links "facebook" "${config_json}" "${max_links}" "${session_name}" "${lib_dir}" "${relaxed_config}")"
+    if [[ -z "${harvested}" ]]; then
+      harvested="$(scout_harvest_copy_links "facebook" "${config_json}" "${max_links}" "${session_name}" "${lib_dir}")"
+    fi
+    if [[ -n "${harvested}" ]]; then
+      printf '%s\n' "${harvested}"
+    fi
+    return 0
+  fi
+
+  if [[ "${platform}" == "linkedin" ]]; then
+    local harvested=""
+    harvested="$(scout_harvest_copy_links "linkedin" "${config_json}" "${max_links}" "${session_name}" "${lib_dir}" "${relaxed_config}")"
+    if [[ -z "${harvested}" ]]; then
+      harvested="$(scout_harvest_copy_links "linkedin" "${config_json}" "${max_links}" "${session_name}" "${lib_dir}")"
+    fi
+    if [[ -n "${harvested}" ]]; then
+      printf '%s\n' "${harvested}"
+      return 0
+    fi
+    harvested="$(scout_harvest_dom_posts "${config_json}" "${platform}" "${max_links}" "${session_name}" "${lib_dir}")"
+    if [[ -z "${harvested}" ]]; then
+      harvested="$(scout_harvest_dom_posts "${config_json}" "${platform}" "${max_links}" "${session_name}" "${lib_dir}" "${relaxed_config}")"
+    fi
+    if [[ -n "${harvested}" ]]; then
+      printf '%s\n' "${harvested}"
+    fi
+    return 0
+  fi
+
+  if [[ "${platform}" == "x" ]]; then
+    local harvested=""
+    harvested="$(scout_harvest_dom_posts "${config_json}" "${platform}" "${max_links}" "${session_name}" "${lib_dir}")"
+    if [[ -z "${harvested}" ]]; then
+      harvested="$(scout_harvest_dom_posts "${config_json}" "${platform}" "${max_links}" "${session_name}" "${lib_dir}" "${relaxed_config}")"
+    fi
+    if [[ -n "${harvested}" ]]; then
+      printf '%s\n' "${harvested}"
+      return 0
+    fi
+    harvested="$(scout_harvest_copy_links "x" "${config_json}" "${max_links}" "${session_name}" "${lib_dir}" "${relaxed_config}")"
+    if [[ -z "${harvested}" ]]; then
+      harvested="$(scout_harvest_copy_links "x" "${config_json}" "${max_links}" "${session_name}" "${lib_dir}")"
+    fi
+    if [[ -n "${harvested}" ]]; then
+      printf '%s\n' "${harvested}"
+    fi
+    return 0
+  fi
+
+  scout_harvest_dom_posts "${config_json}" "${platform}" "${max_links}" "${session_name}" "${lib_dir}"
+}
+
 scout_extract_urls() {
   local config_json="$1"
   local platform="$2"
+  local lib_dir
+  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
   local max_links
   max_links="$(python3 - <<'PY' "${config_json}"
 import json, sys
@@ -11,80 +118,75 @@ print(int(config.get("maxLinksPerRun") or 5))
 PY
 )"
 
-  local port=""
-  port="$(scout_start_browser "${platform}" || true)"
+  local session_name=""
+  session_name="$(scout_resolve_session_name "${config_json}" "${lib_dir}")"
 
-  local feed_url=""
-  case "${platform}" in
-    x)
-      feed_url="https://x.com/home"
-      ;;
-    linkedin)
-      feed_url="https://www.linkedin.com/feed/"
-      ;;
-    facebook)
-      feed_url="https://www.facebook.com/"
-      ;;
-  esac
+  local targets=""
+  targets="$(python3 "${lib_dir}/resolve.py" targets "${config_json}" "${platform}")"
 
-  if [[ -n "${feed_url}" ]] && command -v agent-browser >/dev/null 2>&1 && [[ -n "${port}" ]]; then
-    agent-browser --session "signals-scout-${platform}" connect "${port}" >/dev/null 2>&1 || true
-    agent-browser --session "signals-scout-${platform}" open "${feed_url}" >/dev/null 2>&1 || true
-    agent-browser --session "signals-scout-${platform}" snapshot -i --json 2>/dev/null \
-      | python3 - <<'PY' "${config_json}" "${max_links}" "${platform}"
-import json, re, sys
-config = json.loads(sys.argv[1])
-max_links = int(sys.argv[2])
-platform = sys.argv[3]
-keywords = [k.lower() for k in (config.get("intentKeywords") or []) if str(k).strip()]
-try:
-    snapshot = json.load(sys.stdin)
-except json.JSONDecodeError:
-    snapshot = {}
-refs = snapshot.get("refs") or snapshot.get("elements") or []
-patterns = {
-    "x": re.compile(r"https?://(?:x|twitter)\.com/[^/\s]+/status/\d+", re.I),
-    "linkedin": re.compile(r"https?://(?:www\.)?linkedin\.com/(?:posts|feed/update)/\S+", re.I),
-    "facebook": re.compile(r"https?://(?:www\.)?facebook\.com/\S+/posts/\S+", re.I),
-}
-pattern = patterns.get(platform)
-seen = set()
-urls = []
-for ref in refs:
-    text = " ".join(
-        str(ref.get(key) or "")
-        for key in ("href", "url", "text", "name", "label", "value")
-    )
-    if keywords and not any(keyword in text.lower() for keyword in keywords):
-        continue
-    if not pattern:
-        continue
-    for token in re.findall(r"https?://\S+", text):
-        cleaned = token.rstrip(".,)\"'")
-        if pattern.search(cleaned) and cleaned not in seen:
-            seen.add(cleaned)
-            urls.append(cleaned)
-            if len(urls) >= max_links:
-                break
-    if len(urls) >= max_links:
-        break
-for url in urls:
-    print(url)
-PY
-  else
-    python3 - <<'PY' "${config_json}" "${max_links}"
-import json, sys
-config = json.loads(sys.argv[1])
-max_links = int(sys.argv[2])
-candidates = []
-for entry in (config.get("communities") or []) + (config.get("searchQueries") or []):
-    entry = str(entry).strip()
-    if entry.startswith("http"):
-        candidates.append(entry)
-for url in candidates[:max_links]:
-    print(url)
-PY
+  if [[ -z "${targets}" ]]; then
+    scout_stop_browser "${session_name}" "${lib_dir}"
+    return 0
   fi
 
-  scout_stop_browser "${platform}"
+  local -a collected=()
+  local first_target=""
+  first_target="$(printf '%s\n' "${targets}" | sed -n '1p')"
+
+  local port=""
+  port="$(scout_start_browser "${platform}" "${first_target}" "${session_name}" || true)"
+
+  if [[ -n "${port}" ]] && command -v agent-browser >/dev/null 2>&1; then
+    agent-browser --session "${session_name}" connect "${port}" >/dev/null 2>&1 || true
+    scout_select_content_tab "${session_name}" "${lib_dir}" "${platform}"
+
+    while IFS= read -r target; do
+      [[ -z "${target}" ]] && continue
+      [[ "${#collected[@]}" -ge "${max_links}" ]] && break
+
+      agent-browser --session "${session_name}" open "${target}" >/dev/null 2>&1 || true
+      if [[ "${platform}" == "facebook" ]]; then
+        sleep 8
+      else
+        sleep 5
+      fi
+      scout_select_content_tab "${session_name}" "${lib_dir}" "${platform}"
+
+      while IFS= read -r url; do
+        [[ -z "${url}" ]] && continue
+        local seen=0
+        local existing
+        for existing in "${collected[@]:-}"; do
+          if [[ "${existing}" == "${url}" ]]; then
+            seen=1
+            break
+          fi
+        done
+        if [[ "${seen}" -eq 0 ]]; then
+          collected+=("${url}")
+          if [[ "${#collected[@]}" -ge "${max_links}" ]]; then
+            break
+          fi
+        fi
+      done < <(
+        scout_harvest_page_posts "${config_json}" "${platform}" "${max_links}" "${session_name}" "${lib_dir}"
+      )
+    done <<< "${targets}"
+  fi
+
+  if [[ "${#collected[@]}" -eq 0 ]]; then
+    while IFS= read -r url; do
+      [[ -z "${url}" ]] && continue
+      collected+=("${url}")
+      if [[ "${#collected[@]}" -ge "${max_links}" ]]; then
+        break
+      fi
+    done < <(python3 "${lib_dir}/resolve.py" fallback "${config_json}" "${platform}" "${max_links}")
+  fi
+
+  scout_stop_browser "${session_name}" "${lib_dir}"
+
+  if [[ "${#collected[@]}" -gt 0 ]]; then
+    printf '%s\n' "${collected[@]}"
+  fi
 }

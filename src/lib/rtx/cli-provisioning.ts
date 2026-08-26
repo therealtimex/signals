@@ -62,6 +62,36 @@ export function getSignalsRtxWorkspaceSlug(env: EnvLike = process.env): string {
   return env.SIGNALS_RTX_WORKSPACE_SLUG?.trim() || "signals";
 }
 
+export async function resolveSignalsRtxWorkspaceSlug(
+  env: EnvLike = process.env,
+  fetchImpl: typeof fetch = fetch,
+): Promise<string> {
+  const preferredSlug = getSignalsRtxWorkspaceSlug(env);
+
+  try {
+    await rtxCliRequestOk(
+      `/cli/get-workspace/${encodeURIComponent(preferredSlug)}`,
+      { method: "GET" },
+      env,
+      fetchImpl,
+    );
+    return preferredSlug;
+  } catch (error) {
+    const status = (error as Error & { status?: number }).status;
+    if (status !== 404) {
+      throw error;
+    }
+  }
+
+  const existingSlug = await findExistingRtxWorkspaceSlug(
+    preferredSlug,
+    "Signals",
+    env,
+    fetchImpl,
+  );
+  return existingSlug ?? preferredSlug;
+}
+
 function extractWorkspaceSlug(body: RtxCliBody, fallback: string): string {
   const workspace = body.workspace as { slug?: string } | undefined;
   return (

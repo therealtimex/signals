@@ -33,7 +33,11 @@ PLATFORM="$(scout_pick_platform "${CONFIG_JSON}")"
 URLS="$(scout_extract_urls "${CONFIG_JSON}" "${PLATFORM}")"
 
 if [[ -z "${URLS}" ]]; then
-  echo "{\"queued\":0,\"platform\":\"${PLATFORM}\",\"candidates\":[],\"message\":\"no candidate URLs\"}"
+  DRY_RUN_FLAG="false"
+  if [[ "${DRY_RUN}" -eq 1 ]]; then
+    DRY_RUN_FLAG="true"
+  fi
+  echo "{\"queued\":0,\"platform\":\"${PLATFORM}\",\"dryRun\":${DRY_RUN_FLAG},\"candidates\":[],\"message\":\"no post URLs harvested — navigation pages are not queued as Snowball seeds\"}"
   exit 0
 fi
 
@@ -42,5 +46,17 @@ if [[ "${DRY_RUN}" -eq 1 ]]; then
   exit 0
 fi
 
-RESULT="$(scout_enqueue_urls "${CONFIG_JSON}" "${URLS}" "${PLATFORM}" "${PRODUCER_RUN_ID}" "${SIGNALS_BASE_URL}")"
+# enqueue.sh prints its error JSON to stdout before exiting non-zero. Capture it
+# in the `if` condition (where `set -e` is suspended) so the diagnostic survives
+# instead of being swallowed by the failing assignment.
+RESULT=""
+if ! RESULT="$(scout_enqueue_urls "${CONFIG_JSON}" "${URLS}" "${PLATFORM}" "${PRODUCER_RUN_ID}" "${SIGNALS_BASE_URL}")"; then
+  if [[ -n "${RESULT}" ]]; then
+    echo "${RESULT}" >&2
+  else
+    echo "{\"error\":\"enqueue failed\",\"platform\":\"${PLATFORM}\",\"queued\":0}" >&2
+  fi
+  exit 1
+fi
+
 echo "${RESULT}"

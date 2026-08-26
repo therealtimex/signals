@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { resolveSignalsRtxWorkspaceSlug } from "@/lib/rtx/cli-provisioning";
 import { resolveRtxApiBase, type EnvLike } from "@/lib/rtx/env";
 import { NETWORK_SNOWBALL_TEMPLATE_NAME } from "@/lib/workflows/network-snowball";
 import type { SnowballSeedScoutConfig } from "@/lib/workflows/snowball-seed-scout";
@@ -14,12 +15,39 @@ export type EnqueueSnowballSeedsResult =
   | {
       success: true;
       queued: Array<{ url: string; calendarEventUuid: string | null; scheduledAt: string }>;
+      /** Seeds intentionally not queued (blank URL) — not an error. */
       skipped: string[];
+      /** Seeds the calendar API rejected; the caller must surface these as failures. */
+      failed: Array<{ url: string; reason: string }>;
     }
   | { success: false; error: string };
 
 function hashUrl(url: string): string {
   return createHash("sha256").update(url.trim()).digest("hex");
+}
+
+/** Calendar titles must stay readable; never embed a truncated post URL (breaks Facebook pfbid links). */
+export function formatSnowballCalendarTitle(url: string): string {
+  const prefix = "[Signals] Snowball";
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.replace(/^www\./, "");
+    const parts = parsed.pathname.split("/").filter(Boolean);
+    if (parts.length >= 2) {
+      return `${prefix}: ${host}/${parts.slice(0, 2).join("/")}`;
+    }
+    return `${prefix}: ${host}${parsed.pathname}`;
+  } catch {
+    return prefix;
+  }
+}
+
+function snowballDispatchPrompt(url: string, templateName: string): string {
+  return [
+    `Start Network Snowball (${templateName}) for this seed URL.`,
+    `Use workflowRunConfig.seedValue exactly — do not use the calendar title as the URL.`,
+    `seedValue: ${url}`,
+  ].join(" ");
 }
 
 function randomSaltMinutes(min: number, max: number): number {
@@ -59,6 +87,13 @@ export async function enqueueSnowballCalendarSeeds(
     scheduledAt: string;
   }> = [];
   const skipped: string[] = [];
+  const failed: Array<{ url: string; reason: string }> = [];
+  let workspaceSlug = env.SIGNALS_RTX_WORKSPACE_SLUG?.trim() || "signals";
+  try {
+    workspaceSlug = await resolveSignalsRtxWorkspaceSlug(env, fetchImpl);
+  } catch {
+    // Fall back to configured slug when RTX CLI resolution is unavailable.
+  }
 
   for (const seed of seeds) {
     const url = String(seed.url || "").trim();
@@ -72,13 +107,13 @@ export async function enqueueSnowballCalendarSeeds(
       scoutConfig.saltMaxMinutes,
       seed.scheduledAt,
     );
-    const title = `[Signals] Snowball: ${url.slice(0, 72)}`;
+    const title = formatSnowballCalendarTitle(url);
     const templateName =
       scoutConfig.networkSnowballTemplateName || NETWORK_SNOWBALL_TEMPLATE_NAME;
 
     const body = {
       title,
-      description: `Queued by Snowball Seed Scout for ${templateName}`,
+      description: `Queued by Snowball Seed Scout for ${templateName}.\nSeed URL: ${url}`,
       startDate: scheduledAt,
       allDay: false,
       color: "#22c55e",
@@ -98,10 +133,9 @@ export async function enqueueSnowballCalendarSeeds(
           {
             agent: "cursor",
             agentName: "cursor",
-            workspace: env.SIGNALS_RTX_WORKSPACE_SLUG?.trim() || "signals",
+            workspace: workspaceSlug,
             thread: "network-snowball",
-            prompt:
-              "Start Network Snowball for the queued seed URL in this calendar event metadata (workflowRunConfig.seedValue).",
+            prompt: snowballDispatchPrompt(url, templateName),
           },
         ],
         queueMeta: {
@@ -124,7 +158,10 @@ export async function enqueueSnowballCalendarSeeds(
       };
 
       if (!response.ok) {
-        skipped.push(url);
+        failed.push({
+          url,
+          reason: payload.error || `calendar API responded ${response.status}`,
+        });
         continue;
       }
 
@@ -133,10 +170,13 @@ export async function enqueueSnowballCalendarSeeds(
         calendarEventUuid: payload.event?.uuid ?? null,
         scheduledAt,
       });
-    } catch {
-      skipped.push(url);
+    } catch (error) {
+      failed.push({
+        url,
+        reason: error instanceof Error ? error.message : "calendar request failed",
+      });
     }
   }
 
-  return { success: true, queued, skipped };
+  return { success: true, queued, skipped, failed };
 }

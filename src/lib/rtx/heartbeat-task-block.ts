@@ -141,16 +141,22 @@ function splitHeartbeatContent(content: string): {
     return { beforeTasks: content.trimEnd(), afterTasks: "" };
   }
 
+  // Consume every consecutive task block, including the blank lines separating
+  // them, so that tasks after the first are not left behind in `afterTasks` and
+  // re-emitted alongside the serialized task list.
   let afterIndex = tasksIndex + 1;
   while (afterIndex < lines.length) {
-    const line = lines[afterIndex];
-    if (line.startsWith("- name:")) {
-      while (afterIndex < lines.length && lines[afterIndex].trim() !== "") {
-        afterIndex += 1;
-      }
-      continue;
+    let blockStart = afterIndex;
+    while (blockStart < lines.length && lines[blockStart].trim() === "") {
+      blockStart += 1;
     }
-    break;
+    if (blockStart >= lines.length || !lines[blockStart].startsWith("- name:")) {
+      break;
+    }
+    afterIndex = blockStart;
+    while (afterIndex < lines.length && lines[afterIndex].trim() !== "") {
+      afterIndex += 1;
+    }
   }
 
   return {

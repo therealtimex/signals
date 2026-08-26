@@ -1,0 +1,1008 @@
+#!/usr/bin/env python3
+"""Snowball Seed Scout v2 — resolve scout config to platform URLs and extract post links."""
+
+from __future__ import annotations
+
+import json
+import re
+import sys
+import unittest
+import urllib.error
+import urllib.request
+from urllib.parse import quote_plus
+
+DEFAULT_BROWSER_SESSION = "signals-publish"
+
+AUTHENTICATED_FEED_URLS: dict[str, str] = {
+    "x": "https://x.com/home",
+    "linkedin": "https://www.linkedin.com/feed/",
+    "facebook": "https://www.facebook.com/",
+}
+
+SHARED_BROWSER_SESSIONS = frozenset({DEFAULT_BROWSER_SESSION})
+
+POST_PATTERNS: dict[str, re.Pattern[str]] = {
+    "x": re.compile(r"https?://(?:x|twitter)\.com/[^/\s?#]+/status/\d+", re.I),
+    "linkedin": re.compile(
+        r"https?://(?:(?:www\.)?linkedin\.com/(?:posts|feed/update)/[^\s\"'<>]+|"
+        r"lnkd\.in/p/[^\s\"'<>/?#]+)",
+        re.I,
+    ),
+    "facebook": re.compile(
+        r"https?://(?:www\.)?facebook\.com/(?:"
+        r"[^/\s\"'<>]+/posts/(?:pfbid)?[^\s\"'<>/?#]+|"
+        r"photo/?\?fbid=\d+|"
+        r"groups/[^/\s\"'<>]+/permalink/\d+"
+        r")",
+        re.I,
+    ),
+}
+
+SHELL_TAB_IGNORE = (
+    "cli-browser/index.html",
+    "cli-browser/start.html",
+    "/cli-browser/",
+)
+
+
+def uses_authenticated_session(config: dict) -> bool:
+    if config.get("inheritAuthenticatedSession") is False:
+        return False
+    session_name = resolve_browser_session_name(config, "")
+    if session_name in SHARED_BROWSER_SESSIONS:
+        return True
+    return bool(str(config.get("targetId") or "").strip())
+
+
+def authenticated_feed_url(platform: str) -> str:
+    return AUTHENTICATED_FEED_URLS.get(platform, "")
+
+
+def fetch_target_session_name(signals_base: str, target_id: str) -> str:
+    if not signals_base or not target_id:
+        return ""
+    payload = json.dumps(
+        {"tool": "get_platform_target", "input": {"targetId": target_id}}
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        f"{signals_base.rstrip('/')}/api/agent-tools/invoke",
+        data=payload,
+        headers={"content-type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            body = json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, json.JSONDecodeError, TimeoutError):
+        return ""
+
+    connection = body.get("connection") or {}
+    return str(connection.get("sessionName") or "").strip()
+
+
+def resolve_browser_session_name(config: dict, signals_base: str) -> str:
+    explicit = str(config.get("browserSessionName") or "").strip()
+    if explicit:
+        return explicit
+
+    target_id = str(config.get("targetId") or "").strip()
+    if target_id and signals_base:
+        resolved = fetch_target_session_name(signals_base, target_id)
+        if resolved:
+            return resolved
+
+    return DEFAULT_BROWSER_SESSION
+
+
+def should_stop_browser_session(session_name: str) -> bool:
+    return session_name.strip() not in SHARED_BROWSER_SESSIONS
+
+
+def is_http_url(value: str) -> bool:
+    lowered = value.strip().lower()
+    return lowered.startswith("http://") or lowered.startswith("https://")
+
+
+def looks_like_post_url(url: str, platform: str) -> bool:
+    pattern = POST_PATTERNS.get(platform)
+    if not pattern or not pattern.search(url):
+        return False
+    if platform == "facebook" and "/posts/pfbid" in url.lower():
+        # pfbid tokens are long; truncated calendar/display URLs break navigation.
+        token = url.lower().split("/posts/", 1)[-1]
+        if len(token) < 60:
+            return False
+    return True
+
+
+def resolve_community(platform: str, name: str) -> str:
+    entry = str(name).strip()
+    if not entry:
+        return ""
+    if is_http_url(entry):
+        return entry
+
+    query = quote_plus(entry)
+    if platform == "x":
+        return f"https://x.com/search?q={query}&f=live&src=typed_query"
+    if platform == "linkedin":
+        return (
+            "https://www.linkedin.com/search/results/content/"
+            f"?keywords={query}&origin=GLOBAL_SEARCH_HEADER"
+        )
+    if platform == "facebook":
+        return f"https://www.facebook.com/search/posts?q={query}"
+    return ""
+
+
+def resolve_search(platform: str, query: str, intent_keywords: list[str]) -> str:
+    entry = str(query).strip()
+    if not entry:
+        return ""
+    if is_http_url(entry):
+        return entry
+
+    terms = [entry]
+    for keyword in intent_keywords:
+        keyword = str(keyword).strip()
+        if keyword and keyword.lower() not in entry.lower():
+            terms.append(keyword)
+            break
+
+    combined = quote_plus(" ".join(terms))
+    if platform == "x":
+        return f"https://x.com/search?q={combined}&f=live&src=typed_query"
+    if platform == "linkedin":
+        return (
+            "https://www.linkedin.com/search/results/content/"
+            f"?keywords={combined}&origin=GLOBAL_SEARCH_HEADER"
+        )
+    if platform == "facebook":
+        return f"https://www.facebook.com/search/posts?q={combined}"
+    return ""
+
+
+def resolve_targets(config: dict, platform: str) -> list[str]:
+    keywords = [
+        str(keyword).strip()
+        for keyword in (config.get("intentKeywords") or [])
+        if str(keyword).strip()
+    ]
+    seen: set[str] = set()
+    targets: list[str] = []
+
+    if uses_authenticated_session(config):
+        feed_url = authenticated_feed_url(platform)
+        # Facebook home feed does not expose per-post Share buttons in the DOM;
+        # copy-link harvest needs search/group result pages instead.
+        if feed_url and platform != "facebook":
+            seen.add(feed_url)
+            targets.append(feed_url)
+
+    for entry in config.get("communities") or []:
+        url = resolve_community(platform, str(entry))
+        if url and url not in seen:
+            seen.add(url)
+            targets.append(url)
+
+    for entry in config.get("searchQueries") or []:
+        url = resolve_search(platform, str(entry), keywords)
+        if url and url not in seen:
+            seen.add(url)
+            targets.append(url)
+
+    return targets
+
+
+def is_navigation_url(url: str, platform: str) -> bool:
+    lowered = url.strip().lower()
+    if platform == "x":
+        return (
+            lowered.endswith("x.com/home")
+            or "/x.com/home?" in lowered
+            or "x.com/search?" in lowered
+            or "twitter.com/search?" in lowered
+        )
+    if platform == "linkedin":
+        return (
+            lowered.endswith("linkedin.com/feed/")
+            or lowered.endswith("linkedin.com/feed")
+            or "linkedin.com/search/" in lowered
+        )
+    if platform == "facebook":
+        return (
+            lowered.rstrip("/").endswith("facebook.com")
+            or "facebook.com/search/" in lowered
+        )
+    return False
+
+
+def is_enqueueable_seed(url: str, platform: str) -> bool:
+    return looks_like_post_url(url, platform) and not is_navigation_url(url, platform)
+
+
+def direct_post_urls_from_config(config: dict, platform: str, max_links: int) -> list[str]:
+    seen: set[str] = set()
+    urls: list[str] = []
+    for entry in (config.get("communities") or []) + (config.get("searchQueries") or []):
+        candidate = str(entry).strip()
+        if not is_http_url(candidate):
+            continue
+        if is_enqueueable_seed(candidate, platform) and candidate not in seen:
+            seen.add(candidate)
+            urls.append(candidate)
+            if len(urls) >= max_links:
+                break
+    return urls
+
+
+def fallback_candidates(config: dict, platform: str, max_links: int) -> list[str]:
+    return direct_post_urls_from_config(config, platform, max_links)
+
+
+def extract_post_url_from_share_href(href: str) -> str | None:
+    try:
+        from urllib.parse import parse_qs, unquote, urlparse
+
+        parsed = urlparse(href)
+        if "l.facebook.com" in parsed.netloc:
+            inner = (parse_qs(parsed.query).get("u") or [None])[0]
+            if inner:
+                return extract_post_url_from_share_href(unquote(inner))
+        if "wa.me" in parsed.netloc:
+            text = (parse_qs(parsed.query).get("text") or [None])[0]
+            if text:
+                return extract_post_url_from_share_href(text)
+        if "facebook.com" in parsed.netloc and "/posts/pfbid" in parsed.path:
+            return f"{parsed.scheme}://{parsed.netloc}{parsed.path.rstrip('/')}"
+    except (ValueError, TypeError):
+        return None
+    return None
+
+
+FACEBOOK_INIT_JS = """(() => {
+window.__scoutCopiedLinks = window.__scoutCopiedLinks || [];
+if (!window.__scoutClipboardHooked) {
+  const orig = navigator.clipboard.writeText.bind(navigator.clipboard);
+  navigator.clipboard.writeText = async (text) => {
+    window.__scoutCopiedLinks.push(String(text));
+    try { return await orig(text); } catch (err) { return undefined; }
+  };
+  window.__scoutClipboardHooked = true;
+}
+window.scoutExtractPostUrl = function(href) {
+  try {
+    const url = new URL(href);
+    if (url.hostname.includes('l.facebook.com')) {
+      const inner = url.searchParams.get('u');
+      if (inner) return window.scoutExtractPostUrl(decodeURIComponent(inner));
+    }
+    if (url.hostname.includes('wa.me')) {
+      const text = url.searchParams.get('text');
+      if (text) return window.scoutExtractPostUrl(text);
+    }
+    if (url.hostname.includes('facebook.com') && url.pathname.includes('/posts/pfbid')) {
+      return `${url.origin}${url.pathname}`;
+    }
+  } catch (err) {}
+  return null;
+};
+window.scoutCloseShareDialog = function() {
+  const close = document.querySelector('[aria-label="Close"]');
+  if (close) close.click();
+};
+window.scoutEscapeMenu = function() {
+  document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  window.scoutCloseShareDialog();
+};
+return 'ready';
+})()"""
+
+COPY_LINK_INIT_JS = FACEBOOK_INIT_JS
+
+X_OPEN_MENU_JS = """(() => {
+const keywords = __SCOUT_KEYWORDS__;
+const articles = [...document.querySelectorAll('article')]
+  .filter((art) => art.querySelector('a[href*="/status/"]'))
+  .filter((art) => !art.getAttribute('data-scout-processed'));
+if (!articles.length) return 'none';
+const art = articles[0];
+const text = (art.innerText || '').toLowerCase();
+if (keywords.length && !keywords.some((kw) => text.includes(kw))) {
+  art.setAttribute('data-scout-processed', '1');
+  return 'skipped';
+}
+const share = art.querySelector('button[aria-label="Share post"]');
+if (!share) {
+  art.setAttribute('data-scout-processed', '1');
+  return 'none';
+}
+document.querySelectorAll('article[data-scout-active="1"]').forEach((node) => node.removeAttribute('data-scout-active'));
+art.setAttribute('data-scout-processed', '1');
+art.setAttribute('data-scout-active', '1');
+share.click();
+return 'opened';
+})()"""
+
+X_CLICK_COPY_LINK_JS = """(() => {
+const copy = [...document.querySelectorAll('[role="menuitem"]')]
+  .find((el) => (el.innerText || '').trim() === 'Copy link');
+if (!copy) return 'no-copy';
+copy.click();
+return 'copy-clicked';
+})()"""
+
+X_EXTRACT_URL_JS = """(() => {
+const urls = new Set();
+const copied = window.__scoutCopiedLinks?.[window.__scoutCopiedLinks.length - 1];
+if (copied && /\\/status\\/\\d+/.test(copied)) {
+  urls.add(copied.split('?')[0].replace(/\\/analytics$/, ''));
+}
+const art = document.querySelector('article[data-scout-active="1"]');
+if (art) {
+  for (const anchor of art.querySelectorAll('a[href*="/status/"]')) {
+    const clean = anchor.href.split('?')[0].replace(/\\/analytics$/, '');
+    if (/\\/status\\/\\d+$/.test(clean)) urls.add(clean);
+  }
+}
+return JSON.stringify([...urls]);
+})()"""
+
+X_CLOSE_MENU_JS = """(() => {
+window.scoutEscapeMenu();
+return 'closed';
+})()"""
+
+LINKEDIN_OPEN_MENU_JS = """(() => {
+const keywords = __SCOUT_KEYWORDS__;
+const selectors = [
+  'button[aria-label*="control menu"]',
+  'button.feed-shared-control-menu__trigger',
+  'button[aria-label*="Open control menu for post"]',
+];
+const buttons = [...document.querySelectorAll(selectors.join(','))]
+  .filter((btn) => !btn.closest('[data-scout-processed="1"]'));
+if (!buttons.length) return 'none';
+const btn = buttons[0];
+const root = btn.closest('.feed-shared-update-v2, [data-urn*="activity"], [data-urn*="ugcPost"]')
+  || btn.closest('div[data-urn]')
+  || btn.parentElement;
+const text = (root?.innerText || '').toLowerCase();
+if (keywords.length && !keywords.some((kw) => text.includes(kw))) {
+  if (root) root.setAttribute('data-scout-processed', '1');
+  return 'skipped';
+}
+if (root) root.setAttribute('data-scout-processed', '1');
+document.querySelectorAll('[data-scout-active="1"]').forEach((node) => node.removeAttribute('data-scout-active'));
+if (root) root.setAttribute('data-scout-active', '1');
+btn.click();
+return 'opened';
+})()"""
+
+LINKEDIN_CLICK_COPY_LINK_JS = """(() => {
+const copy = [...document.querySelectorAll('span, div, [role="menuitem"]')]
+  .find((el) => (el.innerText || '').trim() === 'Copy link to post');
+if (!copy) return 'no-copy';
+copy.click();
+return 'copy-clicked';
+})()"""
+
+LINKEDIN_EXTRACT_URL_JS = """(() => {
+const urls = new Set();
+const copied = window.__scoutCopiedLinks?.[window.__scoutCopiedLinks.length - 1];
+if (copied) {
+  const clean = copied.split('?')[0];
+  if (/linkedin\\.com\\/(posts|feed\\/update)/.test(clean) || /lnkd\\.in\\/p\\//.test(clean)) {
+    urls.add(clean);
+  }
+}
+return JSON.stringify([...urls]);
+})()"""
+
+LINKEDIN_CLOSE_MENU_JS = """(() => {
+window.scoutEscapeMenu();
+return 'closed';
+})()"""
+
+
+def build_open_menu_script(platform: str, keywords: list[str]) -> str:
+    keywords_json = json.dumps([keyword.lower() for keyword in keywords if keyword])
+    templates = {
+        "x": X_OPEN_MENU_JS,
+        "linkedin": LINKEDIN_OPEN_MENU_JS,
+        "facebook": FACEBOOK_OPEN_SHARE_JS,
+    }
+    template = templates.get(platform)
+    if not template:
+        return "(() => 'unsupported')()"
+    return template.replace("__SCOUT_KEYWORDS__", keywords_json)
+
+
+FACEBOOK_OPEN_SHARE_JS = """(() => {
+const keywords = __SCOUT_KEYWORDS__;
+const buttons = [...document.querySelectorAll('[aria-label="Send this to friends or post it on your profile."]')]
+  .filter((el) => el.getAttribute('role') === 'button')
+  .filter((btn) => !btn.closest('[data-scout-processed="1"]'));
+if (!buttons.length) return 'none';
+const btn = buttons[0];
+const root = btn.closest('[role="article"], [data-pagelet], div[data-ad-preview]') || btn.parentElement;
+const text = (root?.innerText || '').toLowerCase();
+if (keywords.length && !keywords.some((kw) => text.includes(kw))) {
+  if (root) root.setAttribute('data-scout-processed', '1');
+  return 'skipped';
+}
+if (root) root.setAttribute('data-scout-processed', '1');
+btn.click();
+return 'opened';
+})()"""
+
+
+def build_facebook_open_share_script(keywords: list[str]) -> str:
+    keywords_json = json.dumps([keyword.lower() for keyword in keywords if keyword])
+    return FACEBOOK_OPEN_SHARE_JS.replace("__SCOUT_KEYWORDS__", keywords_json)
+
+FACEBOOK_CLICK_COPY_LINK_JS = """(() => {
+const copy = [...document.querySelectorAll('span, div, [role="button"]')]
+  .find((el) => (el.innerText || '').trim() === 'Copy link');
+if (!copy) return 'no-copy';
+copy.click();
+return 'copy-clicked';
+})()"""
+
+FACEBOOK_EXTRACT_DIALOG_JS = """(() => {
+const urls = new Set();
+for (const anchor of document.querySelectorAll('a[href]')) {
+  const extracted = window.scoutExtractPostUrl(anchor.href);
+  if (extracted) urls.add(extracted);
+}
+for (const input of document.querySelectorAll('input[type="text"], textarea')) {
+  const value = (input.value || '').trim();
+  if (value.includes('facebook.com') && value.includes('/posts/pfbid')) {
+    const extracted = window.scoutExtractPostUrl(value);
+    if (extracted) urls.add(extracted);
+  }
+}
+return JSON.stringify([...urls]);
+})()"""
+
+FACEBOOK_CLOSE_DIALOG_JS = """(() => {
+window.scoutCloseShareDialog();
+return 'closed';
+})()"""
+
+COPY_LINK_PLATFORM_COMMANDS: dict[str, dict[str, str]] = {
+    "x": {
+        "click-copy-link": X_CLICK_COPY_LINK_JS,
+        "extract-url": X_EXTRACT_URL_JS,
+        "close-menu": X_CLOSE_MENU_JS,
+    },
+    "linkedin": {
+        "click-copy-link": LINKEDIN_CLICK_COPY_LINK_JS,
+        "extract-url": LINKEDIN_EXTRACT_URL_JS,
+        "close-menu": LINKEDIN_CLOSE_MENU_JS,
+    },
+    "facebook": {
+        "click-copy-link": FACEBOOK_CLICK_COPY_LINK_JS,
+        "extract-url": FACEBOOK_EXTRACT_DIALOG_JS,
+        "close-menu": FACEBOOK_CLOSE_DIALOG_JS,
+    },
+}
+
+
+def normalize_post_url(url: str, platform: str) -> str:
+    cleaned = str(url).strip().split("#")[0]
+    if platform == "facebook":
+        try:
+            from urllib.parse import parse_qs, urlparse
+
+            parsed = urlparse(cleaned)
+            if parsed.path.rstrip("/") == "/photo":
+                fbid = (parse_qs(parsed.query).get("fbid") or [None])[0]
+                if fbid:
+                    return f"https://www.facebook.com/photo/?fbid={fbid}"
+            if "/permalink/" in parsed.path or "/posts/" in parsed.path:
+                return f"{parsed.scheme}://{parsed.netloc}{parsed.path.rstrip('/')}"
+        except ValueError:
+            pass
+    if platform == "x":
+        cleaned = cleaned.split("?")[0].rstrip("/")
+        if cleaned.endswith("/analytics"):
+            cleaned = cleaned[: -len("/analytics")]
+        return cleaned
+    if platform == "linkedin":
+        return cleaned.split("?")[0].rstrip("/")
+    cleaned = cleaned.split("?")[0].rstrip("/")
+    if cleaned.endswith("/analytics"):
+        cleaned = cleaned[: -len("/analytics")]
+    return cleaned
+
+
+def filter_post_urls(
+    urls: list[str],
+    platform: str,
+    keywords: list[str],
+    max_links: int,
+    *,
+    require_keywords: bool = False,
+) -> list[str]:
+    pattern = POST_PATTERNS.get(platform)
+    if not pattern:
+        return []
+
+    lowered_keywords = [keyword.lower() for keyword in keywords if keyword]
+    seen: set[str] = set()
+    filtered: list[str] = []
+
+    for raw in urls:
+        cleaned = normalize_post_url(str(raw).strip(), platform)
+        if not pattern.search(cleaned) or cleaned in seen:
+            continue
+        if require_keywords and lowered_keywords:
+            haystack = cleaned.lower()
+            if not any(keyword in haystack for keyword in lowered_keywords):
+                continue
+        seen.add(cleaned)
+        filtered.append(cleaned)
+        if len(filtered) >= max_links:
+            break
+
+    return filtered
+
+
+def build_eval_script(platform: str, keywords: list[str], max_links: int) -> str:
+    keywords_json = json.dumps([keyword.lower() for keyword in keywords if keyword])
+    if platform == "x":
+        return (
+            "(() => {"
+            f"const keywords = {keywords_json};"
+            f"const maxLinks = {max_links};"
+            "const urls = new Set();"
+            "const normalize = (href) => {"
+            "if (!href) return null;"
+            "const clean = href.split('?')[0].replace(/\\/analytics$/, '');"
+            "return /\\/status\\/\\d+$/.test(clean) ? clean : null;"
+            "};"
+            "for (const article of document.querySelectorAll('article')) {"
+            "const text = (article.innerText || '').toLowerCase();"
+            "if (keywords.length && !keywords.some((kw) => text.includes(kw))) continue;"
+            "for (const anchor of article.querySelectorAll('a[href*=\"/status/\"]')) {"
+            "const href = normalize(anchor.href);"
+            "if (href) urls.add(href);"
+            "if (urls.size >= maxLinks) break;"
+            "}"
+            "if (urls.size >= maxLinks) break;"
+            "}"
+            "return JSON.stringify([...urls]);"
+            "})()"
+        )
+    if platform == "linkedin":
+        return (
+            "(() => {"
+            f"const keywords = {keywords_json};"
+            f"const maxLinks = {max_links};"
+            "const urls = new Set();"
+            "const normalize = (href) => {"
+            "if (!href) return null;"
+            " const clean = href.split('?')[0];"
+            " if (!/(\\/posts\\/|feed\\/update\\/)/.test(clean)) return null;"
+            " return clean;"
+            "};"
+            "for (const card of document.querySelectorAll('div.feed-shared-update-v2, article, li')) {"
+            "const text = (card.innerText || '').toLowerCase();"
+            "if (keywords.length && !keywords.some((kw) => text.includes(kw))) continue;"
+            "for (const anchor of card.querySelectorAll('a[href]')) {"
+            "const href = normalize(anchor.href);"
+            "if (href) urls.add(href);"
+            "if (urls.size >= maxLinks) break;"
+            "}"
+            "if (urls.size >= maxLinks) break;"
+            "}"
+            "return JSON.stringify([...urls]);"
+            "})()"
+        )
+    if platform == "facebook":
+        return (
+            "(() => {"
+            f"const keywords = {keywords_json};"
+            f"const maxLinks = {max_links};"
+            "const urls = new Set();"
+            "const normalize = (href) => {"
+            "if (!href || !href.includes('facebook.com')) return null;"
+            "try {"
+            "const url = new URL(href);"
+            "if (url.pathname.includes('/posts/')) return url.origin + url.pathname;"
+            "if (url.pathname.replace(/\\/$/, '') === '/photo' && url.searchParams.get('fbid')) {"
+            "return `${url.origin}/photo/?fbid=${url.searchParams.get('fbid')}`;"
+            "}"
+            "if (url.pathname.includes('/permalink/')) return url.origin + url.pathname;"
+            "} catch (err) {}"
+            "return null;"
+            "};"
+            "window.scrollBy(0, Math.min(document.body.scrollHeight || 0, 1600));"
+            "for (const anchor of document.querySelectorAll('a[href*=\"facebook.com\"]')) {"
+            "let text = '';"
+            "let node = anchor;"
+            "for (let depth = 0; depth < 7 && node; depth += 1, node = node.parentElement) {"
+            "text += ` ${node.innerText || ''}`;"
+            "}"
+            "text = text.toLowerCase();"
+            "if (keywords.length && !keywords.some((kw) => text.includes(kw))) continue;"
+            "const href = normalize(anchor.href);"
+            "if (href) urls.add(href);"
+            "if (urls.size >= maxLinks) break;"
+            "}"
+            "return JSON.stringify([...urls]);"
+            "})()"
+        )
+    return "JSON.stringify([])"
+
+
+def parse_eval_posts(
+    config: dict,
+    platform: str,
+    max_links: int,
+    raw_output: str,
+) -> list[str]:
+    keywords = [
+        str(keyword).strip()
+        for keyword in (config.get("intentKeywords") or [])
+        if str(keyword).strip()
+    ]
+    text = raw_output.strip()
+    if not text:
+        return []
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        start = text.find("[")
+        end = text.rfind("]")
+        if start == -1 or end == -1:
+            return []
+        try:
+            payload = json.loads(text[start : end + 1])
+        except json.JSONDecodeError:
+            return []
+
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except json.JSONDecodeError:
+            return []
+    if not isinstance(payload, list):
+        return []
+    return filter_post_urls([str(item) for item in payload], platform, keywords, max_links)
+
+
+def extract_posts_from_snapshot(
+    config: dict,
+    platform: str,
+    max_links: int,
+    snapshot: dict,
+) -> list[str]:
+    keywords = [
+        keyword.lower()
+        for keyword in (config.get("intentKeywords") or [])
+        if str(keyword).strip()
+    ]
+    pattern = POST_PATTERNS.get(platform)
+    if not pattern:
+        return []
+
+    refs = snapshot.get("refs") or snapshot.get("elements") or []
+    seen: set[str] = set()
+    urls: list[str] = []
+
+    for ref in refs:
+        text = " ".join(
+            str(ref.get(key) or "")
+            for key in ("href", "url", "text", "name", "label", "value", "ariaLabel")
+        )
+        if keywords and not any(keyword in text.lower() for keyword in keywords):
+            continue
+
+        for token in re.findall(r"https?://\S+", text):
+            cleaned = token.rstrip(".,)\"'")
+            if pattern.search(cleaned) and cleaned not in seen:
+                seen.add(cleaned)
+                urls.append(cleaned)
+                if len(urls) >= max_links:
+                    return urls
+
+    return urls
+
+
+def pick_content_tab_id(tabs_payload: dict, platform: str = "") -> str:
+    tabs = tabs_payload.get("data", {}).get("tabs") or tabs_payload.get("tabs") or []
+    content_tabs: list[dict] = []
+
+    for tab in tabs:
+        url = str(tab.get("url") or "").strip()
+        lowered = url.lower()
+        if not lowered.startswith("http"):
+            continue
+        if lowered.startswith("devtools://"):
+            continue
+        if any(marker in lowered for marker in SHELL_TAB_IGNORE):
+            continue
+        if str(tab.get("title") or "") == "RealTimeX Browser":
+            continue
+        content_tabs.append(tab)
+
+    if not content_tabs:
+        return ""
+
+    def matches_platform(tab: dict) -> bool:
+        url = str(tab.get("url") or "").lower()
+        if platform == "x":
+            return "x.com" in url or "twitter.com" in url
+        if platform == "linkedin":
+            return "linkedin.com" in url
+        if platform == "facebook":
+            return "facebook.com" in url
+        return True
+
+    preferred = next((tab for tab in content_tabs if matches_platform(tab)), content_tabs[0])
+    return str(
+        preferred.get("tabId")
+        or preferred.get("id")
+        or preferred.get("targetId")
+        or ""
+    )
+
+
+def main() -> int:
+    if len(sys.argv) < 2:
+        print("usage: resolve.py <targets|fallback|extract-posts|pick-tab> ...", file=sys.stderr)
+        return 2
+
+    command = sys.argv[1]
+
+    if command == "session":
+        config = json.loads(sys.argv[2])
+        signals_base = sys.argv[3] if len(sys.argv) > 3 else ""
+        print(resolve_browser_session_name(config, signals_base))
+        return 0
+
+    if command == "should-stop":
+        print("1" if should_stop_browser_session(sys.argv[2]) else "0")
+        return 0
+
+    if command == "targets":
+        config = json.loads(sys.argv[2])
+        platform = sys.argv[3]
+        for url in resolve_targets(config, platform):
+            print(url)
+        return 0
+
+    if command == "fallback":
+        config = json.loads(sys.argv[2])
+        platform = sys.argv[3]
+        max_links = int(sys.argv[4])
+        for url in fallback_candidates(config, platform, max_links):
+            print(url)
+        return 0
+
+    if command == "extract-posts":
+        config = json.loads(sys.argv[2])
+        platform = sys.argv[3]
+        max_links = int(sys.argv[4])
+        snapshot = json.load(sys.stdin)
+        for url in extract_posts_from_snapshot(config, platform, max_links, snapshot):
+            print(url)
+        return 0
+
+    if command == "copy-link-init":
+        print(COPY_LINK_INIT_JS)
+        return 0
+
+    if command.endswith("-open-menu"):
+        platform = command[: -len("-open-menu")]
+        if len(sys.argv) > 2 and sys.argv[2] != "-":
+            config = json.loads(sys.argv[2])
+        else:
+            config = json.load(sys.stdin)
+        keywords = [
+            str(keyword).strip()
+            for keyword in (config.get("intentKeywords") or [])
+            if str(keyword).strip()
+        ]
+        print(build_open_menu_script(platform, keywords))
+        return 0
+
+    if command.endswith("-click-copy-link") or command.endswith("-extract-url") or command.endswith("-close-menu"):
+        platform = command.split("-", 1)[0]
+        action = command[len(platform) + 1 :]
+        script = COPY_LINK_PLATFORM_COMMANDS.get(platform, {}).get(action)
+        if script:
+            print(script)
+            return 0
+        print(f"unknown copy-link command: {command}", file=sys.stderr)
+        return 2
+
+    if command == "facebook-init":
+        print(FACEBOOK_INIT_JS)
+        return 0
+
+    if command == "facebook-open-share":
+        if len(sys.argv) > 2 and sys.argv[2] != "-":
+            config = json.loads(sys.argv[2])
+        else:
+            config = json.load(sys.stdin)
+        keywords = [
+            str(keyword).strip()
+            for keyword in (config.get("intentKeywords") or [])
+            if str(keyword).strip()
+        ]
+        print(build_facebook_open_share_script(keywords))
+        return 0
+
+    if command == "facebook-click-copy-link":
+        print(FACEBOOK_CLICK_COPY_LINK_JS)
+        return 0
+
+    if command == "facebook-extract-dialog":
+        print(FACEBOOK_EXTRACT_DIALOG_JS)
+        return 0
+
+    if command == "facebook-close-dialog":
+        print(FACEBOOK_CLOSE_DIALOG_JS)
+        return 0
+
+    if command == "eval-script":
+        config = json.loads(sys.argv[2])
+        platform = sys.argv[3]
+        max_links = int(sys.argv[4])
+        keywords = [
+            str(keyword).strip()
+            for keyword in (config.get("intentKeywords") or [])
+            if str(keyword).strip()
+        ]
+        print(build_eval_script(platform, keywords, max_links))
+        return 0
+
+    if command == "parse-eval-posts":
+        config_arg = sys.argv[2]
+        if config_arg.startswith("@"):
+            with open(config_arg[1:], encoding="utf-8") as handle:
+                config = json.load(handle)
+        else:
+            config = json.loads(config_arg)
+        platform = sys.argv[3]
+        max_links = int(sys.argv[4])
+        raw_output = sys.stdin.read()
+        for url in parse_eval_posts(config, platform, max_links, raw_output):
+            print(url)
+        return 0
+
+    if command == "pick-tab":
+        payload = json.load(sys.stdin)
+        platform = sys.argv[2] if len(sys.argv) > 2 else ""
+        tab_id = pick_content_tab_id(payload, platform)
+        if tab_id:
+            print(tab_id)
+        return 0
+
+    if command == "self-test":
+        unittest.main(argv=[sys.argv[0]], exit=True, verbosity=2)
+        return 0
+
+    print(f"unknown command: {command}", file=sys.stderr)
+    return 2
+
+
+class ResolveTests(unittest.TestCase):
+    def test_resolve_community_name_on_x(self) -> None:
+        url = resolve_community("x", "Build in Public")
+        self.assertIn("x.com/search?q=Build+in+Public", url)
+
+    def test_resolve_search_with_intent_keyword(self) -> None:
+        url = resolve_search("x", "yc", ["funding", "founder"])
+        self.assertIn("yc", url)
+        self.assertIn("funding", url)
+
+    def test_http_url_passthrough(self) -> None:
+        direct = "https://x.com/someuser/status/123"
+        self.assertEqual(resolve_search("x", direct, []), direct)
+
+    def test_fallback_only_returns_direct_post_urls(self) -> None:
+        config = {
+            "inheritAuthenticatedSession": True,
+            "browserSessionName": "signals-publish",
+            "communities": ["https://x.com/foo/status/111"],
+            "searchQueries": ["yc"],
+            "intentKeywords": [],
+        }
+        urls = fallback_candidates(config, "x", 5)
+        self.assertEqual(urls, ["https://x.com/foo/status/111"])
+
+    def test_fallback_skips_navigation_urls(self) -> None:
+        config = {
+            "inheritAuthenticatedSession": True,
+            "browserSessionName": "signals-publish",
+            "communities": ["Build in Public"],
+            "searchQueries": ["yc"],
+            "intentKeywords": ["funding"],
+        }
+        urls = fallback_candidates(config, "x", 5)
+        self.assertEqual(urls, [])
+
+    def test_authenticated_feed_prepended(self) -> None:
+        config = {
+            "inheritAuthenticatedSession": True,
+            "browserSessionName": "signals-publish",
+            "searchQueries": ["yc"],
+            "intentKeywords": [],
+        }
+        urls = resolve_targets(config, "linkedin")
+        self.assertEqual(urls[0], "https://www.linkedin.com/feed/")
+
+    def test_resolve_browser_session_defaults_to_publish(self) -> None:
+        self.assertEqual(resolve_browser_session_name({}, ""), "signals-publish")
+
+    def test_extract_post_url_from_share_dialog(self) -> None:
+        href = (
+            "https://l.facebook.com/l.php?u=https%3A%2F%2Fwa.me%2F%3Ftext%3D"
+            "https%253A%252F%252Fwww.facebook.com%252Fvdphat%252Fposts%252FpfbidABC123"
+        )
+        self.assertEqual(
+            extract_post_url_from_share_href(href),
+            "https://www.facebook.com/vdphat/posts/pfbidABC123",
+        )
+
+    def test_facebook_photo_urls_are_enqueueable(self) -> None:
+        url = "https://www.facebook.com/photo/?fbid=1234567890&set=a.1"
+        self.assertTrue(looks_like_post_url(url, "facebook"))
+        self.assertEqual(
+            normalize_post_url(url, "facebook"),
+            "https://www.facebook.com/photo/?fbid=1234567890",
+        )
+
+    def test_truncated_facebook_pfbid_urls_are_rejected(self) -> None:
+        truncated = "https://www.facebook.com/saritasym/posts/pfbid0AVUoH55Pnb4cxmX8Gt5yjEYJm"
+        full = (
+            "https://www.facebook.com/saritasym/posts/"
+            "pfbid0AVUoH55Pnb4cxmX8Gt5yjEYJmuy8cS3cvm8iWRUyLyyuxg5MzDSt5NwNpLY6xpvrl"
+        )
+        self.assertFalse(looks_like_post_url(truncated, "facebook"))
+        self.assertTrue(looks_like_post_url(full, "facebook"))
+
+    def test_linkedin_short_urls_are_enqueueable(self) -> None:
+        url = "https://lnkd.in/p/g8t6zZDV"
+        self.assertTrue(looks_like_post_url(url, "linkedin"))
+        self.assertEqual(normalize_post_url(url, "linkedin"), url)
+
+    def test_x_status_urls_strip_analytics(self) -> None:
+        url = "https://x.com/foo/status/123/analytics"
+        self.assertEqual(
+            normalize_post_url(url, "x"),
+            "https://x.com/foo/status/123",
+        )
+
+    def test_parse_eval_posts_handles_quoted_json(self) -> None:
+        raw = '"[\\"https://x.com/foo/status/123\\"]"'
+        urls = parse_eval_posts({"intentKeywords": []}, "x", 5, raw)
+        self.assertEqual(urls, ["https://x.com/foo/status/123"])
+
+    def test_should_not_stop_shared_session(self) -> None:
+        self.assertFalse(should_stop_browser_session("signals-publish"))
+
+    def test_extract_posts_filters_keywords(self) -> None:
+        config = {"intentKeywords": ["funding"]}
+        snapshot = {
+            "refs": [
+                {
+                    "href": "https://x.com/a/status/1",
+                    "text": "raised funding today",
+                },
+                {
+                    "href": "https://x.com/b/status/2",
+                    "text": "random lunch photo",
+                },
+            ]
+        }
+        urls = extract_posts_from_snapshot(config, "x", 5, snapshot)
+        self.assertEqual(urls, ["https://x.com/a/status/1"])
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
