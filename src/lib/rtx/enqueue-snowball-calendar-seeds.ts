@@ -30,6 +30,12 @@ export type EnqueueSnowballSeedsResult =
     }
   | { success: false; error: string };
 
+/**
+ * Per-seed calendar POST budget. Must stay well under
+ * SNOWBALL_SEED_CLAIM_TTL_MS so a request cannot outlive its own claim.
+ */
+const CALENDAR_POST_TIMEOUT_MS = 60_000;
+
 function hashUrl(url: string): string {
   return createHash("sha256").update(url.trim()).digest("hex");
 }
@@ -120,14 +126,13 @@ export async function enqueueSnowballCalendarSeeds(
     // use does not enforce queueMeta.dedupeKey. Claim before the POST so two
     // overlapping runs cannot both queue the same URL.
     const dedupeKey = hashUrl(url);
-    if (
-      !claimSeed({
-        urlHash: dedupeKey,
-        url,
-        platform: seed.platform ?? null,
-        producerRunId: seed.producerRunId ?? null,
-      })
-    ) {
+    const claimToken = claimSeed({
+      urlHash: dedupeKey,
+      url,
+      platform: seed.platform ?? null,
+      producerRunId: seed.producerRunId ?? null,
+    });
+    if (!claimToken) {
       deduped.push(url);
       continue;
     }
@@ -181,6 +186,9 @@ export async function enqueueSnowballCalendarSeeds(
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
+        // Bound the request well inside the claim TTL: a POST that outlived its
+        // own claim could be taken over mid-flight and queue the URL twice.
+        signal: AbortSignal.timeout(CALENDAR_POST_TIMEOUT_MS),
       });
       const payload = (await response.json().catch(() => ({}))) as {
         event?: { uuid?: string };
@@ -189,7 +197,7 @@ export async function enqueueSnowballCalendarSeeds(
 
       if (!response.ok) {
         // Release so the seed stays retryable rather than blocked by our own claim.
-        releaseSeedClaim(dedupeKey);
+        releaseSeedClaim(dedupeKey, claimToken);
         failed.push({
           url,
           reason: payload.error || `calendar API responded ${response.status}`,
@@ -198,10 +206,10 @@ export async function enqueueSnowballCalendarSeeds(
       }
 
       const calendarEventUuid = payload.event?.uuid ?? null;
-      confirmSeed(dedupeKey, calendarEventUuid);
+      confirmSeed(dedupeKey, claimToken, calendarEventUuid);
       queued.push({ url, calendarEventUuid, scheduledAt });
     } catch (error) {
-      releaseSeedClaim(dedupeKey);
+      releaseSeedClaim(dedupeKey, claimToken);
       failed.push({
         url,
         reason: error instanceof Error ? error.message : "calendar request failed",

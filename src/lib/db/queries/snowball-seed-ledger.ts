@@ -84,17 +84,22 @@ export function findRecentlyQueuedSeedHashes(
  * A stale `pending` row left by a crashed run is taken over rather than blocking
  * the URL for the full dedupe window.
  *
- * @returns true when this caller owns the claim and should POST.
+ * The returned token is the row id, which doubles as a fencing token: a takeover
+ * rotates it, so a superseded owner whose POST is still in flight can no longer
+ * confirm or release the row that now belongs to someone else.
+ *
+ * @returns the claim token when this caller owns the claim, otherwise null.
  */
 export function claimSeed(
   entry: SnowballSeedLedgerEntry,
   windowMs: number = SNOWBALL_SEED_DEDUPE_WINDOW_MS,
-): boolean {
+): string | null {
   const now = nowSeconds();
+  const token = nanoid();
   const inserted = db
     .insert(snowballSeedLedger)
     .values({
-      id: nanoid(),
+      id: token,
       urlHash: entry.urlHash,
       url: entry.url,
       platform: entry.platform ?? null,
@@ -105,13 +110,15 @@ export function claimSeed(
     .onConflictDoNothing({ target: snowballSeedLedger.urlHash })
     .run();
 
-  if ((inserted.changes ?? 0) > 0) return true;
+  if ((inserted.changes ?? 0) > 0) return token;
 
   // A row already exists. Take it over only when it is no longer live: a stale
   // claim, or a confirmed entry past the dedupe window.
   const takeover = db
     .update(snowballSeedLedger)
     .set({
+      // Rotating the id invalidates the previous owner's token.
+      id: token,
       url: entry.url,
       platform: entry.platform ?? null,
       producerRunId: entry.producerRunId ?? null,
@@ -140,34 +147,55 @@ export function claimSeed(
     )
     .run();
 
-  return (takeover.changes ?? 0) > 0;
+  return (takeover.changes ?? 0) > 0 ? token : null;
 }
 
-/** Promote a claim to confirmed once the calendar has accepted the event. */
+/**
+ * Promote a claim to confirmed once the calendar has accepted the event.
+ *
+ * @returns false when the claim was taken over meanwhile, so this caller's
+ * response no longer owns the row and must not overwrite it.
+ */
 export function confirmSeed(
   urlHash: string,
+  claimToken: string,
   calendarEventUuid: string | null,
-): void {
+): boolean {
   const now = nowSeconds();
-  db.update(snowballSeedLedger)
+  const result = db
+    .update(snowballSeedLedger)
     .set({ status: "queued", calendarEventUuid, enqueuedAt: now, updatedAt: now })
-    .where(eq(snowballSeedLedger.urlHash, urlHash))
+    .where(
+      and(
+        eq(snowballSeedLedger.urlHash, urlHash),
+        eq(snowballSeedLedger.id, claimToken),
+      ),
+    )
     .run();
+  return (result.changes ?? 0) > 0;
 }
 
 /**
  * Drop a claim whose calendar POST failed, so the seed stays retryable on the
  * next tick instead of being blocked for the full dedupe window.
+ *
+ * Scoped to the caller's own token so a superseded owner cannot delete the claim
+ * that replaced it.
+ *
+ * @returns false when the row no longer belongs to this caller.
  */
-export function releaseSeedClaim(urlHash: string): void {
-  db.delete(snowballSeedLedger)
+export function releaseSeedClaim(urlHash: string, claimToken: string): boolean {
+  const result = db
+    .delete(snowballSeedLedger)
     .where(
       and(
         eq(snowballSeedLedger.urlHash, urlHash),
+        eq(snowballSeedLedger.id, claimToken),
         eq(snowballSeedLedger.status, "pending"),
       ),
     )
     .run();
+  return (result.changes ?? 0) > 0;
 }
 
 /** Drop ledger rows past the dedupe window so the table stays bounded. */
