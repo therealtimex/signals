@@ -224,57 +224,32 @@ tasks: [{ name: morning-brief, agent: claude, prompt: keep-me, interval: 24h }]
     ).toHaveLength(1);
   });
 
-  it("does not let an unbalanced fence inside a prompt hide a real key", () => {
-    // A lone ``` in a block scalar is not a markdown fence. Treating it as one
-    // opened a phantom fence that swallowed the real key and fell through to the
-    // duplicate-key append.
-    const content = `tasks:
+  it("refuses a key that any fence arrangement previously hid", () => {
+    // Unbalanced, mismatched and nested fences each hid a real key in turn.
+    // With no fence state at all, every one of them refuses.
+    const arrangements = [
+      "tasks:\n\n- name: b\n  prompt: |\n    ```\n    code\n\ntasks: [{ name: real }]\n",
+      "# h\n\n```\n~~~\n```\n\ntasks: [{ name: real }]\n",
+      "# h\n\n````markdown\n```yaml\nx\n```\n````\n\ntasks: [{ name: real }]\n",
+      "# h\n\n```\n```yaml\nx\n```\n\ntasks: [{ name: real }]\n",
+    ];
+    for (const content of arrangements) {
+      expect(findUnsupportedTasksRepresentation(content)).toContain("inline list");
+    }
+  });
 
-- name: brief
-  agent: claude
-  prompt: |
-    \`\`\`
-    code
-
-tasks: [{ name: morning-brief, agent: claude }]
-`;
-
+  it("refuses a fenced example, because RealTimeX reads it as a key", () => {
+    // RTX's parseTaskBlock ignores fences entirely, so a fenced column-zero key
+    // is live to the runtime. Skipping it here is what hid real keys four times.
+    const content =
+      "# h\n\n```yaml\ntasks: [{ name: ex }]\n```\n\ntasks:\n\n- name: b\n  agent: c\n  prompt: p\n";
     expect(findUnsupportedTasksRepresentation(content)).toContain("inline list");
   });
 
-  it("closes a fence only on its own delimiter", () => {
-    // A ~~~ inside a ``` block must not close it, and vice versa.
-    const backticks = "# h\n\n```\n~~~\n```\n\ntasks: [{ name: a }]\n";
-    const tildes = "# h\n\n~~~\n```\n~~~\n\ntasks: [{ name: a }]\n";
-
-    expect(findUnsupportedTasksRepresentation(backticks)).toContain("inline list");
-    expect(findUnsupportedTasksRepresentation(tildes)).toContain("inline list");
-  });
-
-  it("does not close a longer fence on a shorter nested one", () => {
-    // CommonMark: ```` is not closed by ```. Closing early would drop out of the
-    // fence and skip the real key below, falling through to the append.
+  it("accepts an indented example, which the runtime does not read as a key", () => {
+    // Indentation is what actually makes a line inert to RTX's locator.
     const content =
-      "# h\n\n````markdown\n```yaml\ntasks: [{ name: ex }]\n```\n````\n\ntasks: [{ name: real }]\n";
-    expect(findUnsupportedTasksRepresentation(content)).toContain("inline list");
-  });
-
-  it("does not treat an info-string line as a closing fence", () => {
-    // A closing fence carries no info string, so ```yaml cannot close ```.
-    const content =
-      "# h\n\n```\n```yaml\ntasks: [{ name: ex }]\n```\n\ntasks: [{ name: real }]\n";
-    expect(findUnsupportedTasksRepresentation(content)).toContain("inline list");
-  });
-
-  it("closes a fence on an equal or longer run of the same delimiter", () => {
-    // The nested example is documentation and must not block the deploy.
-    const content =
-      "# h\n\n````markdown\n```yaml\ntasks: [{ name: ex }]\n```\n````\n\ntasks:\n\n- name: b\n  agent: c\n  prompt: p\n";
-    expect(findUnsupportedTasksRepresentation(content)).toBeNull();
-  });
-
-  it("still ignores a genuine top-level fenced example", () => {
-    const content = "# h\n\n```yaml\ntasks: [{ name: ex }]\n```\n\ntasks:\n\n- name: b\n  agent: c\n  prompt: p\n";
+      "# h\n\nExample:\n\n    tasks: [{ name: ex }]\n\ntasks:\n\n- name: b\n  agent: c\n  prompt: p\n";
     expect(findUnsupportedTasksRepresentation(content)).toBeNull();
   });
 
@@ -282,35 +257,6 @@ tasks: [{ name: morning-brief, agent: claude }]
     for (const value of ["tasks: []", "tasks: [ ]", "tasks: []   # none yet", "tasks:   [  ]  "]) {
       expect(findUnsupportedTasksRepresentation(`# h\n\n${value}\n`)).toBeNull();
     }
-  });
-
-  it("ignores a tasks example inside a fenced code block", () => {
-    // Documentation must not block a deploy; RealTimeX's locator ignores it too.
-    const initial = `# Heartbeat
-
-Example of the unsupported form:
-
-\`\`\`yaml
-tasks: [{ name: example, agent: claude }]
-\`\`\`
-
-tasks:
-
-- name: morning-brief
-  agent: claude
-  prompt: keep-me
-`;
-
-    expect(findUnsupportedTasksRepresentation(initial)).toBeNull();
-    const next = upsertHeartbeatShellTask(initial, {
-      name: "snowball-seed-scout",
-      executor: "shell",
-      command: "bash ./s.sh",
-      interval: "4h",
-      timeout: 900,
-    });
-    expect(next).toContain("- name: snowball-seed-scout");
-    expect(next).toContain("- name: morning-brief");
   });
 
   it("accepts every representation it can round-trip", () => {

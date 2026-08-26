@@ -139,15 +139,25 @@ export async function enqueueSnowballCalendarSeeds(
     // Fall back to configured slug when RTX CLI resolution is unavailable.
   }
 
-  let dispatchThreadSlug = NETWORK_SNOWBALL_DISPATCH_THREAD_SLUG;
+  // Resolve the handoff target before any seed is claimed. A thread we cannot
+  // resolve must abort the batch: queueing against a known-bad thread would claim
+  // and confirm the seeds, deduping them permanently against a dispatch that can
+  // never succeed. Failing here leaves every seed retryable on the next tick.
+  let dispatchThreadSlug: string;
   try {
     dispatchThreadSlug = await resolveNetworkSnowballDispatchThread(
       workspaceSlug,
       env,
       fetchImpl,
     );
-  } catch {
-    // Fall back to the legacy slug when thread resolution is unavailable.
+  } catch (error) {
+    return {
+      success: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : "Could not resolve the Network Snowball dispatch thread",
+    };
   }
 
   // Rows past the dedupe window can never match again; dropping them here keeps

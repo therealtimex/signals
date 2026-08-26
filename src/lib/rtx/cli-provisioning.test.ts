@@ -285,7 +285,7 @@ describe("resolveNetworkSnowballDispatchThread", () => {
           { status: 200 },
         );
       }
-      if (url.includes("/cli/new-thread")) {
+      if (url.includes("/cli/create-thread")) {
         created.push(url);
         return new Response(JSON.stringify({ thread: { slug: "created" } }), { status: 200 });
       }
@@ -304,18 +304,18 @@ describe("resolveNetworkSnowballDispatchThread", () => {
     expect(created).toHaveLength(0);
   });
 
-  it("does not create a thread when the listing itself fails", async () => {
+  it("falls back to the legacy slug when presence itself is unknown", async () => {
     const created: string[] = [];
     const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
       if (url.includes("/cli/get-thread/signals/network-snowball")) {
-        return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
-      }
-      if (url.endsWith("/cli/list-threads/signals")) {
-        // Unknown, not empty — creating here is how duplicate threads appear.
+        // Unknown, not confirmed-missing: the legacy thread may well exist.
         return new Response(JSON.stringify({ error: "boom" }), { status: 500 });
       }
-      if (url.includes("/cli/new-thread")) {
+      if (url.endsWith("/cli/list-threads/signals")) {
+        return new Response(JSON.stringify({ error: "boom" }), { status: 500 });
+      }
+      if (url.includes("/cli/create-thread")) {
         created.push(url);
         return new Response(JSON.stringify({ thread: { slug: "created" } }), { status: 200 });
       }
@@ -331,5 +331,62 @@ describe("resolveNetworkSnowballDispatchThread", () => {
       ),
     ).resolves.toBe("network-snowball");
     expect(created).toHaveLength(0);
+  });
+
+  it("fails instead of returning a thread confirmed to be missing", async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes("/cli/get-thread/signals/network-snowball")) {
+        // Confirmed missing, not unknown.
+        return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
+      }
+      if (url.endsWith("/cli/list-threads/signals")) {
+        return new Response(JSON.stringify({ error: "boom" }), { status: 500 });
+      }
+      return new Response(JSON.stringify({ error: "unexpected" }), { status: 500 });
+    });
+
+    const { resolveNetworkSnowballDispatchThread } = await import("@/lib/rtx/cli-provisioning");
+    // Returning the legacy slug here would queue calendar events against a thread
+    // that cannot exist; the seeds would be claimed and deduped, never retried.
+    await expect(
+      resolveNetworkSnowballDispatchThread(
+        "signals",
+        { RTX_APP_ID: "app-1", SERVER_URL: "http://127.0.0.1:3101" },
+        fetchImpl,
+      ),
+    ).rejects.toThrow(/could not list workspace threads/i);
+  });
+
+  it("converges concurrent resolvers on one slug", async () => {
+    let createCalls = 0;
+    const threads: Array<{ slug: string; name: string }> = [];
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes("/cli/get-thread/signals/network-snowball")) {
+        return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
+      }
+      if (url.endsWith("/cli/list-threads/signals")) {
+        return new Response(JSON.stringify({ threads: [...threads] }), { status: 200 });
+      }
+      if (url.includes("/cli/create-thread")) {
+        createCalls += 1;
+        const slug = `created-${createCalls}`;
+        threads.push({ slug, name: "Network Snowball" });
+        return new Response(JSON.stringify({ thread: { slug } }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ error: "unexpected" }), { status: 500 });
+    });
+
+    const { resolveNetworkSnowballDispatchThread } = await import("@/lib/rtx/cli-provisioning");
+    const env = { RTX_APP_ID: "app-1", SERVER_URL: "http://127.0.0.1:3101" };
+    const [a, b] = await Promise.all([
+      resolveNetworkSnowballDispatchThread("signals", env, fetchImpl),
+      resolveNetworkSnowballDispatchThread("signals", env, fetchImpl),
+    ]);
+
+    // Splitting the first two dispatches across two threads is the failure mode.
+    expect(a).toBe(b);
+    expect(createCalls).toBe(1);
   });
 });

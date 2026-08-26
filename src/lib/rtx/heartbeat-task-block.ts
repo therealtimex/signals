@@ -59,45 +59,28 @@ function detectEol(content: string): string {
  *
  * Matching is anchored to column 0, mirroring RealTimeX's own locator, so a
  * `tasks:` line inside an indented prompt block scalar is not mistaken for a key.
+ * Indentation is the only thing that makes a line inert — fences do not.
  */
 export function findUnsupportedTasksRepresentation(
   content: string,
 ): string | null {
-  // Only a column-0 marker opens a markdown fence, and only its own delimiter
-  // closes it. Matching indented markers would let a ``` inside a prompt block
-  // scalar open a phantom fence that swallows the real key below it, and
-  // toggling on the other delimiter would do the same — both fall through to the
-  // duplicate-key append this guard exists to prevent.
-  let fence: { delimiter: string; length: number } | null = null;
+  // Deliberately no markdown-fence awareness.
+  //
+  // RealTimeX's `parseTaskBlock` does not apply fence state — its loose YAML
+  // extraction starts at the `tasks` line regardless of any surrounding fence.
+  // Any fence tracking here therefore diverges from the parser this guard exists
+  // to protect, and every attempt at it produced the same failure: an unclosed,
+  // mismatched, or nested fence hid a runtime-visible key, the guard returned
+  // null, and the upsert appended a second `tasks:` key that dropped the user's
+  // scheduled task.
+  //
+  // A fenced example in documentation is therefore refused too. Refusing a safe
+  // deploy is visible and recoverable; skipping a real key silently destroys a
+  // task, so the guard errs toward refusal and stays aligned with the parser.
   for (const line of toLf(content).split("\n")) {
-    const marker = line.match(/^(`{3,}|~{3,})(.*)$/);
-    if (marker) {
-      const delimiter = marker[1][0];
-      const length = marker[1].length;
-      const info = marker[2].trim();
-      if (fence === null) {
-        fence = { delimiter, length };
-      } else if (
-        // CommonMark: a fence closes only on its own delimiter, a run at least
-        // as long as the opening one, and no info string. Closing on a shorter
-        // run would end a ```` block at a nested ```, dropping back out of the
-        // fence and skipping a real key below it.
-        delimiter === fence.delimiter &&
-        length >= fence.length &&
-        info === ""
-      ) {
-        fence = null;
-      }
-      continue;
-    }
-    // A fenced example is documentation, not a key. RealTimeX's own locator only
-    // accepts an empty value, so a fenced populated array is inert to it too —
-    // refusing on one would block a deploy that is perfectly safe.
-    if (fence) continue;
-
     const match = line.match(TASKS_KEY_PATTERN);
     if (!match || isExpandableTasksValue(match[1])) continue;
-    return `HEARTBEAT.md declares tasks as an inline list (\`tasks: ${stripInlineComment(match[1])}\`), which cannot be edited safely. Rewrite it as an indented block list (\`tasks:\` on its own line, one \`- name:\` item per task) and deploy again.`;
+    return `HEARTBEAT.md declares tasks as an inline list (\`tasks: ${stripInlineComment(match[1])}\`), which cannot be edited safely — including inside a fenced example, because RealTimeX reads the key regardless of fences. Rewrite it as an indented block list (\`tasks:\` on its own line, one \`- name:\` item per task), or indent the example so it is not a column-zero key, and deploy again.`;
   }
   return null;
 }

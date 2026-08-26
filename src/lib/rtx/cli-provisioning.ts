@@ -354,6 +354,15 @@ export async function listRtxWorkspaceThreads(
  * Prefers the legacy `network-snowball` slug when present, otherwise reuses an
  * existing "Network Snowball" thread, and only creates one when none exists.
  */
+/**
+ * In-flight resolutions, keyed by workspace.
+ *
+ * Two concurrent enqueue batches in one process would otherwise each observe the
+ * thread as missing and create their own. Sharing the in-flight promise makes the
+ * common case single-shot; the post-create relist covers separate processes.
+ */
+const inFlightThreadResolutions = new Map<string, Promise<string>>();
+
 export async function resolveNetworkSnowballDispatchThread(
   workspaceSlug: string,
   env: EnvLike = process.env,
@@ -363,6 +372,26 @@ export async function resolveNetworkSnowballDispatchThread(
   if (!workspace) {
     throw new Error("Workspace slug is required to resolve a Network Snowball thread");
   }
+
+  const inFlight = inFlightThreadResolutions.get(workspace);
+  if (inFlight) return inFlight;
+
+  const resolution = resolveNetworkSnowballDispatchThreadUncached(
+    workspace,
+    env,
+    fetchImpl,
+  ).finally(() => {
+    inFlightThreadResolutions.delete(workspace);
+  });
+  inFlightThreadResolutions.set(workspace, resolution);
+  return resolution;
+}
+
+async function resolveNetworkSnowballDispatchThreadUncached(
+  workspace: string,
+  env: EnvLike,
+  fetchImpl: typeof fetch,
+): Promise<string> {
 
   const preferredPresence = await getRtxThreadPresence(
     workspace,
@@ -403,12 +432,26 @@ export async function resolveNetworkSnowballDispatchThread(
   // succeeded. A failed listing is unknown, not empty, and creating on unknown is
   // how duplicate threads appear.
   if (preferredPresence === "missing" && threads !== null) {
-    return createRtxPublishThread(
+    const created = await createRtxPublishThread(
       workspace,
       NETWORK_SNOWBALL_DISPATCH_THREAD_NAME,
       env,
       fetchImpl,
     );
+
+    // Re-list after creating so two racing resolvers converge on one slug. Each
+    // would otherwise return the thread it just made, splitting dispatch history
+    // across the first two ticks.
+    const settled = await listRtxWorkspaceThreads(workspace, env, fetchImpl);
+    const converged =
+      settled === null
+        ? null
+        : pickStable(
+            settled.filter(
+              (thread) => thread.name === NETWORK_SNOWBALL_DISPATCH_THREAD_NAME,
+            ),
+          );
+    return converged ?? created.trim();
   }
 
   // Presence or listing could not be confirmed; reuse anything plausible rather
@@ -423,6 +466,18 @@ export async function resolveNetworkSnowballDispatchThread(
         );
   if (fallback !== null) return fallback;
 
+  if (preferredPresence === "missing") {
+    // The legacy slug is confirmed absent and the listing failed, so every slug
+    // we could return is known-bad. Returning one anyway would queue calendar
+    // events against a thread that cannot exist: the seeds would be claimed,
+    // confirmed, and deduped, so no later tick would ever retry them. Fail
+    // instead and let the next tick resolve.
+    throw new Error(
+      "Cannot resolve a Network Snowball dispatch thread: the default thread is missing and RealTimeX could not list workspace threads.",
+    );
+  }
+
+  // Presence itself was unknown, so the legacy slug may well exist.
   return NETWORK_SNOWBALL_DISPATCH_THREAD_SLUG;
 }
 
