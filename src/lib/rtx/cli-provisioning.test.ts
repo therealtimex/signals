@@ -215,3 +215,58 @@ describe("getWorkspaceDefaultTerminalAgent", () => {
     });
   });
 });
+
+describe("resolveNetworkSnowballDispatchThread", () => {
+  it("reuses the legacy network-snowball slug when it exists", async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes("/cli/get-thread/signals/network-snowball") && init?.method === "GET") {
+        return new Response(JSON.stringify({ thread: { slug: "network-snowball" } }), {
+          status: 200,
+        });
+      }
+      return new Response(JSON.stringify({ error: "unexpected" }), { status: 500 });
+    });
+
+    const { resolveNetworkSnowballDispatchThread } = await import("@/lib/rtx/cli-provisioning");
+    await expect(
+      resolveNetworkSnowballDispatchThread(
+        "signals",
+        { RTX_APP_ID: "app-1", SERVER_URL: "http://127.0.0.1:3101" },
+        fetchImpl,
+      ),
+    ).resolves.toBe("network-snowball");
+  });
+
+  it("reuses an existing Network Snowball thread by name", async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes("/cli/get-thread/signals/network-snowball") && init?.method === "GET") {
+        return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
+      }
+      if (url.endsWith("/cli/list-threads/signals") && init?.method === "GET") {
+        return new Response(
+          JSON.stringify({
+            threads: [
+              {
+                slug: "f0238db7-6620-4452-9a91-bcdb9dd23fdd",
+                name: "Network Snowball",
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response(JSON.stringify({ error: "unexpected" }), { status: 500 });
+    });
+
+    const { resolveNetworkSnowballDispatchThread } = await import("@/lib/rtx/cli-provisioning");
+    await expect(
+      resolveNetworkSnowballDispatchThread(
+        "signals",
+        { RTX_APP_ID: "app-1", SERVER_URL: "http://127.0.0.1:3101" },
+        fetchImpl,
+      ),
+    ).resolves.toBe("f0238db7-6620-4452-9a91-bcdb9dd23fdd");
+  });
+});

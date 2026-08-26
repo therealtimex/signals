@@ -186,6 +186,79 @@ tasks: [{ name: morning-brief, agent: claude, prompt: keep-me, interval: 24h }]
     ).toThrow(/inline list/);
   });
 
+  it("detects a populated inline array in a CRLF file", () => {
+    // `.` never matches `\r` in JS, so a naive per-line regex silently fails to
+    // match and falls through to the duplicate-key append this guard prevents.
+    const lf = `# Heartbeat\n\ntasks: [{ name: morning-brief, agent: claude, prompt: keep-me }]\n`;
+    const crlf = lf.replace(/\n/g, "\r\n");
+
+    expect(findUnsupportedTasksRepresentation(crlf)).toContain("inline list");
+    expect(() =>
+      upsertHeartbeatShellTask(crlf, {
+        name: "snowball-seed-scout",
+        executor: "shell",
+        command: "bash ./s.sh",
+        interval: "4h",
+        timeout: 900,
+      }),
+    ).toThrow(/inline list/);
+  });
+
+  it("preserves CRLF line endings when it does write", () => {
+    const crlf = `# Heartbeat\r\n\r\ntasks:\r\n\r\n- name: morning-brief\r\n  agent: claude\r\n  prompt: keep-me\r\n`;
+    const next = upsertHeartbeatShellTask(crlf, {
+      name: "snowball-seed-scout",
+      executor: "shell",
+      command: "bash ./s.sh",
+      interval: "4h",
+      timeout: 900,
+    });
+
+    expect(next).toContain("\r\n");
+    expect(next.split("\n").every((l) => l === "" || l.endsWith("\r"))).toBe(true);
+    expect(next).toContain("- name: morning-brief");
+    expect(next).toContain("- name: snowball-seed-scout");
+    // Exactly one key, and it still matches RealTimeX's locator with the \r.
+    expect(
+      next.split("\n").filter((l) => /^tasks\s*:\s*$/.test(l)),
+    ).toHaveLength(1);
+  });
+
+  it("accepts every spelling of an empty task list", () => {
+    for (const value of ["tasks: []", "tasks: [ ]", "tasks: []   # none yet", "tasks:   [  ]  "]) {
+      expect(findUnsupportedTasksRepresentation(`# h\n\n${value}\n`)).toBeNull();
+    }
+  });
+
+  it("ignores a tasks example inside a fenced code block", () => {
+    // Documentation must not block a deploy; RealTimeX's locator ignores it too.
+    const initial = `# Heartbeat
+
+Example of the unsupported form:
+
+\`\`\`yaml
+tasks: [{ name: example, agent: claude }]
+\`\`\`
+
+tasks:
+
+- name: morning-brief
+  agent: claude
+  prompt: keep-me
+`;
+
+    expect(findUnsupportedTasksRepresentation(initial)).toBeNull();
+    const next = upsertHeartbeatShellTask(initial, {
+      name: "snowball-seed-scout",
+      executor: "shell",
+      command: "bash ./s.sh",
+      interval: "4h",
+      timeout: 900,
+    });
+    expect(next).toContain("- name: snowball-seed-scout");
+    expect(next).toContain("- name: morning-brief");
+  });
+
   it("accepts every representation it can round-trip", () => {
     // Guard against the refusal over-reaching: these must stay deployable.
     const supported = [

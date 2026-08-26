@@ -122,6 +122,27 @@ export async function deploySnowballSeedScout(
   const scoutConfig = readSnowballSeedScoutConfig(input.config);
   const preferredSlug = getSignalsRtxWorkspaceSlug(env);
 
+  // Refuse an uneditable heartbeat before `ensureRtxWorkspace`, which would
+  // otherwise create a remote workspace for a deploy that cannot proceed. The
+  // check repeats after slug resolution, since the resolved slug may differ.
+  const preflightDir = resolveRtxWorkspaceWorkingDir(preferredSlug, env);
+  if (preflightDir) {
+    const preflightHeartbeat = await readWorkspaceFile(
+      preflightDir,
+      HEARTBEAT_FILENAME,
+    );
+    const preflightUnsupported = preflightHeartbeat
+      ? findUnsupportedTasksRepresentation(preflightHeartbeat)
+      : null;
+    if (preflightUnsupported) {
+      return {
+        success: false,
+        error: preflightUnsupported,
+        errorCode: "unsupported_heartbeat",
+      };
+    }
+  }
+
   let workspaceSlug: string;
   try {
     workspaceSlug = await ensureRtxWorkspace(preferredSlug, "Signals", env);

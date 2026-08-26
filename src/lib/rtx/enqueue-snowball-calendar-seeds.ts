@@ -1,5 +1,8 @@
 import { createHash } from "node:crypto";
-import { resolveSignalsRtxWorkspaceSlug } from "@/lib/rtx/cli-provisioning";
+import {
+  resolveNetworkSnowballDispatchThread,
+  resolveSignalsRtxWorkspaceSlug,
+} from "@/lib/rtx/cli-provisioning";
 import {
   SNOWBALL_SEED_CLAIM_TTL_MS,
   claimSeed,
@@ -135,6 +138,17 @@ export async function enqueueSnowballCalendarSeeds(
     // Fall back to configured slug when RTX CLI resolution is unavailable.
   }
 
+  let dispatchThreadSlug = "network-snowball";
+  try {
+    dispatchThreadSlug = await resolveNetworkSnowballDispatchThread(
+      workspaceSlug,
+      env,
+      fetchImpl,
+    );
+  } catch {
+    // Fall back to the legacy slug when thread resolution is unavailable.
+  }
+
   // Rows past the dedupe window can never match again; dropping them here keeps
   // the ledger bounded without needing a separate sweeper.
   pruneSnowballSeedLedger();
@@ -202,7 +216,7 @@ export async function enqueueSnowballCalendarSeeds(
             agent: "cursor",
             agentName: "cursor",
             workspace: workspaceSlug,
-            thread: "network-snowball",
+            thread: dispatchThreadSlug,
             prompt: snowballDispatchPrompt(url, templateName),
           },
         ],

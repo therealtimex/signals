@@ -21,10 +21,28 @@ const TASKS_HEADER = "tasks:";
  */
 const TASKS_KEY_PATTERN = /^tasks\s*:\s*(.*)$/;
 
-/** Inline values we can safely expand into a block list. */
+/** Strip a trailing YAML comment so `tasks: [] # none` reads as an empty list. */
+function stripInlineComment(value: string): string {
+  return value.replace(/(^|\s)#.*$/, "$1").trim();
+}
+
+/**
+ * Inline values we can safely expand into a block list: absent, or any spelling
+ * of an empty flow sequence (`[]`, `[ ]`, with or without a trailing comment).
+ */
 function isExpandableTasksValue(value: string): boolean {
-  const trimmed = value.trim();
-  return trimmed === "" || trimmed === "[]";
+  const trimmed = stripInlineComment(value);
+  return trimmed === "" || /^\[\s*\]$/.test(trimmed);
+}
+
+/** CRLF files must parse identically; `.` never matches `\r` in JS. */
+function toLf(content: string): string {
+  return content.replace(/\r\n/g, "\n");
+}
+
+/** Preserve the file's existing newline style on write. */
+function detectEol(content: string): string {
+  return content.includes("\r\n") ? "\r\n" : "\n";
 }
 
 /**
@@ -45,10 +63,20 @@ function isExpandableTasksValue(value: string): boolean {
 export function findUnsupportedTasksRepresentation(
   content: string,
 ): string | null {
-  for (const line of content.split("\n")) {
+  let inFence = false;
+  for (const line of toLf(content).split("\n")) {
+    // A ``` example is documentation, not a key. RealTimeX's own locator only
+    // accepts an empty value, so a fenced populated array is inert to it too —
+    // refusing on one would block a deploy that is perfectly safe.
+    if (/^\s*(```|~~~)/.test(line)) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) continue;
+
     const match = line.match(TASKS_KEY_PATTERN);
     if (!match || isExpandableTasksValue(match[1])) continue;
-    return `HEARTBEAT.md declares tasks as an inline list (\`tasks: ${match[1].trim()}\`), which cannot be edited safely. Rewrite it as an indented block list (\`tasks:\` on its own line, one \`- name:\` item per task) and deploy again.`;
+    return `HEARTBEAT.md declares tasks as an inline list (\`tasks: ${stripInlineComment(match[1])}\`), which cannot be edited safely. Rewrite it as an indented block list (\`tasks:\` on its own line, one \`- name:\` item per task) and deploy again.`;
   }
   return null;
 }
@@ -221,7 +249,7 @@ function endsTaskSection(lines: string[], index: number): boolean {
  * of it. Only the block being upserted is ever rewritten.
  */
 function splitHeartbeatTaskSection(content: string): HeartbeatTaskSection {
-  const lines = content.split("\n");
+  const lines = toLf(content).split("\n");
   const tasksIndex = lines.findIndex((line) => {
     const match = line.match(TASKS_KEY_PATTERN);
     return match ? isExpandableTasksValue(match[1]) : false;
@@ -291,6 +319,7 @@ export function upsertHeartbeatShellTask(
     throw new Error(unsupported);
   }
 
+  const eol = detectEol(content);
   const section = splitHeartbeatTaskSection(content);
   const serialized = serializeTask(task, section.indent);
 
@@ -328,7 +357,8 @@ export function upsertHeartbeatShellTask(
   if (section.after) {
     parts.push("", section.after);
   }
-  return `${parts.join("\n")}\n`;
+  const next = `${parts.join("\n")}\n`;
+  return eol === "\n" ? next : next.replace(/\n/g, eol);
 }
 
 export function defaultHeartbeatSkeleton(): string {

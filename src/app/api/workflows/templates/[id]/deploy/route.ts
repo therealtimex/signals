@@ -64,7 +64,12 @@ export async function POST(
           });
 
     if (!result.success) {
-      return NextResponse.json({ error: result.error }, { status: 500 });
+      // A refusal the user can act on is a client error, not a server fault.
+      const userCorrectable = result.errorCode === "unsupported_heartbeat";
+      return NextResponse.json(
+        { error: result.error, errorCode: result.errorCode },
+        { status: userCorrectable ? 422 : 500 },
+      );
     }
 
     return NextResponse.json(

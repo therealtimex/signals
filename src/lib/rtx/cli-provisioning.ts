@@ -312,6 +312,92 @@ export async function createRtxPublishThread(
   return threadSlug;
 }
 
+export const NETWORK_SNOWBALL_DISPATCH_THREAD_SLUG = "network-snowball";
+export const NETWORK_SNOWBALL_DISPATCH_THREAD_NAME = "Network Snowball";
+
+type ListedThread = { slug?: string; name?: string };
+
+export async function listRtxWorkspaceThreads(
+  workspaceSlug: string,
+  env: EnvLike = process.env,
+  fetchImpl: typeof fetch = fetch,
+): Promise<Array<{ slug: string; name: string }>> {
+  const slug = workspaceSlug.trim();
+  if (!slug) return [];
+
+  try {
+    const body = await rtxCliRequestOk(
+      `/cli/list-threads/${encodeURIComponent(slug)}`,
+      { method: "GET" },
+      env,
+      fetchImpl,
+    );
+    const threads = Array.isArray(body.threads)
+      ? (body.threads as ListedThread[])
+      : [];
+    return threads.flatMap((thread) => {
+      if (typeof thread.slug !== "string" || typeof thread.name !== "string") {
+        return [];
+      }
+      return [{ slug: thread.slug, name: thread.name }];
+    });
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Resolve the workspace thread Snowball calendar dispatches should hand off to.
+ *
+ * Prefers the legacy `network-snowball` slug when present, otherwise reuses an
+ * existing "Network Snowball" thread, and only creates one when none exists.
+ */
+export async function resolveNetworkSnowballDispatchThread(
+  workspaceSlug: string,
+  env: EnvLike = process.env,
+  fetchImpl: typeof fetch = fetch,
+): Promise<string> {
+  const workspace = workspaceSlug.trim();
+  if (!workspace) {
+    throw new Error("Workspace slug is required to resolve a Network Snowball thread");
+  }
+
+  const preferredPresence = await getRtxThreadPresence(
+    workspace,
+    NETWORK_SNOWBALL_DISPATCH_THREAD_SLUG,
+    env,
+    fetchImpl,
+  );
+  if (preferredPresence === "exists") {
+    return NETWORK_SNOWBALL_DISPATCH_THREAD_SLUG;
+  }
+
+  const threads = await listRtxWorkspaceThreads(workspace, env, fetchImpl);
+  const existing = threads.find(
+    (thread) => thread.name === NETWORK_SNOWBALL_DISPATCH_THREAD_NAME,
+  );
+  if (existing) {
+    return existing.slug;
+  }
+
+  if (preferredPresence === "missing") {
+    return createRtxPublishThread(
+      workspace,
+      NETWORK_SNOWBALL_DISPATCH_THREAD_NAME,
+      env,
+      fetchImpl,
+    );
+  }
+
+  // RTX could not confirm thread presence; avoid creating duplicates blindly.
+  const fallback = threads.find((thread) =>
+    thread.name.toLowerCase().includes("network snowball"),
+  );
+  if (fallback) return fallback.slug;
+
+  return NETWORK_SNOWBALL_DISPATCH_THREAD_SLUG;
+}
+
 /**
  * Whether a thread slug still resolves in the workspace.
  *
