@@ -61,12 +61,38 @@ test("flags a loaded page whose server is not answering", () => {
   assert.equal(noResponse.code, "server_unhealthy");
 });
 
-test("only reports ready when the document loaded and health is 200", () => {
+test("a 200 from something that is not Signals is not ready", () => {
+  // Local App ports get reassigned, so 200 only proves *something* is listening.
   const verdict = classifySignalsTarget({
     cdpReachable: true,
     target: TARGET,
     documentHref: "http://localhost:3010/dashboard/workflows",
     healthStatus: 200,
+    healthApp: "some-other-app",
+    healthState: "ok",
+  });
+  assert.equal(verdict.ok, false);
+  assert.equal(verdict.code, "not_signals");
+
+  const degraded = classifySignalsTarget({
+    cdpReachable: true,
+    target: TARGET,
+    documentHref: "http://localhost:3010/dashboard/workflows",
+    healthStatus: 200,
+    healthApp: "signals",
+    healthState: "degraded",
+  });
+  assert.equal(degraded.code, "not_signals");
+});
+
+test("only reports ready when Signals itself confirms it is ok", () => {
+  const verdict = classifySignalsTarget({
+    cdpReachable: true,
+    target: TARGET,
+    documentHref: "http://localhost:3010/dashboard/workflows",
+    healthStatus: 200,
+    healthApp: "signals",
+    healthState: "ok",
   });
   assert.equal(verdict.ok, true);
   assert.equal(verdict.code, "ready");

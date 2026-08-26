@@ -7,9 +7,10 @@
  * An automation that matched on the target URL alone would evaluate against an
  * error page, see zero UI, and report the feature broken when the app is simply
  * not running. Diagnosing which of those it is has to be this flow's job.
+ *
+ * Uses Node's global WebSocket (Node 22+) rather than `ws`, which is only a
+ * transitive dependency here and would break an install without dev deps.
  */
-import WebSocket from "ws";
-
 export const DEFAULT_CDP_URL = "http://127.0.0.1:9888";
 
 /** A loaded document, as opposed to Chrome's error placeholder. */
@@ -25,7 +26,14 @@ export function isLoadedDocument(href) {
  *
  * @returns {{ok: boolean, code: string, message: string}}
  */
-export function classifySignalsTarget({ cdpReachable, target, documentHref, healthStatus }) {
+export function classifySignalsTarget({
+  cdpReachable,
+  target,
+  documentHref,
+  healthStatus,
+  healthApp,
+  healthState,
+}) {
   if (!cdpReachable) {
     return {
       ok: false,
@@ -61,6 +69,17 @@ export function classifySignalsTarget({ cdpReachable, target, documentHref, heal
         "The Local App is serving a stale document; restart it rather than trusting the UI.",
     };
   }
+  if (healthApp !== "signals" || healthState !== "ok") {
+    // A 200 only proves *something* is on this port. Local App ports get
+    // reassigned, so confirm Signals itself is answering before trusting the UI.
+    return {
+      ok: false,
+      code: "not_signals",
+      message:
+        `/api/health answered 200 but reported app="${healthApp ?? "none"}" status="${healthState ?? "none"}". ` +
+        "Something other than Signals is serving this port; re-resolve the Local App port before asserting.",
+    };
+  }
   return { ok: true, code: "ready", message: "Signals Local App is loaded and healthy." };
 }
 
@@ -74,33 +93,67 @@ export function originOf(url) {
 }
 
 async function evaluateHref(webSocketDebuggerUrl) {
-  const ws = new WebSocket(webSocketDebuggerUrl, { perMessageDeflate: false });
+  const socket = new WebSocket(webSocketDebuggerUrl);
   try {
     await new Promise((resolve, reject) => {
-      ws.once("open", resolve);
-      ws.once("error", reject);
+      const cleanup = () => {
+        socket.removeEventListener("open", onOpen);
+        socket.removeEventListener("error", onError);
+      };
+      const onOpen = () => {
+        cleanup();
+        resolve();
+      };
+      const onError = () => {
+        cleanup();
+        reject(new Error("CDP socket failed to open"));
+      };
+      socket.addEventListener("open", onOpen);
+      socket.addEventListener("error", onError);
     });
-    ws.send(
+
+    socket.send(
       JSON.stringify({
         id: 1,
         method: "Runtime.evaluate",
         params: { expression: "location.href", returnByValue: true },
       }),
     );
-    const message = await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error("CDP evaluate timed out")), 10_000);
-      ws.on("message", (raw) => {
-        const data = JSON.parse(raw);
-        if (data.id === 1) {
-          clearTimeout(timer);
-          resolve(data);
+
+    return await new Promise((resolve, reject) => {
+      // Every exit path clears the timer. Leaving it pending on the error path
+      // keeps the event loop alive and hangs the CLI for the full timeout after
+      // a failure that was already known.
+      const cleanup = () => {
+        clearTimeout(timer);
+        socket.removeEventListener("message", onMessage);
+        socket.removeEventListener("error", onError);
+      };
+      const onMessage = (event) => {
+        const raw = typeof event.data === "string" ? event.data : String(event.data);
+        let data;
+        try {
+          data = JSON.parse(raw);
+        } catch {
+          return;
         }
-      });
-      ws.once("error", reject);
+        if (data.id !== 1) return;
+        cleanup();
+        resolve(data.result?.result?.value ?? null);
+      };
+      const onError = () => {
+        cleanup();
+        reject(new Error("CDP socket error while evaluating"));
+      };
+      const timer = setTimeout(() => {
+        cleanup();
+        reject(new Error("CDP evaluate timed out"));
+      }, 10_000);
+      socket.addEventListener("message", onMessage);
+      socket.addEventListener("error", onError);
     });
-    return message.result?.result?.value ?? null;
   } finally {
-    ws.close();
+    socket.close();
   }
 }
 
@@ -140,12 +193,19 @@ export async function resolveSignalsTarget({
 
   const origin = originOf(target.url);
   let healthStatus = null;
+  let healthApp = null;
+  let healthState = null;
   if (isLoadedDocument(documentHref) && origin) {
     try {
       const health = await fetchImpl(`${origin}/api/health`, {
         signal: AbortSignal.timeout(5_000),
       });
       healthStatus = health.status;
+      if (health.ok) {
+        const body = await health.json().catch(() => null);
+        healthApp = body?.app ?? null;
+        healthState = body?.status ?? null;
+      }
     } catch {
       healthStatus = null;
     }
@@ -156,6 +216,8 @@ export async function resolveSignalsTarget({
     target,
     documentHref,
     healthStatus,
+    healthApp,
+    healthState,
   });
 
   return {
@@ -164,6 +226,7 @@ export async function resolveSignalsTarget({
     origin,
     targetUrl: target.url,
     documentHref,
+    healthApp,
     webSocketDebuggerUrl: target.webSocketDebuggerUrl,
   };
 }

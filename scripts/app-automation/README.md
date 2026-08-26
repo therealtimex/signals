@@ -22,8 +22,9 @@ added should pay for itself the first time it is used.
   functions, never run on load. (`node --test` executes files as subprocesses, so a self-invoking
   CLI in a flow turns into a spurious test failure.)
 - `scenarios/` — user journeys composed from flows.
-- `scripts/` — small manual helpers and probes. Non-contractual: never called from CI, never
-  depended on by package scripts.
+- `scripts/` — small manual helpers and probes. Never called from CI. A helper may be *promoted*
+  to a package script once it earns it — `automation:check-target` is the one promotion so far, and
+  new helpers should not assume the same.
 
 If it can be named as a single verb, it is a flow. If it is a story made of several verbs, it is a
 scenario.
@@ -50,6 +51,7 @@ feature broken.
 | `signals_not_open` | Dev app is up, but no Signals Local App page is open |
 | `local_app_stopped` | target advertises a URL but the document did not load |
 | `server_unhealthy` | page loaded, but `/api/health` is not answering |
+| `not_signals` | something else is serving this port — `app` is not `signals` |
 | `ready` | safe to assert against |
 
 Resolve the target before asserting anything. A scenario that skips this step cannot distinguish "the
