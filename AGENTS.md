@@ -76,8 +76,9 @@ provision-verifier → `db:migrate` → build. It is the same gate CI runs.
   in **both LF and CRLF**, through RealTimeX's *real* `parseTaskBlock`, and asserts each task is
   visible to the runtime. Four P1s shipped from this file because its output *looked* right and the
   runtime disagreed; a test that reads our own output cannot catch that. It needs a
-  `realtimex-ai-app` checkout (auto-discovered, or set `RTX_APP_REPO`) and skips without one, so it
-  is not a CI gate — it is on you to run it locally.
+  `realtimex-ai-app` checkout (auto-discovered, or set `RTX_APP_REPO`) and skips without one. It
+  lives in its own `contract` vitest project, excluded from `unit`, so the default gate never
+  depends on a sibling repo's state — which also means nothing runs it for you.
 - Decide what proves the change *before* patching: name the observable that moves if the fix
   works — an API response, a DB row, a test assertion, a screenshot.
 - When sources disagree, trust the most authoritative one. The SQLite row and the API payload

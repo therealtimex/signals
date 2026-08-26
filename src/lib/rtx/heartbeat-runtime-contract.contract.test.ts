@@ -12,9 +12,13 @@ import { upsertHeartbeatShellTask } from "@/lib/rtx/heartbeat-task-block";
  * and the runtime disagreed. A unit test that inspects our own output cannot
  * catch that — only the parser that actually schedules the task can. See #301.
  *
- * This needs a `realtimex-ai-app` checkout, so it cannot gate CI. It skips when
- * the repo is absent, and fails loudly when `RTX_APP_REPO` is set but unusable,
- * so an intentional run can never silently degrade into a skip.
+ * This asserts against a sibling repo's runtime code, so it lives in its own
+ * `contract` vitest project and is excluded from `unit`: the default gate must
+ * never depend on whether that checkout exists or what state it is in. Run it
+ * with `npm run contract:heartbeat`.
+ *
+ * It skips when the repo is absent, and fails when `RTX_APP_REPO` is set but
+ * unusable, so an intentional run cannot silently degrade into a skip.
  */
 const PARSER_REL = "server/utils/heartbeat/taskBlock.js";
 
@@ -127,14 +131,21 @@ const { path: appRepo, explicit } = resolveAppRepo();
 const parserPath = appRepo ? join(appRepo, PARSER_REL) : null;
 const usable = Boolean(parserPath && existsSync(parserPath));
 
-if (explicit && !usable) {
-  throw new Error(
-    `RTX_APP_REPO is set to "${process.env.RTX_APP_REPO}" but ${PARSER_REL} was not found there. ` +
-      "Point it at a realtimex-ai-app checkout, or unset it to skip this probe.",
-  );
-}
+const misconfigured = explicit && !usable;
 
-describe.skipIf(!usable)("HEARTBEAT.md runtime contract", () => {
+describe("HEARTBEAT.md runtime contract", () => {
+  // Report misconfiguration as a failing test rather than a module-load throw: a
+  // top-level throw takes the whole file's suite down with a cryptic error, and
+  // would do the same to any project that happened to include this file.
+  it.runIf(misconfigured)("rejects an unusable RTX_APP_REPO", () => {
+    expect.fail(
+      `RTX_APP_REPO is set to "${process.env.RTX_APP_REPO}" but ${PARSER_REL} was not found there. ` +
+        "Point it at a realtimex-ai-app checkout, or unset it to auto-discover one.",
+    );
+  });
+});
+
+describe.skipIf(!usable || misconfigured)("HEARTBEAT.md runtime contract", () => {
   it("emits tasks RealTimeX actually schedules, in both line endings", () => {
     const dir = mkdtempSync(join(tmpdir(), "hb-contract-"));
     const cases: Array<{ label: string; file: string; expect: string[] | null }> = [];

@@ -46,10 +46,22 @@ export default defineConfig({
             "**/node_modules/**",
             "**/e2e/**",
             "src/**/*.latency.test.ts",
+            "src/**/*.contract.test.ts",
             "src/**/*.import-safety.test.ts",
             "src/**/*.embedded.test.ts",
             "src/**/*.integration.test.ts",
           ],
+        },
+      },
+      {
+        extends: true,
+        test: {
+          // Contract probes assert against a *sibling repo's* runtime code, so the
+          // default gate must never depend on whether that checkout exists or what
+          // state it is in. Opt-in only: `npm run contract:heartbeat`.
+          name: "contract",
+          include: ["src/**/*.contract.test.ts"],
+          exclude: ["**/node_modules/**"],
         },
       },
       {
