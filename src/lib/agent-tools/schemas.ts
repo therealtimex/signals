@@ -325,3 +325,9 @@ export const completeWorkflowRunSchema = z.object({
   summary: z.string().optional().describe("Summary of the run results and mapped cluster"),
   errors: z.array(z.string()).optional().describe("Any error messages encountered during the run"),
 });
+
+export const recordWorkflowRunContactsSchema = z.object({
+  runId: z.string().trim().min(1),
+  templateId: z.string().trim().min(1).optional(),
+  contactIds: z.array(z.string().trim().min(1)).max(50).optional(),
+});

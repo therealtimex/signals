@@ -52,6 +52,7 @@ Then pass `Authorization: Bearer your-secret-token` on each request.
 | `query_workflows` | workflows | List workflow runs |
 | `list_workflow_templates` | workflows | List startable templates |
 | `start_workflow` | workflows | Record a workflow run (failed until migrated to RTX orchestration) |
+| `record_workflow_run_contacts` | workflows | Validate a workflow run/template pair and idempotently add existing contact IDs to the run's durable cohort |
 | `query_content` | content | List content items |
 | `query_goals` | goals | List goals |
 | `create_task` | tasks | Create a follow-up task |

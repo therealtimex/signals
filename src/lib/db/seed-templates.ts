@@ -431,7 +431,7 @@ lease, connect, patrol, approve, mine, write back, release. Follow it in order.
    d. Scrape the post author plus likers/repliers (extracting profile picture image avatar_url) and stage them into \`contacts.csv\`.
    e. Advance to the next candidate thread.
 4. Methodically continue this hunting chain until the \`maxComments\` shift target is fulfilled or candidate feeds are exhausted.
-5. Ingest staged contacts via \`signals-pp-cli import contacts --file ... --dedupe\`, then release the lease.
+5. Ingest staged contacts via \`signals-pp-cli import contacts --file ... --dedupe --workflow-run-id <runId> --template-id <templateId>\`, then release the lease.
 
 Do NOT ask questions about scope — the runtime config is the scope. Do pause for the approval
 checkpoint when it is enabled.
@@ -579,7 +579,7 @@ Follow the numbered "Network Snowball execution contract" below.
    - Anti-Hallucination: Never guess or synthesize vanity profile URLs (e.g. guessing https://linkedin.com/in/<name> from a person's name). Only attach a profile URL/handle if verified from the page links/DOM or search. If unverified, leave profile_url blank.
    - Bot Gate: Skip automated bots (*bot, *_agent, *digest), scraper clones, and news feeds.
 4. Extract rich profile details: name, handle, avatarUrl (real photo image URL from platform DOM / Bookface / Twitter CDN, never synthetic redirecting URLs), bio/headline, company, and role.
-5. Ingest contacts via signals-pp-cli import contacts --file workflow-runs/<runId>/contacts.csv --dedupe.
+5. Ingest contacts via signals-pp-cli import contacts --file workflow-runs/<runId>/contacts.csv --dedupe --workflow-run-id <runId> --template-id <templateId>.
 6. In the notes column, clearly record the causal anchor (e.g. "role: Lead Investor in Acme Seed round").
 7. Report the mapped ecosystem cluster with links in this thread.
 8. Teardown & Resource Release: Call complete_workflow_run when finished (Signals stops running browser sessions and releases the terminal session automatically), and do not continue in this thread.

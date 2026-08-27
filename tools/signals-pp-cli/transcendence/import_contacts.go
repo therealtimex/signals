@@ -22,11 +22,12 @@ const (
 )
 
 var contactImportTools = map[string]struct{}{
-	"query_contacts":          {},
-	"resolve_platform_claim":  {},
-	"create_contact":          {},
-	"enrich_contact":          {},
-	"upsert_contact_identity": {},
+	"query_contacts":               {},
+	"resolve_platform_claim":       {},
+	"create_contact":               {},
+	"enrich_contact":               {},
+	"upsert_contact_identity":      {},
+	"record_workflow_run_contacts": {},
 }
 
 type contactRow struct {
@@ -52,7 +53,53 @@ type importContactsSummary struct {
 	// Notes carries non-failure explanations (e.g. a row skipped because an
 	// archived contact already holds the platform claim). Kept separate from
 	// Errors so it never affects Success or the exit code.
-	Notes []string `json:"notes"`
+	Notes       []string                  `json:"notes"`
+	Attribution *importAttributionSummary `json:"attribution,omitempty"`
+}
+
+type importAttributionSummary struct {
+	WorkflowRunID string  `json:"workflowRunId"`
+	TemplateID    *string `json:"templateId"`
+	Attributed    int     `json:"attributed"`
+	CohortSize    int     `json:"cohortSize"`
+}
+
+type importAttributionState struct {
+	summary *importAttributionSummary
+	seen    map[string]struct{}
+}
+
+func newImportAttributionState(workflowRunID, templateID string) *importAttributionState {
+	var templateIDValue *string
+	if templateID != "" {
+		templateIDValue = &templateID
+	}
+	return &importAttributionState{
+		summary: &importAttributionSummary{
+			WorkflowRunID: workflowRunID,
+			TemplateID:    templateIDValue,
+		},
+		seen: map[string]struct{}{},
+	}
+}
+
+func (state *importAttributionState) applyResult(result map[string]any) {
+	if templateID, ok := nonEmptyString(result["templateId"]); ok {
+		state.summary.TemplateID = &templateID
+	}
+	if cohortSize, ok := result["cohortSize"].(float64); ok {
+		state.summary.CohortSize = int(cohortSize)
+	}
+}
+
+func (state *importAttributionState) add(ids []string) {
+	for _, id := range ids {
+		if id == "" {
+			continue
+		}
+		state.seen[id] = struct{}{}
+	}
+	state.summary.Attributed = len(state.seen)
 }
 
 // contactMatch is the result of a dedupe lookup.
@@ -88,6 +135,8 @@ func newImportContactsCmd(flags *rootFlags) *cobra.Command {
 	var dryRun bool
 	var batchSize int
 	var limit int
+	var workflowRunID string
+	var templateID string
 
 	cmd := &cobra.Command{
 		Use:   "contacts",
@@ -98,6 +147,9 @@ create or enrich contacts via agent-tools invoke.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if filePath == "" {
 				return usageErr(fmt.Errorf("required flag \"file\" not set"))
+			}
+			if err := validateImportAttributionFlags(workflowRunID, templateID); err != nil {
+				return err
 			}
 			if batchSize <= 0 {
 				batchSize = defaultImportBatchSize
@@ -134,16 +186,20 @@ create or enrich contacts via agent-tools invoke.`,
 				Errors:  []string{},
 				Notes:   []string{},
 			}
-
-			for start := 0; start < len(rows); start += batchSize {
-				end := start + batchSize
-				if end > len(rows) {
-					end = len(rows)
-				}
-				chunk := rows[start:end]
-				if err := importContactChunk(cmd, c, flags, chunk, dedupe, &summary); err != nil {
-					return err
-				}
+			preflightFailed, terminalErr := runContactImportWithInvoker(
+				rows,
+				batchSize,
+				dedupe,
+				c.DryRun,
+				workflowRunID,
+				templateID,
+				&summary,
+				func(tool string, input map[string]any) (map[string]any, error) {
+					return invokeAgentTool(cmd, c, flags, tool, input)
+				},
+			)
+			if preflightFailed {
+				return terminalErr
 			}
 
 			if summary.Failed > 0 {
@@ -155,6 +211,9 @@ create or enrich contacts via agent-tools invoke.`,
 				return err
 			}
 			fmt.Println(string(payload))
+			if terminalErr != nil {
+				return terminalErr
+			}
 			if summary.Failed > 0 {
 				return apiErr(fmt.Errorf("%d row(s) failed", summary.Failed))
 			}
@@ -167,8 +226,62 @@ create or enrich contacts via agent-tools invoke.`,
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Preview without mutating Signals")
 	cmd.Flags().IntVar(&batchSize, "batch-size", defaultImportBatchSize, "Rows per invoke chunk (max 50)")
 	cmd.Flags().IntVar(&limit, "limit", 0, "Max rows to process (default 500, hard cap 500)")
+	cmd.Flags().StringVar(&workflowRunID, "workflow-run-id", "", "Attribute imported contacts to this workflow run")
+	cmd.Flags().StringVar(&templateID, "template-id", "", "Template for --workflow-run-id")
 
 	return cmd
+}
+
+func validateImportAttributionFlags(workflowRunID, templateID string) error {
+	if templateID != "" && workflowRunID == "" {
+		return usageErr(fmt.Errorf("--template-id requires --workflow-run-id"))
+	}
+	return nil
+}
+
+func runContactImportWithInvoker(
+	rows []contactRow,
+	batchSize int,
+	dedupe bool,
+	dryRun bool,
+	workflowRunID string,
+	templateID string,
+	summary *importContactsSummary,
+	invoke agentToolInvoker,
+) (preflightFailed bool, terminalErr error) {
+	var attribution *importAttributionState
+	if workflowRunID != "" {
+		attribution = newImportAttributionState(workflowRunID, templateID)
+		summary.Attribution = attribution.summary
+		if !dryRun {
+			result, err := recordWorkflowRunContacts(workflowRunID, templateID, nil, invoke)
+			if err != nil {
+				return true, err
+			}
+			attribution.applyResult(result)
+		}
+	}
+
+	for start := 0; start < len(rows); start += batchSize {
+		end := start + batchSize
+		if end > len(rows) {
+			end = len(rows)
+		}
+		if err := importAttributedContactChunkWithInvoker(
+			rows[start:end],
+			dedupe,
+			dryRun,
+			workflowRunID,
+			templateID,
+			attribution,
+			summary,
+			invoke,
+		); err != nil {
+			return false, err
+		}
+	}
+
+	return false, nil
 }
 
 func readContactRows(filePath string, limit int) ([]contactRow, error) {
@@ -305,9 +418,12 @@ func importContactChunk(
 	flags *rootFlags,
 	rows []contactRow,
 	dedupe bool,
+	workflowRunID string,
+	templateID string,
+	attribution *importAttributionState,
 	summary *importContactsSummary,
 ) error {
-	return importContactChunkWithInvoker(rows, dedupe, c.DryRun, summary, func(tool string, input map[string]any) (map[string]any, error) {
+	return importAttributedContactChunkWithInvoker(rows, dedupe, c.DryRun, workflowRunID, templateID, attribution, summary, func(tool string, input map[string]any) (map[string]any, error) {
 		return invokeAgentTool(cmd, c, flags, tool, input)
 	})
 }
@@ -319,6 +435,32 @@ func importContactChunkWithInvoker(
 	summary *importContactsSummary,
 	invoke agentToolInvoker,
 ) error {
+	return importAttributedContactChunkWithInvoker(rows, dedupe, dryRun, "", "", nil, summary, invoke)
+}
+
+func importAttributedContactChunkWithInvoker(
+	rows []contactRow,
+	dedupe bool,
+	dryRun bool,
+	workflowRunID string,
+	templateID string,
+	attribution *importAttributionState,
+	summary *importContactsSummary,
+	invoke agentToolInvoker,
+) error {
+	chunkContactIDs := make([]string, 0, len(rows))
+	chunkSeen := map[string]struct{}{}
+	attribute := func(contactID string) {
+		if dryRun || workflowRunID == "" || contactID == "" {
+			return
+		}
+		if _, exists := chunkSeen[contactID]; exists {
+			return
+		}
+		chunkSeen[contactID] = struct{}{}
+		chunkContactIDs = append(chunkContactIDs, contactID)
+	}
+
 	for _, row := range rows {
 		if dedupe {
 			existing, err := findExistingContactWithInvoker(row, invoke)
@@ -362,6 +504,7 @@ func importContactChunkWithInvoker(
 				continue
 			}
 			if existing.ID != "" {
+				attribute(existing.ID)
 				if enriched, err := enrichExistingContact(existing.ID, row, invoke); err != nil {
 					summary.Failed++
 					summary.Errors = append(summary.Errors, err.Error())
@@ -374,7 +517,7 @@ func importContactChunkWithInvoker(
 			}
 		}
 
-		contactID, err := createContactFromRow(row, dryRun, invoke)
+		contactID, err := createContactFromRow(row, dryRun, workflowRunID, templateID, invoke)
 		if err != nil {
 			if dryRun {
 				summary.Created++
@@ -385,6 +528,7 @@ func importContactChunkWithInvoker(
 			continue
 		}
 		summary.Created++
+		attribute(contactID)
 		if enriched, err := enrichExistingContact(contactID, row, invoke); err != nil {
 			summary.Failed++
 			summary.Errors = append(summary.Errors, err.Error())
@@ -392,7 +536,38 @@ func importContactChunkWithInvoker(
 			summary.Enriched++
 		}
 	}
+
+	if len(chunkContactIDs) > 0 {
+		if attribution != nil {
+			attribution.add(chunkContactIDs)
+		}
+		result, err := recordWorkflowRunContacts(workflowRunID, templateID, chunkContactIDs, invoke)
+		if err != nil {
+			summary.Success = false
+			summary.Errors = append(summary.Errors, fmt.Sprintf("workflow attribution: %v", err))
+			return apiErr(fmt.Errorf("recording workflow attribution: %w", err))
+		}
+		if attribution != nil {
+			attribution.applyResult(result)
+		}
+	}
 	return nil
+}
+
+func recordWorkflowRunContacts(
+	workflowRunID string,
+	templateID string,
+	contactIDs []string,
+	invoke agentToolInvoker,
+) (map[string]any, error) {
+	input := map[string]any{"runId": workflowRunID}
+	if templateID != "" {
+		input["templateId"] = templateID
+	}
+	if contactIDs != nil {
+		input["contactIds"] = contactIDs
+	}
+	return invoke("record_workflow_run_contacts", input)
 }
 
 func invokeAgentTool(
@@ -505,6 +680,13 @@ func validateContactImportResult(tool string, result map[string]any) error {
 	case "create_contact":
 		if _, ok := nonEmptyString(result["id"]); !ok {
 			return apiErr(fmt.Errorf("create_contact result missing non-empty string id"))
+		}
+	case "record_workflow_run_contacts":
+		if _, ok := nonEmptyString(result["runId"]); !ok {
+			return apiErr(fmt.Errorf("record_workflow_run_contacts result missing non-empty string runId"))
+		}
+		if _, ok := result["cohortSize"].(float64); !ok {
+			return apiErr(fmt.Errorf("record_workflow_run_contacts result missing numeric cohortSize"))
 		}
 	}
 	return nil
@@ -662,7 +844,13 @@ func isLikelyAvatarURL(url string) bool {
 		strings.HasSuffix(lower, ".gif")
 }
 
-func createContactFromRow(row contactRow, dryRun bool, invoke agentToolInvoker) (string, error) {
+func createContactFromRow(
+	row contactRow,
+	dryRun bool,
+	workflowRunID string,
+	templateID string,
+	invoke agentToolInvoker,
+) (string, error) {
 	input := map[string]any{
 		"name": row.Name,
 	}
@@ -706,6 +894,12 @@ func createContactFromRow(row contactRow, dryRun bool, invoke agentToolInvoker) 
 	}
 	if row.Notes != "" {
 		input["notes"] = row.Notes
+	}
+	if workflowRunID != "" {
+		input["workflowRunId"] = workflowRunID
+	}
+	if templateID != "" {
+		input["templateId"] = templateID
 	}
 
 	result, err := invoke("create_contact", input)

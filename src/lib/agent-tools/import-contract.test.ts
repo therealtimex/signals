@@ -18,6 +18,7 @@ const VALID_INPUTS: Record<(typeof CONTACT_IMPORT_TOOL_NAMES)[number], object> =
     platform: "x",
     platformUserId: "contract-user",
   },
+  record_workflow_run_contacts: { runId: "contract-run" },
 };
 
 async function invoke(tool: string, input: object) {

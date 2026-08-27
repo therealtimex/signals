@@ -205,6 +205,18 @@ func TestParseAgentToolEnvelopeRecordedContracts(t *testing.T) {
 		}
 	})
 
+	t.Run("workflow attribution requires run id and cohort size", func(t *testing.T) {
+		result, err := parseAgentToolEnvelope("record_workflow_run_contacts", []byte(
+			`{"success":true,"tool":"record_workflow_run_contacts","result":{"runId":"run-1","templateId":"tpl-1","cohortSize":2,"addedContactIds":[],"alreadyRecorded":2,"processedItems":2}}`,
+		))
+		if err != nil {
+			t.Fatalf("parseAgentToolEnvelope() error = %v", err)
+		}
+		if result["cohortSize"] != float64(2) {
+			t.Fatalf("cohortSize = %#v", result["cohortSize"])
+		}
+	})
+
 	t.Run("validation failure maps to usage error", func(t *testing.T) {
 		_, err := parseAgentToolEnvelope("create_contact", []byte(
 			`{"success":false,"code":"VALIDATION_ERROR","error":"Invalid tool input"}`,
@@ -242,6 +254,8 @@ func TestParseAgentToolEnvelopeRejectsMalformedResponses(t *testing.T) {
 		{name: "claim missing claimed", tool: "resolve_platform_claim", body: `{"success":true,"result":{}}`},
 		{name: "contact claim missing archived", tool: "resolve_platform_claim", body: `{"success":true,"result":{"claimed":true,"claimant":{"kind":"contact","contactId":"contact-1"}}}`},
 		{name: "create missing id", tool: "create_contact", body: `{"success":true,"result":{"name":"Created"}}`},
+		{name: "attribution missing run id", tool: "record_workflow_run_contacts", body: `{"success":true,"result":{"cohortSize":1}}`},
+		{name: "attribution missing cohort size", tool: "record_workflow_run_contacts", body: `{"success":true,"result":{"runId":"run-1"}}`},
 	}
 
 	for _, tt := range tests {
@@ -250,6 +264,349 @@ func TestParseAgentToolEnvelopeRejectsMalformedResponses(t *testing.T) {
 				t.Fatalf("parseAgentToolEnvelope() error = %v, want API error", err)
 			}
 		})
+	}
+}
+
+func TestValidateImportAttributionFlags(t *testing.T) {
+	if err := validateImportAttributionFlags("", "tpl-1"); err == nil || ExitCode(err) != 2 {
+		t.Fatalf("validateImportAttributionFlags() error = %v, want usage error", err)
+	}
+	if err := validateImportAttributionFlags("run-1", ""); err != nil {
+		t.Fatalf("workflow run without template should be valid: %v", err)
+	}
+}
+
+func TestRunContactImportPreflightFailureStopsBeforeMutations(t *testing.T) {
+	tests := []struct {
+		name     string
+		failure  error
+		exitCode int
+	}{
+		{name: "validation", failure: usageErr(fmt.Errorf("template mismatch")), exitCode: 2},
+		{name: "not found", failure: apiErr(fmt.Errorf("workflow run missing")), exitCode: 5},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var calls []string
+			invoke := func(tool string, _ map[string]any) (map[string]any, error) {
+				calls = append(calls, tool)
+				if tool != "record_workflow_run_contacts" {
+					t.Fatalf("contact mutation ran before preflight completed: %q", tool)
+				}
+				return nil, tt.failure
+			}
+
+			summary := importContactsSummary{Success: true, Errors: []string{}, Notes: []string{}}
+			preflightFailed, err := runContactImportWithInvoker(
+				[]contactRow{{Name: "Must Not Mutate"}},
+				1,
+				false,
+				false,
+				"run-1",
+				"tpl-1",
+				&summary,
+				invoke,
+			)
+
+			if !preflightFailed || err == nil || ExitCode(err) != tt.exitCode {
+				t.Fatalf("preflightFailed = %v, error = %v, want exit %d", preflightFailed, err, tt.exitCode)
+			}
+			if !reflect.DeepEqual(calls, []string{"record_workflow_run_contacts"}) {
+				t.Fatalf("calls = %#v, want preflight only", calls)
+			}
+			if summary.Created != 0 || summary.Enriched != 0 || summary.Skipped != 0 || summary.Failed != 0 {
+				t.Fatalf("preflight failure changed row counts: %+v", summary)
+			}
+		})
+	}
+}
+
+func TestImportContactChunkAttributesCreatedAndMatchedContacts(t *testing.T) {
+	var calls []string
+	var createInput map[string]any
+	var enrichInputs []map[string]any
+	var recordInput map[string]any
+	invoke := func(tool string, input map[string]any) (map[string]any, error) {
+		calls = append(calls, tool)
+		switch tool {
+		case "query_contacts":
+			if input["email"] == "existing@example.com" {
+				return map[string]any{"contacts": []any{map[string]any{"id": "contact-existing"}}}, nil
+			}
+			return map[string]any{"contacts": []any{}}, nil
+		case "create_contact":
+			createInput = input
+			return map[string]any{"id": "contact-new"}, nil
+		case "enrich_contact":
+			enrichInputs = append(enrichInputs, input)
+			return map[string]any{}, nil
+		case "record_workflow_run_contacts":
+			recordInput = input
+			return map[string]any{"runId": "run-1", "templateId": "tpl-1", "cohortSize": float64(2)}, nil
+		default:
+			t.Fatalf("unexpected tool call %q", tool)
+			return nil, nil
+		}
+	}
+
+	attribution := newImportAttributionState("run-1", "tpl-1")
+	summary := importContactsSummary{Success: true, Errors: []string{}, Notes: []string{}, Attribution: attribution.summary}
+	err := importAttributedContactChunkWithInvoker([]contactRow{
+		{Name: "New", Email: "new@example.com", Title: "Founder"},
+		{Name: "Existing", Email: "existing@example.com", Title: "CEO"},
+	}, true, false, "run-1", "tpl-1", attribution, &summary, invoke)
+	if err != nil {
+		t.Fatalf("importAttributedContactChunkWithInvoker() error = %v", err)
+	}
+
+	if createInput["workflowRunId"] != "run-1" || createInput["templateId"] != "tpl-1" {
+		t.Fatalf("create input provenance = %#v", createInput)
+	}
+	for _, input := range enrichInputs {
+		if _, exists := input["workflowRunId"]; exists {
+			t.Fatalf("enrich input rewrote workflow provenance: %#v", input)
+		}
+		if _, exists := input["templateId"]; exists {
+			t.Fatalf("enrich input rewrote template provenance: %#v", input)
+		}
+	}
+	if got := recordInput["contactIds"]; !reflect.DeepEqual(got, []string{"contact-new", "contact-existing"}) {
+		t.Fatalf("record contactIds = %#v", got)
+	}
+	if summary.Attribution == nil || summary.Attribution.Attributed != 2 || summary.Attribution.CohortSize != 2 {
+		t.Fatalf("attribution summary = %+v", summary.Attribution)
+	}
+	wantCalls := []string{
+		"query_contacts", "create_contact", "enrich_contact",
+		"query_contacts", "enrich_contact", "record_workflow_run_contacts",
+	}
+	if !reflect.DeepEqual(calls, wantCalls) {
+		t.Fatalf("calls = %#v, want %#v", calls, wantCalls)
+	}
+}
+
+func TestImportContactChunkAttributesMatchEvenWhenEnrichmentFails(t *testing.T) {
+	var recorded []string
+	invoke := func(tool string, input map[string]any) (map[string]any, error) {
+		switch tool {
+		case "query_contacts":
+			return map[string]any{"contacts": []any{map[string]any{"id": "contact-existing"}}}, nil
+		case "enrich_contact":
+			return nil, apiErr(fmt.Errorf("enrichment rejected"))
+		case "record_workflow_run_contacts":
+			recorded, _ = input["contactIds"].([]string)
+			return map[string]any{"runId": "run-1", "cohortSize": float64(1)}, nil
+		default:
+			t.Fatalf("unexpected tool call %q", tool)
+			return nil, nil
+		}
+	}
+
+	attribution := newImportAttributionState("run-1", "")
+	summary := importContactsSummary{Success: true, Errors: []string{}, Notes: []string{}, Attribution: attribution.summary}
+	err := importAttributedContactChunkWithInvoker(
+		[]contactRow{{Name: "Existing", Email: "existing@example.com", Title: "CEO"}},
+		true,
+		false,
+		"run-1",
+		"",
+		attribution,
+		&summary,
+		invoke,
+	)
+	if err != nil {
+		t.Fatalf("importAttributedContactChunkWithInvoker() error = %v", err)
+	}
+	if !reflect.DeepEqual(recorded, []string{"contact-existing"}) || summary.Failed != 1 {
+		t.Fatalf("recorded = %#v, summary = %+v", recorded, summary)
+	}
+}
+
+func TestImportContactChunkExcludesRowsWithoutConcreteActiveContactIDs(t *testing.T) {
+	tests := []struct {
+		name   string
+		row    contactRow
+		dedupe bool
+		invoke agentToolInvoker
+	}{
+		{
+			name:   "ambiguous email",
+			row:    contactRow{Name: "Ambiguous", Email: "shared@example.com"},
+			dedupe: true,
+			invoke: func(tool string, _ map[string]any) (map[string]any, error) {
+				if tool != "query_contacts" {
+					t.Fatalf("unexpected tool call %q", tool)
+				}
+				return map[string]any{"contacts": []any{
+					map[string]any{"id": "contact-a"},
+					map[string]any{"id": "contact-b"},
+				}}, nil
+			},
+		},
+		{
+			name: "org-held claim",
+			row: contactRow{
+				Name: "Org Held", Platform: "x", PlatformUserID: "org-held",
+			},
+			dedupe: true,
+			invoke: func(tool string, _ map[string]any) (map[string]any, error) {
+				if tool != "resolve_platform_claim" {
+					t.Fatalf("unexpected tool call %q", tool)
+				}
+				return map[string]any{
+					"claimed":  true,
+					"claimant": map[string]any{"kind": "org", "orgId": "org-1"},
+				}, nil
+			},
+		},
+		{
+			name: "archived contact claim",
+			row: contactRow{
+				Name: "Archived", Platform: "x", PlatformUserID: "archived",
+			},
+			dedupe: true,
+			invoke: func(tool string, _ map[string]any) (map[string]any, error) {
+				if tool != "resolve_platform_claim" {
+					t.Fatalf("unexpected tool call %q", tool)
+				}
+				return map[string]any{
+					"claimed": true,
+					"claimant": map[string]any{
+						"kind": "contact", "contactId": "contact-archived", "archived": true,
+					},
+				}, nil
+			},
+		},
+		{
+			name:   "failed create",
+			row:    contactRow{Name: "Rejected"},
+			dedupe: false,
+			invoke: func(tool string, _ map[string]any) (map[string]any, error) {
+				if tool != "create_contact" {
+					t.Fatalf("unexpected tool call %q", tool)
+				}
+				return nil, apiErr(fmt.Errorf("create rejected"))
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			attribution := newImportAttributionState("run-1", "")
+			summary := importContactsSummary{Success: true, Errors: []string{}, Notes: []string{}, Attribution: attribution.summary}
+			if err := importAttributedContactChunkWithInvoker(
+				[]contactRow{tt.row}, tt.dedupe, false, "run-1", "", attribution, &summary, tt.invoke,
+			); err != nil {
+				t.Fatalf("importAttributedContactChunkWithInvoker() error = %v", err)
+			}
+			if summary.Attribution.Attributed != 0 || summary.Attribution.CohortSize != 0 {
+				t.Fatalf("unresolved row was attributed: %+v", summary.Attribution)
+			}
+		})
+	}
+}
+
+func TestImportContactChunkDeduplicatesAttributionWithinChunk(t *testing.T) {
+	var recorded []string
+	invoke := func(tool string, input map[string]any) (map[string]any, error) {
+		switch tool {
+		case "create_contact":
+			return map[string]any{"id": "contact-shared"}, nil
+		case "record_workflow_run_contacts":
+			recorded, _ = input["contactIds"].([]string)
+			return map[string]any{"runId": "run-1", "cohortSize": float64(1)}, nil
+		default:
+			t.Fatalf("unexpected tool call %q", tool)
+			return nil, nil
+		}
+	}
+
+	attribution := newImportAttributionState("run-1", "")
+	summary := importContactsSummary{Success: true, Errors: []string{}, Notes: []string{}, Attribution: attribution.summary}
+	if err := importAttributedContactChunkWithInvoker(
+		[]contactRow{{Name: "First"}, {Name: "Duplicate"}},
+		false,
+		false,
+		"run-1",
+		"",
+		attribution,
+		&summary,
+		invoke,
+	); err != nil {
+		t.Fatalf("importAttributedContactChunkWithInvoker() error = %v", err)
+	}
+	if !reflect.DeepEqual(recorded, []string{"contact-shared"}) || summary.Attribution.Attributed != 1 {
+		t.Fatalf("recorded = %#v, attribution = %+v", recorded, summary.Attribution)
+	}
+}
+
+func TestImportContactChunkStopsOnAttributionFailure(t *testing.T) {
+	invoke := func(tool string, _ map[string]any) (map[string]any, error) {
+		switch tool {
+		case "create_contact":
+			return map[string]any{"id": "contact-new"}, nil
+		case "record_workflow_run_contacts":
+			return nil, usageErr(fmt.Errorf("template mismatch"))
+		default:
+			return map[string]any{}, nil
+		}
+	}
+
+	attribution := newImportAttributionState("run-1", "tpl-1")
+	summary := importContactsSummary{Success: true, Errors: []string{}, Notes: []string{}, Attribution: attribution.summary}
+	err := importAttributedContactChunkWithInvoker(
+		[]contactRow{{Name: "New"}}, false, false, "run-1", "tpl-1", attribution, &summary, invoke,
+	)
+	if err == nil || ExitCode(err) != 5 {
+		t.Fatalf("error = %v, want API exit 5", err)
+	}
+	if summary.Success || len(summary.Errors) != 1 || !strings.Contains(summary.Errors[0], "template mismatch") {
+		t.Fatalf("summary = %+v", summary)
+	}
+}
+
+func TestRunContactImportStopsAfterChunkAttributionFailure(t *testing.T) {
+	var calls []string
+	recordCalls := 0
+	invoke := func(tool string, _ map[string]any) (map[string]any, error) {
+		calls = append(calls, tool)
+		switch tool {
+		case "record_workflow_run_contacts":
+			recordCalls++
+			if recordCalls == 1 {
+				return map[string]any{"runId": "run-1", "cohortSize": float64(0)}, nil
+			}
+			return nil, apiErr(fmt.Errorf("cohort write rejected"))
+		case "create_contact":
+			return map[string]any{"id": fmt.Sprintf("contact-%d", len(calls))}, nil
+		default:
+			t.Fatalf("unexpected tool call %q", tool)
+			return nil, nil
+		}
+	}
+
+	summary := importContactsSummary{Success: true, Errors: []string{}, Notes: []string{}}
+	preflightFailed, err := runContactImportWithInvoker(
+		[]contactRow{{Name: "First"}, {Name: "Must Not Run"}},
+		1,
+		false,
+		false,
+		"run-1",
+		"",
+		&summary,
+		invoke,
+	)
+	if preflightFailed || err == nil || ExitCode(err) != 5 {
+		t.Fatalf("preflightFailed = %v, error = %v, want chunk API failure", preflightFailed, err)
+	}
+	wantCalls := []string{
+		"record_workflow_run_contacts",
+		"create_contact",
+		"record_workflow_run_contacts",
+	}
+	if !reflect.DeepEqual(calls, wantCalls) {
+		t.Fatalf("calls = %#v, want %#v", calls, wantCalls)
 	}
 }
 

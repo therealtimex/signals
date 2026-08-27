@@ -154,6 +154,7 @@ export function buildNetworkSnowballTemplateConfig(): Record<string, unknown> {
 
 export function buildNetworkSnowballBriefSection(input: {
   workflowRunId: string;
+  templateId?: string;
   config: Record<string, unknown>;
   signalsBaseUrl?: string;
 }): string {
@@ -168,6 +169,7 @@ export function buildNetworkSnowballBriefSection(input: {
     ecosystem_advocates: "High-signal developers, quoter accounts, and technical testimonials",
     all_connected: "Investors, founding team members, and prominent ecosystem advocates",
   };
+  const attributionFlags = ` --workflow-run-id ${input.workflowRunId}${input.templateId ? ` --template-id ${input.templateId}` : ""}`;
 
   const lines = [
     "Network Snowball execution contract:",
@@ -181,8 +183,8 @@ export function buildNetworkSnowballBriefSection(input: {
     "    - Bot/Clone Filter: Apply the 'Engage for visibility, skip for contacts' rule. Discard automated news bots, clone mirror accounts, and impersonal aggregators (*bot, *daily, *digest) from contacts.csv.",
     "S4. Identity-First Avatar Extraction: For LinkedIn, read avatar only from `.pv-top-card-profile-picture__image` on the target profile — never the first `img[src*=profile-displayphoto]` on the page (authenticated sessions contaminate nav/sidebar/reaction images with the logged-in viewer's photo). Confirm the profile `h1` name matches the contact before saving avatar_url; if scrape is empty or ambiguous, use `https://unavatar.io/linkedin/user:{slug}` or leave avatar_url blank rather than saving a viewer-contaminated media.licdn.com URL. For X use pbs.twimg.com; verify HTTP 200. Never guess synthetic redirecting URLs.",
     snowball.requireApproval
-      ? `S5. Approval & Write Back: Candidate roster must be presented in this thread for operator review before bulk committing. Once confirmed, stage workflow-runs/${input.workflowRunId}/contacts.csv and commit with:\n    signals-pp-cli import contacts --file workflow-runs/${input.workflowRunId}/contacts.csv --dedupe\n    In the notes field, explicitly record the causal relationship (e.g., 'role: Lead Investor in Acme Seed round' or 'role: Co-Founder & CTO').`
-      : `S5. Write Back & Graph Edge Linking: Stage workflow-runs/${input.workflowRunId}/contacts.csv (header: name,company,title,email,platform,platform_handle,profile_url,avatar_url,notes) and commit with:\n    signals-pp-cli import contacts --file workflow-runs/${input.workflowRunId}/contacts.csv --dedupe\n    In the notes field, explicitly record the causal relationship (e.g., 'role: Lead Investor in Acme Seed round' or 'role: Co-Founder & CTO').`,
+      ? `S5. Approval & Write Back: Candidate roster must be presented in this thread for operator review before bulk committing. Once confirmed, stage workflow-runs/${input.workflowRunId}/contacts.csv and commit with:\n    signals-pp-cli import contacts --file workflow-runs/${input.workflowRunId}/contacts.csv --dedupe${attributionFlags}\n    In the notes field, explicitly record the causal relationship (e.g., 'role: Lead Investor in Acme Seed round' or 'role: Co-Founder & CTO').`
+      : `S5. Write Back & Graph Edge Linking: Stage workflow-runs/${input.workflowRunId}/contacts.csv (header: name,company,title,email,platform,platform_handle,profile_url,avatar_url,notes) and commit with:\n    signals-pp-cli import contacts --file workflow-runs/${input.workflowRunId}/contacts.csv --dedupe${attributionFlags}\n    In the notes field, explicitly record the causal relationship (e.g., 'role: Lead Investor in Acme Seed round' or 'role: Co-Founder & CTO').`,
     "S6. Report Progress: Provide a concise summary table in this thread listing discovered contacts, their roles, avatar URLs, and platform links.",
     "S7. Teardown & Resource Release:",
     "    - Terminate Spawned Browser Sessions: Immediately stop/close any browser sessions opened during this run (agent-browser close / realtimex-pp-cli browser-session stop) to release Chromium RAM and CPU.",

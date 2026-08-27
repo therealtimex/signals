@@ -27,6 +27,7 @@ import { runTemplateViaRtx, getRtxRefsFromRunConfig } from "@/lib/agents/run-tem
 import { isRtxEmbedded } from "@/lib/rtx/env";
 import { getWorkflowRun } from "@/lib/db/queries/workflows";
 import { resolveOutboundWorkflowWebhookUrl } from "@/lib/webhooks/rtx-webhook-url";
+import { resolveRunCohort } from "@/lib/workflows/run-cohort";
 
 export interface WorkflowCompletedEventPayload {
   event: "workflow.completed";
@@ -246,13 +247,7 @@ export async function emitWorkflowCompletedEvent(
   const rawConfig = JSON.parse(run.config ?? "{}") as Record<string, unknown>;
   const cascadeConfig = readWorkflowCascadeConfig(rawConfig);
 
-  let createdContactIds = options?.createdContactIds ?? (rawConfig.targetContactIds as string[] | undefined) ?? [];
-  if (createdContactIds.length === 0) {
-    const attributed = db.select({ id: contacts.id }).from(contacts).where(eq(contacts.createdWorkflowRunId, runId)).all();
-    if (attributed.length > 0) {
-      createdContactIds = attributed.map((c) => c.id);
-    }
-  }
+  const { contactIds: createdContactIds } = resolveRunCohort(run, options?.createdContactIds);
 
   const eventPayload: WorkflowCompletedEventPayload = {
     event: "workflow.completed",

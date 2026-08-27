@@ -101,6 +101,7 @@ describe("buildNetworkSnowballBriefSection", () => {
   it("generates comprehensive execution contract with bot gate and avatar extraction", () => {
     const brief = buildNetworkSnowballBriefSection({
       workflowRunId: "run_snow_1",
+      templateId: "tpl_snow_1",
       config: {
         networkSnowball: { version: 1 },
         seedType: "event_url",
@@ -122,7 +123,9 @@ describe("buildNetworkSnowballBriefSection", () => {
     expect(brief).toContain("pv-top-card-profile-picture__image");
     expect(brief).toContain("unavatar.io/linkedin/user:");
     expect(brief).toContain("workflow-runs/run_snow_1/contacts.csv");
-    expect(brief).toContain("signals-pp-cli import contacts");
+    expect(brief).toContain(
+      "signals-pp-cli import contacts --file workflow-runs/run_snow_1/contacts.csv --dedupe --workflow-run-id run_snow_1 --template-id tpl_snow_1",
+    );
     expect(brief).toContain("Terminate Spawned Browser Sessions");
     expect(brief).toContain("schedules release of this workflow's linked terminal session");
   });

@@ -49,6 +49,7 @@ import type {
   startWorkflowSchema,
   dispatchFollowOnWorkflowSchema,
   completeWorkflowRunSchema,
+  recordWorkflowRunContactsSchema,
   updateContactSchema,
   getPersonaSchema,
   getPersonaEvidenceSchema,
@@ -63,6 +64,11 @@ import { validateIdentityAvatarUrl } from "@/lib/contact-avatar-client";
 import { validateWorkflowRunAndTemplateIds } from "@/lib/db/creation-provenance-input";
 import { CreatedSourceDetailFilterError } from "@/lib/db/creation-sources";
 import { AgentToolError } from "@/lib/agent-tools/types";
+import {
+  recordRunCohort,
+  resolveRunCohort,
+  RunCohortError,
+} from "@/lib/workflows/run-cohort";
 
 const DEFAULT_PAGE_SIZE = 20;
 
@@ -979,17 +985,30 @@ export async function handleCompleteWorkflowRun(input: z.infer<typeof completeWo
   }
 
   const completedAt = Math.floor(Date.now() / 1000);
-  const existingResult = JSON.parse(run.result ?? "{}") as Record<string, unknown>;
+  let existingResult: Record<string, unknown> = {};
+  try {
+    const parsed: unknown = JSON.parse(run.result ?? "{}");
+    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+      existingResult = parsed as Record<string, unknown>;
+    }
+  } catch {
+    // Malformed legacy result JSON must not block workflow completion.
+  }
+  const cohort = resolveRunCohort(run, input.createdContactIds);
   const resultJson = JSON.stringify({
     ...existingResult,
     ...(input.summary ? { summary: input.summary } : {}),
-    ...(input.createdContactIds ? { createdContactIds: input.createdContactIds } : {}),
+    ...(cohort.contactIds.length > 0 ? { createdContactIds: cohort.contactIds } : {}),
   });
 
   const updatedRun = updateWorkflowRun(input.runId, {
     status: input.status,
     completedAt,
-    ...(input.processedItems !== undefined ? { processedItems: input.processedItems } : {}),
+    ...(input.processedItems !== undefined
+      ? { processedItems: input.processedItems }
+      : cohort.contactIds.length > run.processedItems
+        ? { processedItems: cohort.contactIds.length }
+        : {}),
     ...(input.successItems !== undefined ? { successItems: input.successItems } : {}),
     result: resultJson,
     ...(input.errors ? { errors: JSON.stringify(input.errors) } : {}),
@@ -998,7 +1017,7 @@ export async function handleCompleteWorkflowRun(input: z.infer<typeof completeWo
   // Automatically emit completion event and trigger workflow cascading / webhook bridge
   const eventResult = await emitWorkflowCompletedEvent(input.runId, {
     summary: input.summary,
-    createdContactIds: input.createdContactIds,
+    createdContactIds: cohort.contactIds.length > 0 ? cohort.contactIds : undefined,
   });
 
   const runtimeSessionId = getRtxRuntimeSessionIdFromRunConfig(run.config);
@@ -1017,6 +1036,8 @@ export async function handleCompleteWorkflowRun(input: z.infer<typeof completeWo
     status: updatedRun?.status ?? input.status,
     completedAt: updatedRun?.completedAt ?? completedAt,
     processedItems: updatedRun?.processedItems ?? input.processedItems ?? 0,
+    createdContactIds: cohort.contactIds,
+    cohortSources: cohort.sources,
     cascadeResult: eventResult.cascadeResult,
     routingRecommendation: eventResult.routingRecommendation,
     terminalSessionTeardown: terminalSessionTeardown.sessionId
@@ -1025,4 +1046,20 @@ export async function handleCompleteWorkflowRun(input: z.infer<typeof completeWo
     browserSessionTeardown,
     message: `Workflow run ${input.runId} marked as ${input.status}. Follow-on cascades and webhook dispatch completed.${teardownNote}`,
   };
+}
+
+export async function handleRecordWorkflowRunContacts(
+  input: z.infer<typeof recordWorkflowRunContactsSchema>,
+) {
+  try {
+    return recordRunCohort(input);
+  } catch (error) {
+    if (error instanceof RunCohortError) {
+      const code = error.code === "RUN_NOT_FOUND" || error.code === "TEMPLATE_NOT_FOUND"
+        ? "NOT_FOUND"
+        : "VALIDATION_ERROR";
+      throw new AgentToolError(code, error.message, { reason: error.code });
+    }
+    throw error;
+  }
 }

@@ -25,6 +25,7 @@ import {
   getPersonaJobSchema,
   completePersonaJobSchema,
   listMailAccountsSchema,
+  recordWorkflowRunContactsSchema,
 } from "@/lib/agent-tools/schemas";
 import {
   logInteractionSchema,
@@ -104,6 +105,7 @@ import {
   handleGetPersonaEvidence,
   handleGeneratePersona,
   handleUpsertPersona,
+  handleRecordWorkflowRunContacts,
 } from "@/lib/agent-tools/handlers";
 import { handleListMailAccounts } from "@/lib/agent-tools/mail-handlers";
 import {
@@ -267,6 +269,15 @@ export const AGENT_TOOLS: Record<string, AgentToolDefinition> = {
     schema: completeWorkflowRunSchema,
     parameters: zodToParameters(completeWorkflowRunSchema),
     execute: handleCompleteWorkflowRun,
+  },
+  record_workflow_run_contacts: {
+    name: "record_workflow_run_contacts",
+    description:
+      "Validate a workflow run and durably add created or discovered contact IDs to its idempotent cohort.",
+    category: "workflows",
+    schema: recordWorkflowRunContactsSchema,
+    parameters: zodToParameters(recordWorkflowRunContactsSchema),
+    execute: handleRecordWorkflowRunContacts,
   },
   query_content: {
     name: "query_content",

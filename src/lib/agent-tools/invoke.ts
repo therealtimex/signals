@@ -8,6 +8,7 @@ export const CONTACT_IMPORT_TOOL_NAMES = [
   "create_contact",
   "enrich_contact",
   "upsert_contact_identity",
+  "record_workflow_run_contacts",
 ] as const;
 
 const CONTACT_IMPORT_TOOLS = new Set<string>(CONTACT_IMPORT_TOOL_NAMES);
