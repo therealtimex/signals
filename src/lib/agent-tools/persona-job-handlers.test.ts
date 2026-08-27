@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import {
   handleCompletePersonaJob,
   handleGetPersonaJob,
 } from "@/lib/agent-tools/persona-job-handlers";
 import { createContact } from "@/lib/db/queries/contacts";
+import { db } from "@/lib/db/client";
 import { createIdentity } from "@/lib/db/queries/identities";
 import { assemblePersonaEvidence } from "@/lib/db/queries/persona-evidence";
 import {
@@ -15,6 +17,7 @@ import {
 } from "@/lib/db/queries/persona-jobs";
 import { getActivePersona } from "@/lib/db/queries/personas";
 import { createWorkflowRun, getWorkflowRun } from "@/lib/db/queries/workflows";
+import { contactPersonas } from "@/lib/db/schema";
 import { resetCoreTables } from "@/test/db";
 
 const validSynthesis = {
@@ -170,6 +173,82 @@ describe("PersonaAgentJob agent-tool handlers", () => {
     expect(completed).toMatchObject({ accepted: true, status: "completed" });
     expect(getPersonaJobById(job.id)?.status).toBe("completed");
     expect(getActivePersona(contact.id)?.id).toBe(getPersonaJobById(job.id)?.resultPersonaId);
+  });
+
+  it("does not let a timed-out predecessor overwrite a completed retry", async () => {
+    const { contact, bundle, job: timedOutJob } = seedRunningJob();
+    markPersonaJobTimedOut(timedOutJob.id, "agent timeout");
+
+    const retryRun = createWorkflowRun({
+      workflowType: "persona",
+      status: "running",
+      trigger: "user",
+    });
+    const retryQueued = createPersonaJob({
+      id: `pa_${nanoid()}`,
+      contactId: contact.id,
+      trigger: "user",
+      force: true,
+      promptVersion: 1,
+      agentPromptVersion: 1,
+      evidenceHash: bundle.provenance.evidenceHash,
+      provenance: bundle.provenance,
+      supersededPersonaId: null,
+      workflowRunId: retryRun.id,
+    });
+    const retryJob = markPersonaJobRunning(retryQueued.id, {
+      rtxWorkspaceSlug: "signals",
+      rtxThreadSlug: `persona-retry-${contact.id}`,
+      rtxRuntimeSessionId: "",
+      agentModel: "codex:gpt-5.6-sol",
+    })!;
+
+    const retry = await handleCompletePersonaJob({
+      jobId: retryJob.id,
+      success: true,
+      synthesis: { ...validSynthesis, summary: "The retry result must remain active" },
+    });
+    expect(retry).toMatchObject({ accepted: true, status: "completed" });
+    const retryPersona = getActivePersona(contact.id)!;
+
+    const latePredecessor = await handleCompletePersonaJob({
+      jobId: timedOutJob.id,
+      success: true,
+      synthesis: { ...validSynthesis, summary: "Late predecessor result" },
+    });
+    expect(latePredecessor).toMatchObject({
+      success: false,
+      code: "PERSONA_JOB_NOT_ACTIVE",
+      status: "superseded",
+    });
+    expect(getPersonaJobById(timedOutJob.id)?.status).toBe("superseded");
+    expect(getActivePersona(contact.id)).toMatchObject({
+      id: retryPersona.id,
+      summary: "The retry result must remain active",
+    });
+  });
+
+  it("persists exactly one persona for concurrent successful callbacks", async () => {
+    const { contact, job } = seedRunningJob();
+
+    const results = await Promise.all([
+      handleCompletePersonaJob({
+        jobId: job.id,
+        success: true,
+        synthesis: validSynthesis,
+      }),
+      handleCompletePersonaJob({
+        jobId: job.id,
+        success: true,
+        synthesis: validSynthesis,
+      }),
+    ]);
+
+    expect(results.filter((result) => "idempotent" in result && result.idempotent)).toHaveLength(1);
+    expect(results.filter((result) => result.status === "completed")).toHaveLength(1);
+    expect(db.select().from(contactPersonas).where(eq(contactPersonas.contactId, contact.id)).all())
+      .toHaveLength(1);
+    expect(getPersonaJobById(job.id)?.status).toBe("completed");
   });
 
   it("returns evidence only while the current hash matches the frozen job hash", async () => {

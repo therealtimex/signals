@@ -9,7 +9,11 @@ import { db } from "@/lib/db/client";
 import { createContact } from "@/lib/db/queries/contacts";
 import { createIdentity } from "@/lib/db/queries/identities";
 import { logInteraction } from "@/lib/db/queries/interactions";
-import { getLatestPersonaJobForContact } from "@/lib/db/queries/persona-jobs";
+import {
+  getLatestPersonaJobForContact,
+  getPersonaJobById,
+  markPersonaJobTimedOut,
+} from "@/lib/db/queries/persona-jobs";
 import { getWorkflowRun } from "@/lib/db/queries/workflows";
 import { personaJobs } from "@/lib/db/schema";
 import { preparePersonaGeneration } from "@/lib/persona/generation/prepare";
@@ -173,6 +177,35 @@ describe("PersonaAgentJob service", () => {
     expect(db.select().from(personaJobs).where(eq(personaJobs.id, first.id)).get()?.status).toBe(
       "superseded",
     );
+  });
+
+  it("supersedes a timed-out predecessor before dispatching its retry", async () => {
+    const storageDir = mkdtempSync(join(tmpdir(), "persona-agent-retry-"));
+    const env = testEnv(storageDir);
+    const contact = seedEvidenceContact("Retry Subject");
+    const prepared = preparePersonaGeneration(contact.id, { force: true });
+    if (prepared.kind !== "ready") throw new Error("expected ready persona generation");
+    const harness = createDispatchHarness();
+
+    const first = await startPersonaAgentJob(contact.id, prepared, {
+      env,
+      fetchImpl: harness.fetchImpl as unknown as typeof fetch,
+      force: true,
+    });
+    expect(markPersonaJobTimedOut(first.id, "agent timeout")?.status).toBe("timeout");
+
+    const retry = await startPersonaAgentJob(contact.id, prepared, {
+      env,
+      fetchImpl: harness.fetchImpl as unknown as typeof fetch,
+      force: true,
+    });
+
+    expect(retry.id).not.toBe(first.id);
+    expect(getPersonaJobById(first.id)).toMatchObject({
+      status: "superseded",
+      errorCode: "superseded",
+    });
+    expect(harness.routingMessages).toHaveLength(2);
   });
 
   it("uses distinct jobs, fresh threads, and isolated brief content for sequential contacts", async () => {

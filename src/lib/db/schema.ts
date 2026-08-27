@@ -637,7 +637,15 @@ export const personaJobs = sqliteTable(
       .notNull()
       .references(() => contacts.id, { onDelete: "cascade" }),
     status: text("status", {
-      enum: ["queued", "running", "completed", "failed", "timeout", "superseded"],
+      enum: [
+        "queued",
+        "running",
+        "completing",
+        "completed",
+        "failed",
+        "timeout",
+        "superseded",
+      ],
     })
       .notNull()
       .default("queued"),

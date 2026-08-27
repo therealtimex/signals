@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { createContact } from "@/lib/db/queries/contacts";
 import {
+  claimPersonaJobCompletion,
   createPersonaJob,
   getActivePersonaJobForContact,
   getPersonaJobById,
@@ -101,6 +102,10 @@ describe("persona job query state machine", () => {
       rtxRuntimeSessionId: "",
       agentModel: null,
     });
+    expect(claimPersonaJobCompletion(job.id)).toMatchObject({
+      claimed: true,
+      job: { status: "completing" },
+    });
     markPersonaJobCompleted(job.id, { resultPersonaId: "persona-1" });
 
     const afterTimeoutAttempt = markPersonaJobTimedOut(job.id, "too late");
@@ -120,12 +125,35 @@ describe("persona job query state machine", () => {
     });
     expect(markPersonaJobTimedOut(job.id, "timed out")?.status).toBe("timeout");
 
+    expect(claimPersonaJobCompletion(job.id)).toMatchObject({
+      claimed: true,
+      job: { status: "completing" },
+    });
     const completed = markPersonaJobCompleted(job.id, { resultPersonaId: "persona-late" });
     expect(completed).toMatchObject({
       status: "completed",
       resultPersonaId: "persona-late",
       error: null,
       errorCode: null,
+    });
+  });
+
+  it("allows only one callback to claim persona persistence", () => {
+    const { job } = seedJob();
+    markPersonaJobRunning(job.id, {
+      rtxWorkspaceSlug: "signals",
+      rtxThreadSlug: "thread-1",
+      rtxRuntimeSessionId: "",
+      agentModel: null,
+    });
+
+    expect(claimPersonaJobCompletion(job.id)).toMatchObject({
+      claimed: true,
+      job: { status: "completing" },
+    });
+    expect(claimPersonaJobCompletion(job.id)).toMatchObject({
+      claimed: false,
+      job: { status: "completing" },
     });
   });
 

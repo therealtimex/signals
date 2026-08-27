@@ -8,6 +8,7 @@ import {
   markPersonaJobRunning,
   markPersonaJobSuperseded,
   markPersonaJobTimedOut,
+  supersedeTimedOutPersonaJobsForContact,
   type PersonaJobView,
 } from "@/lib/db/queries/persona-jobs";
 import {
@@ -135,6 +136,11 @@ export async function startPersonaAgentJob(
     }
   }
 
+  // A retry permanently revokes late callbacks from timed-out predecessors.
+  // This runs before the first await, so callback handling cannot interleave
+  // between revocation and creation in this process.
+  supersedeTimedOutPersonaJobsForContact(contactId);
+
   const jobId = `pa_${nanoid()}`;
   const workflowRun = createWorkflowRun({
     workflowType: "persona",
@@ -259,11 +265,19 @@ export async function awaitPersonaJob(
     }
 
     if (Date.now() >= deadline) {
+      if (job.status === "completing") {
+        await new Promise((resolve) => setTimeout(resolve, pollMs));
+        continue;
+      }
       const message = "The agent did not return a persona within 5 minutes. Open the thread to check on it, or retry.";
       const timedOut = markPersonaJobTimedOut(job.id, message) ?? job;
       if (timedOut.status === "timeout") {
         completeRunAsFailed(timedOut, message);
         scheduleTerminalSessionRelease(timedOut.rtxRuntimeSessionId);
+      }
+      if (timedOut.status === "completing") {
+        await new Promise((resolve) => setTimeout(resolve, pollMs));
+        continue;
       }
       return timedOut;
     }
