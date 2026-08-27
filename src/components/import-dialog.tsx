@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { CheckCircle, FileUp, Loader2, Play, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
+import type { ImportWarning } from "@/lib/workflows/import-warning";
 
 /**
  * Per-platform configuration for the reusable import modal shell.
@@ -59,6 +60,13 @@ export interface ImportSuccess {
   postsAdded?: number;
   uniqueContactCount?: number;
   handlesUpdated?: number;
+  warning?: ImportWarning;
+}
+
+export interface ImportFailure {
+  fileName: string;
+  source: "csv" | "zip" | null;
+  error: string;
 }
 
 type Phase = "pick" | "previewing" | "ready" | "importing";
@@ -74,9 +82,16 @@ interface ImportDialogProps {
   open: boolean;
   onClose: () => void;
   onSuccess: (result: ImportSuccess) => void;
+  onFailure?: (failure: ImportFailure) => void;
 }
 
-export function ImportDialog({ config, open, onClose, onSuccess }: ImportDialogProps) {
+export function ImportDialog({
+  config,
+  open,
+  onClose,
+  onSuccess,
+  onFailure,
+}: ImportDialogProps) {
   const [phase, setPhase] = useState<Phase>("pick");
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<ImportPreview | null>(null);
@@ -143,10 +158,21 @@ export function ImportDialog({ config, open, onClose, onSuccess }: ImportDialogP
       const data = await res.json();
 
       if (!res.ok) {
-        setError(data.error || "Import failed");
+        const message = data.error || "Import failed";
+        setError(message);
         setPhase("ready");
+        onFailure?.({
+          fileName: file.name,
+          source: preview?.source ?? null,
+          error: message,
+        });
         return;
       }
+
+      const warning: ImportWarning | undefined =
+        typeof data.warning?.code === "string" && typeof data.warning?.message === "string"
+          ? data.warning
+          : undefined;
 
       const result: ImportSuccess = {
         added: data.result?.added ?? 0,
@@ -160,14 +186,21 @@ export function ImportDialog({ config, open, onClose, onSuccess }: ImportDialogP
         postsAdded: data.posts?.added,
         uniqueContactCount: data.uniqueContactCount,
         handlesUpdated: data.handleBackfill?.updated,
+        ...(warning && { warning }),
       };
       reset();
       onSuccess(result);
     } catch {
-      setError("Import failed");
+      const message = "Import failed";
+      setError(message);
       setPhase("ready");
+      onFailure?.({
+        fileName: file.name,
+        source: preview?.source ?? null,
+        error: message,
+      });
     }
-  }, [file, config.importEndpoint, reset, onSuccess]);
+  }, [file, preview, config.importEndpoint, reset, onSuccess, onFailure]);
 
   const busy = phase === "previewing" || phase === "importing";
 
@@ -291,7 +324,7 @@ export function ImportDialog({ config, open, onClose, onSuccess }: ImportDialogP
         )}
 
         {error && (
-          <p className="text-sm text-destructive" data-testid="import-dialog-error">
+          <p role="alert" className="text-sm text-destructive" data-testid="import-dialog-error">
             {error}
           </p>
         )}

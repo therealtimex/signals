@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { ImportDialog, type ImportDialogConfig } from "@/components/import-dialog";
+import { IMPORT_RUN_RECORDING_FAILED_MESSAGE } from "@/lib/workflows/import-warning";
 
 // Avoid Radix portal/focus mechanics in happy-dom — the test targets the
 // modal's phase logic, not the dialog primitive.
@@ -164,6 +165,63 @@ describe("ImportDialog", () => {
     expect(onSuccess).not.toHaveBeenCalled();
   });
 
+  it("passes a structured warning through the success callback", async () => {
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url.endsWith("/preview")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            success: true,
+            preview: { source: "csv", fileName: "Connections.csv", fileSize: 220, totalRows: 2 },
+          }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({
+          success: true,
+          result: { added: 2, updated: 0, skipped: 0, errors: [] },
+          source: "csv",
+          workflowRunId: null,
+          warning: {
+            code: "IMPORT_RUN_RECORDING_FAILED",
+            message: IMPORT_RUN_RECORDING_FAILED_MESSAGE,
+          },
+        }),
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const onSuccess = vi.fn();
+
+    await act(async () => {
+      root.render(
+        createElement(ImportDialog, {
+          config: CONFIG,
+          open: true,
+          onClose: vi.fn(),
+          onSuccess,
+        })
+      );
+    });
+
+    await selectFile(container, new File(["csv-bytes"], "Connections.csv"));
+    const runButton = container.querySelector('[data-testid="import-dialog-run"]')!;
+    await act(async () => {
+      runButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(onSuccess).toHaveBeenCalledWith(expect.objectContaining({
+      warning: {
+        code: "IMPORT_RUN_RECORDING_FAILED",
+        message: IMPORT_RUN_RECORDING_FAILED_MESSAGE,
+      },
+    }));
+    expect(container.textContent).toContain("Drop your export here or click to browse");
+    expect(container.querySelector('[data-testid="import-dialog-run"]')).toBeNull();
+  });
+
   it("keeps the modal open with the error when the import fails", async () => {
     const fetchMock = vi.fn().mockImplementation((url: string) => {
       if (url.endsWith("/preview")) {
@@ -182,10 +240,17 @@ describe("ImportDialog", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     const onSuccess = vi.fn();
+    const onFailure = vi.fn();
 
     await act(async () => {
       root.render(
-        createElement(ImportDialog, { config: CONFIG, open: true, onClose: vi.fn(), onSuccess })
+        createElement(ImportDialog, {
+          config: CONFIG,
+          open: true,
+          onClose: vi.fn(),
+          onSuccess,
+          onFailure,
+        })
       );
     });
 
@@ -201,7 +266,69 @@ describe("ImportDialog", () => {
     expect(
       container.querySelector('[data-testid="import-dialog-error"]')?.textContent
     ).toContain("Import failed");
+    expect(container.querySelector('[data-testid="import-dialog-error"]')?.getAttribute("role"))
+      .toBe("alert");
     // Retry stays available
+    expect(container.querySelector('[data-testid="import-dialog-run"]')).not.toBeNull();
+    expect(onFailure).toHaveBeenCalledWith({
+      fileName: "Connections.csv",
+      source: "csv",
+      error: "Import failed",
+    });
+    expect(onSuccess).not.toHaveBeenCalled();
+  });
+
+  it("reports network import failures while keeping retry available", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((url: string) => {
+        if (url.endsWith("/preview")) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              success: true,
+              preview: {
+                source: "csv",
+                fileName: "Connections.csv",
+                fileSize: 220,
+                totalRows: 2,
+              },
+            }),
+          });
+        }
+        return Promise.reject(new Error("network down"));
+      })
+    );
+    const onSuccess = vi.fn();
+    const onFailure = vi.fn();
+
+    await act(async () => {
+      root.render(
+        createElement(ImportDialog, {
+          config: CONFIG,
+          open: true,
+          onClose: vi.fn(),
+          onSuccess,
+          onFailure,
+        })
+      );
+    });
+
+    await selectFile(container, new File(["csv-bytes"], "Connections.csv"));
+    const runButton = container.querySelector('[data-testid="import-dialog-run"]')!;
+    await act(async () => {
+      runButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(onFailure).toHaveBeenCalledWith({
+      fileName: "Connections.csv",
+      source: "csv",
+      error: "Import failed",
+    });
+    expect(container.querySelector('[data-testid="import-dialog-error"]')?.textContent)
+      .toContain("Import failed");
     expect(container.querySelector('[data-testid="import-dialog-run"]')).not.toBeNull();
     expect(onSuccess).not.toHaveBeenCalled();
   });

@@ -1,8 +1,23 @@
 import { describe, expect, it } from "vitest";
 import {
   actionNeedsPlatformConnection,
+  getImportCardNote,
+  getImportToast,
   getActionRunButtonLabel,
+  importStatsFromFailure,
+  importStatsFromSuccess,
 } from "@/app/dashboard/workflows/action-cards-utils";
+import type { ImportSuccess } from "@/components/import-dialog";
+import { IMPORT_RUN_RECORDING_FAILED_MESSAGE } from "@/lib/workflows/import-warning";
+
+const IMPORT_SUCCESS: ImportSuccess = {
+  added: 2,
+  updated: 1,
+  skipped: 3,
+  source: "csv",
+  fileName: "Connections.csv",
+  workflowRunId: "run-123",
+};
 
 describe("action-cards utils", () => {
   it("does not require X connection for RTX enrich actions when disconnected", () => {
@@ -55,5 +70,98 @@ describe("action-cards utils", () => {
         isUpload: true,
       })
     ).toBe("Import…");
+  });
+
+  it("maps full and partial successes into local import stats", () => {
+    expect(importStatsFromSuccess(IMPORT_SUCCESS, 123)).toEqual({
+      status: "completed",
+      added: 2,
+      updated: 1,
+      skipped: 3,
+      lastRunAt: 123,
+      source: "csv",
+      fileName: "Connections.csv",
+      warning: null,
+    });
+
+    expect(
+      importStatsFromSuccess(
+        {
+          ...IMPORT_SUCCESS,
+          workflowRunId: null,
+          warning: {
+            code: "IMPORT_RUN_RECORDING_FAILED",
+            message: IMPORT_RUN_RECORDING_FAILED_MESSAGE,
+          },
+        },
+        456
+      )
+    ).toEqual(expect.objectContaining({
+      lastRunAt: 456,
+      warning: IMPORT_RUN_RECORDING_FAILED_MESSAGE,
+    }));
+  });
+
+  it("maps an import failure into only the affected card's local stats", () => {
+    expect(importStatsFromFailure(
+      {
+        fileName: "Connections.csv",
+        source: "csv",
+        error: "Import failed",
+      },
+      123
+    )).toEqual({
+      status: "failed",
+      added: 0,
+      updated: 0,
+      skipped: 0,
+      lastRunAt: 123,
+      source: "csv",
+      fileName: "Connections.csv",
+      error: "Import failed",
+    });
+  });
+
+  it("suppresses the retry note only for partial success", () => {
+    const baseStats = importStatsFromSuccess(IMPORT_SUCCESS, 123);
+
+    expect(
+      getImportCardNote(
+        { ...baseStats, warning: IMPORT_RUN_RECORDING_FAILED_MESSAGE },
+        "Safe to run again."
+      )
+    ).toEqual({ kind: "warning", text: IMPORT_RUN_RECORDING_FAILED_MESSAGE });
+    expect(
+      getImportCardNote(
+        { ...baseStats, status: "failed", error: "Import failed" },
+        "Safe to run again."
+      )
+    ).toEqual({ kind: "error", text: "Import failed", note: "Safe to run again." });
+    expect(getImportCardNote(baseStats, "Safe to run again.")).toEqual({
+      kind: "note",
+      text: "Safe to run again.",
+    });
+  });
+
+  it("routes partial success to Contacts and full success to its run", () => {
+    expect(getImportToast({
+      ...IMPORT_SUCCESS,
+      workflowRunId: null,
+      warning: {
+        code: "IMPORT_RUN_RECORDING_FAILED",
+        message: IMPORT_RUN_RECORDING_FAILED_MESSAGE,
+      },
+    })).toEqual({
+      message: IMPORT_RUN_RECORDING_FAILED_MESSAGE,
+      actionLabel: "Open Contacts",
+      target: "/dashboard/contacts",
+      tone: "warning",
+    });
+    expect(getImportToast(IMPORT_SUCCESS)).toEqual({
+      message: "Imported Connections.csv: 2 added, 1 updated, 3 skipped",
+      actionLabel: "View in Runs",
+      target: "/dashboard/workflows/run-123",
+      tone: "success",
+    });
   });
 });
