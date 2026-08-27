@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { recordImportRun } from "@/lib/workflows/record-import-run";
-import { getLatestImportRun, getWorkflowRun } from "@/lib/db/queries/workflows";
+import {
+  createWorkflowRun,
+  getLatestImportRun,
+  getWorkflowRun,
+} from "@/lib/db/queries/workflows";
 import { resetCoreTables } from "@/test/db";
 
 const NOW = Math.floor(Date.now() / 1000);
@@ -113,6 +117,43 @@ describe("getLatestImportRun", () => {
       fileName: "takeout.zip",
       startedAt: NOW,
       result: { added: 1, updated: 0, skipped: 0, errors: [] },
+    });
+
+    expect(getLatestImportRun("linkedin")).toBeUndefined();
+  });
+
+  it("returns a platform's latest run even after more than 50 newer runs elsewhere", () => {
+    const linkedin = recordImportRun({
+      platform: "linkedin",
+      importSubType: "linkedin_connections",
+      source: "csv",
+      fileName: "linkedin.csv",
+      startedAt: NOW - 100,
+      result: { added: 1, updated: 0, skipped: 0, errors: [] },
+    });
+
+    for (let index = 0; index < 51; index++) {
+      recordImportRun({
+        platform: "gmail",
+        importSubType: "gmail_takeout",
+        source: "zip",
+        fileName: `takeout-${index}.zip`,
+        startedAt: NOW + index,
+        result: { added: 1, updated: 0, skipped: 0, errors: [] },
+      });
+    }
+
+    expect(getLatestImportRun("linkedin")?.id).toBe(linkedin.id);
+  });
+
+  it("ignores non-import workflow runs with the same platform", () => {
+    createWorkflowRun({
+      workflowType: "search",
+      status: "completed",
+      trigger: "user",
+      config: JSON.stringify({ platform: "linkedin" }),
+      startedAt: NOW,
+      completedAt: NOW,
     });
 
     expect(getLatestImportRun("linkedin")).toBeUndefined();
