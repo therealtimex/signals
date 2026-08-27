@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { execFileSync } from "node:child_process";
 import {
   buildAgentPrompt,
   buildUpsertPersonaInput,
@@ -6,7 +7,9 @@ import {
   metaPathForPrompt,
   parseSynthesisResponseFile,
   readPersonaAgentJobMeta,
+  resolveApplyBaseUrl,
   resolveMetaPath,
+  validateUpsertPersonaInput,
 } from "@/lib/qa/persona-agent-job-smoke-lib";
 import {
   formatSynthesisValidationErrors,
@@ -18,6 +21,9 @@ import type { PersonaEvidenceProvenance } from "@/lib/db/queries/persona-evidenc
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 
 const sampleProvenance = (): PersonaEvidenceProvenance => ({
   identityIds: ["id-1"],
@@ -75,6 +81,50 @@ describe("persona-agent-job-smoke-lib", () => {
     if (!zodResult.success) {
       expect(formatSynthesisValidationErrors(zodResult.error)).toContain("description");
     }
+  });
+
+  it("buildUpsertPersonaInput omits description when synthesis omits it", () => {
+    const meta = createPrepareMetadata({
+      jobId: "job-1",
+      contactId: "contact-1",
+      baseUrl: "http://127.0.0.1:3010",
+      provenance: sampleProvenance(),
+    });
+
+    const input = validateUpsertPersonaInput(
+      buildUpsertPersonaInput({
+        contactId: "contact-1",
+        synthesis: validSynthesis,
+        meta,
+      }),
+    );
+
+    expect(input).not.toHaveProperty("description");
+  });
+
+  it("resolveApplyBaseUrl prefers explicit override then prepare metadata", () => {
+    const meta = createPrepareMetadata({
+      jobId: "job-1",
+      contactId: "contact-1",
+      baseUrl: "http://127.0.0.1:3010",
+      provenance: sampleProvenance(),
+    });
+
+    expect(resolveApplyBaseUrl(meta)).toBe("http://127.0.0.1:3010");
+    expect(resolveApplyBaseUrl(meta, "http://127.0.0.1:3999")).toBe("http://127.0.0.1:3999");
+  });
+
+  it("wrapper verify subprocess resolves imports and validates JSON", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "persona-smoke-cli-"));
+    const responsePath = path.join(dir, "response.json");
+    fs.writeFileSync(responsePath, JSON.stringify(validSynthesis));
+    const output = execFileSync(
+      "bash",
+      ["scripts/qa/run-persona-agent-job-smoke.sh", "verify", "--response", responsePath],
+      { cwd: repoRoot, encoding: "utf8" },
+    );
+
+    expect(output).toContain("Response JSON is valid");
   });
 
   it("apply uses prepare-time provenance instead of refreshing evidence", () => {

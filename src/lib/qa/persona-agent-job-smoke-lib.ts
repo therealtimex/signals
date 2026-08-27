@@ -7,6 +7,7 @@ import {
   type PersonaSynthesisOutput,
 } from "@/lib/persona/synthesis";
 import type { PersonaEvidenceProvenance } from "@/lib/db/queries/persona-evidence";
+import { upsertPersonaSchema } from "@/lib/agent-tools/schemas";
 
 export type PersonaAgentJobMeta = {
   jobId: string;
@@ -134,6 +135,18 @@ export function parseSynthesisResponseFile(responsePath: string): PersonaSynthes
   return parsed.data;
 }
 
+export function resolveApplyBaseUrl(
+  meta: PersonaAgentJobMeta,
+  override?: string,
+): string {
+  return (
+    override?.trim() ||
+    meta.baseUrl ||
+    process.env.SIGNALS_BASE_URL ||
+    "http://127.0.0.1:3000"
+  );
+}
+
 export function buildUpsertPersonaInput(input: {
   contactId: string;
   synthesis: PersonaSynthesisOutput;
@@ -141,13 +154,12 @@ export function buildUpsertPersonaInput(input: {
 }): Record<string, unknown> {
   const { provenance } = input.meta;
 
-  return {
+  const payload: Record<string, unknown> = {
     contactId: input.contactId,
     scope: "shared",
     archetype: input.synthesis.archetype,
     tone: input.synthesis.tone,
     summary: input.synthesis.summary,
-    description: input.synthesis.description ?? null,
     interests: input.synthesis.interests,
     conversionTriggers: input.synthesis.conversionTriggers,
     engagementFormats: input.synthesis.engagementFormats,
@@ -169,6 +181,24 @@ export function buildUpsertPersonaInput(input: {
       preparedAt: input.meta.preparedAt,
     },
   };
+
+  if (input.synthesis.description !== undefined) {
+    payload.description = input.synthesis.description;
+  }
+
+  return payload;
+}
+
+export function validateUpsertPersonaInput(input: Record<string, unknown>): Record<string, unknown> {
+  const parsed = upsertPersonaSchema.safeParse(input);
+  if (!parsed.success) {
+    throw new Error(
+      `upsert_persona payload failed validation: ${parsed.error.issues
+        .map((issue) => `${issue.path.join(".") || "root"}: ${issue.message}`)
+        .join("; ")}`,
+    );
+  }
+  return parsed.data as Record<string, unknown>;
 }
 
 export function createPrepareMetadata(input: {

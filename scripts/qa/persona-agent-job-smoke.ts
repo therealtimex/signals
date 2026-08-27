@@ -10,7 +10,9 @@ import {
   metaPathForPrompt,
   parseSynthesisResponseFile,
   readPersonaAgentJobMeta,
+  resolveApplyBaseUrl,
   resolveMetaPath,
+  validateUpsertPersonaInput,
 } from "@/lib/qa/persona-agent-job-smoke-lib";
 import { PERSONA_PROMPT_VERSION, PERSONA_SYSTEM_PROMPT } from "@/lib/persona/synthesis";
 import type { PersonaEvidenceBundle } from "@/lib/db/queries/persona-evidence";
@@ -18,7 +20,7 @@ import type { PersonaEvidenceBundle } from "@/lib/db/queries/persona-evidence";
 function usage(): void {
   console.log(`Usage:
   scripts/qa/run-persona-agent-job-smoke.sh prepare \\
-    --contact-id <id> [--base-url URL] [--job-id ID] [--out FILE]
+    --contact-id <id> --out FILE [--base-url URL] [--job-id ID]
 
   scripts/qa/run-persona-agent-job-smoke.sh verify \\
     --response FILE
@@ -131,15 +133,15 @@ async function cmdPrepare(args: ParsedArgs): Promise<void> {
   });
 
   const out = args.out as string | undefined;
-  if (out) {
-    fs.writeFileSync(out, prompt, "utf8");
-    const metaPath = metaPathForPrompt(out);
-    fs.writeFileSync(metaPath, `${JSON.stringify(meta, null, 2)}\n`, "utf8");
-    console.log(`Wrote prompt: ${out}`);
-    console.log(`Wrote meta:   ${metaPath}`);
-  } else {
-    process.stdout.write(prompt);
+  if (!out) {
+    throw new Error("prepare requires --out <file> to write the prompt and metadata sidecar");
   }
+
+  fs.writeFileSync(out, prompt, "utf8");
+  const metaPath = metaPathForPrompt(out);
+  fs.writeFileSync(metaPath, `${JSON.stringify(meta, null, 2)}\n`, "utf8");
+  console.log(`Wrote prompt: ${out}`);
+  console.log(`Wrote meta:   ${metaPath}`);
 
   console.error("");
   console.error("Next steps:");
@@ -149,15 +151,9 @@ async function cmdPrepare(args: ParsedArgs): Promise<void> {
   console.error(
     `     scripts/qa/run-persona-agent-job-smoke.sh verify --response /path/to/response.json`,
   );
-  if (out) {
-    console.error(
-      `     scripts/qa/run-persona-agent-job-smoke.sh apply --contact-id ${contactId} --response /path/to/response.json --prompt ${out}`,
-    );
-  } else {
-    console.error(
-      `     scripts/qa/run-persona-agent-job-smoke.sh apply --contact-id ${contactId} --response /path/to/response.json --meta /path/to/prompt.meta.json`,
-    );
-  }
+  console.error(
+    `     scripts/qa/run-persona-agent-job-smoke.sh apply --contact-id ${contactId} --response /path/to/response.json --prompt ${out}`,
+  );
 }
 
 async function cmdVerify(args: ParsedArgs): Promise<void> {
@@ -177,10 +173,6 @@ async function cmdApply(args: ParsedArgs): Promise<void> {
     throw new Error("apply requires --contact-id and --response");
   }
 
-  const baseUrl =
-    (args.baseUrl as string | undefined) ||
-    process.env.SIGNALS_BASE_URL ||
-    "http://127.0.0.1:3000";
   const jobId = args.jobId as string | undefined;
   const metaPath = resolveMetaPath({
     meta: args.meta as string | undefined,
@@ -188,8 +180,11 @@ async function cmdApply(args: ParsedArgs): Promise<void> {
     response: responsePath,
   });
   const meta = readPersonaAgentJobMeta(metaPath, { contactId, jobId });
+  const baseUrl = resolveApplyBaseUrl(meta, args.baseUrl as string | undefined);
   const synthesis = parseSynthesisResponseFile(responsePath);
-  const input = buildUpsertPersonaInput({ contactId, synthesis, meta });
+  const input = validateUpsertPersonaInput(
+    buildUpsertPersonaInput({ contactId, synthesis, meta }),
+  );
 
   if (args.dryRun) {
     console.log("Dry run — would call upsert_persona with:");
