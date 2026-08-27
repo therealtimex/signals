@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import {
@@ -13,12 +13,14 @@ import {
   claimPersonaJobCompletion,
   createPersonaJob,
   getPersonaJobById,
+  markPersonaJobCompleted,
   markPersonaJobRunning,
   markPersonaJobTimedOut,
 } from "@/lib/db/queries/persona-jobs";
-import { getActivePersona } from "@/lib/db/queries/personas";
+import { getActivePersona, upsertPersona } from "@/lib/db/queries/personas";
 import { createWorkflowRun, getWorkflowRun } from "@/lib/db/queries/workflows";
 import { contactPersonas } from "@/lib/db/schema";
+import * as resourceTeardown from "@/lib/rtx/resource-teardown";
 import { resetCoreTables } from "@/test/db";
 
 const validSynthesis = {
@@ -36,6 +38,7 @@ const originalRtxAppId = process.env.RTX_APP_ID;
 describe("PersonaAgentJob agent-tool handlers", () => {
   beforeEach(() => {
     resetCoreTables();
+    vi.restoreAllMocks();
     delete process.env.RTX_APP_ID;
   });
 
@@ -44,7 +47,7 @@ describe("PersonaAgentJob agent-tool handlers", () => {
     else process.env.RTX_APP_ID = originalRtxAppId;
   });
 
-  function seedRunningJob() {
+  function seedRunningJob(runtimeSessionId = "") {
     const contact = createContact({ name: `Persona Subject ${nanoid()}` });
     createIdentity({
       contactId: contact.id,
@@ -74,7 +77,7 @@ describe("PersonaAgentJob agent-tool handlers", () => {
     const job = markPersonaJobRunning(queued.id, {
       rtxWorkspaceSlug: "signals",
       rtxThreadSlug: `persona-${contact.id}`,
-      rtxRuntimeSessionId: "",
+      rtxRuntimeSessionId: runtimeSessionId,
       agentModel: "codex:gpt-5.6-sol",
     })!;
     return { contact, bundle, job, run };
@@ -160,6 +163,64 @@ describe("PersonaAgentJob agent-tool handlers", () => {
       personaId: persona?.id,
       status: "completed",
     });
+  });
+
+  it("reconciles a completed job whose workflow and terminal effects were interrupted", async () => {
+    const { contact, bundle, job, run } = seedRunningJob("session-after-commit-crash");
+    expect(claimPersonaJobCompletion(job.id).claimed).toBe(true);
+    const persona = db.transaction((tx) => {
+      const saved = upsertPersona(
+        {
+          contactId: contact.id,
+          archetype: validSynthesis.archetype,
+          tone: validSynthesis.tone,
+          summary: validSynthesis.summary,
+          interests: validSynthesis.interests,
+          conversionTriggers: validSynthesis.conversionTriggers,
+          engagementFormats: validSynthesis.engagementFormats,
+          confidence: validSynthesis.confidence,
+          model: "codex:gpt-5.6-sol",
+          workflowRunId: run.id,
+          sourceWindow: { jobId: job.id },
+        },
+        tx,
+      );
+      if (
+        !markPersonaJobCompleted(
+          job.id,
+          { resultPersonaId: saved.id, agentModel: "codex:gpt-5.6-sol" },
+          tx,
+        )
+      ) {
+        throw new Error("failed to simulate the authoritative persona/job commit");
+      }
+      return saved;
+    });
+    expect(getPersonaJobById(job.id)?.status).toBe("completed");
+    expect(getWorkflowRun(run.id)?.status).toBe("running");
+
+    const releaseSpy = vi
+      .spyOn(resourceTeardown, "scheduleTerminalSessionRelease")
+      .mockReturnValue({ scheduled: true, sessionId: "session-after-commit-crash" });
+
+    expect(await handleGetPersonaJob({ jobId: job.id })).toMatchObject({
+      status: "completed",
+    });
+    expect(getWorkflowRun(run.id)).toMatchObject({
+      status: "completed",
+      model: "codex:gpt-5.6-sol",
+    });
+    expect(JSON.parse(getWorkflowRun(run.id)?.result ?? "{}")).toMatchObject({
+      personaId: persona.id,
+      recoveredCompletion: true,
+    });
+    expect(releaseSpy).toHaveBeenCalledWith(
+      "session-after-commit-crash",
+      undefined,
+      undefined,
+    );
+    await handleGetPersonaJob({ jobId: job.id });
+    expect(releaseSpy).toHaveBeenCalledTimes(1);
   });
 
   it("accepts a valid callback after the waiter marked the job timed out", async () => {

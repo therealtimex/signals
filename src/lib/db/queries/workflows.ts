@@ -1,6 +1,6 @@
 import { eq, and, desc, count, asc, sql, SQL, isNull } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import { db } from "@/lib/db/client";
+import { db, type DbRunner } from "@/lib/db/client";
 import { workflowRuns, workflowSteps } from "@/lib/db/schema";
 import type {
   WorkflowRun,
@@ -45,21 +45,23 @@ export function updateWorkflowRun(
       | "sourceProcessed"
       | "config"
     >
-  >
+  >,
+  runner: DbRunner = db,
 ): WorkflowRun | undefined {
-  const existing = db
+  const existing = runner
     .select()
     .from(workflowRuns)
     .where(eq(workflowRuns.id, id))
     .get();
   if (!existing) return undefined;
 
-  db.update(workflowRuns)
+  runner
+    .update(workflowRuns)
     .set({ ...data, updatedAt: Math.floor(Date.now() / 1000) })
     .where(eq(workflowRuns.id, id))
     .run();
 
-  return db.select().from(workflowRuns).where(eq(workflowRuns.id, id)).get();
+  return runner.select().from(workflowRuns).where(eq(workflowRuns.id, id)).get();
 }
 
 export function getWorkflowRun(id: string): WorkflowRunWithSteps | undefined {

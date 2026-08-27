@@ -16,7 +16,9 @@ import {
 import { getActivePersona } from "@/lib/db/queries/personas";
 import { updateWorkflowRun } from "@/lib/db/queries/workflows";
 import {
+  completePersonaJobWorkflow,
   PERSONA_AGENT_JOB_MAX_ATTEMPTS,
+  reconcilePersonaJobTerminalEffects,
   reconcileStalePersonaJobCompletion,
 } from "@/lib/persona/agent-job/service";
 import {
@@ -84,6 +86,9 @@ export async function handleGetPersonaJob(input: z.infer<typeof getPersonaJobSch
   if (job.status === "completing" && job.stale) {
     job = reconcileStalePersonaJobCompletion(job.id) ?? job;
   }
+  if (job.status === "completed") {
+    job = reconcilePersonaJobTerminalEffects(job.id) ?? job;
+  }
 
   let evidence: ReturnType<typeof assemblePersonaEvidence>["evidence"] | null = null;
   let evidenceDrifted = false;
@@ -134,7 +139,7 @@ export async function handleCompletePersonaJob(
   }
 
   if (job.status === "completed") {
-    return idempotentJobResponse(job);
+    return idempotentJobResponse(reconcilePersonaJobTerminalEffects(job.id) ?? job);
   }
 
   if (job.status === "completing" && input.success) {
@@ -193,7 +198,11 @@ export async function handleCompletePersonaJob(
 
   const claim = claimPersonaJobCompletion(job.id);
   if (!claim.claimed) {
-    if (claim.job?.status === "completed") return idempotentJobResponse(claim.job);
+    if (claim.job?.status === "completed") {
+      return idempotentJobResponse(
+        reconcilePersonaJobTerminalEffects(claim.job.id) ?? claim.job,
+      );
+    }
     if (claim.job?.status === "completing") {
       const reconciled = reconcileStalePersonaJobCompletion(claim.job.id);
       if (reconciled?.status === "completed") return idempotentJobResponse(reconciled);
@@ -254,6 +263,9 @@ export async function handleCompletePersonaJob(
       if (!finished) {
         throw new Error("Persona completion claim was lost before persistence committed");
       }
+      if (!completePersonaJobWorkflow(finished, { model: qualifiedModel }, tx)) {
+        throw new Error(`Workflow run not found for persona job: ${finished.id}`);
+      }
       return { persona, completed: finished };
     });
     persisted = saved.persona;
@@ -261,7 +273,11 @@ export async function handleCompletePersonaJob(
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to persist persona synthesis";
     const current = getPersonaJobById(claimedJob.id);
-    if (current?.status === "completed") return idempotentJobResponse(current);
+    if (current?.status === "completed") {
+      return idempotentJobResponse(
+        reconcilePersonaJobTerminalEffects(current.id) ?? current,
+      );
+    }
     if (current?.status !== "completing") {
       return inactiveJobResponse(claimedJob.id, current?.status ?? claimedJob.status);
     }
@@ -277,23 +293,7 @@ export async function handleCompletePersonaJob(
     return { success: false, code: "PERSISTENCE_ERROR", error: message, status: "failed" };
   }
 
-  updateWorkflowRun(completed.workflowRunId, {
-    status: "completed",
-    model: qualifiedModel,
-    inputTokens: 0,
-    outputTokens: 0,
-    costUsd: 0,
-    result: JSON.stringify({
-      personaId: persisted.id,
-      evidenceHash: completed.evidenceHash,
-      supersededPersonaId: completed.supersededPersonaId,
-      nicheEdgesUpserted: 0,
-      embedded: false,
-    }),
-    errors: "[]",
-    completedAt: nowSec(),
-  });
-  scheduleTerminalSessionRelease(completed.rtxRuntimeSessionId);
+  reconcilePersonaJobTerminalEffects(completed.id);
 
   let derivatives = {
     nicheEdgesUpserted: 0,
@@ -311,15 +311,11 @@ export async function handleCompletePersonaJob(
     );
   }
 
-  updateWorkflowRun(completed.workflowRunId, {
-    result: JSON.stringify({
-      personaId: persisted.id,
-      evidenceHash: completed.evidenceHash,
-      supersededPersonaId: completed.supersededPersonaId,
-      nicheEdgesUpserted: derivatives.nicheEdgesUpserted,
-      embedded: derivatives.embedded,
-    }),
-    errors: JSON.stringify(derivatives.embedErrors),
+  completePersonaJobWorkflow(completed, {
+    model: qualifiedModel,
+    nicheEdgesUpserted: derivatives.nicheEdgesUpserted,
+    embedded: derivatives.embedded,
+    embedErrors: derivatives.embedErrors,
   });
 
   return {

@@ -1,7 +1,9 @@
 import { nanoid } from "nanoid";
+import { db, type DbRunner } from "@/lib/db/client";
 import {
   createPersonaJob,
   getActivePersonaJobForContact,
+  getLatestPersonaJobForContact,
   getPersonaJobById,
   isPersonaJobTerminal,
   markPersonaJobCompleted,
@@ -52,6 +54,8 @@ import type {
 export const PERSONA_AGENT_JOB_MAX_ATTEMPTS = 2;
 export const DEFAULT_PERSONA_AGENT_JOB_TIMEOUT_MS = 300_000;
 export const PERSONA_AGENT_JOB_TIMEOUT_ENV = "PERSONA_AGENT_JOB_TIMEOUT_MS";
+const PERSONA_JOB_TERMINAL_EFFECT_RETRY_MS = 60_000;
+const personaJobTerminalEffectAttempts = new Map<string, number>();
 
 type ReadyPersonaGeneration = Extract<PreparedPersonaGeneration, { kind: "ready" }>;
 
@@ -113,6 +117,65 @@ function completeRunAsFailed(job: PersonaJobView, error: string): void {
   });
 }
 
+export function completePersonaJobWorkflow(
+  job: PersonaJobView,
+  input: {
+    model?: string | null;
+    nicheEdgesUpserted?: number;
+    embedded?: boolean;
+    embedErrors?: string[];
+    recoveredCompletion?: boolean;
+  } = {},
+  runner: DbRunner = db,
+) {
+  return updateWorkflowRun(
+    job.workflowRunId,
+    {
+      status: "completed",
+      model: input.model ?? job.agentModel,
+      inputTokens: 0,
+      outputTokens: 0,
+      costUsd: 0,
+      result: JSON.stringify({
+        personaId: job.resultPersonaId,
+        evidenceHash: job.evidenceHash,
+        supersededPersonaId: job.supersededPersonaId,
+        nicheEdgesUpserted: input.nicheEdgesUpserted ?? 0,
+        embedded: input.embedded ?? false,
+        ...(input.recoveredCompletion ? { recoveredCompletion: true } : {}),
+      }),
+      errors: JSON.stringify(input.embedErrors ?? []),
+      completedAt: job.completedAt ?? nowSec(),
+    },
+    runner,
+  );
+}
+
+export function reconcilePersonaJobTerminalEffects(
+  jobId: string,
+  opts: Pick<StartPersonaAgentJobOptions, "env" | "fetchImpl"> = {},
+): PersonaJobView | null {
+  const job = getPersonaJobById(jobId);
+  if (!job || job.status !== "completed") return job;
+
+  const workflow = getWorkflowRun(job.workflowRunId);
+  if (workflow && workflow.status !== "completed") {
+    completePersonaJobWorkflow(job, { recoveredCompletion: true });
+  }
+  const now = Date.now();
+  for (const [attemptedJobId, attemptedAt] of personaJobTerminalEffectAttempts) {
+    if (now - attemptedAt >= PERSONA_JOB_TERMINAL_EFFECT_RETRY_MS) {
+      personaJobTerminalEffectAttempts.delete(attemptedJobId);
+    }
+  }
+  const previousAttempt = personaJobTerminalEffectAttempts.get(job.id);
+  if (job.rtxRuntimeSessionId && previousAttempt === undefined) {
+    personaJobTerminalEffectAttempts.set(job.id, now);
+    scheduleTerminalSessionRelease(job.rtxRuntimeSessionId, opts.env, opts.fetchImpl);
+  }
+  return job;
+}
+
 export function reconcileStalePersonaJobCompletion(
   jobId: string,
   opts: Pick<StartPersonaAgentJobOptions, "env" | "fetchImpl"> = {},
@@ -122,31 +185,29 @@ export function reconcileStalePersonaJobCompletion(
 
   const persisted = getPersonaByWorkflowRunId(job.workflowRunId);
   if (persisted) {
-    const completed = markPersonaJobCompleted(job.id, {
-      resultPersonaId: persisted.id,
-      agentModel: persisted.model,
+    const completed = db.transaction((tx) => {
+      const finished = markPersonaJobCompleted(
+        job.id,
+        {
+          resultPersonaId: persisted.id,
+          agentModel: persisted.model,
+        },
+        tx,
+      );
+      if (!finished) return null;
+      if (
+        !completePersonaJobWorkflow(
+          finished,
+          { model: persisted.model, recoveredCompletion: true },
+          tx,
+        )
+      ) {
+        throw new Error(`Workflow run not found for persona job: ${finished.id}`);
+      }
+      return finished;
     });
     if (completed?.status === "completed") {
-      updateWorkflowRun(completed.workflowRunId, {
-        status: "completed",
-        model: persisted.model,
-        inputTokens: 0,
-        outputTokens: 0,
-        costUsd: 0,
-        result: JSON.stringify({
-          personaId: persisted.id,
-          evidenceHash: completed.evidenceHash,
-          supersededPersonaId: completed.supersededPersonaId,
-          recoveredCompletion: true,
-        }),
-        errors: "[]",
-        completedAt: nowSec(),
-      });
-      scheduleTerminalSessionRelease(
-        completed.rtxRuntimeSessionId,
-        opts.env,
-        opts.fetchImpl,
-      );
+      reconcilePersonaJobTerminalEffects(completed.id, opts);
     }
     return getPersonaJobById(job.id);
   }
@@ -176,6 +237,11 @@ export async function startPersonaAgentJob(
   prepared: ReadyPersonaGeneration,
   opts: StartPersonaAgentJobOptions = {},
 ): Promise<PersonaJobView> {
+  const latest = getLatestPersonaJobForContact(contactId);
+  if (latest?.status === "completed") {
+    reconcilePersonaJobTerminalEffects(latest.id, opts);
+  }
+
   let existing = getActivePersonaJobForContact(contactId);
   if (existing?.status === "completing" && existing.stale) {
     const reconciled = reconcileStalePersonaJobCompletion(existing.id, opts);
@@ -321,6 +387,9 @@ export async function awaitPersonaJob(
       job = reconcileStalePersonaJobCompletion(job.id) ?? job;
     }
     if (isPersonaJobTerminal(job.status)) {
+      if (job.status === "completed") {
+        job = reconcilePersonaJobTerminalEffects(job.id) ?? job;
+      }
       return job;
     }
 
