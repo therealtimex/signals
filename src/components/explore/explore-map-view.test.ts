@@ -32,6 +32,20 @@ vi.mock("next/link", () => ({
   }) => createElement("a", { href, className }, children),
 }));
 
+vi.mock("@/components/explore/use-explore-map-theme-colors", () => ({
+  useExploreMapThemeColors: () => ({
+    primary: "rgb(59, 130, 246)",
+    mutedForeground: "rgb(113, 113, 122)",
+    foreground: "rgb(24, 24, 27)",
+    chart: [
+      "rgb(59, 130, 246)",
+      "rgb(16, 185, 129)",
+      "rgb(245, 158, 11)",
+      "rgb(236, 72, 153)",
+    ],
+  }),
+}));
+
 vi.mock("@/components/ui/sidebar", () => ({
   Sidebar: ({ children }: { children: React.ReactNode }) => createElement("aside", null, children),
   SidebarHeader: ({
@@ -360,6 +374,65 @@ describe("ExploreMapView", () => {
 
     expect(container.textContent).toContain("You: Owner");
     expect(container.textContent).toContain("Change");
+  });
+
+  it("renders niche filter chips and layer toggles on loaded graph state", async () => {
+    vi.stubGlobal(
+      "fetch",
+      mockFetchPair({
+        nodes: [
+          {
+            id: "contact:owner",
+            kind: "contact",
+            entityId: "owner",
+            label: "Owner",
+            avatarUrl: null,
+            isOwner: true,
+            followersCount: 10,
+            nicheIds: ["niche-ai"],
+          },
+          {
+            id: "contact:peer",
+            kind: "contact",
+            entityId: "peer",
+            label: "Peer",
+            avatarUrl: null,
+            isOwner: false,
+            followersCount: 10,
+            nicheIds: ["niche-ai"],
+          },
+          {
+            id: "niche:niche-ai",
+            kind: "niche",
+            entityId: "niche-ai",
+            label: "AI agents",
+            nicheType: "interest",
+            memberCount: 2,
+          },
+        ],
+        edges: [],
+        meta: {
+          ownerContactId: "owner",
+          owner: { id: "owner", name: "Owner", avatarUrl: null },
+          totalContacts: 1,
+          shownContacts: 1,
+          truncated: false,
+          limit: 200,
+        },
+      }),
+    );
+
+    await act(async () => {
+      root.render(createElement(ExploreMapView));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(container.querySelector('[data-testid="explore-map-niche-filters"]')).toBeTruthy();
+    expect(container.textContent).toContain("AI agents");
+    expect(container.textContent).toContain("Follows");
+    expect(container.textContent).toContain("Niches");
+    expect(container.querySelector('[data-testid="explore-map-hint"]')).toBeTruthy();
   });
 });
 

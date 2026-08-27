@@ -1,16 +1,25 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, Telescope, Users } from "lucide-react";
 import type { ExploreMapResponse } from "@/lib/db/queries/explore-map";
 import { ExploreMapCanvas } from "@/components/explore/explore-map-force-graph";
+import type { ExploreMapHoverContact } from "@/components/explore/explore-map-canvas";
 import { ExploreContactDrawer } from "@/components/explore/explore-contact-drawer";
+import { ExploreMapHoverCard } from "@/components/explore/explore-map-hover-card";
 import { ExploreOwnerChip } from "@/components/explore/explore-owner-chip";
 import { ExploreSelfPicker } from "@/components/explore/explore-self-picker";
-import { formatExploreMapBadge } from "@/components/explore/explore-map-utils";
+import {
+  buildExploreNicheColorMap,
+  EXPLORE_MAP_DEFAULT_LAYERS,
+  formatExploreMapBadge,
+  listExploreMapNiches,
+  type ExploreMapLayerVisibility,
+} from "@/components/explore/explore-map-utils";
+import { ExploreMapToolbar } from "@/components/explore/explore-map-toolbar";
+import { useExploreMapThemeColors } from "@/components/explore/use-explore-map-theme-colors";
 import { AddContactDialog } from "@/components/add-contact-dialog";
 import { EmptyState } from "@/components/empty-state";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
 type LoadState =
@@ -19,10 +28,14 @@ type LoadState =
   | { status: "ready"; data: ExploreMapResponse; hasContactCandidates: boolean };
 
 export function ExploreMapView() {
+  const theme = useExploreMapThemeColors();
   const [loadState, setLoadState] = useState<LoadState>({ status: "loading" });
   const [selectedContactId, setSelectedContactId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [selectedNicheId, setSelectedNicheId] = useState<string | null>(null);
+  const [layers, setLayers] = useState<ExploreMapLayerVisibility>(EXPLORE_MAP_DEFAULT_LAYERS);
+  const [hoverContact, setHoverContact] = useState<ExploreMapHoverContact | null>(null);
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -92,6 +105,12 @@ export function ExploreMapView() {
     setDrawerOpen(true);
   };
 
+  const readyData = loadState.status === "ready" ? loadState.data : null;
+  const nicheColorMap = useMemo(
+    () => buildExploreNicheColorMap(readyData?.nodes ?? [], theme),
+    [readyData, theme],
+  );
+
   if (loadState.status === "loading") {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
@@ -116,6 +135,13 @@ export function ExploreMapView() {
 
   const { data, hasContactCandidates } = loadState;
   const ownerName = data.meta.owner?.name ?? "You";
+  const mapNiches = listExploreMapNiches(data.nodes);
+  const statsLabel = formatExploreMapBadge({
+    totalContacts: data.meta.totalContacts,
+    shownContacts: data.meta.shownContacts,
+    truncated: data.meta.truncated,
+    nodes: data.nodes,
+  });
 
   const picker = (
     <ExploreSelfPicker
@@ -136,7 +162,7 @@ export function ExploreMapView() {
           description={
             hasContactCandidates
               ? "Your audience map is drawn around your own contact. Tell Signals which contact is you."
-              : "Create your profile to anchor the map — audience connections attach to it as they sync."
+              : "Create your profile to anchor the map — audience connections attach to it as you sync."
           }
         />
         <div className="flex flex-wrap items-center justify-center gap-2">
@@ -192,35 +218,52 @@ export function ExploreMapView() {
   }
 
   return (
-    <div className="relative min-h-[calc(100vh-12rem)] rounded-xl border border-border bg-card/40">
+    <div className="relative h-[calc(100vh-10rem)] min-h-[520px] overflow-hidden rounded-xl border border-border/50 bg-muted/20">
       <div className="absolute left-4 top-4 z-10">
         <ExploreOwnerChip
           name={ownerName}
           onChange={() => setPickerOpen(true)}
-          className="rounded-md border border-border bg-background/80 px-2 py-1 backdrop-blur-sm"
+          className="rounded-full border border-border/60 bg-background/90 px-3 py-1.5 shadow-sm backdrop-blur-md"
         />
       </div>
-      <div className="absolute right-4 top-4 z-10">
-        <Badge variant="secondary">
-          {formatExploreMapBadge({
-            totalContacts: data.meta.totalContacts,
-            shownContacts: data.meta.shownContacts,
-            truncated: data.meta.truncated,
-            nodes: data.nodes,
-          })}
-        </Badge>
-      </div>
-      <div ref={containerRef} className="h-[calc(100vh-12rem)] w-full">
+
+      <div ref={containerRef} className="h-full w-full">
         {containerSize.width > 0 && containerSize.height > 0 ? (
           <ExploreMapCanvas
             nodes={data.nodes}
             edges={data.edges}
             width={containerSize.width}
             height={containerSize.height}
+            selectedNicheId={selectedNicheId}
+            layers={layers}
             onContactClick={handleContactClick}
+            onHoverContactChange={setHoverContact}
           />
         ) : null}
       </div>
+
+      <ExploreMapHoverCard contact={hoverContact} />
+
+      <ExploreMapToolbar
+        niches={mapNiches}
+        nicheColors={nicheColorMap}
+        selectedNicheId={selectedNicheId}
+        onSelectedNicheIdChange={setSelectedNicheId}
+        layers={layers}
+        onLayersChange={setLayers}
+      />
+
+      <p className="pointer-events-none absolute bottom-4 left-4 z-10 text-xs text-muted-foreground">
+        {statsLabel}
+      </p>
+
+      <p
+        className="pointer-events-none absolute bottom-4 left-1/2 z-10 hidden -translate-x-1/2 rounded-full border border-border/60 bg-background/85 px-4 py-1.5 text-xs text-muted-foreground shadow-sm backdrop-blur-md md:block"
+        data-testid="explore-map-hint"
+      >
+        Click a niche to zoom · click a follower for their explore card · scroll to zoom · drag to pan
+      </p>
+
       <ExploreContactDrawer
         contactId={selectedContactId}
         open={drawerOpen}

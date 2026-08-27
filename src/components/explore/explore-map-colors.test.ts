@@ -2,6 +2,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  applyExploreMapLayoutPins,
   buildExploreMapGraphData,
 } from "@/components/explore/explore-map-canvas";
 import {
@@ -110,8 +111,8 @@ describe("explore-map-colors", () => {
     );
 
     for (const node of graph.nodes) {
-      expect(node.color).not.toContain("var(");
-      expect(node.color).not.toContain("color-mix");
+      expect(node.baseColor).not.toContain("var(");
+      expect(node.baseColor).not.toContain("color-mix");
     }
     for (const link of graph.links) {
       expect(link.color).not.toContain("var(");
@@ -119,9 +120,51 @@ describe("explore-map-colors", () => {
       expect(link.color).toMatch(/rgba?\(/i);
     }
 
-    expect(graph.nodes[0]?.color).not.toBe(graph.nodes[1]?.color);
+    expect(graph.nodes[0]?.baseColor).not.toBe(graph.nodes[1]?.baseColor);
     expect(buildExploreMapLinkColor("follows", true, theme)).toBe(
       withAlpha(theme.foreground, 0.45),
     );
+  });
+
+  it("pins owner center and niches on a ring", () => {
+    document.documentElement.style.setProperty("--primary", "#3366cc");
+    document.documentElement.style.setProperty("--foreground", "#111111");
+    document.documentElement.style.setProperty("--muted-foreground", "#666666");
+    document.documentElement.style.setProperty("--chart-1", "#22aa88");
+
+    const theme = readExploreMapThemeColors(document.documentElement);
+    const graph = buildExploreMapGraphData(
+      [
+        {
+          id: "contact:owner",
+          kind: "contact",
+          entityId: "owner",
+          label: "Owner",
+          avatarUrl: null,
+          isOwner: true,
+          followersCount: 50_000,
+          nicheIds: [],
+        },
+        {
+          id: "niche:ai",
+          kind: "niche",
+          entityId: "ai",
+          label: "AI",
+          nicheType: "interest",
+          memberCount: 2,
+        },
+      ],
+      [],
+      theme,
+    );
+
+    const pinned = applyExploreMapLayoutPins(graph.nodes, 800, 600);
+    const owner = pinned.find((node) => node.kind === "contact" && node.isOwner);
+    const niche = pinned.find((node) => node.kind === "niche");
+
+    expect(owner?.fx).toBe(0);
+    expect(owner?.fy).toBe(0);
+    expect(niche?.fx).not.toBe(0);
+    expect(Math.hypot(niche?.fx ?? 0, niche?.fy ?? 0)).toBeCloseTo(Math.min(800, 600) * 0.36, 0);
   });
 });
