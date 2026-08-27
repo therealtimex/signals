@@ -307,7 +307,7 @@ describe("launchTerminalCliAgent", () => {
 });
 
 describe("dispatchTerminalAgentViaSendMessage", () => {
-  it("dispatches via /cli/send-message without resolving workspace default agent", async () => {
+  it("dispatches a fresh PromptInput session without resolving workspace default agent", async () => {
     const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url =
         typeof input === "string"
@@ -319,6 +319,7 @@ describe("dispatchTerminalAgentViaSendMessage", () => {
         const body = JSON.parse(String(init.body)) as Record<string, unknown>;
         expect(body.message).toContain("workflow-runs/run-1/brief.md");
         expect(body.requireTerminalDispatch).toBe(true);
+        expect(body.terminalSessionPolicy).toBe("fresh");
         return new Response(
           JSON.stringify({
             success: true,
@@ -339,6 +340,7 @@ describe("dispatchTerminalAgentViaSendMessage", () => {
         threadSlug: "thread-1",
         message:
           "Execute the Signals workflow brief at `workflow-runs/run-1/brief.md`. Report a concise summary in this thread when finished.",
+        terminalSessionPolicy: "fresh",
       },
       {
         RTX_APP_ID: "app-1",

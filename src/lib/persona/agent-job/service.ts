@@ -37,8 +37,7 @@ import { isRtxEmbedded, type EnvLike } from "@/lib/rtx/env";
 import { resolveSignalsBaseUrlFromEnv } from "@/lib/rtx/resolve-signals-base-url";
 import { scheduleTerminalSessionRelease } from "@/lib/rtx/resource-teardown";
 import {
-  appendRtxThreadMessage,
-  launchTerminalCliAgent,
+  dispatchTerminalAgentViaSendMessage,
   type RuntimeSessionDescriptor,
 } from "@/lib/rtx/runtime-sessions";
 import {
@@ -104,7 +103,9 @@ function backendCodeForLaunch(errorCode: string): PersonaBackendErrorCode {
 
 function agentModelFromDescriptor(descriptor: RuntimeSessionDescriptor): string | null {
   const agent = descriptor.metadata?.canonicalAgent?.trim();
-  const model = descriptor.resumeContract?.modelSelection?.modelId?.trim();
+  const model = (
+    descriptor.resumeContract ?? descriptor.metadata?.resumeContract
+  )?.modelSelection?.modelId?.trim();
   if (agent && model) return `${agent}:${model}`;
   return model || agent || null;
 }
@@ -336,29 +337,13 @@ export async function startPersonaAgentJob(
       contactName,
       absolutePath: briefWrite.absolutePath,
     });
-    const timeline = await appendRtxThreadMessage(
+    const launch = await dispatchTerminalAgentViaSendMessage(
       {
         workspaceSlug,
         threadSlug,
         message: routingMessage,
         reason: `Generate a persona for contact ${contactId}`,
-      },
-      env,
-      fetchImpl,
-    );
-    if (!timeline.success) {
-      failLaunchAndThrow(job, timeline.error, "launch_failed");
-    }
-
-    const launch = await launchTerminalCliAgent(
-      {
-        workspaceSlug,
-        threadSlug,
-        message: routingMessage,
-        reason: `Generate a persona for contact ${contactId}`,
-        requireWorkspaceDefaultAgent: true,
-        spawnSource: "signals-persona",
-        interactionMode: "terminal-first",
+        terminalSessionPolicy: "fresh",
       },
       env,
       fetchImpl,

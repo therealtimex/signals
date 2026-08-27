@@ -30,7 +30,7 @@ Hard constraints found in the code (not assumptions):
 
 - **No app-settings table.** App config is `~/.signals/config.json`, re-implemented 7× with three different `SignalsConfig` shapes (`src/lib/mail/settings.ts:5-36` is the cleanest). `AGENTS.md:161-163`: config.json survives SQLite resets in tests.
 - **Schema changes need owner confirmation** (`AGENTS.md:173-175`); migrations are additive-only, `npm run db:generate`.
-- **Dispatch path amendment (#325):** the handoff is persisted to the dedicated thread with `appendRtxThreadMessage()`, then `launchTerminalCliAgent()` uses RealTimeX's `terminal-first` launch contract to create a fresh runtime session for that job. This bypasses same-thread chat-linked reuse while retaining the dedicated thread as the visible audit timeline. Persona launches require the workspace default terminal agent and retain the existing `TERMINAL_DISPATCH_REQUIRED` failure only when the lookup succeeds with no default configured; lookup transport and permission failures keep their own launch errors.
+- **Dispatch path amendment (#331):** the handoff is submitted once through `POST /cli/send-message` with `requireTerminalDispatch: true` and `terminalSessionPolicy: "fresh"`. RealTimeX PromptInput resolves `thread.terminalAgent` before the workspace default and performs provider-aware first-turn submission. The fresh policy bypasses live-session reuse and historical auto-resume, preserving one runtime per persona job while the dedicated thread remains the visible audit timeline. Signals does not parse or send terminal-agent identity.
 - **Callback auth is loopback-or-bearer** (`src/lib/agent-tools/auth.ts`); correlation is the job id round-tripping through the prompt. Same trust model as `complete_publish`.
 - **Structured workflow also requires RTX**: `rtxChat` returns `RTX_NOT_CONFIGURED` without a fetch when `RTX_APP_ID` is unset (`llm.ts:272-278`). Standalone has *no* working persona backend; "Structured workflow only" in standalone means "selected, but will 503 until embedded".
 - **No `radio-group` primitive** in `src/components/ui` (only `checkbox`, `switch`, `select`, `tabs`).
@@ -299,7 +299,7 @@ export async function runPersonaAgentJobBlocking(contactId, prepared, opts): Pro
 3. Insert job `queued` + workflow run.
 4. `ensureRtxWorkspace(getSignalsRtxWorkspaceSlug(env), "Signals")`; resolve or create the dedicated `Persona Generation` thread using the same presence/list/create/convergence contract as Network Snowball (D5).
 5. Write brief to `<workspace working dir>/persona-jobs/<jobId>/brief.md` (`resolveRtxWorkspaceWorkingDir`, `storage-path.ts:44`).
-6. Persist `buildPersonaJobBriefRoutingMessage(...)` to the shared thread with `appendRtxThreadMessage()`, then call `launchTerminalCliAgent({ workspaceSlug, threadSlug, message, requireWorkspaceDefaultAgent: true })` so this job cannot reuse another persona job's live session.
+6. Submit `buildPersonaJobBriefRoutingMessage(...)` once with `dispatchTerminalAgentViaSendMessage({ workspaceSlug, threadSlug, message, terminalSessionPolicy: "fresh" })`. The canonical PromptInput path persists the handoff, resolves the thread/default agent, launches a fresh runtime, and submits the first turn.
 7. Persist rtx refs, `running`.
 8. Any failure in 4–7 → `failed` + errorCode, run `failed`, rethrow as `PersonaGenerationUnavailableError`.
 

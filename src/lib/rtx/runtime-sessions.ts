@@ -13,6 +13,11 @@ export type RuntimeSessionDescriptor = {
   };
   metadata?: {
     canonicalAgent?: string;
+    resumeContract?: {
+      modelSelection?: {
+        modelId?: string;
+      };
+    };
   };
   resumeContract?: {
     modelSelection?: {
@@ -254,6 +259,8 @@ export type DispatchTerminalAgentInput = {
   threadSlug: string;
   message: string;
   reason?: string;
+  /** Launch a new PromptInput runtime instead of reusing or resuming one. */
+  terminalSessionPolicy?: "fresh";
 };
 
 export async function appendRtxThreadMessage(
@@ -342,6 +349,9 @@ export async function dispatchTerminalAgentViaSendMessage(
         body: JSON.stringify({
           message: input.message,
           requireTerminalDispatch: true,
+          ...(input.terminalSessionPolicy
+            ? { terminalSessionPolicy: input.terminalSessionPolicy }
+            : {}),
         }),
       }
     );
