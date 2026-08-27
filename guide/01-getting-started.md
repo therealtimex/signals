@@ -59,7 +59,7 @@ When Signals runs as a Local App (`RTX_APP_ID` set), all LLM compute goes throug
 2. Approve **`llm.chat`** and **`llm.embed`** permissions.
 3. Ensure your RealtimeX LLM provider configuration is healthy (models and spend controls live in RTX, not Signals).
 
-The Signals **Settings** page shows a short notice when running embedded — it does not expose provider key forms.
+In Signals, open **Settings → AI & agents** to review RTX permission status and choose the global persona generation mode. The Settings UI does not expose provider key forms.
 
 ### Standalone development
 
@@ -72,14 +72,20 @@ Restart the dev server after changing environment variables.
 
 ## Settings and platform connections
 
-Navigate to **Settings** in the sidebar. Connect X, LinkedIn, and Facebook via **RealTimeX Browser** — one unified card per platform with Setup, Validate, and Disconnect. OAuth API sync is optional for X and LinkedIn (collapsed under **Advanced**) and not required for archive import, publish via agent, or Explore.
+Navigate to **Settings** in the sidebar. The page has two tabs:
 
-![Settings page — platform connections](assets/settings-page.png)
-*Settings: browser-native platform cards, Himalaya mail accounts, and the Local App LLM notice when embedded.*
+- **Platform connections** — Connect X, LinkedIn, and Facebook via **RealTimeX Browser** (Setup, Validate, Disconnect per platform). OAuth API sync is optional for X and LinkedIn (collapsed under **Advanced**) and not required for archive import, publish via agent, or Explore.
+- **AI & agents** — Review RealTimeX Local App permission status (`llm.chat`, `llm.embed`, terminal agent jobs) and select **Structured workflow** vs **Terminal agent** for persona generation.
+
+![Settings — platform connections tab](assets/settings-platforms.png)
+*Platform connections: browser-native cards, acting targets, and Himalaya mail accounts.*
+
+![Settings — AI & agents tab](assets/settings-agents.png)
+*AI & agents: RTX runtime permissions, Re-check, and the global persona generation mode selector.*
 
 ## Connecting platforms
 
-In **Settings → Platform Connections**:
+In **Settings → Platform connections**:
 
 - **X / Twitter** — Sign in via the `signals-publish` RealTimeX Browser session. Import followers from an X archive zip (Automation → Workflows). Publish through the terminal agent lane (`docs/rtx-browser-publish.md`).
 - **LinkedIn** — Same browser session model. Import connections from a LinkedIn export zip. Publish is beta via the agent lane.

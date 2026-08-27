@@ -70,6 +70,9 @@ function useSetupChecklist(): ChecklistState {
       fetch("/api/health")
         .then((r) => r.json())
         .catch(() => ({ rtx: { mode: "standalone" } })),
+      fetch("/api/rtx/status")
+        .then((r) => r.json())
+        .catch(() => ({ bootstrap: { mode: "standalone", permissions: null } })),
       fetch("/api/settings")
         .then((r) => r.json())
         .catch(() => ({ source: "none" })),
@@ -85,12 +88,15 @@ function useSetupChecklist(): ChecklistState {
       fetch("/api/mail-accounts")
         .then((r) => r.json())
         .catch(() => ({ accounts: [] })),
-    ]).then(([health, settings, xStatus, linkedinStatus, facebookStatus, mailStatus]) => {
+    ]).then(([health, rtxStatus, settings, xStatus, linkedinStatus, facebookStatus, mailStatus]) => {
       const rtxEmbedded = health?.rtx?.mode === "embedded";
+      const permissions = rtxStatus?.bootstrap?.permissions;
+      const llmPermissionsGranted =
+        permissions?.granted?.includes("llm.chat") && permissions?.granted?.includes("llm.embed");
       setState({
         loading: false,
         rtxEmbedded,
-        rtxLlmReady: rtxEmbedded && health?.rtx?.pingOk === true,
+        rtxLlmReady: rtxEmbedded && llmPermissionsGranted === true,
         standaloneLlmReady: settings.source !== "none",
         xConnected: xStatus.connected === true,
         linkedinConnected: linkedinStatus.connected === true,
@@ -237,31 +243,31 @@ function GettingStartedTab() {
             }
             done={checklist.rtxEmbedded ? checklist.rtxLlmReady : checklist.standaloneLlmReady}
             loading={checklist.loading}
-            href="/dashboard/settings"
+            href="/dashboard/settings?tab=agents"
           />
           <ChecklistItem
             label="X browser session connected"
             done={checklist.xConnected}
             loading={checklist.loading}
-            href="/dashboard/settings"
+            href="/dashboard/settings?tab=platforms"
           />
           <ChecklistItem
             label="LinkedIn browser session connected"
             done={checklist.linkedinConnected}
             loading={checklist.loading}
-            href="/dashboard/settings"
+            href="/dashboard/settings?tab=platforms"
           />
           <ChecklistItem
             label="Facebook browser session connected"
             done={checklist.facebookConnected}
             loading={checklist.loading}
-            href="/dashboard/settings"
+            href="/dashboard/settings?tab=platforms"
           />
           <ChecklistItem
             label="Himalaya mail account registered"
             done={checklist.mailConnected}
             loading={checklist.loading}
-            href="/dashboard/settings"
+            href="/dashboard/settings?tab=platforms"
           />
         </CardContent>
       </Card>
@@ -344,7 +350,7 @@ function XSetupTab() {
           <ol className="list-decimal space-y-2 pl-5">
             <li>
               Open{" "}
-              <Link href="/dashboard/settings" className="text-primary underline underline-offset-2">
+              <Link href="/dashboard/settings?tab=platforms" className="text-primary underline underline-offset-2">
                 Settings
               </Link>{" "}
               → Platform Connections and choose <strong className="text-foreground">Setup session</strong>.
@@ -467,7 +473,7 @@ function LinkedInSetupTab() {
           <ol className="list-decimal space-y-2 pl-5">
             <li>
               Open{" "}
-              <Link href="/dashboard/settings" className="text-primary underline underline-offset-2">
+              <Link href="/dashboard/settings?tab=platforms" className="text-primary underline underline-offset-2">
                 Settings
               </Link>{" "}
               → Platform Connections and choose <strong className="text-foreground">Setup session</strong>.
@@ -632,7 +638,7 @@ function FacebookSetupTab() {
             <li>
               Go to{" "}
               <Link
-                href="/dashboard/settings"
+                href="/dashboard/settings?tab=platforms"
                 className="text-primary underline underline-offset-2"
               >
                 Settings
@@ -721,7 +727,7 @@ function MailSetupTab() {
           <ol className="list-decimal space-y-2 pl-5">
             <li>
               Open{" "}
-              <Link href="/dashboard/settings" className="text-primary underline underline-offset-2">
+              <Link href="/dashboard/settings?tab=platforms" className="text-primary underline underline-offset-2">
                 Settings
               </Link>{" "}
               and find <strong className="text-foreground">Mail Accounts</strong>.
@@ -990,9 +996,10 @@ function FaqTab() {
       q: "Where do I configure AI models and keys?",
       a: (
         <>
-          For the Local App, configure providers and approve <Code>llm.chat</Code> and{" "}
-          <Code>llm.embed</Code> in RealTimeX{" "}
-          <strong className="font-medium text-foreground">Settings → Local Apps</strong>.
+          For the Local App, approve <Code>llm.chat</Code> and <Code>llm.embed</Code> in
+          RealTimeX <strong className="font-medium text-foreground">Settings → Local Apps</strong>{" "}
+          and verify status under Signals{" "}
+          <strong className="font-medium text-foreground">Settings → AI &amp; agents</strong>.
           Standalone source development can use <Code>.env.local</Code> and requires a restart
           after environment changes.
         </>
