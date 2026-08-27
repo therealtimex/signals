@@ -10,6 +10,7 @@ import {
   preparePersonaGeneration,
   type PreparedPersonaGeneration,
 } from "@/lib/persona/generation/prepare";
+import { runPersonaAgentJobBlocking } from "@/lib/persona/agent-job";
 import {
   formatSynthesisValidationErrors,
   parsePersonaSynthesisJson,
@@ -19,6 +20,7 @@ import {
 } from "@/lib/persona/synthesis";
 import { rtxChat } from "@/lib/rtx/llm";
 import type { EnvLike } from "@/lib/rtx/env";
+import { resolvePersonaGenerationMode } from "@/lib/settings/persona-generation-mode";
 
 export type GeneratePersonaResult =
   | {
@@ -117,7 +119,10 @@ export async function generatePersona(
     };
   }
 
-  return runStructuredSynthesis(contactId, prepared, opts);
+  const mode = resolvePersonaGenerationMode(opts?.env ?? process.env).effectiveMode;
+  return mode === "terminal_agent"
+    ? runPersonaAgentJobBlocking(contactId, prepared, opts)
+    : runStructuredSynthesis(contactId, prepared, opts);
 }
 
 export async function runStructuredSynthesis(

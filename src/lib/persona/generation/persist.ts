@@ -22,7 +22,7 @@ export type PersistPersonaSynthesisResult = {
 export async function persistPersonaSynthesis(input: {
   contactId: string;
   synthesis: PersonaSynthesisOutput;
-  bundle: PersonaEvidenceBundle;
+  bundle: Pick<PersonaEvidenceBundle, "provenance">;
   activePersona: SerializedContactPersona | null;
   qualifiedModel: string;
   workflowRunId: string;

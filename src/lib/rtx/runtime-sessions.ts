@@ -8,6 +8,14 @@ export type RuntimeSessionDescriptor = {
     workspaceSlug?: string;
     threadSlug?: string;
   };
+  metadata?: {
+    canonicalAgent?: string;
+  };
+  resumeContract?: {
+    modelSelection?: {
+      modelId?: string;
+    };
+  };
 };
 
 export type LaunchTerminalAgentInput = {
@@ -326,7 +334,7 @@ export async function dispatchTerminalAgentViaSendMessage(
       return mapLaunchHttpError(response.status, body);
     }
 
-    const descriptor = body.descriptor as { id?: string } | undefined;
+    const descriptor = body.descriptor as RuntimeSessionDescriptor | undefined;
     const descriptorId = typeof descriptor?.id === "string" ? descriptor.id : null;
     if (!descriptorId) {
       return {
@@ -350,6 +358,8 @@ export async function dispatchTerminalAgentViaSendMessage(
           workspaceSlug: resolvedWorkspace,
           threadSlug: resolvedThread,
         },
+        ...(descriptor?.metadata ? { metadata: descriptor.metadata } : {}),
+        ...(descriptor?.resumeContract ? { resumeContract: descriptor.resumeContract } : {}),
       },
     };
   } catch (error) {

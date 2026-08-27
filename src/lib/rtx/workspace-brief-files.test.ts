@@ -3,8 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  buildPersonaJobBriefRoutingMessage,
   buildPublishJobBriefRoutingMessage,
   buildWorkflowRunBriefRoutingMessage,
+  personaJobBriefRelativePath,
   publishJobBriefRelativePath,
   workflowRunBriefRelativePath,
   writeRtxWorkspaceBriefFile,
@@ -101,5 +103,26 @@ describe("workspace brief files", () => {
       "File: @publish-jobs/job-1/brief.md"
     );
     expect(buildPublishJobBriefRoutingMessage("job-1")).toContain("AGENTS.md");
+  });
+
+  it("builds a stateless persona-job routing message with the absolute brief path", () => {
+    const message = buildPersonaJobBriefRoutingMessage({
+      jobId: "pa_1",
+      contactId: "contact-1",
+      contactName: "Ada Lovelace",
+      absolutePath: "/path/to/workspace/persona-jobs/pa_1/brief.md",
+    });
+
+    expect(message).toBe([
+      "Signals persona handoff -> Ada Lovelace",
+      "Job: pa_1",
+      "Contact: contact-1",
+      "State: ready",
+      "Type: persona-brief",
+      "Context: Follow workspace guidelines and operating model in AGENTS.md.",
+      "Required: Read the brief file before acting and follow its instructions. This job is stateless; ignore prior threads.",
+      "File: @/path/to/workspace/persona-jobs/pa_1/brief.md",
+    ].join("\n"));
+    expect(personaJobBriefRelativePath("pa_1")).toBe("persona-jobs/pa_1/brief.md");
   });
 });

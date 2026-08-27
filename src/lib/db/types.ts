@@ -19,6 +19,7 @@ import {
   syncCursors,
   engagementMetrics,
   workflowRuns,
+  personaJobs,
   workflowSteps,
   scheduledJobs,
   mediaAssets,
@@ -117,6 +118,8 @@ export type NewWorkflowEnrollment = InferInsertModel<typeof workflowEnrollments>
 // Workflow run types
 export type WorkflowRun = InferSelectModel<typeof workflowRuns>;
 export type NewWorkflowRun = InferInsertModel<typeof workflowRuns>;
+export type PersonaJob = InferSelectModel<typeof personaJobs>;
+export type NewPersonaJob = InferInsertModel<typeof personaJobs>;
 export type WorkflowStep = InferSelectModel<typeof workflowSteps>;
 export type NewWorkflowStep = InferInsertModel<typeof workflowSteps>;
 export type WorkflowRunWithSteps = WorkflowRun & { steps: WorkflowStep[] };

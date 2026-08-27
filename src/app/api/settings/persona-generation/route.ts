@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import "@/lib/persona/agent-job";
 import {
   isPersonaGenerationModeEnvLocked,
   PERSONA_GENERATION_MODES,

@@ -120,6 +120,9 @@ async function runPersonaForContact(
       return { contactId, status: "failed", reason: error.message };
     }
     if (error instanceof PersonaGenerationUnavailableError) {
+      if (error.rtxCode === "AGENT_TIMEOUT" || error.rtxCode === "AGENT_FAILED") {
+        return { contactId, status: "failed", reason: error.message };
+      }
       throw error;
     }
     throw error;

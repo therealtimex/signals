@@ -22,6 +22,8 @@ import {
   upsertPersonaSchema,
   getPersonaEvidenceSchema,
   generatePersonaSchema,
+  getPersonaJobSchema,
+  completePersonaJobSchema,
   listMailAccountsSchema,
 } from "@/lib/agent-tools/schemas";
 import {
@@ -51,6 +53,10 @@ import {
   handleUpdatePublishJob,
   updatePublishJobSchema,
 } from "@/lib/agent-tools/publish-handlers";
+import {
+  handleCompletePersonaJob,
+  handleGetPersonaJob,
+} from "@/lib/agent-tools/persona-job-handlers";
 import {
   handleLogInteraction,
   handleQueryGraph,
@@ -317,11 +323,29 @@ export const AGENT_TOOLS: Record<string, AgentToolDefinition> = {
   generate_persona: {
     name: "generate_persona",
     description:
-      "Synthesize and persist a shared-scope persona from contact evidence via RTX llm.chat (requires embedded RealtimeX runtime).",
+      "Synthesize and persist a shared-scope persona using the globally configured structured-workflow or terminal-agent backend.",
     category: "contacts",
     schema: generatePersonaSchema,
     parameters: zodToParameters(generatePersonaSchema),
     execute: handleGeneratePersona,
+  },
+  get_persona_job: {
+    name: "get_persona_job",
+    description:
+      "Read a PersonaAgentJob status and its evidence while the frozen evidence hash still matches.",
+    category: "contacts",
+    schema: getPersonaJobSchema,
+    parameters: zodToParameters(getPersonaJobSchema),
+    execute: handleGetPersonaJob,
+  },
+  complete_persona_job: {
+    name: "complete_persona_job",
+    description:
+      "Submit the schema-validated synthesis or failure for one PersonaAgentJob callback.",
+    category: "contacts",
+    schema: completePersonaJobSchema,
+    parameters: zodToParameters(completePersonaJobSchema),
+    execute: handleCompletePersonaJob,
   },
   query_orgs: {
     name: "query_orgs",

@@ -229,4 +229,32 @@ describe("generatePersonaStepHandler", () => {
     expect(report.outcomes[0]?.status).toBe("failed");
     expect(report.abortReason).toContain("Approve llm.chat");
   });
+
+  it("records agent timeout as a per-contact failure and continues the batch", async () => {
+    vi.mocked(getActivePersona).mockReturnValue(undefined);
+    vi.mocked(generatePersona)
+      .mockRejectedValueOnce(
+        new PersonaGenerationUnavailableError("AGENT_TIMEOUT", "Agent timed out"),
+      )
+      .mockResolvedValueOnce({
+        generated: true,
+        persona: {} as never,
+        workflowRunId: "child-run-2",
+        supersededPersonaId: null,
+        nicheEdgesUpserted: 0,
+        embedded: false,
+      });
+
+    const report = await generatePersonaStepHandler(["c1", "c2"], makeCtx());
+
+    expect(report.aborted).toBe(false);
+    expect(report.outcomes).toEqual([
+      { contactId: "c1", status: "failed", reason: "Agent timed out" },
+      {
+        contactId: "c2",
+        status: "generated",
+        detail: { personaWorkflowRunId: "child-run-2" },
+      },
+    ]);
+  });
 });

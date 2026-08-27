@@ -264,6 +264,23 @@ export const generatePersonaSchema = z.object({
   force: z.boolean().optional(),
 });
 
+export const getPersonaJobSchema = z.object({
+  jobId: z.string().min(1),
+});
+
+export const completePersonaJobSchema = z
+  .object({
+    jobId: z.string().min(1),
+    success: z.boolean(),
+    synthesis: z.union([z.string(), z.record(z.unknown())]).optional(),
+    model: z.string().max(120).optional(),
+    error: z.string().max(2000).optional(),
+  })
+  .refine((value) => !value.success || value.synthesis !== undefined, {
+    message: "synthesis is required when success is true",
+    path: ["synthesis"],
+  });
+
 export const upsertPersonaSchema = z
   .object({
     contactId: z.string().min(1),

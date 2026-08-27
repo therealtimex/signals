@@ -1,11 +1,11 @@
 import fs from "node:fs";
 import {
   PERSONA_PROMPT_VERSION,
-  PERSONA_SYSTEM_PROMPT,
   formatSynthesisValidationErrors,
   parsePersonaSynthesisJson,
   type PersonaSynthesisOutput,
 } from "@/lib/persona/synthesis";
+export { buildPersonaAgentJobBrief as buildAgentPrompt } from "@/lib/persona/agent-job/prompt";
 import type { PersonaEvidenceProvenance } from "@/lib/db/queries/persona-evidence";
 import { upsertPersonaSchema } from "@/lib/agent-tools/schemas";
 
@@ -17,57 +17,6 @@ export type PersonaAgentJobMeta = {
   preparedAt: string;
   provenance: PersonaEvidenceProvenance;
 };
-
-export function buildAgentPrompt(input: {
-  jobId: string;
-  contactId: string;
-  promptVersion?: number;
-  systemPrompt?: string;
-  evidence: unknown;
-}): string {
-  const promptVersion = input.promptVersion ?? PERSONA_PROMPT_VERSION;
-  const systemPrompt = input.systemPrompt ?? PERSONA_SYSTEM_PROMPT;
-  const evidenceJson = JSON.stringify(input.evidence, null, 2);
-
-  return `# Persona synthesis job
-
-You are executing **one isolated persona synthesis job** for Signals CRM.
-
-## Job metadata
-- jobId: ${input.jobId}
-- contactId: ${input.contactId}
-- promptVersion: ${promptVersion}
-
-## Rules
-1. Use **only** the evidence JSON below. Do not invent employers, metrics, interests, or behaviors.
-2. This job is **stateless**. Ignore all prior messages and prior contacts.
-3. Return **only** a single JSON object matching the schema below. No markdown fences, no commentary, no tool calls.
-4. Do not call Signals agent-tools in this job. Signals will persist the result.
-
-## Output schema (required fields)
-{
-  "archetype": "string, max 80",
-  "tone": "string, max 80",
-  "summary": "string, max 280",
-  "description": "string, max 2000 (optional)",
-  "interests": ["string, max 12 items"],
-  "conversionTriggers": ["string, max 10 items"],
-  "engagementFormats": ["string, max 10 items"],
-  "confidence": 0.0
-}
-
-### Confidence calibration
-- thin evidence → ≤ 0.4
-- single platform → ≤ 0.7
-- rich multi-surface evidence → up to 1.0
-
-## System analyst instructions
-${systemPrompt}
-
-## Evidence JSON
-${evidenceJson}
-`;
-}
 
 export function metaPathForPrompt(promptPath: string): string {
   return `${promptPath}.meta.json`;

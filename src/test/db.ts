@@ -17,6 +17,7 @@ import {
   orgIdentityMetrics,
   orgIdentities,
   contactPersonas,
+  personaJobs,
   niches,
   launches,
   variants,
@@ -53,6 +54,7 @@ export function resetCoreTables(): void {
   db.delete(interactions).run();
   db.delete(contentActivities).run();
   db.delete(engagements).run();
+  db.delete(personaJobs).run();
   db.delete(contactPersonas).run();
   db.delete(workflowRuns).run();
   db.delete(goalProgress).run();
