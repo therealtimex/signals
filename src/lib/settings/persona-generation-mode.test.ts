@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_PERSONA_GENERATION_MODE,
+  getStoredPersonaGenerationMode,
   PERSONA_GENERATION_MODE_ENV,
   registerPersonaAgentJobBackend,
   resetPersonaAgentJobBackendForTests,
@@ -70,5 +71,14 @@ describe("persona-generation-mode", () => {
       available: false,
       unavailableReason: "backend_unavailable",
     });
+  });
+
+  it("clears stored mode when reset to null", () => {
+    setStoredPersonaGenerationMode("terminal_agent");
+    expect(getStoredPersonaGenerationMode()).toBe("terminal_agent");
+
+    setStoredPersonaGenerationMode(null);
+    expect(getStoredPersonaGenerationMode()).toBeNull();
+    expect(resolvePersonaGenerationMode().source).toBe("default");
   });
 });

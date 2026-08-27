@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { parseSettingsTab, settingsTabHref } from "@/app/dashboard/settings/settings-tabs";
+import { describe, expect, it, vi } from "vitest";
+import { navigateSettingsTab, parseSettingsTab, settingsTabHref } from "@/app/dashboard/settings/settings-tabs";
 
 describe("settings-tabs", () => {
   it("parses valid tabs and falls back to platforms", () => {
@@ -12,5 +12,11 @@ describe("settings-tabs", () => {
   it("builds tab hrefs", () => {
     expect(settingsTabHref("platforms")).toBe("/dashboard/settings?tab=platforms");
     expect(settingsTabHref("agents")).toBe("/dashboard/settings?tab=agents");
+  });
+
+  it("navigates with router.replace and scroll disabled", () => {
+    const replace = vi.fn();
+    navigateSettingsTab(replace, "agents");
+    expect(replace).toHaveBeenCalledWith("/dashboard/settings?tab=agents", { scroll: false });
   });
 });

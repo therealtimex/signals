@@ -14,6 +14,7 @@ import {
   type SessionPayload,
 } from "@/app/dashboard/settings/platforms-tab";
 import {
+  navigateSettingsTab,
   parseSettingsTab,
   settingsTabHref,
 } from "@/app/dashboard/settings/settings-tabs";
@@ -138,8 +139,7 @@ export function SettingsPageClient() {
   }, [searchParams, refreshX, refreshLinkedIn]);
 
   function handleTabChange(nextTab: string) {
-    const tab = parseSettingsTab(nextTab);
-    router.replace(settingsTabHref(tab), { scroll: false });
+    navigateSettingsTab(router.replace, parseSettingsTab(nextTab));
   }
 
   async function runSessionAction(platform: PlatformKey, action: "setup" | "validate" | "disconnect") {

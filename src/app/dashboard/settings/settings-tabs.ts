@@ -11,3 +11,10 @@ export function parseSettingsTab(value: string | null | undefined): SettingsTab 
 export function settingsTabHref(tab: SettingsTab): string {
   return `/dashboard/settings?tab=${tab}`;
 }
+
+export function navigateSettingsTab(
+  replace: (href: string, options?: { scroll: boolean }) => void,
+  tab: SettingsTab,
+): void {
+  replace(settingsTabHref(tab), { scroll: false });
+}

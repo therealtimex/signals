@@ -10,6 +10,7 @@ import type {
   PersonaModeResolution,
   PersonaModeUnavailableReason,
 } from "@/lib/settings/persona-generation-mode";
+import { resolvePersonaModeCardSelection } from "@/app/dashboard/settings/persona-generation-mode-selection";
 
 const MODE_COPY: Record<
   PersonaGenerationMode,
@@ -91,8 +92,7 @@ export function PersonaGenerationModeCard() {
     }
   }
 
-  const selected =
-    resolution?.storedMode ?? resolution?.requestedMode ?? "structured_workflow";
+  const selected = resolution ? resolvePersonaModeCardSelection(resolution) : "structured_workflow";
   const envLocked = resolution?.source === "env";
   const usingFallback =
     resolution != null &&

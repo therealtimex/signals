@@ -62,9 +62,7 @@ export function setStoredPersonaGenerationMode(mode: PersonaGenerationMode | nul
     updateSignalsConfig({ personaGenerationMode: mode });
     return;
   }
-  const config = readSignalsConfig();
-  delete config.personaGenerationMode;
-  updateSignalsConfig(config);
+  updateSignalsConfig({ personaGenerationMode: undefined });
 }
 
 export function resetPersonaGenerationModeForTests(): void {
