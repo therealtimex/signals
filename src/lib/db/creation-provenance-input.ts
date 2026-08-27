@@ -50,6 +50,11 @@ export function validateWorkflowRunAndTemplateIds(opts: {
     if (!run) {
       throw new Error(`Unknown workflowRunId: ${workflowRunId}`);
     }
+    if (templateId && run.templateId && run.templateId !== templateId) {
+      throw new Error(
+        `templateId ${templateId} does not match workflow run ${workflowRunId} (template ${run.templateId})`,
+      );
+    }
     if (!templateId && run.templateId) {
       templateId = run.templateId;
     }

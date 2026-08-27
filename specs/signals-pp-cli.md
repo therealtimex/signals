@@ -90,7 +90,7 @@ Examples: `query-contacts`, `create-contact`, `enrich-contact`, `get-publish-job
 | Command | Purpose |
 |---------|---------|
 | `signals-pp-cli doctor` | Resolve base URL; `GET /api/health`; report auth token status |
-| `signals-pp-cli import contacts --file <path> [--dedupe] [--dry-run]` | Read staged CSV/JSON; dedupe; batch create/enrich; emit summary JSON |
+| `signals-pp-cli import contacts --file <path> [--dedupe] [--dry-run] [--workflow-run-id <id> [--template-id <id>]]` | Read staged CSV/JSON; dedupe; batch create/enrich; optionally attribute the cohort to a workflow run; emit summary JSON |
 | `signals-pp-cli reconcile --file <path>` | Preview dedupe / conflicts without mutating |
 | `signals-pp-cli health` | Compact pipeline snapshot for thread summary |
 
@@ -102,6 +102,13 @@ Examples: `query-contacts`, `create-contact`, `enrich-contact`, `get-publish-job
 - `workflow-runs/<runId>/contacts.json`
 
 **Dedupe keys (v1):** email, then `(platform, platformUserId)` when present.
+
+**Workflow attribution:** pass `--workflow-run-id <id>` for workflow imports and optionally
+`--template-id <id>`. Supplying `--template-id` alone is a usage error. Before a non-dry-run
+import mutates contacts, the CLI validates the run/template pair. Each completed chunk then
+records every concrete new or matched contact ID in the run's durable cohort. Repeating the
+same import does not duplicate IDs or inflate the run's processed-item count. Dry-run performs
+neither the preflight request nor cohort writes.
 
 - The email lookup uses `query_contacts`'s exact `email` filter — a server-side match on the
   normalized channel value, so it also matches non-primary email addresses. Archived
@@ -120,9 +127,19 @@ Examples: `query-contacts`, `create-contact`, `enrich-contact`, `get-publish-job
   "enriched": 2,
   "failed": 0,
   "errors": [],
-  "notes": []
+  "notes": [],
+  "attribution": {
+    "workflowRunId": "run_1",
+    "templateId": "tpl_1",
+    "attributed": 20,
+    "cohortSize": 20
+  }
 }
 ```
+
+The additive `attribution` object is present only with `--workflow-run-id`. `attributed` is the
+number of distinct contact IDs sent during this invocation; `cohortSize` is the durable server
+total after the last successful chunk.
 
 `notes` carries non-failure explanations. A note itself never affects `success` or the exit
 code. One is emitted when a row is skipped because its `(platform, platformUserId)` is
@@ -189,7 +206,9 @@ Extend `buildAgentWorkflowBrief` execution requirements:
 # After staging contacts.csv:
 signals-pp-cli import contacts \
   --file workflow-runs/<runId>/contacts.csv \
-  --dedupe
+  --dedupe \
+  --workflow-run-id <runId> \
+  --template-id <templateId>
 ```
 
 Add explicit prohibitions:

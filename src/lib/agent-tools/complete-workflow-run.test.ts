@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resetCoreTables } from "@/test/db";
-import { createWorkflowRun, updateWorkflowRun } from "@/lib/db/queries/workflows";
+import { createContact } from "@/lib/db/queries/contacts";
+import { createWorkflowRun, getWorkflowRun, updateWorkflowRun } from "@/lib/db/queries/workflows";
 import { createTemplate } from "@/lib/db/queries/workflow-templates";
 import { handleCompleteWorkflowRun } from "@/lib/agent-tools/handlers";
 import * as workflowEvents from "@/lib/webhooks/workflow-events";
@@ -116,5 +117,88 @@ describe("complete_workflow_run terminal teardown", () => {
     expect(result.success).toBe(true);
     expect(scheduleSpy).toHaveBeenCalledWith(null);
     expect(result.terminalSessionTeardown).toEqual({ scheduled: false });
+  });
+
+  it("unions explicit, stored, and birth cohorts while leaving config as fallback only", async () => {
+    const template = createTemplate({
+      name: "Network Snowball",
+      templateType: "prospecting",
+      status: "active",
+    });
+    const explicit = createContact({ name: "Explicit" });
+    const stored = createContact({ name: "Stored" });
+    const config = createContact({ name: "Config fallback" });
+    const run = createWorkflowRun({
+      templateId: template.id,
+      workflowType: "search",
+      status: "running",
+      trigger: "template",
+      result: JSON.stringify({ createdContactIds: [stored.id] }),
+      config: JSON.stringify({ targetContactIds: [config.id] }),
+    });
+    const birth = createContact(
+      { name: "Birth" },
+      { tag: "agent:create_contact", workflowRunId: run.id, templateId: template.id },
+    );
+
+    const emitSpy = vi.spyOn(workflowEvents, "emitWorkflowCompletedEvent").mockResolvedValue(
+      mockWorkflowCompletedEvent,
+    );
+    vi.spyOn(resourceTeardown, "stopRunningRtxBrowserSessions").mockResolvedValue({
+      stopped: [],
+      failed: [],
+    });
+    vi.spyOn(resourceTeardown, "scheduleTerminalSessionRelease").mockReturnValue({
+      scheduled: true,
+      sessionId: null,
+    });
+
+    const result = await handleCompleteWorkflowRun({
+      runId: run.id,
+      status: "completed",
+      createdContactIds: [explicit.id],
+    });
+
+    expect(result.createdContactIds).toEqual([explicit.id, stored.id, birth.id]);
+    expect(result.cohortSources).toEqual(["explicit", "stored", "birth"]);
+    expect(result.processedItems).toBe(3);
+    expect(getWorkflowRun(run.id)?.processedItems).toBe(3);
+    expect(emitSpy).toHaveBeenCalledWith(run.id, {
+      summary: undefined,
+      createdContactIds: [explicit.id, stored.id, birth.id],
+    });
+  });
+
+  it("preserves an explicitly supplied processed-item count", async () => {
+    const first = createContact({ name: "First" });
+    const second = createContact({ name: "Second" });
+    const run = createWorkflowRun({
+      workflowType: "search",
+      status: "running",
+      trigger: "template",
+      result: JSON.stringify({ createdContactIds: [first.id, second.id] }),
+    });
+
+    vi.spyOn(workflowEvents, "emitWorkflowCompletedEvent").mockResolvedValue(
+      mockWorkflowCompletedEvent,
+    );
+    vi.spyOn(resourceTeardown, "stopRunningRtxBrowserSessions").mockResolvedValue({
+      stopped: [],
+      failed: [],
+    });
+    vi.spyOn(resourceTeardown, "scheduleTerminalSessionRelease").mockReturnValue({
+      scheduled: true,
+      sessionId: null,
+    });
+
+    const result = await handleCompleteWorkflowRun({
+      runId: run.id,
+      status: "completed",
+      processedItems: 1,
+    });
+
+    expect(result.createdContactIds).toEqual([first.id, second.id]);
+    expect(result.processedItems).toBe(1);
+    expect(getWorkflowRun(run.id)?.processedItems).toBe(1);
   });
 });

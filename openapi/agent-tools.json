@@ -1154,6 +1154,39 @@
                     "type": "object",
                     "properties": {
                       "tool": {
+                        "const": "record_workflow_run_contacts"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "runId": {
+                            "type": "string"
+                          },
+                          "templateId": {
+                            "type": "string"
+                          },
+                          "contactIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "required": [
+                          "runId"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
                         "const": "query_content"
                       },
                       "input": {
@@ -2833,6 +2866,7 @@
                       "start_workflow",
                       "dispatch_follow_on_workflow",
                       "complete_workflow_run",
+                      "record_workflow_run_contacts",
                       "query_content",
                       "query_goals",
                       "create_task",
@@ -3013,6 +3047,6 @@
   ],
   "x-signals-agent-tools": {
     "manifestVersion": "1",
-    "toolCount": 50
+    "toolCount": 51
   }
 }

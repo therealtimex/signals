@@ -97,6 +97,7 @@ export function buildAgentWorkflowBrief(input: {
   const patrolContract = isSocialPatrolTemplateConfig(input.config)
     ? `${buildSocialPatrolBriefSection({
         workflowRunId: input.workflowRunId,
+        templateId: input.template.id,
         config: input.config,
       })}\n`
     : null;
@@ -117,6 +118,7 @@ export function buildAgentWorkflowBrief(input: {
   const snowballContract = isNetworkSnowballTemplateConfig(input.config)
     ? `${buildNetworkSnowballBriefSection({
         workflowRunId: input.workflowRunId,
+        templateId: input.template.id,
         config: input.config,
         signalsBaseUrl: input.signalsBaseUrl,
       })}\n`
@@ -156,7 +158,7 @@ export function buildAgentWorkflowBrief(input: {
     "1. Signals is already running — do not start or manage Local Apps via pp-cli.",
     `2. Verify health before bulk write-back: signals-pp-cli health (or curl -s ${input.signalsBaseUrl}/api/health — expect app=signals, status=ok).`,
     "3. BULK INGESTION REQUIREMENT: After staging workflow-runs/<runId>/contacts.csv (or contacts.json), commit CRM rows with:",
-    `   signals-pp-cli import contacts --file workflow-runs/${input.workflowRunId}/contacts.csv --dedupe`,
+    `   signals-pp-cli import contacts --file workflow-runs/${input.workflowRunId}/contacts.csv --dedupe --workflow-run-id ${input.workflowRunId} --template-id ${input.template.id}`,
     "4. Do NOT call create_contact in a loop for bulk mining — the CLI import performs deduplication, platform claim validation, and rate-limit buffering.",
     "5. Prefer signals-pp-cli over bash invoke-tool.sh wrappers when the bundled CLI is on PATH.",
     "6. When you create contacts or orgs via agent-tools, pass `workflowRunId` and `templateId` from this brief so Signals can attribute them to this run.",

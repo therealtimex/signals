@@ -23,7 +23,8 @@ Every session:
 
 ```bash
 signals-pp-cli health
-signals-pp-cli import contacts --file workflow-runs/<runId>/contacts.csv --dedupe
+signals-pp-cli import contacts --file workflow-runs/<runId>/contacts.csv --dedupe \
+  --workflow-run-id <runId> --template-id <templateId>
 ```
 
 Use `signals-pp-cli reconcile --file …` to preview dedupe without mutating. For `--dedupe --dry-run` imports, reconcile is the accurate preview (dry-run skips dedupe queries).

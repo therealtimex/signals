@@ -189,7 +189,11 @@ describe("buildSocialPatrolBriefSection", () => {
   };
 
   it("spells out lease, browser, budget, write-back, and release steps", () => {
-    const section = buildSocialPatrolBriefSection({ workflowRunId: "run_9", config });
+    const section = buildSocialPatrolBriefSection({
+      workflowRunId: "run_9",
+      templateId: "tpl_patrol_9",
+      config,
+    });
 
     expect(section).toContain(
       `signals-pp-cli targets prepare tgt_fb --intent browse --ttl ${MAX_LEASE_TTL_SECONDS}`,
@@ -206,7 +210,7 @@ describe("buildSocialPatrolBriefSection", () => {
     expect(section).toContain("Bot / Clone Rule");
     expect(section).toContain("DO NOT ingest automated bots");
     expect(section).toContain(
-      "signals-pp-cli import contacts --file workflow-runs/run_9/contacts.csv --dedupe",
+      "signals-pp-cli import contacts --file workflow-runs/run_9/contacts.csv --dedupe --workflow-run-id run_9 --template-id tpl_patrol_9",
     );
     expect(section).toContain("signals-pp-cli targets release --lease <leaseId>");
   });
