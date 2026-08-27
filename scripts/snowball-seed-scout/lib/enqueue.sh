@@ -54,7 +54,9 @@ try:
         body = resp.read().decode("utf-8")
         parsed = json.loads(body)
         if rejected:
-            parsed["rejectedNonPostUrls"] = rejected
+            existing = parsed.get("rejectedNonPostUrls") or []
+            parsed["rejectedNonPostUrls"] = existing + rejected
+            parsed["skipped"] = int(parsed.get("skipped") or 0) + len(rejected)
         print(json.dumps(parsed))
 except Exception as exc:
     print(json.dumps({"error": str(exc), "queued": 0, "skipped": rejected}))
