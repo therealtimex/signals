@@ -11,6 +11,10 @@ export function publishJobBriefRelativePath(jobId: string): string {
   return `publish-jobs/${jobId}/brief.md`;
 }
 
+export function personaJobBriefRelativePath(jobId: string): string {
+  return `persona-jobs/${jobId}/brief.md`;
+}
+
 export function orchestratorEventBriefRelativePath(runId: string): string {
   return `orchestrator-events/${runId}/brief.md`;
 }
@@ -26,6 +30,13 @@ export interface PublishJobBriefRoutingInput {
   jobId: string;
   title?: string | null;
   platforms?: string[];
+  absolutePath?: string;
+}
+
+export interface PersonaJobBriefRoutingInput {
+  jobId: string;
+  contactId: string;
+  contactName?: string | null;
   absolutePath?: string;
 }
 
@@ -100,6 +111,35 @@ export function buildPublishJobBriefRoutingMessage(
   ].filter(Boolean) as string[];
 
   return lines.join("\n");
+}
+
+export function buildPersonaJobBriefRoutingMessage(
+  jobIdOrInput: string | PersonaJobBriefRoutingInput,
+): string {
+  if (typeof jobIdOrInput === "string") {
+    return [
+      "Signals persona handoff",
+      `Job: ${jobIdOrInput}`,
+      "State: ready",
+      "Type: persona-brief",
+      "Context: Follow workspace guidelines and operating model in AGENTS.md.",
+      "Required: Read the brief file before acting and follow its instructions. This job is stateless; ignore prior threads.",
+      `File: @persona-jobs/${jobIdOrInput}/brief.md`,
+    ].join("\n");
+  }
+
+  const { jobId, contactId, contactName, absolutePath } = jobIdOrInput;
+  const targetPath = absolutePath ? `@${absolutePath}` : `@persona-jobs/${jobId}/brief.md`;
+  return [
+    `Signals persona handoff -> ${contactName?.trim() || "Contact"}`,
+    `Job: ${jobId}`,
+    `Contact: ${contactId}`,
+    "State: ready",
+    "Type: persona-brief",
+    "Context: Follow workspace guidelines and operating model in AGENTS.md.",
+    "Required: Read the brief file before acting and follow its instructions. This job is stateless; ignore prior threads.",
+    `File: ${targetPath}`,
+  ].join("\n");
 }
 
 export function buildOrchestratorBriefRoutingMessage(

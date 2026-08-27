@@ -86,6 +86,7 @@ export async function rtxEmbed(
   inputs: string[],
   fetchImpl: typeof fetch = fetch,
   env: EnvLike = process.env,
+  signal?: AbortSignal,
 ): Promise<RtxEmbedResult> {
   const appId = getRtxAppId(env);
   const apiBase = resolveRtxApiBase(env);
@@ -130,6 +131,7 @@ export async function rtxEmbed(
       method: "POST",
       headers: buildHeaders(appId),
       body: JSON.stringify({ input: payloadInputs.length === 1 ? payloadInputs[0] : payloadInputs }),
+      signal,
     });
 
     const body = (await response.json()) as RtxEmbedApiResponse;

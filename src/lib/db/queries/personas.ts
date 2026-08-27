@@ -1,6 +1,6 @@
-import { eq, and } from "drizzle-orm";
+import { eq, and, desc, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import { db } from "@/lib/db/client";
+import { db, type DbRunner } from "@/lib/db/client";
 import { contactPersonas } from "@/lib/db/schema";
 import type { ContactPersona } from "@/lib/db/types";
 
@@ -42,11 +42,24 @@ export function getActivePersona(
   return persona;
 }
 
-export function upsertPersona(input: UpsertPersonaInput): ContactPersona {
-  const now = nowUnix();
-  const id = nanoid();
+export function getPersonaByWorkflowRunId(
+  workflowRunId: string,
+): SerializedContactPersona | undefined {
+  return db
+    .select()
+    .from(contactPersonas)
+    .where(eq(contactPersonas.workflowRunId, workflowRunId))
+    .orderBy(desc(contactPersonas.generatedAt), desc(sql`rowid`))
+    .get();
+}
 
-  const active = db
+function upsertPersonaWithRunner(
+  runner: DbRunner,
+  input: UpsertPersonaInput,
+  now: number,
+  id: string,
+): ContactPersona {
+  const active = runner
     .select()
     .from(contactPersonas)
     .where(
@@ -86,40 +99,54 @@ export function upsertPersona(input: UpsertPersonaInput): ContactPersona {
         : (active?.workflowRunId ?? null),
   };
 
-  db.transaction((tx) => {
-    if (active) {
-      tx.update(contactPersonas)
-        .set({
-          status: "superseded",
-          supersededAt: now,
-          updatedAt: now,
-        })
-        .where(eq(contactPersonas.id, active.id))
-        .run();
-    }
-
-    tx.insert(contactPersonas)
-      .values({
-        id,
-        contactId: input.contactId,
-        status: "active",
-        archetype: merged.archetype,
-        tone: merged.tone,
-        summary: merged.summary,
-        description: merged.description,
-        interests: JSON.stringify(merged.interests),
-        conversionTriggers: JSON.stringify(merged.conversionTriggers),
-        engagementFormats: JSON.stringify(merged.engagementFormats),
-        confidence: merged.confidence,
-        scope: merged.scope,
-        model: merged.model,
-        sourceWindow: JSON.stringify(merged.sourceWindow),
-        workflowRunId: merged.workflowRunId,
-        generatedAt: now,
-        supersededAt: null,
+  if (active) {
+    runner
+      .update(contactPersonas)
+      .set({
+        status: "superseded",
+        supersededAt: now,
+        updatedAt: now,
       })
+      .where(eq(contactPersonas.id, active.id))
       .run();
-  });
+  }
 
-  return db.select().from(contactPersonas).where(eq(contactPersonas.id, id)).get()!;
+  runner
+    .insert(contactPersonas)
+    .values({
+      id,
+      contactId: input.contactId,
+      status: "active",
+      archetype: merged.archetype,
+      tone: merged.tone,
+      summary: merged.summary,
+      description: merged.description,
+      interests: JSON.stringify(merged.interests),
+      conversionTriggers: JSON.stringify(merged.conversionTriggers),
+      engagementFormats: JSON.stringify(merged.engagementFormats),
+      confidence: merged.confidence,
+      scope: merged.scope,
+      model: merged.model,
+      sourceWindow: JSON.stringify(merged.sourceWindow),
+      workflowRunId: merged.workflowRunId,
+      generatedAt: now,
+      supersededAt: null,
+    })
+    .run();
+
+  return runner.select().from(contactPersonas).where(eq(contactPersonas.id, id)).get()!;
+}
+
+export function upsertPersona(
+  input: UpsertPersonaInput,
+  runner?: DbRunner,
+): ContactPersona {
+  const now = nowUnix();
+  const id = nanoid();
+
+  if (runner) {
+    return upsertPersonaWithRunner(runner, input, now, id);
+  }
+
+  return db.transaction((tx) => upsertPersonaWithRunner(tx, input, now, id));
 }

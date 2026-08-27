@@ -22,6 +22,10 @@ Errors return `success: false` with a `code` (`TOOL_NOT_FOUND`, `VALIDATION_ERRO
 
 By default the API is **localhost-only** (`localhost` / `127.0.0.1`).
 
+The local callback trust boundary is intentionally the same for persona and publish jobs: any
+loopback process that knows a job ID can call `complete_persona_job` or `complete_publish`. Signals
+is a single-user local app; remote callers still require the bearer token below.
+
 To allow remote callers, set:
 
 ```bash
@@ -54,7 +58,9 @@ Then pass `Authorization: Bearer your-secret-token` on each request.
 | `get_persona` | contacts | Get active AI persona for a contact |
 | `upsert_persona` | contacts | Save versioned persona (supersedes prior active) |
 | `get_persona_evidence` | contacts | Read shared-scope evidence bundle for persona synthesis |
-| `generate_persona` | contacts | Synthesize persona from evidence via RTX `llm.chat` |
+| `generate_persona` | contacts | Synthesize a persona with the globally configured structured-workflow or terminal-agent backend |
+| `get_persona_job` | contacts | Read PersonaAgentJob status and matching evidence for degraded-mode recovery |
+| `complete_persona_job` | contacts | Return a validated synthesis or failure for a stateless PersonaAgentJob |
 | `query_orgs` | graph | Search organization nodes |
 | `query_org_identities` | graph | List org platform identities with profile/stat fields |
 | `upsert_org_identity` | graph | Create or update an org platform identity |
@@ -85,7 +91,11 @@ Simulation run tool responses include additive fields (`populationSpec`, `error`
 
 `semantic_search` requires Signals running as a RealtimeX Local App with the `llm.embed` permission granted. Vectors are stored locally in SQLite; only embedding generation is delegated to RealtimeX.
 
-`generate_persona` requires the same embedded runtime plus the `llm.chat` permission for structured persona synthesis. Terminal agents can instead call `get_persona_evidence` and write with `upsert_persona` using their own intelligence (no `workflow_runs` row).
+`generate_persona` resolves the global persona mode at call time. Structured workflow requires the
+embedded runtime plus `llm.chat`. Terminal-agent mode creates one fresh RTX thread per contact,
+writes a frozen evidence brief, and blocks programmatic callers until `complete_persona_job`
+validates and persists the result. Automated persona jobs must not call `get_persona_evidence` or
+`upsert_persona`; Signals owns their evidence, validation, provenance, and write.
 
 **Publish lane** (`get_publish_job`, `update_publish_job`, `complete_publish`) coordinates CRM publish jobs with RTX terminal agents. Each job target may snapshot `targetId`, `expectedHandle`, and `sessionName`; callbacks should return `targetId` and the preparation `leaseId`. Browser content manipulation runs in the `signals-publish` skill. Signals owns target activation and live identity verification through `prepare_platform_target`.
 

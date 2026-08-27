@@ -36,6 +36,12 @@ Invoke body: `{ "tool": "<name>", "input": { ... } }`
 | `query_simulations` | List runs; `includeAgents: true` returns public grounding |
 | `record_simulation_results` | Per-agent scores/outcomes on a running simulation |
 | `complete_simulation_run` | Finish run and project `variants.predicted_*` |
+| `get_persona_job` | Inspect a PersonaAgentJob and recover matching evidence when its brief is unavailable |
+| `complete_persona_job` | Submit the JSON synthesis or failure for the current stateless persona job |
+
+For an automated PersonaAgentJob, follow the brief exactly: do not call
+`get_persona_evidence` or `upsert_persona`. Submit the final JSON through
+`complete_persona_job`; one validation failure permits one corrected retry.
 
 ## Wind Tunnel simulation flow
 

@@ -627,6 +627,56 @@ export const workflowRuns = sqliteTable("workflow_runs", {
   index("idx_workflow_runs_type").on(table.workflowType),
 ]);
 
+// --- Persona jobs (terminal-agent synthesis lane) ---
+
+export const personaJobs = sqliteTable(
+  "persona_jobs",
+  {
+    id: text("id").primaryKey(),
+    contactId: text("contact_id")
+      .notNull()
+      .references(() => contacts.id, { onDelete: "cascade" }),
+    status: text("status", {
+      enum: [
+        "queued",
+        "running",
+        "completing",
+        "completed",
+        "failed",
+        "timeout",
+        "superseded",
+      ],
+    })
+      .notNull()
+      .default("queued"),
+    trigger: text("trigger", { enum: ["user", "scheduled", "template"] }).notNull(),
+    force: integer("force").notNull().default(0),
+    promptVersion: integer("prompt_version").notNull(),
+    agentPromptVersion: integer("agent_prompt_version").notNull(),
+    evidenceHash: text("evidence_hash").notNull(),
+    provenance: text("provenance").notNull(),
+    supersededPersonaId: text("superseded_persona_id"),
+    workflowRunId: text("workflow_run_id")
+      .notNull()
+      .references(() => workflowRuns.id),
+    rtxWorkspaceSlug: text("rtx_workspace_slug"),
+    rtxThreadSlug: text("rtx_thread_slug"),
+    rtxRuntimeSessionId: text("rtx_runtime_session_id"),
+    agentModel: text("agent_model"),
+    attempts: integer("attempts").notNull().default(0),
+    resultPersonaId: text("result_persona_id"),
+    error: text("error"),
+    errorCode: text("error_code"),
+    dispatchedAt: integer("dispatched_at"),
+    completedAt: integer("completed_at"),
+    ...timestamps,
+  },
+  (table) => [
+    index("idx_persona_jobs_contact_status").on(table.contactId, table.status),
+    index("idx_persona_jobs_status").on(table.status),
+  ],
+);
+
 // --- Workflow Steps (individual actions within a workflow run) ---
 
 export const workflowSteps = sqliteTable("workflow_steps", {

@@ -1441,6 +1441,67 @@
                     "type": "object",
                     "properties": {
                       "tool": {
+                        "const": "get_persona_job"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "jobId": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "jobId"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "complete_persona_job"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "jobId": {
+                            "type": "string"
+                          },
+                          "success": {
+                            "type": "boolean"
+                          },
+                          "synthesis": {
+                            "description": "union"
+                          },
+                          "model": {
+                            "type": "string"
+                          },
+                          "error": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "jobId",
+                          "success"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
                         "const": "query_orgs"
                       },
                       "input": {
@@ -2779,6 +2840,8 @@
                       "upsert_persona",
                       "get_persona_evidence",
                       "generate_persona",
+                      "get_persona_job",
+                      "complete_persona_job",
                       "query_orgs",
                       "query_org_identities",
                       "upsert_org_identity",
@@ -2950,6 +3013,6 @@
   ],
   "x-signals-agent-tools": {
     "manifestVersion": "1",
-    "toolCount": 48
+    "toolCount": 50
   }
 }

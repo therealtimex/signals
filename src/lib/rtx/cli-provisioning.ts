@@ -312,6 +312,15 @@ export async function createRtxPublishThread(
   return threadSlug;
 }
 
+export async function createRtxPersonaThread(
+  workspaceSlug: string,
+  threadName: string,
+  env: EnvLike = process.env,
+  fetchImpl: typeof fetch = fetch,
+): Promise<string> {
+  return createRtxPublishThread(workspaceSlug, threadName, env, fetchImpl);
+}
+
 export const NETWORK_SNOWBALL_DISPATCH_THREAD_SLUG = "network-snowball";
 export const NETWORK_SNOWBALL_DISPATCH_THREAD_NAME = "Network Snowball";
 
@@ -517,4 +526,10 @@ export function buildPublishThreadName(title: string | null | undefined): string
   const label = (title?.trim() || "Untitled").slice(0, 40);
   const stamp = new Date().toISOString().slice(0, 16).replace("T", " ");
   return `Publish: ${label} — ${stamp}`;
+}
+
+export function buildPersonaThreadName(contactName: string | null | undefined): string {
+  const label = (contactName?.trim() || "Contact").slice(0, 40);
+  const stamp = new Date().toISOString().slice(0, 16).replace("T", " ");
+  return `Persona: ${label} — ${stamp}`;
 }

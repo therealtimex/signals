@@ -18,6 +18,7 @@ import {
 } from "@/lib/persona/synthesis";
 import { hashPersonaEvidence } from "@/lib/db/queries/persona-evidence";
 import type { PersonaEvidenceProvenance } from "@/lib/db/queries/persona-evidence";
+import { PERSONA_AGENT_PROMPT_VERSION } from "@/lib/persona/agent-job/prompt";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -55,6 +56,8 @@ describe("persona-agent-job-smoke-lib", () => {
     });
     expect(prompt).toContain("jobId: job-1");
     expect(prompt).toContain(`promptVersion: ${PERSONA_PROMPT_VERSION}`);
+    expect(prompt).toContain(`agentPromptVersion: ${PERSONA_AGENT_PROMPT_VERSION}`);
+    expect(prompt).toContain("complete_persona_job");
     expect(prompt).toContain('"name": "Ada"');
   });
 

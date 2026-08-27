@@ -66,6 +66,7 @@ From repo root you can also use `scripts/invoke-agent-tool.sh` with `SIGNALS_BAS
 - **In-app Signals chat** (`/api/chat`) — deprecated path; use agent-tools instead
 - **Ad-hoc browser scrape / web search** — use RTX browser/credentials, then write to Signals via agent-tools
 - **Inline server publish** — retired; compose uses **Send to agent** + `get_publish_job` / `complete_publish` (see `signals-publish` skill)
+- **Automated persona briefs** — use only the job brief and return synthesis through `complete_persona_job`; do not fetch evidence or write the persona directly
 - **Deterministic scheduled automation** — use Agent Flows in `flows/` instead
 
 ## Discovery order
@@ -92,6 +93,9 @@ Success: `{ "success": true, "tool": "...", "result": { ... } }`
 Errors: `{ "success": false, "code": "VALIDATION_ERROR|NOT_FOUND|CONFLICT|TOOL_NOT_FOUND|EXECUTION_ERROR", "details": ... }`
 
 Auth: localhost-only by default. Remote calls need `SIGNALS_AGENT_TOOL_TOKEN` + `Authorization: Bearer ...`.
+
+PersonaAgentJob callbacks use the same local trust boundary as publish callbacks: the job ID is the
+correlation token, and the synthesis is validated and persisted by Signals.
 
 ## Agent workflow
 

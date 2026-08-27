@@ -1,23 +1,16 @@
-import { eq } from "drizzle-orm";
-import { db } from "@/lib/db/client";
-import { contacts } from "@/lib/db/schema";
-import {
-  assemblePersonaEvidence,
-  renderPersonaEvidencePrompt,
-} from "@/lib/db/queries/persona-evidence";
+import { renderPersonaEvidencePrompt } from "@/lib/db/queries/persona-evidence";
 import {
   PersonaGenerationUnavailableError,
-  PersonaScopeError,
   PersonaSynthesisError,
 } from "@/lib/db/queries/persona-errors";
-import { projectPersonaInterestsToNiches } from "@/lib/db/queries/persona-niches";
-import {
-  getActivePersona,
-  upsertPersona,
-  type SerializedContactPersona,
-} from "@/lib/db/queries/personas";
+import type { SerializedContactPersona } from "@/lib/db/queries/personas";
 import { createWorkflowRun, updateWorkflowRun } from "@/lib/db/queries/workflows";
-import { embedNodeIfStale, EmbeddingUnavailableError } from "@/lib/embeddings/embed-node";
+import { persistPersonaSynthesis } from "@/lib/persona/generation/persist";
+import {
+  preparePersonaGeneration,
+  type PreparedPersonaGeneration,
+} from "@/lib/persona/generation/prepare";
+import { runPersonaAgentJobBlocking } from "@/lib/persona/agent-job";
 import {
   formatSynthesisValidationErrors,
   parsePersonaSynthesisJson,
@@ -27,6 +20,7 @@ import {
 } from "@/lib/persona/synthesis";
 import { rtxChat } from "@/lib/rtx/llm";
 import type { EnvLike } from "@/lib/rtx/env";
+import { resolvePersonaGenerationMode } from "@/lib/settings/persona-generation-mode";
 
 export type GeneratePersonaResult =
   | {
@@ -46,14 +40,6 @@ export type GeneratePersonaOptions = {
   env?: EnvLike;
   parentWorkflowId?: string | null;
 };
-
-function parseSourceWindow(raw: string | null | undefined): Record<string, unknown> {
-  try {
-    return JSON.parse(raw ?? "{}") as Record<string, unknown>;
-  } catch {
-    return {};
-  }
-}
 
 function accumulateChatUsage(
   totals: { inputTokens: number; outputTokens: number },
@@ -123,32 +109,28 @@ export async function generatePersona(
   contactId: string,
   opts?: GeneratePersonaOptions,
 ): Promise<GeneratePersonaResult> {
-  const contact = db.select({ id: contacts.id }).from(contacts).where(eq(contacts.id, contactId)).get();
-  if (!contact) {
-    throw new Error(`Contact not found: ${contactId}`);
-  }
-
-  const activePersona = getActivePersona(contactId, { includeLocalOnly: true });
-  if (activePersona?.scope === "local_only") {
-    throw new PersonaScopeError(
-      "Cannot generate a shared persona while an active local_only persona exists — re-scope via upsert_persona first",
-    );
-  }
-
-  const bundle = assemblePersonaEvidence(contactId);
-
-  if (
-    !opts?.force &&
-    activePersona &&
-    parseSourceWindow(activePersona.sourceWindow).evidenceHash === bundle.provenance.evidenceHash
-  ) {
+  const prepared = preparePersonaGeneration(contactId, { force: opts?.force });
+  if (prepared.kind === "skip") {
     return {
       generated: false,
       skipped: true,
-      reason: "evidence_unchanged",
-      personaId: activePersona.id,
+      reason: prepared.reason,
+      personaId: prepared.personaId,
     };
   }
+
+  const mode = resolvePersonaGenerationMode(opts?.env ?? process.env).effectiveMode;
+  return mode === "terminal_agent"
+    ? runPersonaAgentJobBlocking(contactId, prepared, opts)
+    : runStructuredSynthesis(contactId, prepared, opts);
+}
+
+export async function runStructuredSynthesis(
+  contactId: string,
+  prepared: Extract<PreparedPersonaGeneration, { kind: "ready" }>,
+  opts?: GeneratePersonaOptions,
+): Promise<Extract<GeneratePersonaResult, { generated: true }>> {
+  const { activePersona, bundle } = prepared;
 
   const now = Math.floor(Date.now() / 1000);
   const workflowRun = createWorkflowRun({
@@ -179,52 +161,17 @@ export async function generatePersona(
     accruedInputTokens = chatUsage.inputTokens;
     accruedOutputTokens = chatUsage.outputTokens;
 
-    const sourceWindow = {
-      promptVersion: PERSONA_PROMPT_VERSION,
-      generator: "workflow",
-      evidenceHash: bundle.provenance.evidenceHash,
-      identityIds: bundle.provenance.identityIds,
-      metricSnapshotAt: bundle.provenance.metricSnapshotAt,
-      contentItemIds: bundle.provenance.contentItemIds,
-      interactionWindow: bundle.provenance.interactionWindow,
-      orgIds: bundle.provenance.orgIds,
-      nicheSlugs: bundle.provenance.nicheSlugs,
-      assembledAt: bundle.provenance.assembledAt,
-    };
-
-    const persona = upsertPersona({
+    const persisted = await persistPersonaSynthesis({
       contactId,
-      archetype: synthesis.archetype,
-      tone: synthesis.tone,
-      summary: synthesis.summary,
-      description: synthesis.description ?? null,
-      interests: synthesis.interests,
-      conversionTriggers: synthesis.conversionTriggers,
-      engagementFormats: synthesis.engagementFormats,
-      confidence: synthesis.confidence,
-      scope: "shared",
-      model: qualifiedModel,
-      sourceWindow,
+      synthesis,
+      bundle,
+      activePersona,
+      qualifiedModel,
       workflowRunId: workflowRun.id,
+      sourceWindowExtras: { generator: "workflow" },
+      fetchImpl: opts?.fetchImpl,
+      env: opts?.env,
     });
-
-    const nicheResult = projectPersonaInterestsToNiches(persona, `persona:${workflowRun.id}`);
-
-    let embedded = false;
-    const embedErrors: string[] = [];
-    try {
-      const embedResult = await embedNodeIfStale("contact", contactId, "persona", {
-        fetchImpl: opts?.fetchImpl,
-        env: opts?.env,
-      });
-      embedded = embedResult.embedded;
-    } catch (error) {
-      if (error instanceof EmbeddingUnavailableError) {
-        embedErrors.push(error.message);
-      } else {
-        throw error;
-      }
-    }
 
     updateWorkflowRun(workflowRun.id, {
       status: "completed",
@@ -232,26 +179,21 @@ export async function generatePersona(
       inputTokens: accruedInputTokens,
       outputTokens: accruedOutputTokens,
       result: JSON.stringify({
-        personaId: persona.id,
+        personaId: persisted.persona.id,
         evidenceHash: bundle.provenance.evidenceHash,
         supersededPersonaId: activePersona?.id ?? null,
       }),
       completedAt: Math.floor(Date.now() / 1000),
-      errors: JSON.stringify(embedErrors),
+      errors: JSON.stringify(persisted.embedErrors),
     });
-
-    const saved = getActivePersona(contactId, { includeLocalOnly: true });
-    if (!saved) {
-      throw new Error(`Persona write failed for contact: ${contactId}`);
-    }
 
     return {
       generated: true,
-      persona: saved,
+      persona: persisted.persona,
       workflowRunId: workflowRun.id,
       supersededPersonaId: activePersona?.id ?? null,
-      nicheEdgesUpserted: nicheResult.edgesUpserted,
-      embedded,
+      nicheEdgesUpserted: persisted.nicheEdgesUpserted,
+      embedded: persisted.embedded,
     };
   } catch (error) {
     accruedInputTokens = chatUsage.inputTokens;

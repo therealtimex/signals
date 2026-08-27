@@ -1,5 +1,12 @@
 import type { RtxChatErrorCode } from "@/lib/rtx/llm";
 
+export type PersonaBackendErrorCode =
+  | RtxChatErrorCode
+  | "TERMINAL_DISPATCH_REQUIRED"
+  | "AGENT_TIMEOUT"
+  | "AGENT_FAILED"
+  | "LAUNCH_FAILED";
+
 export class PersonaEvidenceError extends Error {
   readonly code = "PERSONA_EVIDENCE_ERROR" as const;
 
@@ -29,9 +36,9 @@ export class PersonaSynthesisError extends Error {
 
 export class PersonaGenerationUnavailableError extends Error {
   readonly code = "PERSONA_GENERATION_UNAVAILABLE" as const;
-  readonly rtxCode: RtxChatErrorCode;
+  readonly rtxCode: PersonaBackendErrorCode;
 
-  constructor(rtxCode: RtxChatErrorCode, message: string) {
+  constructor(rtxCode: PersonaBackendErrorCode, message: string) {
     super(message);
     this.name = "PersonaGenerationUnavailableError";
     this.rtxCode = rtxCode;
