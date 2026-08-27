@@ -15,7 +15,8 @@ Responses use a consistent envelope:
 { "success": true, "tool": "create_contact", "result": { ... } }
 ```
 
-Errors return `success: false` with a `code` (`TOOL_NOT_FOUND`, `VALIDATION_ERROR`, `EXECUTION_ERROR`, etc.).
+Errors return `success: false` with a `code` (`TOOL_NOT_FOUND`, `VALIDATION_ERROR`,
+`NOT_FOUND`, `CONFLICT`, or `EXECUTION_ERROR`).
 
 ## Authentication
 

@@ -19,9 +19,16 @@ export type AgentToolDefinition<T extends z.ZodTypeAny = z.ZodTypeAny> = {
   execute: (input: z.infer<T>) => Promise<unknown>;
 };
 
+export type AgentToolErrorCode =
+  | "TOOL_NOT_FOUND"
+  | "VALIDATION_ERROR"
+  | "NOT_FOUND"
+  | "CONFLICT"
+  | "EXECUTION_ERROR";
+
 export class AgentToolError extends Error {
   constructor(
-    public readonly code: "TOOL_NOT_FOUND" | "VALIDATION_ERROR" | "EXECUTION_ERROR",
+    public readonly code: AgentToolErrorCode,
     message: string,
     public readonly details?: unknown
   ) {

@@ -1,6 +1,6 @@
 import { listContacts, getContactById, createContact, updateContact, recalcEnrichment } from "@/lib/db/queries/contacts";
 import { createIdentity, getIdentityById, updateIdentity } from "@/lib/db/queries/identities";
-import { PlatformAccountConflictError, resolvePlatformClaim } from "@/lib/db/identity-claims";
+import { resolvePlatformClaim } from "@/lib/db/identity-claims";
 import { getDashboardMetrics } from "@/lib/db/queries/dashboard";
 import { getWorkflowRun, listWorkflowRuns, updateWorkflowRun } from "@/lib/db/queries/workflows";
 import { listTemplates } from "@/lib/db/queries/workflow-templates";
@@ -62,8 +62,24 @@ import { assertPlatform } from "@/lib/db/platforms";
 import { validateIdentityAvatarUrl } from "@/lib/contact-avatar-client";
 import { validateWorkflowRunAndTemplateIds } from "@/lib/db/creation-provenance-input";
 import { CreatedSourceDetailFilterError } from "@/lib/db/creation-sources";
+import { AgentToolError } from "@/lib/agent-tools/types";
 
 const DEFAULT_PAGE_SIZE = 20;
+
+function platformClaimConflict(
+  platform: string,
+  platformUserId: string,
+  claimant:
+    | { kind: "contact"; contactId: string; identityId: string; archived: boolean }
+    | { kind: "org"; orgId: string; identityId: string },
+): AgentToolError {
+  const ownerId = claimant.kind === "contact" ? claimant.contactId : claimant.orgId;
+  return new AgentToolError(
+    "CONFLICT",
+    `Platform account ${platform}:${platformUserId} is already claimed by ${claimant.kind} ${ownerId}. Reassign, don't duplicate.`,
+    { platform, platformUserId, claimant },
+  );
+}
 
 function serializeContactBirthFields(contact: {
   createdSource: string | null;
@@ -166,7 +182,7 @@ export async function handleQueryContacts(input: z.infer<typeof queryContactsSch
     };
   } catch (error) {
     if (error instanceof CreatedSourceDetailFilterError) {
-      return { error: error.message };
+      throw new AgentToolError("VALIDATION_ERROR", error.message);
     }
     throw error;
   }
@@ -315,7 +331,32 @@ export async function handleCreateContact(input: z.infer<typeof createContactSch
   try {
     resolvedIds = validateWorkflowRunAndTemplateIds({ workflowRunId, templateId });
   } catch (error) {
-    return { error: error instanceof Error ? error.message : "Invalid workflow context" };
+    throw new AgentToolError(
+      "VALIDATION_ERROR",
+      error instanceof Error ? error.message : "Invalid workflow context",
+    );
+  }
+
+  if (rest.platform && (rest.platformUserId || rest.platformHandle)) {
+    const platform = assertPlatform(rest.platform);
+    const platformUserId = (rest.platformUserId ?? rest.platformHandle ?? "")
+      .trim()
+      .replace(/^@/, "");
+    try {
+      validateIdentityAvatarUrl(rest.avatarUrl);
+    } catch (error) {
+      throw new AgentToolError(
+        "VALIDATION_ERROR",
+        error instanceof Error ? error.message : "Invalid avatarUrl",
+      );
+    }
+    const claim = resolvePlatformClaim(platform, platformUserId);
+    if (
+      claim.claimed &&
+      (claim.claimant.kind === "org" || claim.claimant.archived)
+    ) {
+      throw platformClaimConflict(platform, platformUserId, claim.claimant);
+    }
   }
 
   // Auto-deduplication check: enrich existing contact if found
@@ -349,18 +390,14 @@ export async function handleCreateContact(input: z.infer<typeof createContactSch
     }
 
     if (rest.platform && (rest.platformUserId || rest.platformHandle)) {
-      try {
-        await handleUpsertContactIdentity({
-          contactId: existing.id,
-          platform: rest.platform,
-          platformUserId: rest.platformUserId ?? rest.platformHandle,
-          platformHandle: rest.platformHandle,
-          platformUrl: rest.platformUrl,
-          avatarUrl: rest.avatarUrl,
-        });
-      } catch {
-        // Non-blocking if identity is already cleanly linked
-      }
+      await handleUpsertContactIdentity({
+        contactId: existing.id,
+        platform: rest.platform,
+        platformUserId: rest.platformUserId ?? rest.platformHandle,
+        platformHandle: rest.platformHandle,
+        platformUrl: rest.platformUrl,
+        avatarUrl: rest.avatarUrl,
+      });
     }
 
     recalcEnrichment(existing.id);
@@ -411,18 +448,14 @@ export async function handleCreateContact(input: z.infer<typeof createContactSch
   });
 
   if (rest.platform && (rest.platformUserId || rest.platformHandle)) {
-    try {
-      await handleUpsertContactIdentity({
-        contactId: contact.id,
-        platform: rest.platform,
-        platformUserId: rest.platformUserId ?? rest.platformHandle,
-        platformHandle: rest.platformHandle,
-        platformUrl: rest.platformUrl,
-        avatarUrl: rest.avatarUrl,
-      });
-    } catch {
-      // Non-blocking
-    }
+    await handleUpsertContactIdentity({
+      contactId: contact.id,
+      platform: rest.platform,
+      platformUserId: rest.platformUserId ?? rest.platformHandle,
+      platformHandle: rest.platformHandle,
+      platformUrl: rest.platformUrl,
+      avatarUrl: rest.avatarUrl,
+    });
   }
 
   if (rest.notes) {
@@ -486,6 +519,9 @@ export async function handleUpdateContact(input: z.infer<typeof updateContactSch
 
 export async function handleEnrichContact(input: z.infer<typeof enrichContactSchema>) {
   const { contactId, ...data } = input;
+  if (!getContactById(contactId)) {
+    throw new AgentToolError("NOT_FOUND", `Contact not found: ${contactId}`);
+  }
   return enrichContact(contactId, data);
 }
 
@@ -494,14 +530,17 @@ export async function handleUpsertContactIdentity(
 ) {
   const contact = getContactById(input.contactId);
   if (!contact) {
-    return { error: `Contact not found: ${input.contactId}` };
+    throw new AgentToolError("NOT_FOUND", `Contact not found: ${input.contactId}`);
   }
 
   let avatarUrl: string | undefined;
   try {
     avatarUrl = validateIdentityAvatarUrl(input.avatarUrl);
   } catch (error) {
-    return { error: error instanceof Error ? error.message : "Invalid avatarUrl" };
+    throw new AgentToolError(
+      "VALIDATION_ERROR",
+      error instanceof Error ? error.message : "Invalid avatarUrl",
+    );
   }
 
   let platformUrl = input.platformUrl?.trim() || undefined;
@@ -537,13 +576,22 @@ export async function handleUpsertContactIdentity(
   if (input.id) {
     const existing = getIdentityById(input.id);
     if (!existing || existing.contactId !== input.contactId) {
-      return { error: `Identity not found for contact: ${input.id}` };
+      throw new AgentToolError("NOT_FOUND", `Identity not found for contact: ${input.id}`);
     }
 
+    const platform = input.platform ? assertPlatform(input.platform) : existing.platform;
+    const platformUserId = input.platformUserId ?? existing.platformUserId;
+    const claim = resolvePlatformClaim(platform, platformUserId);
+    if (
+      claim.claimed &&
+      (claim.claimant.kind === "org" || claim.claimant.identityId !== existing.id)
+    ) {
+      throw platformClaimConflict(platform, platformUserId, claim.claimant);
+    }
     identity = updateIdentity(input.id, {
       ...sharedFields,
-      ...(input.platform ? { platform: assertPlatform(input.platform) } : {}),
-      ...(input.platformUserId ? { platformUserId: input.platformUserId } : {}),
+      ...(input.platform ? { platform } : {}),
+      ...(input.platformUserId ? { platformUserId } : {}),
     });
   } else {
     const platform = assertPlatform(input.platform!);
@@ -553,20 +601,11 @@ export async function handleUpsertContactIdentity(
     const claim = resolvePlatformClaim(platform, platformUserId);
     const claimant = claim.claimed ? claim.claimant : undefined;
     if (claimant?.kind === "org") {
-      // Throw, don't return {error}. `invoke` turns this into a success:false
-      // envelope; an {error} inside a success:true envelope is invisible to the Go
-      // client, which only checks the outer flag — the row would be counted as
-      // enriched and the import would report success over a rejected attach.
-      throw new PlatformAccountConflictError(platform, platformUserId, {
-        kind: "org",
-        id: claimant.identityId,
-      });
+      throw platformClaimConflict(platform, platformUserId, claimant);
     }
     if (claimant) {
       if (claimant.contactId !== input.contactId) {
-        return {
-          error: `Platform identity already linked to contact ${claimant.contactId}`,
-        };
+        throw platformClaimConflict(platform, platformUserId, claimant);
       }
       identity = updateIdentity(claimant.identityId, {
         ...sharedFields,
@@ -584,7 +623,10 @@ export async function handleUpsertContactIdentity(
   }
 
   if (!identity) {
-    return { error: `Failed to upsert identity for contact: ${input.contactId}` };
+    throw new AgentToolError(
+      "EXECUTION_ERROR",
+      `Failed to upsert identity for contact: ${input.contactId}`,
+    );
   }
 
   recalcEnrichment(input.contactId);
