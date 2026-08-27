@@ -9,41 +9,35 @@ set -euo pipefail
 # generatePersona. It does NOT call generate_persona or llm.chat.
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-NODE_HELPER="$ROOT/scripts/qa/persona-agent-job-smoke.mjs"
+TS_ENTRY="$ROOT/scripts/qa/persona-agent-job-smoke.ts"
 
 usage() {
   cat <<'EOF'
 Usage:
   scripts/qa/run-persona-agent-job-smoke.sh prepare --contact-id <id> [--out FILE]
   scripts/qa/run-persona-agent-job-smoke.sh verify --response FILE
-  scripts/qa/run-persona-agent-job-smoke.sh apply --contact-id <id> --response FILE [--dry-run]
+  scripts/qa/run-persona-agent-job-smoke.sh apply --contact-id <id> --response FILE \\
+    [--meta FILE | --prompt FILE] [--dry-run]
 
 Environment:
   SIGNALS_BASE_URL           Signals API base (default: http://127.0.0.1:3000)
   SIGNALS_AGENT_TOOL_TOKEN   Bearer token when agent-tools API is not localhost-only
 
 Examples:
-  # Build prompt from live evidence
-  scripts/qa/run-persona-agent-job-smoke.sh prepare \
-    --contact-id CONTACT_ID \
+  scripts/qa/run-persona-agent-job-smoke.sh prepare \\
+    --contact-id CONTACT_ID \\
     --out /tmp/persona-agent-job.txt
 
-  # Paste /tmp/persona-agent-job.txt into a fresh RTX terminal-agent session.
-  # Save JSON-only agent output to /tmp/persona-response.json
-
   scripts/qa/run-persona-agent-job-smoke.sh verify --response /tmp/persona-response.json
-  scripts/qa/run-persona-agent-job-smoke.sh apply \
-    --contact-id CONTACT_ID \
-    --response /tmp/persona-response.json
+  scripts/qa/run-persona-agent-job-smoke.sh apply \\
+    --contact-id CONTACT_ID \\
+    --response /tmp/persona-response.json \\
+    --prompt /tmp/persona-agent-job.txt
 
 Prerequisites:
   1. Signals running (standalone or Local App)
-  2. Contact has sufficient persona evidence (platform identity, content, or interactions)
-  3. For apply: shared-scope persona allowed (no active local_only persona)
-
-Notes:
-  - Use a fresh agent session per contact to avoid context bleed.
-  - Do not call generate_persona during this smoke; that is the structured llm.chat path.
+  2. Contact has sufficient persona evidence
+  3. apply requires the prepare sidecar (.meta.json) from the same run
 EOF
 }
 
@@ -52,9 +46,10 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" || "${1:-}" == "" ]]; then
   exit 0
 fi
 
-if [[ ! -f "$NODE_HELPER" ]]; then
-  echo "Missing helper: $NODE_HELPER" >&2
+if [[ ! -f "$TS_ENTRY" ]]; then
+  echo "Missing entrypoint: $TS_ENTRY" >&2
   exit 1
 fi
 
-exec node "$NODE_HELPER" "$@"
+cd "$ROOT"
+exec npx vite-node "$TS_ENTRY" "$@"
