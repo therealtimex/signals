@@ -42,6 +42,11 @@ type DispatchHarness = {
   routingMessages: string[];
   chatUrls: string[];
   createdThreads: Array<{ slug: string; name: string }>;
+  launchRequests: Array<{
+    interactionMode?: string;
+    message?: string;
+    threadSlug?: string;
+  }>;
 };
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -55,17 +60,28 @@ function createDispatchHarness(input?: {
   sendFailure?: { status: number; code: string; error: string };
   onDispatch?: (jobId: string) => void;
   blankSessionId?: boolean;
+  matchingLiveChatLinkedSessionId?: string;
+  defaultAgentLookupFailure?: { status: number; error: string };
 }): DispatchHarness {
   let threadCount = 0;
   let dispatchCount = 0;
+  let workspaceLookupCount = 0;
   const routingMessages: string[] = [];
   const chatUrls: string[] = [];
   const createdThreads: Array<{ slug: string; name: string }> = [];
+  const launchRequests: DispatchHarness["launchRequests"] = [];
 
   const fetchImpl = vi.fn(async (request: string | URL | Request, init?: RequestInit) => {
     const url = String(request);
     if (url.includes("/sdk/llm/chat")) chatUrls.push(url);
     if (url.includes("/cli/get-workspace/signals")) {
+      workspaceLookupCount += 1;
+      if (workspaceLookupCount > 1 && input?.defaultAgentLookupFailure) {
+        return jsonResponse(
+          { error: input.defaultAgentLookupFailure.error },
+          input.defaultAgentLookupFailure.status,
+        );
+      }
       return jsonResponse({
         workspace: {
           slug: "signals",
@@ -112,10 +128,12 @@ function createDispatchHarness(input?: {
     if (url.includes("/sdk/desktop/runtime-sessions/launch-terminal-cli-agent")) {
       dispatchCount += 1;
       const body = JSON.parse(String(init?.body ?? "{}")) as {
+        interactionMode?: string;
         message?: string;
         threadSlug?: string;
         spawnSource?: string;
       };
+      launchRequests.push(body);
       const message = body.message ?? "";
       const jobId = message.match(/^Job: (.+)$/m)?.[1];
       if (!jobId) throw new Error("launch message omitted the persona job id");
@@ -131,10 +149,14 @@ function createDispatchHarness(input?: {
         );
       }
       input?.onDispatch?.(jobId);
+      const sessionId =
+        input?.matchingLiveChatLinkedSessionId && body.interactionMode === "chat-linked"
+          ? input.matchingLiveChatLinkedSessionId
+          : `session-${dispatchCount}`;
       return jsonResponse({
         success: true,
         descriptor: {
-          id: input?.blankSessionId ? " " : `session-${dispatchCount}`,
+          id: input?.blankSessionId ? " " : sessionId,
           linkage: {
             workspaceSlug: "signals",
             threadSlug: body.threadSlug ?? "",
@@ -147,7 +169,7 @@ function createDispatchHarness(input?: {
     throw new Error(`Unexpected RTX request: ${url}`);
   });
 
-  return { fetchImpl, routingMessages, chatUrls, createdThreads };
+  return { fetchImpl, routingMessages, chatUrls, createdThreads, launchRequests };
 }
 
 describe("PersonaAgentJob service", () => {
@@ -399,6 +421,34 @@ describe("PersonaAgentJob service", () => {
     assertNoPrivacySentinels(graceBrief);
   });
 
+  it("does not reuse a matching live chat-linked session in the dedicated thread", async () => {
+    const storageDir = mkdtempSync(join(tmpdir(), "persona-agent-live-session-"));
+    const env = testEnv(storageDir);
+    const contact = seedEvidenceContact("Fresh Session Subject");
+    const prepared = preparePersonaGeneration(contact.id, { force: true });
+    if (prepared.kind !== "ready") throw new Error("expected ready persona generation");
+    const liveSessionId = "cli-agent:existing-persona-chat";
+    const harness = createDispatchHarness({
+      matchingLiveChatLinkedSessionId: liveSessionId,
+    });
+
+    const job = await startPersonaAgentJob(contact.id, prepared, {
+      env,
+      fetchImpl: harness.fetchImpl as unknown as typeof fetch,
+      force: true,
+    });
+
+    expect(job.rtxThreadSlug).toBe("persona-thread-1");
+    expect(job.rtxRuntimeSessionId).toBe("session-1");
+    expect(job.rtxRuntimeSessionId).not.toBe(liveSessionId);
+    expect(harness.launchRequests).toEqual([
+      expect.objectContaining({
+        interactionMode: "terminal-first",
+        threadSlug: "persona-thread-1",
+      }),
+    ]);
+  });
+
   it("keeps concurrent contact jobs isolated while sharing the dedicated thread", async () => {
     const storageDir = mkdtempSync(join(tmpdir(), "persona-agent-concurrent-"));
     const env = testEnv(storageDir);
@@ -468,6 +518,40 @@ describe("PersonaAgentJob service", () => {
       errorCode: "terminal_dispatch_required",
     });
     expect(failed?.error).toContain("workspace settings");
+    expect(getWorkflowRun(failed!.workflowRunId)?.status).toBe("failed");
+  });
+
+  it("keeps a transient second workspace lookup failure distinct from no default agent", async () => {
+    const storageDir = mkdtempSync(join(tmpdir(), "persona-agent-workspace-failure-"));
+    const env = testEnv(storageDir);
+    const contact = seedEvidenceContact("Transient Workspace Failure");
+    const prepared = preparePersonaGeneration(contact.id, { force: true });
+    if (prepared.kind !== "ready") throw new Error("expected ready persona generation");
+    const harness = createDispatchHarness({
+      defaultAgentLookupFailure: {
+        status: 503,
+        error: "Workspace lookup temporarily unavailable",
+      },
+    });
+
+    await expect(
+      startPersonaAgentJob(contact.id, prepared, {
+        env,
+        fetchImpl: harness.fetchImpl as unknown as typeof fetch,
+        force: true,
+      }),
+    ).rejects.toMatchObject({
+      rtxCode: "LAUNCH_FAILED",
+      message: "RealTimeX desktop isn't running.",
+    });
+
+    const failed = getLatestPersonaJobForContact(contact.id);
+    expect(failed).toMatchObject({
+      status: "failed",
+      errorCode: "rtx_unavailable",
+      error: "RealTimeX desktop isn't running.",
+    });
+    expect(failed?.error).not.toContain("workspace settings");
     expect(getWorkflowRun(failed!.workflowRunId)?.status).toBe("failed");
   });
 

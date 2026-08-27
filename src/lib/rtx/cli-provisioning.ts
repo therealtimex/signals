@@ -271,17 +271,13 @@ export async function getWorkspaceDefaultTerminalAgent(
   const slug = workspaceSlug.trim();
   if (!slug) return null;
 
-  try {
-    const body = await rtxCliRequestOk(
-      `/cli/get-workspace/${encodeURIComponent(slug)}`,
-      { method: "GET" },
-      env,
-      fetchImpl
-    );
-    return parseWorkspaceDefaultTerminalAgent(body);
-  } catch {
-    return null;
-  }
+  const body = await rtxCliRequestOk(
+    `/cli/get-workspace/${encodeURIComponent(slug)}`,
+    { method: "GET" },
+    env,
+    fetchImpl
+  );
+  return parseWorkspaceDefaultTerminalAgent(body);
 }
 
 export async function createRtxPublishThread(

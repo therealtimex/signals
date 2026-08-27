@@ -1,5 +1,8 @@
 import { getRtxAppId, resolveRtxApiBase, type EnvLike } from "@/lib/rtx/env";
-import { getWorkspaceDefaultTerminalAgent } from "@/lib/rtx/cli-provisioning";
+import {
+  getWorkspaceDefaultTerminalAgent,
+  type WorkspaceTerminalAgentRef,
+} from "@/lib/rtx/cli-provisioning";
 import type { PublishLaunchErrorCode } from "@/lib/publish/types";
 
 export type RuntimeSessionDescriptor = {
@@ -29,6 +32,8 @@ export type LaunchTerminalAgentInput = {
   modelId?: string;
   requireWorkspaceDefaultAgent?: boolean;
   spawnSource?: string;
+  /** `terminal-first` bypasses the host's same-thread chat-linked reuse path. */
+  interactionMode?: "chat-linked" | "terminal-first";
 };
 
 export type LaunchTerminalAgentResult =
@@ -128,6 +133,7 @@ function buildLaunchRequestBody(
   input: LaunchTerminalAgentInput,
   agent: ResolvedLaunchAgent
 ): Record<string, unknown> {
+  const interactionMode = input.interactionMode ?? "chat-linked";
   return {
     workspaceSlug: input.workspaceSlug,
     threadSlug: input.threadSlug,
@@ -136,8 +142,8 @@ function buildLaunchRequestBody(
     ...(agent.providerId ? { providerId: agent.providerId } : {}),
     ...(agent.modelId ? { modelId: agent.modelId } : {}),
     agentType: "terminal-cli",
-    interactionMode: "chat-linked",
-    primarySurface: "chat",
+    interactionMode,
+    primarySurface: interactionMode === "chat-linked" ? "chat" : "terminal",
     firstTurnDelivery: "queued",
     message: input.message,
     spawnSource: input.spawnSource?.trim() || "signals-publish",
@@ -151,11 +157,19 @@ async function resolveLaunchTerminalAgent(
   env: EnvLike,
   fetchImpl: typeof fetch
 ): Promise<ResolvedLaunchAgent | null> {
-  const workspaceDefault = await getWorkspaceDefaultTerminalAgent(
-    input.workspaceSlug,
-    env,
-    fetchImpl
-  );
+  let workspaceDefault: WorkspaceTerminalAgentRef | null = null;
+  try {
+    workspaceDefault = await getWorkspaceDefaultTerminalAgent(
+      input.workspaceSlug,
+      env,
+      fetchImpl
+    );
+  } catch (error) {
+    // Existing publish callers have an explicit/env fallback. Persona jobs do
+    // not: a failed lookup must remain distinct from a successful lookup with
+    // no configured default agent.
+    if (input.requireWorkspaceDefaultAgent) throw error;
+  }
   if (input.requireWorkspaceDefaultAgent && !workspaceDefault) {
     return null;
   }
@@ -391,17 +405,17 @@ export async function launchTerminalCliAgent(
     };
   }
 
-  const agent = await resolveLaunchTerminalAgent(input, env, fetchImpl);
-  if (!agent) {
-    return {
-      success: false,
-      error:
-        "No terminal agent is configured for this workspace. Set a workspace default terminal agent in RealTimeX.",
-      errorCode: "terminal_dispatch_required",
-    };
-  }
-
   try {
+    const agent = await resolveLaunchTerminalAgent(input, env, fetchImpl);
+    if (!agent) {
+      return {
+        success: false,
+        error:
+          "No terminal agent is configured for this workspace. Set a workspace default terminal agent in RealTimeX.",
+        errorCode: "terminal_dispatch_required",
+      };
+    }
+
     const response = await fetchImpl(
       `${apiBase}/sdk/desktop/runtime-sessions/launch-terminal-cli-agent`,
       {
@@ -431,10 +445,20 @@ export async function launchTerminalCliAgent(
 
     return { success: true, descriptor };
   } catch (error) {
+    const httpStatus = (error as Error & { status?: number }).status;
+    if (httpStatus === 403) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Permission denied",
+        errorCode: "permission_required",
+        httpStatus,
+      };
+    }
     return {
       success: false,
       error: error instanceof Error ? error.message : "Launch request failed",
       errorCode: "rtx_unavailable",
+      ...(httpStatus !== undefined ? { httpStatus } : {}),
     };
   }
 }

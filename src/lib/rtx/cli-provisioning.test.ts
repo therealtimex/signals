@@ -214,6 +214,25 @@ describe("getWorkspaceDefaultTerminalAgent", () => {
       modelId: "gemini-3.7-flash-high",
     });
   });
+
+  it("rejects when the workspace lookup fails", async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response(JSON.stringify({ error: "Workspace service unavailable" }), {
+        status: 503,
+      }),
+    );
+
+    await expect(
+      getWorkspaceDefaultTerminalAgent(
+        "signals",
+        { RTX_APP_ID: "app-1", SERVER_URL: "http://127.0.0.1:3101" },
+        fetchImpl,
+      ),
+    ).rejects.toMatchObject({
+      message: "Workspace service unavailable",
+      status: 503,
+    });
+  });
 });
 
 describe("resolveNetworkSnowballDispatchThread", () => {

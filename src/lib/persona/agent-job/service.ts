@@ -358,6 +358,7 @@ export async function startPersonaAgentJob(
         reason: `Generate a persona for contact ${contactId}`,
         requireWorkspaceDefaultAgent: true,
         spawnSource: "signals-persona",
+        interactionMode: "terminal-first",
       },
       env,
       fetchImpl,
