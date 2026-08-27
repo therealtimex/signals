@@ -1,5 +1,5 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
-import { db } from "@/lib/db/client";
+import { db, type DbRunner } from "@/lib/db/client";
 import { personaJobs } from "@/lib/db/schema";
 import type { PersonaJob } from "@/lib/db/types";
 import type { PersonaEvidenceProvenance } from "@/lib/db/queries/persona-evidence";
@@ -16,6 +16,7 @@ export const PERSONA_JOB_TERMINAL_STATUSES = [
   "superseded",
 ] as const;
 export const PERSONA_JOB_STALE_MS = 30 * 60 * 1000;
+export const PERSONA_JOB_COMPLETION_LEASE_MS = 60 * 1000;
 
 export type PersonaJobView = PersonaJob & {
   provenanceParsed: PersonaEvidenceProvenance;
@@ -43,6 +44,9 @@ export function isPersonaJobStale(
   job: Pick<PersonaJob, "status" | "updatedAt">,
   nowMs = Date.now(),
 ): boolean {
+  if (job.status === "completing") {
+    return job.updatedAt * 1000 < nowMs - PERSONA_JOB_COMPLETION_LEASE_MS;
+  }
   return (
     (PERSONA_JOB_ABANDONABLE_STATUSES as readonly PersonaJobStatus[]).includes(job.status) &&
     job.updatedAt * 1000 < nowMs - PERSONA_JOB_STALE_MS
@@ -262,9 +266,10 @@ export function recordPersonaJobValidationFailure(
 export function markPersonaJobCompleted(
   jobId: string,
   input: { resultPersonaId: string; agentModel?: string | null },
+  runner: DbRunner = db,
 ): PersonaJobView | null {
   const ts = nowSec();
-  const result = db.update(personaJobs)
+  const result = runner.update(personaJobs)
     .set({
       status: "completed",
       resultPersonaId: input.resultPersonaId,
@@ -276,7 +281,9 @@ export function markPersonaJobCompleted(
     })
     .where(and(eq(personaJobs.id, jobId), eq(personaJobs.status, "completing")))
     .run();
-  return result.changes === 1 ? getPersonaJobById(jobId) : null;
+  if (result.changes !== 1) return null;
+  const row = runner.select().from(personaJobs).where(eq(personaJobs.id, jobId)).get();
+  return row ? serializePersonaJob(row) : null;
 }
 
 export type PersonaJobCompletionClaim = {

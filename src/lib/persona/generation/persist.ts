@@ -1,4 +1,5 @@
 import type { PersonaEvidenceBundle } from "@/lib/db/queries/persona-evidence";
+import type { DbRunner } from "@/lib/db/client";
 import { projectPersonaInterestsToNiches } from "@/lib/db/queries/persona-niches";
 import {
   getActivePersona,
@@ -19,7 +20,9 @@ export type PersistPersonaSynthesisResult = {
   embedErrors: string[];
 };
 
-export async function persistPersonaSynthesis(input: {
+export const DEFAULT_PERSONA_EMBED_TIMEOUT_MS = 30_000;
+
+export type PersistPersonaSynthesisInput = {
   contactId: string;
   synthesis: PersonaSynthesisOutput;
   bundle: Pick<PersonaEvidenceBundle, "provenance">;
@@ -29,7 +32,13 @@ export async function persistPersonaSynthesis(input: {
   sourceWindowExtras?: Record<string, unknown>;
   fetchImpl?: typeof fetch;
   env?: EnvLike;
-}): Promise<PersistPersonaSynthesisResult> {
+  embeddingTimeoutMs?: number;
+};
+
+export function persistPersonaSynthesisRecord(
+  input: PersistPersonaSynthesisInput,
+  runner?: DbRunner,
+): SerializedContactPersona {
   const sourceWindow = {
     promptVersion: PERSONA_PROMPT_VERSION,
     evidenceHash: input.bundle.provenance.evidenceHash,
@@ -43,42 +52,91 @@ export async function persistPersonaSynthesis(input: {
     ...input.sourceWindowExtras,
   };
 
-  const persona = upsertPersona({
-    contactId: input.contactId,
-    archetype: input.synthesis.archetype,
-    tone: input.synthesis.tone,
-    summary: input.synthesis.summary,
-    description: input.synthesis.description ?? null,
-    interests: input.synthesis.interests,
-    conversionTriggers: input.synthesis.conversionTriggers,
-    engagementFormats: input.synthesis.engagementFormats,
-    confidence: input.synthesis.confidence,
-    scope: "shared",
-    model: input.qualifiedModel,
-    sourceWindow,
-    workflowRunId: input.workflowRunId,
-  });
+  return upsertPersona(
+    {
+      contactId: input.contactId,
+      archetype: input.synthesis.archetype,
+      tone: input.synthesis.tone,
+      summary: input.synthesis.summary,
+      description: input.synthesis.description ?? null,
+      interests: input.synthesis.interests,
+      conversionTriggers: input.synthesis.conversionTriggers,
+      engagementFormats: input.synthesis.engagementFormats,
+      confidence: input.synthesis.confidence,
+      scope: "shared",
+      model: input.qualifiedModel,
+      sourceWindow,
+      workflowRunId: input.workflowRunId,
+    },
+    runner,
+  );
+}
+
+export async function finishPersonaSynthesisPersistence(input: {
+  persona: SerializedContactPersona;
+  workflowRunId: string;
+  fetchImpl?: typeof fetch;
+  env?: EnvLike;
+  embeddingTimeoutMs?: number;
+}): Promise<Omit<PersistPersonaSynthesisResult, "persona">> {
+  const persona = input.persona;
 
   const nicheResult = projectPersonaInterestsToNiches(
     persona,
     `persona:${input.workflowRunId}`,
   );
 
-  let embedded = false;
-  const embedErrors: string[] = [];
-  try {
-    const embedResult = await embedNodeIfStale("contact", input.contactId, "persona", {
-      fetchImpl: input.fetchImpl,
-      env: input.env,
-    });
-    embedded = embedResult.embedded;
-  } catch (error) {
-    if (error instanceof EmbeddingUnavailableError) {
-      embedErrors.push(error.message);
-    } else {
+  const timeoutMs = Math.max(0, input.embeddingTimeoutMs ?? DEFAULT_PERSONA_EMBED_TIMEOUT_MS);
+  const controller = new AbortController();
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timedOut = new Promise<{ embedded: false; embedErrors: string[] }>((resolve) => {
+    timeout = setTimeout(() => {
+      resolve({
+        embedded: false,
+        embedErrors: [`Persona embedding timed out after ${timeoutMs}ms; the persona was saved.`],
+      });
+      // Settle the timeout branch before aborting so an AbortError cannot win the race.
+      controller.abort();
+    }, timeoutMs);
+  });
+  const embedding = embedNodeIfStale("contact", persona.contactId, "persona", {
+    fetchImpl: input.fetchImpl,
+    env: input.env,
+    signal: controller.signal,
+  })
+    .then((embedResult) => ({ embedded: embedResult.embedded, embedErrors: [] as string[] }))
+    .catch((error: unknown) => {
+      if (error instanceof EmbeddingUnavailableError) {
+        return { embedded: false as const, embedErrors: [error.message] };
+      }
       throw error;
-    }
+    });
+
+  let embeddingResult: { embedded: boolean; embedErrors: string[] };
+  try {
+    embeddingResult = await Promise.race([embedding, timedOut]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
   }
+
+  return {
+    nicheEdgesUpserted: nicheResult.edgesUpserted,
+    embedded: embeddingResult.embedded,
+    embedErrors: embeddingResult.embedErrors,
+  };
+}
+
+export async function persistPersonaSynthesis(
+  input: PersistPersonaSynthesisInput,
+): Promise<PersistPersonaSynthesisResult> {
+  const persona = persistPersonaSynthesisRecord(input);
+  const derivatives = await finishPersonaSynthesisPersistence({
+    persona,
+    workflowRunId: input.workflowRunId,
+    fetchImpl: input.fetchImpl,
+    env: input.env,
+    embeddingTimeoutMs: input.embeddingTimeoutMs,
+  });
 
   const saved = getActivePersona(input.contactId, { includeLocalOnly: true });
   if (!saved) {
@@ -87,8 +145,6 @@ export async function persistPersonaSynthesis(input: {
 
   return {
     persona: saved,
-    nicheEdgesUpserted: nicheResult.edgesUpserted,
-    embedded,
-    embedErrors,
+    ...derivatives,
   };
 }

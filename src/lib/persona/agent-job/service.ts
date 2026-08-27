@@ -4,6 +4,7 @@ import {
   getActivePersonaJobForContact,
   getPersonaJobById,
   isPersonaJobTerminal,
+  markPersonaJobCompleted,
   markPersonaJobFailed,
   markPersonaJobRunning,
   markPersonaJobSuperseded,
@@ -17,7 +18,7 @@ import {
   PersonaSynthesisError,
   type PersonaBackendErrorCode,
 } from "@/lib/db/queries/persona-errors";
-import { getActivePersona } from "@/lib/db/queries/personas";
+import { getActivePersona, getPersonaByWorkflowRunId } from "@/lib/db/queries/personas";
 import { createWorkflowRun, getWorkflowRun, updateWorkflowRun } from "@/lib/db/queries/workflows";
 import type { PreparedPersonaGeneration } from "@/lib/persona/generation/prepare";
 import { PERSONA_PROMPT_VERSION } from "@/lib/persona/synthesis";
@@ -112,6 +113,57 @@ function completeRunAsFailed(job: PersonaJobView, error: string): void {
   });
 }
 
+export function reconcileStalePersonaJobCompletion(
+  jobId: string,
+  opts: Pick<StartPersonaAgentJobOptions, "env" | "fetchImpl"> = {},
+): PersonaJobView | null {
+  const job = getPersonaJobById(jobId);
+  if (!job || job.status !== "completing" || !job.stale) return job;
+
+  const persisted = getPersonaByWorkflowRunId(job.workflowRunId);
+  if (persisted) {
+    const completed = markPersonaJobCompleted(job.id, {
+      resultPersonaId: persisted.id,
+      agentModel: persisted.model,
+    });
+    if (completed?.status === "completed") {
+      updateWorkflowRun(completed.workflowRunId, {
+        status: "completed",
+        model: persisted.model,
+        inputTokens: 0,
+        outputTokens: 0,
+        costUsd: 0,
+        result: JSON.stringify({
+          personaId: persisted.id,
+          evidenceHash: completed.evidenceHash,
+          supersededPersonaId: completed.supersededPersonaId,
+          recoveredCompletion: true,
+        }),
+        errors: "[]",
+        completedAt: nowSec(),
+      });
+      scheduleTerminalSessionRelease(
+        completed.rtxRuntimeSessionId,
+        opts.env,
+        opts.fetchImpl,
+      );
+    }
+    return getPersonaJobById(job.id);
+  }
+
+  const error = "Persona completion was interrupted before its result was saved. Retry generation.";
+  const failed = markPersonaJobFailed(job.id, {
+    error,
+    errorCode: "completion_abandoned",
+    allowedStatuses: ["completing"],
+  });
+  if (failed?.status === "failed") {
+    completeRunAsFailed(failed, error);
+    scheduleTerminalSessionRelease(failed.rtxRuntimeSessionId, opts.env, opts.fetchImpl);
+  }
+  return getPersonaJobById(job.id);
+}
+
 function failLaunchAndThrow(job: PersonaJobView, error: string, errorCode: string): never {
   const actionable = actionableLaunchFailure(errorCode, error);
   const failed = markPersonaJobFailed(job.id, { error: actionable, errorCode }) ?? job;
@@ -124,7 +176,12 @@ export async function startPersonaAgentJob(
   prepared: ReadyPersonaGeneration,
   opts: StartPersonaAgentJobOptions = {},
 ): Promise<PersonaJobView> {
-  const existing = getActivePersonaJobForContact(contactId);
+  let existing = getActivePersonaJobForContact(contactId);
+  if (existing?.status === "completing" && existing.stale) {
+    const reconciled = reconcileStalePersonaJobCompletion(existing.id, opts);
+    if (reconciled?.status === "completed") return reconciled;
+    existing = getActivePersonaJobForContact(contactId);
+  }
   if (existing && !existing.stale) {
     return existing;
   }
@@ -256,9 +313,12 @@ export async function awaitPersonaJob(
   const deadline = Date.now() + Math.max(0, timeoutMs);
 
   for (;;) {
-    const job = getPersonaJobById(jobId);
+    let job = getPersonaJobById(jobId);
     if (!job) {
       throw new Error(`Persona job not found: ${jobId}`);
+    }
+    if (job.status === "completing" && job.stale) {
+      job = reconcileStalePersonaJobCompletion(job.id) ?? job;
     }
     if (isPersonaJobTerminal(job.status)) {
       return job;

@@ -10,14 +10,17 @@ import { createContact } from "@/lib/db/queries/contacts";
 import { createIdentity } from "@/lib/db/queries/identities";
 import { logInteraction } from "@/lib/db/queries/interactions";
 import {
+  claimPersonaJobCompletion,
   getLatestPersonaJobForContact,
   getPersonaJobById,
   markPersonaJobTimedOut,
+  PERSONA_JOB_COMPLETION_LEASE_MS,
 } from "@/lib/db/queries/persona-jobs";
+import { upsertPersona } from "@/lib/db/queries/personas";
 import { getWorkflowRun } from "@/lib/db/queries/workflows";
 import { personaJobs } from "@/lib/db/schema";
 import { preparePersonaGeneration } from "@/lib/persona/generation/prepare";
-import { startPersonaAgentJob } from "@/lib/persona/agent-job/service";
+import { awaitPersonaJob, startPersonaAgentJob } from "@/lib/persona/agent-job/service";
 import { generatePersona } from "@/lib/workflows/generate-persona";
 import { resetCoreTables } from "@/test/db";
 import { assertNoPrivacySentinels, PRIVACY_SENTINELS } from "@/test/privacy-sentinels";
@@ -206,6 +209,95 @@ describe("PersonaAgentJob service", () => {
       errorCode: "superseded",
     });
     expect(harness.routingMessages).toHaveLength(2);
+  });
+
+  it("fails an abandoned completion lease and allows a new generation", async () => {
+    const storageDir = mkdtempSync(join(tmpdir(), "persona-agent-abandoned-completion-"));
+    const env = testEnv(storageDir);
+    const contact = seedEvidenceContact("Abandoned Completion Subject");
+    const prepared = preparePersonaGeneration(contact.id, { force: true });
+    if (prepared.kind !== "ready") throw new Error("expected ready persona generation");
+    const harness = createDispatchHarness();
+
+    const first = await startPersonaAgentJob(contact.id, prepared, {
+      env,
+      fetchImpl: harness.fetchImpl as unknown as typeof fetch,
+      force: true,
+    });
+    expect(claimPersonaJobCompletion(first.id)).toMatchObject({
+      claimed: true,
+      job: { status: "completing" },
+    });
+    db.update(personaJobs)
+      .set({
+        updatedAt: Math.floor((Date.now() - PERSONA_JOB_COMPLETION_LEASE_MS - 1_000) / 1_000),
+      })
+      .where(eq(personaJobs.id, first.id))
+      .run();
+    expect(getPersonaJobById(first.id)).toMatchObject({ status: "completing", stale: true });
+
+    const abandoned = await awaitPersonaJob(first.id, { timeoutMs: 0, pollMs: 0 });
+    expect(abandoned).toMatchObject({
+      status: "failed",
+      errorCode: "completion_abandoned",
+      stale: false,
+    });
+    expect(getWorkflowRun(first.workflowRunId)?.status).toBe("failed");
+
+    const retry = await startPersonaAgentJob(contact.id, prepared, {
+      env,
+      fetchImpl: harness.fetchImpl as unknown as typeof fetch,
+      force: true,
+    });
+    expect(retry).toMatchObject({ status: "running" });
+    expect(retry.id).not.toBe(first.id);
+    expect(harness.routingMessages).toHaveLength(2);
+  });
+
+  it("recovers a persisted persona from an abandoned completion lease", async () => {
+    const storageDir = mkdtempSync(join(tmpdir(), "persona-agent-recovered-completion-"));
+    const env = testEnv(storageDir);
+    const contact = seedEvidenceContact("Recovered Completion Subject");
+    const prepared = preparePersonaGeneration(contact.id, { force: true });
+    if (prepared.kind !== "ready") throw new Error("expected ready persona generation");
+    const harness = createDispatchHarness();
+
+    const job = await startPersonaAgentJob(contact.id, prepared, {
+      env,
+      fetchImpl: harness.fetchImpl as unknown as typeof fetch,
+      force: true,
+    });
+    expect(claimPersonaJobCompletion(job.id).claimed).toBe(true);
+    const persona = upsertPersona({
+      contactId: contact.id,
+      archetype: validSynthesis.archetype,
+      tone: validSynthesis.tone,
+      summary: validSynthesis.summary,
+      interests: validSynthesis.interests,
+      conversionTriggers: validSynthesis.conversionTriggers,
+      engagementFormats: validSynthesis.engagementFormats,
+      confidence: validSynthesis.confidence,
+      model: "codex:gpt-5.6-sol",
+      workflowRunId: job.workflowRunId,
+      sourceWindow: { jobId: job.id },
+    });
+    db.update(personaJobs)
+      .set({
+        updatedAt: Math.floor((Date.now() - PERSONA_JOB_COMPLETION_LEASE_MS - 1_000) / 1_000),
+      })
+      .where(eq(personaJobs.id, job.id))
+      .run();
+
+    const recovered = await awaitPersonaJob(job.id, { timeoutMs: 0, pollMs: 0 });
+    expect(recovered).toMatchObject({
+      status: "completed",
+      resultPersonaId: persona.id,
+      stale: false,
+    });
+    expect(getWorkflowRun(job.workflowRunId)).toMatchObject({
+      status: "completed",
+      model: "codex:gpt-5.6-sol",
+    });
   });
 
   it("uses distinct jobs, fresh threads, and isolated brief content for sequential contacts", async () => {

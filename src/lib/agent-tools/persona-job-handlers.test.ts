@@ -10,6 +10,7 @@ import { db } from "@/lib/db/client";
 import { createIdentity } from "@/lib/db/queries/identities";
 import { assemblePersonaEvidence } from "@/lib/db/queries/persona-evidence";
 import {
+  claimPersonaJobCompletion,
   createPersonaJob,
   getPersonaJobById,
   markPersonaJobRunning,
@@ -245,10 +246,36 @@ describe("PersonaAgentJob agent-tool handlers", () => {
     ]);
 
     expect(results.filter((result) => "idempotent" in result && result.idempotent)).toHaveLength(1);
-    expect(results.filter((result) => result.status === "completed")).toHaveLength(1);
+    expect(results).toEqual([
+      expect.objectContaining({ accepted: true, status: "completed" }),
+      expect.objectContaining({ accepted: true, idempotent: true, status: "completed" }),
+    ]);
     expect(db.select().from(contactPersonas).where(eq(contactPersonas.contactId, contact.id)).all())
       .toHaveLength(1);
     expect(getPersonaJobById(job.id)?.status).toBe("completed");
+  });
+
+  it("does not call an unfinished completion idempotently accepted", async () => {
+    const { contact, job } = seedRunningJob();
+    expect(claimPersonaJobCompletion(job.id)).toMatchObject({
+      claimed: true,
+      job: { status: "completing" },
+    });
+
+    const duplicate = await handleCompletePersonaJob({
+      jobId: job.id,
+      success: true,
+      synthesis: validSynthesis,
+    });
+
+    expect(duplicate).toMatchObject({
+      success: false,
+      code: "PERSONA_JOB_COMPLETION_IN_PROGRESS",
+      retryable: true,
+      status: "completing",
+    });
+    expect(db.select().from(contactPersonas).where(eq(contactPersonas.contactId, contact.id)).all())
+      .toHaveLength(0);
   });
 
   it("returns evidence only while the current hash matches the frozen job hash", async () => {

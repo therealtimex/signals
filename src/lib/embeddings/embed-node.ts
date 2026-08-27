@@ -39,7 +39,7 @@ export async function embedNodeIfStale(
   nodeType: GraphNodeType,
   nodeId: string,
   kind: EmbeddingKind,
-  opts?: { force?: boolean; fetchImpl?: typeof fetch; env?: EnvLike },
+  opts?: { force?: boolean; fetchImpl?: typeof fetch; env?: EnvLike; signal?: AbortSignal },
 ): Promise<EmbedNodeResult> {
   const rawText = assembleEmbedText(nodeType, nodeId, kind);
   const text = truncateEmbedText(rawText);
@@ -57,7 +57,12 @@ export async function embedNodeIfStale(
     }
   }
 
-  const embedResult = await rtxEmbed([text], opts?.fetchImpl, opts?.env ?? process.env);
+  const embedResult = await rtxEmbed(
+    [text],
+    opts?.fetchImpl,
+    opts?.env ?? process.env,
+    opts?.signal,
+  );
   if (!embedResult.success) {
     throw new EmbeddingUnavailableError(embedResult.code, embedResult.error);
   }

@@ -3,6 +3,7 @@ import {
   completePersonaJobSchema,
   getPersonaJobSchema,
 } from "@/lib/agent-tools/schemas";
+import { db } from "@/lib/db/client";
 import { assemblePersonaEvidence } from "@/lib/db/queries/persona-evidence";
 import {
   claimPersonaJobCompletion,
@@ -16,8 +17,12 @@ import { getActivePersona } from "@/lib/db/queries/personas";
 import { updateWorkflowRun } from "@/lib/db/queries/workflows";
 import {
   PERSONA_AGENT_JOB_MAX_ATTEMPTS,
+  reconcileStalePersonaJobCompletion,
 } from "@/lib/persona/agent-job/service";
-import { persistPersonaSynthesis } from "@/lib/persona/generation/persist";
+import {
+  finishPersonaSynthesisPersistence,
+  persistPersonaSynthesisRecord,
+} from "@/lib/persona/generation/persist";
 import {
   formatSynthesisValidationErrors,
   parsePersonaSynthesisJson,
@@ -57,14 +62,27 @@ function idempotentJobResponse(job: NonNullable<ReturnType<typeof getPersonaJobB
   };
 }
 
+function completionInProgressResponse(jobId: string) {
+  return {
+    success: false,
+    code: "PERSONA_JOB_COMPLETION_IN_PROGRESS",
+    error: `Persona job ${jobId} is saving its result; retry after it reaches a terminal state.`,
+    retryable: true,
+    status: "completing",
+  };
+}
+
 export async function handleGetPersonaJob(input: z.infer<typeof getPersonaJobSchema>) {
-  const job = getPersonaJobById(input.jobId);
+  let job = getPersonaJobById(input.jobId);
   if (!job) {
     return {
       success: false,
       code: "PERSONA_JOB_NOT_FOUND",
       error: `Persona job not found: ${input.jobId}`,
     };
+  }
+  if (job.status === "completing" && job.stale) {
+    job = reconcileStalePersonaJobCompletion(job.id) ?? job;
   }
 
   let evidence: ReturnType<typeof assemblePersonaEvidence>["evidence"] | null = null;
@@ -120,7 +138,12 @@ export async function handleCompletePersonaJob(
   }
 
   if (job.status === "completing" && input.success) {
-    return idempotentJobResponse(job);
+    const reconciled = reconcileStalePersonaJobCompletion(job.id);
+    if (reconciled?.status === "completed") return idempotentJobResponse(reconciled);
+    if (reconciled?.status !== "completing") {
+      return inactiveJobResponse(job.id, reconciled?.status ?? job.status);
+    }
+    return completionInProgressResponse(job.id);
   }
 
   if (job.status !== "running" && !(job.status === "timeout" && input.success)) {
@@ -170,8 +193,14 @@ export async function handleCompletePersonaJob(
 
   const claim = claimPersonaJobCompletion(job.id);
   if (!claim.claimed) {
-    if (claim.job?.status === "completed" || claim.job?.status === "completing") {
-      return idempotentJobResponse(claim.job);
+    if (claim.job?.status === "completed") return idempotentJobResponse(claim.job);
+    if (claim.job?.status === "completing") {
+      const reconciled = reconcileStalePersonaJobCompletion(claim.job.id);
+      if (reconciled?.status === "completed") return idempotentJobResponse(reconciled);
+      if (reconciled?.status === "completing") {
+        return completionInProgressResponse(claim.job.id);
+      }
+      return inactiveJobResponse(job.id, reconciled?.status ?? claim.job.status);
     }
     return inactiveJobResponse(job.id, claim.job?.status ?? job.status);
   }
@@ -194,23 +223,48 @@ export async function handleCompletePersonaJob(
   }
 
   const qualifiedModel = input.model?.trim() || claimedJob.agentModel || "terminal-agent:unknown";
-  let persisted: Awaited<ReturnType<typeof persistPersonaSynthesis>>;
+  let persisted: ReturnType<typeof persistPersonaSynthesisRecord>;
+  let completed: NonNullable<ReturnType<typeof markPersonaJobCompleted>>;
   try {
-    persisted = await persistPersonaSynthesis({
-      contactId: claimedJob.contactId,
-      synthesis: parsed.data as PersonaSynthesisOutput,
-      bundle: { provenance: claimedJob.provenanceParsed },
-      activePersona,
-      qualifiedModel,
-      workflowRunId: claimedJob.workflowRunId,
-      sourceWindowExtras: {
-        generator: "terminal_agent",
-        jobId: claimedJob.id,
-        agentPromptVersion: claimedJob.agentPromptVersion,
-      },
+    const saved = db.transaction((tx) => {
+      const persona = persistPersonaSynthesisRecord(
+        {
+          contactId: claimedJob.contactId,
+          synthesis: parsed.data as PersonaSynthesisOutput,
+          bundle: { provenance: claimedJob.provenanceParsed },
+          activePersona,
+          qualifiedModel,
+          workflowRunId: claimedJob.workflowRunId,
+          sourceWindowExtras: {
+            generator: "terminal_agent",
+            jobId: claimedJob.id,
+            agentPromptVersion: claimedJob.agentPromptVersion,
+          },
+        },
+        tx,
+      );
+      const finished = markPersonaJobCompleted(
+        claimedJob.id,
+        {
+          resultPersonaId: persona.id,
+          agentModel: qualifiedModel,
+        },
+        tx,
+      );
+      if (!finished) {
+        throw new Error("Persona completion claim was lost before persistence committed");
+      }
+      return { persona, completed: finished };
     });
+    persisted = saved.persona;
+    completed = saved.completed;
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to persist persona synthesis";
+    const current = getPersonaJobById(claimedJob.id);
+    if (current?.status === "completed") return idempotentJobResponse(current);
+    if (current?.status !== "completing") {
+      return inactiveJobResponse(claimedJob.id, current?.status ?? claimedJob.status);
+    }
     const failed = markPersonaJobFailed(claimedJob.id, {
       error: message,
       errorCode: "agent_failed",
@@ -223,14 +277,6 @@ export async function handleCompletePersonaJob(
     return { success: false, code: "PERSISTENCE_ERROR", error: message, status: "failed" };
   }
 
-  const completed = markPersonaJobCompleted(claimedJob.id, {
-    resultPersonaId: persisted.persona.id,
-    agentModel: qualifiedModel,
-  });
-  if (!completed || completed.status !== "completed") {
-    return inactiveJobResponse(job.id, completed?.status ?? job.status);
-  }
-
   updateWorkflowRun(completed.workflowRunId, {
     status: "completed",
     model: qualifiedModel,
@@ -238,20 +284,47 @@ export async function handleCompletePersonaJob(
     outputTokens: 0,
     costUsd: 0,
     result: JSON.stringify({
-      personaId: persisted.persona.id,
+      personaId: persisted.id,
       evidenceHash: completed.evidenceHash,
       supersededPersonaId: completed.supersededPersonaId,
-      nicheEdgesUpserted: persisted.nicheEdgesUpserted,
-      embedded: persisted.embedded,
+      nicheEdgesUpserted: 0,
+      embedded: false,
     }),
-    errors: JSON.stringify(persisted.embedErrors),
+    errors: "[]",
     completedAt: nowSec(),
   });
   scheduleTerminalSessionRelease(completed.rtxRuntimeSessionId);
 
+  let derivatives = {
+    nicheEdgesUpserted: 0,
+    embedded: false,
+    embedErrors: [] as string[],
+  };
+  try {
+    derivatives = await finishPersonaSynthesisPersistence({
+      persona: persisted,
+      workflowRunId: completed.workflowRunId,
+    });
+  } catch (error) {
+    derivatives.embedErrors.push(
+      error instanceof Error ? error.message : "Failed to finish persona indexing",
+    );
+  }
+
+  updateWorkflowRun(completed.workflowRunId, {
+    result: JSON.stringify({
+      personaId: persisted.id,
+      evidenceHash: completed.evidenceHash,
+      supersededPersonaId: completed.supersededPersonaId,
+      nicheEdgesUpserted: derivatives.nicheEdgesUpserted,
+      embedded: derivatives.embedded,
+    }),
+    errors: JSON.stringify(derivatives.embedErrors),
+  });
+
   return {
     accepted: true,
-    personaId: persisted.persona.id,
+    personaId: persisted.id,
     supersededPersonaId: completed.supersededPersonaId,
     status: "completed",
   };
