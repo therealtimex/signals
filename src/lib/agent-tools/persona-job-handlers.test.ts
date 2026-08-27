@@ -165,7 +165,7 @@ describe("PersonaAgentJob agent-tool handlers", () => {
     });
   });
 
-  it("reconciles a completed job whose workflow and terminal effects were interrupted", async () => {
+  it("reconciles a completed job without releasing the shared terminal session", async () => {
     const { contact, bundle, job, run } = seedRunningJob("session-after-commit-crash");
     expect(claimPersonaJobCompletion(job.id).claimed).toBe(true);
     const persona = db.transaction((tx) => {
@@ -199,9 +199,7 @@ describe("PersonaAgentJob agent-tool handlers", () => {
     expect(getPersonaJobById(job.id)?.status).toBe("completed");
     expect(getWorkflowRun(run.id)?.status).toBe("running");
 
-    const releaseSpy = vi
-      .spyOn(resourceTeardown, "scheduleTerminalSessionRelease")
-      .mockReturnValue({ scheduled: true, sessionId: "session-after-commit-crash" });
+    const releaseSpy = vi.spyOn(resourceTeardown, "scheduleTerminalSessionRelease");
 
     expect(await handleGetPersonaJob({ jobId: job.id })).toMatchObject({
       status: "completed",
@@ -214,13 +212,10 @@ describe("PersonaAgentJob agent-tool handlers", () => {
       personaId: persona.id,
       recoveredCompletion: true,
     });
-    expect(releaseSpy).toHaveBeenCalledWith(
-      "session-after-commit-crash",
-      undefined,
-      undefined,
-    );
-    await handleGetPersonaJob({ jobId: job.id });
-    expect(releaseSpy).toHaveBeenCalledTimes(1);
+    expect(await handleGetPersonaJob({ jobId: job.id })).toMatchObject({
+      status: "completed",
+    });
+    expect(releaseSpy).not.toHaveBeenCalled();
   });
 
   it("accepts a valid callback after the waiter marked the job timed out", async () => {

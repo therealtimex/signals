@@ -18,7 +18,7 @@ import { updateWorkflowRun } from "@/lib/db/queries/workflows";
 import {
   completePersonaJobWorkflow,
   PERSONA_AGENT_JOB_MAX_ATTEMPTS,
-  reconcilePersonaJobTerminalEffects,
+  reconcilePersonaJobCompletionEffects,
   reconcileStalePersonaJobCompletion,
 } from "@/lib/persona/agent-job/service";
 import {
@@ -31,7 +31,6 @@ import {
   personaSynthesisSchema,
   type PersonaSynthesisOutput,
 } from "@/lib/persona/synthesis";
-import { scheduleTerminalSessionRelease } from "@/lib/rtx/resource-teardown";
 
 function nowSec(): number {
   return Math.floor(Date.now() / 1000);
@@ -87,7 +86,7 @@ export async function handleGetPersonaJob(input: z.infer<typeof getPersonaJobSch
     job = reconcileStalePersonaJobCompletion(job.id) ?? job;
   }
   if (job.status === "completed") {
-    job = reconcilePersonaJobTerminalEffects(job.id) ?? job;
+    job = reconcilePersonaJobCompletionEffects(job.id) ?? job;
   }
 
   let evidence: ReturnType<typeof assemblePersonaEvidence>["evidence"] | null = null;
@@ -139,7 +138,7 @@ export async function handleCompletePersonaJob(
   }
 
   if (job.status === "completed") {
-    return idempotentJobResponse(reconcilePersonaJobTerminalEffects(job.id) ?? job);
+    return idempotentJobResponse(reconcilePersonaJobCompletionEffects(job.id) ?? job);
   }
 
   if (job.status === "completing" && input.success) {
@@ -164,7 +163,6 @@ export async function handleCompletePersonaJob(
     });
     if (failed?.status === "failed") {
       failWorkflowRun(failed.workflowRunId, error);
-      scheduleTerminalSessionRelease(failed.rtxRuntimeSessionId);
     }
     return { accepted: true, status: failed?.status ?? job.status, error };
   }
@@ -185,7 +183,6 @@ export async function handleCompletePersonaJob(
     const attemptsRemaining = Math.max(0, PERSONA_AGENT_JOB_MAX_ATTEMPTS - attempts);
     if (updated?.status === "failed") {
       failWorkflowRun(updated.workflowRunId, updated.error ?? synthesisErrors);
-      scheduleTerminalSessionRelease(updated.rtxRuntimeSessionId);
     }
     return {
       success: false,
@@ -200,7 +197,7 @@ export async function handleCompletePersonaJob(
   if (!claim.claimed) {
     if (claim.job?.status === "completed") {
       return idempotentJobResponse(
-        reconcilePersonaJobTerminalEffects(claim.job.id) ?? claim.job,
+        reconcilePersonaJobCompletionEffects(claim.job.id) ?? claim.job,
       );
     }
     if (claim.job?.status === "completing") {
@@ -226,7 +223,6 @@ export async function handleCompletePersonaJob(
     });
     if (failed?.status === "failed") {
       failWorkflowRun(failed.workflowRunId, error);
-      scheduleTerminalSessionRelease(failed.rtxRuntimeSessionId);
     }
     return { success: false, code: "PERSONA_SCOPE_ERROR", error, status: "failed" };
   }
@@ -275,7 +271,7 @@ export async function handleCompletePersonaJob(
     const current = getPersonaJobById(claimedJob.id);
     if (current?.status === "completed") {
       return idempotentJobResponse(
-        reconcilePersonaJobTerminalEffects(current.id) ?? current,
+        reconcilePersonaJobCompletionEffects(current.id) ?? current,
       );
     }
     if (current?.status !== "completing") {
@@ -288,12 +284,11 @@ export async function handleCompletePersonaJob(
     });
     if (failed?.status === "failed") {
       failWorkflowRun(failed.workflowRunId, message);
-      scheduleTerminalSessionRelease(failed.rtxRuntimeSessionId);
     }
     return { success: false, code: "PERSISTENCE_ERROR", error: message, status: "failed" };
   }
 
-  reconcilePersonaJobTerminalEffects(completed.id);
+  reconcilePersonaJobCompletionEffects(completed.id);
 
   let derivatives = {
     nicheEdgesUpserted: 0,
