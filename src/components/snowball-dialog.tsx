@@ -15,6 +15,7 @@ import { NetworkSnowballFields } from "@/app/dashboard/workflows/network-snowbal
 import {
   buildNetworkSnowballRunConfig,
   buildNetworkSnowballTemplateConfig,
+  NETWORK_SNOWBALL_TEMPLATE_NAME,
   readNetworkSnowballConfig,
   type NetworkSnowballConfig,
   type SnowballSeedType,
@@ -79,10 +80,14 @@ function SnowballDialogContent({
 
     try {
       // 1. Locate the Network Snowball template
-      const templatesRes = await fetch("/api/workflows/templates");
+      const templatesRes = await fetch("/api/workflows/templates?isSystem=true&pageSize=50");
       if (!templatesRes.ok) throw new Error("Failed to load workflow templates");
-      const data = (await templatesRes.json()) as { templates: Array<{ id: string; name: string }> };
-      const template = data.templates.find((t) => t.name === "Network Snowball");
+      const templatesPayload = (await templatesRes.json()) as {
+        data?: Array<{ id: string; name: string }>;
+      };
+      const template = (templatesPayload.data ?? []).find(
+        (t) => t.name === NETWORK_SNOWBALL_TEMPLATE_NAME,
+      );
 
       if (!template) {
         throw new Error("Network Snowball template not found. Please re-seed templates.");
