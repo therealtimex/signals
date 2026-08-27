@@ -25,7 +25,7 @@ import {
 } from "@/lib/workflows/snowball-seed-scout";
 
 /** Bump this when seed template prompts change to trigger updates on existing installs. */
-const SEED_VERSION = 22;
+const SEED_VERSION = 23;
 
 export const CONTACT_PROFILE_PIPELINE_TEMPLATE_NAME = "Contact profile pipeline";
 
