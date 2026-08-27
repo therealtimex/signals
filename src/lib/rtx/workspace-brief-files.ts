@@ -123,7 +123,7 @@ export function buildPersonaJobBriefRoutingMessage(
       "State: ready",
       "Type: persona-brief",
       "Context: Follow workspace guidelines and operating model in AGENTS.md.",
-      "Required: Read the brief file before acting and follow its instructions. This job is stateless; ignore prior threads.",
+      "Required: Read the brief file before acting and follow its instructions. This job is stateless; ignore all prior jobs and messages in this shared thread.",
       `File: @persona-jobs/${jobIdOrInput}/brief.md`,
     ].join("\n");
   }
@@ -137,7 +137,7 @@ export function buildPersonaJobBriefRoutingMessage(
     "State: ready",
     "Type: persona-brief",
     "Context: Follow workspace guidelines and operating model in AGENTS.md.",
-    "Required: Read the brief file before acting and follow its instructions. This job is stateless; ignore prior threads.",
+    "Required: Read the brief file before acting and follow its instructions. This job is stateless; ignore all prior jobs and messages in this shared thread.",
     `File: ${targetPath}`,
   ].join("\n");
 }

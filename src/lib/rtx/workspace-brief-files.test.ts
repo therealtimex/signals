@@ -120,7 +120,7 @@ describe("workspace brief files", () => {
       "State: ready",
       "Type: persona-brief",
       "Context: Follow workspace guidelines and operating model in AGENTS.md.",
-      "Required: Read the brief file before acting and follow its instructions. This job is stateless; ignore prior threads.",
+      "Required: Read the brief file before acting and follow its instructions. This job is stateless; ignore all prior jobs and messages in this shared thread.",
       "File: @/path/to/workspace/persona-jobs/pa_1/brief.md",
     ].join("\n"));
     expect(personaJobBriefRelativePath("pa_1")).toBe("persona-jobs/pa_1/brief.md");

@@ -271,17 +271,13 @@ export async function getWorkspaceDefaultTerminalAgent(
   const slug = workspaceSlug.trim();
   if (!slug) return null;
 
-  try {
-    const body = await rtxCliRequestOk(
-      `/cli/get-workspace/${encodeURIComponent(slug)}`,
-      { method: "GET" },
-      env,
-      fetchImpl
-    );
-    return parseWorkspaceDefaultTerminalAgent(body);
-  } catch {
-    return null;
-  }
+  const body = await rtxCliRequestOk(
+    `/cli/get-workspace/${encodeURIComponent(slug)}`,
+    { method: "GET" },
+    env,
+    fetchImpl
+  );
+  return parseWorkspaceDefaultTerminalAgent(body);
 }
 
 export async function createRtxPublishThread(
@@ -312,17 +308,10 @@ export async function createRtxPublishThread(
   return threadSlug;
 }
 
-export async function createRtxPersonaThread(
-  workspaceSlug: string,
-  threadName: string,
-  env: EnvLike = process.env,
-  fetchImpl: typeof fetch = fetch,
-): Promise<string> {
-  return createRtxPublishThread(workspaceSlug, threadName, env, fetchImpl);
-}
-
 export const NETWORK_SNOWBALL_DISPATCH_THREAD_SLUG = "network-snowball";
 export const NETWORK_SNOWBALL_DISPATCH_THREAD_NAME = "Network Snowball";
+export const PERSONA_GENERATION_DISPATCH_THREAD_SLUG = "persona-generation";
+export const PERSONA_GENERATION_DISPATCH_THREAD_NAME = "Persona Generation";
 
 type ListedThread = { slug?: string; name?: string };
 
@@ -357,59 +346,108 @@ export async function listRtxWorkspaceThreads(
   }
 }
 
+type DedicatedDispatchThread = {
+  preferredSlug: string;
+  threadName: string;
+  errorLabel: string;
+};
+
+/**
+ * In-flight resolutions, keyed by workspace and dedicated thread.
+ *
+ * Two concurrent dispatches in one process would otherwise each observe their
+ * thread as missing and create their own. Sharing the in-flight promise makes the
+ * common case single-shot; the post-create relist covers separate processes.
+ */
+const inFlightThreadResolutions = new Map<string, Promise<string>>();
+
 /**
  * Resolve the workspace thread Snowball calendar dispatches should hand off to.
  *
  * Prefers the legacy `network-snowball` slug when present, otherwise reuses an
  * existing "Network Snowball" thread, and only creates one when none exists.
  */
-/**
- * In-flight resolutions, keyed by workspace.
- *
- * Two concurrent enqueue batches in one process would otherwise each observe the
- * thread as missing and create their own. Sharing the in-flight promise makes the
- * common case single-shot; the post-create relist covers separate processes.
- */
-const inFlightThreadResolutions = new Map<string, Promise<string>>();
-
 export async function resolveNetworkSnowballDispatchThread(
   workspaceSlug: string,
   env: EnvLike = process.env,
   fetchImpl: typeof fetch = fetch,
 ): Promise<string> {
-  const workspace = workspaceSlug.trim();
-  if (!workspace) {
-    throw new Error("Workspace slug is required to resolve a Network Snowball thread");
-  }
-
-  const inFlight = inFlightThreadResolutions.get(workspace);
-  if (inFlight) return inFlight;
-
-  const resolution = resolveNetworkSnowballDispatchThreadUncached(
-    workspace,
+  return resolveDedicatedDispatchThread(
+    workspaceSlug,
+    {
+      preferredSlug: NETWORK_SNOWBALL_DISPATCH_THREAD_SLUG,
+      threadName: NETWORK_SNOWBALL_DISPATCH_THREAD_NAME,
+      errorLabel: "Network Snowball",
+    },
     env,
     fetchImpl,
-  ).finally(() => {
-    inFlightThreadResolutions.delete(workspace);
-  });
-  inFlightThreadResolutions.set(workspace, resolution);
-  return resolution;
+  );
 }
 
-async function resolveNetworkSnowballDispatchThreadUncached(
-  workspace: string,
+/**
+ * Resolve the persistent thread used as the activity timeline for persona jobs.
+ * Each dispatch still launches a fresh terminal runtime session with its own job brief.
+ */
+export async function resolvePersonaGenerationDispatchThread(
+  workspaceSlug: string,
+  env: EnvLike = process.env,
+  fetchImpl: typeof fetch = fetch,
+): Promise<string> {
+  return resolveDedicatedDispatchThread(
+    workspaceSlug,
+    {
+      preferredSlug: PERSONA_GENERATION_DISPATCH_THREAD_SLUG,
+      threadName: PERSONA_GENERATION_DISPATCH_THREAD_NAME,
+      errorLabel: "Persona Generation",
+    },
+    env,
+    fetchImpl,
+  );
+}
+
+async function resolveDedicatedDispatchThread(
+  workspaceSlug: string,
+  dedicatedThread: DedicatedDispatchThread,
   env: EnvLike,
   fetchImpl: typeof fetch,
 ): Promise<string> {
+  const workspace = workspaceSlug.trim();
+  if (!workspace) {
+    throw new Error(
+      `Workspace slug is required to resolve a ${dedicatedThread.errorLabel} thread`,
+    );
+  }
 
+  const resolutionKey = `${workspace}\0${dedicatedThread.preferredSlug}`;
+  const inFlight = inFlightThreadResolutions.get(resolutionKey);
+  if (inFlight) return inFlight;
+
+  const resolution = resolveDedicatedDispatchThreadUncached(
+    workspace,
+    dedicatedThread,
+    env,
+    fetchImpl,
+  ).finally(() => {
+    inFlightThreadResolutions.delete(resolutionKey);
+  });
+  inFlightThreadResolutions.set(resolutionKey, resolution);
+  return resolution;
+}
+
+async function resolveDedicatedDispatchThreadUncached(
+  workspace: string,
+  dedicatedThread: DedicatedDispatchThread,
+  env: EnvLike,
+  fetchImpl: typeof fetch,
+): Promise<string> {
   const preferredPresence = await getRtxThreadPresence(
     workspace,
-    NETWORK_SNOWBALL_DISPATCH_THREAD_SLUG,
+    dedicatedThread.preferredSlug,
     env,
     fetchImpl,
   );
   if (preferredPresence === "exists") {
-    return NETWORK_SNOWBALL_DISPATCH_THREAD_SLUG;
+    return dedicatedThread.preferredSlug;
   }
 
   const threads = await listRtxWorkspaceThreads(workspace, env, fetchImpl);
@@ -431,19 +469,19 @@ async function resolveNetworkSnowballDispatchThreadUncached(
   if (threads !== null) {
     const exact = pickStable(
       threads.filter(
-        (thread) => thread.name === NETWORK_SNOWBALL_DISPATCH_THREAD_NAME,
+        (thread) => thread.name === dedicatedThread.threadName,
       ),
     );
     if (exact) return exact;
   }
 
-  // Only create when RTX confirmed the legacy slug is absent *and* the listing
+  // Only create when RTX confirmed the preferred slug is absent *and* the listing
   // succeeded. A failed listing is unknown, not empty, and creating on unknown is
   // how duplicate threads appear.
   if (preferredPresence === "missing" && threads !== null) {
     const created = await createRtxPublishThread(
       workspace,
-      NETWORK_SNOWBALL_DISPATCH_THREAD_NAME,
+      dedicatedThread.threadName,
       env,
       fetchImpl,
     );
@@ -457,7 +495,7 @@ async function resolveNetworkSnowballDispatchThreadUncached(
         ? null
         : pickStable(
             settled.filter(
-              (thread) => thread.name === NETWORK_SNOWBALL_DISPATCH_THREAD_NAME,
+              (thread) => thread.name === dedicatedThread.threadName,
             ),
           );
     return converged ?? created.trim();
@@ -469,8 +507,11 @@ async function resolveNetworkSnowballDispatchThreadUncached(
     threads === null
       ? null
       : pickStable(
-          threads.filter((thread) =>
-            thread.name.toLowerCase().includes("network snowball"),
+          threads.filter(
+            (thread) =>
+              thread.name
+                .toLowerCase()
+                .includes(dedicatedThread.threadName.toLowerCase()),
           ),
         );
   if (fallback !== null) return fallback;
@@ -482,12 +523,12 @@ async function resolveNetworkSnowballDispatchThreadUncached(
     // confirmed, and deduped, so no later tick would ever retry them. Fail
     // instead and let the next tick resolve.
     throw new Error(
-      "Cannot resolve a Network Snowball dispatch thread: the default thread is missing and RealTimeX could not list workspace threads.",
+      `Cannot resolve a ${dedicatedThread.errorLabel} dispatch thread: the default thread is missing and RealTimeX could not list workspace threads.`,
     );
   }
 
-  // Presence itself was unknown, so the legacy slug may well exist.
-  return NETWORK_SNOWBALL_DISPATCH_THREAD_SLUG;
+  // Presence itself was unknown, so the preferred slug may well exist.
+  return dedicatedThread.preferredSlug;
 }
 
 /**
@@ -526,10 +567,4 @@ export function buildPublishThreadName(title: string | null | undefined): string
   const label = (title?.trim() || "Untitled").slice(0, 40);
   const stamp = new Date().toISOString().slice(0, 16).replace("T", " ");
   return `Publish: ${label} — ${stamp}`;
-}
-
-export function buildPersonaThreadName(contactName: string | null | undefined): string {
-  const label = (contactName?.trim() || "Contact").slice(0, 40);
-  const stamp = new Date().toISOString().slice(0, 16).replace("T", " ");
-  return `Persona: ${label} — ${stamp}`;
 }

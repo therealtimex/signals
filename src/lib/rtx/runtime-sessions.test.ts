@@ -51,6 +51,7 @@ describe("launchTerminalCliAgent", () => {
         const body = JSON.parse(String(init.body)) as Record<string, unknown>;
         expect(body.agentName).toBe("antigravity");
         expect(body.providerId).toBe("antigravity-cli");
+        expect(body.interactionMode).toBe("chat-linked");
         return new Response(
           JSON.stringify({
             success: true,
@@ -128,6 +129,180 @@ describe("launchTerminalCliAgent", () => {
       httpStatus: 404,
     });
     expect(fetchImpl).toHaveBeenCalledTimes(3);
+  });
+
+  it("requires a configured workspace default when requested", async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : input.url;
+      if (url.endsWith("/cli/get-workspace/signals") && init?.method === "GET") {
+        return new Response(JSON.stringify({ workspace: { workspace_configs: {} } }), {
+          status: 200,
+        });
+      }
+      return new Response("should not launch", { status: 500 });
+    });
+
+    const result = await launchTerminalCliAgent(
+      {
+        workspaceSlug: "signals",
+        threadSlug: "thread-1",
+        message: "brief",
+        reason: "test",
+        requireWorkspaceDefaultAgent: true,
+      },
+      {
+        RTX_APP_ID: "app-1",
+        RTX_API_BASE_URL: "http://127.0.0.1:3001",
+      },
+      fetchImpl,
+    );
+
+    expect(result).toEqual({
+      success: false,
+      error:
+        "No terminal agent is configured for this workspace. Set a workspace default terminal agent in RealTimeX.",
+      errorCode: "terminal_dispatch_required",
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses terminal-first launch to avoid reusing a matching live chat-linked session", async () => {
+    const matchingLiveSessionId = "cli-agent:live-chat-linked";
+    const launchBodies: Record<string, unknown>[] = [];
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : input.url;
+      if (url.endsWith("/cli/get-workspace/signals") && init?.method === "GET") {
+        return new Response(
+          JSON.stringify({
+            workspace: {
+              workspace_configs: {
+                defaultAgent: {
+                  id: "terminal-codex",
+                  name: "codex",
+                  terminal: { providerId: "codex-cli", modelId: "gpt-5.6-sol" },
+                },
+              },
+            },
+          }),
+          { status: 200 },
+        );
+      }
+      if (url.endsWith("/sdk/desktop/runtime-sessions/launch-terminal-cli-agent")) {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        launchBodies.push(body);
+        // Mirror the desktop host boundary: chat-linked requests reuse a live
+        // same-thread session; terminal-first requests physically launch.
+        const sessionId =
+          body.interactionMode === "chat-linked"
+            ? matchingLiveSessionId
+            : "cli-agent:fresh-persona";
+        return new Response(
+          JSON.stringify({ success: true, descriptor: { id: sessionId } }),
+          { status: 200 },
+        );
+      }
+      return new Response("unexpected", { status: 500 });
+    });
+
+    const result = await launchTerminalCliAgent(
+      {
+        workspaceSlug: "signals",
+        threadSlug: "persona-generation",
+        message: "Run persona brief",
+        reason: "test fresh persona session",
+        requireWorkspaceDefaultAgent: true,
+        interactionMode: "terminal-first",
+      },
+      {
+        RTX_APP_ID: "app-1",
+        RTX_API_BASE_URL: "http://127.0.0.1:3001",
+      },
+      fetchImpl,
+    );
+
+    expect(result).toEqual({
+      success: true,
+      descriptor: { id: "cli-agent:fresh-persona" },
+    });
+    expect(result.success && result.descriptor.id).not.toBe(matchingLiveSessionId);
+    expect(launchBodies).toEqual([
+      expect.objectContaining({
+        workspaceSlug: "signals",
+        threadSlug: "persona-generation",
+        interactionMode: "terminal-first",
+        primarySurface: "terminal",
+      }),
+    ]);
+  });
+
+  it("preserves a 503 default-agent lookup failure instead of reporting missing configuration", async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response(JSON.stringify({ error: "Workspace lookup temporarily unavailable" }), {
+        status: 503,
+      }),
+    );
+
+    const result = await launchTerminalCliAgent(
+      {
+        workspaceSlug: "signals",
+        threadSlug: "persona-generation",
+        message: "Run persona brief",
+        reason: "test lookup failure",
+        requireWorkspaceDefaultAgent: true,
+        interactionMode: "terminal-first",
+      },
+      {
+        RTX_APP_ID: "app-1",
+        RTX_API_BASE_URL: "http://127.0.0.1:3001",
+      },
+      fetchImpl,
+    );
+
+    expect(result).toEqual({
+      success: false,
+      error: "Workspace lookup temporarily unavailable",
+      errorCode: "rtx_unavailable",
+      httpStatus: 503,
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves a network default-agent lookup failure instead of reporting missing configuration", async () => {
+    const fetchImpl = vi.fn(async () => {
+      throw new TypeError("fetch failed");
+    });
+
+    const result = await launchTerminalCliAgent(
+      {
+        workspaceSlug: "signals",
+        threadSlug: "persona-generation",
+        message: "Run persona brief",
+        reason: "test lookup failure",
+        requireWorkspaceDefaultAgent: true,
+      },
+      {
+        RTX_APP_ID: "app-1",
+        RTX_API_BASE_URL: "http://127.0.0.1:3001",
+      },
+      fetchImpl,
+    );
+
+    expect(result).toEqual({
+      success: false,
+      error: "fetch failed",
+      errorCode: "rtx_unavailable",
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 });
 

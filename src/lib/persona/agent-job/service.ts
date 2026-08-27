@@ -29,16 +29,16 @@ import {
   buildPersonaAgentJobBrief,
 } from "@/lib/persona/agent-job/prompt";
 import {
-  buildPersonaThreadName,
-  createRtxPersonaThread,
   ensureRtxWorkspace,
   getSignalsRtxWorkspaceSlug,
+  resolvePersonaGenerationDispatchThread,
 } from "@/lib/rtx/cli-provisioning";
 import { isRtxEmbedded, type EnvLike } from "@/lib/rtx/env";
 import { resolveSignalsBaseUrlFromEnv } from "@/lib/rtx/resolve-signals-base-url";
 import { scheduleTerminalSessionRelease } from "@/lib/rtx/resource-teardown";
 import {
-  dispatchTerminalAgentViaSendMessage,
+  appendRtxThreadMessage,
+  launchTerminalCliAgent,
   type RuntimeSessionDescriptor,
 } from "@/lib/rtx/runtime-sessions";
 import {
@@ -307,9 +307,8 @@ export async function startPersonaAgentJob(
       fetchImpl,
     );
     const contactName = prepared.bundle.evidence.contact.name;
-    const threadSlug = await createRtxPersonaThread(
+    const threadSlug = await resolvePersonaGenerationDispatchThread(
       workspaceSlug,
-      buildPersonaThreadName(contactName),
       env,
       fetchImpl,
     );
@@ -331,17 +330,35 @@ export async function startPersonaAgentJob(
       failLaunchAndThrow(job, briefWrite.error, "launch_failed");
     }
 
-    const launch = await dispatchTerminalAgentViaSendMessage(
+    const routingMessage = buildPersonaJobBriefRoutingMessage({
+      jobId: job.id,
+      contactId,
+      contactName,
+      absolutePath: briefWrite.absolutePath,
+    });
+    const timeline = await appendRtxThreadMessage(
       {
         workspaceSlug,
         threadSlug,
-        message: buildPersonaJobBriefRoutingMessage({
-          jobId: job.id,
-          contactId,
-          contactName,
-          absolutePath: briefWrite.absolutePath,
-        }),
+        message: routingMessage,
         reason: `Generate a persona for contact ${contactId}`,
+      },
+      env,
+      fetchImpl,
+    );
+    if (!timeline.success) {
+      failLaunchAndThrow(job, timeline.error, "launch_failed");
+    }
+
+    const launch = await launchTerminalCliAgent(
+      {
+        workspaceSlug,
+        threadSlug,
+        message: routingMessage,
+        reason: `Generate a persona for contact ${contactId}`,
+        requireWorkspaceDefaultAgent: true,
+        spawnSource: "signals-persona",
+        interactionMode: "terminal-first",
       },
       env,
       fetchImpl,
