@@ -17,11 +17,17 @@ import { cn } from "@/lib/utils";
 import {
   ENRICH_ACTION_IDS,
   actionNeedsPlatformConnection,
+  getImportCardNote,
+  getImportToast,
   getActionRunButtonLabel,
+  importStatsFromFailure,
+  importStatsFromSuccess,
+  type ImportStats,
 } from "@/app/dashboard/workflows/action-cards-utils";
 import {
   ImportDialog,
   type ImportDialogConfig,
+  type ImportFailure,
   type ImportSuccess,
 } from "@/components/import-dialog";
 import { ActionToast } from "@/components/action-toast";
@@ -161,16 +167,6 @@ function getImportDialogConfig(action: ActionDef): ImportDialogConfig {
 type SyncStat = { totalSynced: number; lastSyncedAt: number | null };
 
 /** Last-run stats for a file import card, from the latest import workflow run. */
-type ImportStats = {
-  status: string;
-  added: number;
-  updated: number;
-  skipped: number;
-  lastRunAt: number;
-  source: "csv" | "zip" | null;
-  fileName: string | null;
-};
-
 type PlatformStatus = {
   connected: boolean;
   loading: boolean;
@@ -263,7 +259,12 @@ export function ActionCards() {
   const [migrationNotice, setMigrationNotice] = useState<string | null>(null);
   const [result, setResult] = useState<{ id: string; message: string } | null>(null);
   const [importAction, setImportAction] = useState<ActionDef | null>(null);
-  const [toast, setToast] = useState<{ message: string; runId: string | null } | null>(null);
+  const [toast, setToast] = useState<{
+    message: string;
+    actionLabel: "View in Runs" | "Open Contacts";
+    target: string;
+    tone: "success" | "warning";
+  } | null>(null);
   const [pipelineFollowUp, setPipelineFollowUp] = useState<{
     uniqueContactCount: number;
     running: boolean;
@@ -396,6 +397,7 @@ export function ActionCards() {
 
   const handleImportSuccess = useCallback((action: ActionDef, result: ImportSuccess) => {
     setImportAction(null);
+    const nextToast = getImportToast(result);
 
     if (action.id === "x-import-archive") {
       const contactParts: string[] = [];
@@ -410,8 +412,8 @@ export function ActionCards() {
       const summary = [contactParts.join(", "), postsPart].filter(Boolean).join(" · ");
 
       setToast({
+        ...nextToast,
         message: summary || `Imported ${result.fileName}`,
-        runId: result.workflowRunId,
       });
 
       if ((result.uniqueContactCount ?? 0) > 0) {
@@ -421,10 +423,7 @@ export function ActionCards() {
         });
       }
     } else {
-      setToast({
-        message: `Imported ${result.fileName}: ${result.added} added, ${result.updated} updated, ${result.skipped} skipped`,
-        runId: result.workflowRunId,
-      });
+      setToast(nextToast);
     }
 
     // Reflect the new last-run stats on the import card without a refetch
@@ -432,19 +431,21 @@ export function ActionCards() {
       ...prev,
       [action.platform]: {
         ...prev[action.platform],
-        importStats: {
-          status: "completed",
-          added: result.added,
-          updated: result.updated,
-          skipped: result.skipped,
-          lastRunAt: Math.floor(Date.now() / 1000),
-          source: result.source,
-          fileName: result.fileName,
-        },
+        importStats: importStatsFromSuccess(result, Math.floor(Date.now() / 1000)),
       },
     }));
     router.refresh();
   }, [router]);
+
+  const handleImportFailure = useCallback((action: ActionDef, failure: ImportFailure) => {
+    setPlatformStatus((prev) => ({
+      ...prev,
+      [action.platform]: {
+        ...prev[action.platform],
+        importStats: importStatsFromFailure(failure, Math.floor(Date.now() / 1000)),
+      },
+    }));
+  }, []);
 
   const runProfilePipelineForX = useCallback(async () => {
     setPipelineFollowUp((prev) => (prev ? { ...prev, running: true } : prev));
@@ -608,13 +609,28 @@ export function ActionCards() {
                         (() => {
                           const stats = status.importStats;
                           if (!stats) return null;
+                          const cardNote = getImportCardNote(
+                            stats,
+                            getImportDialogConfig(action).reimportNote
+                          );
                           return (
                             <div className="space-y-1 text-xs text-muted-foreground">
                               {stats.status === "failed" ? (
                                 <p className="text-destructive">Last import failed</p>
+                              ) : stats.status === "unknown" ? (
+                                <p>Last import outcome unknown</p>
                               ) : (
                                 <p>
                                   {stats.added} added · {stats.updated} updated · {stats.skipped} skipped
+                                </p>
+                              )}
+                              {cardNote.kind === "error" && (
+                                <p
+                                  className="text-destructive line-clamp-3 break-words"
+                                  data-testid="import-card-error"
+                                  title={cardNote.text}
+                                >
+                                  {cardNote.text}
                                 </p>
                               )}
                               <p>
@@ -624,7 +640,24 @@ export function ActionCards() {
                                   <> · <span className="break-all">{stats.fileName}</span></>
                                 )}
                               </p>
-                              <p>{getImportDialogConfig(action).reimportNote}</p>
+                              {cardNote.kind === "warning" ? (
+                                <p
+                                  className="text-amber-600 dark:text-amber-400 break-words"
+                                  data-testid="import-card-warning"
+                                >
+                                  {cardNote.text}
+                                </p>
+                              ) : cardNote.kind === "unknown" ? (
+                                <p
+                                  className="break-words"
+                                  data-testid="import-card-unknown"
+                                  title={cardNote.text}
+                                >
+                                  {cardNote.text}
+                                </p>
+                              ) : (
+                                <p>{cardNote.kind === "error" ? cardNote.note : cardNote.text}</p>
+                              )}
                             </div>
                           );
                         })()
@@ -699,19 +732,18 @@ export function ActionCards() {
           open
           onClose={() => setImportAction(null)}
           onSuccess={(result) => handleImportSuccess(importAction, result)}
+          onFailure={(failure) => handleImportFailure(importAction, failure)}
         />
       )}
 
       {toast && (
         <ActionToast
           message={toast.message}
-          actionLabel="View in Runs"
+          actionLabel={toast.actionLabel}
+          tone={toast.tone}
           onAction={() => {
-            const target = toast.runId
-              ? `/dashboard/workflows/${toast.runId}`
-              : "/dashboard/workflows?tab=runs";
             setToast(null);
-            router.push(target);
+            router.push(toast.target);
           }}
           onDismiss={() => setToast(null)}
         />
