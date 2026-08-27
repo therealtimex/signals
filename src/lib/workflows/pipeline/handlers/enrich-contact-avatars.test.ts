@@ -348,5 +348,26 @@ describe("enrichContactAvatars", () => {
     });
     expect(getIdentityById(identity.id)?.avatarUrl).toBe("https://unavatar.io/x/torvalds");
   });
+
+  it("recovers avatar from LinkedIn platform identity slug via unavatar", async () => {
+    const contact = createContact({ name: "Timi Digifa" });
+    const identity = createIdentity({
+      contactId: contact.id,
+      platform: "linkedin",
+      platformUserId: "timi-digifa",
+      platformHandle: "timi-digifa",
+      isPrimary: 1,
+      isActive: 1,
+    });
+
+    const report = await enrichContactAvatars([contact.id], buildCtx(vi.fn()));
+
+    expect(report.outcomes[0]).toMatchObject({
+      contactId: contact.id,
+      status: "updated",
+      detail: { source: "identity_platform", identityId: identity.id },
+    });
+    expect(getIdentityById(identity.id)?.avatarUrl).toBe("https://unavatar.io/linkedin/timi-digifa");
+  });
 });
 

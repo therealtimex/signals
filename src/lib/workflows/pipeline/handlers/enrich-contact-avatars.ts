@@ -188,6 +188,17 @@ function recoverAvatarFromIdentityPlatform(
         return { identity, avatarUrl: `https://unavatar.io/x/${cleanHandle}` };
       }
     }
+    if (identity.platform === "linkedin") {
+      const slug = (
+        identity.platformHandle?.trim() ||
+        identity.platformUserId?.trim() ||
+        ""
+      ).replace(/^@/, "");
+      // LinkedIn vanity slugs: letters, digits, hyphens (batch snowball imports use slug as handle).
+      if (/^[a-zA-Z0-9][a-zA-Z0-9-]{0,98}[a-zA-Z0-9]$|^[a-zA-Z0-9]$/.test(slug)) {
+        return { identity, avatarUrl: `https://unavatar.io/linkedin/${slug}` };
+      }
+    }
   }
   return undefined;
 }
