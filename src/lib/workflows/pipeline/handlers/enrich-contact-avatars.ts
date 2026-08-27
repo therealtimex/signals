@@ -10,6 +10,7 @@ import {
 } from "@/lib/db/queries/contact-dto";
 import { updateIdentity } from "@/lib/db/queries/identities";
 import type { ContactIdentity } from "@/lib/db/types";
+import { buildLinkedInUnavatarUrl } from "@/lib/platforms/linkedin/unavatar-url";
 import type {
   PipelineContactOutcome,
   PipelineStepContext,
@@ -189,14 +190,10 @@ function recoverAvatarFromIdentityPlatform(
       }
     }
     if (identity.platform === "linkedin") {
-      const slug = (
-        identity.platformHandle?.trim() ||
-        identity.platformUserId?.trim() ||
-        ""
-      ).replace(/^@/, "");
-      // LinkedIn vanity slugs: letters, digits, hyphens (batch snowball imports use slug as handle).
-      if (/^[a-zA-Z0-9][a-zA-Z0-9-]{0,98}[a-zA-Z0-9]$|^[a-zA-Z0-9]$/.test(slug)) {
-        return { identity, avatarUrl: `https://unavatar.io/linkedin/${slug}` };
+      const slug = identity.platformHandle?.trim() || identity.platformUserId?.trim() || "";
+      const avatarUrl = buildLinkedInUnavatarUrl(slug);
+      if (avatarUrl) {
+        return { identity, avatarUrl };
       }
     }
   }

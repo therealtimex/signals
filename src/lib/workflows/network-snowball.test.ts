@@ -119,6 +119,8 @@ describe("buildNetworkSnowballBriefSection", () => {
     expect(brief).toContain("Engage for visibility, skip for contacts");
     expect(brief).toContain("Anti-Hallucination Rule");
     expect(brief).toContain("Identity-First Avatar Extraction");
+    expect(brief).toContain("pv-top-card-profile-picture__image");
+    expect(brief).toContain("unavatar.io/linkedin/user:");
     expect(brief).toContain("workflow-runs/run_snow_1/contacts.csv");
     expect(brief).toContain("signals-pp-cli import contacts");
     expect(brief).toContain("Terminate Spawned Browser Sessions");

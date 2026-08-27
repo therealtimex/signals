@@ -367,7 +367,9 @@ describe("enrichContactAvatars", () => {
       status: "updated",
       detail: { source: "identity_platform", identityId: identity.id },
     });
-    expect(getIdentityById(identity.id)?.avatarUrl).toBe("https://unavatar.io/linkedin/timi-digifa");
+    expect(getIdentityById(identity.id)?.avatarUrl).toBe(
+      "https://unavatar.io/linkedin/user:timi-digifa",
+    );
   });
 });
 
