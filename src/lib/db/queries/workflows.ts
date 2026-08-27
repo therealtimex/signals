@@ -156,23 +156,21 @@ export function listWorkflowRuns(opts?: {
  * status. Drives last-run stats on the Workflows import card.
  */
 export function getLatestImportRun(platform: string): WorkflowRun | undefined {
-  const runs = db
+  return db
     .select()
     .from(workflowRuns)
-    .where(eq(workflowRuns.workflowType, "import"))
+    .where(
+      and(
+        eq(workflowRuns.workflowType, "import"),
+        sql`json_valid(${workflowRuns.config})`,
+        sql`json_extract(${workflowRuns.config}, '$.platform') = ${platform}`,
+      ),
+    )
     // rowid tiebreak: a combined upload (e.g. X archive contacts + posts)
     // records runs within the same epoch second — latest inserted wins.
     .orderBy(desc(workflowRuns.createdAt), desc(workflowRuns.startedAt), desc(sql`rowid`))
-    .limit(50)
-    .all();
-
-  return runs.find((run) => {
-    try {
-      return JSON.parse(run.config ?? "{}").platform === platform;
-    } catch {
-      return false;
-    }
-  });
+    .limit(1)
+    .get();
 }
 
 // ── Workflow Steps ─────────────────────────────
