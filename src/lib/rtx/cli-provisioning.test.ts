@@ -390,3 +390,132 @@ describe("resolveNetworkSnowballDispatchThread", () => {
     expect(createCalls).toBe(1);
   });
 });
+
+describe("resolvePersonaGenerationDispatchThread", () => {
+  it("reuses the dedicated thread and recreates it after deletion", async () => {
+    let createCalls = 0;
+    const threads: Array<{ slug: string; name: string }> = [];
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : input.url;
+      if (url.includes("/cli/get-thread/signals/persona-generation")) {
+        return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
+      }
+      if (url.endsWith("/cli/list-threads/signals")) {
+        return new Response(JSON.stringify({ threads: [...threads] }), { status: 200 });
+      }
+      if (url.includes("/cli/create-thread/signals")) {
+        const body = JSON.parse(String(init?.body ?? "{}")) as { name?: string };
+        const name = body.name ?? "";
+        expect(name).toBe("Persona Generation");
+        createCalls += 1;
+        const thread = { slug: `persona-created-${createCalls}`, name };
+        threads.push(thread);
+        return new Response(JSON.stringify({ thread }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ error: "unexpected" }), { status: 500 });
+    });
+
+    const { resolvePersonaGenerationDispatchThread } = await import(
+      "@/lib/rtx/cli-provisioning"
+    );
+    const env = { RTX_APP_ID: "app-1", SERVER_URL: "http://127.0.0.1:3101" };
+    const first = await resolvePersonaGenerationDispatchThread("signals", env, fetchImpl);
+    const reused = await resolvePersonaGenerationDispatchThread("signals", env, fetchImpl);
+
+    expect(first).toBe("persona-created-1");
+    expect(reused).toBe(first);
+    expect(createCalls).toBe(1);
+
+    threads.length = 0;
+    const recreated = await resolvePersonaGenerationDispatchThread(
+      "signals",
+      env,
+      fetchImpl,
+    );
+    expect(recreated).toBe("persona-created-2");
+    expect(createCalls).toBe(2);
+  });
+
+  it("coalesces concurrent first-use resolution on one thread", async () => {
+    let createCalls = 0;
+    const threads: Array<{ slug: string; name: string }> = [];
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : input.url;
+      if (url.includes("/cli/get-thread/signals-concurrent/persona-generation")) {
+        return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
+      }
+      if (url.endsWith("/cli/list-threads/signals-concurrent")) {
+        return new Response(JSON.stringify({ threads: [...threads] }), { status: 200 });
+      }
+      if (url.includes("/cli/create-thread/signals-concurrent")) {
+        createCalls += 1;
+        const thread = {
+          slug: `persona-created-${createCalls}`,
+          name: "Persona Generation",
+        };
+        threads.push(thread);
+        return new Response(JSON.stringify({ thread }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ error: "unexpected" }), { status: 500 });
+    });
+
+    const { resolvePersonaGenerationDispatchThread } = await import(
+      "@/lib/rtx/cli-provisioning"
+    );
+    const env = { RTX_APP_ID: "app-1", SERVER_URL: "http://127.0.0.1:3101" };
+    const [first, second] = await Promise.all([
+      resolvePersonaGenerationDispatchThread("signals-concurrent", env, fetchImpl),
+      resolvePersonaGenerationDispatchThread("signals-concurrent", env, fetchImpl),
+    ]);
+
+    expect(first).toBe(second);
+    expect(first).toBe("persona-created-1");
+    expect(createCalls).toBe(1);
+  });
+
+  it("does not create a duplicate when thread listing fails transiently", async () => {
+    let createCalls = 0;
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : input.url;
+      if (url.includes("/cli/get-thread/signals-list-failure/persona-generation")) {
+        return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
+      }
+      if (url.endsWith("/cli/list-threads/signals-list-failure")) {
+        return new Response(JSON.stringify({ error: "temporarily unavailable" }), {
+          status: 503,
+        });
+      }
+      if (url.includes("/cli/create-thread/signals-list-failure")) {
+        createCalls += 1;
+      }
+      return new Response(JSON.stringify({ error: "unexpected" }), { status: 500 });
+    });
+
+    const { resolvePersonaGenerationDispatchThread } = await import(
+      "@/lib/rtx/cli-provisioning"
+    );
+    await expect(
+      resolvePersonaGenerationDispatchThread(
+        "signals-list-failure",
+        { RTX_APP_ID: "app-1", SERVER_URL: "http://127.0.0.1:3101" },
+        fetchImpl,
+      ),
+    ).rejects.toThrow(/could not list workspace threads/i);
+    expect(createCalls).toBe(0);
+  });
+});

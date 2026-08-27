@@ -1,7 +1,7 @@
 # Settings tabs + Persona generation mode + PersonaAgentJob adapter
 
 **Status:** Approved (System Design, 2026-08-27) — Dev implements this surface; land this file as `specs/persona-generation-mode.md` in the repo.
-**Issue:** [#314](https://github.com/therealtimex/signals/issues/314) · **Backend issue:** [#317](https://github.com/therealtimex/signals/issues/317) (smoke slice merged in PR #318) · **Epic:** #62
+**Issue:** [#314](https://github.com/therealtimex/signals/issues/314) · **Backend issue:** [#317](https://github.com/therealtimex/signals/issues/317) (smoke slice merged in PR #318) · **Dedicated-thread follow-up:** [#325](https://github.com/therealtimex/signals/issues/325) · **Epic:** #62
 **Loop:** `loop-issue-317-56d1dfd6` · **Base:** `main` @ `584bd5b`
 **Parents:** `specs/persona-generation-workflow.md` (§3–§8 consumed as shipped; §9 + ADR-062-4 amended here), `specs/publish-via-terminal-agent.md` (job/dispatch/callback precedent, reused not redesigned)
 
@@ -15,7 +15,7 @@
 | D2 | Effective mode is **derived**, never written: standalone → `structured_workflow`; backend missing → `structured_workflow` | Stored preference survives; UI shows stored vs effective honestly |
 | D3 | `persona_jobs` is a first-class table (publish-jobs shape), linked to a `workflow_runs` row | Indexed status queries for polling/stale, one-active-job invariant, provenance snapshot at dispatch |
 | D4 | Agent returns its JSON through a single agent-tool `complete_persona_job` | RTX exposes **no thread chat-history read** to Local Apps (verified: `/cli/get-thread` = metadata only; `get-terminal-session-context` = sanitized PTY tail). Polling is impossible; callback is the only reliable capture |
-| D5 | One job = one contact = one **fresh RTX thread** in the Signals workspace | Fresh thread ⇒ fresh chat-linked session ⇒ zero cross-contact context, by construction |
+| D5 | Persona jobs share one dedicated **Persona Generation** RTX thread; every job still gets a fresh terminal runtime session and immutable brief | One audit timeline without thread sprawl; jobId + brief + callback preserve isolation |
 | D6 | `generatePersona()` stays a **blocking facade** for all programmatic callers; only the Explore REST route goes async (202 + poll) | Tool / pipeline / sweeper contracts unchanged; blocking = natural serial concurrency cap of 1 |
 | D7 | Persistence happens in the **callback handler**, not the awaiter | Explore's async path and the blocking path share one write; a Signals restart mid-await still lands the persona |
 | D8 | Three PRs: A settings shell → B backend → C Explore UX + docs; A ∥ B | A has no migration and ships value alone; B needs owner sign-off on a migration; C needs B |
@@ -30,7 +30,7 @@ Hard constraints found in the code (not assumptions):
 
 - **No app-settings table.** App config is `~/.signals/config.json`, re-implemented 7× with three different `SignalsConfig` shapes (`src/lib/mail/settings.ts:5-36` is the cleanest). `AGENTS.md:161-163`: config.json survives SQLite resets in tests.
 - **Schema changes need owner confirmation** (`AGENTS.md:173-175`); migrations are additive-only, `npm run db:generate`.
-- **Dispatch path is fixed:** `dispatchTerminalAgentViaSendMessage()` (`src/lib/rtx/runtime-sessions.ts:291`) → `POST /cli/send-message/{ws}/{thread}` with `requireTerminalDispatch: true`; brief written to `<workspace working dir>/<kind>/<id>/brief.md` (`workspace-brief-files.ts`); RTX resolves the default agent server-side; `409 TERMINAL_DISPATCH_REQUIRED` when none. `launchTerminalCliAgent` is legacy/resume-only.
+- **Dispatch path amendment (#325):** the handoff is persisted to the dedicated thread with `appendRtxThreadMessage()`, then `launchTerminalCliAgent()` creates a fresh chat-linked runtime session for that job. Persona launches require the workspace default terminal agent and retain the existing `TERMINAL_DISPATCH_REQUIRED` failure when none is configured.
 - **Callback auth is loopback-or-bearer** (`src/lib/agent-tools/auth.ts`); correlation is the job id round-tripping through the prompt. Same trust model as `complete_publish`.
 - **Structured workflow also requires RTX**: `rtxChat` returns `RTX_NOT_CONFIGURED` without a fetch when `RTX_APP_ID` is unset (`llm.ts:272-278`). Standalone has *no* working persona backend; "Structured workflow only" in standalone means "selected, but will 503 until embedded".
 - **No `radio-group` primitive** in `src/components/ui` (only `checkbox`, `switch`, `select`, `tabs`).
@@ -62,7 +62,7 @@ Hard constraints found in the code (not assumptions):
 │                                                        │                 │
 │   persona_jobs ◄── createPersonaJob ◄──────────────────┘                 │
 │        │  brief: <ws-dir>/persona-jobs/<jobId>/brief.md                  │
-│        │  POST /cli/create-thread ; POST /cli/send-message (D5)          │
+│        │  resolve shared Persona Generation thread; fresh send (D5)      │
 │        │                                                                 │
 │   agent-tools (inbound): get_persona_job · complete_persona_job (D4)     │
 │        └─► validate → persistPersonaSynthesis() → job completed (D7)     │
@@ -297,15 +297,15 @@ export async function runPersonaAgentJobBlocking(contactId, prepared, opts): Pro
 1. `isRtxEmbedded` gate → `failed/standalone` (defensive; the resolver already prevents this).
 2. Join/supersede check (§5.3).
 3. Insert job `queued` + workflow run.
-4. `ensureRtxWorkspace(getSignalsRtxWorkspaceSlug(env), "Signals")`; `POST /cli/create-thread` named `Persona: <contact name> — <YYYY-MM-DD HH:mm>` (D5; a new `createRtxPersonaThread` beside `createRtxPublishThread`, `cli-provisioning.ts:287`).
+4. `ensureRtxWorkspace(getSignalsRtxWorkspaceSlug(env), "Signals")`; resolve or create the dedicated `Persona Generation` thread using the same presence/list/create/convergence contract as Network Snowball (D5).
 5. Write brief to `<workspace working dir>/persona-jobs/<jobId>/brief.md` (`resolveRtxWorkspaceWorkingDir`, `storage-path.ts:44`).
-6. `dispatchTerminalAgentViaSendMessage({ workspaceSlug, threadSlug, message: buildPersonaJobBriefRoutingMessage(...) })`.
+6. Persist `buildPersonaJobBriefRoutingMessage(...)` to the shared thread with `appendRtxThreadMessage()`, then call `launchTerminalCliAgent({ workspaceSlug, threadSlug, message, requireWorkspaceDefaultAgent: true })` so this job cannot reuse another persona job's live session.
 7. Persist rtx refs, `running`.
 8. Any failure in 4–7 → `failed` + errorCode, run `failed`, rethrow as `PersonaGenerationUnavailableError`.
 
 Polling the DB at 1 s is the in-process wait; the callback handler writes to the same SQLite. No EventEmitter in v1 — 1 s latency on a 30–120 s job is noise. Concurrency: the facade blocks, so the pipeline step (`for` loop, `generate-persona-step.ts:22-69`) and the sweep (`persona-refresh-sweep.ts:47-135`) are serial by construction — the "1–2 concurrent" cap from #317 is satisfied with cap = 1 and no scheduler. Cost of that choice: a pipeline batch of 20 takes ~20–40 min in agent mode. Reopen if a user needs faster batches (then: `PERSONA_AGENT_JOB_CONCURRENCY` + a small pool inside the step handler — the job table already supports it).
 
-Teardown: on terminal state, `scheduleTerminalSessionRelease(rtxRuntimeSessionId)` (`resource-teardown.ts:115`) exactly as publish does. Threads are kept (audit trail + Open thread). Thread sprawl from batches is the accepted cost of D5; a "delete completed persona threads older than N days" sweep is a documented follow-up, not v1.
+Teardown: on terminal state, `scheduleTerminalSessionRelease(rtxRuntimeSessionId)` (`resource-teardown.ts:115`) exactly as publish does. Only that job's runtime session is released; the shared `Persona Generation` thread is retained as the audit trail and recreated if the user deletes it.
 
 ### 5.5 Brief and routing message
 
@@ -448,7 +448,7 @@ Acceptance mapping to #314: tabs (A), regression-safe platforms (A), mode persis
 ## 10. Open questions for the owner (non-blocking; defaults stated)
 
 1. **Migration approval** for `persona_jobs` (AGENTS.md rule). Default assumption: approved as additive-only; B cannot merge without it.
-2. **Thread retention.** Default: keep persona threads (audit trail). Alternative: delete on `completed` via `/cli/delete-thread`. Say if the Signals workspace should stay lean.
+2. **Thread retention.** Resolved by #325: keep one dedicated `Persona Generation` thread as the audit trail; do not delete it when individual jobs complete.
 3. **`generate_persona` tool in agent mode** blocks up to 5 min and spawns a second agent. Default: allowed (issue rule: all triggers), documented in the tool description. Alternative: the tool forces structured mode — rejected here because it silently violates "one global mode".
 
 ---
@@ -459,4 +459,4 @@ Acceptance mapping to #314: tabs (A), regression-safe platforms (A), mode persis
 
 **ADR-314-2: One global mode, resolved at call time from env → config.json → default, with derived (never stored) effectiveness.** — Accepted. Context: the issue fixes a single global mode; the codebase has no settings table and seven config.json copies. Options: (a) new kv table — rejected: a migration for one scalar, and settings would live in two places; (b) per-call `mode` option — rejected: reintroduces the flag ADR-062-2 refused and lets callers disagree with the user; (c) shared typed config module, env override, effective mode derived from embedded/backend availability — chosen. Consequences: no migration; tests must reset the key; stored preference is never clobbered by transient unavailability; the same gating explains standalone and pre-backend states to the user.
 
-**ADR-314-3: One fresh RTX thread per persona job.** — Accepted. Context: #317 demands zero cross-contact context. Options: (a) shared "persona jobs" thread with a fresh session per job — rejected: chat-linked agents read thread history, isolation would rest on a prompt instruction; (b) fresh thread per job — chosen, isolation by construction, Open-thread audit trail for free. Consequences: thread count grows with batch size; session release on completion; retention sweep is a follow-up.
+**ADR-314-3 (amended by #325): One dedicated RTX thread with a fresh runtime session per persona job.** — Accepted. Context: per-job threads provided isolation but flooded the workspace timeline. Options: (a) retain one thread per job — rejected after production feedback because thread count grows with every generation; (b) share one `Persona Generation` thread while retaining unique jobs, immutable brief files, fresh runtime sessions, and `jobId`-keyed callbacks — chosen. Consequences: handoffs can interleave in one audit timeline, so each message names the contact, job ID, and brief path and agents are explicitly instructed to ignore prior jobs/messages; session teardown never deletes the shared thread; first-use creation converges under concurrent dispatches and avoids creation when thread presence is unknown.

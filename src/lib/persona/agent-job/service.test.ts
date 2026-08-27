@@ -41,6 +41,7 @@ type DispatchHarness = {
   fetchImpl: ReturnType<typeof vi.fn>;
   routingMessages: string[];
   chatUrls: string[];
+  createdThreads: Array<{ slug: string; name: string }>;
 };
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -56,14 +57,27 @@ function createDispatchHarness(input?: {
   blankSessionId?: boolean;
 }): DispatchHarness {
   let threadCount = 0;
+  let dispatchCount = 0;
   const routingMessages: string[] = [];
   const chatUrls: string[] = [];
+  const createdThreads: Array<{ slug: string; name: string }> = [];
 
   const fetchImpl = vi.fn(async (request: string | URL | Request, init?: RequestInit) => {
     const url = String(request);
     if (url.includes("/sdk/llm/chat")) chatUrls.push(url);
     if (url.includes("/cli/get-workspace/signals")) {
-      return jsonResponse({ workspace: { slug: "signals" } });
+      return jsonResponse({
+        workspace: {
+          slug: "signals",
+          workspace_configs: {
+            defaultAgent: {
+              id: "terminal-codex",
+              name: "codex",
+              terminal: { providerId: "codex-cli", modelId: "gpt-5.6-sol" },
+            },
+          },
+        },
+      });
     }
     if (url.includes("/cli/list-terminal-sessions")) {
       return jsonResponse({ sessions: [] });
@@ -71,9 +85,21 @@ function createDispatchHarness(input?: {
     if (url.includes("/cli/terminate-terminal-session/")) {
       return jsonResponse({ success: true });
     }
+    if (url.includes("/cli/get-thread/signals/persona-generation")) {
+      return jsonResponse({ error: "not found" }, 404);
+    }
+    if (url.includes("/cli/list-threads/signals")) {
+      return jsonResponse({ threads: [...createdThreads] });
+    }
     if (url.includes("/cli/create-thread/signals")) {
       threadCount += 1;
-      return jsonResponse({ thread: { slug: `persona-thread-${threadCount}` } });
+      const body = JSON.parse(String(init?.body ?? "{}")) as { name?: string };
+      const thread = {
+        slug: `persona-thread-${threadCount}`,
+        name: body.name ?? "",
+      };
+      createdThreads.push(thread);
+      return jsonResponse({ thread });
     }
     if (url.includes("/cli/send-message/signals/")) {
       const body = JSON.parse(String(init?.body ?? "{}")) as { message?: string };
@@ -81,20 +107,38 @@ function createDispatchHarness(input?: {
       routingMessages.push(message);
       const jobId = message.match(/^Job: (.+)$/m)?.[1];
       if (!jobId) throw new Error("routing message omitted the persona job id");
+      return jsonResponse({ success: true, terminalDispatchAccepted: false });
+    }
+    if (url.includes("/sdk/desktop/runtime-sessions/launch-terminal-cli-agent")) {
+      dispatchCount += 1;
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        message?: string;
+        threadSlug?: string;
+        spawnSource?: string;
+      };
+      const message = body.message ?? "";
+      const jobId = message.match(/^Job: (.+)$/m)?.[1];
+      if (!jobId) throw new Error("launch message omitted the persona job id");
+      expect(body.spawnSource).toBe("signals-persona");
       if (input?.sendFailure) {
         return jsonResponse(
-          { code: input.sendFailure.code, error: input.sendFailure.error },
+          {
+            success: false,
+            code: input.sendFailure.code,
+            error: input.sendFailure.error,
+          },
           input.sendFailure.status,
         );
       }
       input?.onDispatch?.(jobId);
       return jsonResponse({
         success: true,
-        terminalDispatchAccepted: true,
-        workspaceSlug: "signals",
-        threadSlug: `persona-thread-${threadCount}`,
         descriptor: {
-          id: input?.blankSessionId ? " " : `session-${threadCount}`,
+          id: input?.blankSessionId ? " " : `session-${dispatchCount}`,
+          linkage: {
+            workspaceSlug: "signals",
+            threadSlug: body.threadSlug ?? "",
+          },
           metadata: { canonicalAgent: "codex" },
           resumeContract: { modelSelection: { modelId: "gpt-5.6-sol" } },
         },
@@ -103,7 +147,7 @@ function createDispatchHarness(input?: {
     throw new Error(`Unexpected RTX request: ${url}`);
   });
 
-  return { fetchImpl, routingMessages, chatUrls };
+  return { fetchImpl, routingMessages, chatUrls, createdThreads };
 }
 
 describe("PersonaAgentJob service", () => {
@@ -300,7 +344,7 @@ describe("PersonaAgentJob service", () => {
     });
   });
 
-  it("uses distinct jobs, fresh threads, and isolated brief content for sequential contacts", async () => {
+  it("reuses one thread with fresh sessions and isolated briefs for sequential contacts", async () => {
     const storageDir = mkdtempSync(join(tmpdir(), "persona-agent-isolation-"));
     const env = testEnv(storageDir);
     const ada = seedEvidenceContact("Ada Isolated");
@@ -324,8 +368,21 @@ describe("PersonaAgentJob service", () => {
     });
 
     expect(adaJob.id).not.toBe(graceJob.id);
-    expect(adaJob.rtxThreadSlug).not.toBe(graceJob.rtxThreadSlug);
+    expect(adaJob.rtxThreadSlug).toBe(graceJob.rtxThreadSlug);
+    expect(adaJob.rtxRuntimeSessionId).not.toBe(graceJob.rtxRuntimeSessionId);
+    expect(harness.createdThreads).toEqual([
+      { slug: "persona-thread-1", name: "Persona Generation" },
+    ]);
     expect(adaJob.agentModel).toBe("codex:gpt-5.6-sol");
+    expect(harness.routingMessages[0]).toContain(`Job: ${adaJob.id}`);
+    expect(harness.routingMessages[0]).toContain("Signals persona handoff -> Ada Isolated");
+    expect(harness.routingMessages[1]).toContain(`Job: ${graceJob.id}`);
+    expect(harness.routingMessages[1]).toContain("Signals persona handoff -> Grace Isolated");
+    expect(harness.routingMessages).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("ignore all prior jobs and messages in this shared thread"),
+      ]),
+    );
     const adaBrief = readFileSync(
       join(storageDir, "working-data", "signals", "persona-jobs", adaJob.id, "brief.md"),
       "utf8",
@@ -340,6 +397,46 @@ describe("PersonaAgentJob service", () => {
     expect(graceBrief).not.toContain("Ada Isolated");
     assertNoPrivacySentinels(adaBrief);
     assertNoPrivacySentinels(graceBrief);
+  });
+
+  it("keeps concurrent contact jobs isolated while sharing the dedicated thread", async () => {
+    const storageDir = mkdtempSync(join(tmpdir(), "persona-agent-concurrent-"));
+    const env = testEnv(storageDir);
+    const ada = seedEvidenceContact("Ada Concurrent");
+    const grace = seedEvidenceContact("Grace Concurrent");
+    const adaPrepared = preparePersonaGeneration(ada.id, { force: true });
+    const gracePrepared = preparePersonaGeneration(grace.id, { force: true });
+    if (adaPrepared.kind !== "ready" || gracePrepared.kind !== "ready") {
+      throw new Error("expected ready persona generations");
+    }
+    const harness = createDispatchHarness();
+
+    const [adaJob, graceJob] = await Promise.all([
+      startPersonaAgentJob(ada.id, adaPrepared, {
+        env,
+        fetchImpl: harness.fetchImpl as unknown as typeof fetch,
+        force: true,
+      }),
+      startPersonaAgentJob(grace.id, gracePrepared, {
+        env,
+        fetchImpl: harness.fetchImpl as unknown as typeof fetch,
+        force: true,
+      }),
+    ]);
+
+    expect(adaJob.id).not.toBe(graceJob.id);
+    expect(adaJob.rtxThreadSlug).toBe(graceJob.rtxThreadSlug);
+    expect(adaJob.rtxRuntimeSessionId).not.toBe(graceJob.rtxRuntimeSessionId);
+    expect(harness.createdThreads).toHaveLength(1);
+    expect(harness.routingMessages).toHaveLength(2);
+    for (const job of [adaJob, graceJob]) {
+      const brief = readFileSync(
+        join(storageDir, "working-data", "signals", "persona-jobs", job.id, "brief.md"),
+        "utf8",
+      );
+      expect(brief).toContain(`jobId: ${job.id}`);
+      expect(brief).toContain(`contactId: ${job.contactId}`);
+    }
   });
 
   it("records an actionable failed job and run when terminal dispatch is unavailable", async () => {

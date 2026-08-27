@@ -27,6 +27,8 @@ export type LaunchTerminalAgentInput = {
   agentId?: string;
   providerId?: string;
   modelId?: string;
+  requireWorkspaceDefaultAgent?: boolean;
+  spawnSource?: string;
 };
 
 export type LaunchTerminalAgentResult =
@@ -138,7 +140,7 @@ function buildLaunchRequestBody(
     primarySurface: "chat",
     firstTurnDelivery: "queued",
     message: input.message,
-    spawnSource: "signals-publish",
+    spawnSource: input.spawnSource?.trim() || "signals-publish",
     requestedBy: "Signals",
     reason: input.reason,
   };
@@ -148,12 +150,15 @@ async function resolveLaunchTerminalAgent(
   input: LaunchTerminalAgentInput,
   env: EnvLike,
   fetchImpl: typeof fetch
-): Promise<ResolvedLaunchAgent> {
+): Promise<ResolvedLaunchAgent | null> {
   const workspaceDefault = await getWorkspaceDefaultTerminalAgent(
     input.workspaceSlug,
     env,
     fetchImpl
   );
+  if (input.requireWorkspaceDefaultAgent && !workspaceDefault) {
+    return null;
+  }
 
   return {
     agentName:
@@ -387,6 +392,14 @@ export async function launchTerminalCliAgent(
   }
 
   const agent = await resolveLaunchTerminalAgent(input, env, fetchImpl);
+  if (!agent) {
+    return {
+      success: false,
+      error:
+        "No terminal agent is configured for this workspace. Set a workspace default terminal agent in RealTimeX.",
+      errorCode: "terminal_dispatch_required",
+    };
+  }
 
   try {
     const response = await fetchImpl(

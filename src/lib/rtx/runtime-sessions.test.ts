@@ -129,6 +129,46 @@ describe("launchTerminalCliAgent", () => {
     });
     expect(fetchImpl).toHaveBeenCalledTimes(3);
   });
+
+  it("requires a configured workspace default when requested", async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : input.url;
+      if (url.endsWith("/cli/get-workspace/signals") && init?.method === "GET") {
+        return new Response(JSON.stringify({ workspace: { workspace_configs: {} } }), {
+          status: 200,
+        });
+      }
+      return new Response("should not launch", { status: 500 });
+    });
+
+    const result = await launchTerminalCliAgent(
+      {
+        workspaceSlug: "signals",
+        threadSlug: "thread-1",
+        message: "brief",
+        reason: "test",
+        requireWorkspaceDefaultAgent: true,
+      },
+      {
+        RTX_APP_ID: "app-1",
+        RTX_API_BASE_URL: "http://127.0.0.1:3001",
+      },
+      fetchImpl,
+    );
+
+    expect(result).toEqual({
+      success: false,
+      error:
+        "No terminal agent is configured for this workspace. Set a workspace default terminal agent in RealTimeX.",
+      errorCode: "terminal_dispatch_required",
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("dispatchTerminalAgentViaSendMessage", () => {
