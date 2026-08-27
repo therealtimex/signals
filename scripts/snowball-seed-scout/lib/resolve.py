@@ -331,6 +331,67 @@ def is_enqueueable_seed(url: str, platform: str) -> bool:
     return looks_like_post_url(url, platform) and not is_navigation_url(url, platform)
 
 
+def infer_platform_from_url(url: str) -> str | None:
+    lowered = url.strip().lower()
+    if "lnkd.in/" in lowered or "linkedin.com" in lowered:
+        return "linkedin"
+    if "x.com" in lowered or "twitter.com" in lowered:
+        return "x"
+    if "facebook.com" in lowered:
+        return "facebook"
+    return None
+
+
+def is_global_non_post_url(url: str) -> bool:
+    """Navigation/search/home URLs that must never become Snowball calendar seeds."""
+    lowered = url.strip().lower()
+    if not lowered.startswith("http"):
+        return True
+    if "/test/" in lowered or "e2e" in lowered or "1686-e2e" in lowered:
+        return True
+    if "x.com/home" in lowered or "twitter.com/home" in lowered:
+        return True
+    if "x.com/search?" in lowered or "twitter.com/search?" in lowered:
+        return True
+    if "linkedin.com/search/" in lowered:
+        return True
+    if "linkedin.com/feed" in lowered and "/posts/" not in lowered and "/feed/update/" not in lowered:
+        return True
+    if lowered.rstrip("/").endswith("facebook.com") or "facebook.com/search/" in lowered:
+        return True
+    return False
+
+
+def is_enqueueable_seed_any(url: str, platform_hint: str = "") -> bool:
+    if is_global_non_post_url(url):
+        return False
+    platform = infer_platform_from_url(url) or str(platform_hint or "").strip()
+    if not platform:
+        return False
+    return is_enqueueable_seed(url, platform)
+
+
+def filter_enqueueable_seeds(
+    urls: list[str],
+    platform_hint: str = "",
+) -> tuple[list[str], list[str]]:
+    accepted: list[str] = []
+    rejected: list[str] = []
+    seen: set[str] = set()
+    for raw in urls:
+        candidate = str(raw).strip()
+        if not candidate:
+            continue
+        if candidate in seen:
+            continue
+        if is_enqueueable_seed_any(candidate, platform_hint):
+            seen.add(candidate)
+            accepted.append(candidate)
+        else:
+            rejected.append(candidate)
+    return accepted, rejected
+
+
 def direct_post_urls_from_config(config: dict, platform: str, max_links: int) -> list[str]:
     seen: set[str] = set()
     urls: list[str] = []
@@ -666,7 +727,11 @@ def filter_post_urls(
         cleaned = normalize_post_url(str(raw).strip(), platform)
         # looks_like_post_url, not the bare pattern: a truncated facebook pfbid
         # token still matches the regex but is a dead link once dispatched.
-        if not looks_like_post_url(cleaned, platform) or cleaned in seen:
+        if (
+            not is_enqueueable_seed(cleaned, platform)
+            or is_global_non_post_url(cleaned)
+            or cleaned in seen
+        ):
             continue
         if require_keywords and lowered_keywords:
             haystack = cleaned.lower()
@@ -833,7 +898,11 @@ def extract_posts_from_snapshot(
 
         for token in re.findall(r"https?://\S+", text):
             cleaned = normalize_post_url(token.rstrip(".,)\"'"), platform)
-            if looks_like_post_url(cleaned, platform) and cleaned not in seen:
+            if (
+                is_enqueueable_seed(cleaned, platform)
+                and not is_global_non_post_url(cleaned)
+                and cleaned not in seen
+            ):
                 seen.add(cleaned)
                 urls.append(cleaned)
                 if len(urls) >= max_links:
@@ -1032,6 +1101,21 @@ def main() -> int:
         tab_id = pick_content_tab_id(payload, platform)
         if tab_id:
             print(tab_id)
+        return 0
+
+    if command == "filter-enqueue":
+        platform_hint = sys.argv[2] if len(sys.argv) > 2 else ""
+        urls = [line.strip() for line in sys.stdin if line.strip()]
+        accepted, _ = filter_enqueueable_seeds(urls, platform_hint)
+        for url in accepted:
+            print(url)
+        return 0
+
+    if command == "filter-enqueue-json":
+        platform_hint = sys.argv[2] if len(sys.argv) > 2 else ""
+        urls = [line.strip() for line in sys.stdin if line.strip()]
+        accepted, rejected = filter_enqueueable_seeds(urls, platform_hint)
+        print(json.dumps({"accepted": accepted, "rejected": rejected}))
         return 0
 
     if command == "self-test":
@@ -1342,6 +1426,27 @@ class ResolveTests(unittest.TestCase):
         }
         urls = extract_posts_from_snapshot(config, "x", 5, snapshot)
         self.assertEqual(urls, ["https://x.com/a/status/1"])
+
+    def test_filter_enqueueable_seeds_rejects_navigation_urls(self) -> None:
+        accepted, rejected = filter_enqueueable_seeds(
+            [
+                "https://x.com/home",
+                "https://x.com/search?q=yc+funding&f=live&src=typed_query",
+                "https://www.facebook.com/saritasym/posts/pfbid0AVUoH55Pnb4cxmX8Gt5yjEYJm",
+                "https://x.com/test/status/1686-e2e",
+                "https://lnkd.in/p/g8t6zZDV",
+                "https://x.com/acme/status/1234567890",
+            ],
+            "linkedin",
+        )
+        self.assertEqual(
+            accepted,
+            [
+                "https://lnkd.in/p/g8t6zZDV",
+                "https://x.com/acme/status/1234567890",
+            ],
+        )
+        self.assertEqual(len(rejected), 4)
 
 
 if __name__ == "__main__":
