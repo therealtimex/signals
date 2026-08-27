@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -19,6 +20,14 @@ const (
 	maxImportBatchSize     = 50
 	maxImportRows          = 500
 )
+
+var contactImportTools = map[string]struct{}{
+	"query_contacts":          {},
+	"resolve_platform_claim":  {},
+	"create_contact":          {},
+	"enrich_contact":          {},
+	"upsert_contact_identity": {},
+}
 
 type contactRow struct {
 	Name           string
@@ -399,28 +408,106 @@ func invokeAgentTool(
 	}
 	data, _, err := c.PostWithParams(cmd.Context(), "/api/agent-tools/invoke", nil, body)
 	if err != nil {
+		var responseErr *client.APIError
+		if errors.As(err, &responseErr) {
+			var envelope map[string]any
+			if json.Unmarshal([]byte(responseErr.Body), &envelope) == nil {
+				if success, ok := envelope["success"].(bool); ok && !success {
+					_, envelopeErr := parseAgentToolEnvelope(tool, []byte(responseErr.Body))
+					return nil, envelopeErr
+				}
+			}
+		}
 		return nil, classifyAPIError(err, flags)
 	}
 	if c.DryRun {
 		return map[string]any{"dryRun": true, "tool": tool}, nil
 	}
+	return parseAgentToolEnvelope(tool, data)
+}
+
+func parseAgentToolEnvelope(tool string, data []byte) (map[string]any, error) {
 	var envelope map[string]any
 	if err := json.Unmarshal(data, &envelope); err != nil {
-		return nil, apiErr(fmt.Errorf("decoding invoke response: %w", err))
+		return nil, apiErr(fmt.Errorf("decoding %s invoke response: %w", tool, err))
 	}
-	if success, _ := envelope["success"].(bool); !success {
-		code, _ := envelope["code"].(string)
-		message, _ := envelope["error"].(string)
+
+	rawSuccess, exists := envelope["success"]
+	if !exists {
+		return nil, apiErr(fmt.Errorf("%s invoke response missing boolean success", tool))
+	}
+	success, ok := rawSuccess.(bool)
+	if !ok {
+		return nil, apiErr(fmt.Errorf("%s invoke response has non-boolean success", tool))
+	}
+
+	if !success {
+		code, codeOK := nonEmptyString(envelope["code"])
+		message, messageOK := nonEmptyString(envelope["error"])
+		if !codeOK || !messageOK {
+			return nil, apiErr(fmt.Errorf(
+				"%s invoke failure missing usable code or error message",
+				tool,
+			))
+		}
 		if code == "VALIDATION_ERROR" {
 			return nil, usageErr(fmt.Errorf("%s: %s", tool, message))
 		}
-		return nil, apiErr(fmt.Errorf("%s: %s", tool, message))
+		return nil, apiErr(fmt.Errorf("%s (%s): %s", tool, code, message))
 	}
-	result, ok := envelope["result"].(map[string]any)
+
+	rawResult, exists := envelope["result"]
+	if !exists {
+		return nil, apiErr(fmt.Errorf("%s invoke success response missing result object", tool))
+	}
+	result, ok := rawResult.(map[string]any)
 	if !ok {
-		return map[string]any{}, nil
+		return nil, apiErr(fmt.Errorf("%s invoke success response has non-object result", tool))
+	}
+
+	if _, covered := contactImportTools[tool]; covered {
+		if legacyError, exists := result["error"]; exists {
+			message, _ := nonEmptyString(legacyError)
+			if message == "" {
+				message = "legacy error result"
+			}
+			return nil, apiErr(fmt.Errorf(
+				"%s returned %s inside a successful invoke response",
+				tool,
+				message,
+			))
+		}
+	}
+
+	if err := validateContactImportResult(tool, result); err != nil {
+		return nil, err
 	}
 	return result, nil
+}
+
+func nonEmptyString(value any) (string, bool) {
+	text, ok := value.(string)
+	if !ok {
+		return "", false
+	}
+	text = strings.TrimSpace(text)
+	return text, text != ""
+}
+
+func validateContactImportResult(tool string, result map[string]any) error {
+	switch tool {
+	case "query_contacts":
+		_, err := distinctContactIDs(result)
+		return err
+	case "resolve_platform_claim":
+		_, err := platformClaimMatch(result)
+		return err
+	case "create_contact":
+		if _, ok := nonEmptyString(result["id"]); !ok {
+			return apiErr(fmt.Errorf("create_contact result missing non-empty string id"))
+		}
+	}
+	return nil
 }
 
 func findExistingContact(cmd *cobra.Command, c *client.Client, flags *rootFlags, row contactRow) (contactMatch, error) {
@@ -440,7 +527,10 @@ func findExistingContactWithInvoker(row contactRow, invoke agentToolInvoker) (co
 		if err != nil {
 			return contactMatch{}, err
 		}
-		candidateIDs := distinctContactIDs(result)
+		candidateIDs, err := distinctContactIDs(result)
+		if err != nil {
+			return contactMatch{}, err
+		}
 		if len(candidateIDs) == 1 {
 			return contactMatch{ID: candidateIDs[0], CandidateIDs: candidateIDs}, nil
 		}
@@ -468,7 +558,7 @@ func findExistingContactWithInvoker(row contactRow, invoke agentToolInvoker) (co
 		if err != nil {
 			return contactMatch{}, err
 		}
-		return platformClaimMatch(result), nil
+		return platformClaimMatch(result)
 	}
 	return contactMatch{}, nil
 }
@@ -477,23 +567,25 @@ func normalizeEmail(email string) string {
 	return strings.ToLower(strings.TrimSpace(email))
 }
 
-// distinctContactIDs returns every valid contact ID from an exact-filter query.
-// Invalid entries remain tolerated here for backward compatibility; strict response
-// envelope validation belongs to the dedicated import-contract increment (#225).
-func distinctContactIDs(result map[string]any) []string {
+// distinctContactIDs returns every contact ID from an exact-filter query. The
+// response is strict because a missing or mistyped ID changes dedupe behavior.
+func distinctContactIDs(result map[string]any) ([]string, error) {
 	contacts, ok := result["contacts"].([]any)
 	if !ok {
-		return nil
+		return nil, apiErr(fmt.Errorf("query_contacts result missing contacts array"))
 	}
 	seen := make(map[string]struct{}, len(contacts))
-	for _, item := range contacts {
+	for index, item := range contacts {
 		contact, ok := item.(map[string]any)
 		if !ok {
-			continue
+			return nil, apiErr(fmt.Errorf("query_contacts contacts[%d] is not an object", index))
 		}
-		id, ok := contact["id"].(string)
-		if !ok || id == "" {
-			continue
+		id, ok := nonEmptyString(contact["id"])
+		if !ok {
+			return nil, apiErr(fmt.Errorf(
+				"query_contacts contacts[%d] missing non-empty string id",
+				index,
+			))
 		}
 		seen[id] = struct{}{}
 	}
@@ -502,27 +594,59 @@ func distinctContactIDs(result map[string]any) []string {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
-	return ids
+	return ids, nil
 }
 
-func platformClaimMatch(result map[string]any) contactMatch {
-	if claimed, _ := result["claimed"].(bool); !claimed {
-		return contactMatch{}
+func platformClaimMatch(result map[string]any) (contactMatch, error) {
+	claimed, ok := result["claimed"].(bool)
+	if !ok {
+		return contactMatch{}, apiErr(fmt.Errorf(
+			"resolve_platform_claim result missing boolean claimed",
+		))
+	}
+	if !claimed {
+		return contactMatch{}, nil
 	}
 	claimant, ok := result["claimant"].(map[string]any)
 	if !ok {
-		return contactMatch{}
+		return contactMatch{}, apiErr(fmt.Errorf(
+			"resolve_platform_claim claimed result missing claimant object",
+		))
 	}
-	switch kind, _ := claimant["kind"].(string); kind {
+	kind, ok := nonEmptyString(claimant["kind"])
+	if !ok {
+		return contactMatch{}, apiErr(fmt.Errorf(
+			"resolve_platform_claim claimant missing non-empty string kind",
+		))
+	}
+	switch kind {
 	case "org":
-		orgID, _ := claimant["orgId"].(string)
-		return contactMatch{OrgID: orgID}
+		orgID, ok := nonEmptyString(claimant["orgId"])
+		if !ok {
+			return contactMatch{}, apiErr(fmt.Errorf(
+				"resolve_platform_claim org claimant missing non-empty string orgId",
+			))
+		}
+		return contactMatch{OrgID: orgID}, nil
 	case "contact":
-		contactID, _ := claimant["contactId"].(string)
-		archived, _ := claimant["archived"].(bool)
-		return contactMatch{ID: contactID, Archived: archived}
+		contactID, ok := nonEmptyString(claimant["contactId"])
+		if !ok {
+			return contactMatch{}, apiErr(fmt.Errorf(
+				"resolve_platform_claim contact claimant missing non-empty string contactId",
+			))
+		}
+		archived, ok := claimant["archived"].(bool)
+		if !ok {
+			return contactMatch{}, apiErr(fmt.Errorf(
+				"resolve_platform_claim contact claimant missing boolean archived",
+			))
+		}
+		return contactMatch{ID: contactID, Archived: archived}, nil
 	default:
-		return contactMatch{}
+		return contactMatch{}, apiErr(fmt.Errorf(
+			"resolve_platform_claim claimant has unsupported kind %q",
+			kind,
+		))
 	}
 }
 

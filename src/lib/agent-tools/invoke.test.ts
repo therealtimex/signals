@@ -264,7 +264,7 @@ describe("invokeAgentTool", () => {
         platform: "x",
         platformUserId: "openai",
       }),
-    ).rejects.toMatchObject({ code: "EXECUTION_ERROR" } satisfies Partial<AgentToolError>);
+    ).rejects.toMatchObject({ code: "CONFLICT" } satisfies Partial<AgentToolError>);
   });
 
   it("rejects an org-held account even when the contact was matched by email", async () => {
@@ -293,7 +293,7 @@ describe("invokeAgentTool", () => {
         platform: "x",
         platformUserId: "openai",
       }),
-    ).rejects.toMatchObject({ code: "EXECUTION_ERROR" } satisfies Partial<AgentToolError>);
+    ).rejects.toMatchObject({ code: "CONFLICT" } satisfies Partial<AgentToolError>);
   });
 
   it("query_contacts matches an exact normalized non-primary email", async () => {
@@ -362,13 +362,14 @@ describe("invokeAgentTool", () => {
   });
 
   it("returns an error for ambiguous createdSourceDetail suffix", async () => {
-    const result = await invokeAgentTool("query_contacts", {
-      createdSourceDetail: "create_contact",
-    });
-
-    expect(result).toMatchObject({
-      error: expect.stringContaining("Ambiguous createdSourceDetail"),
-    });
+    await expect(
+      invokeAgentTool("query_contacts", {
+        createdSourceDetail: "create_contact",
+      }),
+    ).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+      message: expect.stringContaining("Ambiguous createdSourceDetail"),
+    } satisfies Partial<AgentToolError>);
   });
 
   it("rejects update_contact payloads that name birth fields", async () => {
@@ -452,16 +453,17 @@ describe("invokeAgentTool", () => {
     const created = await invokeAgentTool("create_contact", { name: "Avatar Guard" });
     const contactId = (created as { id: string }).id;
 
-    const result = await invokeAgentTool("upsert_contact_identity", {
-      contactId,
-      platform: "linkedin",
-      platformUserId: "avatar-guard",
-      avatarUrl: "file:///tmp/avatar.jpg",
-    });
-
-    expect(result).toMatchObject({
-      error: expect.stringContaining("upload-avatar"),
-    });
+    await expect(
+      invokeAgentTool("upsert_contact_identity", {
+        contactId,
+        platform: "linkedin",
+        platformUserId: "avatar-guard",
+        avatarUrl: "file:///tmp/avatar.jpg",
+      }),
+    ).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+      message: expect.stringContaining("upload-avatar"),
+    } satisfies Partial<AgentToolError>);
   });
 
   it("creates a contact with direct platform, handle, and avatarUrl in a single call", async () => {

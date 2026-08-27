@@ -47,11 +47,13 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     if (error instanceof AgentToolError) {
       const status =
-        error.code === "TOOL_NOT_FOUND"
+        error.code === "TOOL_NOT_FOUND" || error.code === "NOT_FOUND"
           ? 404
           : error.code === "VALIDATION_ERROR"
             ? 400
-            : 500;
+            : error.code === "CONFLICT"
+              ? 409
+              : 500;
 
       return NextResponse.json(
         {

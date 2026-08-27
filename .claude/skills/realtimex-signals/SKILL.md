@@ -89,7 +89,7 @@ Content-Type: application/json
 
 Success: `{ "success": true, "tool": "...", "result": { ... } }`
 
-Errors: `{ "success": false, "code": "VALIDATION_ERROR|TOOL_NOT_FOUND|...", "details": ... }`
+Errors: `{ "success": false, "code": "VALIDATION_ERROR|NOT_FOUND|CONFLICT|TOOL_NOT_FOUND|EXECUTION_ERROR", "details": ... }`
 
 Auth: localhost-only by default. Remote calls need `SIGNALS_AGENT_TOOL_TOKEN` + `Authorization: Bearer ...`.
 

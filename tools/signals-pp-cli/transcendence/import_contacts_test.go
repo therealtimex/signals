@@ -1,9 +1,11 @@
 package cli
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -77,11 +79,7 @@ func TestDistinctContactIDs(t *testing.T) {
 		result map[string]any
 		want   []string
 	}{
-		{
-			name:   "zero",
-			result: map[string]any{"contacts": []any{}},
-			want:   []string{},
-		},
+		{name: "zero", result: map[string]any{"contacts": []any{}}, want: []string{}},
 		{
 			name: "one",
 			result: map[string]any{"contacts": []any{
@@ -105,23 +103,162 @@ func TestDistinctContactIDs(t *testing.T) {
 			}},
 			want: []string{"contact-2", "contact-9"},
 		},
-		{
-			name: "malformed entries are ignored",
-			result: map[string]any{"contacts": []any{
-				"not a contact",
-				map[string]any{"id": 42},
-				map[string]any{"name": "missing id"},
-				map[string]any{"id": ""},
-				map[string]any{"id": "contact-valid"},
-			}},
-			want: []string{"contact-valid"},
-		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := distinctContactIDs(tt.result); !reflect.DeepEqual(got, tt.want) {
+			got, err := distinctContactIDs(tt.result)
+			if err != nil {
+				t.Fatalf("distinctContactIDs() error = %v", err)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
 				t.Fatalf("distinctContactIDs() = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDistinctContactIDsRejectsMalformedContacts(t *testing.T) {
+	tests := []struct {
+		name   string
+		result map[string]any
+	}{
+		{name: "missing contacts", result: map[string]any{}},
+		{name: "contacts not array", result: map[string]any{"contacts": map[string]any{}}},
+		{name: "contact not object", result: map[string]any{"contacts": []any{"not a contact"}}},
+		{name: "id not string", result: map[string]any{"contacts": []any{map[string]any{"id": 42}}}},
+		{name: "id missing", result: map[string]any{"contacts": []any{map[string]any{"name": "missing id"}}}},
+		{name: "id empty", result: map[string]any{"contacts": []any{map[string]any{"id": ""}}}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := distinctContactIDs(tt.result); err == nil || ExitCode(err) != 5 {
+				t.Fatalf("distinctContactIDs() error = %v, want API error", err)
+			}
+		})
+	}
+}
+
+func TestParseAgentToolEnvelopeRecordedContracts(t *testing.T) {
+	t.Run("query success exposes every consumed key", func(t *testing.T) {
+		result, err := parseAgentToolEnvelope("query_contacts", []byte(
+			`{"success":true,"tool":"query_contacts","result":{"total":1,"contacts":[{"id":"contact-1"}]}}`,
+		))
+		if err != nil {
+			t.Fatalf("parseAgentToolEnvelope() error = %v", err)
+		}
+		ids, err := distinctContactIDs(result)
+		if err != nil || !reflect.DeepEqual(ids, []string{"contact-1"}) {
+			t.Fatalf("distinctContactIDs() = %#v, %v", ids, err)
+		}
+	})
+
+	t.Run("query no-match remains a successful typed outcome", func(t *testing.T) {
+		result, err := parseAgentToolEnvelope("query_contacts", []byte(
+			`{"success":true,"tool":"query_contacts","result":{"total":0,"contacts":[]}}`,
+		))
+		if err != nil {
+			t.Fatalf("parseAgentToolEnvelope() error = %v", err)
+		}
+		ids, err := distinctContactIDs(result)
+		if err != nil || len(ids) != 0 {
+			t.Fatalf("distinctContactIDs() = %#v, %v", ids, err)
+		}
+	})
+
+	t.Run("unclaimed platform remains a successful typed outcome", func(t *testing.T) {
+		result, err := parseAgentToolEnvelope("resolve_platform_claim", []byte(
+			`{"success":true,"tool":"resolve_platform_claim","result":{"claimed":false}}`,
+		))
+		if err != nil {
+			t.Fatalf("parseAgentToolEnvelope() error = %v", err)
+		}
+		match, err := platformClaimMatch(result)
+		if err != nil || match.matched() {
+			t.Fatalf("platformClaimMatch() = %+v, %v", match, err)
+		}
+	})
+
+	t.Run("claimed contact exposes kind contactId and archived", func(t *testing.T) {
+		result, err := parseAgentToolEnvelope("resolve_platform_claim", []byte(
+			`{"success":true,"tool":"resolve_platform_claim","result":{"claimed":true,"claimant":{"kind":"contact","contactId":"contact-2","identityId":"identity-2","archived":true}}}`,
+		))
+		if err != nil {
+			t.Fatalf("parseAgentToolEnvelope() error = %v", err)
+		}
+		match, err := platformClaimMatch(result)
+		if err != nil || match.ID != "contact-2" || !match.Archived {
+			t.Fatalf("platformClaimMatch() = %+v, %v", match, err)
+		}
+	})
+
+	t.Run("create success requires the consumed id", func(t *testing.T) {
+		result, err := parseAgentToolEnvelope("create_contact", []byte(
+			`{"success":true,"tool":"create_contact","result":{"id":"contact-created","name":"Created"}}`,
+		))
+		if err != nil {
+			t.Fatalf("parseAgentToolEnvelope() error = %v", err)
+		}
+		if result["id"] != "contact-created" {
+			t.Fatalf("create id = %#v", result["id"])
+		}
+	})
+
+	t.Run("validation failure maps to usage error", func(t *testing.T) {
+		_, err := parseAgentToolEnvelope("create_contact", []byte(
+			`{"success":false,"code":"VALIDATION_ERROR","error":"Invalid tool input"}`,
+		))
+		if err == nil || ExitCode(err) != 2 || !strings.Contains(err.Error(), "Invalid tool input") {
+			t.Fatalf("parseAgentToolEnvelope() error = %v, want usage error", err)
+		}
+	})
+
+	t.Run("claim conflict maps to API error", func(t *testing.T) {
+		_, err := parseAgentToolEnvelope("upsert_contact_identity", []byte(
+			`{"success":false,"code":"CONFLICT","error":"Platform account is already claimed","details":{"claimant":{"kind":"org","orgId":"org-1"}}}`,
+		))
+		if err == nil || ExitCode(err) != 5 || !strings.Contains(err.Error(), "CONFLICT") {
+			t.Fatalf("parseAgentToolEnvelope() error = %v, want API conflict", err)
+		}
+	})
+}
+
+func TestParseAgentToolEnvelopeRejectsMalformedResponses(t *testing.T) {
+	tests := []struct {
+		name string
+		tool string
+		body string
+	}{
+		{name: "invalid JSON", tool: "query_contacts", body: `{`},
+		{name: "missing success", tool: "query_contacts", body: `{"result":{"contacts":[]}}`},
+		{name: "non-boolean success", tool: "query_contacts", body: `{"success":"true","result":{"contacts":[]}}`},
+		{name: "failure missing code", tool: "create_contact", body: `{"success":false,"error":"bad"}`},
+		{name: "failure missing message", tool: "create_contact", body: `{"success":false,"code":"CONFLICT"}`},
+		{name: "success missing result", tool: "create_contact", body: `{"success":true}`},
+		{name: "success result not object", tool: "create_contact", body: `{"success":true,"result":[]}`},
+		{name: "query missing contacts", tool: "query_contacts", body: `{"success":true,"result":{}}`},
+		{name: "query contact missing id", tool: "query_contacts", body: `{"success":true,"result":{"contacts":[{}]}}`},
+		{name: "claim missing claimed", tool: "resolve_platform_claim", body: `{"success":true,"result":{}}`},
+		{name: "contact claim missing archived", tool: "resolve_platform_claim", body: `{"success":true,"result":{"claimed":true,"claimant":{"kind":"contact","contactId":"contact-1"}}}`},
+		{name: "create missing id", tool: "create_contact", body: `{"success":true,"result":{"name":"Created"}}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := parseAgentToolEnvelope(tt.tool, []byte(tt.body)); err == nil || ExitCode(err) != 5 {
+				t.Fatalf("parseAgentToolEnvelope() error = %v, want API error", err)
+			}
+		})
+	}
+}
+
+func TestParseAgentToolEnvelopeRejectsLegacyImportToolErrors(t *testing.T) {
+	for tool := range contactImportTools {
+		t.Run(tool, func(t *testing.T) {
+			body := `{"success":true,"result":{"error":"legacy failure"}}`
+			if _, err := parseAgentToolEnvelope(tool, []byte(body)); err == nil || ExitCode(err) != 5 {
+				t.Fatalf("parseAgentToolEnvelope() error = %v, want API error", err)
 			}
 		})
 	}
@@ -155,16 +292,6 @@ func TestImportContactChunkPreservesZeroAndSingleMatchBehavior(t *testing.T) {
 			queryResult: map[string]any{"contacts": []any{
 				map[string]any{"id": "contact-2"},
 				map[string]any{"id": "contact-2"},
-			}},
-			wantCalls:    []string{"query_contacts", "enrich_contact"},
-			wantEnriched: 1,
-		},
-		{
-			name: "malformed entries do not hide one valid ID",
-			queryResult: map[string]any{"contacts": []any{
-				"not a contact",
-				map[string]any{"id": 42},
-				map[string]any{"id": "contact-valid"},
 			}},
 			wantCalls:    []string{"query_contacts", "enrich_contact"},
 			wantEnriched: 1,
@@ -204,6 +331,79 @@ func TestImportContactChunkPreservesZeroAndSingleMatchBehavior(t *testing.T) {
 			}
 			if summary.Created != tt.wantCreated || summary.Enriched != tt.wantEnriched || summary.Skipped != 0 || summary.Failed != 0 {
 				t.Fatalf("unexpected summary counts: %+v", summary)
+			}
+		})
+	}
+}
+
+func TestImportContactChunkDoesNotCountRejectedWrites(t *testing.T) {
+	tests := []struct {
+		name        string
+		row         contactRow
+		failureTool string
+	}{
+		{
+			name:        "rejected create",
+			row:         contactRow{Name: "Create Failure", Email: "create@example.com"},
+			failureTool: "create_contact",
+		},
+		{
+			name:        "rejected enrich",
+			row:         contactRow{Name: "Enrich Failure", Email: "enrich@example.com", Title: "CEO"},
+			failureTool: "enrich_contact",
+		},
+		{
+			name: "rejected identity upsert",
+			row: contactRow{
+				Name:           "Identity Failure",
+				Email:          "identity@example.com",
+				Platform:       "x",
+				PlatformUserID: "identity-failure",
+			},
+			failureTool: "upsert_contact_identity",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			invoke := func(tool string, _ map[string]any) (map[string]any, error) {
+				if tool == tt.failureTool {
+					return nil, apiErr(fmt.Errorf("%s rejected", tool))
+				}
+				switch tool {
+				case "query_contacts":
+					if tt.failureTool == "create_contact" {
+						return map[string]any{"contacts": []any{}}, nil
+					}
+					return map[string]any{
+						"contacts": []any{map[string]any{"id": "contact-existing"}},
+					}, nil
+				case "create_contact":
+					return map[string]any{"id": "contact-created"}, nil
+				case "enrich_contact", "upsert_contact_identity":
+					return map[string]any{}, nil
+				default:
+					t.Fatalf("unexpected tool call %q", tool)
+					return nil, nil
+				}
+			}
+
+			summary := importContactsSummary{Success: true, Errors: []string{}, Notes: []string{}}
+			if err := importContactChunkWithInvoker(
+				[]contactRow{tt.row},
+				true,
+				false,
+				&summary,
+				invoke,
+			); err != nil {
+				t.Fatalf("importContactChunkWithInvoker() error = %v", err)
+			}
+
+			if summary.Created != 0 || summary.Enriched != 0 || summary.Failed != 1 {
+				t.Fatalf("unexpected summary counts: %+v", summary)
+			}
+			if len(summary.Errors) != 1 || !strings.Contains(summary.Errors[0], tt.failureTool) {
+				t.Fatalf("summary errors = %#v", summary.Errors)
 			}
 		})
 	}
