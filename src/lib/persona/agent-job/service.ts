@@ -35,7 +35,6 @@ import {
 } from "@/lib/rtx/cli-provisioning";
 import { isRtxEmbedded, type EnvLike } from "@/lib/rtx/env";
 import { resolveSignalsBaseUrlFromEnv } from "@/lib/rtx/resolve-signals-base-url";
-import { scheduleTerminalSessionRelease } from "@/lib/rtx/resource-teardown";
 import {
   dispatchTerminalAgentViaSendMessage,
   type RuntimeSessionDescriptor,
@@ -53,8 +52,6 @@ import type {
 export const PERSONA_AGENT_JOB_MAX_ATTEMPTS = 2;
 export const DEFAULT_PERSONA_AGENT_JOB_TIMEOUT_MS = 300_000;
 export const PERSONA_AGENT_JOB_TIMEOUT_ENV = "PERSONA_AGENT_JOB_TIMEOUT_MS";
-const PERSONA_JOB_TERMINAL_EFFECT_RETRY_MS = 60_000;
-const personaJobTerminalEffectAttempts = new Map<string, number>();
 
 type ReadyPersonaGeneration = Extract<PreparedPersonaGeneration, { kind: "ready" }>;
 
@@ -152,10 +149,7 @@ export function completePersonaJobWorkflow(
   );
 }
 
-export function reconcilePersonaJobTerminalEffects(
-  jobId: string,
-  opts: Pick<StartPersonaAgentJobOptions, "env" | "fetchImpl"> = {},
-): PersonaJobView | null {
+export function reconcilePersonaJobCompletionEffects(jobId: string): PersonaJobView | null {
   const job = getPersonaJobById(jobId);
   if (!job || job.status !== "completed") return job;
 
@@ -163,24 +157,10 @@ export function reconcilePersonaJobTerminalEffects(
   if (workflow && workflow.status !== "completed") {
     completePersonaJobWorkflow(job, { recoveredCompletion: true });
   }
-  const now = Date.now();
-  for (const [attemptedJobId, attemptedAt] of personaJobTerminalEffectAttempts) {
-    if (now - attemptedAt >= PERSONA_JOB_TERMINAL_EFFECT_RETRY_MS) {
-      personaJobTerminalEffectAttempts.delete(attemptedJobId);
-    }
-  }
-  const previousAttempt = personaJobTerminalEffectAttempts.get(job.id);
-  if (job.rtxRuntimeSessionId && previousAttempt === undefined) {
-    personaJobTerminalEffectAttempts.set(job.id, now);
-    scheduleTerminalSessionRelease(job.rtxRuntimeSessionId, opts.env, opts.fetchImpl);
-  }
   return job;
 }
 
-export function reconcileStalePersonaJobCompletion(
-  jobId: string,
-  opts: Pick<StartPersonaAgentJobOptions, "env" | "fetchImpl"> = {},
-): PersonaJobView | null {
+export function reconcileStalePersonaJobCompletion(jobId: string): PersonaJobView | null {
   const job = getPersonaJobById(jobId);
   if (!job || job.status !== "completing" || !job.stale) return job;
 
@@ -208,7 +188,7 @@ export function reconcileStalePersonaJobCompletion(
       return finished;
     });
     if (completed?.status === "completed") {
-      reconcilePersonaJobTerminalEffects(completed.id, opts);
+      reconcilePersonaJobCompletionEffects(completed.id);
     }
     return getPersonaJobById(job.id);
   }
@@ -221,7 +201,6 @@ export function reconcileStalePersonaJobCompletion(
   });
   if (failed?.status === "failed") {
     completeRunAsFailed(failed, error);
-    scheduleTerminalSessionRelease(failed.rtxRuntimeSessionId, opts.env, opts.fetchImpl);
   }
   return getPersonaJobById(job.id);
 }
@@ -240,12 +219,12 @@ export async function startPersonaAgentJob(
 ): Promise<PersonaJobView> {
   const latest = getLatestPersonaJobForContact(contactId);
   if (latest?.status === "completed") {
-    reconcilePersonaJobTerminalEffects(latest.id, opts);
+    reconcilePersonaJobCompletionEffects(latest.id);
   }
 
   let existing = getActivePersonaJobForContact(contactId);
   if (existing?.status === "completing" && existing.stale) {
-    const reconciled = reconcileStalePersonaJobCompletion(existing.id, opts);
+    const reconciled = reconcileStalePersonaJobCompletion(existing.id);
     if (reconciled?.status === "completed") return reconciled;
     existing = getActivePersonaJobForContact(contactId);
   }
@@ -256,7 +235,6 @@ export async function startPersonaAgentJob(
     const superseded = markPersonaJobSuperseded(existing.id);
     if (superseded?.status === "superseded") {
       completeRunAsFailed(superseded, superseded.error ?? "Superseded by a newer persona job");
-      scheduleTerminalSessionRelease(superseded.rtxRuntimeSessionId, opts.env, opts.fetchImpl);
     }
   }
 
@@ -343,7 +321,7 @@ export async function startPersonaAgentJob(
         threadSlug,
         message: routingMessage,
         reason: `Generate a persona for contact ${contactId}`,
-        terminalSessionPolicy: "fresh",
+        channelTurnId: job.id,
       },
       env,
       fetchImpl,
@@ -390,7 +368,7 @@ export async function awaitPersonaJob(
     }
     if (isPersonaJobTerminal(job.status)) {
       if (job.status === "completed") {
-        job = reconcilePersonaJobTerminalEffects(job.id) ?? job;
+        job = reconcilePersonaJobCompletionEffects(job.id) ?? job;
       }
       return job;
     }
@@ -404,7 +382,6 @@ export async function awaitPersonaJob(
       const timedOut = markPersonaJobTimedOut(job.id, message) ?? job;
       if (timedOut.status === "timeout") {
         completeRunAsFailed(timedOut, message);
-        scheduleTerminalSessionRelease(timedOut.rtxRuntimeSessionId);
       }
       if (timedOut.status === "completing") {
         await new Promise((resolve) => setTimeout(resolve, pollMs));

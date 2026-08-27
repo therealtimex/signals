@@ -259,8 +259,8 @@ export type DispatchTerminalAgentInput = {
   threadSlug: string;
   message: string;
   reason?: string;
-  /** Launch a new PromptInput runtime instead of reusing or resuming one. */
-  terminalSessionPolicy?: "fresh";
+  /** Stable turn identity forwarded through the PromptInput delivery path. */
+  channelTurnId?: string;
 };
 
 export async function appendRtxThreadMessage(
@@ -349,8 +349,8 @@ export async function dispatchTerminalAgentViaSendMessage(
         body: JSON.stringify({
           message: input.message,
           requireTerminalDispatch: true,
-          ...(input.terminalSessionPolicy
-            ? { terminalSessionPolicy: input.terminalSessionPolicy }
+          ...(input.channelTurnId?.trim()
+            ? { channelTurnId: input.channelTurnId.trim() }
             : {}),
         }),
       }

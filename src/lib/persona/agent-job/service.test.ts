@@ -44,7 +44,7 @@ type DispatchHarness = {
   createdThreads: Array<{ slug: string; name: string }>;
   launchRequests: Array<{
     requireTerminalDispatch?: boolean;
-    terminalSessionPolicy?: string;
+    channelTurnId?: string;
     message?: string;
     agentName?: string;
     providerId?: string;
@@ -102,9 +102,6 @@ function createDispatchHarness(input?: {
     if (url.includes("/cli/list-terminal-sessions")) {
       return jsonResponse({ sessions: [] });
     }
-    if (url.includes("/cli/terminate-terminal-session/")) {
-      return jsonResponse({ success: true });
-    }
     if (url.includes("/cli/get-thread/signals/persona-generation")) {
       return jsonResponse({ error: "not found" }, 404);
     }
@@ -125,7 +122,7 @@ function createDispatchHarness(input?: {
       dispatchCount += 1;
       const body = JSON.parse(String(init?.body ?? "{}")) as {
         requireTerminalDispatch?: boolean;
-        terminalSessionPolicy?: string;
+        channelTurnId?: string;
         message?: string;
         agentName?: string;
         providerId?: string;
@@ -148,10 +145,7 @@ function createDispatchHarness(input?: {
         );
       }
       input?.onDispatch?.(jobId);
-      const sessionId =
-        input?.matchingLiveChatLinkedSessionId && body.terminalSessionPolicy !== "fresh"
-          ? input.matchingLiveChatLinkedSessionId
-          : `session-${dispatchCount}`;
+      const sessionId = input?.matchingLiveChatLinkedSessionId ?? "session-1";
       const threadSlug = decodeURIComponent(url.split("/").at(-1) ?? "");
       return jsonResponse({
         success: true,
@@ -374,7 +368,7 @@ describe("PersonaAgentJob service", () => {
     });
   });
 
-  it("reuses one thread with fresh sessions and isolated briefs for sequential contacts", async () => {
+  it("reuses one thread and PromptInput session with isolated briefs for sequential contacts", async () => {
     const storageDir = mkdtempSync(join(tmpdir(), "persona-agent-isolation-"));
     const env = testEnv(storageDir);
     const ada = seedEvidenceContact("Ada Isolated");
@@ -399,7 +393,7 @@ describe("PersonaAgentJob service", () => {
 
     expect(adaJob.id).not.toBe(graceJob.id);
     expect(adaJob.rtxThreadSlug).toBe(graceJob.rtxThreadSlug);
-    expect(adaJob.rtxRuntimeSessionId).not.toBe(graceJob.rtxRuntimeSessionId);
+    expect(adaJob.rtxRuntimeSessionId).toBe(graceJob.rtxRuntimeSessionId);
     expect(harness.createdThreads).toEqual([
       { slug: "persona-thread-1", name: "Persona Generation" },
     ]);
@@ -413,6 +407,10 @@ describe("PersonaAgentJob service", () => {
         expect.stringContaining("ignore all prior jobs and messages in this shared thread"),
       ]),
     );
+    expect(harness.launchRequests.map((request) => request.channelTurnId)).toEqual([
+      adaJob.id,
+      graceJob.id,
+    ]);
     const adaBrief = readFileSync(
       join(storageDir, "working-data", "signals", "persona-jobs", adaJob.id, "brief.md"),
       "utf8",
@@ -429,7 +427,7 @@ describe("PersonaAgentJob service", () => {
     assertNoPrivacySentinels(graceBrief);
   });
 
-  it("does not reuse a matching live chat-linked session in the dedicated thread", async () => {
+  it("reuses a matching live chat-linked session in the dedicated thread", async () => {
     const storageDir = mkdtempSync(join(tmpdir(), "persona-agent-live-session-"));
     const env = testEnv(storageDir);
     const contact = seedEvidenceContact("Fresh Session Subject");
@@ -447,14 +445,14 @@ describe("PersonaAgentJob service", () => {
     });
 
     expect(job.rtxThreadSlug).toBe("persona-thread-1");
-    expect(job.rtxRuntimeSessionId).toBe("session-1");
-    expect(job.rtxRuntimeSessionId).not.toBe(liveSessionId);
+    expect(job.rtxRuntimeSessionId).toBe(liveSessionId);
     expect(harness.launchRequests).toEqual([
       expect.objectContaining({
         requireTerminalDispatch: true,
-        terminalSessionPolicy: "fresh",
+        channelTurnId: job.id,
       }),
     ]);
+    expect(harness.launchRequests[0]).not.toHaveProperty("terminalSessionPolicy");
     expect(harness.launchRequests[0]).not.toHaveProperty("agentName");
     expect(harness.launchRequests[0]).not.toHaveProperty("providerId");
     expect(harness.launchRequests[0]).not.toHaveProperty("modelId");
@@ -487,7 +485,7 @@ describe("PersonaAgentJob service", () => {
 
     expect(adaJob.id).not.toBe(graceJob.id);
     expect(adaJob.rtxThreadSlug).toBe(graceJob.rtxThreadSlug);
-    expect(adaJob.rtxRuntimeSessionId).not.toBe(graceJob.rtxRuntimeSessionId);
+    expect(adaJob.rtxRuntimeSessionId).toBe(graceJob.rtxRuntimeSessionId);
     expect(harness.createdThreads).toHaveLength(1);
     expect(harness.routingMessages).toHaveLength(2);
     for (const job of [adaJob, graceJob]) {
