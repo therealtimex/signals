@@ -5,63 +5,102 @@ export interface SnowballSeedUrlFilterResult {
 
 type SnowballPlatform = "x" | "linkedin" | "facebook";
 
-const POST_PATTERNS: Record<SnowballPlatform, RegExp> = {
-  x: /https?:\/\/(?:x|twitter)\.com\/[^/\s?#]+\/status\/\d+/i,
-  linkedin:
-    /https?:\/\/(?:(?:www\.)?linkedin\.com\/(?:posts|feed\/update)\/[^\s"'<>]+|lnkd\.in\/p\/[^\s"'<>/?#]+)/i,
-  facebook:
-    /https?:\/\/(?:www\.)?facebook\.com\/(?:[^/\s"'<>]+\/posts\/(?:pfbid)?[^\s"'<>/?#]+|photo\/?\?fbid=\d+|groups\/[^/\s"'<>]+\/permalink\/\d+)/i,
-};
-
-function isNavigationUrl(url: string, platform: SnowballPlatform): boolean {
-  const lowered = url.trim().toLowerCase();
-  if (platform === "x") {
-    return (
-      lowered.endsWith("x.com/home") ||
-      lowered.includes("/x.com/home?") ||
-      lowered.includes("x.com/search?") ||
-      lowered.includes("twitter.com/search?")
-    );
+function normalizeHostname(hostname: string | null | undefined): string {
+  if (!hostname) {
+    return "";
   }
-  if (platform === "linkedin") {
-    return (
-      lowered.endsWith("linkedin.com/feed/") ||
-      lowered.endsWith("linkedin.com/feed") ||
-      lowered.includes("linkedin.com/search/")
-    );
-  }
-  return (
-    lowered.replace(/\/+$/, "").endsWith("facebook.com") ||
-    lowered.includes("facebook.com/search/")
-  );
+  return hostname.toLowerCase().replace(/^www\./, "");
 }
 
-function looksLikePostUrl(url: string, platform: SnowballPlatform): boolean {
-  const pattern = POST_PATTERNS[platform];
-  if (!pattern.test(url)) {
-    return false;
-  }
-  if (platform === "facebook" && url.toLowerCase().includes("/posts/pfbid")) {
-    const token = url.toLowerCase().split("/posts/", 2)[1] ?? "";
-    if (token.length < 60) {
-      return false;
-    }
-  }
-  return true;
-}
-
-function inferPlatformFromUrl(url: string): SnowballPlatform | null {
-  const lowered = url.trim().toLowerCase();
-  if (lowered.includes("lnkd.in/") || lowered.includes("linkedin.com")) {
-    return "linkedin";
-  }
-  if (lowered.includes("x.com") || lowered.includes("twitter.com")) {
+function platformForHostname(hostname: string | null | undefined): SnowballPlatform | null {
+  const host = normalizeHostname(hostname);
+  if (host === "x.com" || host === "twitter.com") {
     return "x";
   }
-  if (lowered.includes("facebook.com")) {
+  if (host === "linkedin.com" || host === "lnkd.in") {
+    return "linkedin";
+  }
+  if (host === "facebook.com") {
     return "facebook";
   }
   return null;
+}
+
+function parseSupportedSocialUrl(
+  url: string,
+): { parsed: URL; platform: SnowballPlatform } | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(url.trim());
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return null;
+  }
+  const platform = platformForHostname(parsed.hostname);
+  if (!platform) {
+    return null;
+  }
+  return { parsed, platform };
+}
+
+function looksLikePostUrl(url: string, platform: SnowballPlatform): boolean {
+  const parsedBundle = parseSupportedSocialUrl(url);
+  if (!parsedBundle || parsedBundle.platform !== platform) {
+    return false;
+  }
+
+  const { parsed } = parsedBundle;
+  const path = parsed.pathname.replace(/\/+$/, "") || "/";
+
+  if (platform === "x") {
+    return /^\/[^/]+\/status\/\d+$/i.test(path);
+  }
+  if (platform === "linkedin") {
+    if (normalizeHostname(parsed.hostname) === "lnkd.in") {
+      return /^\/p\/[^/]+/i.test(path);
+    }
+    return /^\/posts\/[^/]+/i.test(path) || /^\/feed\/update\/[^/]+/i.test(path);
+  }
+  if (platform === "facebook") {
+    if (path === "/photo") {
+      const fbid = parsed.searchParams.get("fbid");
+      return Boolean(fbid && /^\d+$/.test(fbid));
+    }
+    if (path.includes("/permalink/")) {
+      return /\/permalink\/\d+$/i.test(path);
+    }
+    if (path.includes("/posts/")) {
+      const token = path.split("/posts/").pop() ?? "";
+      if (token.toLowerCase().startsWith("pfbid")) {
+        return token.length >= 60;
+      }
+      return /^\d+$/.test(token);
+    }
+    return false;
+  }
+  return false;
+}
+
+function isNavigationUrl(url: string, platform: SnowballPlatform): boolean {
+  const parsedBundle = parseSupportedSocialUrl(url);
+  if (!parsedBundle || parsedBundle.platform !== platform) {
+    return false;
+  }
+
+  const path = parsedBundle.parsed.pathname.replace(/\/+$/, "") || "/";
+  if (platform === "x") {
+    return path === "/" || path === "/home" || path.startsWith("/search");
+  }
+  if (platform === "linkedin") {
+    return path === "/feed" || path.startsWith("/search");
+  }
+  return path === "/" || path.startsWith("/search");
+}
+
+function inferPlatformFromUrl(url: string): SnowballPlatform | null {
+  return parseSupportedSocialUrl(url)?.platform ?? null;
 }
 
 /** Navigation/search/home URLs that must never become Snowball calendar seeds. */
@@ -74,41 +113,28 @@ export function isGlobalNonPostUrl(url: string): boolean {
   if (lowered.includes("/test/") || lowered.includes("e2e") || lowered.includes("1686-e2e")) {
     return true;
   }
-  if (lowered.includes("x.com/home") || lowered.includes("twitter.com/home")) {
+
+  const parsedBundle = parseSupportedSocialUrl(url);
+  if (!parsedBundle) {
     return true;
   }
-  if (lowered.includes("x.com/search?") || lowered.includes("twitter.com/search?")) {
-    return true;
-  }
-  if (lowered.includes("linkedin.com/search/")) {
-    return true;
-  }
-  if (
-    lowered.includes("linkedin.com/feed") &&
-    !lowered.includes("/posts/") &&
-    !lowered.includes("/feed/update/")
-  ) {
-    return true;
-  }
-  return (
-    lowered.replace(/\/+$/, "").endsWith("facebook.com") ||
-    lowered.includes("facebook.com/search/")
-  );
+
+  return isNavigationUrl(url, parsedBundle.platform);
 }
 
 function isEnqueueableSeed(url: string, platform: SnowballPlatform): boolean {
   return looksLikePostUrl(url, platform) && !isNavigationUrl(url, platform);
 }
 
-function isEnqueueableSeedAny(url: string, platformHint?: string | null): boolean {
+function isEnqueueableSeedAny(url: string): boolean {
   if (isGlobalNonPostUrl(url)) {
     return false;
   }
-  const platform = inferPlatformFromUrl(url) ?? platformHint?.trim();
-  if (platform !== "x" && platform !== "linkedin" && platform !== "facebook") {
+  const parsedBundle = parseSupportedSocialUrl(url);
+  if (!parsedBundle) {
     return false;
   }
-  return isEnqueueableSeed(url, platform);
+  return isEnqueueableSeed(url, parsedBundle.platform);
 }
 
 /**
@@ -120,6 +146,7 @@ export function filterSnowballEnqueueUrls(
   urls: string[],
   platformHint?: string | null,
 ): SnowballSeedUrlFilterResult {
+  void platformHint;
   const accepted: string[] = [];
   const rejected: string[] = [];
   const seen = new Set<string>();
@@ -129,7 +156,7 @@ export function filterSnowballEnqueueUrls(
     if (!candidate || seen.has(candidate)) {
       continue;
     }
-    if (isEnqueueableSeedAny(candidate, platformHint)) {
+    if (isEnqueueableSeedAny(candidate)) {
       seen.add(candidate);
       accepted.push(candidate);
     } else {

@@ -49,4 +49,14 @@ describe("filterSnowballEnqueueUrls", () => {
     expect(accepted).toEqual(["https://x.com/acme/status/999"]);
     expect(rejected).toEqual(["https://x.com/home"]);
   });
+
+  it("rejects wrapper hosts and padded truncated pfbid query strings", () => {
+    const { accepted, rejected } = filterSnowballEnqueueUrls([
+      "https://evil.example/https://x.com/acme/status/123",
+      `https://www.facebook.com/acme/posts/pfbid0SHORT?utm_source=${"x".repeat(100)}`,
+    ]);
+
+    expect(accepted).toEqual([]);
+    expect(rejected).toHaveLength(2);
+  });
 });

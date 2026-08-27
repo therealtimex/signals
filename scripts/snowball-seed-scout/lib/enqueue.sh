@@ -59,7 +59,17 @@ try:
             parsed["skipped"] = int(parsed.get("skipped") or 0) + len(rejected)
         print(json.dumps(parsed))
 except Exception as exc:
-    print(json.dumps({"error": str(exc), "queued": 0, "skipped": rejected}))
+    print(json.dumps({
+        "error": str(exc),
+        "queued": 0,
+        "skipped": len(rejected),
+        "deduped": 0,
+        "failed": len(urls),
+        "deferred": 0,
+        "rejectedNonPostUrls": rejected,
+        "attemptedUrls": urls,
+        "failures": [{"url": url, "error": str(exc)} for url in urls],
+    }))
     raise SystemExit(1)
 PY
 }
