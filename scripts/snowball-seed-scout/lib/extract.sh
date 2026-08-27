@@ -189,6 +189,10 @@ PY
   scout_stop_browser "${session_name}" "${lib_dir}"
 
   if [[ "${#collected[@]}" -gt 0 ]]; then
-    printf '%s\n' "${collected[@]}"
+    local filtered=""
+    filtered="$(printf '%s\n' "${collected[@]}" | python3 "${lib_dir}/resolve.py" filter-enqueue "${platform}")"
+    if [[ -n "${filtered}" ]]; then
+      printf '%s\n' "${filtered}"
+    fi
   fi
 }

@@ -158,16 +158,73 @@ def is_http_url(value: str) -> bool:
     return lowered.startswith("http://") or lowered.startswith("https://")
 
 
+def _normalize_hostname(hostname: str | None) -> str:
+    if not hostname:
+        return ""
+    return hostname.lower().removeprefix("www.")
+
+
+def platform_for_hostname(hostname: str | None) -> str | None:
+    host = _normalize_hostname(hostname)
+    if host in ("x.com", "twitter.com"):
+        return "x"
+    if host == "linkedin.com":
+        return "linkedin"
+    if host == "lnkd.in":
+        return "linkedin"
+    if host == "facebook.com":
+        return "facebook"
+    return None
+
+
+def parse_supported_social_url(url: str):
+    from urllib.parse import urlparse
+
+    try:
+        parsed = urlparse(url.strip())
+    except ValueError:
+        return None
+    if parsed.scheme not in ("http", "https"):
+        return None
+    platform = platform_for_hostname(parsed.hostname)
+    if not platform:
+        return None
+    return parsed, platform
+
+
 def looks_like_post_url(url: str, platform: str) -> bool:
-    pattern = POST_PATTERNS.get(platform)
-    if not pattern or not pattern.search(url):
+    parsed_bundle = parse_supported_social_url(url)
+    if not parsed_bundle:
         return False
-    if platform == "facebook" and "/posts/pfbid" in url.lower():
-        # pfbid tokens are long; truncated calendar/display URLs break navigation.
-        token = url.lower().split("/posts/", 1)[-1]
-        if len(token) < 60:
-            return False
-    return True
+    parsed, host_platform = parsed_bundle
+    if host_platform != platform:
+        return False
+
+    from urllib.parse import parse_qs
+
+    path = parsed.path.rstrip("/")
+    if platform == "x":
+        return bool(re.match(r"^/[^/]+/status/\d+$", path, re.I))
+    if platform == "linkedin":
+        if _normalize_hostname(parsed.hostname) == "lnkd.in":
+            return bool(re.match(r"^/p/[^/]+", path, re.I))
+        return bool(
+            re.match(r"^/posts/[^/]+", path, re.I)
+            or re.match(r"^/feed/update/[^/]+", path, re.I)
+        )
+    if platform == "facebook":
+        if path == "/photo":
+            fbid = (parse_qs(parsed.query).get("fbid") or [None])[0]
+            return bool(fbid and str(fbid).isdigit())
+        if "/permalink/" in path:
+            return bool(re.search(r"/permalink/\d+$", path))
+        if "/posts/" in path:
+            token = path.rsplit("/posts/", 1)[-1]
+            if token.lower().startswith("pfbid"):
+                return len(token) >= 60
+            return bool(re.fullmatch(r"\d+", token))
+        return False
+    return False
 
 
 def resolve_community(platform: str, name: str) -> str:
@@ -329,6 +386,77 @@ def is_navigation_url(url: str, platform: str) -> bool:
 
 def is_enqueueable_seed(url: str, platform: str) -> bool:
     return looks_like_post_url(url, platform) and not is_navigation_url(url, platform)
+
+
+def infer_platform_from_url(url: str) -> str | None:
+    parsed_bundle = parse_supported_social_url(url)
+    if not parsed_bundle:
+        return None
+    return parsed_bundle[1]
+
+
+def is_global_non_post_url(url: str) -> bool:
+    """Navigation/search/home URLs that must never become Snowball calendar seeds."""
+    lowered = url.strip().lower()
+    if not lowered.startswith("http"):
+        return True
+    if "/test/" in lowered or "e2e" in lowered or "1686-e2e" in lowered:
+        return True
+
+    parsed_bundle = parse_supported_social_url(url)
+    if not parsed_bundle:
+        return True
+
+    parsed, platform = parsed_bundle
+    path = parsed.path.rstrip("/") or "/"
+    if platform == "x":
+        if path in ("/", "/home"):
+            return True
+        if path.startswith("/search"):
+            return True
+    if platform == "linkedin":
+        if path in ("/feed", "/feed/"):
+            return True
+        if path.startswith("/search"):
+            return True
+    if platform == "facebook":
+        if path in ("/", ""):
+            return True
+        if path.startswith("/search"):
+            return True
+    return False
+
+
+def is_enqueueable_seed_any(url: str, platform_hint: str = "") -> bool:
+    del platform_hint  # Classification is host-derived; hints must not bypass parsing.
+    if is_global_non_post_url(url):
+        return False
+    parsed_bundle = parse_supported_social_url(url)
+    if not parsed_bundle:
+        return False
+    _, platform = parsed_bundle
+    return is_enqueueable_seed(url, platform)
+
+
+def filter_enqueueable_seeds(
+    urls: list[str],
+    platform_hint: str = "",
+) -> tuple[list[str], list[str]]:
+    accepted: list[str] = []
+    rejected: list[str] = []
+    seen: set[str] = set()
+    for raw in urls:
+        candidate = str(raw).strip()
+        if not candidate:
+            continue
+        if candidate in seen:
+            continue
+        if is_enqueueable_seed_any(candidate, platform_hint):
+            seen.add(candidate)
+            accepted.append(candidate)
+        else:
+            rejected.append(candidate)
+    return accepted, rejected
 
 
 def direct_post_urls_from_config(config: dict, platform: str, max_links: int) -> list[str]:
@@ -666,7 +794,11 @@ def filter_post_urls(
         cleaned = normalize_post_url(str(raw).strip(), platform)
         # looks_like_post_url, not the bare pattern: a truncated facebook pfbid
         # token still matches the regex but is a dead link once dispatched.
-        if not looks_like_post_url(cleaned, platform) or cleaned in seen:
+        if (
+            not is_enqueueable_seed(cleaned, platform)
+            or is_global_non_post_url(cleaned)
+            or cleaned in seen
+        ):
             continue
         if require_keywords and lowered_keywords:
             haystack = cleaned.lower()
@@ -833,7 +965,11 @@ def extract_posts_from_snapshot(
 
         for token in re.findall(r"https?://\S+", text):
             cleaned = normalize_post_url(token.rstrip(".,)\"'"), platform)
-            if looks_like_post_url(cleaned, platform) and cleaned not in seen:
+            if (
+                is_enqueueable_seed(cleaned, platform)
+                and not is_global_non_post_url(cleaned)
+                and cleaned not in seen
+            ):
                 seen.add(cleaned)
                 urls.append(cleaned)
                 if len(urls) >= max_links:
@@ -1032,6 +1168,21 @@ def main() -> int:
         tab_id = pick_content_tab_id(payload, platform)
         if tab_id:
             print(tab_id)
+        return 0
+
+    if command == "filter-enqueue":
+        platform_hint = sys.argv[2] if len(sys.argv) > 2 else ""
+        urls = [line.strip() for line in sys.stdin if line.strip()]
+        accepted, _ = filter_enqueueable_seeds(urls, platform_hint)
+        for url in accepted:
+            print(url)
+        return 0
+
+    if command == "filter-enqueue-json":
+        platform_hint = sys.argv[2] if len(sys.argv) > 2 else ""
+        urls = [line.strip() for line in sys.stdin if line.strip()]
+        accepted, rejected = filter_enqueueable_seeds(urls, platform_hint)
+        print(json.dumps({"accepted": accepted, "rejected": rejected}))
         return 0
 
     if command == "self-test":
@@ -1342,6 +1493,38 @@ class ResolveTests(unittest.TestCase):
         }
         urls = extract_posts_from_snapshot(config, "x", 5, snapshot)
         self.assertEqual(urls, ["https://x.com/a/status/1"])
+
+    def test_filter_enqueueable_seeds_rejects_navigation_urls(self) -> None:
+        accepted, rejected = filter_enqueueable_seeds(
+            [
+                "https://x.com/home",
+                "https://x.com/search?q=yc+funding&f=live&src=typed_query",
+                "https://www.facebook.com/saritasym/posts/pfbid0AVUoH55Pnb4cxmX8Gt5yjEYJm",
+                "https://x.com/test/status/1686-e2e",
+                "https://lnkd.in/p/g8t6zZDV",
+                "https://x.com/acme/status/1234567890",
+            ],
+            "linkedin",
+        )
+        self.assertEqual(
+            accepted,
+            [
+                "https://lnkd.in/p/g8t6zZDV",
+                "https://x.com/acme/status/1234567890",
+            ],
+        )
+        self.assertEqual(len(rejected), 4)
+
+    def test_filter_rejects_wrapper_and_padded_pfbid_urls(self) -> None:
+        accepted, rejected = filter_enqueueable_seeds(
+            [
+                "https://evil.example/https://x.com/acme/status/123",
+                "https://www.facebook.com/acme/posts/pfbid0SHORT?utm_source="
+                + ("x" * 100),
+            ],
+        )
+        self.assertEqual(accepted, [])
+        self.assertEqual(len(rejected), 2)
 
 
 if __name__ == "__main__":

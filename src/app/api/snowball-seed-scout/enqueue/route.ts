@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { readSnowballSeedScoutDeployment } from "@/lib/rtx/deploy-snowball-seed-scout";
 import { enqueueSnowballCalendarSeeds } from "@/lib/rtx/enqueue-snowball-calendar-seeds";
+import { filterSnowballEnqueueUrls } from "@/lib/rtx/snowball-seed-url-filter";
 
 /** Generous headroom over the scout's own 20-link ceiling. */
 const MAX_ENQUEUE_URLS = 50;
@@ -35,8 +36,30 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const { accepted, rejected } = filterSnowballEnqueueUrls(
+      data.urls,
+      data.platform ?? null,
+    );
+
+    if (accepted.length === 0) {
+      return NextResponse.json({
+        queued: 0,
+        skipped: rejected.length,
+        deduped: 0,
+        failed: 0,
+        deferred: 0,
+        items: [],
+        skippedUrls: [],
+        dedupedUrls: [],
+        failures: [],
+        deferredUrls: [],
+        rejectedNonPostUrls: rejected,
+        message: "No enqueueable post URLs — navigation/search/home pages are not queued as Snowball seeds",
+      });
+    }
+
     const result = await enqueueSnowballCalendarSeeds(
-      data.urls.map((url) => ({
+      accepted.map((url) => ({
         url,
         platform: data.platform ?? null,
         producerRunId: data.producerRunId ?? null,
@@ -53,7 +76,7 @@ export async function POST(req: NextRequest) {
     // request when nothing at all made it onto the calendar.
     const payload = {
       queued: result.queued.length,
-      skipped: result.skipped.length,
+      skipped: result.skipped.length + rejected.length,
       deduped: result.deduped.length,
       failed: result.failed.length,
       deferred: result.deferred.length,
@@ -62,6 +85,7 @@ export async function POST(req: NextRequest) {
       dedupedUrls: result.deduped,
       failures: result.failed,
       deferredUrls: result.deferred,
+      rejectedNonPostUrls: rejected,
     };
 
     if (
