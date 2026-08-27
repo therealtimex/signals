@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -52,9 +53,10 @@ type importContactsSummary struct {
 // attach. OrgID matters because a platform account can be claimed by an org identity
 // as well, which blocks a contact identity just as hard.
 type contactMatch struct {
-	ID       string
-	Archived bool
-	OrgID    string
+	ID           string
+	Archived     bool
+	OrgID        string
+	CandidateIDs []string
 }
 
 // matched reports whether the row resolved to an existing owner of any kind.
@@ -62,8 +64,14 @@ type contactMatch struct {
 // alone, or a new claimant kind silently reverts to creating a duplicate — which
 // is what happened to reconcile when org claims were added.
 func (m contactMatch) matched() bool {
-	return m.ID != "" || m.OrgID != ""
+	return m.ID != "" || m.OrgID != "" || len(m.CandidateIDs) > 0
 }
+
+func (m contactMatch) ambiguous() bool {
+	return len(m.CandidateIDs) > 1
+}
+
+type agentToolInvoker func(tool string, input map[string]any) (map[string]any, error)
 
 func newImportContactsCmd(flags *rootFlags) *cobra.Command {
 	var filePath string
@@ -268,7 +276,7 @@ func mapContactRow(item map[string]any) (contactRow, error) {
 		Name:           get("name"),
 		Company:        get("company"),
 		Title:          get("title"),
-		Email:          strings.ToLower(get("email")),
+		Email:          normalizeEmail(get("email")),
 		Platform:       get("platform"),
 		PlatformUserID: get("platform_user_id", "platformUserId"),
 		PlatformHandle: get("platform_handle", "platformHandle"),
@@ -290,16 +298,36 @@ func importContactChunk(
 	dedupe bool,
 	summary *importContactsSummary,
 ) error {
+	return importContactChunkWithInvoker(rows, dedupe, c.DryRun, summary, func(tool string, input map[string]any) (map[string]any, error) {
+		return invokeAgentTool(cmd, c, flags, tool, input)
+	})
+}
+
+func importContactChunkWithInvoker(
+	rows []contactRow,
+	dedupe bool,
+	dryRun bool,
+	summary *importContactsSummary,
+	invoke agentToolInvoker,
+) error {
 	for _, row := range rows {
 		if dedupe {
-			existing, err := findExistingContact(cmd, c, flags, row)
+			existing, err := findExistingContactWithInvoker(row, invoke)
 			if err != nil {
-				if c.DryRun {
+				if dryRun {
 					summary.Created++
 					continue
 				}
 				summary.Failed++
 				summary.Errors = append(summary.Errors, err.Error())
+				continue
+			}
+			if existing.ambiguous() {
+				summary.Skipped++
+				summary.Notes = append(summary.Notes, fmt.Sprintf(
+					"%s: email %s matches multiple contacts; candidate contact IDs: %s; merge or disambiguate them before importing this row",
+					row.Name, normalizeEmail(row.Email), strings.Join(existing.CandidateIDs, ", "),
+				))
 				continue
 			}
 			if existing.OrgID != "" {
@@ -325,7 +353,7 @@ func importContactChunk(
 				continue
 			}
 			if existing.ID != "" {
-				if enriched, err := enrichExistingContact(cmd, c, flags, existing.ID, row); err != nil {
+				if enriched, err := enrichExistingContact(existing.ID, row, invoke); err != nil {
 					summary.Failed++
 					summary.Errors = append(summary.Errors, err.Error())
 				} else if enriched {
@@ -337,9 +365,9 @@ func importContactChunk(
 			}
 		}
 
-		contactID, err := createContactFromRow(cmd, c, flags, row)
+		contactID, err := createContactFromRow(row, dryRun, invoke)
 		if err != nil {
-			if c.DryRun {
+			if dryRun {
 				summary.Created++
 				continue
 			}
@@ -348,7 +376,7 @@ func importContactChunk(
 			continue
 		}
 		summary.Created++
-		if enriched, err := enrichExistingContact(cmd, c, flags, contactID, row); err != nil {
+		if enriched, err := enrichExistingContact(contactID, row, invoke); err != nil {
 			summary.Failed++
 			summary.Errors = append(summary.Errors, err.Error())
 		} else if enriched {
@@ -396,18 +424,28 @@ func invokeAgentTool(
 }
 
 func findExistingContact(cmd *cobra.Command, c *client.Client, flags *rootFlags, row contactRow) (contactMatch, error) {
-	if row.Email != "" {
+	return findExistingContactWithInvoker(row, func(tool string, input map[string]any) (map[string]any, error) {
+		return invokeAgentTool(cmd, c, flags, tool, input)
+	})
+}
+
+func findExistingContactWithInvoker(row contactRow, invoke agentToolInvoker) (contactMatch, error) {
+	if email := normalizeEmail(row.Email); email != "" {
 		// Exact normalized match, server-side. Trust the filter rather than
 		// re-checking payload fields the server may not send (#207).
-		result, err := invokeAgentTool(cmd, c, flags, "query_contacts", map[string]any{
-			"email":    row.Email,
+		result, err := invoke("query_contacts", map[string]any{
+			"email":    email,
 			"pageSize": 20,
 		})
 		if err != nil {
 			return contactMatch{}, err
 		}
-		if id := firstContactID(result); id != "" {
-			return contactMatch{ID: id}, nil
+		candidateIDs := distinctContactIDs(result)
+		if len(candidateIDs) == 1 {
+			return contactMatch{ID: candidateIDs[0], CandidateIDs: candidateIDs}, nil
+		}
+		if len(candidateIDs) > 1 {
+			return contactMatch{CandidateIDs: candidateIDs}, nil
 		}
 	}
 	if row.Platform != "" && (row.PlatformUserID != "" || row.PlatformHandle != "") {
@@ -423,7 +461,7 @@ func findExistingContact(cmd *cobra.Command, c *client.Client, flags *rootFlags,
 		// resolve_platform_claim is the same resolution upsert_contact_identity
 		// enforces, so this cannot disagree with the guard the way a query_contacts
 		// reconstruction could (#206).
-		result, err := invokeAgentTool(cmd, c, flags, "resolve_platform_claim", map[string]any{
+		result, err := invoke("resolve_platform_claim", map[string]any{
 			"platform":       row.Platform,
 			"platformUserId": targetUser,
 		})
@@ -435,19 +473,36 @@ func findExistingContact(cmd *cobra.Command, c *client.Client, flags *rootFlags,
 	return contactMatch{}, nil
 }
 
-// firstContactID takes the first contact from an exact-filter query result. Safe only
-// because the filter is exact and server-side; do not use it with fuzzy `search`.
-func firstContactID(result map[string]any) string {
+func normalizeEmail(email string) string {
+	return strings.ToLower(strings.TrimSpace(email))
+}
+
+// distinctContactIDs returns every valid contact ID from an exact-filter query.
+// Invalid entries remain tolerated here for backward compatibility; strict response
+// envelope validation belongs to the dedicated import-contract increment (#225).
+func distinctContactIDs(result map[string]any) []string {
 	contacts, ok := result["contacts"].([]any)
-	if !ok || len(contacts) == 0 {
-		return ""
-	}
-	contact, ok := contacts[0].(map[string]any)
 	if !ok {
-		return ""
+		return nil
 	}
-	id, _ := contact["id"].(string)
-	return id
+	seen := make(map[string]struct{}, len(contacts))
+	for _, item := range contacts {
+		contact, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		id, ok := contact["id"].(string)
+		if !ok || id == "" {
+			continue
+		}
+		seen[id] = struct{}{}
+	}
+	ids := make([]string, 0, len(seen))
+	for id := range seen {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 func platformClaimMatch(result map[string]any) contactMatch {
@@ -483,7 +538,7 @@ func isLikelyAvatarURL(url string) bool {
 		strings.HasSuffix(lower, ".gif")
 }
 
-func createContactFromRow(cmd *cobra.Command, c *client.Client, flags *rootFlags, row contactRow) (string, error) {
+func createContactFromRow(row contactRow, dryRun bool, invoke agentToolInvoker) (string, error) {
 	input := map[string]any{
 		"name": row.Name,
 	}
@@ -529,11 +584,11 @@ func createContactFromRow(cmd *cobra.Command, c *client.Client, flags *rootFlags
 		input["notes"] = row.Notes
 	}
 
-	result, err := invokeAgentTool(cmd, c, flags, "create_contact", input)
+	result, err := invoke("create_contact", input)
 	if err != nil {
 		return "", err
 	}
-	if c.DryRun {
+	if dryRun {
 		return "dry-run", nil
 	}
 	contactID, _ := result["id"].(string)
@@ -543,7 +598,7 @@ func createContactFromRow(cmd *cobra.Command, c *client.Client, flags *rootFlags
 	return contactID, nil
 }
 
-func enrichExistingContact(cmd *cobra.Command, c *client.Client, flags *rootFlags, contactID string, row contactRow) (bool, error) {
+func enrichExistingContact(contactID string, row contactRow, invoke agentToolInvoker) (bool, error) {
 	enriched := false
 	enrichInput := map[string]any{
 		"contactId": contactID,
@@ -555,7 +610,7 @@ func enrichExistingContact(cmd *cobra.Command, c *client.Client, flags *rootFlag
 		enrichInput["notes"] = row.Notes
 	}
 	if len(enrichInput) > 1 {
-		if _, err := invokeAgentTool(cmd, c, flags, "enrich_contact", enrichInput); err != nil {
+		if _, err := invoke("enrich_contact", enrichInput); err != nil {
 			return false, err
 		}
 		enriched = true
@@ -586,7 +641,7 @@ func enrichExistingContact(cmd *cobra.Command, c *client.Client, flags *rootFlag
 		if avatarURL != "" {
 			identity["avatarUrl"] = avatarURL
 		}
-		if _, err := invokeAgentTool(cmd, c, flags, "upsert_contact_identity", identity); err != nil {
+		if _, err := invoke("upsert_contact_identity", identity); err != nil {
 			return enriched, err
 		}
 		enriched = true
