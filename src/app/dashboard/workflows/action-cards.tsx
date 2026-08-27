@@ -617,6 +617,8 @@ export function ActionCards() {
                             <div className="space-y-1 text-xs text-muted-foreground">
                               {stats.status === "failed" ? (
                                 <p className="text-destructive">Last import failed</p>
+                              ) : stats.status === "unknown" ? (
+                                <p>Last import outcome unknown</p>
                               ) : (
                                 <p>
                                   {stats.added} added · {stats.updated} updated · {stats.skipped} skipped
@@ -642,6 +644,14 @@ export function ActionCards() {
                                 <p
                                   className="text-amber-600 dark:text-amber-400 break-words"
                                   data-testid="import-card-warning"
+                                >
+                                  {cardNote.text}
+                                </p>
+                              ) : cardNote.kind === "unknown" ? (
+                                <p
+                                  className="break-words"
+                                  data-testid="import-card-unknown"
+                                  title={cardNote.text}
                                 >
                                   {cardNote.text}
                                 </p>

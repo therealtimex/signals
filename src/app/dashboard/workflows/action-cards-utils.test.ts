@@ -7,7 +7,10 @@ import {
   importStatsFromFailure,
   importStatsFromSuccess,
 } from "@/app/dashboard/workflows/action-cards-utils";
-import type { ImportSuccess } from "@/components/import-dialog";
+import {
+  IMPORT_OUTCOME_UNKNOWN_MESSAGE,
+  type ImportSuccess,
+} from "@/components/import-dialog";
 import { IMPORT_RUN_RECORDING_FAILED_MESSAGE } from "@/lib/workflows/import-warning";
 
 const IMPORT_SUCCESS: ImportSuccess = {
@@ -105,6 +108,7 @@ describe("action-cards utils", () => {
   it("maps an import failure into only the affected card's local stats", () => {
     expect(importStatsFromFailure(
       {
+        status: "failed",
         fileName: "Connections.csv",
         source: "csv",
         error: "Import failed",
@@ -122,8 +126,17 @@ describe("action-cards utils", () => {
     });
   });
 
-  it("suppresses the retry note only for partial success", () => {
+  it("suppresses the retry note for partial success and unknown outcomes", () => {
     const baseStats = importStatsFromSuccess(IMPORT_SUCCESS, 123);
+    const unknownStats = importStatsFromFailure(
+      {
+        status: "unknown",
+        fileName: "Connections.csv",
+        source: "csv",
+        error: IMPORT_OUTCOME_UNKNOWN_MESSAGE,
+      },
+      456
+    );
 
     expect(
       getImportCardNote(
@@ -137,6 +150,11 @@ describe("action-cards utils", () => {
         "Safe to run again."
       )
     ).toEqual({ kind: "error", text: "Import failed", note: "Safe to run again." });
+    expect(unknownStats.status).toBe("unknown");
+    expect(getImportCardNote(unknownStats, "Safe to run again.")).toEqual({
+      kind: "unknown",
+      text: IMPORT_OUTCOME_UNKNOWN_MESSAGE,
+    });
     expect(getImportCardNote(baseStats, "Safe to run again.")).toEqual({
       kind: "note",
       text: "Safe to run again.",

@@ -31,7 +31,7 @@ export function importStatsFromSuccess(result: ImportSuccess, now: number): Impo
 
 export function importStatsFromFailure(result: ImportFailure, now: number): ImportStats {
   return {
-    status: "failed",
+    status: result.status,
     added: 0,
     updated: 0,
     skipped: 0,
@@ -48,12 +48,16 @@ export function getImportCardNote(
 ):
   | { kind: "warning"; text: string }
   | { kind: "error"; text: string; note: string }
+  | { kind: "unknown"; text: string }
   | { kind: "note"; text: string } {
   if (stats.warning) {
     return { kind: "warning", text: stats.warning };
   }
   if (stats.status === "failed" && stats.error) {
     return { kind: "error", text: stats.error, note: reimportNote };
+  }
+  if (stats.status === "unknown" && stats.error) {
+    return { kind: "unknown", text: stats.error };
   }
   return { kind: "note", text: reimportNote };
 }

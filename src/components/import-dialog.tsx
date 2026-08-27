@@ -13,7 +13,10 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { CheckCircle, FileUp, Loader2, Play, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { ImportWarning } from "@/lib/workflows/import-warning";
+import {
+  IMPORT_RUN_RECORDING_FAILED,
+  type ImportWarning,
+} from "@/lib/workflows/import-warning";
 
 /**
  * Per-platform configuration for the reusable import modal shell.
@@ -64,12 +67,20 @@ export interface ImportSuccess {
 }
 
 export interface ImportFailure {
+  status: "failed" | "unknown";
   fileName: string;
   source: "csv" | "zip" | null;
   error: string;
 }
 
+export const IMPORT_OUTCOME_UNKNOWN_MESSAGE =
+  "We couldn't confirm whether the import completed. Check Contacts before retrying.";
+
 type Phase = "pick" | "previewing" | "ready" | "importing";
+type ImportDialogError = {
+  message: string;
+  status: ImportFailure["status"] | null;
+};
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -95,7 +106,7 @@ export function ImportDialog({
   const [phase, setPhase] = useState<Phase>("pick");
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<ImportPreview | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ImportDialogError | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -127,7 +138,7 @@ export function ImportDialog({
         const data = await res.json();
 
         if (!res.ok || !data.preview) {
-          setError(data.error || "Could not inspect file");
+          setError({ message: data.error || "Could not inspect file", status: null });
           setPhase("pick");
           return;
         }
@@ -139,7 +150,7 @@ export function ImportDialog({
         });
         setPhase("ready");
       } catch {
-        setError("Could not inspect file");
+        setError({ message: "Could not inspect file", status: null });
         setPhase("pick");
       }
     },
@@ -159,9 +170,10 @@ export function ImportDialog({
 
       if (!res.ok) {
         const message = data.error || "Import failed";
-        setError(message);
+        setError({ message, status: "failed" });
         setPhase("ready");
         onFailure?.({
+          status: "failed",
           fileName: file.name,
           source: preview?.source ?? null,
           error: message,
@@ -170,7 +182,8 @@ export function ImportDialog({
       }
 
       const warning: ImportWarning | undefined =
-        typeof data.warning?.code === "string" && typeof data.warning?.message === "string"
+        data.warning?.code === IMPORT_RUN_RECORDING_FAILED &&
+        typeof data.warning?.message === "string"
           ? data.warning
           : undefined;
 
@@ -191,10 +204,11 @@ export function ImportDialog({
       reset();
       onSuccess(result);
     } catch {
-      const message = "Import failed";
-      setError(message);
+      const message = IMPORT_OUTCOME_UNKNOWN_MESSAGE;
+      setError({ message, status: "unknown" });
       setPhase("ready");
       onFailure?.({
+        status: "unknown",
         fileName: file.name,
         source: preview?.source ?? null,
         error: message,
@@ -309,7 +323,9 @@ export function ImportDialog({
                 </p>
               </div>
             </div>
-            <p className="text-xs text-muted-foreground">{config.reimportNote}</p>
+            {error?.status !== "unknown" && (
+              <p className="text-xs text-muted-foreground">{config.reimportNote}</p>
+            )}
             <Button
               variant="ghost"
               size="sm"
@@ -324,8 +340,15 @@ export function ImportDialog({
         )}
 
         {error && (
-          <p role="alert" className="text-sm text-destructive" data-testid="import-dialog-error">
-            {error}
+          <p
+            role="alert"
+            className={cn(
+              "text-sm",
+              error.status === "unknown" ? "text-muted-foreground" : "text-destructive"
+            )}
+            data-testid="import-dialog-error"
+          >
+            {error.message}
           </p>
         )}
 
