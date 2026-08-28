@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -7,7 +8,12 @@ export const CANONICAL_SIGNALS_APP_ID = "47e45f71-3279-42f5-8e95-731de01b6eae";
 export const CANONICAL_SIGNALS_DISPLAY_NAME = "Signals";
 export const DEFAULT_DEV_CLI_BASE_URL = "http://127.0.0.1:3101/cli";
 
-const QA_DATA_PREFIX = `${sep}private${sep}tmp${sep}signals-qa-`;
+export function qaTemporaryRoot(platform = process.platform, systemTmpDir = tmpdir()) {
+  return platform === "darwin" ? `${sep}private${sep}tmp` : resolve(systemTmpDir);
+}
+
+const QA_TEMP_ROOT = qaTemporaryRoot();
+const QA_DATA_PREFIX = `${QA_TEMP_ROOT}${sep}signals-qa-`;
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 
 export function normalizeIssueId(value) {
@@ -32,11 +38,11 @@ export function qaAppTags(issueId, loopId = "") {
 }
 
 export function defaultQaDataDir(issueId) {
-  return `/private/tmp/signals-qa-issue-${normalizeIssueId(issueId)}-data`;
+  return join(QA_TEMP_ROOT, `signals-qa-issue-${normalizeIssueId(issueId)}-data`);
 }
 
 export function qaReceiptPath(issueId) {
-  return `/private/tmp/signals-qa-local-app-issue-${normalizeIssueId(issueId)}.json`;
+  return join(QA_TEMP_ROOT, `signals-qa-local-app-issue-${normalizeIssueId(issueId)}.json`);
 }
 
 export function qaLauncherDir() {
@@ -66,7 +72,7 @@ export function assertSafeQaDataDir(dataDir) {
   const resolved = resolve(String(dataDir || ""));
   if (!resolved.startsWith(QA_DATA_PREFIX) || resolved === QA_DATA_PREFIX.slice(0, -1)) {
     throw new Error(
-      `QA data directory must be an absolute /private/tmp/signals-qa-* path; received ${resolved}.`,
+      `QA data directory must be an absolute ${QA_DATA_PREFIX}* path; received ${resolved}.`,
     );
   }
   return resolved;

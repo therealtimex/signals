@@ -22,10 +22,13 @@ import {
   buildQaCreateCliArgs,
   canonicalSignalsRepoRoot,
   canonicalConfigProblems,
+  defaultQaDataDir,
   findIssueQaApps,
   parseCliJson,
   qaAppDisplayName,
   qaAppTags,
+  qaReceiptPath,
+  qaTemporaryRoot,
 } from "./signals-qa-local-app.mjs";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
@@ -33,11 +36,11 @@ const repoRoot = dirname(dirname(scriptDir));
 
 assert.equal(qaAppDisplayName("#356"), "Signals issue-356 QA");
 assert.deepEqual(qaAppTags("356"), ["signals", "qa", "ephemeral", "issue-356"]);
-assert.equal(
-  assertSafeQaDataDir("/private/tmp/signals-qa-issue-356-data"),
-  "/private/tmp/signals-qa-issue-356-data",
-);
-assert.throws(() => assertSafeQaDataDir("~/.signals"), /\/private\/tmp\/signals-qa-/);
+assert.equal(qaTemporaryRoot("darwin", "/ignored"), "/private/tmp");
+assert.equal(qaTemporaryRoot("linux", "/tmp"), "/tmp");
+const contractDataDir = defaultQaDataDir("356");
+assert.equal(assertSafeQaDataDir(contractDataDir), contractDataDir);
+assert.throws(() => assertSafeQaDataDir("~/.signals"), /signals-qa-\*/);
 
 const safeApp = {
   id: "qa-app-id",
@@ -63,7 +66,7 @@ assert.equal(findIssueQaApps(appsFromCliPayload(cliPayload), "356")[0].id, "qa-a
 const createArgs = buildQaCreateCliArgs({
   issueId: "356",
   worktree: "/tmp/loop-issue-356",
-  dataDir: "/private/tmp/signals-qa-issue-356-data",
+  dataDir: contractDataDir,
   loopId: "loop-issue-356-example",
   baseUrl: "http://127.0.0.1:3101/cli",
 });
@@ -73,7 +76,7 @@ assert.ok(createArgs.includes("signals,qa,ephemeral,issue-356,loop-issue-356-exa
 const envJson = createArgs[createArgs.indexOf("--env") + 1];
 const env = JSON.parse(envJson);
 assert.equal(env.SIGNALS_QA_WORKTREE, "/tmp/loop-issue-356");
-assert.equal(env.SIGNALS_DATA_DIR, "/private/tmp/signals-qa-issue-356-data");
+assert.equal(env.SIGNALS_DATA_DIR, contractDataDir);
 
 const cleanCanonical = {
   id: CANONICAL_SIGNALS_APP_ID,
@@ -134,8 +137,8 @@ const lifecycleRoot = mkdtempSync(join(tmpdir(), "signals-qa-local-app-test-"));
 const lifecycleIssue = String(Date.now());
 const lifecycleRepo = join(lifecycleRoot, "repo");
 const lifecycleWorktree = join(lifecycleRoot, "worktree");
-const lifecycleData = `/private/tmp/signals-qa-${lifecycleIssue}-data`;
-const lifecycleReceipt = `/private/tmp/signals-qa-local-app-issue-${lifecycleIssue}.json`;
+const lifecycleData = defaultQaDataDir(lifecycleIssue);
+const lifecycleReceipt = qaReceiptPath(lifecycleIssue);
 const mockStatePath = join(lifecycleRoot, "local-apps.json");
 const mockCliPath = join(lifecycleRoot, "mock-realtimex-pp-cli.mjs");
 
