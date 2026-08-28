@@ -81,7 +81,16 @@ describe("writing content agent tools", () => {
               sensitivity: {
                 level: "private",
                 reason: "private_content_type",
-                contextApproval: { by: "user", at: 10, evidence: { note: "approved" } },
+                contextApproval: {
+                  by: "user",
+                  at: 10,
+                  evidence: {
+                    kind: "thread_message",
+                    workspaceSlug: "signals",
+                    threadSlug: "writing-review",
+                    note: "approved",
+                  },
+                },
               },
             },
           ],
@@ -96,6 +105,148 @@ describe("writing content agent tools", () => {
       contentItem: { body: sentinel, sensitivity: { level: "private" } },
     });
   });
+
+  it.each([
+    [
+      "thread message",
+      {
+        kind: "thread_message",
+        workspaceSlug: "signals",
+        threadSlug: "writing-review",
+      },
+    ],
+    ["UI", { kind: "ui", route: "/dashboard/launches/launch_1" }],
+    ["API", { kind: "api", caller: "signals-api" }],
+  ])("accepts durable user approval with %s evidence", async (_label, evidence) => {
+    const sentinel = "VALID-CONTEXT-APPROVAL";
+    const item = createContentItem({
+      body: sentinel,
+      contentType: "email",
+      direction: "inbound",
+      status: "imported",
+    });
+    const launch = upsertLaunch({
+      name: "Approved source",
+      metadata: {
+        writing: {
+          sources: [
+            {
+              id: "src_email",
+              kind: "content_item",
+              contentItemId: item.id,
+              sensitivity: {
+                level: "private",
+                reason: "private_content_type",
+                contextApproval: { by: "user", at: 10, evidence },
+              },
+            },
+          ],
+        },
+      },
+    });
+
+    const approved = await invoke("get_content", {
+      contentItemId: item.id,
+      writingSource: { launchId: launch.id, sourceId: "src_email" },
+    });
+    expect(approved).toMatchObject({ contentItem: { body: sentinel } });
+  });
+
+  it.each([
+    ["absent", undefined],
+    ["scalar", "false"],
+    ["empty object", {}],
+    [
+      "wrong actor",
+      { by: "agent", at: 10, evidence: { kind: "api", caller: "agent" } },
+    ],
+    ["missing timestamp", { by: "user", evidence: { kind: "ui", route: "/launch" } }],
+    [
+      "negative timestamp",
+      { by: "user", at: -1, evidence: { kind: "ui", route: "/launch" } },
+    ],
+    ["missing evidence", { by: "user", at: 10 }],
+    [
+      "malformed evidence",
+      { by: "user", at: 10, evidence: { kind: "thread_message", workspaceSlug: "signals" } },
+    ],
+    ["unknown evidence", { by: "user", at: 10, evidence: { kind: "other" } }],
+  ])(
+    "keeps private content, sources, and brief redacted for %s approval",
+    async (_label, contextApproval) => {
+      const sentinel = "MALFORMED-CONTEXT-APPROVAL-SENTINEL";
+      const item = createContentItem({
+        title: sentinel,
+        body: sentinel,
+        contentType: "email",
+        direction: "inbound",
+        status: "imported",
+      });
+      const launch = upsertLaunch({
+        name: "Malformed approval",
+        brief: sentinel,
+        metadata: {
+          writing: {
+            sources: [
+              {
+                id: "src_email",
+                kind: "content_item",
+                contentItemId: item.id,
+                sensitivity: {
+                  level: "private",
+                  reason: "private_content_type",
+                  contextApproval,
+                },
+              },
+              {
+                id: "src_note",
+                kind: "note",
+                text: sentinel,
+                sensitivity: {
+                  level: "private",
+                  reason: "user_marked",
+                  contextApproval,
+                },
+              },
+              {
+                id: "src_brief",
+                kind: "brief",
+                launchId: "placeholder",
+                sensitivity: {
+                  level: "private",
+                  reason: "user_marked",
+                  contextApproval,
+                },
+              },
+            ],
+          },
+        },
+      });
+      const metadata = JSON.parse(launch.metadata ?? "{}");
+      metadata.writing.sources[2].launchId = launch.id;
+      upsertLaunch({ id: launch.id, name: launch.name, brief: launch.brief, metadata });
+
+      const content = await invoke("get_content", {
+        contentItemId: item.id,
+        writingSource: { launchId: launch.id, sourceId: "src_email" },
+      });
+      expect(content).toMatchObject({
+        contentItem: { title: null, body: null, redacted: true },
+      });
+      expect(JSON.stringify(content)).not.toContain(sentinel);
+
+      const context = await invoke("get_writing_context", { launchId: launch.id });
+      expect(context).toMatchObject({ launch: { brief: null, briefRedacted: true } });
+      expect(context.sources).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: "src_email", redacted: true }),
+          expect.objectContaining({ id: "src_note", redacted: true }),
+          expect.objectContaining({ id: "src_brief", redacted: true }),
+        ]),
+      );
+      expect(JSON.stringify(context)).not.toContain(sentinel);
+    },
+  );
 
   it("returns an untruncated detail body while query_content remains a summary", async () => {
     const body = "x".repeat(10_240);

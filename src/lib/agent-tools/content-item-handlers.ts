@@ -113,6 +113,27 @@ type Sensitivity = {
   contextApproval?: true;
 };
 
+const approvalEvidenceSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("thread_message"),
+    workspaceSlug: z.string().min(1),
+    threadSlug: z.string().min(1),
+    note: z.string().optional(),
+  }),
+  z.object({ kind: z.literal("ui"), route: z.string().min(1) }),
+  z.object({ kind: z.literal("api"), caller: z.string().min(1) }),
+]);
+
+const contextApprovalSchema = z.object({
+  by: z.literal("user"),
+  at: z.number().finite().nonnegative(),
+  evidence: approvalEvidenceSchema,
+});
+
+function hasDurableContextApproval(value: unknown): boolean {
+  return contextApprovalSchema.safeParse(value).success;
+}
+
 function parseObject(value: unknown): Record<string, unknown> {
   if (typeof value === "string") {
     try {
@@ -167,7 +188,7 @@ function hasStoredContentApproval(input: {
       source.id === input.sourceId &&
       source.kind === "content_item" &&
       source.contentItemId === input.contentItemId &&
-      Boolean(sensitivity.contextApproval)
+      hasDurableContextApproval(sensitivity.contextApproval)
     );
   });
 }
@@ -444,7 +465,7 @@ function effectiveSourceSensitivity(input: {
   content?: { contentType: string; direction: string | null };
 }): Sensitivity {
   const stored = parseObject(input.stored.sensitivity);
-  const contextApproval = Boolean(stored.contextApproval);
+  const contextApproval = hasDurableContextApproval(stored.contextApproval);
   if (input.launchScope === "local_only") {
     return {
       level: "private",
@@ -667,12 +688,12 @@ export async function handleGetWritingContext(
   const briefRef = sources.find(
     (source) => source.kind === "brief" && source.launchId === launch.id,
   );
-  const briefSensitivity = briefRef
+  const briefSensitivity: Sensitivity = briefRef
     ? effectiveSourceSensitivity({ stored: briefRef, launchScope: launch.scope })
     : launch.scope === "local_only"
       ? ({ level: "private", reason: "launch_local_only" } as const)
       : ({ level: "public", reason: "public_default" } as const);
-  const briefApproved = Boolean(parseObject(briefRef?.sensitivity).contextApproval);
+  const briefApproved = briefSensitivity.contextApproval === true;
   const briefRedacted = briefSensitivity.level === "private" && !briefApproved;
   const sourceViews = sources.map((source) => sourceView(source, launch.scope));
   const writingView = projectLaunchWriting(writing, sourceViews, input.includeSources);
