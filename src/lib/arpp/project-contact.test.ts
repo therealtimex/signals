@@ -335,6 +335,99 @@ describe("projectContactToArpp", () => {
     expect(JSON.stringify(doc)).not.toContain("Secret Strategist");
   });
 
+  it("selects the public current job title deterministically", () => {
+    const sharedOrg: Org = {
+      id: "org_shared",
+      name: "Shared Company",
+      orgType: "company",
+      domain: "shared.example",
+      website: "https://shared.example",
+      description: null,
+      location: null,
+      avatarUrl: null,
+      industry: null,
+      companySize: null,
+      tags: "[]",
+      ownerContactId: null,
+      accountStage: null,
+      followedAt: null,
+      feedSeenAt: null,
+      enrichmentScore: 0,
+      scope: "shared",
+      metadata: "{}",
+      source: null,
+      createdSource: null,
+      createdSourceDetail: null,
+      createdWorkflowRunId: null,
+      createdTemplateId: null,
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    const contact = baseContact({
+      employments: [
+        {
+          id: "emp_older",
+          contactId: "cnt_dhh",
+          orgId: "org_shared",
+          orgName: "Shared Company",
+          title: "Older Role",
+          startedAt: 1_700_000_000,
+          endedAt: null,
+          isCurrent: true,
+          scope: "shared",
+          source: "manual",
+          metadata: "{}",
+          createdAt: 2,
+          updatedAt: 2,
+        },
+        {
+          id: "emp_newer",
+          contactId: "cnt_dhh",
+          orgId: "org_shared",
+          orgName: "Shared Company",
+          title: "Newer Role",
+          startedAt: 1_725_000_000,
+          endedAt: null,
+          isCurrent: true,
+          scope: "shared",
+          source: "manual",
+          metadata: "{}",
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      ],
+      currentEmployment: {
+        orgId: "org_shared",
+        orgName: "Shared Company",
+        title: "Newer Role",
+      },
+    });
+
+    const doc = projectContactToArpp(
+      { contact, orgsById: new Map([[sharedOrg.id, sharedOrg]]) },
+      { visibility: "public" },
+    );
+
+    expect(doc.identity.jobTitle).toBe("Newer Role");
+
+    const tiedStartDoc = projectContactToArpp(
+      {
+        contact: {
+          ...contact,
+          employments: contact.employments.map((employment) => ({
+            ...employment,
+            startedAt: 1_700_000_000,
+            createdAt: employment.id === "emp_newer" ? 3 : 2,
+          })),
+        },
+        orgsById: new Map([[sharedOrg.id, sharedOrg]]),
+      },
+      { visibility: "public" },
+    );
+
+    expect(tiedStartDoc.identity.jobTitle).toBe("Newer Role");
+  });
+
   it("includes verified email in public mode only when verified", () => {
     const withVerified = baseContact({
       channels: [

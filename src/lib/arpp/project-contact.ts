@@ -70,16 +70,13 @@ function resolvePreferredChannel(
 }
 
 function buildExperience(
-  contact: ContactDTO,
+  employments: ContactEmploymentDTO[],
   orgsById: Map<string, Org>,
-  visibility: "internal" | "public",
   orgIriPrefix: string,
 ): ArppExperience[] {
   const experience: ArppExperience[] = [];
-  for (const employment of contact.employments) {
+  for (const employment of employments) {
     const org = orgsById.get(employment.orgId);
-    if (!isSharedEmployment(employment, org, visibility)) continue;
-
     const meta = parseEmploymentMetadata(employment.metadata);
     const employmentType =
       typeof meta.employmentType === "string" ? meta.employmentType : "other";
@@ -101,6 +98,43 @@ function buildExperience(
     });
   }
   return experience;
+}
+
+function visibleEmployments(
+  contact: ContactDTO,
+  orgsById: Map<string, Org>,
+  visibility: "internal" | "public",
+): ContactEmploymentDTO[] {
+  const visible: ContactEmploymentDTO[] = [];
+  for (const employment of contact.employments) {
+    if (isSharedEmployment(employment, orgsById.get(employment.orgId), visibility)) {
+      visible.push(employment);
+    }
+  }
+  return visible;
+}
+
+function resolveCurrentEmployment(
+  employments: ContactEmploymentDTO[],
+): ContactEmploymentDTO | undefined {
+  let selected: ContactEmploymentDTO | undefined;
+  for (const employment of employments) {
+    if (!employment.isCurrent) continue;
+    if (!selected) {
+      selected = employment;
+      continue;
+    }
+
+    const selectedStart = selected.startedAt ?? -1;
+    const candidateStart = employment.startedAt ?? -1;
+    if (
+      candidateStart > selectedStart ||
+      (candidateStart === selectedStart && employment.createdAt > selected.createdAt)
+    ) {
+      selected = employment;
+    }
+  }
+  return selected;
 }
 
 function collectSameAs(contact: ContactDTO, profiles: ArppProfile[]): string[] {
@@ -155,11 +189,12 @@ export function projectContactToArpp(
   }
 
   const orgIriPrefix = opts?.baseIriPrefix?.replace(/:contact$/, ":org") ?? "signals:org";
-  const experience = buildExperience(contact, orgsById, visibility, orgIriPrefix);
+  const employments = visibleEmployments(contact, orgsById, visibility);
+  const experience = buildExperience(employments, orgsById, orgIriPrefix);
   const sameAs = collectSameAs(contact, profiles);
   const jobTitle =
     visibility === "public"
-      ? experience.find((employment) => employment.timePeriod.current)?.role ?? null
+      ? resolveCurrentEmployment(employments)?.title ?? null
       : contact.currentEmployment?.title ?? contact.title;
 
   const doc: ArppPersonDocument = {
