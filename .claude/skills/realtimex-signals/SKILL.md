@@ -19,17 +19,27 @@ Operate **Signals** (local-first social GTM CRM) via its stable REST API. Intell
 
 Every session:
 
-1. **Prefer the bundled CLI** when `tools/signals-pp-cli/bin/signals-pp-cli.cjs` exists (marketplace plugin) or `signals-pp-cli` is on `PATH`:
+1. **Use the bundled CLI first** when `tools/signals-pp-cli/bin/signals-pp-cli.cjs` exists (marketplace plugin) or `signals-pp-cli` is on `PATH`. It resolves the running Local App and avoids assumptions about the agent's current working directory:
 
 ```bash
 signals-pp-cli health
+signals-pp-cli agent-tools list --agent
+signals-pp-cli agent-tools invoke --agent \
+  --body-json '{"tool":"query_contacts","input":{"search":"acme"}}'
 signals-pp-cli import contacts --file workflow-runs/<runId>/contacts.csv --dedupe \
   --workflow-run-id <runId> --template-id <templateId>
 ```
 
 Use `signals-pp-cli reconcile --file …` to preview dedupe without mutating. For `--dedupe --dry-run` imports, reconcile is the accurate preview (dry-run skips dedupe queries).
 
-2. **Resolve base URL** (fallback when CLI is unavailable):
+When a brief provides a specific Local App URL, pin the CLI to that instance:
+
+```bash
+SIGNALS_BASE_URL="http://127.0.0.1:{port}" signals-pp-cli agent-tools invoke --agent \
+  --body-json '{"tool":"query_contacts","input":{"search":"acme"}}'
+```
+
+2. **Resolve base URL only as a fallback** when the CLI is unavailable:
 
 ```bash
 .claude/skills/realtimex-signals/scripts/resolve-base-url.sh
@@ -41,13 +51,13 @@ Export for subsequent shell helpers:
 export SIGNALS_BASE_URL="$(.claude/skills/realtimex-signals/scripts/resolve-base-url.sh)"
 ```
 
-3. **Load tool manifest** (schemas change — refresh at session start when not using CLI):
+3. **Load the tool manifest** only on that fallback path (schemas change — refresh at session start):
 
 ```bash
 .claude/skills/realtimex-signals/scripts/list-tools.sh | jq '.tools[] | {name, description, category}'
 ```
 
-4. **Invoke tools** via the helper only when the bundled CLI cannot cover the operation:
+4. **Invoke tools via the helper** only when the bundled CLI is unavailable or does not cover the operation:
 
 ```bash
 .claude/skills/realtimex-signals/scripts/invoke-tool.sh query_contacts '{"search":"acme"}'
@@ -67,7 +77,7 @@ From repo root you can also use `scripts/invoke-agent-tool.sh` with `SIGNALS_BAS
 - **In-app Signals chat** (`/api/chat`) — deprecated path; use agent-tools instead
 - **Ad-hoc browser scrape / web search** — use RTX browser/credentials, then write to Signals via agent-tools
 - **Inline server publish** — retired; compose uses **Send to agent** + `get_publish_job` / `complete_publish` (see `signals-publish` skill)
-- **Automated persona briefs** — use only the job brief and return synthesis through `complete_persona_job`; do not fetch evidence or write the persona directly
+- **Automated persona briefs** — use only the job brief and return synthesis through `complete_persona_job` with `signals-pp-cli`; do not fetch evidence or write the persona directly
 - **Deterministic scheduled automation** — use Agent Flows in `flows/` instead
 
 ## Discovery order
@@ -98,14 +108,30 @@ Auth: localhost-only by default. Remote calls need `SIGNALS_AGENT_TOOL_TOKEN` + 
 PersonaAgentJob callbacks use the same local trust boundary as publish callbacks: the job ID is the
 correlation token, and the synthesis is validated and persisted by Signals.
 
+### Automated persona callbacks
+
+The persona brief supplies the exact job ID and Signals base URL. Build the synthesis from the
+brief evidence only, then submit it with the CLI so callback delivery does not depend on a
+workspace-relative skill path:
+
+```bash
+SIGNALS_BASE_URL="<brief-base-url>" signals-pp-cli agent-tools invoke --agent --stdin <<'JSON'
+{"tool":"complete_persona_job","input":{"jobId":"<job-id>","success":true,"synthesis":{"archetype":"...","tone":"...","summary":"...","interests":[],"conversionTriggers":[],"engagementFormats":[],"confidence":0.5}}}
+JSON
+```
+
+For failure, keep the same command and send
+`{"tool":"complete_persona_job","input":{"jobId":"<job-id>","success":false,"error":"<reason>"}}`.
+Use the helper-script fallback only if `signals-pp-cli` is genuinely unavailable.
+
 ## Agent workflow
 
 ```mermaid
 flowchart TD
-  A[User request in chat thread] --> B[resolve-base-url.sh]
-  B --> C[list-tools.sh / manifest]
+  A[User request in chat thread] --> B[signals-pp-cli health]
+  B --> C[agent-tools list / manifest]
   C --> D{Plan tool calls}
-  D --> E[invoke-tool.sh per step]
+  D --> E[agent-tools invoke per step]
   E --> F[Summarize for user with IDs and next steps]
 ```
 
@@ -136,13 +162,15 @@ Signals resolves avatars in this order:
 export SIGNALS_BASE_URL="$(.claude/skills/realtimex-signals/scripts/resolve-base-url.sh)"
 
 # Find target contact id first:
-.claude/skills/realtimex-signals/scripts/invoke-tool.sh query_contacts '{"search":"Trung"}' | jq '.result.contacts[] | {id,name}'
+signals-pp-cli agent-tools invoke --agent \
+  --body-json '{"tool":"query_contacts","input":{"search":"Trung"}}' | jq '.result.contacts[] | {id,name}'
 
 # Upload and attach (use absolute path to the image file):
 .claude/skills/realtimex-signals/scripts/upload-avatar.sh "<contactId>" "/path/to/avatar.png"
 
 # Verify:
-.claude/skills/realtimex-signals/scripts/invoke-tool.sh get_contact '{"contactId":"<contactId>"}' | jq '.result.resolvedAvatarUrl'
+signals-pp-cli agent-tools invoke --agent \
+  --body-json '{"tool":"get_contact","input":{"contactId":"<contactId>"}}' | jq '.result.resolvedAvatarUrl'
 ```
 
 ### Set avatar from a platform profile URL
@@ -150,8 +178,8 @@ export SIGNALS_BASE_URL="$(.claude/skills/realtimex-signals/scripts/resolve-base
 Only when you have a real `https://` URL from sync or public profile:
 
 ```bash
-.claude/skills/realtimex-signals/scripts/invoke-tool.sh upsert_contact_identity \
-  '{"contactId":"<id>","platform":"linkedin","platformUserId":"handle","avatarUrl":"https://media.licdn.com/..."}'
+signals-pp-cli agent-tools invoke --agent \
+  --body-json '{"tool":"upsert_contact_identity","input":{"contactId":"<id>","platform":"linkedin","platformUserId":"handle","avatarUrl":"https://media.licdn.com/..."}}'
 ```
 
 ## Playbooks
@@ -159,23 +187,24 @@ Only when you have a real `https://` URL from sync or public profile:
 ### Add a new person
 
 ```bash
-.claude/skills/realtimex-signals/scripts/invoke-tool.sh create_contact \
-  '{"name":"Jane Doe","company":"Acme","channels":[{"channelType":"email","value":"jane@acme.com","isPrimary":true}]}'
+signals-pp-cli agent-tools invoke --agent \
+  --body-json '{"tool":"create_contact","input":{"name":"Jane Doe","company":"Acme","channels":[{"channelType":"email","value":"jane@acme.com","isPrimary":true}]}}'
 
 # Use contact id from result:
-.claude/skills/realtimex-signals/scripts/invoke-tool.sh upsert_contact_identity \
-  '{"contactId":"<id>","platform":"linkedin","platformUserId":"jane-doe","platformHandle":"jane-doe"}'
+signals-pp-cli agent-tools invoke --agent \
+  --body-json '{"tool":"upsert_contact_identity","input":{"contactId":"<id>","platform":"linkedin","platformUserId":"jane-doe","platformHandle":"jane-doe"}}'
 
-.claude/skills/realtimex-signals/scripts/invoke-tool.sh enrich_contact \
-  '{"contactId":"<id>","title":"Head of Partnerships"}'
+signals-pp-cli agent-tools invoke --agent \
+  --body-json '{"tool":"enrich_contact","input":{"contactId":"<id>","title":"Head of Partnerships"}}'
 ```
 
 ### Find and summarize pipeline
 
 ```bash
-.claude/skills/realtimex-signals/scripts/invoke-tool.sh query_contacts \
-  '{"funnelStage":"qualified","pageSize":20}'
-.claude/skills/realtimex-signals/scripts/invoke-tool.sh query_analytics '{}'
+signals-pp-cli agent-tools invoke --agent \
+  --body-json '{"tool":"query_contacts","input":{"funnelStage":"qualified","pageSize":20}}'
+signals-pp-cli agent-tools invoke --agent \
+  --body-json '{"tool":"query_analytics","input":{}}'
 ```
 
 ### Research → CRM (with RTX browser)
@@ -188,15 +217,15 @@ Only when you have a real `https://` URL from sync or public profile:
 ### Wind Tunnel (variant simulation)
 
 ```bash
-.claude/skills/realtimex-signals/scripts/invoke-tool.sh create_simulation_run \
-  '{"variantId":"<variant-id>","populationSpec":{"contactIds":["<contact-id>"]}}'
+signals-pp-cli agent-tools invoke --agent \
+  --body-json '{"tool":"create_simulation_run","input":{"variantId":"<variant-id>","populationSpec":{"contactIds":["<contact-id>"]}}}'
 
 # After scoring agents externally:
-.claude/skills/realtimex-signals/scripts/invoke-tool.sh record_simulation_results \
-  '{"runId":"<run-id>","results":[{"agentId":"<agent-id>","engagementScore":72,"outcome":"like"}]}'
+signals-pp-cli agent-tools invoke --agent \
+  --body-json '{"tool":"record_simulation_results","input":{"runId":"<run-id>","results":[{"agentId":"<agent-id>","engagementScore":72,"outcome":"like"}]}}'
 
-.claude/skills/realtimex-signals/scripts/invoke-tool.sh complete_simulation_run \
-  '{"runId":"<run-id>","predictedScore":78,"predictionConfidence":0.85,"predictedMetrics":{"likes":120}}'
+signals-pp-cli agent-tools invoke --agent \
+  --body-json '{"tool":"complete_simulation_run","input":{"runId":"<run-id>","predictedScore":78,"predictionConfidence":0.85,"predictedMetrics":{"likes":120}}}'
 ```
 
 ## Install on an RTX workspace

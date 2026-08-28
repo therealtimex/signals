@@ -309,9 +309,9 @@ Session ownership: the shared `Persona Generation` thread owns its PromptInput s
 
 ### 5.5 Brief and routing message
 
-Promote `buildAgentPrompt` from `src/lib/qa/persona-agent-job-smoke-lib.ts:21-70` to `src/lib/persona/agent-job/prompt.ts` (`buildPersonaAgentJobBrief`), the smoke lib re-exports it (smoke stays green, one prompt source). Changes versus the smoke prompt — bump `PERSONA_AGENT_PROMPT_VERSION = 1` (new constant; the structured `PERSONA_PROMPT_VERSION` is untouched):
+Promote `buildAgentPrompt` from `src/lib/qa/persona-agent-job-smoke-lib.ts:21-70` to `src/lib/persona/agent-job/prompt.ts` (`buildPersonaAgentJobBrief`), the smoke lib re-exports it (smoke stays green, one prompt source). The structured `PERSONA_PROMPT_VERSION` is untouched. The initial agent brief used `PERSONA_AGENT_PROMPT_VERSION = 1`; #333 bumps it to `2` for CLI-first callback instructions:
 
-- Rule 4 becomes: *"Do not call any Signals agent-tool to read evidence or write the persona. When your JSON is ready, call **`complete_persona_job`** exactly once with `{ jobId, success: true, synthesis }`. If it returns validation errors, correct the JSON and call it again (at most once more). If you cannot produce a persona, call it with `{ jobId, success: false, error }`."*
+- The callback rules say to submit `complete_persona_job` with `SIGNALS_BASE_URL={baseUrl} signals-pp-cli agent-tools invoke --agent --stdin`, not a workspace-relative helper. They keep the single repair attempt and the `{ jobId, success: false, error }` failure path.
 - Adds `Signals base URL: {baseUrl}` (`resolveSignalsBaseUrlFromRequest` for user triggers; env fallback for scheduled) and *"Load the `realtimex-signals` skill for the agent-tools API"* (publish precedent).
 - Adds *"Optionally include `model` (e.g. `claude:claude-fable-5`) so Signals can record provenance."*
 - Keeps: jobId/contactId/promptVersion block, stateless rule, JSON-only schema, calibration, `PERSONA_SYSTEM_PROMPT`, evidence JSON.

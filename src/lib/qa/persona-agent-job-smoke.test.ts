@@ -57,8 +57,33 @@ describe("persona-agent-job-smoke-lib", () => {
     expect(prompt).toContain("jobId: job-1");
     expect(prompt).toContain(`promptVersion: ${PERSONA_PROMPT_VERSION}`);
     expect(prompt).toContain(`agentPromptVersion: ${PERSONA_AGENT_PROMPT_VERSION}`);
-    expect(prompt).toContain("complete_persona_job");
+    expect(PERSONA_AGENT_PROMPT_VERSION).toBe(2);
+    expect(prompt).toContain(
+      "SIGNALS_BASE_URL=http://127.0.0.1:3000 signals-pp-cli agent-tools invoke --agent --stdin",
+    );
+    expect(prompt).toContain(
+      '\"tool\":\"complete_persona_job\",\"input\":{\"jobId\":\"job-1\"',
+    );
+    expect(prompt).toContain(
+      "Do not run `resolve-base-url.sh` or `invoke-tool.sh` while `signals-pp-cli` is available.",
+    );
     expect(prompt).toContain('"name": "Ada"');
+  });
+
+  it("keeps provisioned persona callback guidance CLI-first", () => {
+    const skill = fs.readFileSync(
+      path.join(repoRoot, ".claude/skills/realtimex-signals/SKILL.md"),
+      "utf8",
+    );
+    const workspaceGuide = fs.readFileSync(
+      path.join(repoRoot, "realtimex-plugin/templates/signals/AGENTS.md"),
+      "utf8",
+    );
+
+    expect(skill).toContain("signals-pp-cli agent-tools invoke --agent");
+    expect(skill).toContain("Automated persona callbacks");
+    expect(workspaceGuide).toContain("signals-pp-cli agent-tools invoke --agent");
+    expect(workspaceGuide).not.toContain("run `scripts/resolve-base-url.sh`");
   });
 
   it("parseSynthesisResponseFile rejects null fields the production schema rejects", () => {

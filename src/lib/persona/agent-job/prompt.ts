@@ -3,7 +3,7 @@ import {
   PERSONA_SYSTEM_PROMPT,
 } from "@/lib/persona/synthesis";
 
-export const PERSONA_AGENT_PROMPT_VERSION = 1;
+export const PERSONA_AGENT_PROMPT_VERSION = 2;
 
 export function buildPersonaAgentJobBrief(input: {
   jobId: string;
@@ -34,10 +34,11 @@ You are executing **one isolated persona synthesis job** for Signals CRM.
 ## Rules
 1. Use **only** the evidence JSON below. Do not invent employers, metrics, interests, or behaviors.
 2. This job is **stateless**. Ignore all prior messages and prior contacts.
-3. Produce only a single JSON object matching the schema below. Do not add markdown fences or commentary.
-4. Do not call any Signals agent-tool to read evidence or write the persona. When your JSON is ready, call **\`complete_persona_job\`** exactly once with \`{ jobId, success: true, synthesis }\`. If it returns validation errors, correct the JSON and call it again (at most once more). If you cannot produce a persona, call it with \`{ jobId, success: false, error }\`.
-5. Load the \`realtimex-signals\` skill for the agent-tools API at ${baseUrl}.
-6. Optionally include \`model\` (for example \`claude:claude-fable-5\`) so Signals can record provenance.
+3. Build a single JSON object matching the schema below. Do not add markdown fences or commentary to the synthesis.
+4. Do not call any Signals agent-tool to read evidence or write the persona. Submit the finished synthesis through the bundled CLI, not a workspace-relative shell helper. Run \`SIGNALS_BASE_URL=${baseUrl} signals-pp-cli agent-tools invoke --agent --stdin\` and pass this JSON envelope on stdin, replacing the synthesis placeholder with your object: \`{"tool":"complete_persona_job","input":{"jobId":"${input.jobId}","success":true,"synthesis":<the synthesis object>}}\`.
+5. If the callback returns validation errors, correct the synthesis and call it again at most once. If you cannot produce a persona, use the same CLI command with \`{"tool":"complete_persona_job","input":{"jobId":"${input.jobId}","success":false,"error":"<reason>"}}\`, replacing the reason placeholder.
+6. Load the \`realtimex-signals\` skill for the callback contract. Do not run \`resolve-base-url.sh\` or \`invoke-tool.sh\` while \`signals-pp-cli\` is available.
+7. Optionally include \`model\` (for example \`claude:claude-fable-5\`) so Signals can record provenance.
 
 ## Output schema (required fields)
 {
