@@ -1,0 +1,4599 @@
+{
+  "schemaVersion": 1,
+  "root": "docs-dev/refs",
+  "spec": "specs/signals-writing-system.md",
+  "validator": "scripts/verify-writing-corpus-manifest.mjs",
+  "updatedAt": "2026-08-28",
+  "policy": {
+    "adoption": "The corpus is dev-only design reference. Nothing is vendored: adopted patterns are re-authored in Signals' words inside .claude/skills/signals-writing (spec §9.1, ADR-347-9).",
+    "licensing": "62 of 63 skills declare no license, author, or copyright; humanizer declares MIT over content derived from a CC BY-SA 4.0 Wikipedia article without naming a copyright holder or documenting relicensing authority. All families are therefore redistribution not-cleared.",
+    "heuristics": "Every reach/timing/multiplier claim in the corpus is unsourced; adopted heuristics start at confidence=low with the corpus path as source and a reviewBy date (spec §5.10).",
+    "exclusions": "Platform-manipulation guidance (engagement-pod evasion, human-mimicry timing, detector gaming), personal identifiers, and named third parties' posts are never adopted (spec §9.5).",
+    "packaging": "docs-dev/refs is never copied into the RealTimeX plugin zip (scripts/package-realtimex-plugin.sh copies .claude/skills only)."
+  },
+  "dispositions": {
+    "adopt-core": "Pattern re-authored into the signals-writing core (claims, voice, audit, approval, adapt spine).",
+    "adopt-overlay": "Platform rules/formulas re-authored into an MVP overlay (x, linkedin, facebook) with provenance records.",
+    "defer-353": "Candidate for a later platform overlay or engage surface under #353; draft/export-only until then.",
+    "reference-only": "Read for design context; nothing adopted into the product skill.",
+    "exclude": "Must not be adopted (manipulation guidance or otherwise unsafe content)."
+  },
+  "families": [
+    {
+      "id": "x-skills",
+      "platform": "x",
+      "provenance": "Unattributed 9-skill bundle. One attribution ('Based on Wikipedia\\'s Signs of AI writing') in x-humanizer; cites a '~450-tweet corpus (July 2026)' with no dataset. No license, author, or copyright.",
+      "license": {
+        "declared": null,
+        "status": "unknown"
+      },
+      "redistribution": "not-cleared",
+      "adoptionPolicy": "re-author-only"
+    },
+    {
+      "id": "threads-skills",
+      "platform": "threads",
+      "provenance": "Unattributed 8-skill bundle, find-and-replace port of x-skills. Cites a '318-post corpus pull (July 2026)' with no dataset. No license, author, or copyright.",
+      "license": {
+        "declared": null,
+        "status": "unknown"
+      },
+      "redistribution": "not-cleared",
+      "adoptionPolicy": "re-author-only"
+    },
+    {
+      "id": "linkedin-skills",
+      "platform": "linkedin",
+      "provenance": "Unattributed 11-skill bundle; rules-explainer names a maintainer ('for Sergey Bulaev', 2026-04-25) and Co.Actor; detector/tier material cites papers and a court case, reach/timing claims are unsourced or vendor-marketing. Embeds a named third party\\'s live post. No license or copyright.",
+      "license": {
+        "declared": null,
+        "status": "unknown"
+      },
+      "redistribution": "not-cleared",
+      "adoptionPolicy": "re-author-only"
+    },
+    {
+      "id": "facebook-skills",
+      "platform": "facebook",
+      "provenance": "Unattributed 8-skill bundle (Page-only). One Wikipedia taxonomy attribution in fb-humanizer. Headline '~66% engagement lift' cited only as 'reported'. No license, author, or copyright.",
+      "license": {
+        "declared": null,
+        "status": "unknown"
+      },
+      "redistribution": "not-cleared",
+      "adoptionPolicy": "re-author-only"
+    },
+    {
+      "id": "instagram-skills",
+      "platform": "instagram",
+      "provenance": "Unattributed 9-skill bundle, structural twin of facebook-skills. One Wikipedia taxonomy attribution in ig-humanizer. No license, author, or copyright.",
+      "license": {
+        "declared": null,
+        "status": "unknown"
+      },
+      "redistribution": "not-cleared",
+      "adoptionPolicy": "re-author-only"
+    },
+    {
+      "id": "tiktok-skills",
+      "platform": "tiktok",
+      "provenance": "Unattributed 8-skill bundle. One Wikipedia taxonomy attribution in tt-humanizer. No license, author, or copyright.",
+      "license": {
+        "declared": null,
+        "status": "unknown"
+      },
+      "redistribution": "not-cleared",
+      "adoptionPolicy": "re-author-only"
+    },
+    {
+      "id": "youtube-skills",
+      "platform": "youtube",
+      "provenance": "Unattributed 9-skill bundle (no humanizer; voice builder attached to community-post-writer). Cites a '214-video corpus pull (July 2026)' with no dataset. No license, author, or copyright.",
+      "license": {
+        "declared": null,
+        "status": "unknown"
+      },
+      "redistribution": "not-cleared",
+      "adoptionPolicy": "re-author-only"
+    },
+    {
+      "id": "humanizer-skill",
+      "platform": null,
+      "provenance": "Single-file skill, frontmatter license: MIT, metadata.version 2.11.2, no named author or copyright holder; body credits Wikipedia / WikiProject AI Cleanup 'Signs of AI writing' (CC BY-SA 4.0).",
+      "license": {
+        "declared": "MIT",
+        "status": "conflict"
+      },
+      "redistribution": "not-cleared",
+      "adoptionPolicy": "re-author-only"
+    }
+  ],
+  "skills": [
+    {
+      "id": "fb-audience-insights",
+      "family": "facebook-skills",
+      "path": "facebook-skills/fb-audience-insights",
+      "platform": "facebook",
+      "surfaces": [],
+      "capability": "research",
+      "disposition": "reference-only",
+      "ruleClasses": {
+        "hard": false,
+        "claim": true,
+        "voice": false,
+        "heuristic": false,
+        "aesthetic": false
+      },
+      "heuristicConfidence": "none",
+      "datedClaims": false,
+      "files": [
+        "SKILL.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "facebook-skills/SKILL.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "signals-writing/SKILL.md router + core/ (spec §6). Global voice rules become core/voice.md (spec §4.3)."
+        }
+      ],
+      "vendorAssumptions": [
+        {
+          "vendor": "apify",
+          "symbols": [],
+          "replacement": "Signals audience intelligence (contacts, niches, personas, platform imports) plus RealTimeX Browser/agent-browser research written back through agent tools. No third-party scraping vendor in the product contract."
+        },
+        {
+          "vendor": "lib-wrapper",
+          "symbols": [
+            "lib.ApifyClient"
+          ],
+          "replacement": "Signals agent tools via the realtimex-signals skill (get_writing_context, get_content, create_content_draft, update_content_draft, upsert_variant, materialize_variant, platform-target tools). The approval card is a skill contract, not a library call (spec §6.4)."
+        }
+      ],
+      "exclusions": [
+        "named Apify actors"
+      ],
+      "notes": "Candid about the platform wall (reaction counts only, no roster); its never-invent rules inform #352. Apify replaced by Signals data."
+    },
+    {
+      "id": "fb-content-planner",
+      "family": "facebook-skills",
+      "path": "facebook-skills/fb-content-planner",
+      "platform": "facebook",
+      "surfaces": [
+        "facebook/post",
+        "facebook/weekly_plan"
+      ],
+      "capability": "plan",
+      "disposition": "reference-only",
+      "ruleClasses": {
+        "hard": false,
+        "claim": false,
+        "voice": false,
+        "heuristic": true,
+        "aesthetic": false
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": false,
+      "files": [
+        "references/example-week.md",
+        "references/pillars-framework.md",
+        "SKILL.md"
+      ],
+      "missingReferences": [],
+      "vendorAssumptions": [],
+      "exclusions": [
+        "posting-time windows and engagement-signal weightings (unsourced)",
+        "clock-time posting table"
+      ],
+      "notes": "Planning is not an MVP mode; no claim-safety rule at all."
+    },
+    {
+      "id": "fb-engagement-drafter",
+      "family": "facebook-skills",
+      "path": "facebook-skills/fb-engagement-drafter",
+      "platform": "facebook",
+      "surfaces": [
+        "facebook/comment"
+      ],
+      "capability": "engage",
+      "disposition": "defer-353",
+      "ruleClasses": {
+        "hard": true,
+        "claim": false,
+        "voice": true,
+        "heuristic": true,
+        "aesthetic": true
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": false,
+      "files": [
+        "references/reply-templates.md",
+        "SKILL.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "facebook-skills/references/voice-profile.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Signals-owned voice profile document (spec §5.1) read through get_writing_context; never a skill-local file."
+        },
+        {
+          "ref": "facebook-skills/SKILL.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "signals-writing/SKILL.md router + core/ (spec §6). Global voice rules become core/voice.md (spec §4.3)."
+        }
+      ],
+      "vendorAssumptions": [
+        {
+          "vendor": "lib-wrapper",
+          "symbols": [
+            "lib.publish",
+            "lib.url_parser"
+          ],
+          "replacement": "Signals agent tools via the realtimex-signals skill (get_writing_context, get_content, create_content_draft, update_content_draft, upsert_variant, materialize_variant, platform-target tools). The approval card is a skill contract, not a library call (spec §6.4)."
+        },
+        {
+          "vendor": "publora",
+          "symbols": [],
+          "replacement": "Signals publish lane: approved content item -> POST /api/content/send-to-agent -> publish_jobs -> signals-publish skill (X direct, Facebook direct, LinkedIn beta). No scheduling API; other networks are draft/export-only (spec §5.8)."
+        }
+      ],
+      "exclusions": [
+        "'first hour is a ranking action'"
+      ],
+      "notes": "facebook/comment is draft_only until #353; reply templates C1-C5 are candidates then. Honest that Publora cannot post Facebook comments."
+    },
+    {
+      "id": "fb-hook-extractor",
+      "family": "facebook-skills",
+      "path": "facebook-skills/fb-hook-extractor",
+      "platform": "facebook",
+      "surfaces": [
+        "facebook/post"
+      ],
+      "capability": "research",
+      "disposition": "reference-only",
+      "ruleClasses": {
+        "hard": false,
+        "claim": false,
+        "voice": false,
+        "heuristic": true,
+        "aesthetic": false
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": true,
+      "files": [
+        "references/classification-rules.md",
+        "references/examples.md",
+        "SKILL.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "facebook-skills/references/hook-formulas.md",
+          "referencedFrom": [
+            "SKILL.md",
+            "references/classification-rules.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Namespaced formula records in overlays/<platform>.md (spec §4.2, §5.10); corpus codes are mapped in formulaMap."
+        }
+      ],
+      "vendorAssumptions": [
+        {
+          "vendor": "apify",
+          "symbols": [],
+          "replacement": "Signals audience intelligence (contacts, niches, personas, platform imports) plus RealTimeX Browser/agent-browser research written back through agent tools. No third-party scraping vendor in the product contract."
+        },
+        {
+          "vendor": "lib-wrapper",
+          "symbols": [
+            "lib.url_parser"
+          ],
+          "replacement": "Signals agent tools via the realtimex-signals skill (get_writing_context, get_content, create_content_draft, update_content_draft, upsert_variant, materialize_variant, platform-target tools). The approval card is a skill contract, not a library call (spec §6.4)."
+        }
+      ],
+      "exclusions": [],
+      "notes": "Depends on missing skeletons; no explicit anti-fabrication rule."
+    },
+    {
+      "id": "fb-humanizer",
+      "family": "facebook-skills",
+      "path": "facebook-skills/fb-humanizer",
+      "platform": "facebook",
+      "surfaces": [
+        "facebook/post",
+        "facebook/comment"
+      ],
+      "capability": "humanize-audit",
+      "disposition": "adopt-overlay",
+      "ruleClasses": {
+        "hard": true,
+        "claim": true,
+        "voice": true,
+        "heuristic": true,
+        "aesthetic": true
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": true,
+      "files": [
+        "references/audit-checklist.md",
+        "references/examples.md",
+        "references/scrub-rules.md",
+        "SKILL.md",
+        "sub-skills/illustration.md",
+        "sub-skills/post-audit.md",
+        "sub-skills/voice-profile.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "facebook-skills/fb-humanizer/references/algorithm-heuristics.md",
+          "referencedFrom": [
+            "references/audit-checklist.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Versioned heuristic rule records with source/observedAt/confidence/reviewBy in the platform overlay (spec §5.10)."
+        },
+        {
+          "ref": "facebook-skills/references/hook-formulas.md",
+          "referencedFrom": [
+            "sub-skills/post-audit.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Namespaced formula records in overlays/<platform>.md (spec §4.2, §5.10); corpus codes are mapped in formulaMap."
+        },
+        {
+          "ref": "facebook-skills/references/voice-profile.md",
+          "referencedFrom": [
+            "SKILL.md",
+            "sub-skills/illustration.md",
+            "sub-skills/voice-profile.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Signals-owned voice profile document (spec §5.1) read through get_writing_context; never a skill-local file."
+        },
+        {
+          "ref": "facebook-skills/SKILL.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "signals-writing/SKILL.md router + core/ (spec §6). Global voice rules become core/voice.md (spec §4.3)."
+        }
+      ],
+      "vendorAssumptions": [
+        {
+          "vendor": "apify",
+          "symbols": [],
+          "replacement": "Signals audience intelligence (contacts, niches, personas, platform imports) plus RealTimeX Browser/agent-browser research written back through agent tools. No third-party scraping vendor in the product contract."
+        },
+        {
+          "vendor": "lib-wrapper",
+          "symbols": [
+            "lib.available_models",
+            "lib.illustrate",
+            "lib.image_backend"
+          ],
+          "replacement": "Signals agent tools via the realtimex-signals skill (get_writing_context, get_content, create_content_draft, update_content_draft, upsert_variant, materialize_variant, platform-target tools). The approval card is a skill contract, not a library call (spec §6.4)."
+        },
+        {
+          "vendor": "pixfaro",
+          "symbols": [],
+          "replacement": "Not replaced in the MVP: media is user-supplied through Signals media assets (POST /api/media, media.plan=user_supplied). Image generation is out of scope (spec §9.4)."
+        },
+        {
+          "vendor": "publora",
+          "symbols": [],
+          "replacement": "Signals publish lane: approved content item -> POST /api/content/send-to-agent -> publish_jobs -> signals-publish skill (X direct, Facebook direct, LinkedIn beta). No scheduling API; other networks are draft/export-only (spec §5.8)."
+        }
+      ],
+      "exclusions": [
+        "illustration sub-skill (Pixfaro)",
+        "Apify read layer",
+        "'~66%' multiplier",
+        "path-depth bug between SKILL.md and sub-skills"
+      ],
+      "notes": "facebook/post audit thresholds (80-char 'sweet spot' as heuristic, 63,206 hard, comment 8,000 hard, 0-2 hashtags/emoji) feed the overlay; scrub passes are core (see linkedin-humanizer)."
+    },
+    {
+      "id": "fb-page-optimizer",
+      "family": "facebook-skills",
+      "path": "facebook-skills/fb-page-optimizer",
+      "platform": "facebook",
+      "surfaces": [
+        "facebook/profile"
+      ],
+      "capability": "profile",
+      "disposition": "reference-only",
+      "ruleClasses": {
+        "hard": false,
+        "claim": false,
+        "voice": false,
+        "heuristic": true,
+        "aesthetic": true
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": true,
+      "files": [
+        "SKILL.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "facebook-skills/SKILL.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "signals-writing/SKILL.md router + core/ (spec §6). Global voice rules become core/voice.md (spec §4.3)."
+        }
+      ],
+      "vendorAssumptions": [],
+      "exclusions": [],
+      "notes": "Profile copy out of scope; states 'keep inside limits' without stating any limit."
+    },
+    {
+      "id": "fb-post-writer",
+      "family": "facebook-skills",
+      "path": "facebook-skills/fb-post-writer",
+      "platform": "facebook",
+      "surfaces": [
+        "facebook/post"
+      ],
+      "capability": "draft",
+      "disposition": "adopt-overlay",
+      "ruleClasses": {
+        "hard": true,
+        "claim": false,
+        "voice": true,
+        "heuristic": true,
+        "aesthetic": true
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": true,
+      "files": [
+        "references/short-post-checklist.md",
+        "SKILL.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "facebook-skills/references/algorithm-heuristics.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Versioned heuristic rule records with source/observedAt/confidence/reviewBy in the platform overlay (spec §5.10)."
+        },
+        {
+          "ref": "facebook-skills/references/hook-formulas.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Namespaced formula records in overlays/<platform>.md (spec §4.2, §5.10); corpus codes are mapped in formulaMap."
+        },
+        {
+          "ref": "facebook-skills/references/voice-profile.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Signals-owned voice profile document (spec §5.1) read through get_writing_context; never a skill-local file."
+        },
+        {
+          "ref": "facebook-skills/SKILL.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "signals-writing/SKILL.md router + core/ (spec §6). Global voice rules become core/voice.md (spec §4.3)."
+        }
+      ],
+      "vendorAssumptions": [
+        {
+          "vendor": "lib-wrapper",
+          "symbols": [
+            "lib.illustrate",
+            "lib.publish"
+          ],
+          "replacement": "Signals agent tools via the realtimex-signals skill (get_writing_context, get_content, create_content_draft, update_content_draft, upsert_variant, materialize_variant, platform-target tools). The approval card is a skill contract, not a library call (spec §6.4)."
+        },
+        {
+          "vendor": "pixfaro",
+          "symbols": [],
+          "replacement": "Not replaced in the MVP: media is user-supplied through Signals media assets (POST /api/media, media.plan=user_supplied). Image generation is out of scope (spec §9.4)."
+        },
+        {
+          "vendor": "publora",
+          "symbols": [],
+          "replacement": "Signals publish lane: approved content item -> POST /api/content/send-to-agent -> publish_jobs -> signals-publish skill (X direct, Facebook direct, LinkedIn beta). No scheduling API; other networks are draft/export-only (spec §5.8)."
+        }
+      ],
+      "formulaMap": [
+        {
+          "corpus": "FB1 One-Line Opinion",
+          "adoptedAs": "facebook/post/one-line-opinion@1"
+        },
+        {
+          "corpus": "FB2 The Tiny Number",
+          "adoptedAs": "facebook/post/tiny-number@1"
+        },
+        {
+          "corpus": "FB3 Ask-the-Page Question",
+          "adoptedAs": "facebook/post/genuine-question@1"
+        },
+        {
+          "corpus": "FB4 This-or-That",
+          "adoptedAs": null
+        },
+        {
+          "corpus": "FB5 Relatable One-Liner",
+          "adoptedAs": "facebook/post/relatable-one-liner@1"
+        },
+        {
+          "corpus": "FB6 Behind-the-Scenes",
+          "adoptedAs": "facebook/post/behind-the-scenes@1"
+        },
+        {
+          "corpus": "FB7 Useful Tip",
+          "adoptedAs": "facebook/post/useful-tip@1"
+        },
+        {
+          "corpus": "FB8 Story Post with a Turn",
+          "adoptedAs": "facebook/post/story-with-a-turn@1"
+        },
+        {
+          "corpus": "FB9 Announcement with Stakes",
+          "adoptedAs": "facebook/post/announcement-with-stakes@1"
+        },
+        {
+          "corpus": "FB10 Community Spotlight",
+          "adoptedAs": "facebook/post/community-spotlight@1"
+        }
+      ],
+      "exclusions": [
+        "FB4 this-or-that vote bait",
+        "'~66% engagement lift' (cited only as 'reported')",
+        "posting windows"
+      ],
+      "notes": "Source for facebook/post formulas and hard rules (63,206-char native limit, 'See more' fold, 0-2 hashtags, links to first comment). Page-oriented; Signals targets are profile or page (target kind), which the overlay must state explicitly."
+    },
+    {
+      "id": "fb-repurposer",
+      "family": "facebook-skills",
+      "path": "facebook-skills/fb-repurposer",
+      "platform": "facebook",
+      "surfaces": [
+        "facebook/post"
+      ],
+      "capability": "adapt",
+      "disposition": "adopt-overlay",
+      "ruleClasses": {
+        "hard": true,
+        "claim": true,
+        "voice": true,
+        "heuristic": true,
+        "aesthetic": true
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": true,
+      "files": [
+        "SKILL.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "facebook-skills/references/algorithm-heuristics.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Versioned heuristic rule records with source/observedAt/confidence/reviewBy in the platform overlay (spec §5.10)."
+        },
+        {
+          "ref": "facebook-skills/references/hook-formulas.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Namespaced formula records in overlays/<platform>.md (spec §4.2, §5.10); corpus codes are mapped in formulaMap."
+        },
+        {
+          "ref": "facebook-skills/references/voice-profile.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Signals-owned voice profile document (spec §5.1) read through get_writing_context; never a skill-local file."
+        },
+        {
+          "ref": "facebook-skills/SKILL.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "signals-writing/SKILL.md router + core/ (spec §6). Global voice rules become core/voice.md (spec §4.3)."
+        }
+      ],
+      "vendorAssumptions": [
+        {
+          "vendor": "lib-wrapper",
+          "symbols": [
+            "lib.publish"
+          ],
+          "replacement": "Signals agent tools via the realtimex-signals skill (get_writing_context, get_content, create_content_draft, update_content_draft, upsert_variant, materialize_variant, platform-target tools). The approval card is a skill contract, not a library call (spec §6.4)."
+        },
+        {
+          "vendor": "publora",
+          "symbols": [],
+          "replacement": "Signals publish lane: approved content item -> POST /api/content/send-to-agent -> publish_jobs -> signals-publish skill (X direct, Facebook direct, LinkedIn beta). No scheduling API; other networks are draft/export-only (spec §5.8)."
+        }
+      ],
+      "exclusions": [
+        "'external links suppress reach' as fact"
+      ],
+      "notes": "Source-to-Facebook native-fit rules (link to first comment, unroll threads to one story) for the overlay adapt section. No references/ directory despite citing two."
+    },
+    {
+      "id": "humanizer-skill",
+      "family": "humanizer-skill",
+      "path": "humanizer-skill",
+      "platform": null,
+      "surfaces": [
+        "core/prose"
+      ],
+      "capability": "humanize-audit",
+      "disposition": "adopt-core",
+      "ruleClasses": {
+        "hard": false,
+        "claim": true,
+        "voice": true,
+        "heuristic": true,
+        "aesthetic": true
+      },
+      "heuristicConfidence": "medium",
+      "datedClaims": false,
+      "files": [
+        "SKILL.md"
+      ],
+      "missingReferences": [],
+      "vendorAssumptions": [],
+      "exclusions": [
+        "verbatim before/after example pairs derived from the CC BY-SA 4.0 Wikipedia article",
+        "MIT relicensing of derived text"
+      ],
+      "notes": "Cleanest claim-safety contract in the corpus ('do not add a fact, name, number, date, quote, or citation unless it comes from the source or the user') and the 'writing sample takes priority over style rules' precedence that D6 adopts. The 'what not to flag' false-positive list is the model for info-severity findings. License is declared MIT but the content is derived from Wikipedia (CC BY-SA 4.0) and the frontmatter names no copyright holder or relicensing authority, so it is treated as conflict/reference-only like everything else."
+    },
+    {
+      "id": "ig-audience-insights",
+      "family": "instagram-skills",
+      "path": "instagram-skills/ig-audience-insights",
+      "platform": "instagram",
+      "surfaces": [],
+      "capability": "research",
+      "disposition": "reference-only",
+      "ruleClasses": {
+        "hard": false,
+        "claim": true,
+        "voice": false,
+        "heuristic": false,
+        "aesthetic": false
+      },
+      "heuristicConfidence": "none",
+      "datedClaims": false,
+      "files": [
+        "SKILL.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "instagram-skills/SKILL.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "signals-writing/SKILL.md router + core/ (spec §6). Global voice rules become core/voice.md (spec §4.3)."
+        }
+      ],
+      "vendorAssumptions": [
+        {
+          "vendor": "apify",
+          "symbols": [],
+          "replacement": "Signals audience intelligence (contacts, niches, personas, platform imports) plus RealTimeX Browser/agent-browser research written back through agent tools. No third-party scraping vendor in the product contract."
+        },
+        {
+          "vendor": "lib-wrapper",
+          "symbols": [
+            "lib.ApifyClient"
+          ],
+          "replacement": "Signals agent tools via the realtimex-signals skill (get_writing_context, get_content, create_content_draft, update_content_draft, upsert_variant, materialize_variant, platform-target tools). The approval card is a skill contract, not a library call (spec §6.4)."
+        }
+      ],
+      "exclusions": [],
+      "notes": "Apify-based; never-invent and follower-normalization rules inform #352."
+    },
+    {
+      "id": "ig-caption-writer",
+      "family": "instagram-skills",
+      "path": "instagram-skills/ig-caption-writer",
+      "platform": "instagram",
+      "surfaces": [
+        "instagram/caption"
+      ],
+      "capability": "draft",
+      "disposition": "defer-353",
+      "ruleClasses": {
+        "hard": true,
+        "claim": false,
+        "voice": true,
+        "heuristic": true,
+        "aesthetic": true
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": true,
+      "files": [
+        "references/caption-checklist.md",
+        "SKILL.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "instagram-skills/references/algorithm-heuristics.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Versioned heuristic rule records with source/observedAt/confidence/reviewBy in the platform overlay (spec §5.10)."
+        },
+        {
+          "ref": "instagram-skills/references/hashtag-strategy.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Deferred to the instagram overlay in #353."
+        },
+        {
+          "ref": "instagram-skills/references/hook-formulas.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Namespaced formula records in overlays/<platform>.md (spec §4.2, §5.10); corpus codes are mapped in formulaMap."
+        },
+        {
+          "ref": "instagram-skills/references/media-workflow.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Signals media assets + media.plan=user_supplied (spec §5.3)."
+        },
+        {
+          "ref": "instagram-skills/references/voice-profile.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Signals-owned voice profile document (spec §5.1) read through get_writing_context; never a skill-local file."
+        },
+        {
+          "ref": "instagram-skills/SKILL.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "signals-writing/SKILL.md router + core/ (spec §6). Global voice rules become core/voice.md (spec §4.3)."
+        }
+      ],
+      "vendorAssumptions": [
+        {
+          "vendor": "lib-wrapper",
+          "symbols": [
+            "lib.publish"
+          ],
+          "replacement": "Signals agent tools via the realtimex-signals skill (get_writing_context, get_content, create_content_draft, update_content_draft, upsert_variant, materialize_variant, platform-target tools). The approval card is a skill contract, not a library call (spec §6.4)."
+        },
+        {
+          "vendor": "publora",
+          "symbols": [],
+          "replacement": "Signals publish lane: approved content item -> POST /api/content/send-to-agent -> publish_jobs -> signals-publish skill (X direct, Facebook direct, LinkedIn beta). No scheduling API; other networks are draft/export-only (spec §5.8)."
+        }
+      ],
+      "formulaMap": [
+        {
+          "corpus": "IG1 Number-First Result",
+          "adoptedAs": null
+        },
+        {
+          "corpus": "IG2 Contrarian Truth",
+          "adoptedAs": null
+        },
+        {
+          "corpus": "IG3 Relatable Cold-Open",
+          "adoptedAs": null
+        },
+        {
+          "corpus": "IG4 Mini-Story Confession",
+          "adoptedAs": null
+        }
+      ],
+      "exclusions": [
+        "Publora upload flow"
+      ],
+      "notes": "Hard rules for the #353 overlay: 2,200-char caption, ~125-char fold, 3-5 hashtags, media required (text-only posts rejected). 5 of 6 cited resources do not exist."
+    },
+    {
+      "id": "ig-carousel-planner",
+      "family": "instagram-skills",
+      "path": "instagram-skills/ig-carousel-planner",
+      "platform": "instagram",
+      "surfaces": [
+        "instagram/carousel",
+        "instagram/caption"
+      ],
+      "capability": "plan",
+      "disposition": "defer-353",
+      "ruleClasses": {
+        "hard": true,
+        "claim": false,
+        "voice": true,
+        "heuristic": true,
+        "aesthetic": false
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": true,
+      "files": [
+        "references/slide-architecture.md",
+        "SKILL.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "instagram-skills/references/algorithm-heuristics.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Versioned heuristic rule records with source/observedAt/confidence/reviewBy in the platform overlay (spec §5.10)."
+        },
+        {
+          "ref": "instagram-skills/references/hashtag-strategy.md",
+          "referencedFrom": [
+            "SKILL.md",
+            "references/slide-architecture.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Deferred to the instagram overlay in #353."
+        },
+        {
+          "ref": "instagram-skills/references/hook-formulas.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Namespaced formula records in overlays/<platform>.md (spec §4.2, §5.10); corpus codes are mapped in formulaMap."
+        },
+        {
+          "ref": "instagram-skills/references/media-workflow.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Signals media assets + media.plan=user_supplied (spec §5.3)."
+        },
+        {
+          "ref": "instagram-skills/references/voice-profile.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Signals-owned voice profile document (spec §5.1) read through get_writing_context; never a skill-local file."
+        },
+        {
+          "ref": "instagram-skills/SKILL.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "signals-writing/SKILL.md router + core/ (spec §6). Global voice rules become core/voice.md (spec §4.3)."
+        }
+      ],
+      "vendorAssumptions": [
+        {
+          "vendor": "lib-wrapper",
+          "symbols": [
+            "lib.illustrate",
+            "lib.publish"
+          ],
+          "replacement": "Signals agent tools via the realtimex-signals skill (get_writing_context, get_content, create_content_draft, update_content_draft, upsert_variant, materialize_variant, platform-target tools). The approval card is a skill contract, not a library call (spec §6.4)."
+        },
+        {
+          "vendor": "pixfaro",
+          "symbols": [],
+          "replacement": "Not replaced in the MVP: media is user-supplied through Signals media assets (POST /api/media, media.plan=user_supplied). Image generation is out of scope (spec §9.4)."
+        },
+        {
+          "vendor": "publora",
+          "symbols": [],
+          "replacement": "Signals publish lane: approved content item -> POST /api/content/send-to-agent -> publish_jobs -> signals-publish skill (X direct, Facebook direct, LinkedIn beta). No scheduling API; other networks are draft/export-only (spec §5.8)."
+        }
+      ],
+      "formulaMap": [
+        {
+          "corpus": "IG5 Listicle",
+          "adoptedAs": null
+        },
+        {
+          "corpus": "IG6 Before/After Transformation",
+          "adoptedAs": null
+        },
+        {
+          "corpus": "IG7 Myth-Buster",
+          "adoptedAs": null
+        },
+        {
+          "corpus": "IG8 Steal-This Framework",
+          "adoptedAs": null
+        }
+      ],
+      "exclusions": [
+        "Pixfaro slide generation",
+        "'swipe-through decays' as fact"
+      ],
+      "notes": "Most media-dependent skill: deliverable is on-image text for 2-10 user-supplied 4:5 images; needs an asset model (#353 'richer assets')."
+    },
+    {
+      "id": "ig-content-planner",
+      "family": "instagram-skills",
+      "path": "instagram-skills/ig-content-planner",
+      "platform": "instagram",
+      "surfaces": [
+        "instagram/caption",
+        "instagram/carousel",
+        "instagram/weekly_plan"
+      ],
+      "capability": "plan",
+      "disposition": "reference-only",
+      "ruleClasses": {
+        "hard": false,
+        "claim": false,
+        "voice": false,
+        "heuristic": true,
+        "aesthetic": false
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": true,
+      "files": [
+        "references/example-week.md",
+        "references/pillars-framework.md",
+        "SKILL.md"
+      ],
+      "missingReferences": [],
+      "vendorAssumptions": [],
+      "exclusions": [
+        "posting-time windows and engagement-signal weightings (unsourced)",
+        "'sends per reach and saves are the 2026 levers'"
+      ],
+      "notes": "Densest cluster of unsourced Instagram ranking claims."
+    },
+    {
+      "id": "ig-hashtag-strategist",
+      "family": "instagram-skills",
+      "path": "instagram-skills/ig-hashtag-strategist",
+      "platform": "instagram",
+      "surfaces": [
+        "instagram/caption"
+      ],
+      "capability": "research",
+      "disposition": "defer-353",
+      "ruleClasses": {
+        "hard": true,
+        "claim": true,
+        "voice": false,
+        "heuristic": true,
+        "aesthetic": false
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": true,
+      "files": [
+        "references/sourcing-tactics.md",
+        "SKILL.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "instagram-skills/references/algorithm-heuristics.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Versioned heuristic rule records with source/observedAt/confidence/reviewBy in the platform overlay (spec §5.10)."
+        },
+        {
+          "ref": "instagram-skills/references/hashtag-strategy.md",
+          "referencedFrom": [
+            "SKILL.md",
+            "references/sourcing-tactics.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Deferred to the instagram overlay in #353."
+        },
+        {
+          "ref": "instagram-skills/SKILL.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "signals-writing/SKILL.md router + core/ (spec §6). Global voice rules become core/voice.md (spec §4.3)."
+        }
+      ],
+      "vendorAssumptions": [],
+      "exclusions": [
+        "<50k/50k-500k/500k+ tier thresholds (asserted, unverifiable via API)"
+      ],
+      "notes": "Honest that the API exposes no tag counts; sizing is judgment. Candidate heuristic records for the instagram overlay."
+    },
+    {
+      "id": "ig-hook-extractor",
+      "family": "instagram-skills",
+      "path": "instagram-skills/ig-hook-extractor",
+      "platform": "instagram",
+      "surfaces": [
+        "instagram/caption",
+        "instagram/carousel"
+      ],
+      "capability": "research",
+      "disposition": "reference-only",
+      "ruleClasses": {
+        "hard": false,
+        "claim": false,
+        "voice": false,
+        "heuristic": true,
+        "aesthetic": false
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": true,
+      "files": [
+        "references/classification-rules.md",
+        "references/examples.md",
+        "SKILL.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "instagram-skills/references/hook-formulas.md",
+          "referencedFrom": [
+            "SKILL.md",
+            "references/classification-rules.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Namespaced formula records in overlays/<platform>.md (spec §4.2, §5.10); corpus codes are mapped in formulaMap."
+        }
+      ],
+      "vendorAssumptions": [
+        {
+          "vendor": "apify",
+          "symbols": [],
+          "replacement": "Signals audience intelligence (contacts, niches, personas, platform imports) plus RealTimeX Browser/agent-browser research written back through agent tools. No third-party scraping vendor in the product contract."
+        },
+        {
+          "vendor": "lib-wrapper",
+          "symbols": [
+            "lib.url_parser"
+          ],
+          "replacement": "Signals agent tools via the realtimex-signals skill (get_writing_context, get_content, create_content_draft, update_content_draft, upsert_variant, materialize_variant, platform-target tools). The approval card is a skill contract, not a library call (spec §6.4)."
+        }
+      ],
+      "exclusions": [],
+      "notes": "Depends on missing skeletons; examples are self-declared illustrative."
+    },
+    {
+      "id": "ig-humanizer",
+      "family": "instagram-skills",
+      "path": "instagram-skills/ig-humanizer",
+      "platform": "instagram",
+      "surfaces": [
+        "instagram/caption",
+        "instagram/carousel"
+      ],
+      "capability": "humanize-audit",
+      "disposition": "defer-353",
+      "ruleClasses": {
+        "hard": true,
+        "claim": true,
+        "voice": true,
+        "heuristic": true,
+        "aesthetic": true
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": true,
+      "files": [
+        "references/audit-checklist.md",
+        "references/examples.md",
+        "references/scrub-rules.md",
+        "SKILL.md",
+        "sub-skills/illustration.md",
+        "sub-skills/post-audit.md",
+        "sub-skills/voice-profile.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "instagram-skills/ig-humanizer/references/algorithm-heuristics.md",
+          "referencedFrom": [
+            "references/audit-checklist.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Versioned heuristic rule records with source/observedAt/confidence/reviewBy in the platform overlay (spec §5.10)."
+        },
+        {
+          "ref": "instagram-skills/references/hashtag-strategy.md",
+          "referencedFrom": [
+            "references/scrub-rules.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Deferred to the instagram overlay in #353."
+        },
+        {
+          "ref": "instagram-skills/references/hook-formulas.md",
+          "referencedFrom": [
+            "sub-skills/post-audit.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Namespaced formula records in overlays/<platform>.md (spec §4.2, §5.10); corpus codes are mapped in formulaMap."
+        },
+        {
+          "ref": "instagram-skills/references/voice-profile.md",
+          "referencedFrom": [
+            "SKILL.md",
+            "sub-skills/illustration.md",
+            "sub-skills/voice-profile.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Signals-owned voice profile document (spec §5.1) read through get_writing_context; never a skill-local file."
+        },
+        {
+          "ref": "instagram-skills/SKILL.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "signals-writing/SKILL.md router + core/ (spec §6). Global voice rules become core/voice.md (spec §4.3)."
+        }
+      ],
+      "vendorAssumptions": [
+        {
+          "vendor": "apify",
+          "symbols": [],
+          "replacement": "Signals audience intelligence (contacts, niches, personas, platform imports) plus RealTimeX Browser/agent-browser research written back through agent tools. No third-party scraping vendor in the product contract."
+        },
+        {
+          "vendor": "lib-wrapper",
+          "symbols": [
+            "lib.available_models",
+            "lib.illustrate",
+            "lib.image_backend"
+          ],
+          "replacement": "Signals agent tools via the realtimex-signals skill (get_writing_context, get_content, create_content_draft, update_content_draft, upsert_variant, materialize_variant, platform-target tools). The approval card is a skill contract, not a library call (spec §6.4)."
+        },
+        {
+          "vendor": "pixfaro",
+          "symbols": [],
+          "replacement": "Not replaced in the MVP: media is user-supplied through Signals media assets (POST /api/media, media.plan=user_supplied). Image generation is out of scope (spec §9.4)."
+        },
+        {
+          "vendor": "publora",
+          "symbols": [],
+          "replacement": "Signals publish lane: approved content item -> POST /api/content/send-to-agent -> publish_jobs -> signals-publish skill (X direct, Facebook direct, LinkedIn beta). No scheduling API; other networks are draft/export-only (spec §5.8)."
+        }
+      ],
+      "exclusions": [
+        "illustration sub-skill (Pixfaro)",
+        "Apify read layer"
+      ],
+      "notes": "Verbatim copy of fb-humanizer with Instagram thresholds (2,200/125, 3-5 hashtags, Reel 5-90 s, 4:5-1.91:1). 'Media plan exists' is a blocker the writing system must surface as a capability note."
+    },
+    {
+      "id": "ig-profile-optimizer",
+      "family": "instagram-skills",
+      "path": "instagram-skills/ig-profile-optimizer",
+      "platform": "instagram",
+      "surfaces": [
+        "instagram/profile"
+      ],
+      "capability": "profile",
+      "disposition": "reference-only",
+      "ruleClasses": {
+        "hard": true,
+        "claim": false,
+        "voice": false,
+        "heuristic": true,
+        "aesthetic": true
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": true,
+      "files": [
+        "SKILL.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "instagram-skills/SKILL.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "signals-writing/SKILL.md router + core/ (spec §6). Global voice rules become core/voice.md (spec §4.3)."
+        }
+      ],
+      "vendorAssumptions": [],
+      "exclusions": [],
+      "notes": "Profile copy out of scope; carries the numeric limits (bio 150, name 30) the FB twin omits."
+    },
+    {
+      "id": "ig-repurposer",
+      "family": "instagram-skills",
+      "path": "instagram-skills/ig-repurposer",
+      "platform": "instagram",
+      "surfaces": [
+        "instagram/caption",
+        "instagram/carousel"
+      ],
+      "capability": "adapt",
+      "disposition": "defer-353",
+      "ruleClasses": {
+        "hard": true,
+        "claim": true,
+        "voice": true,
+        "heuristic": true,
+        "aesthetic": true
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": true,
+      "files": [
+        "SKILL.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "instagram-skills/references/algorithm-heuristics.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Versioned heuristic rule records with source/observedAt/confidence/reviewBy in the platform overlay (spec §5.10)."
+        },
+        {
+          "ref": "instagram-skills/references/hashtag-strategy.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Deferred to the instagram overlay in #353."
+        },
+        {
+          "ref": "instagram-skills/references/hook-formulas.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Namespaced formula records in overlays/<platform>.md (spec §4.2, §5.10); corpus codes are mapped in formulaMap."
+        },
+        {
+          "ref": "instagram-skills/references/media-workflow.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Signals media assets + media.plan=user_supplied (spec §5.3)."
+        },
+        {
+          "ref": "instagram-skills/references/voice-profile.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Signals-owned voice profile document (spec §5.1) read through get_writing_context; never a skill-local file."
+        },
+        {
+          "ref": "instagram-skills/SKILL.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "signals-writing/SKILL.md router + core/ (spec §6). Global voice rules become core/voice.md (spec §4.3)."
+        }
+      ],
+      "vendorAssumptions": [
+        {
+          "vendor": "lib-wrapper",
+          "symbols": [
+            "lib.publish"
+          ],
+          "replacement": "Signals agent tools via the realtimex-signals skill (get_writing_context, get_content, create_content_draft, update_content_draft, upsert_variant, materialize_variant, platform-target tools). The approval card is a skill contract, not a library call (spec §6.4)."
+        },
+        {
+          "vendor": "publora",
+          "symbols": [],
+          "replacement": "Signals publish lane: approved content item -> POST /api/content/send-to-agent -> publish_jobs -> signals-publish skill (X direct, Facebook direct, LinkedIn beta). No scheduling API; other networks are draft/export-only (spec §5.8)."
+        }
+      ],
+      "exclusions": [],
+      "notes": "Every cited resource is absent; near-duplicate of fb-repurposer."
+    },
+    {
+      "id": "linkedin-comment-drafter",
+      "family": "linkedin-skills",
+      "path": "linkedin-skills/linkedin-comment-drafter",
+      "platform": "linkedin",
+      "surfaces": [
+        "linkedin/comment"
+      ],
+      "capability": "engage",
+      "disposition": "defer-353",
+      "ruleClasses": {
+        "hard": true,
+        "claim": false,
+        "voice": true,
+        "heuristic": true,
+        "aesthetic": true
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": true,
+      "files": [
+        "references/comment-templates.md",
+        "references/examples.md",
+        "references/voice-rules.md",
+        "SKILL.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "linkedin-skills/references/voice-profile.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Signals-owned voice profile document (spec §5.1) read through get_writing_context; never a skill-local file."
+        },
+        {
+          "ref": "linkedin-skills/references/voice-rules.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Core voice precedence rules (spec §4.3) in core/voice.md."
+        },
+        {
+          "ref": "linkedin-skills/SKILL.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "signals-writing/SKILL.md router + core/ (spec §6). Global voice rules become core/voice.md (spec §4.3)."
+        }
+      ],
+      "vendorAssumptions": [
+        {
+          "vendor": "apify",
+          "symbols": [],
+          "replacement": "Signals audience intelligence (contacts, niches, personas, platform imports) plus RealTimeX Browser/agent-browser research written back through agent tools. No third-party scraping vendor in the product contract."
+        },
+        {
+          "vendor": "lib-wrapper",
+          "symbols": [
+            "lib.ApifyClient",
+            "lib.approval",
+            "lib.fetch_post",
+            "lib.publish",
+            "lib.repost",
+            "lib.url_parser"
+          ],
+          "replacement": "Signals agent tools via the realtimex-signals skill (get_writing_context, get_content, create_content_draft, update_content_draft, upsert_variant, materialize_variant, platform-target tools). The approval card is a skill contract, not a library call (spec §6.4)."
+        },
+        {
+          "vendor": "publora",
+          "symbols": [],
+          "replacement": "Signals publish lane: approved content item -> POST /api/content/send-to-agent -> publish_jobs -> signals-publish skill (X direct, Facebook direct, LinkedIn beta). No scheduling API; other networks are draft/export-only (spec §5.8)."
+        }
+      ],
+      "exclusions": [
+        "timed human-mimicry pauses (react, wait 8-15 s, comment)",
+        "SALES-T* account-warmup cadence",
+        "'near-zero algorithmic weight' claims"
+      ],
+      "notes": "linkedin/comment is draft_only until #353; the 4-part comment structure and templates T1-T7 are candidates then. Only skill naming an approval-card function (lib.approval.render_approval_card)."
+    },
+    {
+      "id": "linkedin-content-planner",
+      "family": "linkedin-skills",
+      "path": "linkedin-skills/linkedin-content-planner",
+      "platform": "linkedin",
+      "surfaces": [
+        "linkedin/post",
+        "linkedin/weekly_plan"
+      ],
+      "capability": "plan",
+      "disposition": "reference-only",
+      "ruleClasses": {
+        "hard": false,
+        "claim": false,
+        "voice": false,
+        "heuristic": true,
+        "aesthetic": false
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": true,
+      "files": [
+        "references/example-plan-week.md",
+        "references/pillars-framework.md",
+        "SKILL.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "linkedin-skills/references/founder-topics.md",
+          "referencedFrom": [
+            "SKILL.md",
+            "references/pillars-framework.md"
+          ],
+          "disposition": "remove",
+          "replacement": null
+        },
+        {
+          "ref": "linkedin-skills/references/hook-formulas.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Namespaced formula records in overlays/<platform>.md (spec §4.2, §5.10); corpus codes are mapped in formulaMap."
+        }
+      ],
+      "vendorAssumptions": [],
+      "exclusions": [
+        "'Recovery / cold-start protocol' for shadowbanned or pod-penalized accounts",
+        "'Giants strategy' (comment 1-5 minutes before large accounts publish)",
+        "unsourced 360Brew, percentage, and cadence claims",
+        "social-selling statistics without source"
+      ],
+      "notes": "Planning is not an MVP mode; contains the densest cluster of unsourced multipliers in the corpus."
+    },
+    {
+      "id": "linkedin-employee-advocacy",
+      "family": "linkedin-skills",
+      "path": "linkedin-skills/linkedin-employee-advocacy",
+      "platform": "linkedin",
+      "surfaces": [
+        "linkedin/post",
+        "linkedin/comment"
+      ],
+      "capability": "governance",
+      "disposition": "adopt-core",
+      "ruleClasses": {
+        "hard": false,
+        "claim": true,
+        "voice": true,
+        "heuristic": true,
+        "aesthetic": false
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": true,
+      "files": [
+        "references/advocacy-principles.md",
+        "references/governance-playbook.md",
+        "references/team-cadence-matrix.md",
+        "SKILL.md"
+      ],
+      "missingReferences": [],
+      "vendorAssumptions": [
+        {
+          "vendor": "lib-wrapper",
+          "symbols": [
+            "lib.repost"
+          ],
+          "replacement": "Signals agent tools via the realtimex-signals skill (get_writing_context, get_content, create_content_draft, update_content_draft, upsert_variant, materialize_variant, platform-target tools). The approval card is a skill contract, not a library call (spec §6.4)."
+        }
+      ],
+      "exclusions": [
+        "'8x engagement' / '6-8x reach' multipliers (vendor page)",
+        "team touchpoint arithmetic",
+        "review SLA numbers (internally inconsistent)"
+      ],
+      "notes": "Adopted for one thing: the reviewer 'risk surface' flag list (customer names without permission, internal figures, unshipped capabilities, forward-looking guidance, competitor allegations, naming employees, legal matters) and 'trust the voice surface' shape §5.6 riskTier and the claim class. Only skill with an explicit external source line (co.actor marketing page)."
+    },
+    {
+      "id": "linkedin-engager-analytics",
+      "family": "linkedin-skills",
+      "path": "linkedin-skills/linkedin-engager-analytics",
+      "platform": "linkedin",
+      "surfaces": [],
+      "capability": "analytics",
+      "disposition": "reference-only",
+      "ruleClasses": {
+        "hard": false,
+        "claim": true,
+        "voice": false,
+        "heuristic": true,
+        "aesthetic": false
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": false,
+      "files": [
+        "references/output-spec.md",
+        "SKILL.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "linkedin-skills/SKILL.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "signals-writing/SKILL.md router + core/ (spec §6). Global voice rules become core/voice.md (spec §4.3)."
+        }
+      ],
+      "vendorAssumptions": [
+        {
+          "vendor": "apify",
+          "symbols": [],
+          "replacement": "Signals audience intelligence (contacts, niches, personas, platform imports) plus RealTimeX Browser/agent-browser research written back through agent tools. No third-party scraping vendor in the product contract."
+        },
+        {
+          "vendor": "lib-wrapper",
+          "symbols": [
+            "lib.ApifyClient"
+          ],
+          "replacement": "Signals agent tools via the realtimex-signals skill (get_writing_context, get_content, create_content_draft, update_content_draft, upsert_variant, materialize_variant, platform-target tools). The approval card is a skill contract, not a library call (spec §6.4)."
+        }
+      ],
+      "exclusions": [
+        "Apify per-record pricing",
+        "DM cadence"
+      ],
+      "notes": "Apify-based; Signals engagement + contact graph is the replacement. Its consent rule ('do not scrape audiences you are not tracking with permission') informs private-source handling."
+    },
+    {
+      "id": "linkedin-hook-extractor",
+      "family": "linkedin-skills",
+      "path": "linkedin-skills/linkedin-hook-extractor",
+      "platform": "linkedin",
+      "surfaces": [
+        "linkedin/post"
+      ],
+      "capability": "research",
+      "disposition": "reference-only",
+      "ruleClasses": {
+        "hard": false,
+        "claim": true,
+        "voice": false,
+        "heuristic": true,
+        "aesthetic": false
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": true,
+      "files": [
+        "references/classification-rules.md",
+        "references/examples.md",
+        "SKILL.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "linkedin-skills/references/hook-formulas.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Namespaced formula records in overlays/<platform>.md (spec §4.2, §5.10); corpus codes are mapped in formulaMap."
+        }
+      ],
+      "vendorAssumptions": [
+        {
+          "vendor": "apify",
+          "symbols": [],
+          "replacement": "Signals audience intelligence (contacts, niches, personas, platform imports) plus RealTimeX Browser/agent-browser research written back through agent tools. No third-party scraping vendor in the product contract."
+        },
+        {
+          "vendor": "lib-wrapper",
+          "symbols": [
+            "lib.ApifyClient",
+            "lib.url_parser"
+          ],
+          "replacement": "Signals agent tools via the realtimex-signals skill (get_writing_context, get_content, create_content_draft, update_content_draft, upsert_variant, materialize_variant, platform-target tools). The approval card is a skill contract, not a library call (spec §6.4)."
+        }
+      ],
+      "exclusions": [
+        "references/examples.md: a named third party's live post, verbatim hook, and derived template",
+        "classifier covers F1-F10 only while claiming 16"
+      ],
+      "notes": "Classifier depends on the missing skeletons; not an MVP mode."
+    },
+    {
+      "id": "linkedin-humanizer",
+      "family": "linkedin-skills",
+      "path": "linkedin-skills/linkedin-humanizer",
+      "platform": "linkedin",
+      "surfaces": [
+        "linkedin/post",
+        "linkedin/comment"
+      ],
+      "capability": "humanize-audit",
+      "disposition": "adopt-core",
+      "ruleClasses": {
+        "hard": true,
+        "claim": true,
+        "voice": true,
+        "heuristic": true,
+        "aesthetic": true
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": true,
+      "files": [
+        "references/audit-ai-tells.md",
+        "references/audit-checklist.md",
+        "references/audit-examples.md",
+        "references/detector-list.md",
+        "references/emoji-patterns.md",
+        "references/examples.md",
+        "references/rules-explainer.md",
+        "references/scrub-rules.md",
+        "references/tier-rationale.md",
+        "references/voice-fingerprint.md",
+        "scripts/detectors.env.example",
+        "scripts/requirements.txt",
+        "scripts/test_detectors.py",
+        "SKILL.md",
+        "sub-skills/detector-tester.md",
+        "sub-skills/emoji-detector.md",
+        "sub-skills/illustration.md",
+        "sub-skills/post-audit.md",
+        "sub-skills/rules-explainer.md",
+        "sub-skills/voice-profile.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "linkedin-skills/linkedin-humanizer/references/voice-profile.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Signals-owned voice profile document (spec §5.1) read through get_writing_context; never a skill-local file."
+        },
+        {
+          "ref": "linkedin-skills/references/hook-formulas.md",
+          "referencedFrom": [
+            "sub-skills/post-audit.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Namespaced formula records in overlays/<platform>.md (spec §4.2, §5.10); corpus codes are mapped in formulaMap."
+        },
+        {
+          "ref": "linkedin-skills/references/voice-profile.md",
+          "referencedFrom": [
+            "sub-skills/illustration.md",
+            "sub-skills/voice-profile.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Signals-owned voice profile document (spec §5.1) read through get_writing_context; never a skill-local file."
+        },
+        {
+          "ref": "linkedin-skills/SKILL.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "signals-writing/SKILL.md router + core/ (spec §6). Global voice rules become core/voice.md (spec §4.3)."
+        }
+      ],
+      "vendorAssumptions": [
+        {
+          "vendor": "ai-detectors",
+          "symbols": [],
+          "replacement": "Excluded: Signals never calls AI-detection vendors; audits are rule-based findings with provenance (spec §5.5)."
+        },
+        {
+          "vendor": "apify",
+          "symbols": [],
+          "replacement": "Signals audience intelligence (contacts, niches, personas, platform imports) plus RealTimeX Browser/agent-browser research written back through agent tools. No third-party scraping vendor in the product contract."
+        },
+        {
+          "vendor": "lib-wrapper",
+          "symbols": [
+            "lib.available_models",
+            "lib.fetch_post",
+            "lib.fetch_user_recent_comments",
+            "lib.illustrate",
+            "lib.image_backend"
+          ],
+          "replacement": "Signals agent tools via the realtimex-signals skill (get_writing_context, get_content, create_content_draft, update_content_draft, upsert_variant, materialize_variant, platform-target tools). The approval card is a skill contract, not a library call (spec §6.4)."
+        },
+        {
+          "vendor": "pixfaro",
+          "symbols": [],
+          "replacement": "Not replaced in the MVP: media is user-supplied through Signals media assets (POST /api/media, media.plan=user_supplied). Image generation is out of scope (spec §9.4)."
+        },
+        {
+          "vendor": "publora",
+          "symbols": [],
+          "replacement": "Signals publish lane: approved content item -> POST /api/content/send-to-agent -> publish_jobs -> signals-publish skill (X direct, Facebook direct, LinkedIn beta). No scheduling API; other networks are draft/export-only (spec §5.8)."
+        }
+      ],
+      "exclusions": [
+        "sub-skills/detector-tester.md, scripts/* (AI-detector API gaming)",
+        "references/detector-list.md vendor endpoints",
+        "references/emoji-patterns.md frequencies (single viral post as corpus)",
+        "OriginalityAI 'score estimate' proxy",
+        "reach/timing/dwell multipliers and '360Brew' claims",
+        "personal identifiers (maintainer name, home path, live activity IDs)",
+        "aesthetic-vs-strict reclassification that overrides the tier rationale"
+      ],
+      "notes": "Canonical source for the core audit model: forensic/strict/aesthetic tiers map to claim/heuristic/aesthetic classes, the voice-fingerprint conflict table maps to the voice_first precedence (spec §4.3), the blocker/warning/info bands map to §5.5 severities. Evidence is bimodal: detector/tier citations are real (papers, a court case); every reach/timing claim is unsourced. Four unreconciled numbering schemes; internal contradictions (210 vs 265 fold, passive <10% vs <8%)."
+    },
+    {
+      "id": "linkedin-post-writer",
+      "family": "linkedin-skills",
+      "path": "linkedin-skills/linkedin-post-writer",
+      "platform": "linkedin",
+      "surfaces": [
+        "linkedin/post"
+      ],
+      "capability": "draft",
+      "disposition": "adopt-overlay",
+      "ruleClasses": {
+        "hard": true,
+        "claim": false,
+        "voice": true,
+        "heuristic": true,
+        "aesthetic": true
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": true,
+      "files": [
+        "references/algorithm-heuristics.md",
+        "references/hook-formulas.md",
+        "references/humanizer-checklist.md",
+        "SKILL.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "linkedin-skills/references/algorithm-heuristics.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Versioned heuristic rule records with source/observedAt/confidence/reviewBy in the platform overlay (spec §5.10)."
+        },
+        {
+          "ref": "linkedin-skills/references/founder-topics.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "remove",
+          "replacement": null
+        },
+        {
+          "ref": "linkedin-skills/references/hook-formulas.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Namespaced formula records in overlays/<platform>.md (spec §4.2, §5.10); corpus codes are mapped in formulaMap."
+        },
+        {
+          "ref": "linkedin-skills/references/voice-profile.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Signals-owned voice profile document (spec §5.1) read through get_writing_context; never a skill-local file."
+        },
+        {
+          "ref": "linkedin-skills/SKILL.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "signals-writing/SKILL.md router + core/ (spec §6). Global voice rules become core/voice.md (spec §4.3)."
+        }
+      ],
+      "vendorAssumptions": [
+        {
+          "vendor": "ai-detectors",
+          "symbols": [],
+          "replacement": "Excluded: Signals never calls AI-detection vendors; audits are rule-based findings with provenance (spec §5.5)."
+        },
+        {
+          "vendor": "lib-wrapper",
+          "symbols": [
+            "lib.illustrate",
+            "lib.illustrate_set",
+            "lib.publish"
+          ],
+          "replacement": "Signals agent tools via the realtimex-signals skill (get_writing_context, get_content, create_content_draft, update_content_draft, upsert_variant, materialize_variant, platform-target tools). The approval card is a skill contract, not a library call (spec §6.4)."
+        },
+        {
+          "vendor": "pixfaro",
+          "symbols": [],
+          "replacement": "Not replaced in the MVP: media is user-supplied through Signals media assets (POST /api/media, media.plan=user_supplied). Image generation is out of scope (spec §9.4)."
+        },
+        {
+          "vendor": "publora",
+          "symbols": [],
+          "replacement": "Signals publish lane: approved content item -> POST /api/content/send-to-agent -> publish_jobs -> signals-publish skill (X direct, Facebook direct, LinkedIn beta). No scheduling API; other networks are draft/export-only (spec §5.8)."
+        }
+      ],
+      "formulaMap": [
+        {
+          "corpus": "F1 Platform Risk Anaphora",
+          "adoptedAs": "linkedin/post/anaphora@1"
+        },
+        {
+          "corpus": "F2 R.I.P. Obituary",
+          "adoptedAs": "linkedin/post/rip-obituary@1"
+        },
+        {
+          "corpus": "F3 Year-over-Year Pivot",
+          "adoptedAs": "linkedin/post/year-over-year-pivot@1"
+        },
+        {
+          "corpus": "F4 Time-Anchor Confession",
+          "adoptedAs": "linkedin/post/time-anchor-confession@1"
+        },
+        {
+          "corpus": "F5 Self-Proving Meta",
+          "adoptedAs": "linkedin/post/self-proving-meta@1"
+        },
+        {
+          "corpus": "F6 Comment-Gate Lead Magnet",
+          "adoptedAs": null
+        },
+        {
+          "corpus": "F7 Odd-Precision Money Ledger",
+          "adoptedAs": "linkedin/post/precise-ledger@1"
+        },
+        {
+          "corpus": "F8 Paid-vs-Free Reversal",
+          "adoptedAs": "linkedin/post/paid-vs-free-reversal@1"
+        },
+        {
+          "corpus": "F9 Curiosity-Gap Teaser",
+          "adoptedAs": "linkedin/post/curiosity-gap@1"
+        },
+        {
+          "corpus": "F10 Contrarian + Historical Receipts",
+          "adoptedAs": "linkedin/post/contrarian-with-receipts@1"
+        },
+        {
+          "corpus": "F11 Emotional Cold-Open",
+          "adoptedAs": "linkedin/post/emotional-cold-open@1"
+        },
+        {
+          "corpus": "F12 Permission Slip",
+          "adoptedAs": "linkedin/post/permission-slip@1"
+        },
+        {
+          "corpus": "F13 Bait-and-Switch Reversal",
+          "adoptedAs": "linkedin/post/expectation-reversal@1"
+        },
+        {
+          "corpus": "F14 Named Gratitude/Tribute",
+          "adoptedAs": "linkedin/post/named-tribute@1"
+        },
+        {
+          "corpus": "F15 Explain-to-Kids",
+          "adoptedAs": "linkedin/post/explain-simply@1"
+        },
+        {
+          "corpus": "F16 Status-Strip Humility",
+          "adoptedAs": "linkedin/post/status-strip@1"
+        },
+        {
+          "corpus": "F17 Controlled A/B Anecdote",
+          "adoptedAs": "linkedin/post/controlled-comparison@1"
+        },
+        {
+          "corpus": "F18 False-Binary Dissolve",
+          "adoptedAs": "linkedin/post/false-binary-dissolve@1"
+        },
+        {
+          "corpus": "F19 Anecdote-Meets-Evidence Bridge",
+          "adoptedAs": "linkedin/post/anecdote-evidence-bridge@1"
+        },
+        {
+          "corpus": "F20 Diverging-Curves Close",
+          "adoptedAs": "linkedin/post/diverging-curves-close@1"
+        }
+      ],
+      "exclusions": [
+        "F6 comment-gate lead magnet (engagement gating)",
+        "per-formula 'reference engagement' numbers and multipliers",
+        "Tue/Wed/Thu 07:30-09:00 posting window",
+        "founder angles A1-A10 (angles come from the spine)",
+        "target detector scores (OriginalityAI/GPTZero)"
+      ],
+      "notes": "Source for linkedin/post formulas and hard rules (3,000 chars, ~210-char fold, 0-2 hashtags, no external link in body). Both local reference files are redirect tombstones; the 20 formula skeletons were never on disk, so slugs below are re-authored from the names only. Count drifts across the family (16 vs 20)."
+    },
+    {
+      "id": "linkedin-profile-optimizer",
+      "family": "linkedin-skills",
+      "path": "linkedin-skills/linkedin-profile-optimizer",
+      "platform": "linkedin",
+      "surfaces": [
+        "linkedin/profile"
+      ],
+      "capability": "profile",
+      "disposition": "reference-only",
+      "ruleClasses": {
+        "hard": true,
+        "claim": false,
+        "voice": false,
+        "heuristic": true,
+        "aesthetic": true
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": true,
+      "files": [
+        "references/about-section-templates.md",
+        "references/banner-photo-specs.md",
+        "references/experience-skills-rules.md",
+        "references/featured-section-playbook.md",
+        "references/profile-headline-formulas.md",
+        "SKILL.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "linkedin-skills/SKILL.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "signals-writing/SKILL.md router + core/ (spec §6). Global voice rules become core/voice.md (spec §4.3)."
+        }
+      ],
+      "vendorAssumptions": [],
+      "exclusions": [
+        "fabricated example metrics in templates (highest fabrication risk in the corpus)",
+        "co.actor benchmark figures presented as research",
+        "personal handle in examples"
+      ],
+      "notes": "Profile copy is out of scope; banner/photo specs are real platform constraints if a profile surface is ever added."
+    },
+    {
+      "id": "linkedin-reply-handler",
+      "family": "linkedin-skills",
+      "path": "linkedin-skills/linkedin-reply-handler",
+      "platform": "linkedin",
+      "surfaces": [
+        "linkedin/comment"
+      ],
+      "capability": "engage",
+      "disposition": "defer-353",
+      "ruleClasses": {
+        "hard": true,
+        "claim": false,
+        "voice": true,
+        "heuristic": true,
+        "aesthetic": true
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": false,
+      "files": [
+        "references/examples.md",
+        "references/reply-templates.md",
+        "references/threading-rules.md",
+        "SKILL.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "linkedin-skills/references/voice-profile.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Signals-owned voice profile document (spec §5.1) read through get_writing_context; never a skill-local file."
+        },
+        {
+          "ref": "linkedin-skills/SKILL.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "signals-writing/SKILL.md router + core/ (spec §6). Global voice rules become core/voice.md (spec §4.3)."
+        }
+      ],
+      "vendorAssumptions": [
+        {
+          "vendor": "apify",
+          "symbols": [],
+          "replacement": "Signals audience intelligence (contacts, niches, personas, platform imports) plus RealTimeX Browser/agent-browser research written back through agent tools. No third-party scraping vendor in the product contract."
+        },
+        {
+          "vendor": "lib-wrapper",
+          "symbols": [
+            "lib.ApifyClient",
+            "lib.publish",
+            "lib.url_parser"
+          ],
+          "replacement": "Signals agent tools via the realtimex-signals skill (get_writing_context, get_content, create_content_draft, update_content_draft, upsert_variant, materialize_variant, platform-target tools). The approval card is a skill contract, not a library call (spec §6.4)."
+        },
+        {
+          "vendor": "publora",
+          "symbols": [],
+          "replacement": "Signals publish lane: approved content item -> POST /api/content/send-to-agent -> publish_jobs -> signals-publish skill (X direct, Facebook direct, LinkedIn beta). No scheduling API; other networks are draft/export-only (spec §5.8)."
+        }
+      ],
+      "exclusions": [
+        "timed pause before replying",
+        "real activity IDs in examples"
+      ],
+      "notes": "Two-level thread nesting is a genuine platform fact for a future LinkedIn engage adapter."
+    },
+    {
+      "id": "linkedin-repurposer",
+      "family": "linkedin-skills",
+      "path": "linkedin-skills/linkedin-repurposer",
+      "platform": "linkedin",
+      "surfaces": [
+        "linkedin/post"
+      ],
+      "capability": "adapt",
+      "disposition": "adopt-overlay",
+      "ruleClasses": {
+        "hard": true,
+        "claim": true,
+        "voice": true,
+        "heuristic": true,
+        "aesthetic": true
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": true,
+      "files": [
+        "SKILL.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "linkedin-skills/references/algorithm-heuristics.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Versioned heuristic rule records with source/observedAt/confidence/reviewBy in the platform overlay (spec §5.10)."
+        },
+        {
+          "ref": "linkedin-skills/references/hook-formulas.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Namespaced formula records in overlays/<platform>.md (spec §4.2, §5.10); corpus codes are mapped in formulaMap."
+        },
+        {
+          "ref": "linkedin-skills/references/voice-profile.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Signals-owned voice profile document (spec §5.1) read through get_writing_context; never a skill-local file."
+        },
+        {
+          "ref": "linkedin-skills/SKILL.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "signals-writing/SKILL.md router + core/ (spec §6). Global voice rules become core/voice.md (spec §4.3)."
+        }
+      ],
+      "vendorAssumptions": [
+        {
+          "vendor": "lib-wrapper",
+          "symbols": [
+            "lib.publish"
+          ],
+          "replacement": "Signals agent tools via the realtimex-signals skill (get_writing_context, get_content, create_content_draft, update_content_draft, upsert_variant, materialize_variant, platform-target tools). The approval card is a skill contract, not a library call (spec §6.4)."
+        },
+        {
+          "vendor": "publora",
+          "symbols": [],
+          "replacement": "Signals publish lane: approved content item -> POST /api/content/send-to-agent -> publish_jobs -> signals-publish skill (X direct, Facebook direct, LinkedIn beta). No scheduling API; other networks are draft/export-only (spec §5.8)."
+        }
+      ],
+      "exclusions": [
+        "posting window",
+        "'pure-insight posts do not land in 2026'"
+      ],
+      "notes": "Strongest claim rule among LinkedIn writers ('keep the source's claim and facts intact'); native-fit rules feed the overlay adapt section. Whole Resources section is missing."
+    },
+    {
+      "id": "linkedin-thread-monitor",
+      "family": "linkedin-skills",
+      "path": "linkedin-skills/linkedin-thread-monitor",
+      "platform": "linkedin",
+      "surfaces": [
+        "linkedin/comment"
+      ],
+      "capability": "analytics",
+      "disposition": "exclude",
+      "ruleClasses": {
+        "hard": false,
+        "claim": false,
+        "voice": false,
+        "heuristic": true,
+        "aesthetic": false
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": true,
+      "files": [
+        "references/output-spec.md",
+        "references/thread-timing.md",
+        "SKILL.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "linkedin-skills/SKILL.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "signals-writing/SKILL.md router + core/ (spec §6). Global voice rules become core/voice.md (spec §4.3)."
+        }
+      ],
+      "vendorAssumptions": [
+        {
+          "vendor": "apify",
+          "symbols": [],
+          "replacement": "Signals audience intelligence (contacts, niches, personas, platform imports) plus RealTimeX Browser/agent-browser research written back through agent tools. No third-party scraping vendor in the product contract."
+        },
+        {
+          "vendor": "lib-wrapper",
+          "symbols": [
+            "lib.ApifyClient"
+          ],
+          "replacement": "Signals agent tools via the realtimex-signals skill (get_writing_context, get_content, create_content_draft, update_content_draft, upsert_variant, materialize_variant, platform-target tools). The approval card is a skill contract, not a library call (spec §6.4)."
+        }
+      ],
+      "exclusions": [
+        "engagement-pod detection-evasion criteria and 'recovery' guidance",
+        "half-life percentages and 'visibility lift' multipliers (single anecdote)",
+        "verbatim 'Inbound-quality signals' block shared with engager-analytics"
+      ],
+      "notes": "Excluded: its distinctive content is platform-manipulation guidance. Signals tracks engagement through content_posts/engagements; nothing here is needed."
+    },
+    {
+      "id": "threads-audience-insights",
+      "family": "threads-skills",
+      "path": "threads-skills/threads-audience-insights",
+      "platform": "threads",
+      "surfaces": [],
+      "capability": "research",
+      "disposition": "reference-only",
+      "ruleClasses": {
+        "hard": false,
+        "claim": true,
+        "voice": false,
+        "heuristic": true,
+        "aesthetic": false
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": false,
+      "files": [
+        "SKILL.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "threads-skills/SKILL.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "signals-writing/SKILL.md router + core/ (spec §6). Global voice rules become core/voice.md (spec §4.3)."
+        }
+      ],
+      "vendorAssumptions": [
+        {
+          "vendor": "apify",
+          "symbols": [],
+          "replacement": "Signals audience intelligence (contacts, niches, personas, platform imports) plus RealTimeX Browser/agent-browser research written back through agent tools. No third-party scraping vendor in the product contract."
+        },
+        {
+          "vendor": "lib-wrapper",
+          "symbols": [
+            "lib.ApifyClient"
+          ],
+          "replacement": "Signals agent tools via the realtimex-signals skill (get_writing_context, get_content, create_content_draft, update_content_draft, upsert_variant, materialize_variant, platform-target tools). The approval card is a skill contract, not a library call (spec §6.4)."
+        }
+      ],
+      "exclusions": [
+        "Apify actor floor/cost"
+      ],
+      "notes": "Honest about the absence of engager rosters; Apify replaced by Signals audience data."
+    },
+    {
+      "id": "threads-content-planner",
+      "family": "threads-skills",
+      "path": "threads-skills/threads-content-planner",
+      "platform": "threads",
+      "surfaces": [
+        "threads/post",
+        "threads/thread",
+        "threads/weekly_plan"
+      ],
+      "capability": "plan",
+      "disposition": "reference-only",
+      "ruleClasses": {
+        "hard": false,
+        "claim": false,
+        "voice": false,
+        "heuristic": true,
+        "aesthetic": false
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": false,
+      "files": [
+        "references/example-week.md",
+        "references/pillars-framework.md",
+        "SKILL.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "threads-skills/threads-content-planner/references/algorithm-heuristics.md",
+          "referencedFrom": [
+            "references/pillars-framework.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Versioned heuristic rule records with source/observedAt/confidence/reviewBy in the platform overlay (spec §5.10)."
+        },
+        {
+          "ref": "threads-skills/threads-content-planner/references/hook-formulas.md",
+          "referencedFrom": [
+            "references/pillars-framework.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Namespaced formula records in overlays/<platform>.md (spec §4.2, §5.10); corpus codes are mapped in formulaMap."
+        }
+      ],
+      "vendorAssumptions": [],
+      "exclusions": [
+        "posting-time windows and engagement-signal weightings (unsourced)",
+        "'replies are the heaviest ranking signal' as fact"
+      ],
+      "notes": "Structural clone of x-content-planner."
+    },
+    {
+      "id": "threads-hook-extractor",
+      "family": "threads-skills",
+      "path": "threads-skills/threads-hook-extractor",
+      "platform": "threads",
+      "surfaces": [
+        "threads/post",
+        "threads/thread"
+      ],
+      "capability": "research",
+      "disposition": "reference-only",
+      "ruleClasses": {
+        "hard": false,
+        "claim": true,
+        "voice": false,
+        "heuristic": true,
+        "aesthetic": false
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": true,
+      "files": [
+        "references/classification-rules.md",
+        "references/examples.md",
+        "SKILL.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "threads-skills/references/hook-formulas.md",
+          "referencedFrom": [
+            "SKILL.md",
+            "references/classification-rules.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Namespaced formula records in overlays/<platform>.md (spec §4.2, §5.10); corpus codes are mapped in formulaMap."
+        }
+      ],
+      "vendorAssumptions": [
+        {
+          "vendor": "apify",
+          "symbols": [],
+          "replacement": "Signals audience intelligence (contacts, niches, personas, platform imports) plus RealTimeX Browser/agent-browser research written back through agent tools. No third-party scraping vendor in the product contract."
+        },
+        {
+          "vendor": "lib-wrapper",
+          "symbols": [
+            "lib.url_parser"
+          ],
+          "replacement": "Signals agent tools via the realtimex-signals skill (get_writing_context, get_content, create_content_draft, update_content_draft, upsert_variant, materialize_variant, platform-target tools). The approval card is a skill contract, not a library call (spec §6.4)."
+        }
+      ],
+      "exclusions": [
+        "formula-count drift (10 vs 13)"
+      ],
+      "notes": "Same as x-hook-extractor; T11-T13 exemplars are the only concrete skeleton text in the corpus."
+    },
+    {
+      "id": "threads-humanizer",
+      "family": "threads-skills",
+      "path": "threads-skills/threads-humanizer",
+      "platform": "threads",
+      "surfaces": [
+        "threads/post",
+        "threads/thread"
+      ],
+      "capability": "humanize-audit",
+      "disposition": "defer-353",
+      "ruleClasses": {
+        "hard": true,
+        "claim": true,
+        "voice": true,
+        "heuristic": true,
+        "aesthetic": true
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": true,
+      "files": [
+        "references/audit-checklist.md",
+        "references/examples.md",
+        "references/scrub-rules.md",
+        "SKILL.md",
+        "sub-skills/illustration.md",
+        "sub-skills/post-audit.md",
+        "sub-skills/voice-profile.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "threads-skills/references/hook-formulas.md",
+          "referencedFrom": [
+            "sub-skills/post-audit.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Namespaced formula records in overlays/<platform>.md (spec §4.2, §5.10); corpus codes are mapped in formulaMap."
+        },
+        {
+          "ref": "threads-skills/references/voice-profile.md",
+          "referencedFrom": [
+            "SKILL.md",
+            "sub-skills/illustration.md",
+            "sub-skills/voice-profile.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Signals-owned voice profile document (spec §5.1) read through get_writing_context; never a skill-local file."
+        },
+        {
+          "ref": "threads-skills/SKILL.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "signals-writing/SKILL.md router + core/ (spec §6). Global voice rules become core/voice.md (spec §4.3)."
+        },
+        {
+          "ref": "threads-skills/threads-humanizer/references/algorithm-heuristics.md",
+          "referencedFrom": [
+            "references/audit-checklist.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Versioned heuristic rule records with source/observedAt/confidence/reviewBy in the platform overlay (spec §5.10)."
+        }
+      ],
+      "vendorAssumptions": [
+        {
+          "vendor": "apify",
+          "symbols": [],
+          "replacement": "Signals audience intelligence (contacts, niches, personas, platform imports) plus RealTimeX Browser/agent-browser research written back through agent tools. No third-party scraping vendor in the product contract."
+        },
+        {
+          "vendor": "lib-wrapper",
+          "symbols": [
+            "lib.available_models",
+            "lib.illustrate",
+            "lib.image_backend"
+          ],
+          "replacement": "Signals agent tools via the realtimex-signals skill (get_writing_context, get_content, create_content_draft, update_content_draft, upsert_variant, materialize_variant, platform-target tools). The approval card is a skill contract, not a library call (spec §6.4)."
+        },
+        {
+          "vendor": "pixfaro",
+          "symbols": [],
+          "replacement": "Not replaced in the MVP: media is user-supplied through Signals media assets (POST /api/media, media.plan=user_supplied). Image generation is out of scope (spec §9.4)."
+        },
+        {
+          "vendor": "publora",
+          "symbols": [],
+          "replacement": "Signals publish lane: approved content item -> POST /api/content/send-to-agent -> publish_jobs -> signals-publish skill (X direct, Facebook direct, LinkedIn beta). No scheduling API; other networks are draft/export-only (spec §5.8)."
+        }
+      ],
+      "exclusions": [
+        "illustration sub-skill (Pixfaro)",
+        "Apify read layer"
+      ],
+      "notes": "Verbatim copy of x-humanizer with a 'tone warming' section; audit thresholds feed the #353 threads overlay."
+    },
+    {
+      "id": "threads-post-writer",
+      "family": "threads-skills",
+      "path": "threads-skills/threads-post-writer",
+      "platform": "threads",
+      "surfaces": [
+        "threads/post",
+        "threads/thread"
+      ],
+      "capability": "draft",
+      "disposition": "defer-353",
+      "ruleClasses": {
+        "hard": true,
+        "claim": false,
+        "voice": true,
+        "heuristic": true,
+        "aesthetic": true
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": true,
+      "files": [
+        "references/single-post-checklist.md",
+        "references/thread-structure.md",
+        "SKILL.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "threads-skills/references/algorithm-heuristics.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Versioned heuristic rule records with source/observedAt/confidence/reviewBy in the platform overlay (spec §5.10)."
+        },
+        {
+          "ref": "threads-skills/references/hook-formulas.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Namespaced formula records in overlays/<platform>.md (spec §4.2, §5.10); corpus codes are mapped in formulaMap."
+        },
+        {
+          "ref": "threads-skills/references/voice-profile.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Signals-owned voice profile document (spec §5.1) read through get_writing_context; never a skill-local file."
+        },
+        {
+          "ref": "threads-skills/SKILL.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "signals-writing/SKILL.md router + core/ (spec §6). Global voice rules become core/voice.md (spec §4.3)."
+        }
+      ],
+      "vendorAssumptions": [
+        {
+          "vendor": "lib-wrapper",
+          "symbols": [
+            "lib.illustrate",
+            "lib.publish"
+          ],
+          "replacement": "Signals agent tools via the realtimex-signals skill (get_writing_context, get_content, create_content_draft, update_content_draft, upsert_variant, materialize_variant, platform-target tools). The approval card is a skill contract, not a library call (spec §6.4)."
+        },
+        {
+          "vendor": "pixfaro",
+          "symbols": [],
+          "replacement": "Not replaced in the MVP: media is user-supplied through Signals media assets (POST /api/media, media.plan=user_supplied). Image generation is out of scope (spec §9.4)."
+        },
+        {
+          "vendor": "publora",
+          "symbols": [],
+          "replacement": "Signals publish lane: approved content item -> POST /api/content/send-to-agent -> publish_jobs -> signals-publish skill (X direct, Facebook direct, LinkedIn beta). No scheduling API; other networks are draft/export-only (spec §5.8)."
+        }
+      ],
+      "formulaMap": [
+        {
+          "corpus": "T1 Warm Contrarian",
+          "adoptedAs": null
+        },
+        {
+          "corpus": "T2 Data-Point",
+          "adoptedAs": null
+        },
+        {
+          "corpus": "T3 Build-in-Public Confession",
+          "adoptedAs": null
+        },
+        {
+          "corpus": "T4 Quote-Post Add-Value",
+          "adoptedAs": null
+        },
+        {
+          "corpus": "T5 Mini-List",
+          "adoptedAs": null
+        },
+        {
+          "corpus": "T6 Relatable Cold-Open",
+          "adoptedAs": null
+        },
+        {
+          "corpus": "T7 Listicle-Thread Promise",
+          "adoptedAs": null
+        },
+        {
+          "corpus": "T8 Story Thread",
+          "adoptedAs": null
+        },
+        {
+          "corpus": "T9 Curiosity-Gap",
+          "adoptedAs": null
+        },
+        {
+          "corpus": "T10 How-I Teardown",
+          "adoptedAs": null
+        },
+        {
+          "corpus": "T11 First-Person Status Flex",
+          "adoptedAs": null
+        },
+        {
+          "corpus": "T12 Permission Reframe",
+          "adoptedAs": null
+        },
+        {
+          "corpus": "T13 Copy-Swap Micro-Lesson",
+          "adoptedAs": null
+        }
+      ],
+      "exclusions": [
+        "T4 quote-post dunk",
+        "'318-post corpus pull (July 2026)' provenance",
+        "Meta app reconnection operational note"
+      ],
+      "notes": "Hard rules worth keeping for the #353 overlay: 500 chars/unit, one-hashtag platform cap, links not in unit 1. T11-T13 are self-described 'hypotheses to test'."
+    },
+    {
+      "id": "threads-profile-optimizer",
+      "family": "threads-skills",
+      "path": "threads-skills/threads-profile-optimizer",
+      "platform": "threads",
+      "surfaces": [
+        "threads/profile"
+      ],
+      "capability": "profile",
+      "disposition": "reference-only",
+      "ruleClasses": {
+        "hard": true,
+        "claim": false,
+        "voice": false,
+        "heuristic": true,
+        "aesthetic": true
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": true,
+      "files": [
+        "SKILL.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "threads-skills/SKILL.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "signals-writing/SKILL.md router + core/ (spec §6). Global voice rules become core/voice.md (spec §4.3)."
+        }
+      ],
+      "vendorAssumptions": [],
+      "exclusions": [],
+      "notes": "Profile copy is out of scope."
+    },
+    {
+      "id": "threads-reply-drafter",
+      "family": "threads-skills",
+      "path": "threads-skills/threads-reply-drafter",
+      "platform": "threads",
+      "surfaces": [
+        "threads/reply",
+        "threads/quote"
+      ],
+      "capability": "engage",
+      "disposition": "defer-353",
+      "ruleClasses": {
+        "hard": true,
+        "claim": true,
+        "voice": true,
+        "heuristic": true,
+        "aesthetic": true
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": false,
+      "files": [
+        "references/reply-templates.md",
+        "SKILL.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "threads-skills/references/voice-profile.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Signals-owned voice profile document (spec §5.1) read through get_writing_context; never a skill-local file."
+        },
+        {
+          "ref": "threads-skills/SKILL.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "signals-writing/SKILL.md router + core/ (spec §6). Global voice rules become core/voice.md (spec §4.3)."
+        }
+      ],
+      "vendorAssumptions": [
+        {
+          "vendor": "lib-wrapper",
+          "symbols": [
+            "lib.publish",
+            "lib.url_parser"
+          ],
+          "replacement": "Signals agent tools via the realtimex-signals skill (get_writing_context, get_content, create_content_draft, update_content_draft, upsert_variant, materialize_variant, platform-target tools). The approval card is a skill contract, not a library call (spec §6.4)."
+        },
+        {
+          "vendor": "publora",
+          "symbols": [],
+          "replacement": "Signals publish lane: approved content item -> POST /api/content/send-to-agent -> publish_jobs -> signals-publish skill (X direct, Facebook direct, LinkedIn beta). No scheduling API; other networks are draft/export-only (spec §5.8)."
+        }
+      ],
+      "exclusions": [
+        "quote-dunk template"
+      ],
+      "notes": "Character-identical templates to x-reply-drafter apart from casing."
+    },
+    {
+      "id": "threads-repurposer",
+      "family": "threads-skills",
+      "path": "threads-skills/threads-repurposer",
+      "platform": "threads",
+      "surfaces": [
+        "threads/post",
+        "threads/thread"
+      ],
+      "capability": "adapt",
+      "disposition": "defer-353",
+      "ruleClasses": {
+        "hard": true,
+        "claim": true,
+        "voice": true,
+        "heuristic": true,
+        "aesthetic": true
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": true,
+      "files": [
+        "SKILL.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "threads-skills/references/algorithm-heuristics.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Versioned heuristic rule records with source/observedAt/confidence/reviewBy in the platform overlay (spec §5.10)."
+        },
+        {
+          "ref": "threads-skills/references/hook-formulas.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Namespaced formula records in overlays/<platform>.md (spec §4.2, §5.10); corpus codes are mapped in formulaMap."
+        },
+        {
+          "ref": "threads-skills/references/voice-profile.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Signals-owned voice profile document (spec §5.1) read through get_writing_context; never a skill-local file."
+        },
+        {
+          "ref": "threads-skills/SKILL.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "signals-writing/SKILL.md router + core/ (spec §6). Global voice rules become core/voice.md (spec §4.3)."
+        }
+      ],
+      "vendorAssumptions": [
+        {
+          "vendor": "lib-wrapper",
+          "symbols": [
+            "lib.publish"
+          ],
+          "replacement": "Signals agent tools via the realtimex-signals skill (get_writing_context, get_content, create_content_draft, update_content_draft, upsert_variant, materialize_variant, platform-target tools). The approval card is a skill contract, not a library call (spec §6.4)."
+        },
+        {
+          "vendor": "publora",
+          "symbols": [],
+          "replacement": "Signals publish lane: approved content item -> POST /api/content/send-to-agent -> publish_jobs -> signals-publish skill (X direct, Facebook direct, LinkedIn beta). No scheduling API; other networks are draft/export-only (spec §5.8)."
+        }
+      ],
+      "exclusions": [],
+      "notes": "Near-duplicate of x-repurposer plus 'warm the tone'."
+    },
+    {
+      "id": "tt-audience-insights",
+      "family": "tiktok-skills",
+      "path": "tiktok-skills/tt-audience-insights",
+      "platform": "tiktok",
+      "surfaces": [],
+      "capability": "research",
+      "disposition": "reference-only",
+      "ruleClasses": {
+        "hard": false,
+        "claim": true,
+        "voice": false,
+        "heuristic": false,
+        "aesthetic": false
+      },
+      "heuristicConfidence": "none",
+      "datedClaims": false,
+      "files": [
+        "SKILL.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "tiktok-skills/SKILL.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "signals-writing/SKILL.md router + core/ (spec §6). Global voice rules become core/voice.md (spec §4.3)."
+        }
+      ],
+      "vendorAssumptions": [
+        {
+          "vendor": "apify",
+          "symbols": [],
+          "replacement": "Signals audience intelligence (contacts, niches, personas, platform imports) plus RealTimeX Browser/agent-browser research written back through agent tools. No third-party scraping vendor in the product contract."
+        },
+        {
+          "vendor": "lib-wrapper",
+          "symbols": [
+            "lib.ApifyClient"
+          ],
+          "replacement": "Signals agent tools via the realtimex-signals skill (get_writing_context, get_content, create_content_draft, update_content_draft, upsert_variant, materialize_variant, platform-target tools). The approval card is a skill contract, not a library call (spec §6.4)."
+        }
+      ],
+      "exclusions": [
+        "Apify pricing"
+      ],
+      "notes": "Apify-based; commenters-not-likers honesty and never-invent rules inform #352."
+    },
+    {
+      "id": "tt-caption-writer",
+      "family": "tiktok-skills",
+      "path": "tiktok-skills/tt-caption-writer",
+      "platform": "tiktok",
+      "surfaces": [
+        "tiktok/caption"
+      ],
+      "capability": "draft",
+      "disposition": "defer-353",
+      "ruleClasses": {
+        "hard": true,
+        "claim": false,
+        "voice": true,
+        "heuristic": true,
+        "aesthetic": false
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": false,
+      "files": [
+        "references/settings-matrix.md",
+        "SKILL.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "tiktok-skills/references/algorithm-heuristics.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Versioned heuristic rule records with source/observedAt/confidence/reviewBy in the platform overlay (spec §5.10)."
+        },
+        {
+          "ref": "tiktok-skills/references/voice-profile.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Signals-owned voice profile document (spec §5.1) read through get_writing_context; never a skill-local file."
+        },
+        {
+          "ref": "tiktok-skills/references/voice-rules.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Core voice precedence rules (spec §4.3) in core/voice.md."
+        },
+        {
+          "ref": "tiktok-skills/SKILL.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "signals-writing/SKILL.md router + core/ (spec §6). Global voice rules become core/voice.md (spec §4.3)."
+        },
+        {
+          "ref": "tiktok-skills/tt-caption-writer/lib/publora_client.py",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Signals agent tools / signals-pp-cli (spec §7.2); no Python wrapper ships."
+        }
+      ],
+      "vendorAssumptions": [
+        {
+          "vendor": "lib-wrapper",
+          "symbols": [
+            "lib.illustrate",
+            "lib.publish",
+            "lib.tiktok_settings"
+          ],
+          "replacement": "Signals agent tools via the realtimex-signals skill (get_writing_context, get_content, create_content_draft, update_content_draft, upsert_variant, materialize_variant, platform-target tools). The approval card is a skill contract, not a library call (spec §6.4)."
+        },
+        {
+          "vendor": "pixfaro",
+          "symbols": [],
+          "replacement": "Not replaced in the MVP: media is user-supplied through Signals media assets (POST /api/media, media.plan=user_supplied). Image generation is out of scope (spec §9.4)."
+        },
+        {
+          "vendor": "publora",
+          "symbols": [],
+          "replacement": "Signals publish lane: approved content item -> POST /api/content/send-to-agent -> publish_jobs -> signals-publish skill (X direct, Facebook direct, LinkedIn beta). No scheduling API; other networks are draft/export-only (spec §5.8)."
+        }
+      ],
+      "exclusions": [
+        "Publora platformSettings.tiktok flag matrix and rate limits (vendor behaviour)"
+      ],
+      "notes": "tiktok/caption is a genuine text artifact (2,200 chars incl. hashtags, 3-5 hashtags); publish settings belong to a future adapter, not the writing contract."
+    },
+    {
+      "id": "tt-content-planner",
+      "family": "tiktok-skills",
+      "path": "tiktok-skills/tt-content-planner",
+      "platform": "tiktok",
+      "surfaces": [
+        "tiktok/script",
+        "tiktok/caption",
+        "tiktok/weekly_plan"
+      ],
+      "capability": "plan",
+      "disposition": "reference-only",
+      "ruleClasses": {
+        "hard": false,
+        "claim": false,
+        "voice": false,
+        "heuristic": true,
+        "aesthetic": false
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": false,
+      "files": [
+        "references/example-week.md",
+        "references/pillars-framework.md",
+        "SKILL.md"
+      ],
+      "missingReferences": [],
+      "vendorAssumptions": [],
+      "exclusions": [
+        "posting-time windows and engagement-signal weightings (unsourced)"
+      ],
+      "notes": "Planning is not an MVP mode."
+    },
+    {
+      "id": "tt-hook-scripter",
+      "family": "tiktok-skills",
+      "path": "tiktok-skills/tt-hook-scripter",
+      "platform": "tiktok",
+      "surfaces": [
+        "tiktok/script"
+      ],
+      "capability": "draft",
+      "disposition": "defer-353",
+      "ruleClasses": {
+        "hard": false,
+        "claim": true,
+        "voice": true,
+        "heuristic": true,
+        "aesthetic": false
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": true,
+      "files": [
+        "references/hook-anatomy.md",
+        "SKILL.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "tiktok-skills/references/algorithm-heuristics.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Versioned heuristic rule records with source/observedAt/confidence/reviewBy in the platform overlay (spec §5.10)."
+        },
+        {
+          "ref": "tiktok-skills/references/hook-formulas.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Namespaced formula records in overlays/<platform>.md (spec §4.2, §5.10); corpus codes are mapped in formulaMap."
+        },
+        {
+          "ref": "tiktok-skills/references/voice-profile.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Signals-owned voice profile document (spec §5.1) read through get_writing_context; never a skill-local file."
+        },
+        {
+          "ref": "tiktok-skills/SKILL.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "signals-writing/SKILL.md router + core/ (spec §6). Global voice rules become core/voice.md (spec §4.3)."
+        }
+      ],
+      "vendorAssumptions": [],
+      "formulaMap": [
+        {
+          "corpus": "T1 Cold-Open Result",
+          "adoptedAs": null
+        },
+        {
+          "corpus": "T2 Pattern Interrupt",
+          "adoptedAs": null
+        },
+        {
+          "corpus": "T3 Specific-Number Reveal",
+          "adoptedAs": null
+        },
+        {
+          "corpus": "T4 Open Loop Question",
+          "adoptedAs": null
+        },
+        {
+          "corpus": "T5 Relatable Call-Out",
+          "adoptedAs": null
+        },
+        {
+          "corpus": "T6 Bold Claim No Hedge",
+          "adoptedAs": null
+        },
+        {
+          "corpus": "T7 Listicle Promise",
+          "adoptedAs": null
+        },
+        {
+          "corpus": "T8 Story In Medias Res",
+          "adoptedAs": null
+        },
+        {
+          "corpus": "T9 Tutorial Cold Start",
+          "adoptedAs": null
+        },
+        {
+          "corpus": "T10 Trend-Ride With A Twist",
+          "adoptedAs": null
+        }
+      ],
+      "exclusions": [
+        "'~70% sound-on' figure",
+        "timing budget presented as ranking mechanics"
+      ],
+      "notes": "tiktok/script (spoken line + on-screen text) is exportable text; 'never promise a result the video does not show' is a claim rule."
+    },
+    {
+      "id": "tt-humanizer",
+      "family": "tiktok-skills",
+      "path": "tiktok-skills/tt-humanizer",
+      "platform": "tiktok",
+      "surfaces": [
+        "tiktok/script",
+        "tiktok/caption"
+      ],
+      "capability": "humanize-audit",
+      "disposition": "defer-353",
+      "ruleClasses": {
+        "hard": true,
+        "claim": true,
+        "voice": true,
+        "heuristic": true,
+        "aesthetic": true
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": true,
+      "files": [
+        "references/audit-checklist.md",
+        "references/examples.md",
+        "references/scrub-rules.md",
+        "SKILL.md",
+        "sub-skills/illustration.md",
+        "sub-skills/post-audit.md",
+        "sub-skills/voice-profile.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "tiktok-skills/references/voice-profile.md",
+          "referencedFrom": [
+            "SKILL.md",
+            "sub-skills/illustration.md",
+            "sub-skills/voice-profile.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Signals-owned voice profile document (spec §5.1) read through get_writing_context; never a skill-local file."
+        },
+        {
+          "ref": "tiktok-skills/SKILL.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "signals-writing/SKILL.md router + core/ (spec §6). Global voice rules become core/voice.md (spec §4.3)."
+        }
+      ],
+      "vendorAssumptions": [
+        {
+          "vendor": "apify",
+          "symbols": [],
+          "replacement": "Signals audience intelligence (contacts, niches, personas, platform imports) plus RealTimeX Browser/agent-browser research written back through agent tools. No third-party scraping vendor in the product contract."
+        },
+        {
+          "vendor": "lib-wrapper",
+          "symbols": [
+            "lib.available_models",
+            "lib.illustrate",
+            "lib.image_backend"
+          ],
+          "replacement": "Signals agent tools via the realtimex-signals skill (get_writing_context, get_content, create_content_draft, update_content_draft, upsert_variant, materialize_variant, platform-target tools). The approval card is a skill contract, not a library call (spec §6.4)."
+        },
+        {
+          "vendor": "pixfaro",
+          "symbols": [],
+          "replacement": "Not replaced in the MVP: media is user-supplied through Signals media assets (POST /api/media, media.plan=user_supplied). Image generation is out of scope (spec §9.4)."
+        },
+        {
+          "vendor": "publora",
+          "symbols": [],
+          "replacement": "Signals publish lane: approved content item -> POST /api/content/send-to-agent -> publish_jobs -> signals-publish skill (X direct, Facebook direct, LinkedIn beta). No scheduling API; other networks are draft/export-only (spec §5.8)."
+        }
+      ],
+      "exclusions": [
+        "illustration sub-skill (Pixfaro)",
+        "Apify read layer"
+      ],
+      "notes": "Adds a spoken-word scrub tier; otherwise the shared humanizer template."
+    },
+    {
+      "id": "tt-profile-optimizer",
+      "family": "tiktok-skills",
+      "path": "tiktok-skills/tt-profile-optimizer",
+      "platform": "tiktok",
+      "surfaces": [
+        "tiktok/profile"
+      ],
+      "capability": "profile",
+      "disposition": "reference-only",
+      "ruleClasses": {
+        "hard": true,
+        "claim": false,
+        "voice": false,
+        "heuristic": true,
+        "aesthetic": true
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": true,
+      "files": [
+        "SKILL.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "tiktok-skills/SKILL.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "signals-writing/SKILL.md router + core/ (spec §6). Global voice rules become core/voice.md (spec §4.3)."
+        }
+      ],
+      "vendorAssumptions": [],
+      "exclusions": [],
+      "notes": "Profile copy out of scope; bio 80 / name 30 / link at 1k followers are platform facts."
+    },
+    {
+      "id": "tt-repurposer",
+      "family": "tiktok-skills",
+      "path": "tiktok-skills/tt-repurposer",
+      "platform": "tiktok",
+      "surfaces": [
+        "tiktok/script",
+        "tiktok/caption"
+      ],
+      "capability": "adapt",
+      "disposition": "defer-353",
+      "ruleClasses": {
+        "hard": true,
+        "claim": true,
+        "voice": true,
+        "heuristic": true,
+        "aesthetic": true
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": true,
+      "files": [
+        "SKILL.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "tiktok-skills/references/algorithm-heuristics.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Versioned heuristic rule records with source/observedAt/confidence/reviewBy in the platform overlay (spec §5.10)."
+        },
+        {
+          "ref": "tiktok-skills/references/hook-formulas.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Namespaced formula records in overlays/<platform>.md (spec §4.2, §5.10); corpus codes are mapped in formulaMap."
+        },
+        {
+          "ref": "tiktok-skills/references/voice-profile.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Signals-owned voice profile document (spec §5.1) read through get_writing_context; never a skill-local file."
+        },
+        {
+          "ref": "tiktok-skills/references/voice-rules.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Core voice precedence rules (spec §4.3) in core/voice.md."
+        },
+        {
+          "ref": "tiktok-skills/SKILL.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "signals-writing/SKILL.md router + core/ (spec §6). Global voice rules become core/voice.md (spec §4.3)."
+        }
+      ],
+      "vendorAssumptions": [
+        {
+          "vendor": "lib-wrapper",
+          "symbols": [
+            "lib.publish"
+          ],
+          "replacement": "Signals agent tools via the realtimex-signals skill (get_writing_context, get_content, create_content_draft, update_content_draft, upsert_variant, materialize_variant, platform-target tools). The approval card is a skill contract, not a library call (spec §6.4)."
+        },
+        {
+          "vendor": "publora",
+          "symbols": [],
+          "replacement": "Signals publish lane: approved content item -> POST /api/content/send-to-agent -> publish_jobs -> signals-publish skill (X direct, Facebook direct, LinkedIn beta). No scheduling API; other networks are draft/export-only (spec §5.8)."
+        }
+      ],
+      "exclusions": [],
+      "notes": "Near-duplicate of yt-repurposer; degrades to copy-paste without an .mp4, which is the only path a writing system can honor."
+    },
+    {
+      "id": "tt-trend-mapper",
+      "family": "tiktok-skills",
+      "path": "tiktok-skills/tt-trend-mapper",
+      "platform": "tiktok",
+      "surfaces": [
+        "tiktok/script"
+      ],
+      "capability": "research",
+      "disposition": "defer-353",
+      "ruleClasses": {
+        "hard": false,
+        "claim": true,
+        "voice": false,
+        "heuristic": true,
+        "aesthetic": false
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": false,
+      "files": [
+        "references/trend-fit-rubric.md",
+        "SKILL.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "tiktok-skills/references/algorithm-heuristics.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Versioned heuristic rule records with source/observedAt/confidence/reviewBy in the platform overlay (spec §5.10)."
+        },
+        {
+          "ref": "tiktok-skills/references/hook-formulas.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Namespaced formula records in overlays/<platform>.md (spec §4.2, §5.10); corpus codes are mapped in formulaMap."
+        },
+        {
+          "ref": "tiktok-skills/SKILL.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "signals-writing/SKILL.md router + core/ (spec §6). Global voice rules become core/voice.md (spec §4.3)."
+        }
+      ],
+      "vendorAssumptions": [
+        {
+          "vendor": "lib-wrapper",
+          "symbols": [
+            "lib.url_parser"
+          ],
+          "replacement": "Signals agent tools via the realtimex-signals skill (get_writing_context, get_content, create_content_draft, update_content_draft, upsert_variant, materialize_variant, platform-target tools). The approval card is a skill contract, not a library call (spec §6.4)."
+        }
+      ],
+      "exclusions": [
+        "sound lifecycle day-counts"
+      ],
+      "notes": "Trend fit rubric is text-only and honest ('never fabricate a trend's popularity'); sound selection needs data Signals does not have."
+    },
+    {
+      "id": "x-audience-insights",
+      "family": "x-skills",
+      "path": "x-skills/x-audience-insights",
+      "platform": "x",
+      "surfaces": [],
+      "capability": "research",
+      "disposition": "reference-only",
+      "ruleClasses": {
+        "hard": false,
+        "claim": true,
+        "voice": false,
+        "heuristic": false,
+        "aesthetic": false
+      },
+      "heuristicConfidence": "none",
+      "datedClaims": false,
+      "files": [
+        "SKILL.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "x-skills/SKILL.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "signals-writing/SKILL.md router + core/ (spec §6). Global voice rules become core/voice.md (spec §4.3)."
+        }
+      ],
+      "vendorAssumptions": [
+        {
+          "vendor": "apify",
+          "symbols": [],
+          "replacement": "Signals audience intelligence (contacts, niches, personas, platform imports) plus RealTimeX Browser/agent-browser research written back through agent tools. No third-party scraping vendor in the product contract."
+        },
+        {
+          "vendor": "lib-wrapper",
+          "symbols": [
+            "lib.ApifyClient"
+          ],
+          "replacement": "Signals agent tools via the realtimex-signals skill (get_writing_context, get_content, create_content_draft, update_content_draft, upsert_variant, materialize_variant, platform-target tools). The approval card is a skill contract, not a library call (spec §6.4)."
+        }
+      ],
+      "exclusions": [
+        "Apify actor pricing"
+      ],
+      "notes": "Apify-based; Signals audience intelligence (niches, personas, imports) is the replacement. Its 'normalize by follower count' and 'never invent a number' rules inform #352 aggregation."
+    },
+    {
+      "id": "x-content-planner",
+      "family": "x-skills",
+      "path": "x-skills/x-content-planner",
+      "platform": "x",
+      "surfaces": [
+        "x/post",
+        "x/thread",
+        "x/weekly_plan"
+      ],
+      "capability": "plan",
+      "disposition": "reference-only",
+      "ruleClasses": {
+        "hard": false,
+        "claim": false,
+        "voice": false,
+        "heuristic": true,
+        "aesthetic": false
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": true,
+      "files": [
+        "references/example-week.md",
+        "references/pillars-framework.md",
+        "SKILL.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "x-skills/x-content-planner/references/algorithm-heuristics.md",
+          "referencedFrom": [
+            "references/pillars-framework.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Versioned heuristic rule records with source/observedAt/confidence/reviewBy in the platform overlay (spec §5.10)."
+        },
+        {
+          "ref": "x-skills/x-content-planner/references/hook-formulas.md",
+          "referencedFrom": [
+            "references/pillars-framework.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Namespaced formula records in overlays/<platform>.md (spec §4.2, §5.10); corpus codes are mapped in formulaMap."
+        }
+      ],
+      "vendorAssumptions": [],
+      "exclusions": [
+        "posting-time windows and engagement-signal weightings (unsourced)",
+        "'bookmarks are a heavy 2026 ranking signal'"
+      ],
+      "notes": "Planning is not an MVP mode; pillar-mix idea may inform a later Launch brief template. Does not read the voice profile despite producing angles."
+    },
+    {
+      "id": "x-hook-extractor",
+      "family": "x-skills",
+      "path": "x-skills/x-hook-extractor",
+      "platform": "x",
+      "surfaces": [
+        "x/post",
+        "x/thread"
+      ],
+      "capability": "research",
+      "disposition": "reference-only",
+      "ruleClasses": {
+        "hard": false,
+        "claim": true,
+        "voice": false,
+        "heuristic": true,
+        "aesthetic": false
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": true,
+      "files": [
+        "references/classification-rules.md",
+        "references/examples.md",
+        "SKILL.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "x-skills/references/hook-formulas.md",
+          "referencedFrom": [
+            "SKILL.md",
+            "references/classification-rules.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Namespaced formula records in overlays/<platform>.md (spec §4.2, §5.10); corpus codes are mapped in formulaMap."
+        }
+      ],
+      "vendorAssumptions": [
+        {
+          "vendor": "apify",
+          "symbols": [],
+          "replacement": "Signals audience intelligence (contacts, niches, personas, platform imports) plus RealTimeX Browser/agent-browser research written back through agent tools. No third-party scraping vendor in the product contract."
+        },
+        {
+          "vendor": "lib-wrapper",
+          "symbols": [
+            "lib.url_parser"
+          ],
+          "replacement": "Signals agent tools via the realtimex-signals skill (get_writing_context, get_content, create_content_draft, update_content_draft, upsert_variant, materialize_variant, platform-target tools). The approval card is a skill contract, not a library call (spec §6.4)."
+        }
+      ],
+      "exclusions": [
+        "formula-count drift (frontmatter 10 vs body 11)"
+      ],
+      "notes": "Classifier depends on the missing formula skeletons; 'audit the source, flag AI tells, do not copy' informs core/claims.md. Not an MVP mode."
+    },
+    {
+      "id": "x-humanizer",
+      "family": "x-skills",
+      "path": "x-skills/x-humanizer",
+      "platform": "x",
+      "surfaces": [
+        "x/post",
+        "x/thread"
+      ],
+      "capability": "humanize-audit",
+      "disposition": "adopt-overlay",
+      "ruleClasses": {
+        "hard": true,
+        "claim": true,
+        "voice": true,
+        "heuristic": true,
+        "aesthetic": true
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": true,
+      "files": [
+        "references/audit-checklist.md",
+        "references/examples.md",
+        "references/scrub-rules.md",
+        "SKILL.md",
+        "sub-skills/illustration.md",
+        "sub-skills/post-audit.md",
+        "sub-skills/voice-profile.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "x-skills/references/hook-formulas.md",
+          "referencedFrom": [
+            "sub-skills/post-audit.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Namespaced formula records in overlays/<platform>.md (spec §4.2, §5.10); corpus codes are mapped in formulaMap."
+        },
+        {
+          "ref": "x-skills/references/voice-profile.md",
+          "referencedFrom": [
+            "SKILL.md",
+            "sub-skills/illustration.md",
+            "sub-skills/voice-profile.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Signals-owned voice profile document (spec §5.1) read through get_writing_context; never a skill-local file."
+        },
+        {
+          "ref": "x-skills/SKILL.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "signals-writing/SKILL.md router + core/ (spec §6). Global voice rules become core/voice.md (spec §4.3)."
+        },
+        {
+          "ref": "x-skills/x-humanizer/references/algorithm-heuristics.md",
+          "referencedFrom": [
+            "references/audit-checklist.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Versioned heuristic rule records with source/observedAt/confidence/reviewBy in the platform overlay (spec §5.10)."
+        }
+      ],
+      "vendorAssumptions": [
+        {
+          "vendor": "apify",
+          "symbols": [],
+          "replacement": "Signals audience intelligence (contacts, niches, personas, platform imports) plus RealTimeX Browser/agent-browser research written back through agent tools. No third-party scraping vendor in the product contract."
+        },
+        {
+          "vendor": "lib-wrapper",
+          "symbols": [
+            "lib.available_models",
+            "lib.illustrate",
+            "lib.image_backend"
+          ],
+          "replacement": "Signals agent tools via the realtimex-signals skill (get_writing_context, get_content, create_content_draft, update_content_draft, upsert_variant, materialize_variant, platform-target tools). The approval card is a skill contract, not a library call (spec §6.4)."
+        },
+        {
+          "vendor": "pixfaro",
+          "symbols": [],
+          "replacement": "Not replaced in the MVP: media is user-supplied through Signals media assets (POST /api/media, media.plan=user_supplied). Image generation is out of scope (spec §9.4)."
+        },
+        {
+          "vendor": "publora",
+          "symbols": [],
+          "replacement": "Signals publish lane: approved content item -> POST /api/content/send-to-agent -> publish_jobs -> signals-publish skill (X direct, Facebook direct, LinkedIn beta). No scheduling API; other networks are draft/export-only (spec §5.8)."
+        }
+      ],
+      "exclusions": [
+        "sub-skills/illustration.md (Pixfaro image generation)",
+        "Apify read layer for voice samples",
+        "'2026 X ranking checklist' framing"
+      ],
+      "notes": "x/post and x/thread audit thresholds (280/25k, 0-1 hashtag, 0-1 emoji, length variance) feed overlay hard/heuristic records; the scrub passes and the strongest never-invent clauses are re-authored in core (linkedin-humanizer is the canonical copy). Voice-profile builder is replaced by the Signals voice store."
+    },
+    {
+      "id": "x-post-writer",
+      "family": "x-skills",
+      "path": "x-skills/x-post-writer",
+      "platform": "x",
+      "surfaces": [
+        "x/post",
+        "x/thread"
+      ],
+      "capability": "draft",
+      "disposition": "adopt-overlay",
+      "ruleClasses": {
+        "hard": true,
+        "claim": false,
+        "voice": true,
+        "heuristic": true,
+        "aesthetic": true
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": true,
+      "files": [
+        "references/single-tweet-checklist.md",
+        "SKILL.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "x-skills/references/algorithm-heuristics.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Versioned heuristic rule records with source/observedAt/confidence/reviewBy in the platform overlay (spec §5.10)."
+        },
+        {
+          "ref": "x-skills/references/hook-formulas.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Namespaced formula records in overlays/<platform>.md (spec §4.2, §5.10); corpus codes are mapped in formulaMap."
+        },
+        {
+          "ref": "x-skills/references/voice-profile.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Signals-owned voice profile document (spec §5.1) read through get_writing_context; never a skill-local file."
+        },
+        {
+          "ref": "x-skills/SKILL.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "signals-writing/SKILL.md router + core/ (spec §6). Global voice rules become core/voice.md (spec §4.3)."
+        }
+      ],
+      "vendorAssumptions": [
+        {
+          "vendor": "lib-wrapper",
+          "symbols": [
+            "lib.illustrate",
+            "lib.publish"
+          ],
+          "replacement": "Signals agent tools via the realtimex-signals skill (get_writing_context, get_content, create_content_draft, update_content_draft, upsert_variant, materialize_variant, platform-target tools). The approval card is a skill contract, not a library call (spec §6.4)."
+        },
+        {
+          "vendor": "pixfaro",
+          "symbols": [],
+          "replacement": "Not replaced in the MVP: media is user-supplied through Signals media assets (POST /api/media, media.plan=user_supplied). Image generation is out of scope (spec §9.4)."
+        },
+        {
+          "vendor": "publora",
+          "symbols": [],
+          "replacement": "Signals publish lane: approved content item -> POST /api/content/send-to-agent -> publish_jobs -> signals-publish skill (X direct, Facebook direct, LinkedIn beta). No scheduling API; other networks are draft/export-only (spec §5.8)."
+        }
+      ],
+      "formulaMap": [
+        {
+          "corpus": "X1 One-Liner Contrarian",
+          "adoptedAs": "x/post/one-liner-contrarian@1"
+        },
+        {
+          "corpus": "X2 Data-Point Hook",
+          "adoptedAs": "x/post/data-point@1"
+        },
+        {
+          "corpus": "X3 Build-in-Public Confession",
+          "adoptedAs": "x/post/build-in-public-confession@1"
+        },
+        {
+          "corpus": "X4 Quote-Tweet Dunk-with-Value",
+          "adoptedAs": null
+        },
+        {
+          "corpus": "X5 Mini-List Tweet",
+          "adoptedAs": "x/post/mini-list@1"
+        },
+        {
+          "corpus": "X6 Relatable Cold-Open",
+          "adoptedAs": "x/post/relatable-cold-open@1"
+        },
+        {
+          "corpus": "X11 Third-Person Case-Study Flex",
+          "adoptedAs": "x/post/third-party-case-study@1"
+        }
+      ],
+      "exclusions": [
+        "X4 quote-tweet dunk (third-party dunking)",
+        "'~450-tweet corpus (July 2026)' provenance claim",
+        "Publora thread auto-split behaviour"
+      ],
+      "notes": "Source for x/post formulas and the 280-char/1-hashtag/no-link-in-body hard rules; the fabrication ban is inherited only via the humanizer step, so core/claims.md applies. Formula skeletons were never on disk (bundle-root hook-formulas.md)."
+    },
+    {
+      "id": "x-profile-optimizer",
+      "family": "x-skills",
+      "path": "x-skills/x-profile-optimizer",
+      "platform": "x",
+      "surfaces": [
+        "x/profile"
+      ],
+      "capability": "profile",
+      "disposition": "reference-only",
+      "ruleClasses": {
+        "hard": true,
+        "claim": false,
+        "voice": false,
+        "heuristic": true,
+        "aesthetic": true
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": true,
+      "files": [
+        "SKILL.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "x-skills/SKILL.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "signals-writing/SKILL.md router + core/ (spec §6). Global voice rules become core/voice.md (spec §4.3)."
+        }
+      ],
+      "vendorAssumptions": [],
+      "exclusions": [
+        "'two-second' conversion claims"
+      ],
+      "notes": "Profile copy is outside the writing system's Launch/Variant scope. Contains em dashes despite banning them."
+    },
+    {
+      "id": "x-reply-drafter",
+      "family": "x-skills",
+      "path": "x-skills/x-reply-drafter",
+      "platform": "x",
+      "surfaces": [
+        "x/reply",
+        "x/quote"
+      ],
+      "capability": "engage",
+      "disposition": "defer-353",
+      "ruleClasses": {
+        "hard": true,
+        "claim": true,
+        "voice": true,
+        "heuristic": true,
+        "aesthetic": true
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": false,
+      "files": [
+        "references/reply-templates.md",
+        "SKILL.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "x-skills/references/voice-profile.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Signals-owned voice profile document (spec §5.1) read through get_writing_context; never a skill-local file."
+        },
+        {
+          "ref": "x-skills/SKILL.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "signals-writing/SKILL.md router + core/ (spec §6). Global voice rules become core/voice.md (spec §4.3)."
+        }
+      ],
+      "vendorAssumptions": [
+        {
+          "vendor": "lib-wrapper",
+          "symbols": [
+            "lib.publish",
+            "lib.url_parser"
+          ],
+          "replacement": "Signals agent tools via the realtimex-signals skill (get_writing_context, get_content, create_content_draft, update_content_draft, upsert_variant, materialize_variant, platform-target tools). The approval card is a skill contract, not a library call (spec §6.4)."
+        },
+        {
+          "vendor": "publora",
+          "symbols": [],
+          "replacement": "Signals publish lane: approved content item -> POST /api/content/send-to-agent -> publish_jobs -> signals-publish skill (X direct, Facebook direct, LinkedIn beta). No scheduling API; other networks are draft/export-only (spec §5.8)."
+        }
+      ],
+      "exclusions": [
+        "quote-dunk template R5/X4 against small accounts",
+        "canned-praise examples"
+      ],
+      "notes": "Engage surfaces (x/reply, x/quote) are draft_only until #353 adds engage capability; reply templates are near-verbatim with threads-reply-drafter."
+    },
+    {
+      "id": "x-repurposer",
+      "family": "x-skills",
+      "path": "x-skills/x-repurposer",
+      "platform": "x",
+      "surfaces": [
+        "x/post",
+        "x/thread"
+      ],
+      "capability": "adapt",
+      "disposition": "adopt-overlay",
+      "ruleClasses": {
+        "hard": true,
+        "claim": true,
+        "voice": true,
+        "heuristic": true,
+        "aesthetic": true
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": true,
+      "files": [
+        "SKILL.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "x-skills/references/algorithm-heuristics.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Versioned heuristic rule records with source/observedAt/confidence/reviewBy in the platform overlay (spec §5.10)."
+        },
+        {
+          "ref": "x-skills/references/hook-formulas.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Namespaced formula records in overlays/<platform>.md (spec §4.2, §5.10); corpus codes are mapped in formulaMap."
+        },
+        {
+          "ref": "x-skills/references/voice-profile.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Signals-owned voice profile document (spec §5.1) read through get_writing_context; never a skill-local file."
+        },
+        {
+          "ref": "x-skills/SKILL.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "signals-writing/SKILL.md router + core/ (spec §6). Global voice rules become core/voice.md (spec §4.3)."
+        }
+      ],
+      "vendorAssumptions": [
+        {
+          "vendor": "lib-wrapper",
+          "symbols": [
+            "lib.publish"
+          ],
+          "replacement": "Signals agent tools via the realtimex-signals skill (get_writing_context, get_content, create_content_draft, update_content_draft, upsert_variant, materialize_variant, platform-target tools). The approval card is a skill contract, not a library call (spec §6.4)."
+        },
+        {
+          "vendor": "publora",
+          "symbols": [],
+          "replacement": "Signals publish lane: approved content item -> POST /api/content/send-to-agent -> publish_jobs -> signals-publish skill (X direct, Facebook direct, LinkedIn beta). No scheduling API; other networks are draft/export-only (spec §5.8)."
+        }
+      ],
+      "exclusions": [
+        "'cut ~40%' and 'no fold' claims as facts"
+      ],
+      "notes": "Source-to-X native-fit rules for the overlay's adapt section; 'delivery changes, meaning and numbers never' is a core claim rule."
+    },
+    {
+      "id": "x-thread-builder",
+      "family": "x-skills",
+      "path": "x-skills/x-thread-builder",
+      "platform": "x",
+      "surfaces": [
+        "x/thread"
+      ],
+      "capability": "draft",
+      "disposition": "adopt-overlay",
+      "ruleClasses": {
+        "hard": true,
+        "claim": true,
+        "voice": true,
+        "heuristic": true,
+        "aesthetic": true
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": true,
+      "files": [
+        "references/thread-structure.md",
+        "SKILL.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "x-skills/references/algorithm-heuristics.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Versioned heuristic rule records with source/observedAt/confidence/reviewBy in the platform overlay (spec §5.10)."
+        },
+        {
+          "ref": "x-skills/references/hook-formulas.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Namespaced formula records in overlays/<platform>.md (spec §4.2, §5.10); corpus codes are mapped in formulaMap."
+        },
+        {
+          "ref": "x-skills/references/voice-profile.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Signals-owned voice profile document (spec §5.1) read through get_writing_context; never a skill-local file."
+        },
+        {
+          "ref": "x-skills/SKILL.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "signals-writing/SKILL.md router + core/ (spec §6). Global voice rules become core/voice.md (spec §4.3)."
+        }
+      ],
+      "vendorAssumptions": [
+        {
+          "vendor": "lib-wrapper",
+          "symbols": [
+            "lib.publish"
+          ],
+          "replacement": "Signals agent tools via the realtimex-signals skill (get_writing_context, get_content, create_content_draft, update_content_draft, upsert_variant, materialize_variant, platform-target tools). The approval card is a skill contract, not a library call (spec §6.4)."
+        },
+        {
+          "vendor": "publora",
+          "symbols": [],
+          "replacement": "Signals publish lane: approved content item -> POST /api/content/send-to-agent -> publish_jobs -> signals-publish skill (X direct, Facebook direct, LinkedIn beta). No scheduling API; other networks are draft/export-only (spec §5.8)."
+        }
+      ],
+      "formulaMap": [
+        {
+          "corpus": "X7 Listicle-Thread Promise",
+          "adoptedAs": "x/thread/listicle-promise@1"
+        },
+        {
+          "corpus": "X8 Story Thread",
+          "adoptedAs": "x/thread/story-arc@1"
+        },
+        {
+          "corpus": "X9 Curiosity-Gap Opener",
+          "adoptedAs": "x/thread/curiosity-gap-opener@1"
+        },
+        {
+          "corpus": "X10 How-I Teardown",
+          "adoptedAs": "x/thread/how-i-teardown@1"
+        }
+      ],
+      "exclusions": [
+        "tap-through decay percentages (hedged 'reported pattern', unsourced)",
+        "Publora (1/N) numbering assumptions"
+      ],
+      "notes": "Source for x/thread structure (promise + open loop, 5-9 units, no link in unit 1) and the 'true story only' claim rule."
+    },
+    {
+      "id": "yt-audience-insights",
+      "family": "youtube-skills",
+      "path": "youtube-skills/yt-audience-insights",
+      "platform": "youtube",
+      "surfaces": [],
+      "capability": "research",
+      "disposition": "reference-only",
+      "ruleClasses": {
+        "hard": false,
+        "claim": true,
+        "voice": false,
+        "heuristic": false,
+        "aesthetic": false
+      },
+      "heuristicConfidence": "none",
+      "datedClaims": false,
+      "files": [
+        "SKILL.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "youtube-skills/SKILL.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "signals-writing/SKILL.md router + core/ (spec §6). Global voice rules become core/voice.md (spec §4.3)."
+        }
+      ],
+      "vendorAssumptions": [
+        {
+          "vendor": "lib-wrapper",
+          "symbols": [
+            "lib.YouTubeClient"
+          ],
+          "replacement": "Signals agent tools via the realtimex-signals skill (get_writing_context, get_content, create_content_draft, update_content_draft, upsert_variant, materialize_variant, platform-target tools). The approval card is a skill contract, not a library call (spec §6.4)."
+        },
+        {
+          "vendor": "youtube-data-api",
+          "symbols": [],
+          "replacement": "Deferred with #353: YouTube surfaces are draft/export-only and Signals has no YouTube ingestion."
+        }
+      ],
+      "exclusions": [
+        "YouTube Data API quota arithmetic"
+      ],
+      "notes": "Only first-party API in the corpus; never-invent rules inform #352."
+    },
+    {
+      "id": "yt-channel-optimizer",
+      "family": "youtube-skills",
+      "path": "youtube-skills/yt-channel-optimizer",
+      "platform": "youtube",
+      "surfaces": [
+        "youtube/profile"
+      ],
+      "capability": "profile",
+      "disposition": "reference-only",
+      "ruleClasses": {
+        "hard": true,
+        "claim": false,
+        "voice": false,
+        "heuristic": true,
+        "aesthetic": true
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": true,
+      "files": [
+        "SKILL.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "youtube-skills/SKILL.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "signals-writing/SKILL.md router + core/ (spec §6). Global voice rules become core/voice.md (spec §4.3)."
+        }
+      ],
+      "vendorAssumptions": [],
+      "exclusions": [],
+      "notes": "Channel copy out of scope; banner safe-area and trailer length are platform facts."
+    },
+    {
+      "id": "yt-community-post-writer",
+      "family": "youtube-skills",
+      "path": "youtube-skills/yt-community-post-writer",
+      "platform": "youtube",
+      "surfaces": [
+        "youtube/community_post"
+      ],
+      "capability": "draft",
+      "disposition": "defer-353",
+      "ruleClasses": {
+        "hard": true,
+        "claim": false,
+        "voice": true,
+        "heuristic": true,
+        "aesthetic": false
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": false,
+      "files": [
+        "references/post-types.md",
+        "SKILL.md",
+        "sub-skills/illustration.md",
+        "sub-skills/voice-profile.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "youtube-skills/references/algorithm-heuristics.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Versioned heuristic rule records with source/observedAt/confidence/reviewBy in the platform overlay (spec §5.10)."
+        },
+        {
+          "ref": "youtube-skills/references/voice-profile.md",
+          "referencedFrom": [
+            "SKILL.md",
+            "sub-skills/illustration.md",
+            "sub-skills/voice-profile.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Signals-owned voice profile document (spec §5.1) read through get_writing_context; never a skill-local file."
+        },
+        {
+          "ref": "youtube-skills/references/voice-rules.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Core voice precedence rules (spec §4.3) in core/voice.md."
+        },
+        {
+          "ref": "youtube-skills/SKILL.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "signals-writing/SKILL.md router + core/ (spec §6). Global voice rules become core/voice.md (spec §4.3)."
+        },
+        {
+          "ref": "youtube-skills/yt-community-post-writer/lib/url_parser.py",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Signals agent tools / signals-pp-cli (spec §7.2); no Python wrapper ships."
+        }
+      ],
+      "vendorAssumptions": [
+        {
+          "vendor": "lib-wrapper",
+          "symbols": [
+            "lib.available_models",
+            "lib.illustrate",
+            "lib.image_backend",
+            "lib.publish"
+          ],
+          "replacement": "Signals agent tools via the realtimex-signals skill (get_writing_context, get_content, create_content_draft, update_content_draft, upsert_variant, materialize_variant, platform-target tools). The approval card is a skill contract, not a library call (spec §6.4)."
+        },
+        {
+          "vendor": "pixfaro",
+          "symbols": [],
+          "replacement": "Not replaced in the MVP: media is user-supplied through Signals media assets (POST /api/media, media.plan=user_supplied). Image generation is out of scope (spec §9.4)."
+        },
+        {
+          "vendor": "publora",
+          "symbols": [],
+          "replacement": "Signals publish lane: approved content item -> POST /api/content/send-to-agent -> publish_jobs -> signals-publish skill (X direct, Facebook direct, LinkedIn beta). No scheduling API; other networks are draft/export-only (spec §5.8)."
+        }
+      ],
+      "exclusions": [
+        "illustration sub-skill (Pixfaro; self-contradictory model default)",
+        "Apify read layer"
+      ],
+      "notes": "youtube/community_post is exportable text (polls 2-4 options); the family's voice builder is bolted on here because there is no yt-humanizer."
+    },
+    {
+      "id": "yt-content-planner",
+      "family": "youtube-skills",
+      "path": "youtube-skills/yt-content-planner",
+      "platform": "youtube",
+      "surfaces": [
+        "youtube/title",
+        "youtube/community_post",
+        "youtube/weekly_plan"
+      ],
+      "capability": "plan",
+      "disposition": "reference-only",
+      "ruleClasses": {
+        "hard": false,
+        "claim": false,
+        "voice": false,
+        "heuristic": true,
+        "aesthetic": false
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": false,
+      "files": [
+        "references/example-week.md",
+        "references/pillars-framework.md",
+        "SKILL.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "youtube-skills/references/algorithm-heuristics.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Versioned heuristic rule records with source/observedAt/confidence/reviewBy in the platform overlay (spec §5.10)."
+        },
+        {
+          "ref": "youtube-skills/references/hook-formulas.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Namespaced formula records in overlays/<platform>.md (spec §4.2, §5.10); corpus codes are mapped in formulaMap."
+        },
+        {
+          "ref": "youtube-skills/SKILL.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "signals-writing/SKILL.md router + core/ (spec §6). Global voice rules become core/voice.md (spec §4.3)."
+        },
+        {
+          "ref": "youtube-skills/yt-content-planner/lib/url_parser.py",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Signals agent tools / signals-pp-cli (spec §7.2); no Python wrapper ships."
+        }
+      ],
+      "vendorAssumptions": [
+        {
+          "vendor": "lib-wrapper",
+          "symbols": [
+            "lib.publish"
+          ],
+          "replacement": "Signals agent tools via the realtimex-signals skill (get_writing_context, get_content, create_content_draft, update_content_draft, upsert_variant, materialize_variant, platform-target tools). The approval card is a skill contract, not a library call (spec §6.4)."
+        }
+      ],
+      "exclusions": [
+        "posting-time windows and engagement-signal weightings (unsourced)",
+        "'Tuesday afternoon ET' publishing advice"
+      ],
+      "notes": "Planning is not an MVP mode."
+    },
+    {
+      "id": "yt-description-writer",
+      "family": "youtube-skills",
+      "path": "youtube-skills/yt-description-writer",
+      "platform": "youtube",
+      "surfaces": [
+        "youtube/description"
+      ],
+      "capability": "draft",
+      "disposition": "defer-353",
+      "ruleClasses": {
+        "hard": true,
+        "claim": false,
+        "voice": true,
+        "heuristic": true,
+        "aesthetic": false
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": false,
+      "files": [
+        "references/description-template.md",
+        "SKILL.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "youtube-skills/references/algorithm-heuristics.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Versioned heuristic rule records with source/observedAt/confidence/reviewBy in the platform overlay (spec §5.10)."
+        },
+        {
+          "ref": "youtube-skills/references/voice-profile.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Signals-owned voice profile document (spec §5.1) read through get_writing_context; never a skill-local file."
+        },
+        {
+          "ref": "youtube-skills/references/voice-rules.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Core voice precedence rules (spec §4.3) in core/voice.md."
+        },
+        {
+          "ref": "youtube-skills/SKILL.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "signals-writing/SKILL.md router + core/ (spec §6). Global voice rules become core/voice.md (spec §4.3)."
+        },
+        {
+          "ref": "youtube-skills/yt-description-writer/lib/url_parser.py",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Signals agent tools / signals-pp-cli (spec §7.2); no Python wrapper ships."
+        }
+      ],
+      "vendorAssumptions": [
+        {
+          "vendor": "lib-wrapper",
+          "symbols": [
+            "lib.publish"
+          ],
+          "replacement": "Signals agent tools via the realtimex-signals skill (get_writing_context, get_content, create_content_draft, update_content_draft, upsert_variant, materialize_variant, platform-target tools). The approval card is a skill contract, not a library call (spec §6.4)."
+        }
+      ],
+      "exclusions": [
+        "Publora title/platformSettings plumbing"
+      ],
+      "notes": "youtube/description is exportable text: 5,000-char cap, first ~150 chars before 'Show more', chapters >=3 starting 0:00, 3-5 hashtags."
+    },
+    {
+      "id": "yt-hook-scripter",
+      "family": "youtube-skills",
+      "path": "youtube-skills/yt-hook-scripter",
+      "platform": "youtube",
+      "surfaces": [
+        "youtube/hook_script"
+      ],
+      "capability": "draft",
+      "disposition": "defer-353",
+      "ruleClasses": {
+        "hard": false,
+        "claim": true,
+        "voice": true,
+        "heuristic": true,
+        "aesthetic": false
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": true,
+      "files": [
+        "references/retention-beats.md",
+        "SKILL.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "youtube-skills/references/algorithm-heuristics.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Versioned heuristic rule records with source/observedAt/confidence/reviewBy in the platform overlay (spec §5.10)."
+        },
+        {
+          "ref": "youtube-skills/references/hook-formulas.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Namespaced formula records in overlays/<platform>.md (spec §4.2, §5.10); corpus codes are mapped in formulaMap."
+        },
+        {
+          "ref": "youtube-skills/references/voice-profile.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Signals-owned voice profile document (spec §5.1) read through get_writing_context; never a skill-local file."
+        },
+        {
+          "ref": "youtube-skills/SKILL.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "signals-writing/SKILL.md router + core/ (spec §6). Global voice rules become core/voice.md (spec §4.3)."
+        },
+        {
+          "ref": "youtube-skills/yt-hook-scripter/lib/url_parser.py",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Signals agent tools / signals-pp-cli (spec §7.2); no Python wrapper ships."
+        }
+      ],
+      "vendorAssumptions": [
+        {
+          "vendor": "lib-wrapper",
+          "symbols": [
+            "lib.publish"
+          ],
+          "replacement": "Signals agent tools via the realtimex-signals skill (get_writing_context, get_content, create_content_draft, update_content_draft, upsert_variant, materialize_variant, platform-target tools). The approval card is a skill contract, not a library call (spec §6.4)."
+        }
+      ],
+      "formulaMap": [
+        {
+          "corpus": "Y7 Restate-and-Raise",
+          "adoptedAs": null
+        },
+        {
+          "corpus": "Y8 Cold-Open Payoff Tease",
+          "adoptedAs": null
+        },
+        {
+          "corpus": "Y9 Question-and-Contract",
+          "adoptedAs": null
+        },
+        {
+          "corpus": "Y10 Shorts 3-Second Hook",
+          "adoptedAs": null
+        }
+      ],
+      "exclusions": [
+        "retention-graph mechanics as fact"
+      ],
+      "notes": "youtube/hook_script is exportable text; 'never promise more than the video delivers' is a claim rule."
+    },
+    {
+      "id": "yt-repurposer",
+      "family": "youtube-skills",
+      "path": "youtube-skills/yt-repurposer",
+      "platform": "youtube",
+      "surfaces": [
+        "youtube/community_post",
+        "youtube/title",
+        "youtube/description",
+        "youtube/hook_script"
+      ],
+      "capability": "adapt",
+      "disposition": "defer-353",
+      "ruleClasses": {
+        "hard": false,
+        "claim": true,
+        "voice": true,
+        "heuristic": true,
+        "aesthetic": true
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": true,
+      "files": [
+        "SKILL.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "youtube-skills/references/algorithm-heuristics.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Versioned heuristic rule records with source/observedAt/confidence/reviewBy in the platform overlay (spec §5.10)."
+        },
+        {
+          "ref": "youtube-skills/references/hook-formulas.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Namespaced formula records in overlays/<platform>.md (spec §4.2, §5.10); corpus codes are mapped in formulaMap."
+        },
+        {
+          "ref": "youtube-skills/references/voice-profile.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Signals-owned voice profile document (spec §5.1) read through get_writing_context; never a skill-local file."
+        },
+        {
+          "ref": "youtube-skills/references/voice-rules.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Core voice precedence rules (spec §4.3) in core/voice.md."
+        },
+        {
+          "ref": "youtube-skills/SKILL.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "signals-writing/SKILL.md router + core/ (spec §6). Global voice rules become core/voice.md (spec §4.3)."
+        }
+      ],
+      "vendorAssumptions": [
+        {
+          "vendor": "lib-wrapper",
+          "symbols": [
+            "lib.publish"
+          ],
+          "replacement": "Signals agent tools via the realtimex-signals skill (get_writing_context, get_content, create_content_draft, update_content_draft, upsert_variant, materialize_variant, platform-target tools). The approval card is a skill contract, not a library call (spec §6.4)."
+        },
+        {
+          "vendor": "publora",
+          "symbols": [],
+          "replacement": "Signals publish lane: approved content item -> POST /api/content/send-to-agent -> publish_jobs -> signals-publish skill (X direct, Facebook direct, LinkedIn beta). No scheduling API; other networks are draft/export-only (spec §5.8)."
+        }
+      ],
+      "exclusions": [],
+      "notes": "Near-duplicate of tt-repurposer; delegates scrubbing because there is no yt-humanizer."
+    },
+    {
+      "id": "yt-thumbnail-brief",
+      "family": "youtube-skills",
+      "path": "youtube-skills/yt-thumbnail-brief",
+      "platform": "youtube",
+      "surfaces": [
+        "youtube/thumbnail_brief"
+      ],
+      "capability": "asset-brief",
+      "disposition": "defer-353",
+      "ruleClasses": {
+        "hard": true,
+        "claim": true,
+        "voice": false,
+        "heuristic": true,
+        "aesthetic": true
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": true,
+      "files": [
+        "references/brief-template.md",
+        "SKILL.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "youtube-skills/references/algorithm-heuristics.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Versioned heuristic rule records with source/observedAt/confidence/reviewBy in the platform overlay (spec §5.10)."
+        },
+        {
+          "ref": "youtube-skills/references/thumbnail-principles.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Deferred to the youtube overlay in #353 (asset briefs)."
+        },
+        {
+          "ref": "youtube-skills/SKILL.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "signals-writing/SKILL.md router + core/ (spec §6). Global voice rules become core/voice.md (spec §4.3)."
+        },
+        {
+          "ref": "youtube-skills/yt-thumbnail-brief/lib/url_parser.py",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Signals agent tools / signals-pp-cli (spec §7.2); no Python wrapper ships."
+        }
+      ],
+      "vendorAssumptions": [
+        {
+          "vendor": "lib-wrapper",
+          "symbols": [
+            "lib.PubloraClient"
+          ],
+          "replacement": "Signals agent tools via the realtimex-signals skill (get_writing_context, get_content, create_content_draft, update_content_draft, upsert_variant, materialize_variant, platform-target tools). The approval card is a skill contract, not a library call (spec §6.4)."
+        },
+        {
+          "vendor": "publora",
+          "symbols": [],
+          "replacement": "Signals publish lane: approved content item -> POST /api/content/send-to-agent -> publish_jobs -> signals-publish skill (X direct, Facebook direct, LinkedIn beta). No scheduling API; other networks are draft/export-only (spec §5.8)."
+        }
+      ],
+      "exclusions": [
+        "Publora thumbnail endpoint plumbing"
+      ],
+      "notes": "A designer brief (words, not pixels): <=4-word overlay, 120-px legibility, 1280x720 <=2 MB; 'a moment not in the video' is a claim rule."
+    },
+    {
+      "id": "yt-title-optimizer",
+      "family": "youtube-skills",
+      "path": "youtube-skills/yt-title-optimizer",
+      "platform": "youtube",
+      "surfaces": [
+        "youtube/title"
+      ],
+      "capability": "draft",
+      "disposition": "defer-353",
+      "ruleClasses": {
+        "hard": true,
+        "claim": true,
+        "voice": false,
+        "heuristic": true,
+        "aesthetic": true
+      },
+      "heuristicConfidence": "low",
+      "datedClaims": true,
+      "files": [
+        "references/title-checklist.md",
+        "SKILL.md"
+      ],
+      "missingReferences": [
+        {
+          "ref": "youtube-skills/references/algorithm-heuristics.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Versioned heuristic rule records with source/observedAt/confidence/reviewBy in the platform overlay (spec §5.10)."
+        },
+        {
+          "ref": "youtube-skills/references/hook-formulas.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Namespaced formula records in overlays/<platform>.md (spec §4.2, §5.10); corpus codes are mapped in formulaMap."
+        },
+        {
+          "ref": "youtube-skills/SKILL.md",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "signals-writing/SKILL.md router + core/ (spec §6). Global voice rules become core/voice.md (spec §4.3)."
+        },
+        {
+          "ref": "youtube-skills/yt-title-optimizer/lib/url_parser.py",
+          "referencedFrom": [
+            "SKILL.md"
+          ],
+          "disposition": "replace",
+          "replacement": "Signals agent tools / signals-pp-cli (spec §7.2); no Python wrapper ships."
+        }
+      ],
+      "vendorAssumptions": [
+        {
+          "vendor": "lib-wrapper",
+          "symbols": [
+            "lib.publish"
+          ],
+          "replacement": "Signals agent tools via the realtimex-signals skill (get_writing_context, get_content, create_content_draft, update_content_draft, upsert_variant, materialize_variant, platform-target tools). The approval card is a skill contract, not a library call (spec §6.4)."
+        }
+      ],
+      "formulaMap": [
+        {
+          "corpus": "Y1 Curiosity-Gap",
+          "adoptedAs": null
+        },
+        {
+          "corpus": "Y2 Number/Listicle",
+          "adoptedAs": null
+        },
+        {
+          "corpus": "Y3 How-I Outcome",
+          "adoptedAs": null
+        },
+        {
+          "corpus": "Y4 Mistake/Negativity",
+          "adoptedAs": null
+        },
+        {
+          "corpus": "Y5 Transformation",
+          "adoptedAs": null
+        },
+        {
+          "corpus": "Y6 Versus/Comparison",
+          "adoptedAs": null
+        },
+        {
+          "corpus": "Y11 Third-Party Success Story",
+          "adoptedAs": null
+        }
+      ],
+      "exclusions": [
+        "'214-video corpus pull (July 2026)' provenance",
+        "'fast click-away is a ranking penalty'"
+      ],
+      "notes": "youtube/title is exportable text (100-char cap, 40-60 target, 0-1 emoji); 'curiosity must be honest' is a claim rule. Does not read the voice profile (defect)."
+    }
+  ]
+}
