@@ -63,8 +63,11 @@ import { ContactTimelineTab } from "@/components/contact-timeline-tab";
 import { ContactAvatarUpload } from "@/components/contact-avatar-upload";
 import { ContactRelationshipSection } from "@/components/contact-relationship-section";
 import { ContactSourceLine } from "@/components/contact-source-line";
+import { ContactProfileSection } from "@/components/contact-profile-section";
+import { AgentProfileView } from "@/components/agent-profile-view";
 import { SnowballDialog } from "@/components/snowball-dialog";
 import { formatWebsiteLabel, hrefForWebsite, isRedundantHeadline } from "@/lib/contact-detail-format";
+import type { ArppPersonDocument } from "@/lib/arpp/types";
 
 const platformLabels: Record<string, string> = {
   x: "X / Twitter",
@@ -80,6 +83,7 @@ interface ContactDetailClientProps {
   createdTemplateName?: string | null;
   createdWorkflowRunHref?: string | null;
   profilePipelineTemplateId?: string | null;
+  agentProfile?: ArppPersonDocument;
 }
 
 function MetaLink({ href, children }: { href: string; children: ReactNode }) {
@@ -102,6 +106,7 @@ export function ContactDetailClient({
   createdTemplateName,
   createdWorkflowRunHref,
   profilePipelineTemplateId = null,
+  agentProfile,
 }: ContactDetailClientProps) {
   const router = useRouter();
   const [tab, setTab] = useState("details");
@@ -376,11 +381,21 @@ export function ContactDetailClient({
               <div>
                 <h1 className="text-heading-1 truncate">{contact.name}</h1>
                 <div className="mt-1 flex flex-wrap items-center gap-2">
-                  {(contact.company || contact.title) && (
+                  {contact.currentEmployment ? (
+                    <span className="text-muted-foreground">
+                      <Link
+                        href={`/dashboard/organizations/${contact.currentEmployment.orgId}`}
+                        className="text-primary hover:underline"
+                      >
+                        {contact.currentEmployment.orgName}
+                      </Link>
+                      {contact.currentEmployment.title ? ` · ${contact.currentEmployment.title}` : ""}
+                    </span>
+                  ) : (contact.company || contact.title) ? (
                     <span className="text-muted-foreground">
                       {[contact.company, contact.title].filter(Boolean).join(" · ")}
                     </span>
-                  )}
+                  ) : null}
                   <FunnelStageBadge stage={contact.funnelStage} />
                   <RelationshipGoalSelector
                     goal={contact.relationshipGoal}
@@ -406,7 +421,11 @@ export function ContactDetailClient({
             </div>
           </div>
         </div>
-        <div className="flex shrink-0 flex-wrap items-center gap-3">
+        <div
+          role="group"
+          aria-label="Contact actions"
+          className="flex w-full min-w-0 flex-wrap items-center gap-3 sm:w-auto sm:shrink-0"
+        >
           {!contactArchived ? (
             <TooltipProvider>
               <Tooltip>
@@ -466,7 +485,7 @@ export function ContactDetailClient({
       </div>
 
       <Tabs value={tab} onValueChange={setTab}>
-        <TabsList>
+        <TabsList className="max-w-full overflow-x-auto">
           <TabsTrigger value="details">Details</TabsTrigger>
           <TabsTrigger value="identities">
             Identities ({contact.identities.length})
@@ -477,12 +496,19 @@ export function ContactDetailClient({
         </TabsList>
 
         <TabsContent value="details" className="space-y-4">
+          <ContactProfileSection
+            contact={contact}
+            canEnrich={canEnrich}
+            onEdit={() => setEditOpen(true)}
+            onEnrich={() => void handleRunProfilePipeline()}
+          />
           <ContactRelationshipSection
             contactId={contact.id}
             isSelf={contact.isSelf}
             openTaskCount={openTaskCount}
             onOpenTasks={() => setTab("tasks")}
           />
+          {agentProfile ? <AgentProfileView profile={agentProfile} /> : null}
         </TabsContent>
 
         <TabsContent value="identities" className="space-y-4">

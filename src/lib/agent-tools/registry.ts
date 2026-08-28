@@ -6,6 +6,7 @@ import {
   createTaskSchema,
   enrichContactSchema,
   getContactSchema,
+  getContactArppSchema,
   listWorkflowTemplatesSchema,
   queryAnalyticsSchema,
   queryContactsSchema,
@@ -33,6 +34,7 @@ import {
   queryNichesSchema,
   queryOrgsSchema,
   getOrgSchema,
+  getOrgArooSchema,
   createOrgSchema,
   updateOrgSchema,
   getOrgRelationshipsSchema,
@@ -111,6 +113,10 @@ import {
   handleCompleteSimulationRun,
   handleCalibrateSimulationRun,
 } from "@/lib/agent-tools/graph-handlers";
+import {
+  handleGetContactArpp,
+  handleGetOrgAroo,
+} from "@/lib/agent-tools/arpp-handlers";
 import {
   completeSimulationRunParameters,
   zodToParameters,
@@ -191,6 +197,15 @@ export const AGENT_TOOLS: Record<string, AgentToolDefinition> = {
     schema: getContactSchema,
     parameters: zodToParameters(getContactSchema),
     execute: handleGetContact,
+  },
+  get_contact_arpp: {
+    name: "get_contact_arpp",
+    description:
+      "Project one contact as an Agent-Readable Person Profile (ARPP), with internal or public visibility.",
+    category: "contacts",
+    schema: getContactArppSchema,
+    parameters: zodToParameters(getContactArppSchema),
+    execute: handleGetContactArpp,
   },
   create_contact: {
     name: "create_contact",
@@ -407,6 +422,15 @@ export const AGENT_TOOLS: Record<string, AgentToolDefinition> = {
     schema: getOrgSchema,
     parameters: zodToParameters(getOrgSchema),
     execute: handleGetOrg,
+  },
+  get_org_aroo: {
+    name: "get_org_aroo",
+    description:
+      "Project one company as an Agent-Readable Organization Object (AROO), with internal or public visibility.",
+    category: "graph",
+    schema: getOrgArooSchema,
+    parameters: zodToParameters(getOrgArooSchema),
+    execute: handleGetOrgAroo,
   },
   create_org: {
     name: "create_org",

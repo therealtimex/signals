@@ -9,12 +9,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { SnowballDialog } from "@/components/snowball-dialog";
 import { ProvenanceLine } from "@/components/provenance-line";
+import { AgentProfileView } from "@/components/agent-profile-view";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { getOrgEmailIntelligence } from "@/lib/contacts/email-patterns/intelligence";
 import type { listOrgTimeline } from "@/lib/db/queries/org-activities";
 import type { OrgPersonRow } from "@/lib/db/queries/org-people";
 import type { getOrgRelationshipSummary } from "@/lib/db/queries/org-relationships";
 import type { OrgDTO } from "@/lib/serializers/org";
+import type { ArooOrganizationDocument } from "@/lib/arpp/types";
 import { orgTabHref, parseOrgTab, type OrgTab } from "../organization-tabs";
 import { EditOrganizationDialog } from "./edit-organization-dialog";
 import { EnrichCompanyButton } from "./enrich-company-button";
@@ -43,6 +45,7 @@ export function OrganizationDetailClient({
   timeline,
   signalScanState,
   selfContact,
+  agentProfile,
 }: {
   org: OrgDTO;
   people: OrgPersonRow[];
@@ -51,6 +54,7 @@ export function OrganizationDetailClient({
   timeline: ReturnType<typeof listOrgTimeline>;
   signalScanState: OrgSignalScanState;
   selfContact: { id: string; name: string } | null;
+  agentProfile?: ArooOrganizationDocument;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -206,6 +210,7 @@ export function OrganizationDetailClient({
             <RelationshipOverview summary={relationships} />
             <EmailIntelligenceCard orgId={org.id} initial={emailIntelligence} />
           </div>
+          {agentProfile ? <AgentProfileView profile={agentProfile} /> : null}
         </TabsContent>
 
         <TabsContent value="people" className="pt-4">

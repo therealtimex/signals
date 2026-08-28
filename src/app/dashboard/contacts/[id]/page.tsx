@@ -5,6 +5,7 @@ import { getTasksByContact } from "@/lib/db/queries/tasks";
 import { getSystemTemplateByName, getTemplate } from "@/lib/db/queries/workflow-templates";
 import { getWorkflowRun } from "@/lib/db/queries/workflows";
 import { CONTACT_PROFILE_PIPELINE_TEMPLATE_NAME } from "@/lib/db/seed-templates";
+import { loadAndProjectContactToArpp } from "@/lib/arpp/load";
 import { ContactDetailClient } from "./contact-detail-client";
 
 export default async function ContactDetailPage({
@@ -33,6 +34,7 @@ export default async function ContactDetailPage({
       ? `/dashboard/workflows/${contact.createdWorkflowRunId}`
       : null;
   const profilePipelineTemplate = getSystemTemplateByName(CONTACT_PROFILE_PIPELINE_TEMPLATE_NAME);
+  const agentProfile = loadAndProjectContactToArpp(id, { visibility: "internal" });
 
   return (
     <ContactDetailClient
@@ -42,6 +44,7 @@ export default async function ContactDetailPage({
       createdTemplateName={createdTemplateName}
       createdWorkflowRunHref={runHref}
       profilePipelineTemplateId={profilePipelineTemplate?.id ?? null}
+      agentProfile={agentProfile}
     />
   );
 }

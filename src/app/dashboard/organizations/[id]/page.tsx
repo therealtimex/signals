@@ -8,6 +8,7 @@ import { getOrgEmailIntelligence } from "@/lib/contacts/email-patterns/intellige
 import { listOrgTimeline } from "@/lib/db/queries/org-activities";
 import { OrganizationDetailClient } from "./organization-detail-client";
 import { getOrgSignalScanState } from "@/lib/orgs/signal-scan-state";
+import { loadAndProjectOrgToAroo } from "@/lib/arpp/load";
 
 export default async function OrganizationDetailPage({
   params,
@@ -27,6 +28,7 @@ export default async function OrganizationDetailPage({
   const signalScanState = getOrgSignalScanState(id, org.followedAt);
   const ownerContactId = getOwnerContactId();
   const selfContact = ownerContactId ? getContactById(ownerContactId) : null;
+  const agentProfile = loadAndProjectOrgToAroo(id, { visibility: "internal" });
   return (
     <Suspense fallback={<div className="min-h-96 animate-pulse rounded-lg bg-muted/40" />}>
       <OrganizationDetailClient
@@ -37,6 +39,7 @@ export default async function OrganizationDetailPage({
         timeline={timeline}
         signalScanState={signalScanState}
         selfContact={selfContact ? { id: selfContact.id, name: selfContact.name } : null}
+        agentProfile={agentProfile}
       />
     </Suspense>
   );

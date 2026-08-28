@@ -41,6 +41,7 @@ Then pass `Authorization: Bearer your-secret-token` on each request.
 | `query_contacts` | contacts | Search/filter **active** contacts; `email` is an exact normalized match (incl. non-primary channels), `platformUserId` an exact identity match. Results list their identities. Not a claim lookup — use `resolve_platform_claim` |
 | `resolve_platform_claim` | contacts | Is this platform account already claimed, by a contact **or an org** identity? Same resolution `upsert_contact_identity` enforces. Returns `{claimed:false}` or `{claimed:true, claimant:{kind, …, archived}}` |
 | `get_contact` | contacts | Full contact by ID |
+| `get_contact_arpp` | contacts | Project a contact as ARPP with internal or public visibility |
 | `create_contact` | contacts | Create a contact (`channels[]`, `employments[]` supported) |
 | `update_contact` | contacts | Update contact fields |
 | `upsert_contact_identity` | contacts | Create or update a platform identity for a contact |
@@ -64,6 +65,7 @@ Then pass `Authorization: Bearer your-secret-token` on each request.
 | `complete_persona_job` | contacts | Return a validated synthesis or failure for a stateless PersonaAgentJob |
 | `query_orgs` | graph | Search organization nodes |
 | `get_org` | graph | Read one company by ID or normalized domain, including profile provenance |
+| `get_org_aroo` | graph | Project a company as AROO with internal or public visibility |
 | `create_org` | graph | Create a company with immutable agent creation provenance |
 | `update_org` | graph | Update editable company fields with per-write provenance |
 | `get_org_relationships` | graph | Read company relationship coverage, strength bands, and introduction paths |

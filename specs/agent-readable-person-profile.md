@@ -753,3 +753,5 @@ A consumer that cannot validate a proof MUST still accept L0–L2 data and mark 
 /person.private.json              local / encrypted (tone, notes, constraints)
 /.well-known/agent.json           agents the person operates
 ```
+
+**Signals implementation:** see [`arpp-signals-projection.md`](./arpp-signals-projection.md) for `projectContactToArpp()` field mapping and API surface. Organization counterpart: [`agent-readable-organization-profile.md`](./agent-readable-organization-profile.md) (AROO).
