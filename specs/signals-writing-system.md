@@ -273,6 +273,8 @@ Invariants (tested in #350):
 - V3 — At most one `approved` profile per `(ownerContactId, label)`. Approval atomically replaces the one root `index.json`: the new version becomes active and the previous active version becomes `superseded` with `supersededBy`. It never rewrites either immutable version file.
 - V4 — `signatureLines[*].text` must be a substring of the referenced sample; anything else is rejected (no invented voice).
 - V5 — Variants record `{ id, version, hash }` of the profile used; a superseded version stays readable forever. Every registered version document is immutable; status, approval, and supersession are index projections.
+- V6 — Every voice-store mutation, including version allocation, document installation, draft registration, approval, rejection, and root-index read/modify/write, runs under the same store-global lock. The lock serializes all callers that share a `SIGNALS_DATA_DIR`, including separate processes; a process-local mutex alone is insufficient. Immediately before replacing `index.json`, the writer re-reads it and requires both `generation` and the canonical index hash to equal the snapshot read after lock acquisition. A mismatch discards the candidate index and retries from the new authority; bounded exhaustion returns `STORE_CONFLICT` without losing either committed update.
+- V7 — Version installation is immutable and no-clobber. Allocation starts at `index.profiles[id].latestVersion + 1` (or 1) while holding V6's lock. If `vN.json` already exists but is absent from the index, an exact valid `{ id, version: N, hash }` match is reused and registered without rewriting; any different hash, invalid document, or mismatched identity is preserved as an orphan and allocation advances to the next unused `N`. Gaps are valid, occupied paths are never overwritten, and integrity diagnostics report skipped orphans.
 
 ### 5.2 Evidence spine and preserved claims
 
@@ -794,8 +796,8 @@ snapshotted `SourceRef` policy. Writes inherit the launch scope. The writing ski
 | `update_content_draft` | #349 | `{ contentItemId, body?, title?, threadTexts?, mediaAssetIds?, expectedUpdatedAt? }` | updated item summary | preserves the same ordered-unit rule; only `draft`/`failed` items (`EDITABLE_STATUSES`), otherwise `CONFLICT`; `expectedUpdatedAt` mismatch → `CONFLICT` |
 | `get_writing_context` | #349 (voice fields land with #350) | `{ launchId, surfaces?: SurfaceId[], includeSources?: boolean }` | `{ launch (scope, audienceSpec, metadata.writing, brief only when its SourceRef is public/context-approved), niches[], sources[] (body/excerpt only when public or durably context-approved; otherwise `{ redacted: true, sensitivity }`), targets[] (platform_targets for requested platforms), voiceProfile (active approved, full) \| null, capabilities: Record<SurfaceId, SurfaceCapabilities>, variants[] (summaries with `metadata.writing.audit.verdict`, `approval.state`), approvalPolicy }` | read-only; `NOT_FOUND`; a `local_only` launch is readable but its brief and sources are forced private by S2 |
 | `list_voice_profiles` / `get_voice_profile` | #350 | `{ status? }` / `{ id, version? }` | profiles (full document) | read-only |
-| `upsert_voice_profile` | #350 | immutable profile content (no `version`/`hash`/lifecycle fields; `id` optional on create) | stored draft projection with `version`, `hash` | V1–V5; cannot set lifecycle; bumps `version` when hash changes |
-| `approve_voice_profile` | #350 | `{ id, version, evidence: ApprovalEvidence }` | approved profile; previous approved → `superseded` | `CONFLICT` when `version` is not the latest draft; `VALIDATION_ERROR` when V1 fails |
+| `upsert_voice_profile` | #350 | immutable profile content (no `version`/`hash`/lifecycle fields; `id` optional on create) | stored draft projection with `version`, `hash` | V1–V7; cannot set lifecycle; same hash returns the registered latest version; changed hash allocates under the global lock; `STORE_BUSY`, `STORE_CONFLICT` |
+| `approve_voice_profile` | #350 | `{ id, version, evidence: ApprovalEvidence }` | approved profile; previous approved → `superseded` | `CONFLICT` when `version` is not the latest draft; `VALIDATION_ERROR` when V1 fails; V6 `STORE_BUSY`/`STORE_CONFLICT` |
 | `upsert_variant` (extended) | #350 | existing input + validated `metadata.writing`, `generationMetadata` | existing output + `lineageEdges[]` | validation only when `generationMetadata.kind === "signals-writing"`; refuses `status: "published"` for writing variants (`use materialize_variant + publish lane`) |
 | `materialize_variant` | #350 | `{ variantId, approval?: { by: "user", evidence }, idempotencyKey? }` | `{ contentItemId, created, updated, nextAction: "publish" \| "export", capability }` | validates before idempotency; an existing unqueued item is replaced in place after an approved revision; `AUDIT_STALE`, `AUDIT_BLOCKED`, `APPROVAL_REQUIRED`, `CAPABILITY_UNSUPPORTED`, `TARGET_REQUIRED`, `CONFLICT` |
 | `revoke_variant_approval` | #350 | `{ variantId, reason }` | approval state | returns `approved` content item to `draft` if not yet queued; `CONFLICT` if the item is `queued`/`publishing`/`published` |
@@ -811,7 +813,7 @@ snapshotted `SourceRef` policy. Writes inherit the launch scope. The writing ski
 | `EvidenceSpine` | `launches.metadata.writing.spine` (latest); `variants.metadata.writing.spine.hash` (snapshot) | spine history is not kept in the MVP |
 | `VariantWriting`, `WritingAudit`, `ApprovalState` | `variants.metadata.writing` | `auditHistory` capped at 5 |
 | `VariantGeneration` | `variants.generationMetadata`; `variants.generationModel` mirrors `model` | |
-| `VoiceProfileVersionDocument` + `VoiceProfileIndex` | immutable `SIGNALS_DATA_DIR/writing/voice-profiles/<id>/v<version>.json` + one atomically replaced `voice-profiles/index.json` | index is the lifecycle authority; `resetCoreTables()` gets a sibling `resetWritingStore()` for tests |
+| `VoiceProfileVersionDocument` + `VoiceProfileIndex` | immutable `SIGNALS_DATA_DIR/writing/voice-profiles/<id>/v<version>.json` + one atomically replaced `voice-profiles/index.json` | index is the lifecycle authority; one cross-process store lock serializes all mutations; `resetCoreTables()` gets a sibling `resetWritingStore()` for tests |
 | Materialized artifact | `content_items` (`status: approved`, `platformTarget: <platform>`, `contentType`, `body: units.texts[0]`, `aiGenerated: true`, `generationPrompt: null`) + `platformData.writing = { variantId, launchId, surface, targetId, units, voiceProfile, formulaId, overlay, approval, capability, materialization: { auditId, inputHash, approvalAt, approvalBy } }` | one row per variant per platform; ordered units and approval snapshot are publish-gate inputs |
 | Lineage | `graph_edges` per §5.7 | created in the same transaction as the triggering write |
 | Capability registry | `src/lib/writing/capabilities.ts` (static) | G1 static test |
@@ -851,17 +853,33 @@ snapshotted `SourceRef` policy. Writes inherit the launch scope. The writing ski
 (it does today) and copy `targetId` into the edge properties (it does today). The legacy
 `upsert_variant status: "published"` path stays for non-writing variants only.
 
-**Voice profile commit/recovery protocol.** `upsert_voice_profile` first creates and fsyncs the
-immutable version document with a temp-file + rename, then atomically replaces `index.json` to
-register the draft. A crash between those operations leaves an unregistered orphan that readers
-ignore and the next upsert may reconcile by exact `{ id, version, hash }`. Approval changes no
-version file: under the store lock it reads generation `g`, builds generation `g + 1` with the new
-active version and old version's supersession in the same JSON object, writes and fsyncs a sibling
-temp file, renames it over `index.json`, then fsyncs the directory. On startup, incomplete temp
-files are ignored. Thus readers observe the complete old index before rename or the complete new
-index after rename—never zero or two active versions. Tests inject crashes before version rename,
-before index rename, and immediately after index rename, then assert recovery yields exactly the
-old or new authoritative state and all indexed hashes resolve to immutable documents.
+**Voice profile commit/recovery protocol.** One `withVoiceProfileStoreLock` primitive guards every
+mutation from allocation through index commit. It must exclude other processes sharing the data
+directory as well as concurrent requests in one process; lock acquisition has a bounded wait and
+returns `STORE_BUSY`, and crash recovery may reclaim a lock only after proving the prior owner is
+dead. Its identity is the real path of `voice-profiles/.store.lock`, so path aliases cannot create
+independent locks for one store. After acquiring it, a writer reads generation `g` and the
+canonical hash of `index.json`.
+
+`upsert_voice_profile` first returns the indexed latest version when its hash already matches.
+Otherwise it applies V7: probe from `latestVersion + 1`, reuse an exact valid unregistered orphan,
+or skip any occupied non-matching path until a free version is found. For a free path it writes and
+fsyncs a unique sibling temp file, installs it with an atomic no-replace operation, and fsyncs the
+directory. Ordinary overwrite-capable rename is not sufficient for this immutable install. A
+crash after install but before index commit leaves a complete orphan; partial temp files are
+ignored. Different-content retry never overwrites that orphan and deterministically advances to a
+free version.
+
+The writer then builds generation `g + 1` from its locked snapshot and writes/fsyncs a unique index
+temp. Immediately before the committing rename it re-reads the authoritative index and compares
+generation plus canonical hash with `{ g, baseIndexHash }`; mismatch discards the temp and retries
+the whole operation from the new authority (or returns `STORE_CONFLICT` after the bounded retry
+limit). On match it renames the temp over `index.json` and fsyncs the directory. Approval/rejection
+use this identical locked generation check but never touch version documents. Thus simultaneous
+same-profile/same-content upserts coalesce, same-profile/different-content upserts register ordered
+versions, and different-profile upserts both survive in successive index generations. Readers
+observe the complete old index before its rename or the complete new index after it—never a lost
+registration, zero active versions, or two active versions for one owner/label.
 
 **Revocation and revision:** `revoke_variant_approval` first rejects
 `queued`/`publishing`/`published` with `CONFLICT` and no mutation. Otherwise it writes
@@ -940,7 +958,7 @@ Each requirement names the issue that owns its test.
 | R2 | Every `claimMap` entry with `present: true` references a claim whose `sourceId` exists in the spine snapshot; validation rejects orphans. | unit | #350 |
 | R3 | Sensitivity uses only existing fields plus the launch/source snapshot: email, DM, inbound, and every `local_only` source are forced private. Sentinel tokens remain redacted from `get_content` for base-private items and from writing context for every case without durable context approval; they block output without claim-level output approval. | unit + tool | #349/#350 |
 | R4 | `approve_voice_profile` rejects profiles with <3 admissible approved samples, with any `content_item` sample that is `aiGenerated`, inbound, or not self-authored, or with a signature line that is not a substring of its sample. | unit + tool | #350 |
-| R5 | Only `approve_voice_profile` can set `approved`; one atomic index replacement activates the new version and supersedes the previous one; immutable versions remain readable. Crash injection before/after each rename recovers exactly the old or new index with one active profile. | unit | #350 |
+| R5 | Only `approve_voice_profile` can set `approved`; one locked atomic index replacement activates the new version and supersedes the previous one; immutable versions remain readable. Concurrency tests prove: same-profile/same-content upserts coalesce, same-profile/different-content upserts register distinct ordered versions, different-profile upserts both survive, and approval cannot lose a concurrent registration. Crash injection before/after each install/rename recovers exactly the old or new index with one active profile; retry against a different-content orphan skips it without overwrite and registers a later version. | unit + multi-process concurrency | #350 |
 | R6 | Variants record `voiceProfile { id, version, hash }`; `get_writing_context` returns the active approved profile only. | tool | #349/#350 |
 | R7 | Under `voice_first`, an audit finding for a heuristic/aesthetic rule that targets a protected quirk is marked `skippedForVoice` and does not affect the verdict; under `rules_first` it applies and `voice.status = "rules_first"` is recorded. | skill packaging test with fixture drafts + unit for verdict derivation | #348/#350 |
 | R8 | One template run with three surfaces yields three variants with distinct `platform/surface`, identical `spine.hash`, and bodies that differ (not prefix/suffix copies). | skill integration fixture | #348 |
@@ -1075,7 +1093,7 @@ and its drift-fixture self-test are part of `npm run check`.
 **Status:** Accepted. **Context:** `AGENTS.md` gates migrations; every MVP access is by id or 1-hop edge. **Options:** (a) tables now — rejected: sign-off cost before the contracts have been exercised; (b) JSON contracts in existing columns + typed edges, validated by Zod — chosen. **Consequences:** contracts carry `schemaVersion`; `metadata.writing` validation only applies to `signals-writing` producers; §7.4 lists the concrete triggers that justify a later migration, and each JSON document is designed as a straight projection of that future row.
 
 ### ADR-347-4: Voice profiles live in a Signals-owned file store now; a `voice_profiles` table later
-**Status:** Accepted. **Context:** The corpus keeps voice in a skill-local markdown file that is agent-owned and unreadable by the app; N9 forbids `contact_personas`; `config.json` is for scalars. **Options:** (a) agent workspace files — rejected: Signals cannot read them for context or UI, no versioning; (b) `config.json` — rejected: not versioned, wrong tool; (c) table now — rejected per ADR-347-3; (d) versioned JSON documents under `SIGNALS_DATA_DIR/writing/voice-profiles/` behind tools — chosen. **Consequences:** V1–V5 are enforced in one module; the row shape for the eventual table is fixed today; backups must include the directory (documented in `docs/local-app.md` by #350).
+**Status:** Accepted. **Context:** The corpus keeps voice in a skill-local markdown file that is agent-owned and unreadable by the app; N9 forbids `contact_personas`; `config.json` is for scalars. **Options:** (a) agent workspace files — rejected: Signals cannot read them for context or UI, no versioning; (b) `config.json` — rejected: not versioned, wrong tool; (c) table now — rejected per ADR-347-3; (d) versioned JSON documents under `SIGNALS_DATA_DIR/writing/voice-profiles/` behind tools — chosen. **Consequences:** V1–V7 are enforced in one module; the row shape for the eventual table is fixed today; backups must include the directory (documented in `docs/local-app.md` by #350).
 
 ### ADR-347-5: Explicit approval by default; `auto_low_risk` is user configuration that never publishes
 **Status:** Accepted. **Context:** N7. **Options:** (a) approval toggle per run — rejected: per-call flags let agents disagree with the user (same reasoning as ADR-314-2); (b) global policy resolved env → `config.json` → default, tiers derived from the audit — chosen. **Consequences:** `high` always needs the user; policy-approved variants still require a separate publish instruction; the approval record carries the policy in force.
