@@ -158,6 +158,93 @@ describe("Workflow Events & Agentic Router", () => {
     expect(sentBody).toContain('"event":"workflow.completed"');
   });
 
+  it("omits outbound webhook signatures when no secret is configured", async () => {
+    const prevSignals = process.env.SIGNALS_WEBHOOK_SECRET;
+    const prevRtx = process.env.REALTIMEX_WEBHOOK_SECRET;
+    delete process.env.SIGNALS_WEBHOOK_SECRET;
+    delete process.env.REALTIMEX_WEBHOOK_SECRET;
+
+    try {
+      const template = createTemplate({
+        name: "Network Snowball",
+        templateType: "prospecting",
+        status: "active",
+      });
+
+      const parentRun = createWorkflowRun({
+        templateId: template.id,
+        workflowType: "search",
+        status: "completed",
+        trigger: "template",
+      });
+
+      let sentHeaders: Record<string, string> | undefined;
+      const mockFetch = (async (_url: string, init?: RequestInit) => {
+        sentHeaders = init?.headers as Record<string, string> | undefined;
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }) as unknown as typeof fetch;
+
+      await emitWorkflowCompletedEvent(parentRun.id, {
+        webhookUrl: "https://example.com/hook",
+        fetchImpl: mockFetch,
+      });
+
+      expect(sentHeaders?.["X-Webhook-Signature-256"]).toBeUndefined();
+      expect(sentHeaders?.["x-realtimex-signature"]).toBeUndefined();
+    } finally {
+      if (prevSignals === undefined) {
+        delete process.env.SIGNALS_WEBHOOK_SECRET;
+      } else {
+        process.env.SIGNALS_WEBHOOK_SECRET = prevSignals;
+      }
+      if (prevRtx === undefined) {
+        delete process.env.REALTIMEX_WEBHOOK_SECRET;
+      } else {
+        process.env.REALTIMEX_WEBHOOK_SECRET = prevRtx;
+      }
+    }
+  });
+
+  it("signs outbound webhook when SIGNALS_WEBHOOK_SECRET is set", async () => {
+    const prevSignals = process.env.SIGNALS_WEBHOOK_SECRET;
+    process.env.SIGNALS_WEBHOOK_SECRET = "test-secret-key-12345";
+
+    try {
+      const template = createTemplate({
+        name: "Network Snowball",
+        templateType: "prospecting",
+        status: "active",
+      });
+
+      const parentRun = createWorkflowRun({
+        templateId: template.id,
+        workflowType: "search",
+        status: "completed",
+        trigger: "template",
+      });
+
+      let sentHeaders: Record<string, string> | undefined;
+      const mockFetch = (async (_url: string, init?: RequestInit) => {
+        sentHeaders = init?.headers as Record<string, string> | undefined;
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }) as unknown as typeof fetch;
+
+      await emitWorkflowCompletedEvent(parentRun.id, {
+        webhookUrl: "https://example.com/hook",
+        fetchImpl: mockFetch,
+      });
+
+      expect(sentHeaders?.["X-Webhook-Signature-256"]).toMatch(/^sha256=/);
+      expect(sentHeaders?.["x-realtimex-signature"]).toMatch(/^sha256=/);
+    } finally {
+      if (prevSignals === undefined) {
+        delete process.env.SIGNALS_WEBHOOK_SECRET;
+      } else {
+        process.env.SIGNALS_WEBHOOK_SECRET = prevSignals;
+      }
+    }
+  });
+
   it("resolves agentic router webhook URL from REALTIMEX_BASE_URL", async () => {
     const previousBaseUrl = process.env.REALTIMEX_BASE_URL;
     process.env.REALTIMEX_BASE_URL = "http://127.0.0.1:3101/cli";

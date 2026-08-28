@@ -354,12 +354,6 @@ export async function emitWorkflowCompletedEvent(
     options?.webhookUrl ??
     resolveOutboundWorkflowWebhookUrl(process.env, { agenticRouter: isAgenticRouter });
 
-  const targetSecret =
-    options?.secret ??
-    process.env.REALTIMEX_WEBHOOK_SECRET ??
-    process.env.SIGNALS_WEBHOOK_SECRET ??
-    "signals_secret_rtx_2026";
-
   let outboundDelivered = false;
   if (targetWebhookUrl) {
     try {
@@ -370,7 +364,7 @@ export async function emitWorkflowCompletedEvent(
       });
 
       const headers = buildSignedWebhookHeaders(rawBody, {
-        secret: targetSecret,
+        secret: options?.secret,
         eventType: "workflow.completed",
         source: "com.realtimex.signals",
       });
