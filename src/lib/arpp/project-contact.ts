@@ -157,6 +157,10 @@ export function projectContactToArpp(
   const orgIriPrefix = opts?.baseIriPrefix?.replace(/:contact$/, ":org") ?? "signals:org";
   const experience = buildExperience(contact, orgsById, visibility, orgIriPrefix);
   const sameAs = collectSameAs(contact, profiles);
+  const jobTitle =
+    visibility === "public"
+      ? experience.find((employment) => employment.timePeriod.current)?.role ?? null
+      : contact.currentEmployment?.title ?? contact.title;
 
   const doc: ArppPersonDocument = {
     $schema: "https://arpp.dev/schema/1.1/person.json",
@@ -181,7 +185,7 @@ export function projectContactToArpp(
       preferredName,
       biography: contact.profile.bio,
       disambiguatingDescription: contact.profile.headline,
-      jobTitle: contact.currentEmployment?.title ?? contact.title,
+      jobTitle,
       url: contact.website,
       ...(email ? { email } : {}),
       ...(contact.resolvedAvatarUrl

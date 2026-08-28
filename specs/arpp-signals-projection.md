@@ -119,7 +119,7 @@ Extensions live under `signals.*` so strict ARPP validators ignore them (forward
 | `identity.preferredName` | primary identity `displayName` if ≠ fullName | |
 | `identity.biography` | `contact.profile.bio` | |
 | `identity.disambiguatingDescription` | `contact.profile.headline` | Headline is short; ARPP allows longer disambiguator later |
-| `identity.jobTitle` | `contact.currentEmployment.title` | |
+| `identity.jobTitle` | Internal: `contact.currentEmployment.title`; public: first current employment remaining after the shared-scope filter | Prevents a local-only current role from leaking through the identity block |
 | `identity.url` | `contact.website` | |
 | `identity.image.url` | `contact.resolvedAvatarUrl` | Omit if null |
 | `identity.contact.timezone` | `contacts.metadata.profile.timezone` | Future — parse JSON metadata |

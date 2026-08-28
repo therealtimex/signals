@@ -233,6 +233,108 @@ describe("projectContactToArpp", () => {
     expect(doc.meta.visibility).toBe("public");
   });
 
+  it("derives public job title only from shared current employment", () => {
+    const privateOrg: Org = {
+      id: "org_private",
+      name: "Private Venture",
+      orgType: "company",
+      domain: null,
+      website: null,
+      description: null,
+      location: null,
+      avatarUrl: null,
+      industry: null,
+      companySize: null,
+      tags: "[]",
+      ownerContactId: null,
+      accountStage: null,
+      followedAt: null,
+      feedSeenAt: null,
+      enrichmentScore: 0,
+      scope: "local_only",
+      metadata: "{}",
+      source: null,
+      createdSource: null,
+      createdSourceDetail: null,
+      createdWorkflowRunId: null,
+      createdTemplateId: null,
+      createdAt: 2,
+      updatedAt: 2,
+    };
+    const sharedOrg: Org = {
+      ...privateOrg,
+      id: "org_shared",
+      name: "Shared Company",
+      domain: "shared.example",
+      website: "https://shared.example",
+      scope: "shared",
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    const contact = baseContact({
+      employments: [
+        {
+          id: "emp_private",
+          contactId: "cnt_dhh",
+          orgId: "org_private",
+          orgName: "Private Venture",
+          title: "Secret Strategist",
+          startedAt: 1_725_000_000,
+          endedAt: null,
+          isCurrent: true,
+          scope: "local_only",
+          source: "manual",
+          metadata: "{}",
+          createdAt: 2,
+          updatedAt: 2,
+        },
+        {
+          id: "emp_shared",
+          contactId: "cnt_dhh",
+          orgId: "org_shared",
+          orgName: "Shared Company",
+          title: "Public Advisor",
+          startedAt: 1_700_000_000,
+          endedAt: null,
+          isCurrent: true,
+          scope: "shared",
+          source: "manual",
+          metadata: "{}",
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      ],
+      currentEmployment: {
+        orgId: "org_private",
+        orgName: "Private Venture",
+        title: "Secret Strategist",
+      },
+      company: "Private Venture",
+      title: "Secret Strategist",
+    });
+
+    const doc = projectContactToArpp(
+      {
+        contact,
+        orgsById: new Map([
+          [privateOrg.id, privateOrg],
+          [sharedOrg.id, sharedOrg],
+        ]),
+      },
+      { visibility: "public" },
+    );
+
+    expect(doc.identity.jobTitle).toBe("Public Advisor");
+    expect(doc.experience).toHaveLength(1);
+    expect(doc.experience[0]).toMatchObject({
+      role: "Public Advisor",
+      organization: { name: "Shared Company" },
+      timePeriod: { current: true },
+    });
+    expect(JSON.stringify(doc)).not.toContain("Private Venture");
+    expect(JSON.stringify(doc)).not.toContain("Secret Strategist");
+  });
+
   it("includes verified email in public mode only when verified", () => {
     const withVerified = baseContact({
       channels: [
