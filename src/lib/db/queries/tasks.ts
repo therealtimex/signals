@@ -3,11 +3,13 @@ import { nanoid } from "nanoid";
 import { db } from "@/lib/db/client";
 import { tasks } from "@/lib/db/schema";
 import type { Task, NewTask } from "@/lib/db/types";
+import { logOrgActivity } from "@/lib/db/queries/org-activities";
 
 export function listTasks(opts?: {
   status?: string;
   priority?: string;
   assignee?: string;
+  relatedOrgId?: string;
 }): Task[] {
   const conditions: SQL[] = [];
 
@@ -20,6 +22,7 @@ export function listTasks(opts?: {
   if (opts?.assignee) {
     conditions.push(eq(tasks.assignee, opts.assignee as Task["assignee"]));
   }
+  if (opts?.relatedOrgId) conditions.push(eq(tasks.relatedOrgId, opts.relatedOrgId));
 
   const query = db.select().from(tasks);
 
@@ -46,7 +49,19 @@ export function getTasksByContact(contactId: string): Task[] {
 export function createTask(data: Omit<NewTask, "id">): Task {
   const id = nanoid();
   db.insert(tasks).values({ ...data, id }).run();
-  return getTaskById(id)!;
+  const task = getTaskById(id)!;
+  if (task.relatedOrgId) {
+    logOrgActivity({
+      orgId: task.relatedOrgId,
+      activityType: "task_created",
+      title: task.title,
+      summary: task.description,
+      source: task.assignee === "agent" ? "agent:create_task" : "manual:create_task",
+      dedupeKey: `task:${task.id}`,
+      metadata: { taskId: task.id },
+    });
+  }
+  return task;
 }
 
 export function updateTask(id: string, data: Partial<NewTask>): Task | undefined {

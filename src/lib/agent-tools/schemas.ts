@@ -230,6 +230,7 @@ export const createTaskSchema = z.object({
   priority: z.enum(["low", "medium", "high", "urgent"]).optional(),
   dueDate: z.number().int().optional(),
   relatedContactId: z.string().optional(),
+  relatedOrgId: z.string().optional(),
 });
 
 export const listWorkflowTemplatesSchema = z.object({

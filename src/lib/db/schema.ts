@@ -11,6 +11,26 @@ import {
   RELATIONSHIP_GOAL_STATUS_ENUM,
 } from "../relationship-goals";
 
+export const COMPANY_SIZE_ENUM = [
+  "1-10",
+  "11-50",
+  "51-200",
+  "201-500",
+  "501-1000",
+  "1001-5000",
+  "5001-10000",
+  "10001+",
+] as const;
+
+export const ACCOUNT_STAGE_ENUM = [
+  "prospect",
+  "engaged",
+  "qualified",
+  "opportunity",
+  "customer",
+  "advocate",
+] as const;
+
 // Helper for default timestamps (unix epoch seconds)
 const timestamps = {
   createdAt: integer("created_at")
@@ -548,11 +568,12 @@ export const tasks = sqliteTable("tasks", {
     .notNull()
     .default("user"),
   relatedContactId: text("related_contact_id").references(() => contacts.id),
+  relatedOrgId: text("related_org_id").references(() => orgs.id, { onDelete: "set null" }),
   relatedTemplateId: text("related_template_id").references(() => workflowTemplates.id),
   dueAt: integer("due_at"),
   completedAt: integer("completed_at"),
   ...timestamps,
-});
+}, (table) => [index("idx_tasks_related_org").on(table.relatedOrgId)]);
 
 // --- Sync Cursors (pagination state for platform imports) ---
 
@@ -865,6 +886,15 @@ export const orgs = sqliteTable("orgs", {
   description: text("description"),
   location: text("location"),
   avatarUrl: text("avatar_url"),
+  industry: text("industry"),
+  companySize: text("company_size", { enum: COMPANY_SIZE_ENUM }),
+  tags: text("tags").default("[]"),
+  ownerContactId: text("owner_contact_id").references(() => contacts.id, {
+    onDelete: "set null",
+  }),
+  accountStage: text("account_stage", { enum: ACCOUNT_STAGE_ENUM }),
+  followedAt: integer("followed_at"),
+  feedSeenAt: integer("feed_seen_at"),
   enrichmentScore: integer("enrichment_score").notNull().default(0),
   scope: text("scope", { enum: ["shared", "local_only"] })
     .notNull()
@@ -884,6 +914,114 @@ export const orgs = sqliteTable("orgs", {
   index("idx_orgs_created_source").on(table.createdSource, table.createdSourceDetail),
   index("idx_orgs_created_run").on(table.createdWorkflowRunId),
   index("idx_orgs_created_template").on(table.createdTemplateId),
+  index("idx_orgs_account_stage").on(table.accountStage),
+  index("idx_orgs_owner").on(table.ownerContactId),
+  index("idx_orgs_followed").on(table.followedAt),
+]);
+
+// --- Company intelligence ---
+
+export const orgDomains = sqliteTable("org_domains", {
+  id: text("id").primaryKey(),
+  orgId: text("org_id")
+    .notNull()
+    .references(() => orgs.id, { onDelete: "cascade" }),
+  domain: text("domain").notNull(),
+  kind: text("kind", { enum: ["primary", "alias"] }).notNull().default("alias"),
+  source: text("source").notNull(),
+  mxStatus: text("mx_status", { enum: ["ok", "none", "error", "unknown"] })
+    .notNull()
+    .default("unknown"),
+  catchAll: text("catch_all", { enum: ["yes", "no", "unknown"] })
+    .notNull()
+    .default("unknown"),
+  mailCheckedAt: integer("mail_checked_at"),
+  mailEvidence: text("mail_evidence").default("{}"),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex("idx_org_domains_domain").on(table.domain),
+  index("idx_org_domains_org").on(table.orgId),
+]);
+
+export const orgEmailPatterns = sqliteTable("org_email_patterns", {
+  id: text("id").primaryKey(),
+  orgId: text("org_id")
+    .notNull()
+    .references(() => orgs.id, { onDelete: "cascade" }),
+  pattern: text("pattern").notNull(),
+  rank: integer("rank").notNull(),
+  confidence: text("confidence", { enum: ["high", "medium", "low"] }).notNull(),
+  score: real("score").notNull(),
+  matchCount: integer("match_count").notNull().default(0),
+  sampleCount: integer("sample_count").notNull().default(0),
+  evidence: text("evidence").default("[]"),
+  isSelected: integer("is_selected", { mode: "boolean" }).notNull().default(false),
+  source: text("source").notNull(),
+  evaluatedAt: integer("evaluated_at").notNull(),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex("idx_org_email_patterns_org_pattern").on(table.orgId, table.pattern),
+  index("idx_org_email_patterns_org_rank").on(table.orgId, table.rank),
+]);
+
+export const contactEmailCandidates = sqliteTable("contact_email_candidates", {
+  id: text("id").primaryKey(),
+  contactId: text("contact_id")
+    .notNull()
+    .references(() => contacts.id, { onDelete: "cascade" }),
+  orgId: text("org_id")
+    .notNull()
+    .references(() => orgs.id, { onDelete: "cascade" }),
+  address: text("address").notNull(),
+  addressNormalized: text("address_normalized").notNull(),
+  pattern: text("pattern"),
+  status: text("status", { enum: ["predicted", "uncertain", "verified", "invalid"] })
+    .notNull()
+    .default("predicted"),
+  confidence: text("confidence", { enum: ["high", "medium", "low"] }).notNull(),
+  evidence: text("evidence").default("{}"),
+  source: text("source").notNull(),
+  verificationMethod: text("verification_method"),
+  verifiedAt: integer("verified_at"),
+  checkedAt: integer("checked_at"),
+  probeAttempts: integer("probe_attempts").notNull().default(0),
+  promotedChannelId: text("promoted_channel_id"),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex("idx_email_candidates_contact_address").on(
+    table.contactId,
+    table.addressNormalized,
+  ),
+  index("idx_email_candidates_org_status").on(table.orgId, table.status),
+]);
+
+export const orgActivities = sqliteTable("org_activities", {
+  id: text("id").primaryKey(),
+  orgId: text("org_id")
+    .notNull()
+    .references(() => orgs.id, { onDelete: "cascade" }),
+  contactId: text("contact_id").references(() => contacts.id, { onDelete: "set null" }),
+  activityType: text("activity_type").notNull(),
+  title: text("title").notNull(),
+  summary: text("summary"),
+  whyItMatters: text("why_it_matters"),
+  recommendedAction: text("recommended_action").default("{}"),
+  url: text("url"),
+  occurredAt: integer("occurred_at").notNull(),
+  actor: text("actor", { enum: ["user", "agent", "system", "sync"] }).notNull(),
+  source: text("source").notNull(),
+  workflowRunId: text("workflow_run_id"),
+  dedupeKey: text("dedupe_key").notNull(),
+  scope: text("scope", { enum: ["shared", "local_only"] })
+    .notNull()
+    .default("shared"),
+  metadata: text("metadata").default("{}"),
+  createdAt: integer("created_at")
+    .notNull()
+    .default(sql`(unixepoch())`),
+}, (table) => [
+  uniqueIndex("idx_org_activities_dedupe").on(table.dedupeKey),
+  index("idx_org_activities_org_time").on(table.orgId, table.occurredAt),
 ]);
 
 // --- Contact Employments (career history — Phase 2) ---

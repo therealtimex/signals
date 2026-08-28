@@ -141,6 +141,13 @@ flowchart TD
 4. Prefer `enrich_contact` over `update_contact` when filling missing fields
 5. Reply with contact IDs, fields changed, enrichment score, suggested follow-ups
 
+### Company profiles
+
+For company work, query with `query_orgs` or `get_org` before creating anything. Use `create_org`
+for a new company and `update_org` for cited edits or enrichment; pass field evidence URLs when
+research supplied the value. Keep verified social profiles in `org_identities` via
+`upsert_org_identity`. Do not expose raw provenance tags as user-facing descriptions.
+
 ## Contact avatars
 
 Signals resolves avatars in this order:

@@ -37,7 +37,7 @@ const navItems = [
   { title: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { title: "Explore", href: "/dashboard/explore", icon: Telescope },
   { title: "Contacts", href: "/dashboard/contacts", icon: Users },
-  { title: "Organizations", href: "/dashboard/organizations", icon: Building2 },
+  { title: "Companies", href: "/dashboard/organizations", icon: Building2 },
   { title: "Content", href: "/dashboard/content", icon: FileText },
   { title: "Launches", href: "/dashboard/launches", icon: Rocket },
   { title: "Automation", href: "/dashboard/workflows", icon: Zap },

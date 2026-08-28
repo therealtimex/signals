@@ -1,5 +1,11 @@
+import { Suspense } from "react";
 import { notFound } from "next/navigation";
-import { getOrgById, listOrgLinkedContacts } from "@/lib/db/queries/orgs";
+import { getOrgDTO } from "@/lib/db/queries/orgs";
+import { getContactById, getOwnerContactId } from "@/lib/db/queries/contacts";
+import { getOrgRelationshipSummary } from "@/lib/db/queries/org-relationships";
+import { listOrgPeople } from "@/lib/db/queries/org-people";
+import { getOrgEmailIntelligence } from "@/lib/contacts/email-patterns/intelligence";
+import { listOrgTimeline } from "@/lib/db/queries/org-activities";
 import { OrganizationDetailClient } from "./organization-detail-client";
 
 export default async function OrganizationDetailPage({
@@ -8,11 +14,27 @@ export default async function OrganizationDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const org = getOrgById(id);
+  const org = getOrgDTO(id);
   if (!org) {
     notFound();
   }
 
-  const contacts = listOrgLinkedContacts(id);
-  return <OrganizationDetailClient org={org} contacts={contacts} />;
+  const people = listOrgPeople(id, { employment: "all", pageSize: 100 });
+  const relationships = getOrgRelationshipSummary(id);
+  const emailIntelligence = getOrgEmailIntelligence(id);
+  const timeline = listOrgTimeline(id, { pageSize: 100 });
+  const ownerContactId = getOwnerContactId();
+  const selfContact = ownerContactId ? getContactById(ownerContactId) : null;
+  return (
+    <Suspense fallback={<div className="min-h-96 animate-pulse rounded-lg bg-muted/40" />}>
+      <OrganizationDetailClient
+        org={org}
+        people={people.data}
+        relationships={relationships}
+        emailIntelligence={emailIntelligence}
+        timeline={timeline}
+        selfContact={selfContact ? { id: selfContact.id, name: selfContact.name } : null}
+      />
+    </Suspense>
+  );
 }

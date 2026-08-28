@@ -12,6 +12,7 @@ import {
   PersonaScopeError,
   PersonaSynthesisError,
 } from "@/lib/db/queries/persona-errors";
+import { OrgDomainConflictError, OrgValidationError } from "@/lib/orgs/errors";
 
 export type ApiErrorBody = {
   error: string;
@@ -28,6 +29,24 @@ export function toErrorResponse(error: unknown): NextResponse<ApiErrorBody> {
         details: error.flatten(),
       },
       { status: 400 },
+    );
+  }
+
+  if (error instanceof OrgValidationError) {
+    return NextResponse.json(
+      { error: error.message, code: error.code, details: error.details },
+      { status: 400 },
+    );
+  }
+
+  if (error instanceof OrgDomainConflictError) {
+    return NextResponse.json(
+      {
+        error: error.message,
+        code: error.code,
+        details: { domain: error.domain, orgId: error.orgId },
+      },
+      { status: 409 },
     );
   }
 

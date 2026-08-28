@@ -7,6 +7,8 @@ export type SignalsConfig = {
   anthropicApiKey?: string;
   authMethod?: "api_key";
   personaGenerationMode?: "structured_workflow" | "terminal_agent";
+  emailSmtpProbeEnabled?: boolean;
+  allowPredictedEmailInAutomation?: boolean;
   [key: string]: unknown;
 };
 

@@ -64,6 +64,7 @@ import { validateIdentityAvatarUrl } from "@/lib/contact-avatar-client";
 import { validateWorkflowRunAndTemplateIds } from "@/lib/db/creation-provenance-input";
 import { CreatedSourceDetailFilterError } from "@/lib/db/creation-sources";
 import { AgentToolError } from "@/lib/agent-tools/types";
+import { listContactEmailCandidates } from "@/lib/contacts/email-verification/candidates";
 import {
   recordRunCohort,
   resolveRunCohort,
@@ -183,6 +184,7 @@ export async function handleQueryContacts(input: z.infer<typeof queryContactsSch
         identityCount: c.identities.length,
         identities: c.identities.map(serializeContactIdentityRef),
         resolvedAvatarUrl: c.resolvedAvatarUrl,
+        emailCandidates: listContactEmailCandidates(c.id),
         ...serializeContactBirthFields(c),
       })),
     };
@@ -245,6 +247,7 @@ export async function handleGetContact(input: z.infer<typeof getContactSchema>) 
     enrichmentScore: contact.enrichmentScore,
     tags: contact.tags,
     identities: contact.identities.map(serializeContactIdentity),
+    emailCandidates: listContactEmailCandidates(contact.id),
     ...serializeContactBirthFields(contact),
   };
 }
@@ -883,6 +886,7 @@ export async function handleCreateTask(input: z.infer<typeof createTaskSchema>) 
     priority: input.priority ?? "medium",
     dueAt: input.dueDate ?? null,
     relatedContactId: input.relatedContactId ?? null,
+    relatedOrgId: input.relatedOrgId ?? null,
     assignee: "user",
   });
 

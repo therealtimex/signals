@@ -18,9 +18,9 @@ export default async function OrganizationsPage({
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-heading-1">Organizations</h1>
+        <h1 className="text-heading-1">Companies</h1>
         <p className="text-muted-foreground mt-1">
-          Browse companies and teams linked to your contacts.
+          Browse companies, funds, and teams linked to your people.
         </p>
       </div>
       <OrganizationListClient

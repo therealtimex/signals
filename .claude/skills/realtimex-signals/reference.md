@@ -38,10 +38,36 @@ Invoke body: `{ "tool": "<name>", "input": { ... } }`
 | `complete_simulation_run` | Finish run and project `variants.predicted_*` |
 | `get_persona_job` | Inspect a PersonaAgentJob and recover matching evidence when its brief is unavailable |
 | `complete_persona_job` | Submit the JSON synthesis or failure for the current stateless persona job |
+| `query_orgs` | Search company nodes |
+| `get_org` | Read a company by `orgId` or normalized `domain` |
+| `create_org` | Create a company with agent provenance |
+| `update_org` | Update company profile fields and attach cited field evidence |
+| `get_org_relationships` | Relationship strength, coverage, and introduction paths |
+| `list_org_contacts` | Company people with employment, strength, and email status |
+| `link_contact_to_org` / `unlink_contact_from_org` | Maintain structured employment links |
+| `get_org_email_intelligence` | Domains, patterns, and predicted-email counts |
+| `infer_org_email_pattern` / `set_org_email_pattern` | Learn or override the business-email rule |
+| `generate_org_email_candidates` | Generate non-sendable predicted addresses |
+| `list_email_candidates` / `update_email_candidate` | Inspect and explicitly verify predictions |
+| `add_org_domain_alias` | Add an alternate company mail domain |
+| `list_org_activity` / `log_org_activity` | Read or write the unified company feed |
+| `follow_org` | Toggle company signal tracking |
+| `query_org_identities` | List company social identities |
+| `upsert_org_identity` | Create or update a verified company social identity |
 
 For an automated PersonaAgentJob, follow the brief exactly: do not call
 `get_persona_evidence` or `upsert_persona`. Submit the final JSON through
 `complete_persona_job`; one validation failure permits one corrected retry.
+
+## Company intelligence
+
+Use `get_org` before researching a company. Write only cited facts with `update_org`, passing
+`workflowRunId` and `fieldSources.<field>.evidenceUrl` during enrichment. Use
+`upsert_org_identity` only for profiles you verified belong to the company. Company domains are
+normalized to lowercase hostnames such as `acme.com`; invalid local or IP hosts are rejected.
+Use `link_contact_to_org`, not `upsert_edge`, for employment. Predicted email candidates are
+never contact channels and must not be used for outreach until explicit verification promotes
+them. Catch-all and inconclusive probe results remain uncertain.
 
 ## Wind Tunnel simulation flow
 

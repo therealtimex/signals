@@ -25,6 +25,25 @@ describe("agent-tools registry", () => {
     expect(names).toContain("enrich_contact");
     expect(names).toContain("upsert_contact_identity");
     expect(names).toContain("query_org_identities");
+    expect(names).toContain("get_org");
+    expect(names).toContain("create_org");
+    expect(names).toContain("update_org");
+    expect(names).toEqual(expect.arrayContaining([
+      "get_org_relationships",
+      "list_org_contacts",
+      "link_contact_to_org",
+      "unlink_contact_from_org",
+      "get_org_email_intelligence",
+      "infer_org_email_pattern",
+      "set_org_email_pattern",
+      "generate_org_email_candidates",
+      "list_email_candidates",
+      "update_email_candidate",
+      "add_org_domain_alias",
+      "log_org_activity",
+      "list_org_activity",
+      "follow_org",
+    ]));
     expect(names).toContain("upsert_org_identity");
     expect(names).toContain("list_mail_accounts");
 

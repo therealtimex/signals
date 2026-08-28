@@ -1,4 +1,10 @@
 import { z } from "zod";
+import {
+  accountStageSchema,
+  companySizeSchema,
+  orgTypeSchema,
+  orgUpdateFieldsSchema,
+} from "@/lib/orgs/schemas";
 
 const graphNodeType = z.enum([
   "contact",
@@ -21,7 +27,145 @@ export const queryOrgsSchema = z.object({
   page: z.number().int().positive().optional(),
   pageSize: z.number().int().positive().max(100).optional(),
   includeLocalOnly: z.boolean().optional(),
+  stage: accountStageSchema.optional(),
+  owner: z.string().min(1).optional(),
+  followed: z.boolean().optional(),
+  tag: z.string().trim().min(1).optional(),
 });
+
+export const getOrgSchema = z
+  .object({
+    orgId: z.string().min(1).optional(),
+    domain: z.string().min(1).optional(),
+  })
+  .refine((input) => Boolean(input.orgId || input.domain), {
+    message: "orgId or domain is required",
+  });
+
+export const createOrgSchema = z.object({
+  name: z.string().trim().min(1).max(240),
+  orgType: orgTypeSchema.optional(),
+  domain: z.string().trim().max(255).nullable().optional(),
+  website: z.string().trim().max(2_048).nullable().optional(),
+  description: z.string().trim().max(10_000).nullable().optional(),
+  location: z.string().trim().max(500).nullable().optional(),
+  avatarUrl: z.string().url().nullable().optional(),
+  industry: z.string().trim().max(500).nullable().optional(),
+  companySize: companySizeSchema.nullable().optional(),
+  tags: z.array(z.string().trim().min(1).max(100)).max(50).optional(),
+  ownerContactId: z.string().min(1).nullable().optional(),
+  accountStage: accountStageSchema.nullable().optional(),
+  workflowRunId: z.string().min(1).optional(),
+  templateId: z.string().min(1).optional(),
+});
+
+export const updateOrgSchema = orgUpdateFieldsSchema.extend({
+  orgId: z.string().min(1),
+  workflowRunId: z.string().min(1).optional(),
+  fieldSources: z
+    .record(z.object({ evidenceUrl: z.string().url().optional() }))
+    .optional(),
+});
+
+export const getOrgRelationshipsSchema = z.object({
+  orgId: z.string().min(1),
+  includeLocalOnly: z.boolean().optional(),
+});
+
+export const listOrgContactsSchema = z.object({
+  orgId: z.string().min(1),
+  q: z.string().optional(),
+  employment: z.enum(["current", "former", "all"]).optional(),
+  band: z.enum(["unknown", "weak", "moderate", "strong"]).optional(),
+  sort: z.enum(["name", "strength", "lastInteraction", "title"]).optional(),
+  dir: z.enum(["asc", "desc"]).optional(),
+  page: z.number().int().positive().optional(),
+  pageSize: z.number().int().positive().max(100).optional(),
+  includeLocalOnly: z.boolean().optional(),
+});
+
+export const linkContactToOrgSchema = z.object({
+  orgId: z.string().min(1),
+  contactId: z.string().min(1),
+  title: z.string().trim().max(500).nullable().optional(),
+  isCurrent: z.boolean().optional(),
+  startedAt: z.number().int().nullable().optional(),
+});
+
+export const unlinkContactFromOrgSchema = z.object({
+  orgId: z.string().min(1),
+  contactId: z.string().min(1),
+  mode: z.enum(["remove", "mark_former"]).optional(),
+});
+
+export const getOrgEmailIntelligenceSchema = z.object({ orgId: z.string().min(1) });
+export const inferOrgEmailPatternSchema = z.object({
+  orgId: z.string().min(1),
+  checkMail: z.boolean().optional(),
+});
+export const setOrgEmailPatternSchema = z.object({
+  orgId: z.string().min(1),
+  pattern: z.string().optional(),
+  evidenceUrl: z.string().url().optional(),
+  clear: z.boolean().optional(),
+}).refine((input) => input.clear || Boolean(input.pattern), {
+  message: "pattern is required unless clear is true",
+  path: ["pattern"],
+});
+export const generateOrgEmailCandidatesSchema = z.object({
+  orgId: z.string().min(1),
+  contactIds: z.array(z.string().min(1)).optional(),
+});
+const emailCandidateStatusSchema = z.enum(["predicted", "uncertain", "verified", "invalid"]);
+export const listEmailCandidatesSchema = z.object({
+  orgId: z.string().min(1).optional(),
+  contactId: z.string().min(1).optional(),
+  status: emailCandidateStatusSchema.optional(),
+}).refine((input) => Boolean(input.orgId || input.contactId), {
+  message: "orgId or contactId is required",
+});
+export const updateEmailCandidateSchema = z.object({
+  candidateId: z.string().min(1),
+  action: z.enum(["verify", "invalidate", "mark_uncertain", "correct", "probe"]),
+  address: z.string().email().optional(),
+  evidenceUrl: z.string().url().optional(),
+  note: z.string().max(2_000).optional(),
+});
+export const addOrgDomainAliasSchema = z.object({
+  orgId: z.string().min(1),
+  domain: z.string().trim().min(1).max(255),
+});
+
+export const logOrgActivitySchema = z.object({
+  orgId: z.string().min(1),
+  contactId: z.string().min(1).nullable().optional(),
+  activityType: z.enum([
+    "funding", "hiring", "leadership_change", "product_launch", "news", "content",
+    "engagement", "note", "contact_linked", "contact_unlinked", "profile_updated",
+    "profile_enriched", "email_pattern_inferred", "email_verified", "followed",
+    "unfollowed", "workflow_started", "task_created",
+  ]),
+  title: z.string().trim().min(1).max(500),
+  summary: z.string().max(20_000).nullable().optional(),
+  whyItMatters: z.string().max(4_000).nullable().optional(),
+  recommendedAction: z.record(z.unknown()).optional(),
+  url: z.string().url().nullable().optional(),
+  occurredAt: z.number().int().optional(),
+  workflowRunId: z.string().min(1).nullable().optional(),
+  dedupeKey: z.string().min(1).optional(),
+  scope: z.enum(["shared", "local_only"]).optional(),
+  metadata: z.record(z.unknown()).optional(),
+});
+export const listOrgActivitySchema = z.object({
+  orgId: z.string().min(1),
+  category: z.enum(["signal", "workspace", "all"]).optional(),
+  types: z.array(z.string().min(1)).optional(),
+  since: z.number().int().optional(),
+  page: z.number().int().positive().optional(),
+  pageSize: z.number().int().positive().max(100).optional(),
+  includeLocalOnly: z.boolean().optional(),
+});
+export const followOrgSchema = z.object({ orgId: z.string().min(1), follow: z.boolean() });
 
 export const queryGraphSchema = z.object({
   nodeType: graphNodeType,

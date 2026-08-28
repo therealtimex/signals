@@ -132,6 +132,16 @@ export async function register() {
     }
 
     try {
+      const { backfillOrgDomains } = await import("@/lib/db/backfills/org-domains");
+      const domainBackfill = backfillOrgDomains();
+      if (domainBackfill.inserted > 0) {
+        console.log("[instrumentation] Company domain backfill applied:", domainBackfill);
+      }
+    } catch (e) {
+      console.warn("[instrumentation] Company domain backfill skipped:", (e as Error).message);
+    }
+
+    try {
       const { runGraphIntegrityJob } = await import("@/lib/db/graph-integrity");
       const integrity = runGraphIntegrityJob({ repair: true });
       if (integrity.repairedCount > 0) {

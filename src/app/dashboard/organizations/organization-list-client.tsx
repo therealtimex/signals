@@ -92,10 +92,10 @@ function OrganizationListInner({
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Building2 className="h-5 w-5" />
-            No organizations yet
+            No companies yet
           </CardTitle>
           <CardDescription>
-            Add companies and teams to link contacts through the graph.
+            Add a company to connect people, relationships, and signals.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -110,7 +110,7 @@ function OrganizationListInner({
       <div className="flex items-center gap-4">
         <form onSubmit={handleSearchSubmit} className="flex-1">
           <Input
-            placeholder="Search organizations..."
+            placeholder="Search companies..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="max-w-sm"
@@ -123,7 +123,7 @@ function OrganizationListInner({
         <Card>
           <CardContent className="pt-6">
             <p className="text-sm text-muted-foreground text-center">
-              No organizations match your search.
+              No companies match your search.
             </p>
           </CardContent>
         </Card>
