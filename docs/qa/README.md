@@ -54,10 +54,11 @@ node scripts/qa/provision-signals-qa-local-app.mjs \
 
 The command uses the supported `realtimex-pp-cli` Local Apps API, creates
 `Signals issue-356 QA`, starts it with `npm run dev` in the supplied worktree, and records the
-generated app id in `/private/tmp/signals-qa-local-app-issue-356.json`. The app and its data are
-tagged and isolated from the canonical Signals record. It targets the Dev API at `3101` by
-default and does not inherit an ambient production `REALTIMEX_BASE_URL`; use `--base-url` only for
-a deliberate alternate Dev runtime.
+generated app id in the platform temp directory (`/private/tmp` on macOS, `/tmp` on Linux) as
+`signals-qa-local-app-issue-356.json`. The app and its data are tagged and isolated from the
+canonical Signals record. It targets the Dev API at `3101` by default and does not inherit an
+ambient production `REALTIMEX_BASE_URL`; use `--base-url` only for a deliberate alternate Dev
+runtime.
 
 After evidence capture, teardown is mandatory:
 
@@ -71,7 +72,8 @@ tags. The verifier reads the authoritative dev SQLite record and fails if the ca
 an ephemeral data directory/worktree command or if the issue QA record still exists.
 
 `scripts/qa/provision-signals-local-app.mjs` is incident recovery for the canonical record, not a
-QA provisioner. It requires the explicit `--restore-canonical` guard.
+QA provisioner. It requires the explicit `--restore-canonical` guard and defaults to the dev
+database; a different database must be supplied explicitly with `--db` or `RTX_DB_PATH`.
 
 ## CI data directory
 

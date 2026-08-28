@@ -8,6 +8,9 @@
  *   node scripts/qa/provision-signals-local-app.mjs --restore-canonical \
  *     [--db /path/to/realtimex.db]
  *
+ * Without --db or RTX_DB_PATH, recovery targets only the dev database under
+ * desktop-user-data/dev. Non-dev automatic storage roots are rejected.
+ *
  * Environment:
  *   RTX_DB_PATH          Override database path
  *   REALTIMEX_USER_DATA  Base user data dir (default: ~/.realtimex.ai/desktop-user-data)
@@ -130,10 +133,14 @@ function parseDbArg() {
     process.env.REALTIMEX_USER_DATA?.trim() ||
     join(homedir(), ".realtimex.ai", "desktop-user-data");
   const userSegment = process.env.REALTIMEX_USER?.trim() || "trungle_rta_vn";
-  const storageRoot =
-    process.env.REALTIMEX_STORAGE_ROOT?.trim() ||
-    (process.env.REALTIMEX_RUNTIME === "dev" ? "dev" : "app");
-  return join(userData, storageRoot, "users", userSegment, "storage", "realtimex.db");
+  const storageRoot = process.env.REALTIMEX_STORAGE_ROOT?.trim();
+  const runtime = process.env.REALTIMEX_RUNTIME?.trim();
+  if ((storageRoot && storageRoot !== "dev") || (runtime && runtime !== "dev")) {
+    throw new Error(
+      "Canonical Signals recovery defaults to dev storage. Pass --db or RTX_DB_PATH to target another database explicitly.",
+    );
+  }
+  return join(userData, "dev", "users", userSegment, "storage", "realtimex.db");
 }
 
 function sqlQuote(value) {

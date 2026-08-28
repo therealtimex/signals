@@ -135,7 +135,9 @@ REALTIMEX_RUNTIME=dev node scripts/qa/verify-signals-local-app-hygiene.mjs --iss
 
 The canonical dev app id (`47e45f71-3279-42f5-8e95-731de01b6eae`) is reserved for manual daily
 development. `scripts/qa/provision-signals-local-app.mjs --restore-canonical` is an incident
-recovery command if that record was corrupted; it is not a QA setup step.
+recovery command if that record was corrupted; it is not a QA setup step. Without `--db` or
+`RTX_DB_PATH`, it resolves only the database under `desktop-user-data/dev`; targeting any other
+database requires an explicit path.
 
 **Agent Workflow Run QA** (issue #153) uses the same `desktop.runtime-sessions` bridge as publish.
 If `POST /api/workflows/templates/{id}/run` returns `503` with a plain `Not Found` body, the

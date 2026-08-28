@@ -16,6 +16,7 @@ import {
   qaAppDisplayName,
   qaAppTags,
   qaReceiptPath,
+  qaTemporaryRoot,
   runRealtimeXCli,
 } from "./signals-qa-local-app.mjs";
 
@@ -23,10 +24,11 @@ function usage() {
   console.log(`Usage:
   node scripts/qa/provision-signals-qa-local-app.mjs \\
     --issue <number> --worktree <absolute-path> [--loop-id <id>] \\
-    [--data-dir /private/tmp/signals-qa-...] [--base-url http://127.0.0.1:3101/cli] \\
+    [--data-dir <platform-temp>/signals-qa-...] [--base-url http://127.0.0.1:3101/cli] \\
     [--no-start]
 
-Creates a new issue-scoped QA Local App. It never updates the canonical Signals app.`);
+Creates a new issue-scoped QA Local App. It never updates the canonical Signals app.
+The platform temp directory on this host is ${qaTemporaryRoot()}.`);
 }
 
 try {

@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, dirname, join, resolve, sep } from "node:path";
+import { basename, delimiter, dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const CANONICAL_SIGNALS_APP_ID = "47e45f71-3279-42f5-8e95-731de01b6eae";
@@ -76,6 +76,18 @@ export function assertSafeQaDataDir(dataDir) {
     );
   }
   return resolved;
+}
+
+export function assertIssueBoundQaDataDir(dataDir, issueId) {
+  const safeDataDir = assertSafeQaDataDir(dataDir);
+  const normalizedIssueId = normalizeIssueId(issueId);
+  const issueMarker = new RegExp(`(?:^|-)issue-${normalizedIssueId}(?:-|$)`);
+  if (!issueMarker.test(basename(safeDataDir))) {
+    throw new Error(
+      `Receipt-less QA data directory must include issue-${normalizedIssueId}; received ${safeDataDir}.`,
+    );
+  }
+  return safeDataDir;
 }
 
 export function assertSignalsIssueWorktree(worktree) {

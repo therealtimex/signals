@@ -238,9 +238,10 @@ Use this workflow when validating Signals changes against the RealTimeX desktop 
    ```
 
    The provisioner creates and starts `Signals issue-<N> QA`, uses a launcher that runs `npm run
-   dev` in the issue worktree, pins `SIGNALS_DATA_DIR` under `/private/tmp/signals-qa-*`, tags the
-   record `signals,qa,ephemeral,issue-<N>`, and writes a receipt containing the exact app id. It
-   refuses `main`, the canonical app id, an unsafe data path, or a pre-existing issue app.
+   dev` in the issue worktree, pins `SIGNALS_DATA_DIR` under the platform temp directory
+   (`/private/tmp/signals-qa-*` on macOS, `/tmp/signals-qa-*` on Linux), tags the record
+   `signals,qa,ephemeral,issue-<N>`, and writes a receipt containing the exact app id. It refuses
+   `main`, the canonical app id, an unsafe data path, or a pre-existing issue app.
 
 3. If RealTimeX prompts for permissions, grant only those required by the test. Signals listens on
    the port RealTimeX assigns it — commonly `3010`, while a

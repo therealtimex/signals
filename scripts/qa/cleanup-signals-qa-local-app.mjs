@@ -3,6 +3,7 @@ import { existsSync, readFileSync, rmSync } from "node:fs";
 import {
   DEFAULT_DEV_CLI_BASE_URL,
   appsFromCliPayload,
+  assertIssueBoundQaDataDir,
   assertSafeQaApp,
   assertSafeQaDataDir,
   defaultQaDataDir,
@@ -10,16 +11,19 @@ import {
   normalizeIssueId,
   parseFlagArgs,
   qaReceiptPath,
+  qaTemporaryRoot,
   runRealtimeXCli,
 } from "./signals-qa-local-app.mjs";
 
 function usage() {
   console.log(`Usage:
   node scripts/qa/cleanup-signals-qa-local-app.mjs --issue <number> \\
-    [--app-id <uuid>] [--data-dir /private/tmp/signals-qa-...] \\
+    [--app-id <uuid>] [--data-dir <platform-temp>/signals-qa-...] \\
     [--base-url http://127.0.0.1:3101/cli] [--keep-data]
 
-Stops and deletes only a safety-tagged issue QA app. The canonical Signals app is rejected.`);
+Stops and deletes only a safety-tagged issue QA app. The canonical Signals app is rejected.
+The platform temp directory on this host is ${qaTemporaryRoot()}.
+When a receipt exists, app, data, and base URL overrides must match it.`);
 }
 
 try {
@@ -34,15 +38,40 @@ try {
   const receipt = existsSync(receiptPath)
     ? JSON.parse(readFileSync(receiptPath, "utf8"))
     : null;
-  if (receipt && (receipt.kind !== "signals-qa-local-app" || receipt.issueId !== issueId)) {
+  if (
+    receipt &&
+    (receipt.kind !== "signals-qa-local-app" ||
+      receipt.issueId !== issueId ||
+      !receipt.appId ||
+      !receipt.dataDir ||
+      !receipt.baseUrl)
+  ) {
     throw new Error(`Invalid QA receipt at ${receiptPath}.`);
   }
 
-  const requestedAppId = flags.get("app-id") || receipt?.appId || "";
-  const dataDir = assertSafeQaDataDir(
-    flags.get("data-dir") || receipt?.dataDir || defaultQaDataDir(issueId),
-  );
-  const baseUrl = flags.get("base-url") || receipt?.baseUrl || DEFAULT_DEV_CLI_BASE_URL;
+  const appIdOverride = flags.get("app-id");
+  const dataDirOverride = flags.get("data-dir");
+  const baseUrlOverride = flags.get("base-url");
+  const receiptDataDir = receipt ? assertSafeQaDataDir(receipt.dataDir) : "";
+  if (receipt && appIdOverride && appIdOverride !== receipt.appId) {
+    throw new Error(`--app-id conflicts with the receipt at ${receiptPath}.`);
+  }
+  if (
+    receipt &&
+    dataDirOverride &&
+    assertSafeQaDataDir(dataDirOverride) !== receiptDataDir
+  ) {
+    throw new Error(`--data-dir conflicts with the receipt at ${receiptPath}.`);
+  }
+  if (receipt && baseUrlOverride && baseUrlOverride !== receipt.baseUrl) {
+    throw new Error(`--base-url conflicts with the receipt at ${receiptPath}.`);
+  }
+
+  const requestedAppId = receipt?.appId || appIdOverride;
+  const dataDir = receipt
+    ? receiptDataDir
+    : assertIssueBoundQaDataDir(dataDirOverride || defaultQaDataDir(issueId), issueId);
+  const baseUrl = receipt?.baseUrl || baseUrlOverride || DEFAULT_DEV_CLI_BASE_URL;
   const cliOptions = { baseUrl, cli: flags.get("cli") };
 
   const before = appsFromCliPayload(
@@ -56,6 +85,14 @@ try {
   }
 
   const app = candidates[0] || null;
+  if (!app && receipt) {
+    throw new Error(
+      `Receipt-backed QA Local App ${receipt.appId} was not found; retaining its data and receipt.`,
+    );
+  }
+  if (!app && appIdOverride) {
+    throw new Error(`Requested QA Local App ${appIdOverride} was not found.`);
+  }
   if (app) {
     assertSafeQaApp(app, issueId);
     const runtimeStatus = app.runtime?.status || app.persistedStatus || app.status;
@@ -80,7 +117,11 @@ try {
     rmSync(dataDir, { recursive: true, force: true });
     dataRemoved = true;
   }
-  if (existsSync(receiptPath)) rmSync(receiptPath, { force: true });
+  let receiptRemoved = false;
+  if (existsSync(receiptPath)) {
+    rmSync(receiptPath, { force: true });
+    receiptRemoved = true;
+  }
 
   console.log(
     JSON.stringify(
@@ -91,7 +132,7 @@ try {
         appDeleted: Boolean(app),
         dataDir,
         dataRemoved,
-        receiptRemoved: true,
+        receiptRemoved,
       },
       null,
       2,

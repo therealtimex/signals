@@ -17,6 +17,7 @@ import { fileURLToPath } from "node:url";
 import {
   CANONICAL_SIGNALS_APP_ID,
   appsFromCliPayload,
+  assertIssueBoundQaDataDir,
   assertSafeQaApp,
   assertSafeQaDataDir,
   buildQaCreateCliArgs,
@@ -40,6 +41,11 @@ assert.equal(qaTemporaryRoot("darwin", "/ignored"), "/private/tmp");
 assert.equal(qaTemporaryRoot("linux", "/tmp"), "/tmp");
 const contractDataDir = defaultQaDataDir("356");
 assert.equal(assertSafeQaDataDir(contractDataDir), contractDataDir);
+assert.equal(assertIssueBoundQaDataDir(contractDataDir, "356"), contractDataDir);
+assert.throws(
+  () => assertIssueBoundQaDataDir(defaultQaDataDir("357"), "356"),
+  /must include issue-356/,
+);
 assert.throws(() => assertSafeQaDataDir("~/.signals"), /signals-qa-\*/);
 
 const safeApp = {
@@ -139,6 +145,7 @@ const lifecycleRepo = join(lifecycleRoot, "repo");
 const lifecycleWorktree = join(lifecycleRoot, "worktree");
 const lifecycleData = defaultQaDataDir(lifecycleIssue);
 const lifecycleReceipt = qaReceiptPath(lifecycleIssue);
+const otherIssueData = defaultQaDataDir(`${lifecycleIssue}1`);
 const mockStatePath = join(lifecycleRoot, "local-apps.json");
 const mockCliPath = join(lifecycleRoot, "mock-realtimex-pp-cli.mjs");
 
@@ -248,6 +255,73 @@ console.log(JSON.stringify({ meta: { source: "mock" }, results }));
 
   mkdirSync(lifecycleData, { recursive: true });
   writeFileSync(join(lifecycleData, "ephemeral.txt"), "qa only\n");
+
+  const mismatchedAppCleanup = spawnSync(
+    process.execPath,
+    [
+      join(scriptDir, "cleanup-signals-qa-local-app.mjs"),
+      "--issue",
+      lifecycleIssue,
+      "--app-id",
+      "wrong-qa-app",
+      "--cli",
+      mockCliPath,
+    ],
+    { encoding: "utf8", env: childEnv },
+  );
+  assert.equal(mismatchedAppCleanup.status, 1);
+  assert.match(mismatchedAppCleanup.stderr, /--app-id conflicts with the receipt/);
+  assert.equal(existsSync(lifecycleReceipt), true);
+  assert.equal(existsSync(lifecycleData), true);
+
+  mkdirSync(otherIssueData, { recursive: true });
+  writeFileSync(join(otherIssueData, "other-issue.txt"), "must survive\n");
+  const mismatchedDataCleanup = spawnSync(
+    process.execPath,
+    [
+      join(scriptDir, "cleanup-signals-qa-local-app.mjs"),
+      "--issue",
+      lifecycleIssue,
+      "--data-dir",
+      otherIssueData,
+      "--cli",
+      mockCliPath,
+    ],
+    { encoding: "utf8", env: childEnv },
+  );
+  assert.equal(mismatchedDataCleanup.status, 1);
+  assert.match(mismatchedDataCleanup.stderr, /--data-dir conflicts with the receipt/);
+  assert.equal(existsSync(lifecycleReceipt), true);
+  assert.equal(existsSync(lifecycleData), true);
+  assert.equal(existsSync(otherIssueData), true);
+
+  lifecycleState = JSON.parse(readFileSync(mockStatePath, "utf8"));
+  assert.equal(lifecycleState.apps.length, 2);
+  const receiptBackedApp = lifecycleState.apps[1];
+  writeFileSync(
+    mockStatePath,
+    `${JSON.stringify({ apps: [lifecycleState.apps[0]] })}\n`,
+  );
+  const missingReceiptAppCleanup = spawnSync(
+    process.execPath,
+    [
+      join(scriptDir, "cleanup-signals-qa-local-app.mjs"),
+      "--issue",
+      lifecycleIssue,
+      "--cli",
+      mockCliPath,
+    ],
+    { encoding: "utf8", env: childEnv },
+  );
+  assert.equal(missingReceiptAppCleanup.status, 1);
+  assert.match(missingReceiptAppCleanup.stderr, /retaining its data and receipt/);
+  assert.equal(existsSync(lifecycleReceipt), true);
+  assert.equal(existsSync(lifecycleData), true);
+  writeFileSync(
+    mockStatePath,
+    `${JSON.stringify({ apps: [lifecycleState.apps[0], receiptBackedApp] })}\n`,
+  );
+
   const cleanupResult = spawnSync(
     process.execPath,
     [
@@ -264,14 +338,112 @@ console.log(JSON.stringify({ meta: { source: "mock" }, results }));
   assert.deepEqual(lifecycleState.apps.map((app) => app.id), [CANONICAL_SIGNALS_APP_ID]);
   assert.equal(existsSync(lifecycleReceipt), false);
   assert.equal(existsSync(lifecycleData), false);
+
+  const receiptlessForeignDataCleanup = spawnSync(
+    process.execPath,
+    [
+      join(scriptDir, "cleanup-signals-qa-local-app.mjs"),
+      "--issue",
+      lifecycleIssue,
+      "--data-dir",
+      otherIssueData,
+      "--cli",
+      mockCliPath,
+    ],
+    { encoding: "utf8", env: childEnv },
+  );
+  assert.equal(receiptlessForeignDataCleanup.status, 1);
+  assert.match(receiptlessForeignDataCleanup.stderr, /must include issue-/);
+  assert.equal(existsSync(otherIssueData), true);
 } finally {
   rmSync(lifecycleReceipt, { force: true });
   rmSync(lifecycleData, { recursive: true, force: true });
+  rmSync(otherIssueData, { recursive: true, force: true });
   rmSync(lifecycleRoot, { recursive: true, force: true });
 }
 
 const sqliteAvailable = spawnSync("sqlite3", ["-version"], { encoding: "utf8" }).status === 0;
 if (sqliteAvailable) {
+  const recoveryRoot = mkdtempSync(join(tmpdir(), "signals-canonical-recovery-test-"));
+  const recoveryUser = "qa-test-user";
+  const productionDb = join(
+    recoveryRoot,
+    "app",
+    "users",
+    recoveryUser,
+    "storage",
+    "realtimex.db",
+  );
+  const devDb = join(
+    recoveryRoot,
+    "dev",
+    "users",
+    recoveryUser,
+    "storage",
+    "realtimex.db",
+  );
+  const recoverySchema = `CREATE TABLE local_apps (
+    id TEXT PRIMARY KEY,
+    display_name TEXT NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    app_type TEXT NOT NULL DEFAULT 'node',
+    config TEXT NOT NULL DEFAULT '{}',
+    metadata TEXT NOT NULL DEFAULT '{}',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    status TEXT NOT NULL DEFAULT 'stopped',
+    is_configured INTEGER NOT NULL DEFAULT 1,
+    createdAt TEXT,
+    updatedAt TEXT
+  );`;
+  try {
+    mkdirSync(dirname(productionDb), { recursive: true });
+    mkdirSync(dirname(devDb), { recursive: true });
+    execFileSync("sqlite3", [
+      productionDb,
+      `${recoverySchema}
+       INSERT INTO local_apps (id, display_name, name)
+       VALUES ('${CANONICAL_SIGNALS_APP_ID}', 'Production Sentinel', 'signals');`,
+    ]);
+    execFileSync("sqlite3", [devDb, recoverySchema]);
+    const recoveryEnv = {
+      ...process.env,
+      REALTIMEX_USER_DATA: recoveryRoot,
+      REALTIMEX_USER: recoveryUser,
+    };
+    delete recoveryEnv.RTX_DB_PATH;
+    delete recoveryEnv.REALTIMEX_STORAGE_ROOT;
+    delete recoveryEnv.REALTIMEX_RUNTIME;
+    const recoveryResult = spawnSync(
+      process.execPath,
+      [join(scriptDir, "provision-signals-local-app.mjs"), "--restore-canonical"],
+      { encoding: "utf8", env: recoveryEnv },
+    );
+    assert.equal(recoveryResult.status, 0, recoveryResult.stderr);
+    assert.ok(recoveryResult.stdout.includes(devDb));
+    assert.equal(
+      execFileSync(
+        "sqlite3",
+        [
+          productionDb,
+          `SELECT display_name FROM local_apps WHERE id = '${CANONICAL_SIGNALS_APP_ID}';`,
+        ],
+        { encoding: "utf8" },
+      ).trim(),
+      "Production Sentinel",
+    );
+    assert.equal(
+      execFileSync(
+        "sqlite3",
+        [devDb, `SELECT display_name FROM local_apps WHERE id = '${CANONICAL_SIGNALS_APP_ID}';`],
+        { encoding: "utf8" },
+      ).trim(),
+      "Signals",
+    );
+  } finally {
+    rmSync(recoveryRoot, { recursive: true, force: true });
+  }
+
   const verifierRoot = mkdtempSync(join(tmpdir(), "signals-qa-hygiene-test-"));
   const verifierDb = join(verifierRoot, "realtimex.db");
   const verifierIssue = String(Date.now() + 1);
