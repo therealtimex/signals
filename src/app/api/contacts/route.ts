@@ -18,6 +18,10 @@ import type { CreationTag, CreatedSource } from "@/lib/db/creation-sources";
 import { CreatedSourceDetailFilterError } from "@/lib/db/creation-sources";
 import { ChannelWriteError } from "@/lib/db/queries/contact-channel-writes";
 import { EmploymentWriteError } from "@/lib/db/queries/contact-employment-writes";
+import {
+  enrichmentTierToScoreRange,
+  parseContactListSort,
+} from "@/lib/contacts/list-filters";
 
 function isUniqueConstraintError(error: unknown): boolean {
   return (
@@ -86,6 +90,19 @@ export async function GET(req: NextRequest) {
   const createdTemplateId = searchParams.get("createdTemplateId") ?? undefined;
   const minEnrichmentScore = searchParams.get("minEnrichmentScore");
   const maxEnrichmentScore = searchParams.get("maxEnrichmentScore");
+  const enrichmentTier = searchParams.get("enrichmentTier") ?? undefined;
+  const sortParam = searchParams.get("sort") ?? undefined;
+  const orderParam = searchParams.get("order") ?? undefined;
+  const hasRelationshipGoal = searchParams.get("hasRelationshipGoal") === "true";
+  const { sort, order } = parseContactListSort(sortParam, orderParam);
+
+  const tierRange =
+    enrichmentTier && enrichmentTier !== "all"
+      ? enrichmentTierToScoreRange(enrichmentTier)
+      : null;
+  if (enrichmentTier && enrichmentTier !== "all" && !tierRange) {
+    return NextResponse.json({ error: `Invalid enrichment tier: ${enrichmentTier}` }, { status: 400 });
+  }
 
   try {
     const result = listContacts({
@@ -97,6 +114,9 @@ export async function GET(req: NextRequest) {
       page,
       pageSize,
       includeArchived,
+      sort,
+      order,
+      hasRelationshipGoal: hasRelationshipGoal || undefined,
       ...(createdSource ? { createdSource: createdSource as CreatedSource } : {}),
       createdSourceDetail,
       createdWorkflowRunId,
@@ -106,6 +126,12 @@ export async function GET(req: NextRequest) {
         : {}),
       ...(maxEnrichmentScore !== null && maxEnrichmentScore !== ""
         ? { maxEnrichmentScore: parseInt(maxEnrichmentScore, 10) }
+        : {}),
+      ...(tierRange?.minEnrichmentScore !== undefined
+        ? { minEnrichmentScore: tierRange.minEnrichmentScore }
+        : {}),
+      ...(tierRange?.maxEnrichmentScore !== undefined
+        ? { maxEnrichmentScore: tierRange.maxEnrichmentScore }
         : {}),
     });
     return NextResponse.json({ data: result.data, total: result.total });
