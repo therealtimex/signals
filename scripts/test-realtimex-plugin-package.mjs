@@ -229,6 +229,23 @@ const skillMd = execSync(
 if (skillMd.includes(".claude/skills/realtimex-signals")) {
   errors.push("realtimex-signals SKILL.md still references .claude/skills paths");
 }
+if (!skillMd.includes("signals-pp-cli agent-tools invoke --agent")) {
+  errors.push("realtimex-signals SKILL.md missing CLI-first agent-tools invocation");
+}
+if (!skillMd.includes("Automated persona callbacks")) {
+  errors.push("realtimex-signals SKILL.md missing persona callback CLI guidance");
+}
+
+const workspaceAgentsMd = execSync(
+  `unzip -p "${zipPath}" templates/signals/AGENTS.md`,
+  { encoding: "utf8" }
+);
+if (!workspaceAgentsMd.includes("signals-pp-cli agent-tools invoke --agent")) {
+  errors.push("Signals workspace AGENTS.md missing CLI-first agent-tools guidance");
+}
+if (workspaceAgentsMd.includes("run `scripts/resolve-base-url.sh`")) {
+  errors.push("Signals workspace AGENTS.md requires an ambiguous helper path");
+}
 
 const publishSkillMd = execSync(
   `unzip -p "${zipPath}" skills/signals-publish/SKILL.md`,
