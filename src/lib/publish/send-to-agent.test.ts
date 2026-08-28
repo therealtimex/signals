@@ -1,7 +1,14 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createContentItem, getContentItem } from "@/lib/db/queries/content";
 import { getPublishJobById } from "@/lib/db/queries/publish-jobs";
 import { upsertLaunch } from "@/lib/db/queries/launches";
+import {
+  ensureBrowserConnection,
+  registerPlatformTarget,
+} from "@/lib/db/queries/platform-targets";
 import { upsertVariant } from "@/lib/db/queries/variants";
 import { handleGetPublishJob } from "@/lib/agent-tools/publish-handlers";
 import { sendContentToAgent } from "@/lib/publish/send-to-agent";
@@ -12,9 +19,10 @@ const env: NodeJS.ProcessEnv = {
   ...process.env,
   RTX_APP_ID: "app-test",
   RTX_API_BASE_URL: "http://127.0.0.1:3001",
-  STORAGE_DIR: "/private/tmp/signals-writing-send-tests",
   SIGNALS_RTX_WORKSPACE_SLUG: "signals",
 };
+
+let storageDir = "";
 
 function fakeRtxFetch(dispatch = "success") {
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -61,6 +69,16 @@ function createApprovedWritingItem(input?: {
   approvalState?: string;
   materializationHash?: string;
 }) {
+  const connection = ensureBrowserConnection({ sessionName: "writing-send-tests" });
+  const target = registerPlatformTarget({
+    connectionId: connection.id,
+    platform: "x",
+    kind: "account",
+    name: "Approved target",
+    handle: "@approved",
+    capabilities: ["publish"],
+    source: "test",
+  });
   const launch = upsertLaunch({ name: "Writing launch" });
   const variantUnits = buildWritingUnits(input?.variantUnits ?? ["A", "B", "C"]);
   const variant = upsertVariant({
@@ -76,12 +94,12 @@ function createApprovedWritingItem(input?: {
           auditId: "audit-1",
         },
         units: variantUnits,
-        targetId: "target-1",
+        targetId: target.id,
       },
     },
   });
   const itemUnits = buildWritingUnits(input?.itemUnits ?? ["A", "B", "C"]);
-  return createContentItem({
+  const item = createContentItem({
     title: "Thread",
     body: itemUnits.texts[0],
     contentType: "thread",
@@ -96,7 +114,7 @@ function createApprovedWritingItem(input?: {
       capability: { publish: "direct" },
       units: itemUnits,
       variantId: variant.id,
-      targetId: "target-1",
+      targetId: target.id,
       materialization: {
         auditId: "audit-1",
         inputHash: input?.materializationHash ?? "hash-1",
@@ -105,10 +123,19 @@ function createApprovedWritingItem(input?: {
       },
     }),
   });
+  return Object.assign(item, { approvedTargetId: target.id });
 }
 
 describe("send-to-agent writing gates", () => {
-  beforeEach(() => resetCoreTables());
+  beforeEach(() => {
+    resetCoreTables();
+    storageDir = mkdtempSync(join(tmpdir(), "signals-writing-send-tests-"));
+    env.STORAGE_DIR = storageDir;
+  });
+
+  afterEach(() => {
+    rmSync(storageDir, { recursive: true, force: true });
+  });
 
   it("rejects bare agent drafts and draft-only surfaces before provisioning", async () => {
     const draft = createContentItem({
@@ -190,12 +217,63 @@ describe("send-to-agent writing gates", () => {
     ).toMatchObject({ success: false, errorCode: "writing_artifact_stale" });
   });
 
+  it("fails closed when the writing marker is present but malformed", async () => {
+    const malformed = createContentItem({
+      body: "Stored body",
+      contentType: "post",
+      platformTarget: "x",
+      status: "approved",
+      platformData: JSON.stringify({ writing: {} }),
+    });
+
+    await expect(
+      sendContentToAgent(
+        { contentItemId: malformed.id, platforms: ["x"], text: "caller bypass" },
+        env,
+        fakeRtxFetch(),
+      ),
+    ).resolves.toMatchObject({
+      success: false,
+      errorCode: "writing_artifact_stale",
+    });
+    expect(getContentItem(malformed.id)?.status).toBe("approved");
+  });
+
+  it("rejects omitted, substituted, and multiple acting targets", async () => {
+    const item = createApprovedWritingItem();
+    const connection = ensureBrowserConnection({ sessionName: "writing-send-tests" });
+    const substituted = registerPlatformTarget({
+      connectionId: connection.id,
+      platform: "x",
+      kind: "account",
+      name: "Substituted target",
+      handle: "@substituted",
+      capabilities: ["publish"],
+      source: "test",
+    });
+
+    for (const targets of [
+      undefined,
+      [{ targetId: substituted.id }],
+      [{ targetId: item.approvedTargetId }, { targetId: substituted.id }],
+    ]) {
+      await expect(
+        sendContentToAgent(
+          { contentItemId: item.id, platforms: ["x"], targets, text: "bypass" },
+          env,
+          fakeRtxFetch(),
+        ),
+      ).resolves.toMatchObject({ success: false, errorCode: "invalid_target" });
+    }
+  });
+
   it("ignores caller text and carries persisted X thread units through the job API", async () => {
     const item = createApprovedWritingItem();
     const result = await sendContentToAgent(
       {
         contentItemId: item.id,
         platforms: ["x"],
+        targets: [{ targetId: item.approvedTargetId }],
         text: "EVIL",
         threadTexts: ["EVIL2"],
         kind: "original",
@@ -220,7 +298,12 @@ describe("send-to-agent writing gates", () => {
   it("restores approved writing state when terminal dispatch fails", async () => {
     const item = createApprovedWritingItem();
     const result = await sendContentToAgent(
-      { contentItemId: item.id, platforms: ["x"], text: "ignored" },
+      {
+        contentItemId: item.id,
+        platforms: ["x"],
+        targets: [{ targetId: item.approvedTargetId }],
+        text: "ignored",
+      },
       env,
       fakeRtxFetch("failure"),
     );

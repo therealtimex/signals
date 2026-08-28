@@ -69,6 +69,20 @@ describe("writing publish gate", () => {
     });
   });
 
+  it("rejects an approved state without complete decision evidence", () => {
+    const incomplete = fixture();
+    const metadata = JSON.parse(incomplete.variant.metadata ?? "{}");
+    delete metadata.writing.approval.at;
+    delete metadata.writing.approval.by;
+    delete metadata.writing.approval.auditId;
+    incomplete.variant.metadata = JSON.stringify(metadata);
+
+    expect(evaluateWritingPublishGate(incomplete)).toMatchObject({
+      ok: false,
+      code: WRITING_APPROVAL_REQUIRED,
+    });
+  });
+
   it.each([
     ["auditId", (value: ReturnType<typeof fixture>) => (value.writing.materialization!.auditId = "other")],
     ["inputHash", (value: ReturnType<typeof fixture>) => (value.writing.materialization!.inputHash = "other")],

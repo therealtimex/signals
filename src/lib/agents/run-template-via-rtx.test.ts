@@ -1,4 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runTemplateViaRtx } from "@/lib/agents/run-template-via-rtx";
 import { createTemplate } from "@/lib/db/queries/workflow-templates";
 import { getLaunchById, upsertLaunch } from "@/lib/db/queries/launches";
@@ -6,8 +9,18 @@ import { buildWritingTemplateConfig } from "@/lib/workflows/signals-writing";
 import { resetCoreTables } from "@/test/db";
 
 describe("runTemplateViaRtx health preflight", () => {
-  it("refuses dispatch when Signals health check fails", async () => {
+  let storageDir = "";
+
+  beforeEach(() => {
     resetCoreTables();
+    storageDir = mkdtempSync(join(tmpdir(), "signals-writing-run-tests-"));
+  });
+
+  afterEach(() => {
+    rmSync(storageDir, { recursive: true, force: true });
+  });
+
+  it("refuses dispatch when Signals health check fails", async () => {
     const template = createTemplate({
       name: "Health Gate",
       templateType: "prospecting",
@@ -31,6 +44,7 @@ describe("runTemplateViaRtx health preflight", () => {
         ...process.env,
         RTX_APP_ID: "test-app-id",
         PORT: "3099",
+        STORAGE_DIR: storageDir,
       },
       fetchImpl
     );
@@ -47,7 +61,6 @@ describe("runTemplateViaRtx health preflight", () => {
   });
 
   it("records a successful writing dispatch on its launch", async () => {
-    resetCoreTables();
     const launch = upsertLaunch({
       name: "Launch",
       metadata: { writing: { sources: [], runs: [], preserve: true } },
@@ -100,7 +113,7 @@ describe("runTemplateViaRtx health preflight", () => {
         ...process.env,
         RTX_APP_ID: "test-app-id",
         RTX_API_BASE_URL: "http://127.0.0.1:3001",
-        STORAGE_DIR: "/private/tmp/signals-writing-run-tests",
+        STORAGE_DIR: storageDir,
       },
       fetchImpl,
     );

@@ -14,10 +14,10 @@ const variantWritingProjectionSchema = z
       .nullable(),
     approval: z
       .object({
-        state: z.string().min(1),
-        at: z.number().int().nonnegative(),
-        by: z.string().min(1),
-        auditId: z.string().min(1),
+        state: z.enum(["pending", "approved", "rejected", "revoked"]),
+        at: z.number().int().nonnegative().optional(),
+        by: z.string().min(1).optional(),
+        auditId: z.string().min(1).optional(),
       })
       .passthrough()
       .nullable(),

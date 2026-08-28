@@ -5,6 +5,7 @@ import {
   deriveWritingPublishText,
   mergeContentWriting,
   readContentWriting,
+  readContentWritingState,
   writingUnitsSchema,
 } from "@/lib/writing/content-writing";
 
@@ -38,6 +39,17 @@ describe("content writing metadata", () => {
       writing: { extension: { keep: true }, units: { texts: ["Revised", "B"] } },
     });
     expect(readContentWriting({ platformData: merged })?.units.texts).toEqual(["Revised", "B"]);
+  });
+
+  it("distinguishes an absent writing marker from invalid writing metadata", () => {
+    expect(readContentWritingState({ platformData: "{}" })).toEqual({ kind: "absent" });
+    expect(
+      readContentWritingState({ platformData: JSON.stringify({ writing: {} }) }),
+    ).toEqual({ kind: "invalid" });
+    expect(readContentWritingState({ platformData: JSON.stringify({ writing }) })).toMatchObject({
+      kind: "valid",
+      writing: { idempotencyKey: "draft-1" },
+    });
   });
 
   it("projects ordered X threads but never emits continuations for another platform", () => {

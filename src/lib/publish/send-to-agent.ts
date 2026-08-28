@@ -42,10 +42,12 @@ import {
   publishCapabilityForPlatform,
   type PublishCapability,
 } from "@/lib/writing/capabilities";
-import { readContentWriting } from "@/lib/writing/content-writing";
+import { readContentWritingState } from "@/lib/writing/content-writing";
 import { surfaceForDraft } from "@/lib/writing/surfaces";
 import {
   evaluateWritingPublishGate,
+  WRITING_APPROVAL_REQUIRED,
+  WRITING_ARTIFACT_STALE,
   type WritingPublishGateResult,
 } from "@/lib/writing/publish-gate";
 
@@ -105,7 +107,15 @@ export async function sendContentToAgent(
     };
   }
 
-  const writing = readContentWriting(item);
+  const writingState = readContentWritingState(item);
+  if (writingState.kind === "invalid") {
+    return gateFailure({
+      ok: false,
+      code: WRITING_ARTIFACT_STALE,
+      reason: "Writing metadata is present but invalid; the artifact cannot be published safely.",
+    });
+  }
+  const writing = writingState.kind === "valid" ? writingState.writing : null;
   if (!writing && !SENDABLE_ITEM_STATUSES.has(item.status)) {
     return {
       success: false,
@@ -164,6 +174,24 @@ export async function sendContentToAgent(
     : null;
   if (preGate && !preGate.ok) return gateFailure(preGate);
 
+  if (writing) {
+    if (!writing.targetId) {
+      return gateFailure({
+        ok: false,
+        code: WRITING_APPROVAL_REQUIRED,
+        reason: "The approved writing artifact does not name an acting target.",
+      });
+    }
+    if ((input.targets?.length ?? 0) !== 1) {
+      return invalidWritingTarget(
+        "Writing items require exactly one explicit acting target matching the approved artifact",
+      );
+    }
+    if (input.targets![0].targetId !== writing.targetId) {
+      return invalidWritingTarget("Requested acting target does not match the approved artifact");
+    }
+  }
+
   const targetSnapshots: PublishJobTarget[] = [];
   for (const requested of input.targets ?? []) {
     const target = resolveTargetById(requested.targetId);
@@ -216,13 +244,15 @@ export async function sendContentToAgent(
 
   const platforms = [...new Set(targetSnapshots.map((target) => target.platform))];
   if (writing) {
-    if (platforms.length !== 1 || platforms[0] !== item.platformTarget) {
-      return {
-        success: false,
-        error: "Writing items require exactly one platform matching platformTarget",
-        errorCode: "invalid_target",
-        httpStatus: 400,
-      };
+    if (
+      targetSnapshots.length !== 1 ||
+      targetSnapshots[0].targetId !== writing.targetId ||
+      platforms.length !== 1 ||
+      platforms[0] !== item.platformTarget
+    ) {
+      return invalidWritingTarget(
+        "Writing items require one resolved acting target and platform matching the approved artifact",
+      );
     }
   } else {
     for (const platform of platforms) {
@@ -270,17 +300,25 @@ export async function sendContentToAgent(
   const transactionResult = db.transaction(() => {
     if (writing) {
       const freshItem = getContentItem(input.contentItemId);
-      const freshWriting = freshItem ? readContentWriting(freshItem) : null;
-      if (!freshItem || !freshWriting) {
+      const freshWritingState = freshItem ? readContentWritingState(freshItem) : null;
+      if (!freshItem || !freshWritingState || freshWritingState.kind !== "valid") {
+        const unavailableGate: Exclude<WritingPublishGateResult, { ok: true }> = {
+          ok: false,
+          code:
+            freshWritingState?.kind === "invalid"
+              ? WRITING_ARTIFACT_STALE
+              : WRITING_APPROVAL_REQUIRED,
+          reason:
+            freshWritingState?.kind === "invalid"
+              ? "Writing metadata became invalid before publish-job creation."
+              : "Writing materialization is no longer available.",
+        };
         return {
           ok: false as const,
-          gate: {
-            ok: false as const,
-            code: "WRITING_APPROVAL_REQUIRED" as const,
-            reason: "Writing materialization is no longer available.",
-          },
+          gate: unavailableGate,
         };
       }
+      const freshWriting = freshWritingState.writing;
       const gate = evaluateWritingPublishGate({
         item: freshItem,
         writing: freshWriting,
@@ -289,6 +327,22 @@ export async function sendContentToAgent(
           : null,
       });
       if (!gate.ok) return { ok: false as const, gate };
+      if (
+        !freshWriting.targetId ||
+        targetSnapshots.length !== 1 ||
+        targetSnapshots[0].targetId !== freshWriting.targetId ||
+        targetSnapshots[0].platform !== freshItem.platformTarget
+      ) {
+        const targetGate: Exclude<WritingPublishGateResult, { ok: true }> = {
+          ok: false,
+          code: WRITING_ARTIFACT_STALE,
+          reason: "Approved acting target changed before publish-job creation.",
+        };
+        return {
+          ok: false as const,
+          gate: targetGate,
+        };
+      }
       const freshPayload = validatePublishJobPayload({
         text: gate.payload.text,
         threadTexts: gate.payload.threadTexts,
@@ -427,5 +481,14 @@ function gateFailure(gate: Exclude<WritingPublishGateResult, { ok: true }>): Sen
     error: gate.reason,
     errorCode: gate.code.toLowerCase(),
     httpStatus: 409,
+  };
+}
+
+function invalidWritingTarget(error: string): SendToAgentResult {
+  return {
+    success: false,
+    error,
+    errorCode: "invalid_target",
+    httpStatus: 400,
   };
 }

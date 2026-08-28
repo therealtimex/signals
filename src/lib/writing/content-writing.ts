@@ -62,6 +62,11 @@ export const contentWritingSchema = z
 
 export type ContentWritingMetadata = z.infer<typeof contentWritingSchema>;
 
+export type ContentWritingReadState =
+  | { kind: "absent" }
+  | { kind: "invalid" }
+  | { kind: "valid"; writing: ContentWritingMetadata };
+
 function parseObject(value: unknown): Record<string, unknown> {
   if (typeof value === "string") {
     try {
@@ -78,9 +83,21 @@ function parseObject(value: unknown): Record<string, unknown> {
 export function readContentWriting(
   item: Pick<ContentItem, "platformData"> | { platformData?: unknown },
 ): ContentWritingMetadata | null {
+  const state = readContentWritingState(item);
+  return state.kind === "valid" ? state.writing : null;
+}
+
+export function readContentWritingState(
+  item: Pick<ContentItem, "platformData"> | { platformData?: unknown },
+): ContentWritingReadState {
   const root = parseObject(item.platformData);
+  if (!Object.prototype.hasOwnProperty.call(root, CONTENT_WRITING_KEY)) {
+    return { kind: "absent" };
+  }
   const parsed = contentWritingSchema.safeParse(root[CONTENT_WRITING_KEY]);
-  return parsed.success ? parsed.data : null;
+  return parsed.success
+    ? { kind: "valid", writing: parsed.data }
+    : { kind: "invalid" };
 }
 
 export function mergeContentWriting(

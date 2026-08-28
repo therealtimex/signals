@@ -275,11 +275,24 @@ describe("writing content agent tools", () => {
               sensitivity: { level: "private", reason: "user_marked" },
             },
           ],
+          spine: {
+            schemaVersion: 1,
+            id: "spine_private",
+            launchId: "placeholder",
+            sources: [{ id: "nested_source", text: sentinel }],
+            claims: [{ id: "nested_claim", text: sentinel }],
+            message: {
+              core: sentinel,
+              supporting: [sentinel],
+            },
+          },
+          futurePrivateField: { nested: sentinel },
         },
       },
     });
     const metadata = JSON.parse(launch.metadata ?? "{}");
     metadata.writing.sources[2].launchId = launch.id;
+    metadata.writing.spine.launchId = launch.id;
     upsertLaunch({ id: launch.id, name: launch.name, brief: launch.brief, metadata });
 
     const context = await invoke("get_writing_context", { launchId: launch.id });
@@ -290,6 +303,8 @@ describe("writing content agent tools", () => {
       approvalPolicy: "explicit",
     });
     expect(JSON.stringify(context)).not.toContain(sentinel);
+    expect(context).not.toHaveProperty("launch.writing.spine");
+    expect(context).not.toHaveProperty("launch.writing.futurePrivateField");
     expect(context.sources).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ id: "src_private", redacted: true }),
@@ -302,6 +317,9 @@ describe("writing content agent tools", () => {
       includeSources: false,
     });
     expect(withoutSources).not.toHaveProperty("sources");
+    expect(withoutSources).not.toHaveProperty("launch.writing.sources");
+    expect(withoutSources).not.toHaveProperty("launch.writing.spine");
+    expect(JSON.stringify(withoutSources)).not.toContain(sentinel);
 
     const local = upsertLaunch({ name: "Local", brief: sentinel, scope: "local_only" });
     const localContext = await invoke("get_writing_context", { launchId: local.id });

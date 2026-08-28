@@ -41,17 +41,21 @@ export function evaluateWritingPublishGate(args: {
 
   const projection = readVariantWritingProjection(variant);
   if (!projection) return approvalRequired("Linked variant writing metadata is missing or invalid.");
-  if (projection.approval?.state !== "approved") {
+  const approval = projection.approval;
+  if (approval?.state !== "approved") {
     return approvalRequired("Linked variant approval is missing or revoked.");
+  }
+  if (approval.at === undefined || !approval.by || !approval.auditId) {
+    return approvalRequired("Linked approved variant decision metadata is incomplete.");
   }
   if (!projection.audit) return approvalRequired("Linked variant audit is missing.");
 
   const snapshot = writing.materialization;
   if (snapshot.auditId !== projection.audit.id) return stale("auditId mismatch");
   if (snapshot.inputHash !== projection.audit.inputHash) return stale("inputHash mismatch");
-  if (snapshot.approvalAt !== projection.approval.at) return stale("approvalAt mismatch");
-  if (snapshot.approvalBy !== projection.approval.by) return stale("approvalBy mismatch");
-  if (projection.approval.auditId !== projection.audit.id) return stale("approval auditId mismatch");
+  if (snapshot.approvalAt !== approval.at) return stale("approvalAt mismatch");
+  if (snapshot.approvalBy !== approval.by) return stale("approvalBy mismatch");
+  if (approval.auditId !== projection.audit.id) return stale("approval auditId mismatch");
   if (
     projection.units &&
     JSON.stringify(writing.units.texts) !== JSON.stringify(projection.units.texts)

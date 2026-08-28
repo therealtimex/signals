@@ -110,7 +110,7 @@ type SensitivityReason =
 type Sensitivity = {
   level: "public" | "private";
   reason: SensitivityReason;
-  contextApproval?: unknown;
+  contextApproval?: true;
 };
 
 function parseObject(value: unknown): Record<string, unknown> {
@@ -444,18 +444,18 @@ function effectiveSourceSensitivity(input: {
   content?: { contentType: string; direction: string | null };
 }): Sensitivity {
   const stored = parseObject(input.stored.sensitivity);
-  const contextApproval = stored.contextApproval;
+  const contextApproval = Boolean(stored.contextApproval);
   if (input.launchScope === "local_only") {
     return {
       level: "private",
       reason: "launch_local_only",
-      ...(contextApproval ? { contextApproval } : {}),
+      ...(contextApproval ? { contextApproval: true as const } : {}),
     };
   }
   if (input.content) {
     const base = baseSensitivity(input.content);
     if (base.level === "private") {
-      return { ...base, ...(contextApproval ? { contextApproval } : {}) };
+      return { ...base, ...(contextApproval ? { contextApproval: true as const } : {}) };
     }
   }
   if (stored.level === "private") {
@@ -467,7 +467,7 @@ function effectiveSourceSensitivity(input: {
         stored.reason === "launch_local_only"
           ? stored.reason
           : "user_marked",
-      ...(contextApproval ? { contextApproval } : {}),
+      ...(contextApproval ? { contextApproval: true as const } : {}),
     };
   }
   return { level: "public", reason: "public_default" };
@@ -485,16 +485,120 @@ function sourceView(source: Record<string, unknown>, launchScope: string) {
       ? { contentType: content.contentType, direction: content.direction }
       : undefined,
   });
-  const approved = Boolean(parseObject(source.sensitivity).contextApproval);
+  const approved = sensitivity.contextApproval === true;
   const redacted = sensitivity.level === "private" && !approved;
-  const identifying = Object.fromEntries(
-    Object.entries(source).filter(([key]) => !["body", "excerpt", "text"].includes(key)),
-  );
-  if (redacted) return { ...identifying, sensitivity, redacted: true as const };
+  const base = {
+    ...(typeof source.id === "string" ? { id: source.id } : {}),
+    ...(typeof source.kind === "string" ? { kind: source.kind } : {}),
+    sensitivity,
+  };
+
   if (source.kind === "content_item") {
-    return { ...source, sensitivity, body: content?.body ?? null };
+    return {
+      ...base,
+      ...(typeof source.contentItemId === "string"
+        ? { contentItemId: source.contentItemId }
+        : {}),
+      ...(typeof source.sha256 === "string" ? { sha256: source.sha256 } : {}),
+      ...(typeof source.contentType === "string" ? { contentType: source.contentType } : {}),
+      ...(source.direction === "inbound" || source.direction === "outbound" || source.direction === null
+        ? { direction: source.direction }
+        : {}),
+      ...(redacted
+        ? { redacted: true as const }
+        : {
+            ...(typeof source.title === "string" ? { title: source.title } : {}),
+            body: content?.body ?? null,
+          }),
+    };
   }
-  return { ...source, sensitivity };
+  if (source.kind === "url") {
+    return {
+      ...base,
+      ...(typeof source.url === "string" ? { url: source.url } : {}),
+      ...(typeof source.retrievedAt === "number" ? { retrievedAt: source.retrievedAt } : {}),
+      ...(typeof source.sha256 === "string" ? { sha256: source.sha256 } : {}),
+      ...(redacted
+        ? { redacted: true as const }
+        : {
+            ...(typeof source.title === "string" ? { title: source.title } : {}),
+            ...(typeof source.excerpt === "string" ? { excerpt: source.excerpt } : {}),
+          }),
+    };
+  }
+  if (source.kind === "file") {
+    return {
+      ...base,
+      ...(typeof source.path === "string" ? { path: source.path } : {}),
+      ...(typeof source.sha256 === "string" ? { sha256: source.sha256 } : {}),
+      ...(redacted ? { redacted: true as const } : {}),
+    };
+  }
+  if (source.kind === "note") {
+    return {
+      ...base,
+      ...(typeof source.enteredAt === "number" ? { enteredAt: source.enteredAt } : {}),
+      ...(redacted
+        ? { redacted: true as const }
+        : typeof source.text === "string"
+          ? { text: source.text }
+          : {}),
+    };
+  }
+  if (source.kind === "brief") {
+    return {
+      ...base,
+      ...(typeof source.launchId === "string" ? { launchId: source.launchId } : {}),
+      ...(redacted ? { redacted: true as const } : {}),
+    };
+  }
+  return { ...base, ...(redacted ? { redacted: true as const } : {}) };
+}
+
+function projectLaunchWriting(
+  writing: Record<string, unknown> | null,
+  sourceViews: ReturnType<typeof sourceView>[],
+  includeSources: boolean,
+): Record<string, unknown> | null {
+  if (!writing) return null;
+  const surfaces = parseArray(writing.surfaces).flatMap((entry) => {
+    const surface = parseSurfaceId(entry.surface);
+    if (!surface || typeof entry.platform !== "string") return [];
+    return [
+      {
+        platform: entry.platform,
+        surface,
+        ...(typeof entry.targetId === "string" ? { targetId: entry.targetId } : {}),
+      },
+    ];
+  });
+  const runs = parseArray(writing.runs).flatMap((entry) => {
+    if (typeof entry.workflowRunId !== "string" || typeof entry.startedAt !== "number") return [];
+    return [
+      {
+        workflowRunId: entry.workflowRunId,
+        ...(typeof entry.mode === "string" ? { mode: entry.mode } : {}),
+        startedAt: entry.startedAt,
+        ...(typeof entry.rtxThreadSlug === "string"
+          ? { rtxThreadSlug: entry.rtxThreadSlug }
+          : {}),
+      },
+    ];
+  });
+  return {
+    ...(writing.schemaVersion === 1 ? { schemaVersion: 1 } : {}),
+    ...(typeof writing.goal === "string" ? { goal: writing.goal } : {}),
+    surfaces,
+    ...(typeof writing.voicePrecedence === "string"
+      ? { voicePrecedence: writing.voicePrecedence }
+      : {}),
+    ...(typeof writing.approvalPolicy === "string"
+      ? { approvalPolicy: writing.approvalPolicy }
+      : {}),
+    runs,
+    ...(includeSources ? { sources: sourceViews } : {}),
+    // `spine` intentionally stays omitted until #350 exposes a privacy-safe projection.
+  };
 }
 
 function requestedWritingSurfaces(
@@ -571,7 +675,7 @@ export async function handleGetWritingContext(
   const briefApproved = Boolean(parseObject(briefRef?.sensitivity).contextApproval);
   const briefRedacted = briefSensitivity.level === "private" && !briefApproved;
   const sourceViews = sources.map((source) => sourceView(source, launch.scope));
-  const writingView = writing ? { ...writing, sources: sourceViews } : null;
+  const writingView = projectLaunchWriting(writing, sourceViews, input.includeSources);
 
   return {
     launch: {
