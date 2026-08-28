@@ -217,6 +217,28 @@ describe("ContactDetailClient details layout", () => {
     expect(html).toContain('href="/dashboard/organizations/org1"');
   });
 
+  it("keeps contact actions within the mobile content width", () => {
+    const html = renderToStaticMarkup(
+      createElement(ContactDetailClient, {
+        contact: contactFixture,
+        tasks: [],
+        explore: exploreFixture,
+        profilePipelineTemplateId: "tmpl-1",
+      }),
+    );
+    const wrapper = document.createElement("div");
+    wrapper.innerHTML = html;
+    const actions = wrapper.querySelector('[role="group"][aria-label="Contact actions"]');
+
+    expect(actions).not.toBeNull();
+    expect(actions?.classList.contains("w-full")).toBe(true);
+    expect(actions?.classList.contains("min-w-0")).toBe(true);
+    expect(actions?.classList.contains("flex-wrap")).toBe(true);
+    expect(actions?.classList.contains("sm:w-auto")).toBe(true);
+    expect(actions?.classList.contains("sm:shrink-0")).toBe(true);
+    expect(actions?.classList.contains("shrink-0")).toBe(false);
+  });
+
   it("hides a headline that repeats title and company", () => {
     const html = renderToStaticMarkup(
       createElement(ContactDetailClient, {

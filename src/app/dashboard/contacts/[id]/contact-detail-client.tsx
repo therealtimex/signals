@@ -421,7 +421,11 @@ export function ContactDetailClient({
             </div>
           </div>
         </div>
-        <div className="flex shrink-0 flex-wrap items-center gap-3">
+        <div
+          role="group"
+          aria-label="Contact actions"
+          className="flex w-full min-w-0 flex-wrap items-center gap-3 sm:w-auto sm:shrink-0"
+        >
           {!contactArchived ? (
             <TooltipProvider>
               <Tooltip>
