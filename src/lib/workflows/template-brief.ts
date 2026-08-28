@@ -18,6 +18,10 @@ import {
   isNetworkSnowballTemplateConfig,
 } from "@/lib/workflows/network-snowball";
 import { WORKFLOW_TERMINAL_TEARDOWN_AFTER_COMPLETE } from "@/lib/rtx/teardown";
+import {
+  buildWritingBriefSection,
+  isSignalsWritingTemplateConfig,
+} from "@/lib/workflows/signals-writing";
 
 const CATEGORY_LABELS: Record<string, string> = {
   prospecting: "Search",
@@ -33,7 +37,14 @@ const TOOLS_BY_TYPE: Record<string, string[]> = {
   prospecting: ["query_contacts", "enrich_contact", "create_task"],
   enrichment: ["query_contacts", "enrich_contact"],
   pruning: ["query_contacts", "find_duplicate_contacts", "merge_contacts", "create_task"],
-  content: ["query_content", "create_task"],
+  content: [
+    "query_content",
+    "get_content",
+    "get_writing_context",
+    "create_content_draft",
+    "update_content_draft",
+    "create_task",
+  ],
   engagement: ["query_contacts", "create_task"],
   outreach: ["query_contacts", "create_task"],
   nurture: ["query_contacts", "get_contact", "update_contact", "query_goals", "create_task"],
@@ -123,6 +134,14 @@ export function buildAgentWorkflowBrief(input: {
         signalsBaseUrl: input.signalsBaseUrl,
       })}\n`
     : null;
+  const writingContract = isSignalsWritingTemplateConfig(input.config)
+    ? `${buildWritingBriefSection({
+        template: input.template,
+        config: input.config,
+        workflowRunId: input.workflowRunId,
+        signalsBaseUrl: input.signalsBaseUrl,
+      })}\n`
+    : null;
 
   const sections = [
     `You are executing the Signals agent workflow template "${input.template.name}".`,
@@ -136,7 +155,7 @@ export function buildAgentWorkflowBrief(input: {
     "",
     "Workspace context:",
     "- Personality & guidelines: Follow `AGENTS.md` for workspace operating model, skill checklist, and privacy rules.",
-    "- Workspace skills available: `realtimex-signals`, `signals-publish`, `agent-browser`.",
+    "- Workspace skills available: `realtimex-signals`, `signals-writing`, `signals-publish`, `agent-browser`.",
     "",
     instructions ? `Instructions:\n${instructions}` : null,
     "",
@@ -174,6 +193,7 @@ export function buildAgentWorkflowBrief(input: {
     publishContract,
     nurtureContract,
     snowballContract,
+    writingContract,
     "Do not call legacy in-process workflow runners. This thread is the execution lane.",
   ];
 

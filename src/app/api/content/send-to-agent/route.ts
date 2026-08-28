@@ -10,6 +10,7 @@ const sendToAgentSchema = z
     platforms: z.array(z.enum(PUBLISH_PLATFORM_TARGETS)).default([]),
     targets: z.array(z.object({ targetId: z.string().min(1) })).optional(),
     text: z.string().default(""),
+    threadTexts: z.array(z.string()).optional(),
     mediaAssetIds: z.array(z.string()).optional(),
     kind: z.enum(PUBLISH_JOB_KINDS).optional(),
     sourcePostUrl: z.string().min(1).optional(),

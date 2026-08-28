@@ -16,8 +16,56 @@ describe("smoke: agent tools API", () => {
           description: expect.any(String),
           parameters: expect.objectContaining({ type: "object" }),
         }),
+        ...[
+          "get_content",
+          "create_content_draft",
+          "update_content_draft",
+          "get_writing_context",
+        ].map((name) => expect.objectContaining({ name })),
       ])
     );
+  });
+
+  it("creates and reads an untruncated writing draft over HTTP", async () => {
+    const create = await smokeFetch("/api/agent-tools/invoke", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        tool: "create_content_draft",
+        input: {
+          idempotencyKey: "integration-writing-smoke-v1",
+          platform: "x",
+          contentType: "thread",
+          body: "Writing smoke unit A",
+          threadTexts: ["Writing smoke unit B"],
+        },
+      }),
+    });
+    expect(create.ok).toBe(true);
+    const created = await create.json();
+    expect(created).toMatchObject({
+      success: true,
+      result: { status: "draft", surface: "x/thread", capability: { publish: "direct" } },
+    });
+
+    const read = await smokeFetch("/api/agent-tools/invoke", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        tool: "get_content",
+        input: { contentItemId: created.result.contentItemId },
+      }),
+    });
+    expect(read.ok).toBe(true);
+    await expect(read.json()).resolves.toMatchObject({
+      success: true,
+      result: {
+        contentItem: {
+          body: "Writing smoke unit A",
+          writing: { units: { texts: ["Writing smoke unit A", "Writing smoke unit B"] } },
+        },
+      },
+    });
   });
 
   it("invoke creates and enriches a contact", async () => {

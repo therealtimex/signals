@@ -1275,6 +1275,232 @@
                     "type": "object",
                     "properties": {
                       "tool": {
+                        "const": "get_content"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "contentItemId": {
+                            "type": "string"
+                          },
+                          "includeMetrics": {
+                            "type": "boolean"
+                          },
+                          "writingSource": {
+                            "type": "object",
+                            "properties": {
+                              "launchId": {
+                                "type": "string"
+                              },
+                              "sourceId": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "launchId",
+                              "sourceId"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "contentItemId"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "create_content_draft"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "idempotencyKey": {
+                            "type": "string"
+                          },
+                          "platform": {
+                            "type": "string",
+                            "enum": [
+                              "x",
+                              "linkedin",
+                              "gmail",
+                              "substack",
+                              "instagram",
+                              "facebook",
+                              "threads",
+                              "tiktok",
+                              "youtube",
+                              "bluesky",
+                              "telegram",
+                              "whatsapp"
+                            ]
+                          },
+                          "contentType": {
+                            "type": "string",
+                            "enum": [
+                              "post",
+                              "thread"
+                            ]
+                          },
+                          "body": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "threadTexts": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "description": "Ordered continuation unit; allowed only for thread drafts."
+                            }
+                          },
+                          "mediaAssetIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "targetId": {
+                            "type": "string"
+                          },
+                          "origin": {
+                            "type": "object",
+                            "properties": {
+                              "launchId": {
+                                "type": "string"
+                              },
+                              "variantId": {
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "idempotencyKey",
+                          "platform",
+                          "contentType",
+                          "body"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "update_content_draft"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "contentItemId": {
+                            "type": "string"
+                          },
+                          "body": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "threadTexts": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "mediaAssetIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "expectedUpdatedAt": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "contentItemId"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "get_writing_context"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "launchId": {
+                            "type": "string"
+                          },
+                          "surfaces": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "enum": [
+                                "x/post",
+                                "x/thread",
+                                "x/reply",
+                                "x/quote",
+                                "linkedin/post",
+                                "linkedin/comment",
+                                "facebook/post",
+                                "threads/post",
+                                "threads/thread",
+                                "instagram/caption",
+                                "instagram/carousel",
+                                "tiktok/caption",
+                                "tiktok/script",
+                                "youtube/title",
+                                "youtube/description",
+                                "youtube/community_post",
+                                "youtube/hook_script",
+                                "youtube/thumbnail_brief"
+                              ]
+                            }
+                          },
+                          "includeSources": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "launchId"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
                         "const": "query_goals"
                       },
                       "input": {
@@ -3740,6 +3966,10 @@
                       "complete_workflow_run",
                       "record_workflow_run_contacts",
                       "query_content",
+                      "get_content",
+                      "create_content_draft",
+                      "update_content_draft",
+                      "get_writing_context",
                       "query_goals",
                       "create_task",
                       "get_persona",
@@ -3937,6 +4167,6 @@
   ],
   "x-signals-agent-tools": {
     "manifestVersion": "1",
-    "toolCount": 70
+    "toolCount": 74
   }
 }

@@ -42,6 +42,7 @@ export type PublishPayloadValidationResult =
 
 export function validatePublishJobPayload(input: {
   text?: string;
+  threadTexts?: string[];
   mediaAssetIds?: string[];
   platforms: PublishPlatformTarget[];
   title?: string;
@@ -54,6 +55,32 @@ export function validatePublishJobPayload(input: {
   const text = input.text ?? "";
   const mediaAssetIds = input.mediaAssetIds ?? [];
   const platforms = [...new Set(input.platforms)];
+
+  if (input.threadTexts?.some((entry) => !entry.trim())) {
+    return {
+      ok: false,
+      error: "threadTexts entries must not be blank",
+      errorCode: "invalid_request",
+    };
+  }
+  const threadTexts = input.threadTexts?.map((entry) => entry.trim());
+  if ((threadTexts?.length ?? 0) > 24 || threadTexts?.some((entry) => entry.length > 4_000)) {
+    return {
+      ok: false,
+      error: "threadTexts supports at most 24 entries of at most 4,000 characters each",
+      errorCode: "invalid_request",
+    };
+  }
+  if (
+    threadTexts?.length &&
+    (kind !== "original" || platforms.length !== 1 || platforms[0] !== "x")
+  ) {
+    return {
+      ok: false,
+      error: "threadTexts is supported only for original X publish jobs",
+      errorCode: "invalid_request",
+    };
+  }
 
   if (platforms.length === 0) {
     return { ok: false, error: "At least one publish platform is required", errorCode: "invalid_request" };
@@ -99,6 +126,7 @@ export function validatePublishJobPayload(input: {
   const payload: PublishJobPayload = {
     kind,
     text,
+    ...(threadTexts?.length ? { threadTexts } : {}),
     mediaAssetIds,
     platforms,
     composedAt: input.composedAt ?? Math.floor(Date.now() / 1000),

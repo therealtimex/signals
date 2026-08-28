@@ -6,7 +6,7 @@ import {
 import { linkMediaToContent } from "@/lib/db/queries/media";
 import type { PublishPlatformTarget } from "@/lib/publish/types";
 
-const EDITABLE_STATUSES = new Set(["draft", "failed"]);
+export const EDITABLE_STATUSES = new Set(["draft", "failed"]);
 
 export type SaveComposeDraftInput = {
   body: string;

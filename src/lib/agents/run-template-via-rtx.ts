@@ -9,6 +9,11 @@ import { getTemplate, updateTemplate } from "@/lib/db/queries/workflow-templates
 import type { WorkflowRun, WorkflowTemplate } from "@/lib/db/types";
 import { getPlatformTargetById } from "@/lib/db/queries/platform-targets";
 import { isContactNurtureTemplateConfig } from "@/lib/workflows/contact-relationship-nurture";
+import { getLaunchById, upsertLaunch } from "@/lib/db/queries/launches";
+import {
+  isSignalsWritingTemplateConfig,
+  readSignalsWritingTemplateConfig,
+} from "@/lib/workflows/signals-writing";
 import {
   buildAgentWorkflowBrief,
   buildTemplateThreadName,
@@ -85,6 +90,60 @@ function buildStoredRunConfig(
     rtxWorkspaceSlug: rtx.workspaceSlug,
     rtxThreadSlug: rtx.threadSlug,
     rtxRuntimeSessionId: rtx.runtimeSessionId ?? null,
+  });
+}
+
+function parseObject(value: unknown): Record<string, unknown> {
+  if (typeof value === "string") {
+    try {
+      return parseObject(JSON.parse(value));
+    } catch {
+      return {};
+    }
+  }
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function recordWritingLaunchRun(input: {
+  config: Record<string, unknown>;
+  workflowRunId: string;
+  startedAt: number;
+  rtxThreadSlug: string;
+}): void {
+  if (!isSignalsWritingTemplateConfig(input.config)) return;
+  const writingConfig = readSignalsWritingTemplateConfig(input.config);
+  if (!writingConfig?.launchId) return;
+  const launch = getLaunchById(writingConfig.launchId);
+  if (!launch) return;
+  const metadata = parseObject(launch.metadata);
+  const writing = parseObject(metadata.writing);
+  const priorRuns = Array.isArray(writing.runs)
+    ? writing.runs.filter((run) => {
+        const record = parseObject(run);
+        return record.workflowRunId !== input.workflowRunId;
+      })
+    : [];
+  upsertLaunch({
+    id: launch.id,
+    name: launch.name,
+    status: launch.status === "draft" ? "generating" : launch.status,
+    metadata: {
+      ...metadata,
+      writing: {
+        ...writing,
+        runs: [
+          ...priorRuns,
+          {
+            workflowRunId: input.workflowRunId,
+            mode: writingConfig.mode,
+            startedAt: input.startedAt,
+            rtxThreadSlug: input.rtxThreadSlug,
+          },
+        ],
+      },
+    },
   });
 }
 
@@ -367,6 +426,13 @@ export async function runTemplateViaRtx(
 
     const resolvedWorkspace = launch.descriptor.linkage?.workspaceSlug ?? workspaceSlug;
     const resolvedThread = launch.descriptor.linkage?.threadSlug ?? threadSlug;
+
+    recordWritingLaunchRun({
+      config: mergedConfig,
+      workflowRunId: run.id,
+      startedAt: now,
+      rtxThreadSlug: resolvedThread,
+    });
 
     const updatedRun = updateWorkflowRun(run.id, {
       config: buildStoredRunConfig(template, mergedConfig, {

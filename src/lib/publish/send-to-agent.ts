@@ -1,4 +1,7 @@
 import { getContentItem, updateContentItem } from "@/lib/db/queries/content";
+import { db } from "@/lib/db/client";
+import { isPlatform } from "@/lib/db/platforms";
+import { getVariantById } from "@/lib/db/queries/variants";
 import {
   createPublishJob,
   markPublishJobLaunchFailed,
@@ -34,6 +37,17 @@ import {
   publishJobBriefRelativePath,
   writeRtxWorkspaceBriefFile,
 } from "@/lib/rtx/workspace-brief-files";
+import {
+  getSurfaceCapabilities,
+  publishCapabilityForPlatform,
+  type PublishCapability,
+} from "@/lib/writing/capabilities";
+import { readContentWriting } from "@/lib/writing/content-writing";
+import { surfaceForDraft } from "@/lib/writing/surfaces";
+import {
+  evaluateWritingPublishGate,
+  type WritingPublishGateResult,
+} from "@/lib/writing/publish-gate";
 
 const SENDABLE_ITEM_STATUSES = new Set(["draft", "approved", "failed"]);
 
@@ -42,6 +56,7 @@ export type SendToAgentInput = {
   platforms: PublishPlatformTarget[];
   targets?: Array<{ targetId: string }>;
   text: string;
+  threadTexts?: string[];
   mediaAssetIds?: string[];
   kind?: PublishJobPayload["kind"];
   sourcePostUrl?: string;
@@ -57,6 +72,7 @@ export type SendToAgentResult =
       rtxWorkspaceSlug: string;
       rtxThreadSlug: string;
       status: "queued";
+      payload: PublishJobPayload;
     }
   | {
       success: false;
@@ -89,7 +105,8 @@ export async function sendContentToAgent(
     };
   }
 
-  if (!SENDABLE_ITEM_STATUSES.has(item.status)) {
+  const writing = readContentWriting(item);
+  if (!writing && !SENDABLE_ITEM_STATUSES.has(item.status)) {
     return {
       success: false,
       error: `Cannot send content in "${item.status}" status`,
@@ -97,6 +114,55 @@ export async function sendContentToAgent(
       httpStatus: 400,
     };
   }
+
+  const writingCapability: PublishCapability | null = writing
+    ? writing.surface
+      ? getSurfaceCapabilities(writing.surface).publish
+      : item.platformTarget && isPlatform(item.platformTarget)
+        ? publishCapabilityForPlatform(item.platformTarget)
+        : "unsupported"
+    : null;
+  if (writing && writingCapability !== "direct" && writingCapability !== "beta") {
+    return {
+      success: false,
+      error: `Writing surface cannot be published (${writingCapability ?? "unsupported"})`,
+      errorCode: "capability_unsupported",
+      httpStatus: 400,
+    };
+  }
+  if (writing) {
+    const itemSurface =
+      item.platformTarget &&
+      isPlatform(item.platformTarget) &&
+      (item.contentType === "post" || item.contentType === "thread")
+        ? surfaceForDraft(item.platformTarget, item.contentType)
+        : null;
+    if (!writing.surface || writing.surface !== itemSurface) {
+      return {
+        success: false,
+        error: "Writing surface no longer matches the materialized content target",
+        errorCode: "invalid_target",
+        httpStatus: 400,
+      };
+    }
+  }
+  if (writing && input.kind && input.kind !== "original") {
+    return {
+      success: false,
+      error: "Writing items support original publish jobs only",
+      errorCode: "invalid_request",
+      httpStatus: 400,
+    };
+  }
+
+  const preGate = writing
+    ? evaluateWritingPublishGate({
+        item,
+        writing,
+        variant: writing.variantId ? (getVariantById(writing.variantId) ?? null) : null,
+      })
+    : null;
+  if (preGate && !preGate.ok) return gateFailure(preGate);
 
   const targetSnapshots: PublishJobTarget[] = [];
   for (const requested of input.targets ?? []) {
@@ -149,8 +215,40 @@ export async function sendContentToAgent(
   }
 
   const platforms = [...new Set(targetSnapshots.map((target) => target.platform))];
+  if (writing) {
+    if (platforms.length !== 1 || platforms[0] !== item.platformTarget) {
+      return {
+        success: false,
+        error: "Writing items require exactly one platform matching platformTarget",
+        errorCode: "invalid_target",
+        httpStatus: 400,
+      };
+    }
+  } else {
+    for (const platform of platforms) {
+      const capability = publishCapabilityForPlatform(platform);
+      if (capability !== "direct" && capability !== "beta") {
+        return {
+          success: false,
+          error: `Publish capability is unavailable for ${platform}`,
+          errorCode: "capability_unsupported",
+          httpStatus: 400,
+        };
+      }
+    }
+    if (input.threadTexts !== undefined && item.contentType !== "thread") {
+      return {
+        success: false,
+        error: "threadTexts is only valid for thread content",
+        errorCode: "invalid_request",
+        httpStatus: 400,
+      };
+    }
+  }
+  const writingPayload = preGate?.ok ? preGate.payload : null;
   const payloadResult = validatePublishJobPayload({
-    text: input.text,
+    text: writingPayload?.text ?? input.text,
+    threadTexts: writingPayload?.threadTexts ?? (writing ? undefined : input.threadTexts),
     mediaAssetIds: input.mediaAssetIds ?? [],
     platforms,
     title: item.title ?? undefined,
@@ -167,17 +265,57 @@ export async function sendContentToAgent(
       httpStatus: 400,
     };
   }
-  const payload = payloadResult.payload;
+  let payload = payloadResult.payload;
 
-  supersedeActiveJobsForContentItem(input.contentItemId);
-  const job = createPublishJob({
-    contentItemId: input.contentItemId,
-    payload,
-    platforms,
-    targets: targetSnapshots,
+  const transactionResult = db.transaction(() => {
+    if (writing) {
+      const freshItem = getContentItem(input.contentItemId);
+      const freshWriting = freshItem ? readContentWriting(freshItem) : null;
+      if (!freshItem || !freshWriting) {
+        return {
+          ok: false as const,
+          gate: {
+            ok: false as const,
+            code: "WRITING_APPROVAL_REQUIRED" as const,
+            reason: "Writing materialization is no longer available.",
+          },
+        };
+      }
+      const gate = evaluateWritingPublishGate({
+        item: freshItem,
+        writing: freshWriting,
+        variant: freshWriting.variantId
+          ? (getVariantById(freshWriting.variantId) ?? null)
+          : null,
+      });
+      if (!gate.ok) return { ok: false as const, gate };
+      const freshPayload = validatePublishJobPayload({
+        text: gate.payload.text,
+        threadTexts: gate.payload.threadTexts,
+        mediaAssetIds: input.mediaAssetIds ?? [],
+        platforms,
+        title: freshItem.title ?? undefined,
+        kind: "original",
+        composedAt: payload.composedAt,
+      });
+      if (!freshPayload.ok) {
+        throw new Error(freshPayload.error);
+      }
+      payload = freshPayload.payload;
+    }
+
+    supersedeActiveJobsForContentItem(input.contentItemId);
+    const job = createPublishJob({
+      contentItemId: input.contentItemId,
+      payload,
+      platforms,
+      targets: targetSnapshots,
+    });
+    updateContentItem(input.contentItemId, { status: "queued" });
+    return { ok: true as const, job };
   });
-
-  updateContentItem(input.contentItemId, { status: "queued" });
+  if (!transactionResult.ok) return gateFailure(transactionResult.gate);
+  const job = transactionResult.job;
 
   try {
     const workspaceSlug = await ensureRtxWorkspace(
@@ -232,7 +370,7 @@ export async function sendContentToAgent(
 
     if (!launch.success) {
       markPublishJobLaunchFailed(job.id, launch.error, launch.errorCode);
-      updateContentItem(input.contentItemId, { status: "draft" });
+      updateContentItem(input.contentItemId, { status: writing ? "approved" : "draft" });
       const httpStatus =
         launch.errorCode === "permission_required"
           ? 403
@@ -268,11 +406,12 @@ export async function sendContentToAgent(
       rtxWorkspaceSlug: resolvedWorkspace,
       rtxThreadSlug: resolvedThread,
       status: "queued",
+      payload,
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Launch failed";
     markPublishJobLaunchFailed(job.id, message, "launch_failed");
-    updateContentItem(input.contentItemId, { status: "draft" });
+    updateContentItem(input.contentItemId, { status: writing ? "approved" : "draft" });
     return {
       success: false,
       error: message,
@@ -280,4 +419,13 @@ export async function sendContentToAgent(
       httpStatus: 502,
     };
   }
+}
+
+function gateFailure(gate: Exclude<WritingPublishGateResult, { ok: true }>): SendToAgentResult {
+  return {
+    success: false,
+    error: gate.reason,
+    errorCode: gate.code.toLowerCase(),
+    httpStatus: 409,
+  };
 }

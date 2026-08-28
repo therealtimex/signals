@@ -40,6 +40,7 @@ import {
   browserConnections,
   browserSessionLeases,
   platformTargets,
+  publishJobs,
   snowballSeedLedger,
   tasks,
 } from "@/lib/db/schema";
@@ -76,6 +77,7 @@ export function resetCoreTables(): void {
   db.delete(mediaAssets).run();
   db.delete(variants).run();
   db.delete(contentPosts).run();
+  db.delete(publishJobs).run();
   db.delete(platformTargets).run();
   db.delete(browserConnections).run();
   db.delete(contentItems).run();

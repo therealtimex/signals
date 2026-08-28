@@ -158,6 +158,16 @@ import {
   preparePlatformTargetSchema,
   releasePlatformTargetSchema,
 } from "@/lib/agent-tools/platform-target-handlers";
+import {
+  createContentDraftSchema,
+  getContentSchema,
+  getWritingContextSchema,
+  handleCreateContentDraft,
+  handleGetContent,
+  handleGetWritingContext,
+  handleUpdateContentDraft,
+  updateContentDraftSchema,
+} from "@/lib/agent-tools/content-item-handlers";
 import type { AgentToolDefinition } from "@/lib/agent-tools/types";
 
 export const AGENT_TOOL_VERSION = "1";
@@ -336,6 +346,42 @@ export const AGENT_TOOLS: Record<string, AgentToolDefinition> = {
     schema: queryContentSchema,
     parameters: zodToParameters(queryContentSchema),
     execute: handleQueryContent,
+  },
+  get_content: {
+    name: "get_content",
+    description:
+      "Read one content item by ID with an untruncated body. Private email, DM, and inbound content is redacted unless a matching persisted launch source carries context approval.",
+    category: "content",
+    schema: getContentSchema,
+    parameters: zodToParameters(getContentSchema),
+    execute: handleGetContent,
+  },
+  create_content_draft: {
+    name: "create_content_draft",
+    description:
+      "Create one platform-native writing draft with ordered units and idempotent replay. Draft creation never approves or publishes content.",
+    category: "content",
+    schema: createContentDraftSchema,
+    parameters: zodToParameters(createContentDraftSchema),
+    execute: handleCreateContentDraft,
+  },
+  update_content_draft: {
+    name: "update_content_draft",
+    description:
+      "Revise the body, title, ordered continuation units, or media of an editable writing draft. expectedUpdatedAt enables optimistic concurrency.",
+    category: "content",
+    schema: updateContentDraftSchema,
+    parameters: zodToParameters(updateContentDraftSchema),
+    execute: handleUpdateContentDraft,
+  },
+  get_writing_context: {
+    name: "get_writing_context",
+    description:
+      "Read a launch's privacy-filtered writing sources, niches, targets, surface capabilities, variants, and approval policy.",
+    category: "content",
+    schema: getWritingContextSchema,
+    parameters: zodToParameters(getWritingContextSchema),
+    execute: handleGetWritingContext,
   },
   query_goals: {
     name: "query_goals",

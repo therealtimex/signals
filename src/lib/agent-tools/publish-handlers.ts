@@ -157,6 +157,9 @@ export async function handleGetPublishJob(input: z.infer<typeof getPublishJobSch
     payload: {
       kind: normalizePublishJobKind(job.payloadParsed.kind),
       text: job.payloadParsed.text,
+      ...(job.payloadParsed.threadTexts?.length
+        ? { threadTexts: job.payloadParsed.threadTexts }
+        : {}),
       platforms: job.payloadParsed.platforms,
       media,
       ...(job.payloadParsed.sourcePostUrl

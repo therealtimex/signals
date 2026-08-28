@@ -21,6 +21,8 @@ export interface PublishJobPayload {
   /** Defaults to "original" when omitted (legacy jobs). */
   kind?: PublishJobKind;
   text: string;
+  /** Ordered continuation units for an X thread; unit 0 remains in text. */
+  threadTexts?: string[];
   mediaAssetIds: string[];
   platforms: PublishPlatformTarget[];
   /** Required for repost/quote jobs when sourcePostId is absent. */
