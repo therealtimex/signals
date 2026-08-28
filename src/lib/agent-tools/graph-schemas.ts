@@ -121,6 +121,7 @@ export const listEmailCandidatesSchema = z.object({
   orgId: z.string().min(1).optional(),
   contactId: z.string().min(1).optional(),
   status: emailCandidateStatusSchema.optional(),
+  includePredicted: z.boolean().optional(),
 }).refine((input) => Boolean(input.orgId || input.contactId), {
   message: "orgId or contactId is required",
 });

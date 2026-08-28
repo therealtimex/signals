@@ -23,7 +23,11 @@ import {
   inferOrgEmailPatterns,
   setOrgEmailPattern,
 } from "@/lib/contacts/email-patterns/intelligence";
-import { updateEmailCandidate } from "@/lib/contacts/email-verification/candidates";
+import {
+  listContactEmailCandidates,
+  listOrgEmailCandidates,
+  updateEmailCandidate,
+} from "@/lib/contacts/email-verification/candidates";
 import { checkOrgMailDomains } from "@/lib/contacts/email-verification/mail-domains";
 import { db } from "@/lib/db/client";
 import { contactEmailCandidates, contactEmployments, orgs } from "@/lib/db/schema";
@@ -258,11 +262,13 @@ export async function handleGenerateOrgEmailCandidates(
 }
 
 export async function handleListEmailCandidates(input: z.infer<typeof listEmailCandidatesSchema>) {
-  const data = db.select().from(contactEmailCandidates).where(and(
-    input.orgId ? eq(contactEmailCandidates.orgId, input.orgId) : undefined,
-    input.contactId ? eq(contactEmailCandidates.contactId, input.contactId) : undefined,
-    input.status ? eq(contactEmailCandidates.status, input.status) : undefined,
-  )).all();
+  const data = input.contactId
+    ? listContactEmailCandidates(input.contactId, { includePredicted: input.includePredicted })
+      .filter((candidate) => (
+        (!input.orgId || candidate.orgId === input.orgId)
+        && (!input.status || candidate.status === input.status)
+      ))
+    : listOrgEmailCandidates(input.orgId!, { status: input.status, includePredicted: input.includePredicted });
   return { data, total: data.length };
 }
 
@@ -270,7 +276,7 @@ export async function handleUpdateEmailCandidate(
   input: z.infer<typeof updateEmailCandidateSchema>,
 ) {
   try {
-    const candidate = updateEmailCandidate(input.candidateId, {
+    const candidate = await updateEmailCandidate(input.candidateId, {
       action: input.action,
       address: input.address,
       evidenceUrl: input.evidenceUrl,

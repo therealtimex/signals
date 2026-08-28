@@ -7,6 +7,7 @@ import { listOrgPeople } from "@/lib/db/queries/org-people";
 import { getOrgEmailIntelligence } from "@/lib/contacts/email-patterns/intelligence";
 import { listOrgTimeline } from "@/lib/db/queries/org-activities";
 import { OrganizationDetailClient } from "./organization-detail-client";
+import { getOrgSignalScanState } from "@/lib/orgs/signal-scan-state";
 
 export default async function OrganizationDetailPage({
   params,
@@ -23,6 +24,7 @@ export default async function OrganizationDetailPage({
   const relationships = getOrgRelationshipSummary(id);
   const emailIntelligence = getOrgEmailIntelligence(id);
   const timeline = listOrgTimeline(id, { pageSize: 100 });
+  const signalScanState = getOrgSignalScanState(id);
   const ownerContactId = getOwnerContactId();
   const selfContact = ownerContactId ? getContactById(ownerContactId) : null;
   return (
@@ -33,6 +35,7 @@ export default async function OrganizationDetailPage({
         relationships={relationships}
         emailIntelligence={emailIntelligence}
         timeline={timeline}
+        signalScanState={signalScanState}
         selfContact={selfContact ? { id: selfContact.id, name: selfContact.name } : null}
       />
     </Suspense>

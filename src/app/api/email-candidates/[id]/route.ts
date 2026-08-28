@@ -12,7 +12,7 @@ const schema = z.object({
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   try {
-    const candidate = updateEmailCandidate(id, schema.parse(await req.json()));
+    const candidate = await updateEmailCandidate(id, schema.parse(await req.json()));
     if (!candidate) return NextResponse.json({ error: "Candidate not found" }, { status: 404 });
     return NextResponse.json(candidate);
   } catch (error) {

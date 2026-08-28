@@ -18,6 +18,7 @@ import type { OrgDTO } from "@/lib/serializers/org";
 import { orgTabHref, parseOrgTab, type OrgTab } from "../organization-tabs";
 import { EditOrganizationDialog } from "./edit-organization-dialog";
 import { EnrichCompanyButton } from "./enrich-company-button";
+import type { OrgSignalScanState } from "@/lib/orgs/signal-scan-state";
 import {
   CompanyFeed,
   CompanyPeopleTable,
@@ -40,6 +41,7 @@ export function OrganizationDetailClient({
   relationships,
   emailIntelligence,
   timeline,
+  signalScanState,
   selfContact,
 }: {
   org: OrgDTO;
@@ -47,6 +49,7 @@ export function OrganizationDetailClient({
   relationships: ReturnType<typeof getOrgRelationshipSummary>;
   emailIntelligence: ReturnType<typeof getOrgEmailIntelligence>;
   timeline: ReturnType<typeof listOrgTimeline>;
+  signalScanState: OrgSignalScanState;
   selfContact: { id: string; name: string } | null;
 }) {
   const router = useRouter();
@@ -206,11 +209,11 @@ export function OrganizationDetailClient({
         </TabsContent>
 
         <TabsContent value="people" className="pt-4">
-          <CompanyPeopleTable companyName={org.name} people={people} />
+          <CompanyPeopleTable orgId={org.id} companyName={org.name} people={people} />
         </TabsContent>
 
         <TabsContent value="signals" className="pt-4">
-          <CompanyFeed orgId={org.id} initial={timeline} category="signal" followedAt={org.followedAt} />
+          <CompanyFeed orgId={org.id} initial={timeline} category="signal" followedAt={org.followedAt} signalScanState={signalScanState} onLaunchWorkflow={() => setSnowballOpen(true)} />
         </TabsContent>
         <TabsContent value="activity" className="pt-4">
           <CompanyFeed orgId={org.id} initial={timeline} category="workspace" followedAt={org.followedAt} />
@@ -234,6 +237,7 @@ export function OrganizationDetailClient({
         seedType="org_id"
         seedValue={org.name}
         entityName={org.name}
+        orgId={org.id}
       />
     </div>
   );

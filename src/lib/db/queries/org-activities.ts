@@ -88,8 +88,14 @@ export function listOrgTimeline(
   } = {},
 ) {
   const org = db.select().from(orgs).where(eq(orgs.id, orgId)).get();
+  if (!org || (!options.includeLocalOnly && org.scope === "local_only")) {
+    return { data: [], total: 0 };
+  }
   const employmentRows = db.select({ contactId: contactEmployments.contactId }).from(contactEmployments)
-    .where(eq(contactEmployments.orgId, orgId)).all();
+    .where(and(
+      eq(contactEmployments.orgId, orgId),
+      options.includeLocalOnly ? undefined : eq(contactEmployments.scope, "shared"),
+    )).all();
   const memberIds = [...new Set(employmentRows.map((row) => row.contactId))];
   const memberIdSet = new Set(memberIds);
   const people = memberIds.length

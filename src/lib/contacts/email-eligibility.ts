@@ -3,6 +3,21 @@ import { db } from "@/lib/db/client";
 import { contactChannels, contactEmailCandidates } from "@/lib/db/schema";
 import { resolveEmailVerificationSettings } from "@/lib/settings/email-verification-settings";
 
+export type CandidateEmailEligibility = { sendable: boolean; reason?: string };
+
+export function resolveCandidateEmailEligibility(
+  status: "predicted" | "uncertain" | "verified" | "invalid",
+  options: { includePredicted?: boolean; allowPredicted?: boolean } = {},
+): CandidateEmailEligibility {
+  if (status === "verified") return { sendable: true };
+  if (status === "predicted") {
+    if (!options.allowPredicted) return { sendable: false, reason: "predicted_email_disabled" };
+    if (!options.includePredicted) return { sendable: false, reason: "predicted_email_not_requested" };
+    return { sendable: true };
+  }
+  return { sendable: false, reason: status === "invalid" ? "invalid_email" : "email_not_verified" };
+}
+
 export function resolveAutomationEmail(
   contactId: string,
   options?: { includePredicted?: boolean },
@@ -15,12 +30,14 @@ export function resolveAutomationEmail(
   if (channels[0]) return { address: channels[0].value, status: "unverified", eligible: true };
   const candidate = db.select().from(contactEmailCandidates).where(eq(contactEmailCandidates.contactId, contactId)).get();
   if (!candidate) return { address: null, status: "none", eligible: false, reason: "no_email" };
-  const enabled = resolveEmailVerificationSettings().allowPredictedInAutomation.effectiveValue;
-  const eligible = candidate.status === "predicted" && options?.includePredicted === true && enabled;
+  const decision = resolveCandidateEmailEligibility(candidate.status, {
+    includePredicted: options?.includePredicted,
+    allowPredicted: resolveEmailVerificationSettings().allowPredictedInAutomation.effectiveValue,
+  });
   return {
     address: candidate.address,
     status: candidate.status,
-    eligible,
-    ...(!eligible ? { reason: "predicted_email_disabled" } : {}),
+    eligible: decision.sendable,
+    ...(decision.reason ? { reason: decision.reason } : {}),
   };
 }

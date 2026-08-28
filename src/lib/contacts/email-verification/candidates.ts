@@ -1,13 +1,17 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db/client";
-import { contactChannels, contactEmailCandidates } from "@/lib/db/schema";
+import { contactChannels, contactEmailCandidates, orgDomains } from "@/lib/db/schema";
 import { normalizeChannelValue } from "@/lib/db/channel-types";
 import { ensureContactChannel } from "@/lib/db/queries/contact-channel-writes";
 import { updateContactChannel } from "@/lib/db/queries/contact-channels";
 import { recalcContactEnrichment } from "@/lib/db/contact-enrichment-recalc";
 import { logOrgActivity } from "@/lib/db/queries/org-activities";
 import { transitionCandidate, type CandidateEvent } from "./transitions";
+import { resolveEmailVerificationSettings } from "@/lib/settings/email-verification-settings";
+import { resolveCandidateEmailEligibility } from "@/lib/contacts/email-eligibility";
+import { checkOrgMailDomains, type MxResolver } from "./mail-domains";
+import { smtpRcptProbe, type SmtpProbeProvider } from "./smtp-probe";
 
 function parseEvidence(value: string | null): Record<string, unknown> {
   try {
@@ -18,12 +22,91 @@ function parseEvidence(value: string | null): Record<string, unknown> {
   }
 }
 
-export function listContactEmailCandidates(contactId: string) {
+export function listContactEmailCandidates(contactId: string, options?: { includePredicted?: boolean }) {
+  const allowPredicted = resolveEmailVerificationSettings().allowPredictedInAutomation.effectiveValue;
   return db.select().from(contactEmailCandidates).where(eq(contactEmailCandidates.contactId, contactId)).all()
-    .map((candidate) => ({ ...candidate, sendable: false as const }));
+    .map((candidate) => ({
+      ...candidate,
+      ...resolveCandidateEmailEligibility(candidate.status, {
+        includePredicted: options?.includePredicted,
+        allowPredicted,
+      }),
+    }));
 }
 
-export function updateEmailCandidate(
+export function listOrgEmailCandidates(
+  orgId: string,
+  options?: { status?: "predicted" | "uncertain" | "verified" | "invalid"; includePredicted?: boolean },
+) {
+  const allowPredicted = resolveEmailVerificationSettings().allowPredictedInAutomation.effectiveValue;
+  return db.select().from(contactEmailCandidates).where(and(
+    eq(contactEmailCandidates.orgId, orgId),
+    options?.status ? eq(contactEmailCandidates.status, options.status) : undefined,
+  )).all().map((candidate) => ({
+    ...candidate,
+    ...resolveCandidateEmailEligibility(candidate.status, {
+      includePredicted: options?.includePredicted,
+      allowPredicted,
+    }),
+  }));
+}
+
+export type EmailCandidateDependencies = {
+  settings?: typeof resolveEmailVerificationSettings;
+  mxResolver?: MxResolver;
+  probe?: SmtpProbeProvider;
+  catchAllAddress?: (domain: string) => string;
+};
+
+async function resolveProbeEvent(
+  candidate: typeof contactEmailCandidates.$inferSelect,
+  dependencies: EmailCandidateDependencies,
+): Promise<{ event: CandidateEvent; catchAll: "yes" | "no" | "unknown"; detail: string }> {
+  const settings = (dependencies.settings ?? resolveEmailVerificationSettings)();
+  if (!settings.smtpProbeEnabled.effectiveValue) {
+    return { event: "probe_inconclusive", catchAll: "unknown", detail: "smtp_probe_disabled" };
+  }
+  const checked = await checkOrgMailDomains(candidate.orgId, dependencies.mxResolver);
+  const domain = candidate.addressNormalized.split("@").at(-1) ?? "";
+  const mailDomain = checked.find((row) => row.domain === domain);
+  if (!mailDomain || mailDomain.mxStatus === "none") {
+    return { event: "probe_undeliverable", catchAll: "unknown", detail: "domain_has_no_mx" };
+  }
+  if (mailDomain.mxStatus !== "ok") {
+    return { event: "probe_inconclusive", catchAll: "unknown", detail: "mx_lookup_inconclusive" };
+  }
+  const provider = dependencies.probe ?? smtpRcptProbe;
+  const target = await provider(candidate.addressNormalized, mailDomain.records);
+  if (target.outcome === "rejected") {
+    return { event: "probe_undeliverable", catchAll: "unknown", detail: target.detail ?? "recipient_rejected" };
+  }
+  if (target.outcome === "inconclusive") {
+    return { event: "probe_inconclusive", catchAll: "unknown", detail: target.detail ?? "probe_inconclusive" };
+  }
+  const randomAddress = dependencies.catchAllAddress?.(domain)
+    ?? `signals-probe-${nanoid(12).toLowerCase()}@${domain}`;
+  const catchAllProbe = await provider(randomAddress, mailDomain.records);
+  const catchAll = catchAllProbe.outcome === "accepted" ? "yes"
+    : catchAllProbe.outcome === "rejected" ? "no" : "unknown";
+  const domainRow = db.select().from(orgDomains).where(and(
+    eq(orgDomains.orgId, candidate.orgId), eq(orgDomains.domain, domain),
+  )).get();
+  if (domainRow) {
+    const evidence = parseEvidence(domainRow.mailEvidence);
+    db.update(orgDomains).set({
+      catchAll,
+      mailEvidence: JSON.stringify({ ...evidence, smtp: { target, catchAll: catchAllProbe } }),
+      updatedAt: Math.floor(Date.now() / 1000),
+    }).where(eq(orgDomains.id, domainRow.id)).run();
+  }
+  return {
+    event: "probe_deliverable",
+    catchAll,
+    detail: catchAll === "yes" ? "catch_all_domain" : catchAll === "no" ? "recipient_accepted" : "catch_all_inconclusive",
+  };
+}
+
+export async function updateEmailCandidate(
   candidateId: string,
   input: {
     action: "verify" | "invalidate" | "mark_uncertain" | "correct" | "probe";
@@ -32,6 +115,7 @@ export function updateEmailCandidate(
     note?: string;
     actor?: "manual" | "agent";
   },
+  dependencies: EmailCandidateDependencies = {},
 ) {
   const candidate = db.select().from(contactEmailCandidates).where(eq(contactEmailCandidates.id, candidateId)).get();
   if (!candidate) return undefined;
@@ -65,15 +149,16 @@ export function updateEmailCandidate(
   }
 
   const actor = input.actor ?? "manual";
+  const probe = input.action === "probe" ? await resolveProbeEvent(candidate, dependencies) : null;
   const event: CandidateEvent =
     input.action === "verify"
       ? actor === "agent" ? "agent_verify" : "manual_verify"
       : input.action === "invalidate"
         ? actor === "agent" ? "agent_invalidate" : "manual_invalidate"
         : input.action === "probe"
-          ? "probe_inconclusive"
+          ? probe!.event
           : "mark_uncertain";
-  const transition = transitionCandidate(candidate.status, event);
+  const transition = transitionCandidate(candidate.status, event, { catchAll: probe?.catchAll });
   const evidence = parseEvidence(candidate.evidence);
   const history = Array.isArray(evidence.history) ? evidence.history : [];
   const nextEvidence = {
@@ -87,7 +172,7 @@ export function updateEmailCandidate(
       event,
       method: transition.verificationMethod,
       at: now,
-      detail: input.note ?? transition.reason ?? null,
+      detail: input.note ?? probe?.detail ?? transition.reason ?? null,
     }],
   };
   let promotedChannelId = candidate.promotedChannelId;

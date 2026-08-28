@@ -14,6 +14,8 @@ import { logOrgActivity } from "@/lib/db/queries/org-activities";
 import { normalizeChannelValue } from "@/lib/db/channel-types";
 import { deriveNameParts } from "./name-parts";
 import { EMAIL_PATTERNS, isValidEmailPattern, matchPattern, renderPattern } from "./patterns";
+import { listOrgEmailCandidates } from "@/lib/contacts/email-verification/candidates";
+import { resolveEmailVerificationSettings } from "@/lib/settings/email-verification-settings";
 
 const ROLE_ACCOUNTS = new Set([
   "admin", "billing", "contact", "hello", "hr", "info", "jobs", "sales", "support", "team",
@@ -302,7 +304,7 @@ export function getOrgEmailIntelligence(orgId: string) {
   const org = getOrgById(orgId);
   const domains = orgDomainRows(orgId);
   const patterns = db.select().from(orgEmailPatterns).where(eq(orgEmailPatterns.orgId, orgId)).all();
-  const candidates = db.select().from(contactEmailCandidates).where(eq(contactEmailCandidates.orgId, orgId)).all();
+  const candidates = listOrgEmailCandidates(orgId);
   const candidateCounts = { predicted: 0, uncertain: 0, verified: 0, invalid: 0 };
   for (const candidate of candidates) candidateCounts[candidate.status]++;
   return {
@@ -312,6 +314,8 @@ export function getOrgEmailIntelligence(orgId: string) {
     domains,
     patterns,
     selected: patterns.find((pattern) => pattern.isSelected) ?? null,
+    candidates,
+    automationEligibility: resolveEmailVerificationSettings().allowPredictedInAutomation,
     candidateCounts,
     evaluatedAt: patterns.length ? Math.max(...patterns.map((pattern) => pattern.evaluatedAt)) : null,
   };

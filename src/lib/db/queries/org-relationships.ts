@@ -20,6 +20,9 @@ import {
   type IntroPath,
   type SecondDegreeConnection,
 } from "@/lib/graph/intro-paths";
+import { getSystemTemplateByName } from "@/lib/db/queries/workflow-templates";
+import { listWorkflowRuns } from "@/lib/db/queries/workflows";
+import { NETWORK_SNOWBALL_TEMPLATE_NAME } from "@/lib/workflows/network-snowball";
 
 type VisibilityOptions = { includeLocalOnly?: boolean };
 const COMMUNICATION_TYPES = new Set<string>(INTERACTION_TYPE_GROUPS.communication);
@@ -235,6 +238,16 @@ export function getOrgRelationshipSummary(orgId: string, options?: VisibilityOpt
   for (const row of emailRows) {
     if (row.isVerified) verifiedEmailContactIds.add(row.contactId);
   }
+  const snowballTemplate = getSystemTemplateByName(NETWORK_SNOWBALL_TEMPLATE_NAME);
+  const snowballRun = snowballTemplate
+    ? listWorkflowRuns({ templateId: snowballTemplate.id, pageSize: 100 }).data.find((run) => {
+      try {
+        return (JSON.parse(run.config ?? "{}") as { orgId?: string }).orgId === orgId;
+      } catch {
+        return false;
+      }
+    })
+    : undefined;
 
   return {
     people: {
@@ -259,6 +272,14 @@ export function getOrgRelationshipSummary(orgId: string, options?: VisibilityOpt
     owner,
     paths: intro.paths as IntroPath[],
     pathCoverage: intro.coverage,
-    snowball: null,
+    snowball: snowballRun ? {
+      workflowRunId: snowballRun.id,
+      status: snowballRun.status,
+      startedAt: snowballRun.startedAt,
+      completedAt: snowballRun.completedAt,
+      processedItems: snowballRun.processedItems,
+      successItems: snowballRun.successItems,
+      errorItems: snowballRun.errorItems,
+    } : null,
   };
 }
