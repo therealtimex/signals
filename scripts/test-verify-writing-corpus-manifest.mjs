@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
  * Regression: the writing-corpus manifest validator must pass on the committed manifest and must
- * fail on drift (a skill missing from the manifest, a dangling reference without a disposition,
- * a vendor assumption without a replacement, an un-namespaced formula id).
+ * fail on curated or mechanical drift, including duplicate skill rows, reference source lists,
+ * vendor symbols, license declarations, file lists, and formula ids.
  */
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
@@ -43,25 +43,40 @@ if (ok.status !== 0) {
   console.error("committed manifest failed validation:", ok.stdout, ok.stderr);
   process.exit(1);
 }
-if (!/writing-corpus manifest: OK \(63 skills, 177 files/.test(ok.stdout)) {
+if (
+  !/writing-corpus manifest: OK \(63 skills, 177 files, 167 per-skill missing-target records, 187 reference edges, 51 unique missing target paths/.test(
+    ok.stdout
+  )
+) {
   console.error("unexpected summary line:", ok.stdout);
   process.exit(1);
 }
 
 expectFailure("missing-skill", (m) => m.skills.splice(0, 1));
+expectFailure("duplicate-skill", (m) => m.skills.push(structuredClone(m.skills[0])));
 expectFailure("missing-ref-disposition", (m) => {
   const entry = m.skills.find((s) => s.missingReferences.length > 0);
   entry.missingReferences[0].disposition = null;
 });
+expectFailure("missing-ref-source-drift", (m) => {
+  const entry = m.skills.find((s) => s.missingReferences.some((ref) => ref.referencedFrom.length > 0));
+  entry.missingReferences.find((ref) => ref.referencedFrom.length > 0).referencedFrom.push("invented.md");
+});
 expectFailure("vendor-without-replacement", (m) => {
   const entry = m.skills.find((s) => s.vendorAssumptions.length > 0);
   entry.vendorAssumptions[0].replacement = "";
+});
+expectFailure("vendor-symbol-drift", (m) => {
+  const entry = m.skills.find((s) => s.vendorAssumptions.length > 0);
+  entry.vendorAssumptions[0].symbols.push("invented.symbol");
 });
 expectFailure("unnamespaced-formula", (m) => {
   const entry = m.skills.find((s) => (s.formulaMap ?? []).some((f) => f.adoptedAs));
   entry.formulaMap.find((f) => f.adoptedAs).adoptedAs = "X1";
 });
 expectFailure("cleared-license-without-declaration", (m) => {
+  m.families[0].license.status = "declared";
+  m.families[0].license.declared = null;
   m.families[0].redistribution = "cleared";
 });
 expectFailure("file-drift", (m) => m.skills[0].files.push("references/does-not-exist.md"));

@@ -193,7 +193,18 @@ export function validateManifest(manifest, scanned, platforms) {
     if (!LICENSE_STATUSES.includes(family.license?.status)) {
       err(`family ${family.id}: license.status must be one of ${LICENSE_STATUSES.join("|")}`);
     }
-    if (family.redistribution !== "not-cleared" && family.license?.status !== "declared") {
+    const declaredLicense =
+      typeof family.license?.declared === "string" && family.license.declared.trim().length > 0;
+    if (["declared", "conflict"].includes(family.license?.status) && !declaredLicense) {
+      err(`family ${family.id}: license.status=${family.license?.status} needs license.declared`);
+    }
+    if (family.license?.status === "unknown" && family.license?.declared !== null) {
+      err(`family ${family.id}: license.status=unknown requires license.declared=null`);
+    }
+    if (
+      family.redistribution !== "not-cleared" &&
+      !(family.license?.status === "declared" && declaredLicense)
+    ) {
       err(`family ${family.id}: redistribution must be "not-cleared" unless a clean license is declared`);
     }
     if (family.adoptionPolicy !== "re-author-only") {
@@ -206,12 +217,16 @@ export function validateManifest(manifest, scanned, platforms) {
   const seen = new Set();
   for (const entry of manifest.skills) {
     const label = `skill ${entry.id ?? entry.path ?? "?"}`;
+    if (seen.has(entry.path)) {
+      err(`${label}: duplicate manifest entry for path ${entry.path}`);
+      continue;
+    }
+    seen.add(entry.path);
     const disk = byPath.get(entry.path);
     if (!disk) {
       err(`${label}: path ${entry.path} has no SKILL.md on disk`);
       continue;
     }
-    seen.add(entry.path);
     if (entry.id !== disk.id) err(`${label}: id must equal directory name ${disk.id}`);
     if (entry.family !== disk.family) err(`${label}: family must be ${disk.family}`);
     if (!families.has(entry.family)) err(`${label}: family ${entry.family} is not declared`);
@@ -248,11 +263,19 @@ export function validateManifest(manifest, scanned, platforms) {
     }
     if (!sameList(entry.files ?? [], disk.files)) err(`${label}: files[] drifted from disk (run --update)`);
 
-    const manifestRefs = (entry.missingReferences ?? []).map((m) => m.ref);
-    if (!sameList(manifestRefs, disk.missingReferences.map((m) => m.ref))) {
+    const diskRefs = new Map(disk.missingReferences.map((missing) => [missing.ref, missing]));
+    const manifestRefs = (entry.missingReferences ?? []).map((missing) => missing.ref);
+    if (new Set(manifestRefs).size !== manifestRefs.length) {
+      err(`${label}: duplicate missingReferences ref`);
+    }
+    if (!sameList(manifestRefs, [...diskRefs.keys()])) {
       err(`${label}: missingReferences drifted from disk (run --update)`);
     }
     for (const missing of entry.missingReferences ?? []) {
+      const diskMissing = diskRefs.get(missing.ref);
+      if (diskMissing && !sameList(missing.referencedFrom ?? [], diskMissing.referencedFrom)) {
+        err(`${label}: missing ref ${missing.ref} referencedFrom drifted from disk (run --update)`);
+      }
       if (!MISSING_REF_DISPOSITIONS.includes(missing.disposition)) {
         err(`${label}: missing ref ${missing.ref} needs disposition ${MISSING_REF_DISPOSITIONS.join("|")}`);
       }
@@ -261,11 +284,19 @@ export function validateManifest(manifest, scanned, platforms) {
       }
     }
 
-    const manifestVendors = (entry.vendorAssumptions ?? []).map((v) => v.vendor);
-    if (!sameList(manifestVendors, disk.vendorAssumptions.map((v) => v.vendor))) {
+    const diskVendors = new Map(disk.vendorAssumptions.map((vendor) => [vendor.vendor, vendor]));
+    const manifestVendors = (entry.vendorAssumptions ?? []).map((vendor) => vendor.vendor);
+    if (new Set(manifestVendors).size !== manifestVendors.length) {
+      err(`${label}: duplicate vendorAssumptions vendor`);
+    }
+    if (!sameList(manifestVendors, [...diskVendors.keys()])) {
       err(`${label}: vendorAssumptions drifted from disk (run --update)`);
     }
     for (const vendor of entry.vendorAssumptions ?? []) {
+      const diskVendor = diskVendors.get(vendor.vendor);
+      if (diskVendor && !sameList(vendor.symbols ?? [], diskVendor.symbols)) {
+        err(`${label}: vendor ${vendor.vendor} symbols drifted from disk (run --update)`);
+      }
       if (typeof vendor.replacement !== "string" || !vendor.replacement) {
         err(`${label}: vendor ${vendor.vendor} needs a Signals/RealTimeX replacement`);
       }
@@ -337,14 +368,22 @@ export function run(argv = process.argv.slice(2), repoRoot = REPO_ROOT) {
 
   const errors = validateManifest(manifest, scanned, platforms);
   const fileCount = scanned.reduce((n, skill) => n + skill.files.length, 0);
-  const missingCount = scanned.reduce((n, skill) => n + skill.missingReferences.length, 0);
+  const missingRecordCount = scanned.reduce((n, skill) => n + skill.missingReferences.length, 0);
+  const missingEdgeCount = scanned.reduce(
+    (n, skill) =>
+      n + skill.missingReferences.reduce((count, missing) => count + missing.referencedFrom.length, 0),
+    0
+  );
+  const missingTargetCount = new Set(
+    scanned.flatMap((skill) => skill.missingReferences.map((missing) => missing.ref))
+  ).size;
   if (errors.length) {
     console.error(`writing-corpus manifest: ${errors.length} error(s)`);
     for (const error of errors) console.error(`  - ${error}`);
     return 1;
   }
   console.log(
-    `writing-corpus manifest: OK (${scanned.length} skills, ${fileCount} files, ${missingCount} dangling references, ${manifest.families.length} families)`
+    `writing-corpus manifest: OK (${scanned.length} skills, ${fileCount} files, ${missingRecordCount} per-skill missing-target records, ${missingEdgeCount} reference edges, ${missingTargetCount} unique missing target paths, ${manifest.families.length} families)`
   );
   return 0;
 }

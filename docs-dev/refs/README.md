@@ -11,7 +11,8 @@ It is **not** product code and is **never** packaged into the RealTimeX plugin.
 the single-file `humanizer-skill`. The seven platform families are near-identical ports of one
 template; their shared bundle-root layer (`references/hook-formulas.md`,
 `references/algorithm-heuristics.md`, `references/voice-profile.md`, root `SKILL.md`, `lib/`)
-was never copied, so 167 references point at 51 files that do not exist.
+was never copied. The manifest records the resulting gaps as 167 per-skill missing-target
+records, 187 source-to-target reference edges, and 51 unique missing target paths.
 
 ## Rules for using it
 

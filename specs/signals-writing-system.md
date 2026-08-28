@@ -211,7 +211,7 @@ type VoiceProfile = {
   schemaVersion: 1;
   id: `vp_${string}`;
   version: number;                                // 1..n; a new approved revision increments
-  status: "draft" | "approved" | "superseded" | "rejected";
+  status: "draft" | "approved" | "superseded" | "rejected"; // read-model projection from VoiceProfileIndex
   label: string;
   ownerContactId: string | null;                  // the `contacts.isSelf` row when present
   platforms: Platform[];                          // [] = all
@@ -230,8 +230,8 @@ type VoiceProfile = {
   brand?: { handle?: string; link?: string; notes?: string };
   derivedBy: { method: "agent" | "manual"; model?: string; workflowRunId?: string;
                rtxThreadSlug?: string; at: number };
-  approval?: { by: "user"; at: number; evidence: ApprovalEvidence };
-  supersededBy?: { id: `vp_${string}`; version: number };
+  approval?: { by: "user"; at: number; evidence: ApprovalEvidence }; // projected lifecycle field
+  supersededBy?: { id: `vp_${string}`; version: number };             // projected lifecycle field
   hash: string;                                   // stable content hash; lifecycle fields excluded
 };
 
@@ -239,25 +239,58 @@ type ApprovalEvidence =
   | { kind: "thread_message"; workspaceSlug: string; threadSlug: string; note?: string }
   | { kind: "ui"; route: string }
   | { kind: "api"; caller: string };
+
+type VoiceProfileVersionDocument = Omit<VoiceProfile, "status" | "approval" | "supersededBy">;
+
+type VoiceProfileIndex = {
+  schemaVersion: 1;
+  generation: number;
+  profiles: Record<`vp_${string}`, {
+    ownerContactId: string | null;
+    label: string;
+    latestVersion: number;
+    versions: Record<string, {
+      hash: string;
+      state: "draft" | "approved" | "superseded" | "rejected";
+      approval?: { by: "user"; at: number; evidence: ApprovalEvidence };
+      supersededBy?: { id: `vp_${string}`; version: number };
+    }>;
+  }>;
+  activeByOwnerLabel: Record<string, { id: `vp_${string}`; version: number; hash: string }>;
+  updatedAt: number;
+};
 ```
+
+`activeByOwnerLabel` is keyed by the SHA-256 of canonical `[ownerContactId, label]`. Version files
+contain only `VoiceProfileVersionDocument`; tools overlay lifecycle from the single authoritative
+`VoiceProfileIndex` to return `VoiceProfile`. This keeps the content blobs immutable and makes the
+global one-active-profile invariant a one-file commit, rather than a best-effort multi-file edit.
 
 Invariants (tested in #350):
 
 - V1 — A profile cannot reach `approved` with fewer than 3 samples whose `approved` is true and whose source is admissible: `content_item` sources must have `origin ∈ {authored, imported}`, `direction: outbound`, and `aiGenerated: false`; pasted/file sources need `authorship: "self"`.
-- V2 — Only the approve tool (§7.2) sets `approved`; `upsert_voice_profile` can only write `draft` and always bumps `version` when the `hash` changes. `hash` is SHA-256 over canonical JSON with sorted object keys, excluding `version`, `status`, `approval`, `supersededBy`, and `hash`; lifecycle transitions therefore cannot change it.
-- V3 — At most one `approved` profile per `(ownerContactId, label)`; approving a new version atomically marks the previous version `superseded` with `supersededBy` pointing to the new `{ id, version }`. Approved version content is immutable; this lifecycle transition is the only permitted rewrite of an existing version document.
+- V2 — Only the approve tool (§7.2) sets `approved`; `upsert_voice_profile` can only register `draft` and always bumps `version` when the `hash` changes. `hash` is SHA-256 over canonical JSON with sorted object keys, excluding `version`, `status`, `approval`, `supersededBy`, and `hash`; lifecycle transitions therefore cannot change it.
+- V3 — At most one `approved` profile per `(ownerContactId, label)`. Approval atomically replaces the one root `index.json`: the new version becomes active and the previous active version becomes `superseded` with `supersededBy`. It never rewrites either immutable version file.
 - V4 — `signatureLines[*].text` must be a substring of the referenced sample; anything else is rejected (no invented voice).
-- V5 — Variants record `{ id, version, hash }` of the profile used; a superseded version stays readable forever. Version documents are content-immutable after approval, except for the V3 lifecycle rewrite.
+- V5 — Variants record `{ id, version, hash }` of the profile used; a superseded version stays readable forever. Every registered version document is immutable; status, approval, and supersession are index projections.
 
 ### 5.2 Evidence spine and preserved claims
 
 ```ts
+type SourceSensitivity = {
+  level: "public" | "private";
+  reason: "public_default" | "private_content_type" | "inbound" | "user_marked" | "launch_local_only";
+  contextApproval?: { by: "user"; at: number; evidence: ApprovalEvidence };
+};
+
 type SourceRef =
-  | { id: `src_${string}`; kind: "content_item"; contentItemId: string; title?: string; sha256: string }
-  | { id: `src_${string}`; kind: "url"; url: string; title?: string; retrievedAt: number; sha256: string; excerpt?: string }
-  | { id: `src_${string}`; kind: "file"; path: string; sha256: string }
-  | { id: `src_${string}`; kind: "note"; text: string; enteredAt: number }        // user brief text
-  | { id: `src_${string}`; kind: "brief"; launchId: string };                      // launches.brief
+  | { id: `src_${string}`; kind: "content_item"; contentItemId: string; title?: string; sha256: string;
+      contentType: string; direction: "inbound" | "outbound" | null; sensitivity: SourceSensitivity }
+  | { id: `src_${string}`; kind: "url"; url: string; title?: string; retrievedAt: number; sha256: string;
+      excerpt?: string; sensitivity: SourceSensitivity }
+  | { id: `src_${string}`; kind: "file"; path: string; sha256: string; sensitivity: SourceSensitivity }
+  | { id: `src_${string}`; kind: "note"; text: string; enteredAt: number; sensitivity: SourceSensitivity }
+  | { id: `src_${string}`; kind: "brief"; launchId: string; sensitivity: SourceSensitivity };
 
 type PreservedClaim = {
   id: `clm_${string}`;
@@ -266,8 +299,9 @@ type PreservedClaim = {
   sourceId: `src_${string}`;
   locator?: string;                   // line/paragraph/quote anchor inside the source
   verbatimRequired: boolean;          // quotes, numbers, names, dates default true
-  sensitivity: "public" | "private";  // private = local_only sources or user-marked
-  includeInOutput: boolean;           // private claims require an explicit true
+  sensitivity: "public" | "private";  // inherited from the source snapshot
+  includeInOutput: boolean;
+  outputApproval?: { by: "user"; at: number; evidence: ApprovalEvidence };
 };
 
 type WritingGoal = "replies" | "reposts" | "saves" | "likes" | "follows" | "clicks" | "leads" | "awareness";
@@ -295,7 +329,7 @@ type EvidenceSpine = {
 Invariants:
 
 - S1 — Every `claims[*].sourceId` resolves inside `sources`. Every `message.proofClaimIds` resolves inside `claims`.
-- S2 — `sensitivity: "private"` is forced for `content_item` sources whose scope is `local_only` and for `note` sources the user marks private; such claims need `includeInOutput: true` to appear in any variant.
+- S2 — `content_items` has no scope column. Sensitivity is derived without a migration and snapshotted on `SourceRef`: `contentType ∈ {"email", "dm"}` or `direction === "inbound"` is always private; a `launch.scope === "local_only"` forces every source on that launch private; and a user may tighten any file/note/URL source to private. Those forced decisions cannot be overridden public. A private source body/excerpt is redacted from `get_writing_context` unless its ref already carries `contextApproval`; agent input flags cannot manufacture that approval. A private claim may set `includeInOutput: true` only with `outputApproval`, and is otherwise a blocker if emitted.
 - S3 — The spine hash is snapshotted on every variant; a changed spine after approval invalidates the approval (§5.6).
 
 ### 5.3 Platform-native generation request
@@ -350,7 +384,7 @@ type VariantWriting = {
   voiceProfile: { id: string; version: number; hash: string } | null;
   voicePrecedence: "voice_first" | "rules_first";
   spine: { id: `spn_${string}`; hash: string };
-  units: { count: number; chars: number[] };           // per unit (tweet, post, slide)
+  units: { texts: [string, ...string[]]; count: number; chars: number[] }; // canonical ordered units
   claimMap: { claimId: `clm_${string}`; present: boolean; unit?: number; verbatim?: boolean }[];
   audit: WritingAudit | null;                          // latest
   auditHistory?: Pick<WritingAudit, "id" | "auditedAt" | "verdict">[];   // ≤ 5, newest first
@@ -377,6 +411,12 @@ type VariantGeneration = {
 `upsert_variant` (#350) validates `metadata.writing` and `generationMetadata` whenever
 `generationMetadata.kind === "signals-writing"`; other producers (manual dialog, older agents)
 are untouched. Validation failures return `VALIDATION_ERROR` with the Zod path.
+
+`units.texts` is the canonical authored payload. `count` must equal `texts.length`, every
+`chars[i]` is derived from `texts[i]`, and `variants.body` must equal `texts[0]`. A post has one
+unit; an `x/thread` has at least two. Materialization stores all units in order, while the content
+item's legacy `body` mirrors unit 0. The publish job maps unit 0 to `text` and the remaining units
+to `threadTexts`; no layer may re-split, join, or renumber them implicitly.
 
 ### 5.5 Structured audit
 
@@ -516,6 +556,8 @@ Gates (each has a required test):
 - G2 — `create_content_draft` accepts any registry platform (drafts are allowed everywhere) but stamps `platformData.writing.capability.publish` so UI and agents render the honest state.
 - G3 — `materialize_variant` for a `draft_only`/`export_only` surface succeeds (content item `approved`) and returns `nextAction: "export"`; for `unsupported` it fails with `CAPABILITY_UNSUPPORTED`.
 - G4 — `get_writing_context` returns the capability row for every requested surface; the skill must refuse to claim publishing for anything not `direct`/`beta`.
+- G5 — A content item with `platformData.writing` enters `send-to-agent` only when its item status is exactly `approved`, its linked variant still has an approved current audit, and `{ auditId, inputHash, approvalAt, approvalBy }` exactly matches the materialization snapshot. Missing/revoked approval returns `WRITING_APPROVAL_REQUIRED`; any audit, units, target, or snapshot mismatch returns `WRITING_ARTIFACT_STALE`. Validation, publish-job creation, and the transition to `queued` occur in one transaction, so revocation cannot race the gate. A launch failure restores a writing item to `approved` (legacy items keep their existing retry behavior).
+- G6 — The REST input and `PublishJobPayload` carry `threadTexts?: string[]`. For a writing item, `send-to-agent` derives `text` and `threadTexts` from persisted canonical units and never trusts caller-supplied text. `threadTexts` is non-empty only for `platformTarget: "x"`, `contentType: "thread"`, and `kind: "original"`; `signals-publish` receives it unchanged.
 
 ### 5.9 Outcome attribution and calibration linkage
 
@@ -738,24 +780,28 @@ change in `seed-templates.ts`, not a schema migration).
 
 All tools follow the existing 4-edit convention (schema → handler → registry → `docs/agent-tools.md`,
 then `npm run generate:agent-tools-openapi`), the existing localhost/bearer auth, and the
-`{ success, code, details }` error envelope. Scope rules: reads exclude `local_only` rows unless
-`includeLocalOnly: true`; writes inherit the launch scope.
+`{ success, code, details }` error envelope. There is no `content_items.scope`: `get_content` is an
+authenticated detail-by-id read and reports sensitivity computed from existing `contentType` and
+`direction`; base-private content is redacted unless the request names a matching, durably
+context-approved launch source. Writing runs consume source text only through the launch's
+snapshotted `SourceRef` policy. Writes inherit the launch scope. The writing skill must never use
+`get_content` to bypass a redacted source returned by `get_writing_context`.
 
 | Tool | Issue | Input (abridged) | Output | Idempotency / errors |
 |---|---|---|---|---|
-| `get_content` | #349 | `{ contentItemId, includeMetrics?: boolean }` | full item: untruncated `body`, `title`, `contentType`, `platformTarget`, `status`, `origin`, `direction`, `aiGenerated`, `threadId`, `parentItemId`, `platformAccountId`, `platformData`, `media[]`, `post` (`platformPostId`, `platformUrl`, `publishedAt`, `engagementSnapshot`), `latestMetrics`, `gtm` (`variantId`, `launchId`), `writing` (from `platformData.writing`) | read-only; `NOT_FOUND` |
-| `create_content_draft` | #349 | `{ idempotencyKey, platform, contentType: "post" \| "thread", body, title?, threadTexts?, mediaAssetIds?, targetId?, origin: { launchId?, variantId? } }` | `{ contentItemId, created: boolean, capability: { publish } }` | same `idempotencyKey` (stored in `platformData.writing.idempotencyKey`) returns the existing item; `VALIDATION_ERROR` for unknown platform / surface; one platform per item (no comma lists) |
-| `update_content_draft` | #349 | `{ contentItemId, body?, title?, threadTexts?, mediaAssetIds?, expectedUpdatedAt? }` | updated item summary | only `draft`/`failed` items (`EDITABLE_STATUSES`), otherwise `CONFLICT`; `expectedUpdatedAt` mismatch → `CONFLICT` |
-| `get_writing_context` | #349 (voice fields land with #350) | `{ launchId, surfaces?: SurfaceId[], includeSources?: boolean }` | `{ launch (brief, audienceSpec, metadata.writing), niches[], sources[] (full bodies for content_item refs), targets[] (platform_targets for requested platforms), voiceProfile (active approved, full) \| null, capabilities: Record<SurfaceId, SurfaceCapabilities>, variants[] (summaries with `metadata.writing.audit.verdict`, `approval.state`), approvalPolicy }` | read-only; `NOT_FOUND`; `local_only` launch readable (detail-by-id rule, ui-4.1 §6) |
+| `get_content` | #349 | `{ contentItemId, includeMetrics?: boolean, writingSource?: { launchId, sourceId } }` | item metadata plus computed `sensitivity` and either untruncated `body` or `{ body: null, redacted: true }`; also `title`, `contentType`, `platformTarget`, `status`, `origin`, `direction`, `aiGenerated`, `threadId`, `parentItemId`, `platformAccountId`, `platformData`, `media[]`, `post`, `latestMetrics`, `gtm`, `writing` | authenticated detail-by-id; email/DM/inbound bodies require `writingSource` to resolve to this item and carry user `contextApproval`; `NOT_FOUND` |
+| `create_content_draft` | #349 | `{ idempotencyKey, platform, contentType: "post" \| "thread", body, title?, threadTexts?, mediaAssetIds?, targetId?, origin: { launchId?, variantId? } }` | `{ contentItemId, created: boolean, capability: { publish } }` | `body` is unit 0 and `threadTexts` are ordered continuation units; same `idempotencyKey` (stored in `platformData.writing.idempotencyKey`) returns the existing item; `VALIDATION_ERROR` for unknown platform / surface; one platform per item (no comma lists) |
+| `update_content_draft` | #349 | `{ contentItemId, body?, title?, threadTexts?, mediaAssetIds?, expectedUpdatedAt? }` | updated item summary | preserves the same ordered-unit rule; only `draft`/`failed` items (`EDITABLE_STATUSES`), otherwise `CONFLICT`; `expectedUpdatedAt` mismatch → `CONFLICT` |
+| `get_writing_context` | #349 (voice fields land with #350) | `{ launchId, surfaces?: SurfaceId[], includeSources?: boolean }` | `{ launch (scope, audienceSpec, metadata.writing, brief only when its SourceRef is public/context-approved), niches[], sources[] (body/excerpt only when public or durably context-approved; otherwise `{ redacted: true, sensitivity }`), targets[] (platform_targets for requested platforms), voiceProfile (active approved, full) \| null, capabilities: Record<SurfaceId, SurfaceCapabilities>, variants[] (summaries with `metadata.writing.audit.verdict`, `approval.state`), approvalPolicy }` | read-only; `NOT_FOUND`; a `local_only` launch is readable but its brief and sources are forced private by S2 |
 | `list_voice_profiles` / `get_voice_profile` | #350 | `{ status? }` / `{ id, version? }` | profiles (full document) | read-only |
-| `upsert_voice_profile` | #350 | `VoiceProfile` minus `approval`/`hash`/`status` | stored draft with `version`, `hash` | V1–V5; cannot set `approved`; bumps `version` when hash changes |
+| `upsert_voice_profile` | #350 | immutable profile content (no `version`/`hash`/lifecycle fields; `id` optional on create) | stored draft projection with `version`, `hash` | V1–V5; cannot set lifecycle; bumps `version` when hash changes |
 | `approve_voice_profile` | #350 | `{ id, version, evidence: ApprovalEvidence }` | approved profile; previous approved → `superseded` | `CONFLICT` when `version` is not the latest draft; `VALIDATION_ERROR` when V1 fails |
 | `upsert_variant` (extended) | #350 | existing input + validated `metadata.writing`, `generationMetadata` | existing output + `lineageEdges[]` | validation only when `generationMetadata.kind === "signals-writing"`; refuses `status: "published"` for writing variants (`use materialize_variant + publish lane`) |
-| `materialize_variant` | #350 | `{ variantId, approval: { by: "user", evidence }, idempotencyKey? }` | `{ contentItemId, created, nextAction: "publish" \| "export", capability }` | idempotent via existing `materialized_as` edge; `AUDIT_STALE`, `AUDIT_BLOCKED`, `APPROVAL_REQUIRED`, `CAPABILITY_UNSUPPORTED`, `TARGET_REQUIRED` (publish-capable surface without a resolvable target) |
+| `materialize_variant` | #350 | `{ variantId, approval?: { by: "user", evidence }, idempotencyKey? }` | `{ contentItemId, created, updated, nextAction: "publish" \| "export", capability }` | validates before idempotency; an existing unqueued item is replaced in place after an approved revision; `AUDIT_STALE`, `AUDIT_BLOCKED`, `APPROVAL_REQUIRED`, `CAPABILITY_UNSUPPORTED`, `TARGET_REQUIRED`, `CONFLICT` |
 | `revoke_variant_approval` | #350 | `{ variantId, reason }` | approval state | returns `approved` content item to `draft` if not yet queued; `CONFLICT` if the item is `queued`/`publishing`/`published` |
 
 `query_content` is unchanged (its 200-char body truncation is the reason `get_content` exists).
-`send-to-agent` (REST) gains the G1 gate; no agent tool creates publish jobs directly.
+`send-to-agent` (REST) gains G1/G5/G6; no agent tool creates publish jobs directly.
 
 ### 7.4 Persistence mapping (implemented by #350)
 
@@ -765,8 +811,8 @@ then `npm run generate:agent-tools-openapi`), the existing localhost/bearer auth
 | `EvidenceSpine` | `launches.metadata.writing.spine` (latest); `variants.metadata.writing.spine.hash` (snapshot) | spine history is not kept in the MVP |
 | `VariantWriting`, `WritingAudit`, `ApprovalState` | `variants.metadata.writing` | `auditHistory` capped at 5 |
 | `VariantGeneration` | `variants.generationMetadata`; `variants.generationModel` mirrors `model` | |
-| `VoiceProfile` | `SIGNALS_DATA_DIR/writing/voice-profiles/<id>/v<version>.json` + `<id>/current.json` pointer | append-only per version; `resetCoreTables()` gets a sibling `resetWritingStore()` for tests |
-| Materialized artifact | `content_items` (`status: approved`, `platformTarget: <platform>`, `contentType`, `aiGenerated: true`, `generationPrompt: null`) + `platformData.writing = { variantId, launchId, surface, targetId, voiceProfile, formulaId, overlay, approval, capability }` | one row per variant per platform |
+| `VoiceProfileVersionDocument` + `VoiceProfileIndex` | immutable `SIGNALS_DATA_DIR/writing/voice-profiles/<id>/v<version>.json` + one atomically replaced `voice-profiles/index.json` | index is the lifecycle authority; `resetCoreTables()` gets a sibling `resetWritingStore()` for tests |
+| Materialized artifact | `content_items` (`status: approved`, `platformTarget: <platform>`, `contentType`, `body: units.texts[0]`, `aiGenerated: true`, `generationPrompt: null`) + `platformData.writing = { variantId, launchId, surface, targetId, units, voiceProfile, formulaId, overlay, approval, capability, materialization: { auditId, inputHash, approvalAt, approvalBy } }` | one row per variant per platform; ordered units and approval snapshot are publish-gate inputs |
 | Lineage | `graph_edges` per §5.7 | created in the same transaction as the triggering write |
 | Capability registry | `src/lib/writing/capabilities.ts` (static) | G1 static test |
 | Surfaces / rule id helpers | `src/lib/writing/surfaces.ts`, `src/lib/writing/ids.ts` | shared by tools, UI, and the overlay packaging test |
@@ -775,24 +821,58 @@ then `npm run generate:agent-tools-openapi`), the existing localhost/bearer auth
 **Materialization algorithm** (`materialize_variant`):
 
 1. Load variant + launch; require `generationMetadata.kind === "signals-writing"`.
-2. If a `materialized_as` edge exists → return its content item (`created: false`).
-3. Require `metadata.writing.audit` present, recompute the canonical audit input hash from §5.5,
+2. Require `metadata.writing.audit` present, recompute the canonical audit input hash from §5.5,
    require it to equal `audit.inputHash` (else `AUDIT_STALE`), and require `verdict !== "block"`
    (else `AUDIT_BLOCKED`).
-4. Resolve policy; if `riskTier !== "low"` or policy is `explicit`, require `approval.by === "user"` with evidence (else `APPROVAL_REQUIRED`).
-5. Resolve capability for `platform/surface`; `unsupported` → `CAPABILITY_UNSUPPORTED`; if `publish ∈ {direct, beta}` require `targetId` resolvable via `platform_targets` (else `TARGET_REQUIRED`).
-6. In one transaction: create the content item (`approved`, single `platformTarget`, body from the variant, `contentType` from `variantType`), link media attachments referenced by the request, set `variants.contentItemId`, `variants.status = "selected"`, write `approval` + `materializedContentItemId` into `metadata.writing`, insert `materialized_as`.
-7. Return `nextAction: "publish"` for `direct`/`beta`, `"export"` otherwise.
+3. Resolve an effective approval tied to `audit.id`: reuse a stored current approval, accept the
+   call's user evidence as a `pending/revoked → approved` decision, or use the `auto_low_risk`
+   approval already created at audit time. If `riskTier !== "low"` or policy is `explicit`, the
+   effective decision must be `by: "user"` with evidence (else `APPROVAL_REQUIRED`). Persist that
+   effective approval only in the create/update transaction below.
+4. Resolve capability for `platform/surface`; `unsupported` → `CAPABILITY_UNSUPPORTED`; if
+   `publish ∈ {direct, beta}` require `targetId` resolvable via `platform_targets` (else
+   `TARGET_REQUIRED`). Validate the ordered-unit invariants from §5.4.
+5. Only after steps 2–4, look up `materialized_as`. If its item and materialization snapshot exactly
+   match the current audit, approval, target, and canonical units, return it (`created: false,
+   updated: false`). This is the sole idempotent-return path.
+6. If an edge exists but its snapshot is old, reject `queued`/`publishing`/`published` items with
+   `CONFLICT`; a published artifact is revised as a new variant, never mutated. For an unqueued
+   `draft`/`failed`/`approved` item, replace body/title/ordered units/media/target and the complete
+   writing snapshot in place, then restore `status: "approved"` (`created: false, updated: true`).
+7. Otherwise create the content item with unit 0 as `body`, all ordered units under
+   `platformData.writing`, a single `platformTarget`, and `status: "approved"`.
+8. The create/update path is one transaction with media links, `variants.contentItemId`, variant
+   `status: "selected"`, `metadata.writing.materializedContentItemId`, and an insert/update of the
+   `materialized_as` edge properties. Return `nextAction: "publish"` for `direct`/`beta`, `"export"`
+   otherwise.
 
 `publishVariantForContentItem` (called by `complete_publish`) already flips the variant to
 `published` and adds `published_as`; #350 makes it tolerate the pre-existing `contentItemId`
 (it does today) and copy `targetId` into the edge properties (it does today). The legacy
 `upsert_variant status: "published"` path stays for non-writing variants only.
 
-**Revocation:** spine hash change (`upsert_launch` with a new spine) → every variant of the launch
-whose `spine.hash` differs gets `approval.state = "revoked", revokedReason: "spine_changed"`, and
-its approved-but-unqueued content item returns to `draft`. Superseding a voice profile does not
-auto-revoke; it flags `voice: { superseded: true }` in the context for the next audit.
+**Voice profile commit/recovery protocol.** `upsert_voice_profile` first creates and fsyncs the
+immutable version document with a temp-file + rename, then atomically replaces `index.json` to
+register the draft. A crash between those operations leaves an unregistered orphan that readers
+ignore and the next upsert may reconcile by exact `{ id, version, hash }`. Approval changes no
+version file: under the store lock it reads generation `g`, builds generation `g + 1` with the new
+active version and old version's supersession in the same JSON object, writes and fsyncs a sibling
+temp file, renames it over `index.json`, then fsyncs the directory. On startup, incomplete temp
+files are ignored. Thus readers observe the complete old index before rename or the complete new
+index after rename—never zero or two active versions. Tests inject crashes before version rename,
+before index rename, and immediately after index rename, then assert recovery yields exactly the
+old or new authoritative state and all indexed hashes resolve to immutable documents.
+
+**Revocation and revision:** `revoke_variant_approval` first rejects
+`queued`/`publishing`/`published` with `CONFLICT` and no mutation. Otherwise it writes
+`approval.state = "revoked"` (with reason) and returns an `approved` materialized item to `draft`
+in one transaction. A spine hash change performs the same revoke/draft transition for unqueued
+items; an already queued or published artifact is not mutated, but the variant is marked stale so
+it cannot be materialized or sent again. After editing, the variant needs a new matching audit and
+approval; step 6 above then refreshes the same unqueued content item. Superseding a voice profile
+does not auto-revoke; it flags `voice: { superseded: true }` in the context for the next audit.
+G5 independently rejects every writing item whose linked approval is revoked, missing, or stale,
+even if a corrupted/manual row still says `status: "approved"`.
 
 **Migration-free boundary and later triggers (ADR-347-3/4).** Nothing above needs DDL. A migration
 becomes justified — and gets its own ADR and owner sign-off — when one of these appears:
@@ -858,19 +938,19 @@ Each requirement names the issue that owns its test.
 |---|---|---|---|
 | R1 | A variant persisted with `generationMetadata.kind = "signals-writing"` and any invented claim (`claims.invented.length > 0`) has `verdict: block` and cannot be materialized (`AUDIT_BLOCKED`). | unit + tool | #350 |
 | R2 | Every `claimMap` entry with `present: true` references a claim whose `sourceId` exists in the spine snapshot; validation rejects orphans. | unit | #350 |
-| R3 | A `private` claim with `includeInOutput: false` appearing in `claims.privateIncluded` is a blocker. | unit | #350 |
+| R3 | Sensitivity uses only existing fields plus the launch/source snapshot: email, DM, inbound, and every `local_only` source are forced private. Sentinel tokens remain redacted from `get_content` for base-private items and from writing context for every case without durable context approval; they block output without claim-level output approval. | unit + tool | #349/#350 |
 | R4 | `approve_voice_profile` rejects profiles with <3 admissible approved samples, with any `content_item` sample that is `aiGenerated`, inbound, or not self-authored, or with a signature line that is not a substring of its sample. | unit + tool | #350 |
-| R5 | Only `approve_voice_profile` can set `approved`; approving supersedes the previous approved version; superseded versions remain readable. | unit | #350 |
+| R5 | Only `approve_voice_profile` can set `approved`; one atomic index replacement activates the new version and supersedes the previous one; immutable versions remain readable. Crash injection before/after each rename recovers exactly the old or new index with one active profile. | unit | #350 |
 | R6 | Variants record `voiceProfile { id, version, hash }`; `get_writing_context` returns the active approved profile only. | tool | #349/#350 |
 | R7 | Under `voice_first`, an audit finding for a heuristic/aesthetic rule that targets a protected quirk is marked `skippedForVoice` and does not affect the verdict; under `rules_first` it applies and `voice.status = "rules_first"` is recorded. | skill packaging test with fixture drafts + unit for verdict derivation | #348/#350 |
 | R8 | One template run with three surfaces yields three variants with distinct `platform/surface`, identical `spine.hash`, and bodies that differ (not prefix/suffix copies). | skill integration fixture | #348 |
 | R9 | `create_content_draft` rejects comma-joined or unknown platforms; accepts any registry platform; stamps `capability.publish`. | route/tool | #349 |
-| R10 | `send-to-agent` rejects a content item whose platform is not `direct`/`beta` (`CAPABILITY_UNSUPPORTED`), and the registry's publish-capable set equals `PUBLISH_PLATFORM_TARGETS` (static test). | unit | #349 |
-| R11 | `materialize_variant` is idempotent (second call returns the same content item, `created: false`), refuses an audit whose canonical `inputHash` no longer matches, does not stale an audit when Wind Tunnel changes prediction/status fields only, and requires a resolvable target for publish-capable surfaces. | tool | #350 |
+| R10 | `send-to-agent` rejects a content item whose platform is not `direct`/`beta` (`CAPABILITY_UNSUPPORTED`), rejects writing items that are not currently approved or whose audit/materialization snapshot is stale, and the registry's publish-capable set equals `PUBLISH_PLATFORM_TARGETS` (static test). | unit | #349/#350 |
+| R11 | `materialize_variant` validates audit/approval before its idempotent return; an unchanged second call returns the same item (`created: false, updated: false`), while a revised/re-audited/re-approved unqueued variant refreshes that item (`updated: true`). It refuses a stale canonical `inputHash`, does not stale for Wind Tunnel prediction/status-only changes, never mutates queued/published artifacts, and requires a resolvable target for publish-capable surfaces. | tool | #350 |
 | R12 | Under `explicit` policy, `materialize_variant` without `approval.by = "user"` fails with `APPROVAL_REQUIRED`; under `auto_low_risk` it succeeds for `low` tier only and never enqueues a publish job. | tool | #350 |
-| R13 | Materialization produces a content item with a single `platformTarget` and `status: approved`; publishing it through the existing lane flips the variant to `published` and adds `published_as` with `targetId`. | integration (publish handlers) | #350 |
+| R13 | Materialization produces a content item with a single `platformTarget` and `status: approved`; an X thread fixture with units `[A, B, C]` materializes `body: A`, persists `[A, B, C]`, creates a publish payload with `text: A` and `threadTexts: [B, C]`, and reaches `signals-publish` in that order. Completing publish flips the variant to `published` and adds `published_as` with `targetId`. | integration (publish handlers) | #349/#350 |
 | R14 | Lineage query: `content_post → content_item → variant → launch → sources` resolves for a published writing variant via edges only. | query test | #350 |
-| R15 | Changing the spine hash revokes approvals and returns unqueued approved items to `draft`; queued/published items are untouched. | unit | #350 |
+| R15 | Changing the spine hash revokes approvals and returns unqueued approved items to `draft`; queued/published items are untouched. Re-approval updates the unqueued item, and `send-to-agent` rejects a manually re-approved-status row while the linked variant remains revoked/stale. | unit | #349/#350 |
 | R16 | `get_content` returns the untruncated body for a 10 kB item; `query_content` still truncates to 200 chars. | tool | #349 |
 | R17 | The packaged plugin zip contains `skills/signals-writing/**` and no `docs-dev/**`; overlay files pass the record-format check. | package test | #348 |
 | R18 | The brief section for a `signalsWriting` template lists capability rows and never lists a removed tool name. | unit | #349 |
@@ -916,8 +996,9 @@ in Signals' words with the corpus path recorded as `source` on each rule — nev
 
 ### 9.3 Broken references
 
-167 reference edges point at 51 targets that do not exist anywhere in the corpus. They fall into
-five groups, each with one disposition (recorded per reference in the manifest):
+The scan finds 167 per-skill missing-target records comprising 187 source-to-target reference
+edges and 51 unique target paths that do not exist anywhere in the corpus. They fall into five
+groups, each with one disposition (recorded per per-skill missing-target record in the manifest):
 
 | Group | Targets | Referencing skills | Disposition |
 |---|---|---|---|
@@ -1029,8 +1110,8 @@ expand this PR):
 
 | Order | Issue | Consumes from this spec | Delivers | Tests |
 |---|---|---|---|---|
-| 1 | **#349** agent tools | §7.2, §7.3 (`get_content`, `create_content_draft`, `update_content_draft`, `get_writing_context`), §5.8 G1/G2, §6.6 template-brief line | tools + `send-to-agent` gate + `signals-writing.ts` brief section + seeded template rewrite + `docs/agent-tools.md` + OpenAPI | R9, R10, R16, R18; auth/scope/idempotency per tool |
-| 2 | **#350** persistence & lineage | §5.1–§5.7, §5.11, §7.4 | `src/lib/writing/{contracts,surfaces,ids,capabilities,voice-profile-store,attribution-key}.ts`, `upsert_variant` validation, voice tools, `materialize_variant`, `revoke_variant_approval`, edges, policy module | R1–R7 (verdict/validation), R11–R15 |
+| 1 | **#349** agent tools | §7.2, §7.3 (`get_content`, `create_content_draft`, `update_content_draft`, `get_writing_context`), §5.8 G1/G2/G5/G6, §6.6 template-brief line | tools + `send-to-agent` capability/approval seams + ordered-thread publish payload + `signals-writing.ts` brief section + seeded template rewrite + docs + OpenAPI | R3, R9, R10, R13, R16, R18; auth/scope/idempotency per tool |
+| 2 | **#350** persistence & lineage | §5.1–§5.7, §5.11, §7.4 | `src/lib/writing/{contracts,surfaces,ids,capabilities,voice-profile-store,attribution-key}.ts`, `upsert_variant` validation, voice tools, `materialize_variant`, `revoke_variant_approval`, edges, policy module, linked-variant half of G5 | R1–R7 (verdict/validation), R10–R15 |
 | 3 | **#348** skill MVP | §6 entirely, §4.3, §9.2–§9.6 (what to re-author) | `.claude/skills/signals-writing/**`, plugin packaging, docs | R7, R8, R17; overlay format test; packaged-zip test |
 | — | **#354** Compose fix | §7.8 | draft-route validation from `PUBLISH_PLATFORM_TARGETS` | route regression |
 | 4 | **#351** Creative Studio | §7.5, §5.4–§5.6 (what to render) | routes/components, REST wrappers for materialize/revoke | component/route/e2e per #351 |
