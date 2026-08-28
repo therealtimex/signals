@@ -24,6 +24,14 @@ vi.mock("@/components/pagination-controls", () => ({
   PaginationControls: () => null,
 }));
 
+vi.mock("@/components/contact-list-saved-views-toolbar", () => ({
+  ContactListSavedViewsToolbar: () => null,
+}));
+
+vi.mock("@/components/contact-list-filter-chips", () => ({
+  ContactListFilterChips: () => null,
+}));
+
 vi.mock("@/components/ui/select", () => {
   function passthrough(tag: string) {
     function SelectStub({ children }: { children?: React.ReactNode }) {
@@ -67,6 +75,9 @@ describe("ContactListClient", () => {
         total: 1,
         page: 1,
         pageSize: 25,
+        filters: {},
+        provenanceTemplates: [],
+        provenanceWorkflowRuns: [],
       }),
     );
     expect(html).toContain("Trung Le");

@@ -299,4 +299,40 @@ describe("contacts queries", () => {
     expect(inProgressResults.total).toBe(1);
     expect(inProgressResults.data[0]?.name).toBe("Özkan Taşlı");
   });
+
+  it("filters contacts with an assigned relationship goal", () => {
+    createContact({ name: "No Goal" });
+    const withGoal = createContact({
+      name: "Goal Holder",
+      relationshipGoal: "warm_conversation",
+    });
+
+    const result = listContacts({ hasRelationshipGoal: true });
+    expect(result.total).toBe(1);
+    expect(result.data[0]?.id).toBe(withGoal.id);
+  });
+
+  it("searches company and identity handles", () => {
+    const rampContact = createContact({
+      name: "Blake Martin",
+      employments: [{ orgName: "Ramp", title: "Marketing", isCurrent: true }],
+    });
+    createContact({ name: "Other Person" });
+
+    const byCompany = listContacts({ search: "Ramp" });
+    expect(byCompany.total).toBe(1);
+    expect(byCompany.data[0]?.id).toBe(rampContact.id);
+
+    const handleContact = createContact({ name: "Handle Match" });
+    createIdentity({
+      contactId: handleContact.id,
+      platform: "x",
+      platformUserId: "unique-handle-42",
+      platformHandle: "unique_handle_42",
+    });
+
+    const byHandle = listContacts({ search: "unique_handle" });
+    expect(byHandle.total).toBe(1);
+    expect(byHandle.data[0]?.id).toBe(handleContact.id);
+  });
 });

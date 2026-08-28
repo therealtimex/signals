@@ -1,11 +1,13 @@
-import { eq, like, and, or, desc, asc, count, inArray, exists, sql, SQL, gte, lte } from "drizzle-orm";
+import { eq, like, and, or, desc, asc, count, inArray, exists, sql, SQL, gte, lte, isNotNull } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db/client";
 import {
   contacts,
   contactChannels,
+  contactEmployments,
   contactIdentities,
   contentItems,
+  orgs,
   tasks,
   workflowSteps,
 } from "@/lib/db/schema";
@@ -234,6 +236,7 @@ export function listContacts(opts?: {
   createdTemplateId?: string;
   minEnrichmentScore?: number;
   maxEnrichmentScore?: number;
+  hasRelationshipGoal?: boolean;
 }): PaginatedResult<ContactDTO> {
   const conditions: SQL[] = [];
 
@@ -259,6 +262,42 @@ export function listContacts(opts?: {
                 eq(contactChannels.channelType, "email"),
                 like(contactChannels.value, pattern),
               ),
+            ),
+        ),
+        exists(
+          db
+            .select({ id: contactIdentities.id })
+            .from(contactIdentities)
+            .where(
+              and(
+                eq(contactIdentities.contactId, contacts.id),
+                or(
+                  like(contactIdentities.platformHandle, pattern),
+                  like(contactIdentities.platformUserId, pattern),
+                  like(contactIdentities.displayName, pattern),
+                  like(contactIdentities.headline, pattern),
+                ),
+              ),
+            ),
+        ),
+        exists(
+          db
+            .select({ id: contactEmployments.id })
+            .from(contactEmployments)
+            .where(
+              and(
+                eq(contactEmployments.contactId, contacts.id),
+                like(contactEmployments.title, pattern),
+              ),
+            ),
+        ),
+        exists(
+          db
+            .select({ id: contactEmployments.id })
+            .from(contactEmployments)
+            .innerJoin(orgs, eq(contactEmployments.orgId, orgs.id))
+            .where(
+              and(eq(contactEmployments.contactId, contacts.id), like(orgs.name, pattern)),
             ),
         ),
       )!,
@@ -344,6 +383,9 @@ export function listContacts(opts?: {
   }
   if (opts?.maxEnrichmentScore !== undefined) {
     conditions.push(lte(contacts.enrichmentScore, opts.maxEnrichmentScore));
+  }
+  if (opts?.hasRelationshipGoal) {
+    conditions.push(isNotNull(contacts.relationshipGoal));
   }
 
   const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
