@@ -224,15 +224,10 @@ export function ContactListClient({
   ].filter(Boolean).length;
 
   useEffect(() => {
-    if (contactListHasProvenanceFilters(filters)) {
+    if (provenanceFilterCount > 0) {
       setAdvancedOpen(true);
     }
-  }, [
-    filters.createdSource,
-    filters.createdSourceDetail,
-    filters.createdTemplateId,
-    filters.createdWorkflowRunId,
-  ]);
+  }, [provenanceFilterCount]);
   const hasListFilters = hasUserFilters || Boolean(filters.archived);
 
   if (contacts.length === 0 && !hasListFilters) {
