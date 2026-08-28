@@ -14,7 +14,9 @@ Signals is distributed as a **RealTimeX Local App**. Developers can also run it 
 | **Default port** | `3000` (override with `--port`, `PORT`, or `RTX_PORT`) |
 | **Data directory** | `~/.signals/` (override with `SIGNALS_DATA_DIR`) |
 
-See [`rtx-local-app.example.json`](../rtx-local-app.example.json) for the marketplace v2 runtime contract. For current source-checkout QA, use `scripts/qa/provision-signals-local-app.mjs`.
+See [`rtx-local-app.example.json`](../rtx-local-app.example.json) for the marketplace v2 runtime
+contract. For source-checkout QA, create a dedicated issue app with
+`scripts/qa/provision-signals-qa-local-app.mjs`; never repoint the canonical **Signals** app.
 
 ## Environment injection (RTX Electron)
 
@@ -114,18 +116,33 @@ RTX_PORT=3000 \
 npm run dev
 ```
 
-Register the app in **Settings → Local Apps** first so `/sdk/register` resolves the app id.
-
-For headless QA against the canonical dev app id (`47e45f71-3279-42f5-8e95-731de01b6eae`), upsert it into the RTX SQLite database when missing:
+Register the app in **Settings → Local Apps** first so `/sdk/register` resolves the app id. Issue
+QA should use the guarded provisioner from the issue worktree:
 
 ```bash
-node scripts/qa/provision-signals-local-app.mjs
-# or: node scripts/qa/provision-signals-local-app.mjs --db /path/to/realtimex.db
+node scripts/qa/provision-signals-qa-local-app.mjs \
+  --issue <N> \
+  --worktree "$PWD" \
+  --loop-id <loop-id>
 ```
 
-This pre-grants manifest permissions so `/sdk/register` and `/sdk/ping` succeed without an Electron permission prompt.
+After evidence capture, delete the issue app and verify canonical configuration hygiene:
 
-**Agent Workflow Run QA** (issue #153) uses the same `desktop.runtime-sessions` bridge as publish. If `POST /api/workflows/templates/{id}/run` returns `503` with a plain `Not Found` body, the RealTimeX host at `SERVER_URL` / `RTX_API_BASE_URL` does not expose `/sdk/desktop/runtime-sessions/*` — update or restart the RealTimeX desktop app, confirm `desktop.runtime-sessions` is granted, and re-run `provision-signals-local-app.mjs` if needed.
+```bash
+node scripts/qa/cleanup-signals-qa-local-app.mjs --issue <N>
+REALTIMEX_RUNTIME=dev node scripts/qa/verify-signals-local-app-hygiene.mjs --issue <N>
+```
+
+The canonical dev app id (`47e45f71-3279-42f5-8e95-731de01b6eae`) is reserved for manual daily
+development. `scripts/qa/provision-signals-local-app.mjs --restore-canonical` is an incident
+recovery command if that record was corrupted; it is not a QA setup step.
+
+**Agent Workflow Run QA** (issue #153) uses the same `desktop.runtime-sessions` bridge as publish.
+If `POST /api/workflows/templates/{id}/run` returns `503` with a plain `Not Found` body, the
+RealTimeX host at `SERVER_URL` / `RTX_API_BASE_URL` does not expose
+`/sdk/desktop/runtime-sessions/*` — update or restart the RealTimeX desktop app, confirm
+`desktop.runtime-sessions` is granted to the issue QA app, and reprovision that issue app if
+needed. Do not modify the canonical app.
 
 **Agent workflow preflight** (issue #157):
 

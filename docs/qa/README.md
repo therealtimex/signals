@@ -40,6 +40,39 @@ Publishable versions repeat the full gate before release in
 | Local App bootstrap | See [local-app.md](./local-app.md) |
 | `npm run doctor` | React Doctor advisory scan (not part of gate) |
 
+## Isolated RealTimeX Local App QA
+
+Never repoint the manually managed **Signals** Local App for issue QA. Create a disposable,
+issue-scoped app instead:
+
+```bash
+node scripts/qa/provision-signals-qa-local-app.mjs \
+  --issue 356 \
+  --worktree /absolute/path/to/the/issue-worktree \
+  --loop-id loop-issue-356-example
+```
+
+The command uses the supported `realtimex-pp-cli` Local Apps API, creates
+`Signals issue-356 QA`, starts it with `npm run dev` in the supplied worktree, and records the
+generated app id in `/private/tmp/signals-qa-local-app-issue-356.json`. The app and its data are
+tagged and isolated from the canonical Signals record. It targets the Dev API at `3101` by
+default and does not inherit an ambient production `REALTIMEX_BASE_URL`; use `--base-url` only for
+a deliberate alternate Dev runtime.
+
+After evidence capture, teardown is mandatory:
+
+```bash
+node scripts/qa/cleanup-signals-qa-local-app.mjs --issue 356
+REALTIMEX_RUNTIME=dev node scripts/qa/verify-signals-local-app-hygiene.mjs --issue 356
+```
+
+Cleanup refuses the canonical app id and any record missing the expected issue name and safety
+tags. The verifier reads the authoritative dev SQLite record and fails if the canonical app uses
+an ephemeral data directory/worktree command or if the issue QA record still exists.
+
+`scripts/qa/provision-signals-local-app.mjs` is incident recovery for the canonical record, not a
+QA provisioner. It requires the explicit `--restore-canonical` guard.
+
 ## CI data directory
 
 GitHub Actions sets `SIGNALS_DATA_DIR` to `${{ github.workspace }}/.ci/signals-data` so boot and migrations stay inside the workspace.
