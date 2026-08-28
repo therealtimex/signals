@@ -485,7 +485,7 @@ export function ContactDetailClient({
       </div>
 
       <Tabs value={tab} onValueChange={setTab}>
-        <TabsList>
+        <TabsList className="max-w-full overflow-x-auto">
           <TabsTrigger value="details">Details</TabsTrigger>
           <TabsTrigger value="identities">
             Identities ({contact.identities.length})

@@ -239,6 +239,24 @@ describe("ContactDetailClient details layout", () => {
     expect(actions?.classList.contains("shrink-0")).toBe(false);
   });
 
+  it("contains the contact tab strip within the mobile content width", () => {
+    const html = renderToStaticMarkup(
+      createElement(ContactDetailClient, {
+        contact: contactFixture,
+        tasks: [],
+        explore: exploreFixture,
+        profilePipelineTemplateId: "tmpl-1",
+      }),
+    );
+    const wrapper = document.createElement("div");
+    wrapper.innerHTML = html;
+    const tabs = wrapper.querySelector('[role="tablist"]');
+
+    expect(tabs).not.toBeNull();
+    expect(tabs?.classList.contains("max-w-full")).toBe(true);
+    expect(tabs?.classList.contains("overflow-x-auto")).toBe(true);
+  });
+
   it("hides a headline that repeats title and company", () => {
     const html = renderToStaticMarkup(
       createElement(ContactDetailClient, {
