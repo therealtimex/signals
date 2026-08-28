@@ -11,6 +11,7 @@ import { getContactsByIds } from "@/lib/db/queries/contacts";
 import { getContactRelationshipStrength } from "@/lib/db/queries/org-relationships";
 import type { ContactEmployment } from "@/lib/db/types";
 import type { RelationshipStrength, RelationshipStrengthBand } from "@/lib/graph/relationship-strength";
+import { selectActiveEmailCandidate } from "@/lib/contacts/email-verification/active-candidate";
 
 export type OrgPersonRow = {
   id: string;
@@ -55,11 +56,11 @@ function emailStatus(contactId: string): OrgPersonRow["emailStatus"] {
   const verified = channels.find((channel) => channel.isVerified);
   if (verified) return { status: "verified", address: verified.value };
   if (channels[0]) return { status: "unverified", address: channels[0].value };
-  const candidate = db
+  const candidate = selectActiveEmailCandidate(db
     .select()
     .from(contactEmailCandidates)
     .where(eq(contactEmailCandidates.contactId, contactId))
-    .get();
+    .all());
   return candidate
     ? { status: candidate.status, address: candidate.address }
     : { status: "none", address: null };

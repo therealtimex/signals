@@ -2,6 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { contactChannels, contactEmailCandidates } from "@/lib/db/schema";
 import { resolveEmailVerificationSettings } from "@/lib/settings/email-verification-settings";
+import { selectActiveEmailCandidate } from "@/lib/contacts/email-verification/active-candidate";
 
 export type CandidateEmailEligibility = { sendable: boolean; reason?: string };
 
@@ -28,7 +29,9 @@ export function resolveAutomationEmail(
   const verified = channels.find((channel) => channel.isVerified);
   if (verified) return { address: verified.value, status: "verified", eligible: true };
   if (channels[0]) return { address: channels[0].value, status: "unverified", eligible: true };
-  const candidate = db.select().from(contactEmailCandidates).where(eq(contactEmailCandidates.contactId, contactId)).get();
+  const candidate = selectActiveEmailCandidate(
+    db.select().from(contactEmailCandidates).where(eq(contactEmailCandidates.contactId, contactId)).all(),
+  );
   if (!candidate) return { address: null, status: "none", eligible: false, reason: "no_email" };
   const decision = resolveCandidateEmailEligibility(candidate.status, {
     includePredicted: options?.includePredicted,

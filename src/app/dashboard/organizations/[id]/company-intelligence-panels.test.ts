@@ -1,6 +1,9 @@
-import { createElement } from "react";
+// @vitest-environment happy-dom
+
+import { act, createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CompanyFeed, CompanyPeopleTable, EmailIntelligenceCard } from "./company-intelligence-panels";
 
 describe("company intelligence panels", () => {
@@ -54,5 +57,82 @@ describe("company intelligence panels", () => {
     expect(markup).toContain("Snowball workflow");
     expect(markup).toContain("last scan was partial");
     expect(markup).toContain("coverage is stale");
+  });
+});
+
+describe("company feed actions", () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  beforeEach(() => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(() => {
+    act(() => root.unmount());
+    container.remove();
+    vi.unstubAllGlobals();
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = false;
+  });
+
+  async function renderFeed(category: "signal" | "note") {
+    await act(async () => {
+      root.render(createElement(CompanyFeed, {
+        orgId: "org-1", initial: { data: [], total: 0 }, category, followedAt: null,
+        signalScanState: category === "signal"
+          ? { status: "idle", stale: false, permissionDenied: false, lastRunAt: null, message: null }
+          : undefined,
+      }));
+    });
+  }
+
+  function button(label: string) {
+    return [...container.querySelectorAll<HTMLButtonElement>("button")]
+      .find((candidate) => candidate.textContent?.includes(label))!;
+  }
+
+  it("shows permission details when follow is forbidden", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(
+      JSON.stringify({ error: "Following companies is restricted", code: "FORBIDDEN" }),
+      { status: 403 },
+    )));
+    await renderFeed("signal");
+    await act(async () => { button("Follow").click(); await Promise.resolve(); });
+    expect(container.querySelector('[role="status"]')?.textContent).toContain(
+      "Permission denied: Following companies is restricted",
+    );
+  });
+
+  it("preserves the not-embedded task message", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(
+      JSON.stringify({ error: "Company tasks are available inside RealTimeX", code: "RTX_UNAVAILABLE" }),
+      { status: 503 },
+    )));
+    await renderFeed("signal");
+    await act(async () => { button("Create task").click(); await Promise.resolve(); });
+    expect(container.querySelector('[role="status"]')?.textContent).toBe(
+      "Company tasks are available inside RealTimeX",
+    );
+  });
+
+  it("preserves note API errors", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(
+      JSON.stringify({ error: "Notes are read-only for this company" }),
+      { status: 409 },
+    )));
+    await renderFeed("note");
+    const textarea = container.querySelector("textarea")!;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
+      setter.call(textarea, "Important note");
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => { button("Add note").click(); await Promise.resolve(); });
+    expect(container.querySelector('[role="status"]')?.textContent).toBe(
+      "Notes are read-only for this company",
+    );
   });
 });

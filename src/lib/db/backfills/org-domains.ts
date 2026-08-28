@@ -4,7 +4,10 @@ import { db } from "@/lib/db/client";
 import { orgDomains, orgs } from "@/lib/db/schema";
 import { normalizeOrgDomain } from "@/lib/orgs/domain";
 
-/** Project legacy `orgs.domain` values into the normalized domain identity table. */
+/**
+ * Project legacy `orgs.domain` values into the normalized domain identity table.
+ * Canonical collisions are owned by the lexicographically smallest org id.
+ */
 export function backfillOrgDomains(): {
   inserted: number;
   skipped: number;
@@ -14,8 +17,6 @@ export function backfillOrgDomains(): {
 } {
   const rows = db.select({ id: orgs.id, domain: orgs.domain }).from(orgs).all()
     .sort((a, b) => a.id.localeCompare(b.id));
-  const identities = db.select().from(orgDomains).all();
-  const identityByDomain = new Map(identities.map((identity) => [identity.domain, identity]));
   let inserted = 0;
   let skipped = 0;
   let normalized = 0;
@@ -41,10 +42,7 @@ export function backfillOrgDomains(): {
   }
 
   for (const [domain, group] of groups) {
-    const claimed = identityByDomain.get(domain);
-    const winner = (claimed ? group.find((row) => row.id === claimed.orgId) : undefined)
-      ?? group.find((row) => row.domain === domain)
-      ?? group[0];
+    const winner = group[0];
     const losers = group.filter((row) => row.id !== winner.id);
 
     // Clear duplicates before writing the canonical value so the legacy unique index cannot race us.

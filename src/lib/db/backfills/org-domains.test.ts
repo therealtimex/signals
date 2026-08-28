@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { orgDomains, orgs } from "@/lib/db/schema";
 import { createOrg, getOrgByDomain } from "@/lib/db/queries/orgs";
@@ -21,14 +20,13 @@ describe("company domain backfill", () => {
   });
 
   it("normalizes legacy URLs and resolves canonical duplicates deterministically", () => {
-    const url = createOrg({ name: "URL Co" });
-    const canonical = createOrg({ name: "Canonical Co" });
-    db.update(orgs).set({ domain: "https://www.Acme.com/about" }).where(eq(orgs.id, url.id)).run();
-    db.update(orgs).set({ domain: "Acme.COM" }).where(eq(orgs.id, canonical.id)).run();
-    db.delete(orgDomains).run();
+    db.insert(orgs).values([
+      { id: "org-a-url", name: "URL Co", domain: "https://www.Acme.com/about" },
+      { id: "org-z-canonical", name: "Canonical Co", domain: "Acme.COM" },
+    ]).run();
 
     expect(backfillOrgDomains()).toMatchObject({ inserted: 1, conflicts: 1 });
-    expect(getOrgByDomain("acme.com")?.id).toBe(url.id < canonical.id ? url.id : canonical.id);
+    expect(getOrgByDomain("acme.com")?.id).toBe("org-a-url");
     expect(db.select().from(orgDomains).all()).toHaveLength(1);
     expect(db.select().from(orgDomains).all()[0]).toMatchObject({ domain: "acme.com", kind: "primary" });
     expect(backfillOrgDomains()).toMatchObject({ inserted: 0, conflicts: 0 });

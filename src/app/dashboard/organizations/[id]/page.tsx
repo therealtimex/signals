@@ -24,7 +24,7 @@ export default async function OrganizationDetailPage({
   const relationships = getOrgRelationshipSummary(id);
   const emailIntelligence = getOrgEmailIntelligence(id);
   const timeline = listOrgTimeline(id, { pageSize: 100 });
-  const signalScanState = getOrgSignalScanState(id);
+  const signalScanState = getOrgSignalScanState(id, org.followedAt);
   const ownerContactId = getOwnerContactId();
   const selfContact = ownerContactId ? getContactById(ownerContactId) : null;
   return (

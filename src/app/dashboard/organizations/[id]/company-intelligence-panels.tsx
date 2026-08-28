@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import type { OrgSignalScanState } from "@/lib/orgs/signal-scan-state";
+import { companyActionError, type CompanyActionFeedback } from "@/lib/orgs/company-action-errors";
 import {
   Table,
   TableBody,
@@ -300,7 +301,7 @@ export function CompanyFeed({ orgId, initial, category, followedAt, signalScanSt
   const [followed, setFollowed] = useState(Boolean(followedAt));
   const [pending, setPending] = useState(false);
   const [note, setNote] = useState("");
-  const [message, setMessage] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<CompanyActionFeedback | null>(null);
   const [localScanState, setLocalScanState] = useState<OrgSignalScanState | undefined>();
   const scanState = localScanState ?? signalScanState;
   const visible = items.filter((item) => category === "note" ? item.type === "note" : item.category === category);
@@ -314,40 +315,61 @@ export function CompanyFeed({ orgId, initial, category, followedAt, signalScanSt
   }
 
   async function toggleFollow() {
-    setPending(true);
+    setPending(true); setFeedback(null);
     try {
       const nextFollowed = !followed;
       const response = await fetch(`/api/orgs/${orgId}/follow`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ follow: nextFollowed }) });
-      if (response.ok) { setFollowed(() => nextFollowed); await refresh(); }
+      if (response.ok) {
+        setFollowed(nextFollowed);
+        if (scanState) {
+          setLocalScanState({
+            ...scanState,
+            stale: nextFollowed && (
+              !scanState.lastRunAt
+              || Math.floor(Date.now() / 1000) - scanState.lastRunAt > 7 * 86_400
+            ),
+          });
+        }
+        setFeedback({ kind: "success", message: nextFollowed ? "Company followed." : "Company unfollowed." });
+        await refresh();
+      } else {
+        setFeedback(await companyActionError(response, "Follow status could not be updated."));
+      }
+    } catch {
+      setFeedback({ kind: "error", message: "Follow status could not be updated." });
     } finally {
       setPending(false);
     }
   }
 
   async function scan() {
-    setPending(true); setMessage(null);
+    setPending(true); setFeedback(null);
     try {
       const response = await fetch(`/api/orgs/${orgId}/signal-scan`, { method: "POST" });
       if (response.ok) {
-        setMessage("Signal scan started.");
+        setFeedback({ kind: "success", message: "Signal scan started." });
         setLocalScanState({ status: "pending", stale: scanState?.stale ?? true, permissionDenied: false, lastRunAt: scanState?.lastRunAt ?? null, message: null });
       } else {
-        const body = await response.json().catch(() => ({}));
-        setMessage(typeof body.error === "string" ? body.error : "Signal scan could not start.");
-        setLocalScanState({ status: "failed", stale: scanState?.stale ?? true, permissionDenied: body.code === "FORBIDDEN" || body.code === "PERMISSION_DENIED", lastRunAt: scanState?.lastRunAt ?? null, message: typeof body.error === "string" ? body.error : null });
+        const error = await companyActionError(response, "Signal scan could not start.");
+        setFeedback(error);
+        setLocalScanState({ status: "failed", stale: scanState?.stale ?? true, permissionDenied: error.kind === "permission", lastRunAt: scanState?.lastRunAt ?? null, message: error.message });
       }
+    } catch {
+      setFeedback({ kind: "error", message: "Signal scan could not start." });
     } finally {
       setPending(false);
     }
   }
 
   async function createFollowUpTask() {
-    setPending(true); setMessage(null);
+    setPending(true); setFeedback(null);
     try {
       const response = await fetch("/api/tasks", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: "Review company signals", taskType: "follow_up", relatedOrgId: orgId }) });
-      setMessage(response.ok ? "Follow-up task created." : "Task could not be created.");
+      setFeedback(response.ok
+        ? { kind: "success", message: "Follow-up task created." }
+        : await companyActionError(response, "Task could not be created."));
     } catch {
-      setMessage("Task could not be created.");
+      setFeedback({ kind: "error", message: "Task could not be created." });
     } finally {
       setPending(false);
     }
@@ -355,10 +377,18 @@ export function CompanyFeed({ orgId, initial, category, followedAt, signalScanSt
 
   async function addNote() {
     if (!note.trim()) return;
-    setPending(true);
+    setPending(true); setFeedback(null);
     try {
       const response = await fetch(`/api/orgs/${orgId}/activities`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ activityType: "note", summary: note.trim() }) });
-      if (response.ok) { setNote(""); await refresh(); }
+      if (response.ok) {
+        setNote("");
+        setFeedback({ kind: "success", message: "Note added." });
+        await refresh();
+      } else {
+        setFeedback(await companyActionError(response, "Note could not be added."));
+      }
+    } catch {
+      setFeedback({ kind: "error", message: "Note could not be added." });
     } finally {
       setPending(false);
     }
@@ -370,7 +400,7 @@ export function CompanyFeed({ orgId, initial, category, followedAt, signalScanSt
       <CardContent className="space-y-4">
         {category === "note" ? <div className="space-y-2"><Textarea value={note} onChange={(event) => setNote(event.target.value)} placeholder="Add company context for people and agents…" /><Button size="sm" disabled={pending || !note.trim()} onClick={addNote}>Add note</Button></div> : null}
         {category === "signal" && scanState ? <div className="space-y-2 text-sm" aria-live="polite">{scanState.permissionDenied ? <p className="rounded border border-destructive/40 bg-destructive/5 p-3">Signal scan permission was denied. Check the RealTimeX workspace connection.</p> : null}{scanState.status === "pending" ? <p className="rounded border p-3">Signal scan is in progress. Existing results remain visible.</p> : null}{scanState.status === "partial" ? <p className="rounded border border-amber-500/40 bg-amber-500/5 p-3">The last scan was partial. {scanState.message}</p> : null}{scanState.status === "failed" && !scanState.permissionDenied ? <p className="rounded border border-destructive/40 bg-destructive/5 p-3">The last scan failed. {scanState.message}</p> : null}{scanState.stale && scanState.status !== "pending" ? <p className="rounded border border-amber-500/40 bg-amber-500/5 p-3">Signal coverage is stale or has not been scanned yet.</p> : null}</div> : null}
-        {message ? <p className="text-sm" role="status">{message}</p> : null}
+        {feedback ? <p className={feedback.kind === "success" ? "text-sm" : feedback.kind === "permission" ? "rounded border border-destructive/40 bg-destructive/5 p-3 text-sm" : feedback.kind === "not_embedded" ? "rounded border border-amber-500/40 bg-amber-500/5 p-3 text-sm" : "text-sm text-destructive"} role="status">{feedback.message}</p> : null}
         {visible.length === 0 ? (
           <div className="rounded-lg border border-dashed p-10 text-center"><p className="font-medium">No {category === "note" ? "notes" : `${category} items`} yet</p><p className="mt-1 text-sm text-muted-foreground">{category === "signal" ? "Follow this company or scan for funding, hiring, leadership, product, and news signals." : "Company and relationship history will appear here."}</p></div>
         ) : (
