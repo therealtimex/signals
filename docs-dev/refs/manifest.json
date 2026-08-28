@@ -6,7 +6,7 @@
   "updatedAt": "2026-08-28",
   "policy": {
     "adoption": "The corpus is dev-only design reference. Nothing is vendored: adopted patterns are re-authored in Signals' words inside .claude/skills/signals-writing (spec §9.1, ADR-347-9).",
-    "licensing": "62 of 63 skills declare no license, author, or copyright; humanizer declares MIT over content derived from a CC BY-SA 4.0 Wikipedia article without a copyright holder. All families are therefore redistribution not-cleared.",
+    "licensing": "62 of 63 skills declare no license, author, or copyright; humanizer declares MIT over content derived from a CC BY-SA 4.0 Wikipedia article without naming a copyright holder or documenting relicensing authority. All families are therefore redistribution not-cleared.",
     "heuristics": "Every reach/timing/multiplier claim in the corpus is unsourced; adopted heuristics start at confidence=low with the corpus path as source and a reviewBy date (spec §5.10).",
     "exclusions": "Platform-manipulation guidance (engagement-pod evasion, human-mimicry timing, detector gaming), personal identifiers, and named third parties' posts are never adopted (spec §9.5).",
     "packaging": "docs-dev/refs is never copied into the RealTimeX plugin zip (scripts/package-realtimex-plugin.sh copies .claude/skills only)."
@@ -99,7 +99,7 @@
     {
       "id": "humanizer-skill",
       "platform": null,
-      "provenance": "Single-file skill, frontmatter license: MIT, metadata.version 2.11.2, no author or copyright holder; body credits Wikipedia / WikiProject AI Cleanup 'Signs of AI writing' (CC BY-SA 4.0).",
+      "provenance": "Single-file skill, frontmatter license: MIT, metadata.version 2.11.2, no named author or copyright holder; body credits Wikipedia / WikiProject AI Cleanup 'Signs of AI writing' (CC BY-SA 4.0).",
       "license": {
         "declared": "MIT",
         "status": "conflict"
@@ -668,7 +668,7 @@
         "verbatim before/after example pairs derived from the CC BY-SA 4.0 Wikipedia article",
         "MIT relicensing of derived text"
       ],
-      "notes": "Cleanest claim-safety contract in the corpus ('do not add a fact, name, number, date, quote, or citation unless it comes from the source or the user') and the 'writing sample takes priority over style rules' precedence that D6 adopts. The 'what not to flag' false-positive list is the model for info-severity findings. License is declared MIT but the content is derived from Wikipedia (CC BY-SA 4.0) and the frontmatter names no copyright holder, so it is treated as conflict/reference-only like everything else."
+      "notes": "Cleanest claim-safety contract in the corpus ('do not add a fact, name, number, date, quote, or citation unless it comes from the source or the user') and the 'writing sample takes priority over style rules' precedence that D6 adopts. The 'what not to flag' false-positive list is the model for info-severity findings. License is declared MIT but the content is derived from Wikipedia (CC BY-SA 4.0) and the frontmatter names no copyright holder or relicensing authority, so it is treated as conflict/reference-only like everything else."
     },
     {
       "id": "ig-audience-insights",

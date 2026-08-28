@@ -16,8 +16,9 @@ was never copied, so 167 references point at 51 files that do not exist.
 ## Rules for using it
 
 1. **Reference only, re-author always.** 62 of 63 skills declare no license, author, or copyright;
-   `humanizer-skill` declares MIT over text derived from a CC BY-SA 4.0 Wikipedia article with no
-   copyright holder. Nothing here may be copied into `.claude/skills/` or any shipped artifact.
+   `humanizer-skill` declares MIT over text derived from a CC BY-SA 4.0 Wikipedia article without
+   naming a copyright holder or documenting relicensing authority. Nothing here may be copied into
+   `.claude/skills/` or any shipped artifact.
    Adopted patterns are rewritten in Signals' words with the corpus path recorded as provenance.
 2. **Every performance claim is unsourced.** "2026 algorithm", timing windows, multipliers, and
    "corpus pull" figures start as `heuristic` rules at `confidence: low` with a review date

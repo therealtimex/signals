@@ -26,7 +26,7 @@ validator.
 | D8 | Explicit approval is the default and is a user decision recorded on the variant; `writingApprovalPolicy` in `config.json` can relax to `auto_low_risk`, which still never publishes. | Risk relaxation is deliberate configuration (same mechanism as `personaGenerationMode`, ADR-314-2). |
 | D9 | A static capability registry keyed by `platform/surface` gates draft, export, publish, metrics, engage. Publish is `direct` only for surfaces backed by `PUBLISH_PLATFORM_TARGETS` (`x`, `linkedin`, `facebook`); everything else is `draft_only`/`export_only`. | "Can draft" must never be confused with "can publish"; a static test pins the registry to the publish lane. |
 | D10 | Identifiers are namespaced: surfaces `x/thread`, formulas `linkedin/post/anaphora@1`, rules `x/post/hard/char-limit`, overlays `overlay:x@1`. Heuristic rules carry source, observed date, confidence, and review date. | Cross-platform names in the corpus collide (five different "R1"s); provenance must travel with the rule. |
-| D11 | Corpus adoption policy: nothing is vendored. 62 of 63 skills declare no license; `humanizer-skill` declares MIT over CC BY-SA-derived text with no copyright holder. Every adopted pattern is **re-authored** with the corpus path as provenance; license status is a validated manifest field, not a silent copy. | Signals ships proprietary; there is no grant anywhere in the corpus to rely on. |
+| D11 | Corpus adoption policy: nothing is vendored. 62 of 63 skills declare no license; `humanizer-skill` declares MIT over CC BY-SA-derived text without naming a copyright holder or documenting relicensing authority. Every adopted pattern is **re-authored** with the corpus path as provenance; license status is a validated manifest field, not a silent copy. | Signals ships proprietary; there is no clean redistribution grant across the corpus to rely on. |
 | D12 | Outcome attribution is a deterministic key (`platform, surface, goal, formulaId, overlay version, voice profile version, audience cohort, launch, variant`) derived from persisted lineage; recommendations are correlational with sample size and window. | #352 must not invent causal folklore; the key exists from the first variant so no backfill is needed. |
 
 ---
@@ -231,8 +231,8 @@ type VoiceProfile = {
   derivedBy: { method: "agent" | "manual"; model?: string; workflowRunId?: string;
                rtxThreadSlug?: string; at: number };
   approval?: { by: "user"; at: number; evidence: ApprovalEvidence };
-  supersedesId?: `vp_${string}`;
-  hash: string;                                   // sha256 of canonical JSON without approval/hash
+  supersededBy?: { id: `vp_${string}`; version: number };
+  hash: string;                                   // stable content hash; lifecycle fields excluded
 };
 
 type ApprovalEvidence =
@@ -244,10 +244,10 @@ type ApprovalEvidence =
 Invariants (tested in #350):
 
 - V1 — A profile cannot reach `approved` with fewer than 3 samples whose `approved` is true and whose source is admissible: `content_item` sources must have `origin ∈ {authored, imported}`, `direction: outbound`, and `aiGenerated: false`; pasted/file sources need `authorship: "self"`.
-- V2 — Only the approve tool (§7.2) sets `approved`; `upsert_voice_profile` can only write `draft` and always bumps `version` when the `hash` changes.
-- V3 — At most one `approved` profile per `(ownerContactId, label)`; approving a new version marks the previous `superseded` with `supersedesId` set.
+- V2 — Only the approve tool (§7.2) sets `approved`; `upsert_voice_profile` can only write `draft` and always bumps `version` when the `hash` changes. `hash` is SHA-256 over canonical JSON with sorted object keys, excluding `version`, `status`, `approval`, `supersededBy`, and `hash`; lifecycle transitions therefore cannot change it.
+- V3 — At most one `approved` profile per `(ownerContactId, label)`; approving a new version atomically marks the previous version `superseded` with `supersededBy` pointing to the new `{ id, version }`. Approved version content is immutable; this lifecycle transition is the only permitted rewrite of an existing version document.
 - V4 — `signatureLines[*].text` must be a substring of the referenced sample; anything else is rejected (no invented voice).
-- V5 — Variants record `{ id, version, hash }` of the profile used; a superseded version stays readable forever (file store is append-only per version).
+- V5 — Variants record `{ id, version, hash }` of the profile used; a superseded version stays readable forever. Version documents are content-immutable after approval, except for the V3 lifecycle rewrite.
 
 ### 5.2 Evidence spine and preserved claims
 
@@ -322,7 +322,7 @@ type GenerationRequest = {
                   media?: { plan: "none" | "user_supplied"; assetIds?: string[] } };
   instructions?: string;                              // operator guidance, ≤ 4,000 chars
   requestedBy: { workflowRunId: string; rtxThreadSlug?: string; rtxRuntimeSessionId?: string };
-  requestHash: string;                                // sha256 of the request without requestedBy
+  requestHash: string;                                // sha256 of canonical request without requestedBy/requestHash
 };
 ```
 
@@ -400,6 +400,7 @@ type WritingAudit = {
   schemaVersion: 1;
   id: `aud_${string}`;
   variantId: string;
+  inputHash: string;                                  // stable hash of audit-relevant variant input
   auditedAt: number;
   auditor: { kind: "agent"; model?: string; skillVersion: string; workflowRunId?: string };
   overlay: { id: string; version: number };  core: { version: number };
@@ -420,7 +421,12 @@ Verdict derivation (deterministic, tested):
 - `block` if any finding has `severity: "blocker"`. Blockers are exactly: any `hard` violation; any `claims.invented`; any `claims.altered` whose claim is `verbatimRequired`; any `claims.privateIncluded` whose claim has `includeInOutput: false`; a publish-capable surface with no resolvable `targetId` at materialization time.
 - `warn` if no blockers and any `warning` (missing non-verbatim claim, voice drift ≥ 0.4, heuristic conflict, `rules_first` used).
 - `pass` otherwise. `info` findings never change the verdict.
-- An audit older than the variant body (`auditedAt < variants.updatedAt` after a body change) is stale; materialization refuses stale audits (`AUDIT_STALE`).
+- `inputHash` is SHA-256 over canonical JSON (sorted object keys) containing the variant `body`
+  and these `metadata.writing` fields: `platform`, `surface`, `targetId`, `goal`, `formulaId`,
+  `overlay`, `core`, `voiceProfile`, `voicePrecedence`, `spine`, `units`, and `claimMap`.
+  It deliberately excludes audit/approval/lineage/materialization state, row status/timestamps,
+  capability snapshots, and Wind Tunnel predictions. Materialization recomputes this hash and
+  refuses a mismatch as `AUDIT_STALE`; an optional simulation of unchanged writing stays valid.
 
 ### 5.6 Approval and risk state
 
@@ -770,7 +776,9 @@ then `npm run generate:agent-tools-openapi`), the existing localhost/bearer auth
 
 1. Load variant + launch; require `generationMetadata.kind === "signals-writing"`.
 2. If a `materialized_as` edge exists → return its content item (`created: false`).
-3. Require `metadata.writing.audit` present, `auditedAt ≥ variants.updatedAt` (else `AUDIT_STALE`) and `verdict !== "block"` (else `AUDIT_BLOCKED`).
+3. Require `metadata.writing.audit` present, recompute the canonical audit input hash from §5.5,
+   require it to equal `audit.inputHash` (else `AUDIT_STALE`), and require `verdict !== "block"`
+   (else `AUDIT_BLOCKED`).
 4. Resolve policy; if `riskTier !== "low"` or policy is `explicit`, require `approval.by === "user"` with evidence (else `APPROVAL_REQUIRED`).
 5. Resolve capability for `platform/surface`; `unsupported` → `CAPABILITY_UNSUPPORTED`; if `publish ∈ {direct, beta}` require `targetId` resolvable via `platform_targets` (else `TARGET_REQUIRED`).
 6. In one transaction: create the content item (`approved`, single `platformTarget`, body from the variant, `contentType` from `variantType`), link media attachments referenced by the request, set `variants.contentItemId`, `variants.status = "selected"`, write `approval` + `materializedContentItemId` into `metadata.writing`, insert `materialized_as`.
@@ -858,7 +866,7 @@ Each requirement names the issue that owns its test.
 | R8 | One template run with three surfaces yields three variants with distinct `platform/surface`, identical `spine.hash`, and bodies that differ (not prefix/suffix copies). | skill integration fixture | #348 |
 | R9 | `create_content_draft` rejects comma-joined or unknown platforms; accepts any registry platform; stamps `capability.publish`. | route/tool | #349 |
 | R10 | `send-to-agent` rejects a content item whose platform is not `direct`/`beta` (`CAPABILITY_UNSUPPORTED`), and the registry's publish-capable set equals `PUBLISH_PLATFORM_TARGETS` (static test). | unit | #349 |
-| R11 | `materialize_variant` is idempotent (second call returns the same content item, `created: false`), refuses stale audits, and requires a resolvable target for publish-capable surfaces. | tool | #350 |
+| R11 | `materialize_variant` is idempotent (second call returns the same content item, `created: false`), refuses an audit whose canonical `inputHash` no longer matches, does not stale an audit when Wind Tunnel changes prediction/status fields only, and requires a resolvable target for publish-capable surfaces. | tool | #350 |
 | R12 | Under `explicit` policy, `materialize_variant` without `approval.by = "user"` fails with `APPROVAL_REQUIRED`; under `auto_low_risk` it succeeds for `low` tier only and never enqueues a publish job. | tool | #350 |
 | R13 | Materialization produces a content item with a single `platformTarget` and `status: approved`; publishing it through the existing lane flips the variant to `published` and adds `published_as` with `targetId`. | integration (publish handlers) | #350 |
 | R14 | Lineage query: `content_post → content_item → variant → launch → sources` resolves for a published writing variant via edges only. | query test | #350 |
@@ -969,8 +977,8 @@ and `datedClaims` from disk and fails on drift or on any missing curated field; 
 that platforms come from `PLATFORMS`, surfaces and formula ids are namespaced, unknown/conflicting
 licenses stay `not-cleared`, and every vendor/dangling reference has a replacement. Adding or
 removing corpus files: run `node scripts/verify-writing-corpus-manifest.mjs --update`, fill the
-`null` dispositions/replacements it leaves behind, and re-run the validator. The check is part of
-`npm run check`.
+`null` dispositions/replacements it leaves behind, and re-run the validator. Both the validator
+and its drift-fixture self-test are part of `npm run check`.
 
 ---
 
@@ -1001,7 +1009,7 @@ removing corpus files: run `node scripts/verify-writing-corpus-manifest.mjs --up
 **Status:** Accepted. **Context:** The corpus mixes platform limits, unsourced "2026 algorithm" claims, taste, and safety in the same lists and contradicts itself across copies. **Options:** (a) keep tiers from `linkedin-humanizer` (forensic/strict/aesthetic) — rejected: tiers encode detection strength, not authority; (b) classes by *authority* (`hard` > `claim` > `voice` > `heuristic` > `aesthetic`) with only the first two able to block, every heuristic carrying source/confidence/review date — chosen. **Consequences:** voice from real samples wins over style rules by construction (N3); dated claims expire; audits expose which rules were applied or skipped and why.
 
 ### ADR-347-9: Re-author only; no verbatim vendoring; licensing is a visible manifest field
-**Status:** Accepted. **Context:** 62/63 skills have no license; the one MIT declaration sits on CC BY-SA-derived text with no copyright holder; the LinkedIn bundle embeds personal identifiers and a named third party's post. **Options:** (a) vendor with attribution — rejected: no grant to rely on; (b) re-author every adopted pattern in Signals' words, cite the corpus path as provenance, exclude manipulation/identifier content — chosen. **Consequences:** the manifest's `license.status`, `redistribution`, and `adoptionPolicy` are validated; the validator runs in the gate so silently copied content cannot enter without a manifest change.
+**Status:** Accepted. **Context:** 62/63 skills have no license; the one MIT declaration sits on CC BY-SA-derived text without naming a copyright holder or documenting relicensing authority; the LinkedIn bundle embeds personal identifiers and a named third party's post. **Options:** (a) vendor with attribution — rejected: no clean redistribution grant to rely on; (b) re-author every adopted pattern in Signals' words, cite the corpus path as provenance, exclude manipulation/identifier content — chosen. **Consequences:** the manifest's `license.status`, `redistribution`, and `adoptionPolicy` are validated; the validator runs in the gate so silently copied content cannot enter without a manifest change.
 
 ### ADR-347-10: Namespaced identifiers and closed surface vocabulary
 **Status:** Accepted. **Context:** Five different "R1"s, "T1"s that mean Threads in one family and TikTok in another, counts that drift. **Options:** (a) keep corpus codes — rejected; (b) `platform/surface/slug@version` for formulas, `platform/surface/class/slug` for rules, closed per-platform surface registry — chosen. **Consequences:** attribution keys are stable across overlay versions; the manifest maps corpus codes to slugs so provenance is not lost.
