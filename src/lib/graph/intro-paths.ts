@@ -33,16 +33,18 @@ export function buildIntroductionPaths(
   limit = 5,
 ): { paths: IntroPath[]; coverage: "direct" | "second_degree" | "none" } {
   const best = new Map<string, IntroPath>();
+  const targetsById = new Map(targets.map((target) => [target.contactId, target]));
   for (const target of targets) {
     if (!target.direct) continue;
-    const score = target.strength.score ?? 0;
-    const strong = target.strength.band === "strong";
+    const { strength } = target;
+    const score = strength.score ?? 0;
+    const strong = strength.band === "strong";
     best.set(target.contactId, {
       target: { contactId: target.contactId, name: target.name, title: target.title },
       via: [],
       score,
-      band: target.strength.band,
-      explanation: `You're connected to ${target.name} (${target.strength.band === "unknown" ? "strength unknown" : `${target.strength.band} — ${score}/100`})`,
+      band: strength.band,
+      explanation: `You're connected to ${target.name} (${strength.band === "unknown" ? "strength unknown" : `${strength.band} — ${score}/100`})`,
       nextAction: {
         kind: strong ? "reach_out" : "re_engage",
         label: strong ? "Reach out" : "Re-engage",
@@ -53,17 +55,18 @@ export function buildIntroductionPaths(
 
   for (const connection of secondDegree) {
     if (best.has(connection.targetContactId)) continue;
-    const target = targets.find((candidate) => candidate.contactId === connection.targetContactId);
+    const target = targetsById.get(connection.targetContactId);
     if (!target) continue;
+    const { via } = connection;
     const factor = connection.connection === "connected" ? 0.8 : connection.connection === "mutual_follows" ? 0.7 : 0.5;
-    const score = Math.round((connection.via.strength.score ?? 0) * factor);
+    const score = Math.round((via.strength.score ?? 0) * factor);
     const candidate: IntroPath = {
       target: { contactId: target.contactId, name: target.name, title: target.title },
-      via: [{ contactId: connection.via.contactId, name: connection.via.name }],
+      via: [{ contactId: via.contactId, name: via.name }],
       score,
       band: target.strength.band,
-      explanation: `Ask ${connection.via.name} — they can connect you with ${target.name}`,
-      nextAction: { kind: "ask_intro", label: `Ask ${connection.via.name} for an introduction` },
+      explanation: `Ask ${via.name} — they can connect you with ${target.name}`,
+      nextAction: { kind: "ask_intro", label: `Ask ${via.name} for an introduction` },
     };
     const existing = best.get(target.contactId);
     if (!existing || candidate.score > existing.score) best.set(target.contactId, candidate);

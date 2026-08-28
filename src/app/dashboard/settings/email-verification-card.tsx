@@ -1,27 +1,18 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { MailCheck } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { useInitialEmailVerificationSettings } from "@/app/dashboard/settings/email-verification-settings-context";
 
-type Flag = { storedValue: boolean; effectiveValue: boolean; source: string; envLocked: boolean };
-type Settings = { smtpProbeEnabled: Flag; allowPredictedInAutomation: Flag };
+import type { EmailVerificationSettings } from "@/lib/settings/email-verification-settings";
 
 export function EmailVerificationCard() {
-  const [settings, setSettings] = useState<Settings | null>(null);
+  const initialSettings = useInitialEmailVerificationSettings();
+  const [settings, setSettings] = useState(initialSettings);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    fetch("/api/settings/email-verification")
-      .then(async (response) => {
-        if (!response.ok) throw new Error("Could not load settings");
-        return response.json() as Promise<Settings>;
-      })
-      .then(setSettings)
-      .catch(() => setError("Could not load email verification settings."));
-  }, []);
 
   async function update(patch: Record<string, boolean>) {
     setError(null);
@@ -30,9 +21,12 @@ export function EmailVerificationCard() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(patch),
     });
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok) setError(body.error ?? "Could not save this setting.");
-    else setSettings(body as Settings);
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      setError(typeof body.error === "string" ? body.error : "Could not save this setting.");
+      return;
+    }
+    setSettings(await response.json() as EmailVerificationSettings);
   }
 
   return (
@@ -44,13 +38,13 @@ export function EmailVerificationCard() {
       <CardContent className="space-y-5">
         <div className="flex items-start justify-between gap-4">
           <div><Label htmlFor="smtp-probe">SMTP recipient probing</Label><p className="mt-1 text-xs text-muted-foreground">Off by default. Syntax and domain evidence remain available without recipient probing.</p></div>
-          <Switch id="smtp-probe" checked={settings?.smtpProbeEnabled.effectiveValue ?? false} disabled={!settings || settings.smtpProbeEnabled.envLocked} onCheckedChange={(value) => update({ smtpProbeEnabled: value })} />
+          <Switch id="smtp-probe" checked={settings.smtpProbeEnabled.effectiveValue} disabled={settings.smtpProbeEnabled.envLocked} onCheckedChange={(value) => update({ smtpProbeEnabled: value })} />
         </div>
         <div className="flex items-start justify-between gap-4">
           <div><Label htmlFor="predicted-automation">Allow predicted emails in automation</Label><p className="mt-1 text-xs text-muted-foreground">Keep disabled unless a workflow explicitly accepts unverified recipients.</p></div>
-          <Switch id="predicted-automation" checked={settings?.allowPredictedInAutomation.effectiveValue ?? false} disabled={!settings || settings.allowPredictedInAutomation.envLocked} onCheckedChange={(value) => update({ allowPredictedInAutomation: value })} />
+          <Switch id="predicted-automation" checked={settings.allowPredictedInAutomation.effectiveValue} disabled={settings.allowPredictedInAutomation.envLocked} onCheckedChange={(value) => update({ allowPredictedInAutomation: value })} />
         </div>
-        {settings?.smtpProbeEnabled.envLocked || settings?.allowPredictedInAutomation.envLocked ? <p className="text-xs text-muted-foreground">Environment-managed settings are read-only here.</p> : null}
+        {settings.smtpProbeEnabled.envLocked || settings.allowPredictedInAutomation.envLocked ? <p className="text-xs text-muted-foreground">Environment-managed settings are read-only here.</p> : null}
         {error ? <p className="text-sm text-destructive" role="alert">{error}</p> : null}
       </CardContent>
     </Card>

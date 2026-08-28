@@ -22,6 +22,7 @@ import {
 } from "@/lib/graph/intro-paths";
 
 type VisibilityOptions = { includeLocalOnly?: boolean };
+const COMMUNICATION_TYPES = new Set<string>(INTERACTION_TYPE_GROUPS.communication);
 
 function contactEdges(contactId: string, ownerId: string, options?: VisibilityOptions) {
   return db
@@ -61,13 +62,20 @@ export function getContactRelationshipStrength(
 
   const ownerId = getOwnerContactId();
   const edges = ownerId && ownerId !== contactId ? contactEdges(contactId, ownerId, options) : [];
-  const warmth = edges
-    .filter((edge) => edge.edgeType === "relationship" && edge.weight != null)
-    .map((edge) => edge.weight!)
-    .sort((a, b) => b - a)[0];
-  const connected = edges.some((edge) => edge.edgeType === "connected_to");
-  const follows = edges.filter((edge) => edge.edgeType === "follows");
-  const directions = new Set(follows.map((edge) => `${edge.srcId}:${edge.dstId}`));
+  let warmth: number | undefined;
+  let connected = false;
+  let followCount = 0;
+  const directions = new Set<string>();
+  for (const edge of edges) {
+    if (edge.edgeType === "relationship" && edge.weight != null) {
+      warmth = warmth === undefined ? edge.weight : Math.max(warmth, edge.weight);
+    }
+    if (edge.edgeType === "connected_to") connected = true;
+    if (edge.edgeType === "follows") {
+      followCount++;
+      directions.add(`${edge.srcId}:${edge.dstId}`);
+    }
+  }
   const mutualFollows = ownerId
     ? directions.has(`${ownerId}:${contactId}`) && directions.has(`${contactId}:${ownerId}`)
     : false;
@@ -77,12 +85,10 @@ export function getContactRelationshipStrength(
     interactions: rows.map((row) => ({
       occurredAt: row.occurredAt,
       direction: row.direction,
-      communication: (INTERACTION_TYPE_GROUPS.communication as readonly string[]).includes(
-        row.interactionType,
-      ),
+      communication: COMMUNICATION_TYPES.has(row.interactionType),
       meaningful: row.isMeaningful,
     })),
-    connection: connected ? "connected" : mutualFollows ? "mutual_follows" : follows.length ? "follows" : null,
+    connection: connected ? "connected" : mutualFollows ? "mutual_follows" : followCount ? "follows" : null,
     now: options?.now,
   });
 }
@@ -113,33 +119,46 @@ export function getOrgRelationshipSummary(orgId: string, options?: VisibilityOpt
       ),
     )
     .all();
-  const currentRows = employmentRows.filter((employment) => employment.isCurrent);
-  const currentIds = [...new Set(currentRows.map((employment) => employment.contactId))];
-  const allIds = [...new Set(employmentRows.map((employment) => employment.contactId))];
+  const currentRows = [] as typeof employmentRows;
+  const currentIdSet = new Set<string>();
+  const allIdSet = new Set<string>();
+  const formerIdSet = new Set<string>();
+  for (const employment of employmentRows) {
+    allIdSet.add(employment.contactId);
+    if (employment.isCurrent) {
+      currentRows.push(employment);
+      currentIdSet.add(employment.contactId);
+    } else {
+      formerIdSet.add(employment.contactId);
+    }
+  }
+  const currentIds = [...currentIdSet];
+  const allIds = [...allIdSet];
   const peopleRows = allIds.length
     ? db.select({ id: contacts.id, name: contacts.name }).from(contacts).where(inArray(contacts.id, allIds)).all()
     : [];
   const peopleById = new Map(peopleRows.map((person) => [person.id, person]));
-  const strengthRows = currentIds.map((contactId) => ({
-    contactId,
-    name: peopleById.get(contactId)?.name ?? "Unknown",
-    strength: getContactRelationshipStrength(contactId, options),
-  }));
+  const strengthRows: { contactId: string; name: string; strength: RelationshipStrength }[] = [];
+  for (const contactId of currentIds) {
+    strengthRows.push({
+      contactId,
+      name: peopleById.get(contactId)?.name ?? "Unknown",
+      strength: getContactRelationshipStrength(contactId, options),
+    });
+  }
   const strengthById = new Map(strengthRows.map((row) => [row.contactId, row.strength]));
 
   const emailRows = currentIds.length
     ? db.select().from(contactChannels).where(and(inArray(contactChannels.contactId, currentIds), eq(contactChannels.channelType, "email"))).all()
     : [];
-  const identityContactIds = new Set(
-    currentIds.length
-      ? db.select({ contactId: contactIdentities.contactId }).from(contactIdentities).where(inArray(contactIdentities.contactId, currentIds)).all().map((row) => row.contactId)
-      : [],
-  );
-  const personaContactIds = new Set(
-    currentIds.length
-      ? db.select({ contactId: contactPersonas.contactId }).from(contactPersonas).where(inArray(contactPersonas.contactId, currentIds)).all().map((row) => row.contactId)
-      : [],
-  );
+  const identityRows = currentIds.length
+    ? db.select({ contactId: contactIdentities.contactId }).from(contactIdentities).where(inArray(contactIdentities.contactId, currentIds)).all()
+    : [];
+  const identityContactIds = new Set(identityRows.map((row) => row.contactId));
+  const personaRows = currentIds.length
+    ? db.select({ contactId: contactPersonas.contactId }).from(contactPersonas).where(inArray(contactPersonas.contactId, currentIds)).all()
+    : [];
+  const personaContactIds = new Set(personaRows.map((row) => row.contactId));
 
   const interactionRows = allIds.length
     ? db.select({ occurredAt: interactions.occurredAt }).from(interactions).where(
@@ -157,19 +176,35 @@ export function getOrgRelationshipSummary(orgId: string, options?: VisibilityOpt
   const visibleEdges = db.select().from(graphEdges).where(
     options?.includeLocalOnly ? undefined : eq(graphEdges.scope, "shared"),
   ).all();
-  const ownerNeighbors = ownerId
-    ? [...new Set(visibleEdges.filter((edge) => edge.srcId === ownerId || edge.dstId === ownerId).map((edge) => edge.srcId === ownerId ? edge.dstId : edge.srcId))]
-        .filter((id) => id !== ownerId && !currentIds.includes(id))
-        .slice(0, 2_000)
-    : [];
+  const ownerNeighbors: string[] = [];
+  const ownerNeighborSet = new Set<string>();
+  if (ownerId) {
+    for (const edge of visibleEdges) {
+      if (edge.srcId !== ownerId && edge.dstId !== ownerId) continue;
+      const neighborId: string = edge.srcId === ownerId ? edge.dstId : edge.srcId;
+      if (neighborId === ownerId || currentIdSet.has(neighborId) || ownerNeighborSet.has(neighborId)) continue;
+      ownerNeighborSet.add(neighborId);
+      ownerNeighbors.push(neighborId);
+      if (ownerNeighbors.length === 2_000) break;
+    }
+  }
   const neighborPeople = ownerNeighbors.length
     ? db.select({ id: contacts.id, name: contacts.name }).from(contacts).where(inArray(contacts.id, ownerNeighbors)).all()
     : [];
   const secondDegree: SecondDegreeConnection[] = [];
+  const edgesByPair = new Map<string, (typeof visibleEdges)[number][]>();
+  for (const edge of visibleEdges) {
+    if (edge.srcType !== "contact" || edge.dstType !== "contact") continue;
+    const key = edge.srcId < edge.dstId ? `${edge.srcId}:${edge.dstId}` : `${edge.dstId}:${edge.srcId}`;
+    const rows = edgesByPair.get(key) ?? [];
+    rows.push(edge);
+    edgesByPair.set(key, rows);
+  }
   for (const neighbor of neighborPeople) {
     const viaStrength = getContactRelationshipStrength(neighbor.id, options);
     for (const targetId of currentIds) {
-      const kind = connectionKind(visibleEdges.filter((edge) => edgeTouches(edge, neighbor.id, targetId)));
+      const key = neighbor.id < targetId ? `${neighbor.id}:${targetId}` : `${targetId}:${neighbor.id}`;
+      const kind = connectionKind(edgesByPair.get(key) ?? []);
       if (kind) secondDegree.push({ targetContactId: targetId, via: { contactId: neighbor.id, name: neighbor.name, strength: viaStrength }, connection: kind });
     }
   }
@@ -186,24 +221,32 @@ export function getOrgRelationshipSummary(orgId: string, options?: VisibilityOpt
   );
 
   const bands = { unknown: 0, weak: 0, moderate: 0, strong: 0 };
-  for (const row of strengthRows) bands[row.strength.band]++;
-  const best = strengthRows
-    .filter((row) => row.strength.score !== null)
-    .sort((a, b) => (b.strength.score ?? 0) - (a.strength.score ?? 0))[0];
+  let best: (typeof strengthRows)[number] | undefined;
+  let withRelationship = 0;
+  for (const row of strengthRows) {
+    bands[row.strength.band]++;
+    if (row.strength.band !== "unknown") withRelationship++;
+    if (row.strength.score !== null && (!best || row.strength.score > (best.strength.score ?? 0))) {
+      best = row;
+    }
+  }
   const emailContactIds = new Set(emailRows.map((row) => row.contactId));
-  const verifiedEmailContactIds = new Set(emailRows.filter((row) => row.isVerified).map((row) => row.contactId));
+  const verifiedEmailContactIds = new Set<string>();
+  for (const row of emailRows) {
+    if (row.isVerified) verifiedEmailContactIds.add(row.contactId);
+  }
 
   return {
     people: {
       total: allIds.length,
       current: currentIds.length,
-      former: [...new Set(employmentRows.filter((row) => !row.isCurrent).map((row) => row.contactId))].length,
+      former: formerIdSet.size,
     },
     coverage: {
       withEmail: emailContactIds.size,
       withVerifiedEmail: verifiedEmailContactIds.size,
       withIdentity: identityContactIds.size,
-      withRelationship: strengthRows.filter((row) => row.strength.band !== "unknown").length,
+      withRelationship,
       withPersona: personaContactIds.size,
     },
     strength: {

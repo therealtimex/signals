@@ -66,9 +66,10 @@ export function serializeOrgDTO(input: {
     logo: input.org.avatarUrl,
     socialProfile: input.identities.length > 0 ? "present" : null,
   };
-  const missing = Object.entries(tracked)
-    .filter(([, value]) => !value)
-    .map(([key]) => key);
+  const missing: string[] = [];
+  for (const [key, value] of Object.entries(tracked)) {
+    if (!value) missing.push(key);
+  }
 
   return {
     ...input.org,

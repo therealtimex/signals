@@ -78,7 +78,7 @@ export function listOrgPeople(orgId: string, options: ListOrgPeopleOptions = {})
     )
     .all();
   const structuredContactIds = new Set(structuredEmployments.map((row) => row.contactId));
-  const legacyEmployments = db
+  const legacyEdges = db
     .select()
     .from(graphEdges)
     .where(
@@ -90,9 +90,10 @@ export function listOrgPeople(orgId: string, options: ListOrgPeopleOptions = {})
         options.includeLocalOnly ? undefined : eq(graphEdges.scope, "shared"),
       ),
     )
-    .all()
-    .filter((edge) => !structuredContactIds.has(edge.srcId))
-    .map((edge): ContactEmployment => {
+    .all();
+  const legacyEmployments: ContactEmployment[] = [];
+  for (const edge of legacyEdges) {
+      if (structuredContactIds.has(edge.srcId)) continue;
       let title: string | null = null;
       try {
         const properties = JSON.parse(edge.properties ?? "{}") as { title?: string | null };
@@ -100,7 +101,7 @@ export function listOrgPeople(orgId: string, options: ListOrgPeopleOptions = {})
       } catch {
         title = null;
       }
-      return {
+      legacyEmployments.push({
         id: `legacy-edge:${edge.id}`,
         contactId: edge.srcId,
         orgId,
@@ -113,8 +114,8 @@ export function listOrgPeople(orgId: string, options: ListOrgPeopleOptions = {})
         metadata: edge.properties ?? "{}",
         createdAt: edge.createdAt,
         updatedAt: edge.updatedAt,
-      };
-    });
+      });
+  }
   const employments = [...structuredEmployments, ...legacyEmployments]
     .filter((row) => employment === "all" || row.isCurrent === (employment === "current"));
   const contactRows = getContactsByIds([...new Set(employments.map((row) => row.contactId))]);

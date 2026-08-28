@@ -87,16 +87,31 @@ export function inferOrgEmailPatterns(orgId: string) {
   }
 
   const now = Math.floor(Date.now() / 1000);
-  const ranked = EMAIL_PATTERNS.map((pattern, order) => {
+  const ranked: {
+    pattern: string;
+    order: number;
+    matchCount: number;
+    sampleCount: number;
+    score: number;
+    evidence: { contactId: string; address: string }[];
+  }[] = [];
+  for (const [order, pattern] of EMAIL_PATTERNS.entries()) {
     const row = counts.get(pattern)!;
+    if (row.matchCount === 0) continue;
     const score = evidence.length ? row.matchCount / evidence.length : 0;
-    return { pattern, order, matchCount: row.matchCount, sampleCount: evidence.length, score, evidence: row.evidence };
-  })
-    .filter((row) => row.matchCount > 0)
-    .sort((a, b) => b.score - a.score || a.order - b.order);
-  const override = db.select().from(orgEmailPatterns).where(
+    ranked.push({ pattern, order, matchCount: row.matchCount, sampleCount: evidence.length, score, evidence: row.evidence });
+  }
+  ranked.sort((a, b) => b.score - a.score || a.order - b.order);
+  const selectedPatterns = db.select().from(orgEmailPatterns).where(
     and(eq(orgEmailPatterns.orgId, orgId), eq(orgEmailPatterns.isSelected, true)),
-  ).all().find((row) => row.source !== "inferred");
+  ).all();
+  let override: (typeof selectedPatterns)[number] | undefined;
+  for (const row of selectedPatterns) {
+    if (row.source !== "inferred") {
+      override = row;
+      break;
+    }
+  }
 
   db.transaction((tx) => {
     tx.delete(orgEmailPatterns).where(
@@ -144,14 +159,15 @@ export function setOrgEmailPattern(
 ) {
   if (!getOrgById(orgId)) return undefined;
   if (input.clear) {
-    const overrides = db.select().from(orgEmailPatterns).where(eq(orgEmailPatterns.orgId, orgId)).all()
-      .filter((row) => row.source !== "inferred");
-    for (const override of overrides) {
-      db.delete(orgEmailPatterns).where(eq(orgEmailPatterns.id, override.id)).run();
+    const patterns = db.select().from(orgEmailPatterns).where(eq(orgEmailPatterns.orgId, orgId)).all();
+    let inferred: (typeof patterns)[number] | undefined;
+    for (const row of patterns) {
+      if (row.source !== "inferred") {
+        db.delete(orgEmailPatterns).where(eq(orgEmailPatterns.id, row.id)).run();
+      } else if (!inferred || row.rank < inferred.rank) {
+        inferred = row;
+      }
     }
-    const inferred = db.select().from(orgEmailPatterns).where(eq(orgEmailPatterns.orgId, orgId)).all()
-      .filter((row) => row.source === "inferred")
-      .sort((a, b) => a.rank - b.rank)[0];
     if (inferred) {
       db.update(orgEmailPatterns).set({ isSelected: true }).where(eq(orgEmailPatterns.id, inferred.id)).run();
     }
@@ -196,9 +212,13 @@ export function generateOrgEmailCandidates(orgId: string, options?: { contactIds
   const selected = db.select().from(orgEmailPatterns).where(
     and(eq(orgEmailPatterns.orgId, orgId), eq(orgEmailPatterns.isSelected, true)),
   ).get();
-  const employments = db.select().from(contactEmployments).where(
+  const employmentRows = db.select().from(contactEmployments).where(
     and(eq(contactEmployments.orgId, orgId), eq(contactEmployments.isCurrent, true)),
-  ).all().filter((row) => !options?.contactIds || options.contactIds.includes(row.contactId));
+  ).all();
+  const contactFilter = options?.contactIds ? new Set(options.contactIds) : null;
+  const employments = contactFilter
+    ? employmentRows.filter((row) => contactFilter.has(row.contactId))
+    : employmentRows;
   const contacts = getContactsByIds([...new Set(employments.map((row) => row.contactId))]);
   const domains = new Set(orgDomainRows(orgId).map((row) => row.domain));
   let created = 0;
@@ -206,8 +226,16 @@ export function generateOrgEmailCandidates(orgId: string, options?: { contactIds
   const skipped: { contactId: string; reason: string }[] = [];
 
   for (const contact of contacts) {
-    const channels = contact.channels.filter((channel) => channel.channelType === "email");
-    if (channels.some((channel) => channel.isVerified && domains.has(emailDomain(channel.valueNormalized)))) {
+    const channels = [];
+    let verifiedEmailExists = false;
+    for (const channel of contact.channels) {
+      if (channel.channelType !== "email") continue;
+      channels.push(channel);
+      if (channel.isVerified && domains.has(emailDomain(channel.valueNormalized))) {
+        verifiedEmailExists = true;
+      }
+    }
+    if (verifiedEmailExists) {
       skipped.push({ contactId: contact.id, reason: "verified_email_exists" });
       continue;
     }
@@ -226,7 +254,14 @@ export function generateOrgEmailCandidates(orgId: string, options?: { contactIds
     }
     const address = `${renderPattern(selected.pattern, parts)}@${org.domain}`;
     const normalized = normalizeChannelValue("email", address);
-    if (channels.some((channel) => channel.valueNormalized === normalized)) {
+    let alreadyOnRecord = false;
+    for (const channel of channels) {
+      if (channel.valueNormalized === normalized) {
+        alreadyOnRecord = true;
+        break;
+      }
+    }
+    if (alreadyOnRecord) {
       skipped.push({ contactId: contact.id, reason: "already_on_record" });
       continue;
     }

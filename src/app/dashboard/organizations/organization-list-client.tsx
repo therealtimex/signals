@@ -20,11 +20,9 @@ import { PaginationControls } from "@/components/pagination-controls";
 import type { OrgListRow } from "@/lib/db/queries/orgs";
 
 function formatUpdatedAt(updatedAt: number): string {
-  return new Date(updatedAt * 1000).toLocaleDateString("en-US", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
+  const date = new Date(updatedAt * 1000);
+  const month = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return `${month[date.getUTCMonth()]} ${date.getUTCDate()}, ${date.getUTCFullYear()}`;
 }
 
 interface OrganizationListClientProps {

@@ -27,6 +27,8 @@ export function resolveEmailVerificationSettings() {
   };
 }
 
+export type EmailVerificationSettings = ReturnType<typeof resolveEmailVerificationSettings>;
+
 export function updateEmailVerificationSettings(input: {
   smtpProbeEnabled?: boolean;
   allowPredictedInAutomation?: boolean;

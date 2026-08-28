@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -72,25 +72,6 @@ export function EditOrganizationDialog({
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    setForm({
-      name: org.name,
-      orgType: org.orgType,
-      domain: org.domain ?? "",
-      website: org.website ?? "",
-      location: org.location ?? "",
-      description: org.description ?? "",
-      avatarUrl: org.avatarUrl ?? "",
-      industry: org.industry ?? "",
-      companySize: org.companySize ?? "none",
-      tags: org.tags.join(", "),
-      ownerContactId: org.ownerContactId ?? "none",
-      accountStage: org.accountStage ?? "none",
-    });
-    setError(null);
-  }, [open, org]);
 
   async function save() {
     const domainResult = form.domain.trim() ? normalizeOrgDomain(form.domain) : null;

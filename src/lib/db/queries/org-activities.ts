@@ -91,6 +91,7 @@ export function listOrgTimeline(
   const employmentRows = db.select({ contactId: contactEmployments.contactId }).from(contactEmployments)
     .where(eq(contactEmployments.orgId, orgId)).all();
   const memberIds = [...new Set(employmentRows.map((row) => row.contactId))];
+  const memberIdSet = new Set(memberIds);
   const people = memberIds.length
     ? db.select({ id: contacts.id, name: contacts.name }).from(contacts).where(inArray(contacts.id, memberIds)).all()
     : [];
@@ -120,12 +121,34 @@ export function listOrgTimeline(
     workflowRunId: activity.workflowRunId,
     attachments: [],
   }));
-  const interactionRows = db.select().from(interactions).where(
+  const availableInteractions = db.select().from(interactions).where(
     and(
       options.includeLocalOnly ? undefined : eq(interactions.scope, "shared"),
     ),
-  ).all().filter((interaction) => interaction.orgId === orgId || memberIds.includes(interaction.contactId))
-    .map((interaction) => ({
+  ).all();
+  const interactionRows: {
+    id: string;
+    kind: "interaction";
+    type: string;
+    category: "workspace";
+    title: string;
+    summary: string | null;
+    whyItMatters: null;
+    recommendedAction: Record<string, never>;
+    contact: { id: string; name: string } | null;
+    occurredAt: number;
+    ingestedAt: number;
+    isNew: boolean;
+    actor: "user" | "agent" | "system" | "sync";
+    sourceLabel: string;
+    sourceDetail: string;
+    url: null;
+    workflowRunId: string | null;
+    attachments: never[];
+  }[] = [];
+  for (const interaction of availableInteractions) {
+    if (interaction.orgId !== orgId && !memberIdSet.has(interaction.contactId)) continue;
+    interactionRows.push({
       id: interaction.id,
       kind: "interaction" as const,
       type: interaction.interactionType,
@@ -144,13 +167,17 @@ export function listOrgTimeline(
       url: null,
       workflowRunId: interaction.workflowRunId,
       attachments: [],
-    }));
-  let rows = [...activities, ...interactionRows];
-  if (options.category && options.category !== "all") rows = rows.filter((row) => row.category === options.category);
-  const types = options.types;
-  if (types?.length) rows = rows.filter((row) => types.includes(row.type));
+    });
+  }
+  const rows = [] as (typeof activities[number] | typeof interactionRows[number])[];
+  const typeSet = options.types?.length ? new Set(options.types) : null;
   const since = options.since;
-  if (since) rows = rows.filter((row) => row.occurredAt >= since);
+  for (const row of [...activities, ...interactionRows]) {
+    if (options.category && options.category !== "all" && row.category !== options.category) continue;
+    if (typeSet && !typeSet.has(row.type)) continue;
+    if (since && row.occurredAt < since) continue;
+    rows.push(row);
+  }
   rows.sort((a, b) => b.occurredAt - a.occurredAt || b.ingestedAt - a.ingestedAt || b.id.localeCompare(a.id));
   const total = rows.length;
   const page = options.page ?? 1;

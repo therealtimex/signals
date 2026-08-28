@@ -221,6 +221,7 @@ export function OrganizationDetailClient({
       </Tabs>
 
       <EditOrganizationDialog
+        key={`${org.id}:${org.updatedAt}:${editOpen ? "open" : "closed"}`}
         org={org}
         selfContact={selfContact}
         open={editOpen}

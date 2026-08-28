@@ -794,21 +794,23 @@ export async function handleDispatchFollowOnWorkflow(
   });
 
   if (result.triggered && result.childRunIds && result.childRunIds.length > 0 && isRtxEmbedded()) {
-    for (const childRunId of result.childRunIds) {
-      try {
-        const childRun = getWorkflowRun(childRunId);
-        if (childRun && childRun.templateId) {
-          const childConfig = JSON.parse(childRun.config ?? "{}") as Record<string, unknown>;
-          await runTemplateViaRtx({
-            templateId: childRun.templateId,
-            config: childConfig,
-            existingRunId: childRun.id,
-          });
+    await Promise.all(
+      result.childRunIds.map(async (childRunId) => {
+        try {
+          const childRun = getWorkflowRun(childRunId);
+          if (childRun && childRun.templateId) {
+            const childConfig = JSON.parse(childRun.config ?? "{}") as Record<string, unknown>;
+            await runTemplateViaRtx({
+              templateId: childRun.templateId,
+              config: childConfig,
+              existingRunId: childRun.id,
+            });
+          }
+        } catch (err) {
+          console.warn(`[handleDispatchFollowOnWorkflow] Failed to launch RTX agent for child run ${childRunId}:`, err);
         }
-      } catch (err) {
-        console.warn(`[handleDispatchFollowOnWorkflow] Failed to launch RTX agent for child run ${childRunId}:`, err);
-      }
-    }
+      }),
+    );
 
     try {
       const orchestratorThread = await getOrCreateOrchestratorThread();
