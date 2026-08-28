@@ -329,14 +329,14 @@ dist/standalone/…/
 
 ```
 com.realtimex.signals-plugin.zip
-  tools/signals-pp-cli/bin/…
-  skills/realtimex-signals/      # SKILL.md references bundled CLI
+  tools/signals-pp-cli/README.md   # npm bootstrap docs (no native binaries)
+  skills/realtimex-signals/       # includes run-signals-pp-cli.sh
   skills/signals-publish/
   flows/…
   marketplace/release-manifest.json
 ```
 
-On workspace provision, the plugin installer places the platform-matching binary on the workspace `PATH` (or the skill scripts invoke `tools/signals-pp-cli/bin/signals-pp-cli.cjs` relative to the workspace root).
+On workspace provision, terminal agents bootstrap `@realtimex/signals-pp-cli@<health.cliVersion>` via `skills/realtimex-signals/scripts/run-signals-pp-cli.sh`. Standalone app tarballs still bundle `tools/signals-pp-cli/bin/` for offline use.
 
 ### 6.5 CI integration
 
@@ -408,7 +408,7 @@ Add to `.github/workflows/plugin-release.yml` (after `build:standalone-artifact`
 
 **ADR-174-3: Canonical staged CSV schema is frozen in §4.2.** — Accepted. Agents writing `workflow-runs/<runId>/contacts.csv` must use the column table above; JSON uses the same field names. Briefs should reference this section, not invent per-template columns.
 
-**ADR-174-4: Artifact-only distribution; version locked to Signals release.** — Accepted (§6). No npm publish. CLI version = `package.json` version = plugin `realtimex.plugin.json` version for a given release artifact.
+**ADR-174-4: npm publish + health-pinned on-demand install (revised 2026-08, #342).** — Accepted. Publish `@realtimex/signals-pp-cli` to npm on every Signals release (version = `package.json`). `/api/health` exposes `cliPackage` and `cliVersion`. Terminal agents bootstrap via `run-signals-pp-cli.sh` (`npx --yes @realtimex/signals-pp-cli@<cliVersion>`). Marketplace plugin ships a thin pointer (`tools/signals-pp-cli/README.md` + skill bootstrap script only); standalone app artifacts retain bundled binaries for offline installs.
 
 **ADR-174-5: Split generated vs hand-maintained CLI source.** — Accepted. Printing Press writes `tools/signals-pp-cli/source/`; transcendence commands live in `tools/signals-pp-cli/transcendence/` and link against the generated client package. `build:signals-pp-cli` composes both before `go build`. No regen-merge into a single tree.
 

@@ -39,9 +39,10 @@ const required = [
   "templates/signals/AGENTS.md",
   "skills/realtimex-signals/SKILL.md",
   "skills/realtimex-signals/scripts/resolve-base-url.sh",
+  "skills/realtimex-signals/scripts/run-signals-pp-cli.sh",
   "skills/signals-publish/SKILL.md",
   "skills/signals-publish/scripts/x-publish.cjs",
-  "tools/signals-pp-cli/bin/signals-pp-cli.cjs",
+  "tools/signals-pp-cli/README.md",
   "flows/signals-crm-agent-task.agent-flow.json",
   "flows/signals-create-enrich-contact.agent-flow.json",
   "marketplace/local-app.manifest.json",
@@ -229,8 +230,8 @@ const skillMd = execSync(
 if (skillMd.includes(".claude/skills/realtimex-signals")) {
   errors.push("realtimex-signals SKILL.md still references .claude/skills paths");
 }
-if (!skillMd.includes("signals-pp-cli agent-tools invoke --agent")) {
-  errors.push("realtimex-signals SKILL.md missing CLI-first agent-tools invocation");
+if (!skillMd.includes("run-signals-pp-cli.sh agent-tools invoke --agent")) {
+  errors.push("realtimex-signals SKILL.md missing health-pinned CLI agent-tools invocation");
 }
 if (!skillMd.includes("Automated persona callbacks")) {
   errors.push("realtimex-signals SKILL.md missing persona callback CLI guidance");
@@ -240,11 +241,25 @@ const workspaceAgentsMd = execSync(
   `unzip -p "${zipPath}" templates/signals/AGENTS.md`,
   { encoding: "utf8" }
 );
-if (!workspaceAgentsMd.includes("signals-pp-cli agent-tools invoke --agent")) {
-  errors.push("Signals workspace AGENTS.md missing CLI-first agent-tools guidance");
+if (!workspaceAgentsMd.includes("run-signals-pp-cli.sh health")) {
+  errors.push("Signals workspace AGENTS.md missing health-pinned CLI bootstrap");
+}
+if (!workspaceAgentsMd.includes("@realtimex/signals-pp-cli")) {
+  errors.push("Signals workspace AGENTS.md missing npm CLI package reference");
 }
 if (workspaceAgentsMd.includes("run `scripts/resolve-base-url.sh`")) {
   errors.push("Signals workspace AGENTS.md requires an ambiguous helper path");
+}
+
+const bundledNativeCli = entries.filter(
+  (entry) =>
+    /^tools\/signals-pp-cli\/bin\/(?:darwin|linux|win32)-/.test(entry) ||
+    entry === "tools/signals-pp-cli/bin/signals-pp-cli.cjs",
+);
+if (bundledNativeCli.length > 0) {
+  errors.push(
+    `Thin plugin must not ship bundled CLI binaries (found: ${bundledNativeCli.slice(0, 3).join(", ")}${bundledNativeCli.length > 3 ? "…" : ""})`,
+  );
 }
 
 const publishSkillMd = execSync(

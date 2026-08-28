@@ -56,11 +56,11 @@ describe("template-brief", () => {
     expect(brief).toContain("Founder Search");
     expect(brief).toContain("Search X for founders.");
     expect(brief).toContain(getTemplateToolsHint("prospecting").join(", "));
-    expect(brief).toContain("signals-pp-cli import contacts");
+    expect(brief).toContain("run-signals-pp-cli.sh import contacts");
     expect(brief).toContain(
       "--workflow-run-id run_1 --template-id tpl_1",
     );
-    expect(brief).toContain("signals-pp-cli health");
+    expect(brief).toContain("run-signals-pp-cli.sh health");
     expect(brief).toContain('export SIGNALS_BASE_URL="http://localhost:3000"');
     expect(brief).toContain("AGENTS.md");
     expect(brief).toContain("http://localhost:3000/api/agent-tools");

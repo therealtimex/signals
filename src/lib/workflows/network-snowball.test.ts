@@ -124,7 +124,7 @@ describe("buildNetworkSnowballBriefSection", () => {
     expect(brief).toContain("unavatar.io/linkedin/user:");
     expect(brief).toContain("workflow-runs/run_snow_1/contacts.csv");
     expect(brief).toContain(
-      "signals-pp-cli import contacts --file workflow-runs/run_snow_1/contacts.csv --dedupe --workflow-run-id run_snow_1 --template-id tpl_snow_1",
+      ".claude/skills/realtimex-signals/scripts/run-signals-pp-cli.sh import contacts --file workflow-runs/run_snow_1/contacts.csv --dedupe --workflow-run-id run_snow_1 --template-id tpl_snow_1",
     );
     expect(brief).toContain("Terminate Spawned Browser Sessions");
     expect(brief).toContain("schedules release of this workflow's linked terminal session");

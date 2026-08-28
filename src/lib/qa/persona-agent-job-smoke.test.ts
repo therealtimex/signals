@@ -80,9 +80,10 @@ describe("persona-agent-job-smoke-lib", () => {
       "utf8",
     );
 
-    expect(skill).toContain("signals-pp-cli agent-tools invoke --agent");
+    expect(skill).toContain("run-signals-pp-cli.sh agent-tools invoke --agent");
     expect(skill).toContain("Automated persona callbacks");
-    expect(workspaceGuide).toContain("signals-pp-cli agent-tools invoke --agent");
+    expect(workspaceGuide).toContain("run-signals-pp-cli.sh health");
+    expect(workspaceGuide).toContain("npx @realtimex/signals-pp-cli@<cliVersion>");
     expect(workspaceGuide).not.toContain("run `scripts/resolve-base-url.sh`");
   });
 

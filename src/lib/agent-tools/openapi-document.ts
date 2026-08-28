@@ -28,9 +28,11 @@ const HEALTH_RESPONSE = {
   properties: {
     status: { type: "string", enum: ["ok"] },
     app: { type: "string", enum: ["signals"] },
+    cliPackage: { type: "string" },
+    cliVersion: { type: "string" },
     rtx: { type: "object", additionalProperties: true },
   },
-  required: ["status", "app"],
+  required: ["status", "app", "cliPackage", "cliVersion"],
   additionalProperties: true,
 } as const;
 
