@@ -1,6 +1,6 @@
 {
   "name": "@realtimex/signals",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "description": "Signals \u2014 Local-first Social GTM & Relationship Knowledge Graph",
   "type": "module",
