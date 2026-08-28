@@ -35,7 +35,7 @@ npm run check
 
 Vitest isolates SQLite per worker on its own (`src/test/setup-env.ts`); `db:migrate`, `dev`, and
 `build` do not. Never delete or hand-edit `data.db*` or committed migrations in
-`src/lib/db/migrations/` (30 files) — add a new one with `npm run db:generate`.
+`src/lib/db/migrations/` (31 files) — add a new one with `npm run db:generate`.
 
 ## 3) Commands
 

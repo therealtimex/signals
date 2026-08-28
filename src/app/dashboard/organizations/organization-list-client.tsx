@@ -20,11 +20,9 @@ import { PaginationControls } from "@/components/pagination-controls";
 import type { OrgListRow } from "@/lib/db/queries/orgs";
 
 function formatUpdatedAt(updatedAt: number): string {
-  return new Date(updatedAt * 1000).toLocaleDateString("en-US", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
+  const date = new Date(updatedAt * 1000);
+  const month = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return `${month[date.getUTCMonth()]} ${date.getUTCDate()}, ${date.getUTCFullYear()}`;
 }
 
 interface OrganizationListClientProps {
@@ -92,10 +90,10 @@ function OrganizationListInner({
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Building2 className="h-5 w-5" />
-            No organizations yet
+            No companies yet
           </CardTitle>
           <CardDescription>
-            Add companies and teams to link contacts through the graph.
+            Add a company to connect people, relationships, and signals.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -110,7 +108,7 @@ function OrganizationListInner({
       <div className="flex items-center gap-4">
         <form onSubmit={handleSearchSubmit} className="flex-1">
           <Input
-            placeholder="Search organizations..."
+            placeholder="Search companies..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="max-w-sm"
@@ -123,7 +121,7 @@ function OrganizationListInner({
         <Card>
           <CardContent className="pt-6">
             <p className="text-sm text-muted-foreground text-center">
-              No organizations match your search.
+              No companies match your search.
             </p>
           </CardContent>
         </Card>

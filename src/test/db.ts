@@ -16,6 +16,10 @@ import {
   identityMetrics,
   orgIdentityMetrics,
   orgIdentities,
+  orgActivities,
+  orgDomains,
+  orgEmailPatterns,
+  contactEmailCandidates,
   contactPersonas,
   personaJobs,
   niches,
@@ -44,6 +48,10 @@ import {
 export function resetCoreTables(): void {
   db.delete(snowballSeedLedger).run();
   db.delete(tasks).run();
+  db.delete(contactEmailCandidates).run();
+  db.delete(orgEmailPatterns).run();
+  db.delete(orgActivities).run();
+  db.delete(orgDomains).run();
   db.delete(browserSessionLeases).run();
   db.delete(workflowSteps).run();
   db.delete(scheduledJobs).run();

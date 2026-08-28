@@ -69,6 +69,7 @@ export function AddOrganizationDialog({ onCreated }: AddOrganizationDialogProps)
           website: website.trim() || null,
           location: location.trim() || null,
           description: description.trim() || null,
+          createdVia: "manual",
         }),
       });
 
@@ -99,13 +100,13 @@ export function AddOrganizationDialog({ onCreated }: AddOrganizationDialogProps)
       <DialogTrigger asChild>
         <Button>
           <Plus className="mr-2 h-4 w-4" />
-          Add Organization
+          Add Company
         </Button>
       </DialogTrigger>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>Add Organization</DialogTitle>
-          <DialogDescription>Create a company or team node in your graph.</DialogDescription>
+          <DialogTitle>Add Company</DialogTitle>
+          <DialogDescription>Create a company, fund, team, or community in your graph.</DialogDescription>
         </DialogHeader>
         <div className="grid gap-4">
           <div className="grid gap-2">
@@ -169,7 +170,7 @@ export function AddOrganizationDialog({ onCreated }: AddOrganizationDialogProps)
               id="orgDescription"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="What does this organization do?"
+              placeholder="What does this company do?"
               rows={3}
             />
           </div>
@@ -180,7 +181,7 @@ export function AddOrganizationDialog({ onCreated }: AddOrganizationDialogProps)
             Cancel
           </Button>
           <Button onClick={handleSave} disabled={saving || !name.trim()}>
-            {saving ? "Saving..." : "Save Organization"}
+            {saving ? "Saving..." : "Save Company"}
           </Button>
         </DialogFooter>
       </DialogContent>

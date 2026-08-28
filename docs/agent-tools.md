@@ -63,6 +63,23 @@ Then pass `Authorization: Bearer your-secret-token` on each request.
 | `get_persona_job` | contacts | Read PersonaAgentJob status and matching evidence for degraded-mode recovery |
 | `complete_persona_job` | contacts | Return a validated synthesis or failure for a stateless PersonaAgentJob |
 | `query_orgs` | graph | Search organization nodes |
+| `get_org` | graph | Read one company by ID or normalized domain, including profile provenance |
+| `create_org` | graph | Create a company with immutable agent creation provenance |
+| `update_org` | graph | Update editable company fields with per-write provenance |
+| `get_org_relationships` | graph | Read company relationship coverage, strength bands, and introduction paths |
+| `list_org_contacts` | graph | List current/former company people with strength and email status |
+| `link_contact_to_org` | graph | Link a contact through structured employment |
+| `unlink_contact_from_org` | graph | Remove an employment or mark it former |
+| `get_org_email_intelligence` | graph | Read domains, email patterns, and candidate counts |
+| `infer_org_email_pattern` | graph | Infer ranked patterns from verified/imported company samples |
+| `set_org_email_pattern` | graph | Select or clear an evidence-backed pattern override |
+| `generate_org_email_candidates` | graph | Generate non-sendable predicted addresses for company people |
+| `list_email_candidates` | graph | Read predictions separately from contact email channels |
+| `update_email_candidate` | graph | Verify, invalidate, correct, or probe a prediction |
+| `add_org_domain_alias` | graph | Add a normalized company domain alias |
+| `log_org_activity` | graph | Write an idempotent company signal or workspace event |
+| `list_org_activity` | graph | Read the unified company signal/activity feed |
+| `follow_org` | graph | Follow or unfollow a company for signal tracking |
 | `query_org_identities` | graph | List org platform identities with profile/stat fields |
 | `upsert_org_identity` | graph | Create or update an org platform identity |
 | `query_graph` | graph | 1-hop graph traversal from a node |
@@ -89,6 +106,16 @@ Then pass `Authorization: Bearer your-secret-token` on each request.
 Simulation run tool responses include additive fields (`populationSpec`, `error`, `workflowRunId`, `createdAt`, `updatedAt`, `transcriptsPrunedAt`) shared with the dashboard REST API (`specs/ui-4.1-rest-api.md`).
 
 `create_contact` / `update_contact` with a `company` field also dual-write an `orgs` row and `works_at` edge (contacts projection unchanged).
+
+Company profile agents should call `get_org` before research, write cited fields through
+`update_org.fieldSources`, and use `upsert_org_identity` for verified social profiles. The
+dashboard and agent tools share the same normalized company DTO; raw source tags remain
+secondary provenance details rather than user-facing labels.
+
+Predicted business emails live only in `contact_email_candidates`; they are not contact channels
+and are excluded from outreach by default. Use `update_email_candidate` with explicit evidence to
+verify one. Verification promotes it to a sendable channel; catch-all or inconclusive probes never
+do. Link people with `link_contact_to_org` rather than writing `works_at` graph edges directly.
 
 `semantic_search` requires Signals running as a RealtimeX Local App with the `llm.embed` permission granted. Vectors are stored locally in SQLite; only embedding generation is delegated to RealtimeX.
 

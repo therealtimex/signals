@@ -13,13 +13,13 @@ import { Loader2, Sparkles, X } from "lucide-react";
 import Link from "next/link";
 import { NetworkSnowballFields } from "@/app/dashboard/workflows/network-snowball-fields";
 import {
-  buildNetworkSnowballRunConfig,
   buildNetworkSnowballTemplateConfig,
   NETWORK_SNOWBALL_TEMPLATE_NAME,
   readNetworkSnowballConfig,
   type NetworkSnowballConfig,
   type SnowballSeedType,
 } from "@/lib/workflows/network-snowball";
+import { buildSnowballDialogRunConfig } from "./snowball-dialog-config";
 
 interface SnowballDialogProps {
   open: boolean;
@@ -27,6 +27,7 @@ interface SnowballDialogProps {
   seedType: SnowballSeedType;
   seedValue: string;
   entityName: string;
+  orgId?: string;
 }
 
 export function SnowballDialog({
@@ -35,6 +36,7 @@ export function SnowballDialog({
   seedType,
   seedValue,
   entityName,
+  orgId,
 }: SnowballDialogProps) {
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
@@ -45,6 +47,7 @@ export function SnowballDialog({
           seedType={seedType}
           seedValue={seedValue}
           entityName={entityName}
+          orgId={orgId}
         />
       )}
     </Dialog>
@@ -56,11 +59,13 @@ function SnowballDialogContent({
   seedType,
   seedValue,
   entityName,
+  orgId,
 }: {
   onClose: () => void;
   seedType: SnowballSeedType;
   seedValue: string;
   entityName: string;
+  orgId?: string;
 }) {
   const [config, setConfig] = useState<NetworkSnowballConfig>(() =>
     readNetworkSnowballConfig({
@@ -98,7 +103,7 @@ function SnowballDialogContent({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          config: buildNetworkSnowballRunConfig(config),
+          config: buildSnowballDialogRunConfig(config, orgId),
         }),
       });
 

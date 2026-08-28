@@ -1311,6 +1311,9 @@
                           },
                           "relatedContactId": {
                             "type": "string"
+                          },
+                          "relatedOrgId": {
+                            "type": "string"
                           }
                         },
                         "required": [
@@ -1559,8 +1562,806 @@
                           },
                           "includeLocalOnly": {
                             "type": "boolean"
+                          },
+                          "stage": {
+                            "type": "string",
+                            "enum": [
+                              "prospect",
+                              "engaged",
+                              "qualified",
+                              "opportunity",
+                              "customer",
+                              "advocate"
+                            ]
+                          },
+                          "owner": {
+                            "type": "string"
+                          },
+                          "followed": {
+                            "type": "boolean"
+                          },
+                          "tag": {
+                            "type": "string"
                           }
                         },
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "get_org"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "orgId": {
+                            "type": "string"
+                          },
+                          "domain": {
+                            "type": "string"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "create_org"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string"
+                          },
+                          "orgType": {
+                            "type": "string",
+                            "enum": [
+                              "company",
+                              "fund",
+                              "team",
+                              "community",
+                              "other"
+                            ]
+                          },
+                          "domain": {
+                            "type": "string"
+                          },
+                          "website": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": "string"
+                          },
+                          "location": {
+                            "type": "string"
+                          },
+                          "avatarUrl": {
+                            "type": "string"
+                          },
+                          "industry": {
+                            "type": "string"
+                          },
+                          "companySize": {
+                            "type": "string",
+                            "enum": [
+                              "1-10",
+                              "11-50",
+                              "51-200",
+                              "201-500",
+                              "501-1000",
+                              "1001-5000",
+                              "5001-10000",
+                              "10001+"
+                            ]
+                          },
+                          "tags": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "ownerContactId": {
+                            "type": "string"
+                          },
+                          "accountStage": {
+                            "type": "string",
+                            "enum": [
+                              "prospect",
+                              "engaged",
+                              "qualified",
+                              "opportunity",
+                              "customer",
+                              "advocate"
+                            ]
+                          },
+                          "workflowRunId": {
+                            "type": "string"
+                          },
+                          "templateId": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "name"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "update_org"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string"
+                          },
+                          "orgType": {
+                            "type": "string",
+                            "enum": [
+                              "company",
+                              "fund",
+                              "team",
+                              "community",
+                              "other"
+                            ]
+                          },
+                          "domain": {
+                            "type": "string"
+                          },
+                          "website": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": "string"
+                          },
+                          "location": {
+                            "type": "string"
+                          },
+                          "avatarUrl": {
+                            "type": "string"
+                          },
+                          "industry": {
+                            "type": "string"
+                          },
+                          "companySize": {
+                            "type": "string",
+                            "enum": [
+                              "1-10",
+                              "11-50",
+                              "51-200",
+                              "201-500",
+                              "501-1000",
+                              "1001-5000",
+                              "5001-10000",
+                              "10001+"
+                            ]
+                          },
+                          "tags": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "ownerContactId": {
+                            "type": "string"
+                          },
+                          "accountStage": {
+                            "type": "string",
+                            "enum": [
+                              "prospect",
+                              "engaged",
+                              "qualified",
+                              "opportunity",
+                              "customer",
+                              "advocate"
+                            ]
+                          },
+                          "orgId": {
+                            "type": "string"
+                          },
+                          "workflowRunId": {
+                            "type": "string"
+                          },
+                          "fieldSources": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "object",
+                              "properties": {
+                                "evidenceUrl": {
+                                  "type": "string"
+                                }
+                              },
+                              "additionalProperties": false
+                            }
+                          }
+                        },
+                        "required": [
+                          "orgId"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "get_org_relationships"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "orgId": {
+                            "type": "string"
+                          },
+                          "includeLocalOnly": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "orgId"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "list_org_contacts"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "orgId": {
+                            "type": "string"
+                          },
+                          "q": {
+                            "type": "string"
+                          },
+                          "employment": {
+                            "type": "string",
+                            "enum": [
+                              "current",
+                              "former",
+                              "all"
+                            ]
+                          },
+                          "band": {
+                            "type": "string",
+                            "enum": [
+                              "unknown",
+                              "weak",
+                              "moderate",
+                              "strong"
+                            ]
+                          },
+                          "sort": {
+                            "type": "string",
+                            "enum": [
+                              "name",
+                              "strength",
+                              "lastInteraction",
+                              "title"
+                            ]
+                          },
+                          "dir": {
+                            "type": "string",
+                            "enum": [
+                              "asc",
+                              "desc"
+                            ]
+                          },
+                          "page": {
+                            "type": "number"
+                          },
+                          "pageSize": {
+                            "type": "number"
+                          },
+                          "includeLocalOnly": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "orgId"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "link_contact_to_org"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "orgId": {
+                            "type": "string"
+                          },
+                          "contactId": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "isCurrent": {
+                            "type": "boolean"
+                          },
+                          "startedAt": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "orgId",
+                          "contactId"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "unlink_contact_from_org"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "orgId": {
+                            "type": "string"
+                          },
+                          "contactId": {
+                            "type": "string"
+                          },
+                          "mode": {
+                            "type": "string",
+                            "enum": [
+                              "remove",
+                              "mark_former"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "orgId",
+                          "contactId"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "get_org_email_intelligence"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "orgId": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "orgId"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "infer_org_email_pattern"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "orgId": {
+                            "type": "string"
+                          },
+                          "checkMail": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "orgId"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "set_org_email_pattern"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "orgId": {
+                            "type": "string"
+                          },
+                          "pattern": {
+                            "type": "string"
+                          },
+                          "evidenceUrl": {
+                            "type": "string"
+                          },
+                          "clear": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "orgId"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "generate_org_email_candidates"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "orgId": {
+                            "type": "string"
+                          },
+                          "contactIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "required": [
+                          "orgId"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "list_email_candidates"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "orgId": {
+                            "type": "string"
+                          },
+                          "contactId": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "predicted",
+                              "uncertain",
+                              "verified",
+                              "invalid"
+                            ]
+                          },
+                          "includePredicted": {
+                            "type": "boolean"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "update_email_candidate"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "candidateId": {
+                            "type": "string"
+                          },
+                          "action": {
+                            "type": "string",
+                            "enum": [
+                              "verify",
+                              "invalidate",
+                              "mark_uncertain",
+                              "correct",
+                              "probe"
+                            ]
+                          },
+                          "address": {
+                            "type": "string"
+                          },
+                          "evidenceUrl": {
+                            "type": "string"
+                          },
+                          "note": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "candidateId",
+                          "action"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "add_org_domain_alias"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "orgId": {
+                            "type": "string"
+                          },
+                          "domain": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "orgId",
+                          "domain"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "log_org_activity"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "orgId": {
+                            "type": "string"
+                          },
+                          "contactId": {
+                            "type": "string"
+                          },
+                          "activityType": {
+                            "type": "string",
+                            "enum": [
+                              "funding",
+                              "hiring",
+                              "leadership_change",
+                              "product_launch",
+                              "news",
+                              "content",
+                              "engagement",
+                              "note",
+                              "contact_linked",
+                              "contact_unlinked",
+                              "profile_updated",
+                              "profile_enriched",
+                              "email_pattern_inferred",
+                              "email_verified",
+                              "followed",
+                              "unfollowed",
+                              "workflow_started",
+                              "task_created"
+                            ]
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "summary": {
+                            "type": "string"
+                          },
+                          "whyItMatters": {
+                            "type": "string"
+                          },
+                          "recommendedAction": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "object"
+                            }
+                          },
+                          "url": {
+                            "type": "string"
+                          },
+                          "occurredAt": {
+                            "type": "number"
+                          },
+                          "workflowRunId": {
+                            "type": "string"
+                          },
+                          "dedupeKey": {
+                            "type": "string"
+                          },
+                          "scope": {
+                            "type": "string",
+                            "enum": [
+                              "shared",
+                              "local_only"
+                            ]
+                          },
+                          "metadata": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "object"
+                            }
+                          }
+                        },
+                        "required": [
+                          "orgId",
+                          "activityType",
+                          "title"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "list_org_activity"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "orgId": {
+                            "type": "string"
+                          },
+                          "category": {
+                            "type": "string",
+                            "enum": [
+                              "signal",
+                              "workspace",
+                              "all"
+                            ]
+                          },
+                          "types": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "since": {
+                            "type": "number"
+                          },
+                          "page": {
+                            "type": "number"
+                          },
+                          "pageSize": {
+                            "type": "number"
+                          },
+                          "includeLocalOnly": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "orgId"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "follow_org"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "orgId": {
+                            "type": "string"
+                          },
+                          "follow": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "orgId",
+                          "follow"
+                        ],
                         "additionalProperties": false
                       }
                     },
@@ -2885,6 +3686,23 @@
                       "get_persona_job",
                       "complete_persona_job",
                       "query_orgs",
+                      "get_org",
+                      "create_org",
+                      "update_org",
+                      "get_org_relationships",
+                      "list_org_contacts",
+                      "link_contact_to_org",
+                      "unlink_contact_from_org",
+                      "get_org_email_intelligence",
+                      "infer_org_email_pattern",
+                      "set_org_email_pattern",
+                      "generate_org_email_candidates",
+                      "list_email_candidates",
+                      "update_email_candidate",
+                      "add_org_domain_alias",
+                      "log_org_activity",
+                      "list_org_activity",
+                      "follow_org",
                       "query_org_identities",
                       "upsert_org_identity",
                       "query_graph",
@@ -3055,6 +3873,6 @@
   ],
   "x-signals-agent-tools": {
     "manifestVersion": "1",
-    "toolCount": 51
+    "toolCount": 68
   }
 }

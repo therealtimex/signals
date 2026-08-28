@@ -10,6 +10,7 @@ const createTaskSchema = z.object({
   priority: z.enum(["low", "medium", "high", "urgent"]).optional(),
   assignee: z.enum(["user", "agent"]).optional(),
   relatedContactId: z.string().optional(),
+  relatedOrgId: z.string().optional(),
   relatedTemplateId: z.string().optional(),
   dueAt: z.number().int().optional(),
 });
@@ -19,8 +20,9 @@ export async function GET(req: NextRequest) {
   const status = searchParams.get("status") ?? undefined;
   const priority = searchParams.get("priority") ?? undefined;
   const assignee = searchParams.get("assignee") ?? undefined;
+  const relatedOrgId = searchParams.get("relatedOrgId") ?? undefined;
 
-  const results = listTasks({ status, priority, assignee });
+  const results = listTasks({ status, priority, assignee, relatedOrgId });
   return NextResponse.json(results);
 }
 

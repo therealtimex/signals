@@ -58,6 +58,87 @@ describe("graph agent tools", () => {
     expect((graphResult as { edgeCount: number }).edgeCount).toBeGreaterThanOrEqual(0);
   });
 
+  it("creates, reads, and updates companies through shared DTO tools", async () => {
+    const created = await invokeAgentTool("create_org", {
+      name: "Agent Company",
+      domain: "https://www.Agent.example/about",
+      description: "Initial",
+    });
+    expect(created).toMatchObject({
+      name: "Agent Company",
+      domain: "agent.example",
+      provenance: { label: "Agent added" },
+    });
+
+    const orgId = (created as { id: string }).id;
+    await expect(invokeAgentTool("get_org", { domain: "agent.example" })).resolves.toMatchObject({
+      id: orgId,
+    });
+    await expect(
+      invokeAgentTool("update_org", {
+        orgId,
+        website: "agent.example",
+        location: "Remote",
+      }),
+    ).resolves.toMatchObject({
+      fieldsUpdated: expect.arrayContaining(["website", "location"]),
+      org: { website: "https://agent.example/", location: "Remote" },
+    });
+  });
+
+  it("round-trips company relationships, email intelligence, and activity tools", async () => {
+    const company = await invokeAgentTool("create_org", {
+      name: "Intelligence Co",
+      domain: "intelligence.example",
+    }) as { id: string };
+    const person = await invokeAgentTool("create_contact", { name: "Ada Lovelace" }) as { id: string };
+
+    await expect(invokeAgentTool("link_contact_to_org", {
+      orgId: company.id,
+      contactId: person.id,
+      title: "Founder",
+    })).resolves.toMatchObject({ employment: { title: "Founder" } });
+    await expect(invokeAgentTool("list_org_contacts", { orgId: company.id })).resolves.toMatchObject({
+      total: 1,
+      people: [expect.objectContaining({ id: person.id, worksAtTitle: "Founder" })],
+    });
+    await expect(invokeAgentTool("get_org_relationships", { orgId: company.id })).resolves.toMatchObject({
+      people: { current: 1 },
+    });
+
+    await expect(invokeAgentTool("add_org_domain_alias", {
+      orgId: company.id,
+      domain: "mail.intelligence.example",
+    })).resolves.toMatchObject({ domain: "mail.intelligence.example", kind: "alias" });
+    await expect(invokeAgentTool("infer_org_email_pattern", { orgId: company.id })).resolves.toMatchObject({
+      canInfer: true,
+      candidateCounts: { predicted: 0 },
+    });
+
+    const activity = {
+      orgId: company.id,
+      activityType: "funding",
+      title: "Raised a seed round",
+      url: "https://news.example/intelligence-seed",
+      dedupeKey: "https://news.example/intelligence-seed",
+    };
+    await expect(invokeAgentTool("log_org_activity", activity)).resolves.toMatchObject({ created: true });
+    await expect(invokeAgentTool("log_org_activity", activity)).resolves.toMatchObject({ created: false });
+    await expect(invokeAgentTool("list_org_activity", { orgId: company.id, category: "signal" })).resolves.toMatchObject({ total: 1 });
+    await expect(invokeAgentTool("follow_org", { orgId: company.id, follow: true })).resolves.toMatchObject({ followedAt: expect.any(Number) });
+    await expect(invokeAgentTool("unlink_contact_from_org", {
+      orgId: company.id,
+      contactId: person.id,
+      mode: "mark_former",
+    })).resolves.toMatchObject({ mode: "mark_former" });
+  });
+
+  it("returns a validation error for an invalid get_org domain", async () => {
+    await expect(invokeAgentTool("get_org", { domain: "localhost" })).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+    });
+  });
+
   it("log_interaction appends an interaction row", async () => {
     const created = await invokeAgentTool("create_contact", { name: "Logger" });
     const contactId = (created as { id: string }).id;

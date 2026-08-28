@@ -28,6 +28,10 @@ import {
   goalWorkflows,
   goalProgress,
   orgs,
+  orgDomains,
+  orgEmailPatterns,
+  orgActivities,
+  contactEmailCandidates,
   graphEdges,
   interactions,
   identityMetrics,
@@ -60,6 +64,15 @@ export type NewContactChannel = InferInsertModel<typeof contactChannels>;
 // Contact employment types
 export type ContactEmployment = InferSelectModel<typeof contactEmployments>;
 export type NewContactEmployment = InferInsertModel<typeof contactEmployments>;
+
+export type OrgDomain = InferSelectModel<typeof orgDomains>;
+export type NewOrgDomain = InferInsertModel<typeof orgDomains>;
+export type OrgEmailPattern = InferSelectModel<typeof orgEmailPatterns>;
+export type NewOrgEmailPattern = InferInsertModel<typeof orgEmailPatterns>;
+export type ContactEmailCandidate = InferSelectModel<typeof contactEmailCandidates>;
+export type NewContactEmailCandidate = InferInsertModel<typeof contactEmailCandidates>;
+export type OrgActivity = InferSelectModel<typeof orgActivities>;
+export type NewOrgActivity = InferInsertModel<typeof orgActivities>;
 
 /** Resolved contact read model — use ContactDTO from contact-dto for the full shape. */
 export type ContactWithIdentities = import("@/lib/db/queries/contact-dto").ContactDTO;

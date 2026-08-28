@@ -25,9 +25,11 @@ import {
 } from "@/lib/workflows/snowball-seed-scout";
 
 /** Bump this when seed template prompts change to trigger updates on existing installs. */
-const SEED_VERSION = 23;
+const SEED_VERSION = 24;
 
 export const CONTACT_PROFILE_PIPELINE_TEMPLATE_NAME = "Contact profile pipeline";
+export const COMPANY_PROFILE_ENRICHMENT_TEMPLATE_NAME = "Company Profile Enrichment";
+export const COMPANY_SIGNAL_SCAN_TEMPLATE_NAME = "Company Signal Scan";
 
 interface TemplateSeed {
   name: string;
@@ -41,6 +43,44 @@ interface TemplateSeed {
 }
 
 const SEED_TEMPLATES: TemplateSeed[] = [
+  {
+    name: COMPANY_PROFILE_ENRICHMENT_TEMPLATE_NAME,
+    description:
+      "Enrich a company profile with cited website and public-profile evidence through a RealTimeX agent.",
+    templateType: "enrichment",
+    targetPersona: "Companies with incomplete profile and firmographic data",
+    estimatedCost: 0.2,
+    systemPrompt: `You are a company profile enrichment agent operating Signals through agent tools.
+
+## Contract
+1. Read config.orgId and call get_org before researching.
+2. Inspect the company website and any existing organization identities. Use public company pages only when you can verify the company match.
+3. Fill gaps with update_org. Include workflowRunId and fieldSources with a cited evidenceUrl for every researched field.
+4. Never overwrite a newer manually edited value. Never guess a logo; use an og:image or site icon only after confirming it returns successfully.
+5. Use upsert_org_identity for verified social profiles.
+6. Report fieldsUpdated and unresolvedFields, then call complete_workflow_run. Set result.partial=true and include errors when any source failed.
+7. Always call complete_workflow_run before ending the turn so Signals can release runtime resources.`,
+    config: { companyEnrichment: { version: 1 }, acceptsOrgId: true },
+  },
+  {
+    name: COMPANY_SIGNAL_SCAN_TEMPLATE_NAME,
+    description: "Scan cited public sources for material company signals and recommended actions.",
+    templateType: "enrichment",
+    targetPersona: "Followed companies and accounts with active relationship coverage",
+    estimatedCost: 0.2,
+    systemPrompt: `You are a company signal research agent operating Signals through agent tools.
+
+1. Read config.orgId and call get_org plus list_org_contacts.
+2. Search the company website and public web for dated funding, hiring, leadership, launch, news, content, and engagement signals within config.lookbackDays.
+3. For every cited finding call log_org_activity with the article URL as dedupeKey, the source date as occurredAt, and a concise whyItMatters tied to known people or relationship coverage.
+4. Never fabricate a date. When no date exists, use the current time and metadata.dateUnknown=true.
+5. Rescans are safe: cited URLs are deduplicated.
+6. Call complete_workflow_run with result.partial=true and errors when any source failed.`,
+    config: {
+      companySignalScan: { version: 1, lookbackDays: 90 },
+      acceptsOrgId: true,
+    },
+  },
   {
     name: "Top AI Influencers",
     description: "Find and catalog influential voices in AI/ML on X and LinkedIn. Searches for thought leaders, researchers, and founders building AI products.",
