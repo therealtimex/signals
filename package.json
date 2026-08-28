@@ -10,7 +10,7 @@
   "scripts": {
     "preinstall": "node scripts/node-runtime-contract.mjs",
     "dev": "next dev --turbopack -p ${RTX_PORT:-${PORT:-3000}}",
-    "build": "NODE_ENV=production next build",
+    "build": "next build",
     "start": "next start",
     "build:cli": "tsup",
     "db:generate": "drizzle-kit generate",
