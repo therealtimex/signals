@@ -55,7 +55,7 @@ describe("complete_workflow_run terminal teardown", () => {
       failed: [],
     });
     const scheduleSpy = vi
-      .spyOn(resourceTeardown, "scheduleTerminalSessionRelease")
+      .spyOn(resourceTeardown, "scheduleWorkflowTerminalSessionRelease")
       .mockReturnValue({ scheduled: true, sessionId: "cli-agent:session-abc" });
 
     const result = await handleCompleteWorkflowRun({
@@ -106,7 +106,7 @@ describe("complete_workflow_run terminal teardown", () => {
       stopped: [],
       failed: [],
     });
-    const scheduleSpy = vi.spyOn(resourceTeardown, "scheduleTerminalSessionRelease");
+    const scheduleSpy = vi.spyOn(resourceTeardown, "scheduleWorkflowTerminalSessionRelease");
 
     const result = await handleCompleteWorkflowRun({
       runId: run.id,
@@ -148,7 +148,7 @@ describe("complete_workflow_run terminal teardown", () => {
       stopped: [],
       failed: [],
     });
-    vi.spyOn(resourceTeardown, "scheduleTerminalSessionRelease").mockReturnValue({
+    vi.spyOn(resourceTeardown, "scheduleWorkflowTerminalSessionRelease").mockReturnValue({
       scheduled: true,
       sessionId: null,
     });
@@ -186,7 +186,7 @@ describe("complete_workflow_run terminal teardown", () => {
       stopped: [],
       failed: [],
     });
-    vi.spyOn(resourceTeardown, "scheduleTerminalSessionRelease").mockReturnValue({
+    vi.spyOn(resourceTeardown, "scheduleWorkflowTerminalSessionRelease").mockReturnValue({
       scheduled: true,
       sessionId: null,
     });

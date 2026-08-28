@@ -28,6 +28,7 @@ import { resolveActiveTerminalSessionIdForThread } from "@/lib/rtx/runtime-sessi
 import {
   formatDeferredTerminalTeardownNote,
   scheduleTerminalSessionRelease,
+  scheduleWorkflowTerminalSessionRelease,
   stopRunningRtxBrowserSessions,
 } from "@/lib/rtx/resource-teardown";
 import type { WorkflowType } from "@/lib/workflows/types";
@@ -1030,7 +1031,7 @@ export async function handleCompleteWorkflowRun(input: z.infer<typeof completeWo
   const browserSessionTeardown = await stopRunningRtxBrowserSessions({
     stopAllRunning: true,
   });
-  const terminalSessionTeardown = scheduleTerminalSessionRelease(runtimeSessionId);
+  const terminalSessionTeardown = scheduleWorkflowTerminalSessionRelease(runtimeSessionId);
   const teardownNote = formatDeferredTerminalTeardownNote({
     terminal: terminalSessionTeardown,
     browser: browserSessionTeardown,

@@ -2,8 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 import {
   formatAgentLaneTeardownNote,
   releaseAgentLaneResources,
+  RESUMABLE_TERMINAL_RELEASE_REASON,
   scheduleTerminalSessionRelease,
+  scheduleWorkflowTerminalSessionRelease,
   stopRunningRtxBrowserSessions,
+  WORKFLOW_TERMINAL_RELEASE_EXTRA_IDLE_WAIT_MS,
 } from "@/lib/rtx/resource-teardown";
 import * as browserSessions from "@/lib/rtx/browser-sessions";
 import * as runtimeSessions from "@/lib/rtx/runtime-sessions";
@@ -112,8 +115,54 @@ describe("scheduleTerminalSessionRelease", () => {
     expect(waitSpy).toHaveBeenCalledWith("cli-agent:session-1", {
       env: process.env,
       fetchImpl: fetch,
+      retryDelaysMs: expect.arrayContaining([250, 14_000]),
     });
-    expect(terminateSpy).toHaveBeenCalledWith("cli-agent:session-1", process.env, fetch);
+    expect(terminateSpy).toHaveBeenCalledWith(
+      "cli-agent:session-1",
+      process.env,
+      fetch,
+      { reason: RESUMABLE_TERMINAL_RELEASE_REASON }
+    );
+    vi.useRealTimers();
+  });
+
+  it("skips terminate when the chat-linked turn is still busy", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(runtimeSessions, "waitForTerminalSessionIdle").mockResolvedValue({
+      idle: false,
+      reason: "Chat-linked turn remained busy (capturing).",
+    });
+    const terminateSpy = vi
+      .spyOn(runtimeSessions, "terminateTerminalRuntimeSession")
+      .mockResolvedValue({ success: true, terminated: true });
+
+    scheduleTerminalSessionRelease("cli-agent:session-1");
+    await Promise.resolve();
+    await vi.runAllTimersAsync();
+
+    expect(terminateSpy).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  it("uses extended idle wait for workflow completion scheduling", async () => {
+    vi.useFakeTimers();
+    const waitSpy = vi
+      .spyOn(runtimeSessions, "waitForTerminalSessionIdle")
+      .mockResolvedValue({ idle: true });
+    vi.spyOn(runtimeSessions, "terminateTerminalRuntimeSession").mockResolvedValue({
+      success: true,
+      terminated: true,
+    });
+
+    scheduleWorkflowTerminalSessionRelease("cli-agent:session-1");
+    await Promise.resolve();
+    await vi.runAllTimersAsync();
+
+    expect(waitSpy).toHaveBeenCalledWith("cli-agent:session-1", {
+      env: process.env,
+      fetchImpl: fetch,
+      retryDelaysMs: expect.arrayContaining([...WORKFLOW_TERMINAL_RELEASE_EXTRA_IDLE_WAIT_MS]),
+    });
     vi.useRealTimers();
   });
 });

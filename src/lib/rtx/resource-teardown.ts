@@ -5,10 +5,25 @@ import {
 } from "@/lib/rtx/browser-sessions";
 import type { EnvLike } from "@/lib/rtx/env";
 import {
+  DEFAULT_TERMINAL_SESSION_IDLE_WAIT_DELAYS_MS,
   terminateTerminalRuntimeSession,
   waitForTerminalSessionIdle,
   type TerminateTerminalSessionResult,
 } from "@/lib/rtx/runtime-sessions";
+import {
+  DEFAULT_TERMINAL_RELEASE_REASON,
+  RESUMABLE_TERMINAL_RELEASE_REASON,
+  WORKFLOW_TERMINAL_RELEASE_EXTRA_IDLE_WAIT_MS,
+  type TerminalSessionReleaseOptions,
+} from "@/lib/rtx/terminal-teardown";
+
+export {
+  DEFAULT_TERMINAL_RELEASE_REASON,
+  RESUMABLE_TERMINAL_RELEASE_REASON,
+  WORKFLOW_COMPLETED_TERMINAL_RELEASE_REASON,
+  WORKFLOW_TERMINAL_RELEASE_EXTRA_IDLE_WAIT_MS,
+  type TerminalSessionReleaseOptions,
+} from "@/lib/rtx/terminal-teardown";
 
 export type BrowserSessionTeardownResult = {
   stopped: string[];
@@ -114,6 +129,7 @@ export type ScheduledTerminalSessionRelease = {
 
 export function scheduleTerminalSessionRelease(
   terminalSessionId: string | null | undefined,
+  options: TerminalSessionReleaseOptions = {},
   env: EnvLike = process.env,
   fetchImpl: typeof fetch = fetch
 ): ScheduledTerminalSessionRelease {
@@ -122,16 +138,38 @@ export function scheduleTerminalSessionRelease(
     return { scheduled: true, sessionId: null };
   }
 
+  const {
+    reason = RESUMABLE_TERMINAL_RELEASE_REASON,
+    skipTerminateIfBusy = true,
+    extraIdleWaitDelaysMs = [],
+  } = options;
+
   setImmediate(() => {
     void (async () => {
-      const idle = await waitForTerminalSessionIdle(sessionId, { env, fetchImpl });
+      const idle = await waitForTerminalSessionIdle(sessionId, {
+        env,
+        fetchImpl,
+        retryDelaysMs: [
+          ...DEFAULT_TERMINAL_SESSION_IDLE_WAIT_DELAYS_MS,
+          ...extraIdleWaitDelaysMs,
+        ],
+      });
       if (!idle.idle) {
+        if (skipTerminateIfBusy) {
+          console.warn(
+            `[scheduleTerminalSessionRelease] ${sessionId}: ${idle.reason} Skipping terminal terminate to avoid mid-turn kill.`
+          );
+          return;
+        }
+
         console.warn(
           `[scheduleTerminalSessionRelease] ${sessionId}: ${idle.reason} Terminating anyway.`
         );
       }
 
-      const result = await terminateTerminalRuntimeSession(sessionId, env, fetchImpl);
+      const result = await terminateTerminalRuntimeSession(sessionId, env, fetchImpl, {
+        reason,
+      });
       if (!result.success) {
         console.warn(
           `[scheduleTerminalSessionRelease] Failed for ${sessionId}: ${result.error}`
@@ -141,6 +179,24 @@ export function scheduleTerminalSessionRelease(
   });
 
   return { scheduled: true, sessionId };
+}
+
+/** Workflow completion: long idle wait, resumable close, never kill a busy turn. */
+export function scheduleWorkflowTerminalSessionRelease(
+  terminalSessionId: string | null | undefined,
+  env: EnvLike = process.env,
+  fetchImpl: typeof fetch = fetch
+): ScheduledTerminalSessionRelease {
+  return scheduleTerminalSessionRelease(
+    terminalSessionId,
+    {
+      reason: RESUMABLE_TERMINAL_RELEASE_REASON,
+      skipTerminateIfBusy: true,
+      extraIdleWaitDelaysMs: [...WORKFLOW_TERMINAL_RELEASE_EXTRA_IDLE_WAIT_MS],
+    },
+    env,
+    fetchImpl
+  );
 }
 
 export function formatDeferredTerminalTeardownNote(input: {
