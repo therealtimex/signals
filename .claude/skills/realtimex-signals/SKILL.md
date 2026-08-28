@@ -19,23 +19,33 @@ Operate **Signals** (local-first social GTM CRM) via its stable REST API. Intell
 
 Every session:
 
-1. **Use the bundled CLI first** when `tools/signals-pp-cli/bin/signals-pp-cli.cjs` exists (marketplace plugin) or `signals-pp-cli` is on `PATH`. It resolves the running Local App and avoids assumptions about the agent's current working directory:
+1. **Use health-pinned npm CLI first** — resolve version from `/api/health` and run via the skill bootstrap script (do not trust a stale global `signals-pp-cli` on `PATH`):
 
 ```bash
-signals-pp-cli health
-signals-pp-cli agent-tools list --agent
-signals-pp-cli agent-tools invoke --agent \
+.claude/skills/realtimex-signals/scripts/run-signals-pp-cli.sh health
+.claude/skills/realtimex-signals/scripts/run-signals-pp-cli.sh agent-tools list --agent
+.claude/skills/realtimex-signals/scripts/run-signals-pp-cli.sh agent-tools invoke --agent \
   --body-json '{"tool":"query_contacts","input":{"search":"acme"}}'
-signals-pp-cli import contacts --file workflow-runs/<runId>/contacts.csv --dedupe \
+.claude/skills/realtimex-signals/scripts/run-signals-pp-cli.sh import contacts --file workflow-runs/<runId>/contacts.csv --dedupe \
   --workflow-run-id <runId> --template-id <templateId>
 ```
+
+Equivalent manual form when you already know the base URL:
+
+```bash
+export SIGNALS_BASE_URL="http://127.0.0.1:{port}"
+CLI_VERSION="$(curl -sf "$SIGNALS_BASE_URL/api/health" | jq -r .cliVersion)"
+npx --yes @realtimex/signals-pp-cli@"$CLI_VERSION" health
+```
+
+Fallback when `tools/signals-pp-cli/bin/signals-pp-cli.cjs` exists in a provisioned plugin workspace, only if its version matches health `cliVersion`.
 
 Use `signals-pp-cli reconcile --file …` to preview dedupe without mutating. For `--dedupe --dry-run` imports, reconcile is the accurate preview (dry-run skips dedupe queries).
 
 When a brief provides a specific Local App URL, pin the CLI to that instance:
 
 ```bash
-SIGNALS_BASE_URL="http://127.0.0.1:{port}" signals-pp-cli agent-tools invoke --agent \
+SIGNALS_BASE_URL="http://127.0.0.1:{port}" .claude/skills/realtimex-signals/scripts/run-signals-pp-cli.sh agent-tools invoke --agent \
   --body-json '{"tool":"query_contacts","input":{"search":"acme"}}'
 ```
 

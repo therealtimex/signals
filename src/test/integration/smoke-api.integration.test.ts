@@ -10,12 +10,14 @@ describe("smoke:core API", () => {
     expect(body).toMatchObject({
       status: "ok",
       app: "signals",
+      cliPackage: "@realtimex/signals-pp-cli",
       rtx: {
         mode: "standalone",
         appId: null,
         manifest: "signals",
       },
     });
+    expect(body.cliVersion).toMatch(/^\d+\.\d+\.\d+/);
   });
 
   it("rtx status endpoint exposes manifest", async () => {

@@ -210,7 +210,7 @@ describe("buildSocialPatrolBriefSection", () => {
     expect(section).toContain("Bot / Clone Rule");
     expect(section).toContain("DO NOT ingest automated bots");
     expect(section).toContain(
-      "signals-pp-cli import contacts --file workflow-runs/run_9/contacts.csv --dedupe --workflow-run-id run_9 --template-id tpl_patrol_9",
+      ".claude/skills/realtimex-signals/scripts/run-signals-pp-cli.sh import contacts --file workflow-runs/run_9/contacts.csv --dedupe --workflow-run-id run_9 --template-id tpl_patrol_9",
     );
     expect(section).toContain("signals-pp-cli targets release --lease <leaseId>");
   });

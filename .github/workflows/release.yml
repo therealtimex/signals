@@ -178,6 +178,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version-file: ".nvmrc"
+          registry-url: "https://registry.npmjs.org"
+          cache: "npm"
 
       - name: Verify RealtimeX Node runtime
         run: npm run verify:node-runtime
@@ -192,6 +194,17 @@ jobs:
 
       - name: Build cross-platform signals-pp-cli
         run: SIGNALS_PP_CLI_CROSS_COMPILE=1 npm run build:signals-pp-cli
+
+      - name: Package signals-pp-cli for npm
+        run: npm run package:signals-pp-cli-npm
+
+      - name: Test signals-pp-cli npm package layout
+        run: node scripts/test-signals-pp-cli-npm-package.mjs
+
+      - name: Publish signals-pp-cli to npm
+        run: npm run publish:signals-pp-cli-npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Download target artifacts
         uses: actions/download-artifact@v4

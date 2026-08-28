@@ -35,6 +35,12 @@
                         "signals"
                       ]
                     },
+                    "cliPackage": {
+                      "type": "string"
+                    },
+                    "cliVersion": {
+                      "type": "string"
+                    },
                     "rtx": {
                       "type": "object",
                       "additionalProperties": true
@@ -42,7 +48,9 @@
                   },
                   "required": [
                     "status",
-                    "app"
+                    "app",
+                    "cliPackage",
+                    "cliVersion"
                   ],
                   "additionalProperties": true
                 }

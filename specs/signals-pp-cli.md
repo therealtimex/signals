@@ -408,7 +408,7 @@ Add to `.github/workflows/plugin-release.yml` (after `build:standalone-artifact`
 
 **ADR-174-3: Canonical staged CSV schema is frozen in §4.2.** — Accepted. Agents writing `workflow-runs/<runId>/contacts.csv` must use the column table above; JSON uses the same field names. Briefs should reference this section, not invent per-template columns.
 
-**ADR-174-4: Artifact-only distribution; version locked to Signals release.** — Accepted (§6). No npm publish. CLI version = `package.json` version = plugin `realtimex.plugin.json` version for a given release artifact.
+**ADR-174-4: npm publish + health-pinned on-demand install (revised 2026-08, #342).** — Accepted. Publish `@realtimex/signals-pp-cli` to npm on every Signals release (version = `package.json`). `/api/health` exposes `cliPackage` and `cliVersion`. Terminal agents bootstrap via `run-signals-pp-cli.sh` (`npx --yes @realtimex/signals-pp-cli@<cliVersion>`). Marketplace plugin may still ship a thin shim or bundled binary as offline fallback until npm path is universal.
 
 **ADR-174-5: Split generated vs hand-maintained CLI source.** — Accepted. Printing Press writes `tools/signals-pp-cli/source/`; transcendence commands live in `tools/signals-pp-cli/transcendence/` and link against the generated client package. `build:signals-pp-cli` composes both before `go build`. No regen-merge into a single tree.
 

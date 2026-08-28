@@ -185,7 +185,7 @@ export function buildSocialPatrolBriefSection(input: {
     `P7. Mine human engagers (post authors, likers, and repliers) from the threads you engage with, targeting up to ${patrol.maxScrapedContacts} contact(s). Extract full profile data including profile picture URL (avatar_url) from post and user elements.`,
     "    Bot / Clone Rule: Engage with popular bot, curator, or aggregator accounts if their thread has high human visibility, but DO NOT ingest automated bots, mirror clones, or news feeds into contacts.csv (save the reply with contactId: null). Identify bots by handles ending in *bot/*_agent/*digest, automated bio disclosures, or zero-conversation link scraping.",
     `P8. Write back: stage workflow-runs/${input.workflowRunId}/contacts.csv (header: name,company,title,email,platform,platform_handle,profile_url,avatar_url,notes) containing only real human prospects, then commit with`,
-    `    signals-pp-cli import contacts --file workflow-runs/${input.workflowRunId}/contacts.csv --dedupe${attributionFlags}`,
+    `    .claude/skills/realtimex-signals/scripts/run-signals-pp-cli.sh import contacts --file workflow-runs/${input.workflowRunId}/contacts.csv --dedupe${attributionFlags}`,
     "    Record every published reply as a Signals content_item attributed to this workflow run (linking contactId for human prospects, or contactId: null for bot/aggregator threads).",
     "P9. Release the lease when the shift ends: signals-pp-cli targets release --lease <leaseId>, then summarize comments and ingested contacts with links in this thread.",
   ];
