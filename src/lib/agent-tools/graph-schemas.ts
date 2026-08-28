@@ -42,6 +42,11 @@ export const getOrgSchema = z
     message: "orgId or domain is required",
   });
 
+export const getOrgArooSchema = z.object({
+  orgId: z.string().min(1),
+  visibility: z.enum(["internal", "public"]).optional(),
+});
+
 export const createOrgSchema = z.object({
   name: z.string().trim().min(1).max(240),
   orgType: orgTypeSchema.optional(),

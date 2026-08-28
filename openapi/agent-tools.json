@@ -315,6 +315,37 @@
                     "type": "object",
                     "properties": {
                       "tool": {
+                        "const": "get_contact_arpp"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "contactId": {
+                            "type": "string"
+                          },
+                          "visibility": {
+                            "type": "string",
+                            "enum": [
+                              "internal",
+                              "public"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "contactId"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
                         "const": "create_contact"
                       },
                       "input": {
@@ -1608,6 +1639,37 @@
                             "type": "string"
                           }
                         },
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "get_org_aroo"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "orgId": {
+                            "type": "string"
+                          },
+                          "visibility": {
+                            "type": "string",
+                            "enum": [
+                              "internal",
+                              "public"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "orgId"
+                        ],
                         "additionalProperties": false
                       }
                     },
@@ -3662,6 +3724,7 @@
                       "query_contacts",
                       "resolve_platform_claim",
                       "get_contact",
+                      "get_contact_arpp",
                       "create_contact",
                       "update_contact",
                       "enrich_contact",
@@ -3687,6 +3750,7 @@
                       "complete_persona_job",
                       "query_orgs",
                       "get_org",
+                      "get_org_aroo",
                       "create_org",
                       "update_org",
                       "get_org_relationships",
@@ -3873,6 +3937,6 @@
   ],
   "x-signals-agent-tools": {
     "manifestVersion": "1",
-    "toolCount": 68
+    "toolCount": 70
   }
 }

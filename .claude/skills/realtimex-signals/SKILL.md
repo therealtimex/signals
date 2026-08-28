@@ -162,7 +162,9 @@ flowchart TD
 For company work, query with `query_orgs` or `get_org` before creating anything. Use `create_org`
 for a new company and `update_org` for cited edits or enrichment; pass field evidence URLs when
 research supplied the value. Keep verified social profiles in `org_identities` via
-`upsert_org_identity`. Do not expose raw provenance tags as user-facing descriptions.
+`upsert_org_identity`. Use `get_contact_arpp` or `get_org_aroo` when an agent-readable interchange
+document is needed; request `visibility: "public"` for the privacy-filtered slice. Do not expose raw
+provenance tags as user-facing descriptions.
 
 ## Contact avatars
 

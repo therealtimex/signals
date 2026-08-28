@@ -18,6 +18,7 @@ Invoke body: `{ "tool": "<name>", "input": { ... } }`
 | `query_contacts` | Search/filter active CRM contacts (`email` = exact normalized match, `platformUserId` = exact identity match) |
 | `resolve_platform_claim` | Is a platform account already claimed, by a contact or an org? Use before creating a contact for an imported handle |
 | `get_contact` | Full record by `contactId` |
+| `get_contact_arpp` | Agent-readable ARPP projection by `contactId`; supports `visibility` |
 | `create_contact` | New contact (requires `name`; optional `channels[]`, `employments[]`) |
 | `update_contact` | Overwrite fields on existing contact |
 | `upsert_contact_identity` | Create or update a platform identity for a contact |
@@ -40,6 +41,7 @@ Invoke body: `{ "tool": "<name>", "input": { ... } }`
 | `complete_persona_job` | Submit the JSON synthesis or failure for the current stateless persona job |
 | `query_orgs` | Search company nodes |
 | `get_org` | Read a company by `orgId` or normalized `domain` |
+| `get_org_aroo` | Agent-readable AROO projection by `orgId`; supports `visibility` |
 | `create_org` | Create a company with agent provenance |
 | `update_org` | Update company profile fields and attach cited field evidence |
 | `get_org_relationships` | Relationship strength, coverage, and introduction paths |

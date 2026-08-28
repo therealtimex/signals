@@ -69,6 +69,10 @@ export const getContactSchema = z.object({
   contactId: z.string().min(1),
 });
 
+export const getContactArppSchema = getContactSchema.extend({
+  visibility: z.enum(["internal", "public"]).optional(),
+});
+
 export const createContactSchema = z.object({
   name: z.string().min(1),
   email: z.string().email().optional().or(z.literal("")),

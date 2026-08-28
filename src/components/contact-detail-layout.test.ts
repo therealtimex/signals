@@ -54,7 +54,23 @@ const contactFixture: ContactWithIdentities = {
   primaryPhone: null,
   channelCount: 1,
   channels: [],
-  employments: [],
+  employments: [
+    {
+      id: "emp1",
+      contactId: "c1",
+      orgId: "org1",
+      orgName: "Acme",
+      title: "Founder",
+      startedAt: 1_704_067_200,
+      endedAt: null,
+      isCurrent: true,
+      scope: "shared",
+      source: "manual",
+      metadata: "{}",
+      createdAt: 1,
+      updatedAt: 1,
+    },
+  ],
   currentEmployment: {
     orgId: "org1",
     orgName: "Acme",
@@ -196,6 +212,9 @@ describe("ContactDetailClient details layout", () => {
     expect(html).toContain("Enrich profile");
     expect(html).toContain("This is me");
     expect(html).toContain("Added");
+    expect(html).toContain("Profile");
+    expect(html).toContain("Experience");
+    expect(html).toContain('href="/dashboard/organizations/org1"');
   });
 
   it("hides a headline that repeats title and company", () => {
@@ -207,6 +226,7 @@ describe("ContactDetailClient details layout", () => {
           title: "CEO",
           company: "OpenAI",
           headline: "CEO at OpenAI",
+          currentEmployment: { orgId: "org-openai", orgName: "OpenAI", title: "CEO" },
         },
         tasks: [],
         explore: exploreFixture,
@@ -228,6 +248,29 @@ describe("ContactDetailClient details layout", () => {
       }),
     );
     expect(html).toContain("This profile is still thin");
+  });
+
+  it("shows actionable empty-state controls for a sparse profile", () => {
+    const html = renderToStaticMarkup(
+      createElement(ContactDetailClient, {
+        contact: {
+          ...contactFixture,
+          company: null,
+          title: null,
+          headline: null,
+          bio: null,
+          currentEmployment: null,
+          employments: [],
+          profile: { ...contactFixture.profile, headline: null, bio: null },
+        },
+        tasks: [],
+        explore: exploreFixture,
+        profilePipelineTemplateId: "tmpl-1",
+      }),
+    );
+    expect(html).toContain("Profile details are still sparse");
+    expect(html).toContain("Edit profile");
+    expect(html).toContain("Enrich profile");
   });
 });
 
