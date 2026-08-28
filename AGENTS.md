@@ -223,9 +223,13 @@ Use this workflow when validating Signals changes against the RealTimeX desktop 
    frontend `3100`, server `3101`, and Electron CDP `9888`. Never use the production RealTimeX app
    for this testing.
 
-2. In the running RealTimeX dev app, add the Signals worktree under test as a Local App. Use
-   `npm run dev`, the worktree as the working directory, and an isolated data directory such as
-   `SIGNALS_DATA_DIR=/private/tmp/signals-qa-<run-id>-data`.
+2. In the running RealTimeX dev app, register the Signals worktree under test as a **dedicated QA
+   Local App** — never repoint the canonical dev app (`47e45f71-3279-42f5-8e95-731de01b6eae`,
+   display name **Signals**). Prior loops used separate entries such as `Signals issue-335 QA`;
+   follow that pattern (`Signals issue-<N> QA`) so daily dev keeps `SIGNALS_DATA_DIR=~/.signals`.
+
+   For the QA entry, use `npm run dev`, the worktree as the working directory, and an isolated data
+   directory such as `SIGNALS_DATA_DIR=/private/tmp/signals-qa-<run-id>-data`.
 
 3. Start the Local App from the RealTimeX UI and grant only the manifest permissions required by
    the test. Signals listens on the port RealTimeX assigns it — commonly `3010`, while a
@@ -243,9 +247,22 @@ Use this workflow when validating Signals changes against the RealTimeX desktop 
    Do not point `rtxtest dev up` at the Signals repository; it is a Local App, not the RealTimeX
    app repo.
 
-5. After QA, stop the Signals Local App from the UI, stop the `yarn dev:all` host, and confirm the
-   Signals port plus `3100`, `3101`, and `9888` are clear. Keep the Local App configuration unless
-   deletion is explicitly requested.
+5. After QA, stop the QA Local App from the UI, stop the `yarn dev:all` host, and confirm the
+   Signals port plus `3100`, `3101`, and `9888` are clear.
+
+   **Teardown / config hygiene**
+
+   - Delete or disable the issue-specific QA Local App entry when the loop closes.
+   - Do **not** leave disposable `SIGNALS_DATA_DIR` paths or worktree `args` on the canonical
+     **Signals** app. If that app was modified, restore it before handoff:
+
+     ```bash
+     node scripts/qa/provision-signals-local-app.mjs \
+       --db ~/.realtimex.ai/desktop-user-data/dev/users/trungle_rta_vn/storage/realtimex.db
+     ```
+
+     (`REALTIMEX_RUNTIME=dev` selects the dev storage root when the script resolves the DB path.)
+   - Disposable `/private/tmp/signals-qa-*` directories may be removed after evidence is captured.
 
 ### Visual evidence for UI changes
 
