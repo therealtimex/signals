@@ -174,8 +174,13 @@ if (!existsSync(dbPath)) {
 const storageRoot =
   process.env.REALTIMEX_STORAGE_ROOT?.trim() ||
   (process.env.REALTIMEX_RUNTIME === "dev" ? "dev" : "app");
-const targetsDevStorage =
-  storageRoot === "dev" || resolve(dbPath).includes(`${sep}dev${sep}users${sep}`);
+const resolvedDbPath = resolve(dbPath);
+const dbStorageRoot = resolvedDbPath.includes(`${sep}dev${sep}users${sep}`)
+  ? "dev"
+  : resolvedDbPath.includes(`${sep}app${sep}users${sep}`)
+    ? "app"
+    : null;
+const targetsDevStorage = (dbStorageRoot || storageRoot) === "dev";
 const rtxServerPort = targetsDevStorage ? "3101" : "3001";
 const rtxBaseUrl = `http://127.0.0.1:${rtxServerPort}/cli`;
 

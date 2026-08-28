@@ -77,18 +77,21 @@ try {
   const before = appsFromCliPayload(
     runRealtimeXCli(["list-local-apps", "--data-source", "live", "--no-cache"], cliOptions),
   );
+  const issueApps = findIssueQaApps(before, issueId);
   const candidates = requestedAppId
     ? before.filter((app) => app.id === requestedAppId)
-    : findIssueQaApps(before, issueId);
+    : issueApps;
   if (candidates.length > 1) {
     throw new Error(`Multiple issue-${issueId} QA apps exist; pass --app-id explicitly.`);
   }
 
   const app = candidates[0] || null;
   if (!app && receipt) {
-    throw new Error(
-      `Receipt-backed QA Local App ${receipt.appId} was not found; retaining its data and receipt.`,
-    );
+    if (issueApps.length > 0) {
+      throw new Error(
+        `Receipt-backed QA Local App ${receipt.appId} was already deleted, but another issue-${issueId} QA app remains; retaining its data and receipt.`,
+      );
+    }
   }
   if (!app && appIdOverride) {
     throw new Error(`Requested QA Local App ${appIdOverride} was not found.`);
@@ -130,6 +133,7 @@ try {
         issueId,
         appId: app?.id || requestedAppId || null,
         appDeleted: Boolean(app),
+        appAlreadyAbsent: Boolean(receipt && !app),
         dataDir,
         dataRemoved,
         receiptRemoved,

@@ -217,6 +217,10 @@ if (command === "list-local-apps") {
 } else if (command === "delete-local-app") {
   state.apps = state.apps.filter((app) => app.id !== args[1]);
   save();
+  if (process.env.MOCK_DELETE_FAIL_AFTER_COMMIT === "1") {
+    console.error("Simulated response loss after committed delete");
+    process.exit(1);
+  }
   results = { success: true, appId: args[1] };
 } else {
   console.error("Unexpected mock command: " + command);
@@ -295,14 +299,38 @@ console.log(JSON.stringify({ meta: { source: "mock" }, results }));
   assert.equal(existsSync(lifecycleData), true);
   assert.equal(existsSync(otherIssueData), true);
 
+  const interruptedCleanup = spawnSync(
+    process.execPath,
+    [
+      join(scriptDir, "cleanup-signals-qa-local-app.mjs"),
+      "--issue",
+      lifecycleIssue,
+      "--cli",
+      mockCliPath,
+    ],
+    {
+      encoding: "utf8",
+      env: { ...childEnv, MOCK_DELETE_FAIL_AFTER_COMMIT: "1" },
+    },
+  );
+  assert.equal(interruptedCleanup.status, 1);
+  assert.match(interruptedCleanup.stderr, /Simulated response loss after committed delete/);
+  assert.equal(existsSync(lifecycleReceipt), true);
+  assert.equal(existsSync(lifecycleData), true);
+
   lifecycleState = JSON.parse(readFileSync(mockStatePath, "utf8"));
-  assert.equal(lifecycleState.apps.length, 2);
-  const receiptBackedApp = lifecycleState.apps[1];
+  assert.deepEqual(lifecycleState.apps.map((app) => app.id), [CANONICAL_SIGNALS_APP_ID]);
+  const replacementIssueApp = {
+    id: "qa-replacement-app",
+    displayName: `Signals issue-${lifecycleIssue} QA`,
+    tags: ["signals", "qa", "ephemeral", `issue-${lifecycleIssue}`],
+    persistedStatus: "stopped",
+  };
   writeFileSync(
     mockStatePath,
-    `${JSON.stringify({ apps: [lifecycleState.apps[0]] })}\n`,
+    `${JSON.stringify({ apps: [...lifecycleState.apps, replacementIssueApp] })}\n`,
   );
-  const missingReceiptAppCleanup = spawnSync(
+  const ambiguousRetryCleanup = spawnSync(
     process.execPath,
     [
       join(scriptDir, "cleanup-signals-qa-local-app.mjs"),
@@ -313,14 +341,11 @@ console.log(JSON.stringify({ meta: { source: "mock" }, results }));
     ],
     { encoding: "utf8", env: childEnv },
   );
-  assert.equal(missingReceiptAppCleanup.status, 1);
-  assert.match(missingReceiptAppCleanup.stderr, /retaining its data and receipt/);
+  assert.equal(ambiguousRetryCleanup.status, 1);
+  assert.match(ambiguousRetryCleanup.stderr, /another issue-.* QA app remains/);
   assert.equal(existsSync(lifecycleReceipt), true);
   assert.equal(existsSync(lifecycleData), true);
-  writeFileSync(
-    mockStatePath,
-    `${JSON.stringify({ apps: [lifecycleState.apps[0], receiptBackedApp] })}\n`,
-  );
+  writeFileSync(mockStatePath, `${JSON.stringify({ apps: lifecycleState.apps })}\n`);
 
   const cleanupResult = spawnSync(
     process.execPath,
@@ -334,6 +359,9 @@ console.log(JSON.stringify({ meta: { source: "mock" }, results }));
     { encoding: "utf8", env: childEnv },
   );
   assert.equal(cleanupResult.status, 0, cleanupResult.stderr);
+  const cleanupOutput = JSON.parse(cleanupResult.stdout);
+  assert.equal(cleanupOutput.appDeleted, false);
+  assert.equal(cleanupOutput.appAlreadyAbsent, true);
   lifecycleState = JSON.parse(readFileSync(mockStatePath, "utf8"));
   assert.deepEqual(lifecycleState.apps.map((app) => app.id), [CANONICAL_SIGNALS_APP_ID]);
   assert.equal(existsSync(lifecycleReceipt), false);
@@ -440,6 +468,27 @@ if (sqliteAvailable) {
       ).trim(),
       "Signals",
     );
+
+    const explicitAppDbEnv = { ...recoveryEnv, REALTIMEX_RUNTIME: "dev" };
+    const explicitAppDbResult = spawnSync(
+      process.execPath,
+      [
+        join(scriptDir, "provision-signals-local-app.mjs"),
+        "--restore-canonical",
+        "--db",
+        productionDb,
+      ],
+      { encoding: "utf8", env: explicitAppDbEnv },
+    );
+    assert.equal(explicitAppDbResult.status, 0, explicitAppDbResult.stderr);
+    const productionConfig = JSON.parse(
+      execFileSync(
+        "sqlite3",
+        [productionDb, `SELECT config FROM local_apps WHERE id = '${CANONICAL_SIGNALS_APP_ID}';`],
+        { encoding: "utf8" },
+      ).trim(),
+    );
+    assert.equal(productionConfig.env.REALTIMEX_BASE_URL, "http://127.0.0.1:3001/cli");
   } finally {
     rmSync(recoveryRoot, { recursive: true, force: true });
   }
