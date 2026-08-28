@@ -38,9 +38,15 @@ CLI_VERSION="$(curl -sf "$SIGNALS_BASE_URL/api/health" | jq -r .cliVersion)"
 npx --yes @realtimex/signals-pp-cli@"$CLI_VERSION" health
 ```
 
-Fallback when `tools/signals-pp-cli/bin/signals-pp-cli.cjs` exists in a provisioned plugin workspace, only if its version matches health `cliVersion`.
+Or use the workspace skill bootstrap script:
 
-Use `signals-pp-cli reconcile --file …` to preview dedupe without mutating. For `--dedupe --dry-run` imports, reconcile is the accurate preview (dry-run skips dedupe queries).
+```bash
+skills/realtimex-signals/scripts/run-signals-pp-cli.sh health
+```
+
+Provisioned plugin workspaces do **not** bundle native CLI binaries — always bootstrap via health-pinned `npx` (or `run-signals-pp-cli.sh`). Standalone offline installs may still ship `tools/signals-pp-cli/bin/` in the app artifact.
+
+Use `run-signals-pp-cli.sh reconcile --file …` to preview dedupe without mutating. For `--dedupe --dry-run` imports, reconcile is the accurate preview (dry-run skips dedupe queries).
 
 When a brief provides a specific Local App URL, pin the CLI to that instance:
 
