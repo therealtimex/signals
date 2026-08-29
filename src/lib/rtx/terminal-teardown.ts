@@ -7,7 +7,10 @@ export const DEFAULT_TERMINAL_RELEASE_REASON = "cli_terminal_session_terminated"
 /** Distinct reason for workflow completion (forward-compatible with RTX UI). */
 export const WORKFLOW_COMPLETED_TERMINAL_RELEASE_REASON = "workflow_completed_resumable";
 
-/** Extra idle-wait backoff after the standard ~30s sequence for workflow turns. */
+/**
+ * Extra idle-wait backoff after the standard close sequence (mirrors RealtimeX
+ * Loops `DEFAULT_CLOSE_SESSION_RETRY_DELAYS_MS` plus workflow tail waits).
+ */
 export const WORKFLOW_TERMINAL_RELEASE_EXTRA_IDLE_WAIT_MS = [
   15_000,
   30_000,

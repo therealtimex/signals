@@ -29,7 +29,7 @@ describe("complete_workflow_run terminal teardown", () => {
     vi.restoreAllMocks();
   });
 
-  it("stops browsers and retains the workflow terminal session on completion", async () => {
+  it("stops browsers and schedules workflow terminal release on completion", async () => {
     const template = createTemplate({
       name: "Network Snowball",
       templateType: "prospecting",
@@ -57,9 +57,8 @@ describe("complete_workflow_run terminal teardown", () => {
     const scheduleSpy = vi
       .spyOn(resourceTeardown, "scheduleWorkflowTerminalSessionRelease")
       .mockReturnValue({
-        scheduled: false,
+        scheduled: true,
         sessionId: "cli-agent:session-abc",
-        retained: true,
       });
 
     const result = await handleCompleteWorkflowRun({
@@ -72,15 +71,16 @@ describe("complete_workflow_run terminal teardown", () => {
     expect(browserSpy).toHaveBeenCalledWith({ stopAllRunning: true });
     expect(scheduleSpy).toHaveBeenCalledWith("cli-agent:session-abc");
     expect(result.terminalSessionTeardown).toEqual({
-      scheduled: false,
+      scheduled: true,
       sessionId: "cli-agent:session-abc",
-      retained: true,
     });
     expect(result.browserSessionTeardown).toEqual({
       stopped: ["network-snowball"],
       failed: [],
     });
-    expect(result.message).toContain("Terminal session retained for review/resume.");
+    expect(result.message).toContain(
+      "Terminal session release scheduled after the chat-linked turn finishes."
+    );
     expect(result.message).toContain("Browser sessions stopped: network-snowball.");
   });
 

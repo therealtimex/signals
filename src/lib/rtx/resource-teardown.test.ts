@@ -6,6 +6,7 @@ import {
   scheduleTerminalSessionRelease,
   scheduleWorkflowTerminalSessionRelease,
   stopRunningRtxBrowserSessions,
+  WORKFLOW_COMPLETED_TERMINAL_RELEASE_REASON,
 } from "@/lib/rtx/resource-teardown";
 import * as browserSessions from "@/lib/rtx/browser-sessions";
 import * as runtimeSessions from "@/lib/rtx/runtime-sessions";
@@ -143,16 +144,36 @@ describe("scheduleTerminalSessionRelease", () => {
     vi.useRealTimers();
   });
 
-  it("uses extended idle wait for workflow completion scheduling", () => {
-    expect(scheduleWorkflowTerminalSessionRelease("cli-agent:session-1")).toEqual({
-      scheduled: false,
-      sessionId: "cli-agent:session-1",
-      retained: true,
-    });
+  it("uses extended idle wait and workflow_completed_resumable for workflow completion", async () => {
+    vi.useFakeTimers();
+    const waitSpy = vi
+      .spyOn(runtimeSessions, "waitForTerminalSessionIdle")
+      .mockResolvedValue({ idle: true });
+    const terminateSpy = vi
+      .spyOn(runtimeSessions, "terminateTerminalRuntimeSession")
+      .mockResolvedValue({ success: true, terminated: true });
+
+    const scheduled = scheduleWorkflowTerminalSessionRelease("cli-agent:session-1");
+    expect(scheduled).toEqual({ scheduled: true, sessionId: "cli-agent:session-1" });
     expect(scheduleWorkflowTerminalSessionRelease(null)).toEqual({
-      scheduled: false,
+      scheduled: true,
       sessionId: null,
-      retained: false,
     });
+
+    await Promise.resolve();
+    await vi.runAllTimersAsync();
+
+    expect(waitSpy).toHaveBeenCalledWith("cli-agent:session-1", {
+      env: process.env,
+      fetchImpl: fetch,
+      retryDelaysMs: expect.arrayContaining([250, 14_000, 15_000, 90_000]),
+    });
+    expect(terminateSpy).toHaveBeenCalledWith(
+      "cli-agent:session-1",
+      process.env,
+      fetch,
+      { reason: WORKFLOW_COMPLETED_TERMINAL_RELEASE_REASON }
+    );
+    vi.useRealTimers();
   });
 });

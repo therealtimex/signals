@@ -13,6 +13,7 @@ import {
 import {
   DEFAULT_TERMINAL_RELEASE_REASON,
   RESUMABLE_TERMINAL_RELEASE_REASON,
+  WORKFLOW_COMPLETED_TERMINAL_RELEASE_REASON,
   WORKFLOW_TERMINAL_RELEASE_EXTRA_IDLE_WAIT_MS,
   type TerminalSessionReleaseOptions,
 } from "@/lib/rtx/terminal-teardown";
@@ -125,8 +126,6 @@ export async function releaseAgentLaneResources(
 export type ScheduledTerminalSessionRelease = {
   scheduled: boolean;
   sessionId: string | null;
-  /** Workflow completion keeps the PTY attached instead of scheduling terminate. */
-  retained?: boolean;
 };
 
 export function scheduleTerminalSessionRelease(
@@ -184,14 +183,25 @@ export function scheduleTerminalSessionRelease(
 }
 
 /**
- * Workflow completion releases browser RAM only. The chat-linked terminal stays
- * attached so operators can review output and resume; RTX idle policy reclaims PTY later.
+ * Workflow completion follows the RealtimeX Loops close contract: stop browsers
+ * immediately, wait for a non-busy chat-linked turn (bounded retries), then
+ * terminate with `workflow_completed_resumable`.
  */
 export function scheduleWorkflowTerminalSessionRelease(
-  terminalSessionId: string | null | undefined
+  terminalSessionId: string | null | undefined,
+  env: EnvLike = process.env,
+  fetchImpl: typeof fetch = fetch
 ): ScheduledTerminalSessionRelease {
-  const sessionId = terminalSessionId?.trim() || null;
-  return { scheduled: false, sessionId, retained: Boolean(sessionId) };
+  return scheduleTerminalSessionRelease(
+    terminalSessionId,
+    {
+      reason: WORKFLOW_COMPLETED_TERMINAL_RELEASE_REASON,
+      skipTerminateIfBusy: true,
+      extraIdleWaitDelaysMs: [...WORKFLOW_TERMINAL_RELEASE_EXTRA_IDLE_WAIT_MS],
+    },
+    env,
+    fetchImpl
+  );
 }
 
 export function formatDeferredTerminalTeardownNote(input: {
@@ -200,10 +210,10 @@ export function formatDeferredTerminalTeardownNote(input: {
 }): string {
   const parts: string[] = [];
 
-  if (input.terminal.retained) {
-    parts.push("Terminal session retained for review/resume.");
-  } else if (input.terminal.scheduled && input.terminal.sessionId) {
-    parts.push("Terminal session release scheduled.");
+  if (input.terminal.scheduled && input.terminal.sessionId) {
+    parts.push(
+      "Terminal session release scheduled after the chat-linked turn finishes."
+    );
   }
 
   if (input.browser.stopped.length > 0) {
