@@ -18,6 +18,7 @@ const variantWritingProjectionSchema = z
         at: z.number().int().nonnegative().optional(),
         by: z.string().min(1).optional(),
         auditId: z.string().min(1).optional(),
+        riskTier: z.enum(["low", "medium", "high"]).optional(),
       })
       .passthrough()
       .nullable(),
@@ -25,6 +26,15 @@ const variantWritingProjectionSchema = z
     targetId: z.string().min(1).optional(),
     platform: z.string().min(1).optional(),
     surface: z.string().min(1).optional(),
+    schemaVersion: z.literal(1).optional(),
+    spine: z.object({ id: z.string().min(1), hash: z.string().min(1) }).passthrough().optional(),
+    materializedContentItemId: z.string().min(1).optional(),
+    lineage: z.object({
+      derivedFromVariantId: z.string().optional(),
+      adaptedFromContentItemId: z.string().optional(),
+      adaptedFromVariantId: z.string().optional(),
+      sourceIds: z.array(z.string()),
+    }).passthrough().optional(),
   })
   .passthrough();
 

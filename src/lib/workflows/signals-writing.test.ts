@@ -43,7 +43,14 @@ describe("Signals Writing workflow contract", () => {
     expect(section).toContain("youtube/thumbnail_brief");
     expect(section).toContain("publish=export_only");
     expect(section).toContain("get_writing_context");
-    expect(section).toContain("create_content_draft");
+    expect(section).toContain("upsert_variant");
+    expect(section).toContain("materialize_variant");
+    expect(section).toContain("list_voice_profiles");
+    expect(section).toContain("get_voice_profile");
+    expect(section).toContain("upsert_voice_profile");
+    expect(section).toContain("approve_voice_profile");
+    expect(section).toContain("revoke_variant_approval");
+    expect(section).not.toContain("create_content_draft");
     expect(section).not.toMatch(/save_draft|report_progress|search_web/);
   });
 

@@ -16,6 +16,11 @@ Signals is distributed as a **RealTimeX Local App**. Developers can also run it 
 
 See [`rtx-local-app.example.json`](../rtx-local-app.example.json) for the marketplace v2 runtime contract. For current source-checkout QA, use `scripts/qa/provision-signals-local-app.mjs`.
 
+Back up the entire data directory, not only `data.db`: approved Signals Writing voice profiles are
+immutable files under `writing/voice-profiles/`, with lifecycle state in that directory's
+`index.json`. If a `.store.lock` names another host, never delete it automatically; confirm that
+the other host is no longer using the shared data directory before removing the lock manually.
+
 ## Environment injection (RTX Electron)
 
 `LocalAppsManager` injects these variables when starting Signals:

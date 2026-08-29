@@ -1501,6 +1501,119 @@
                     "type": "object",
                     "properties": {
                       "tool": {
+                        "const": "list_voice_profiles"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "draft",
+                              "approved",
+                              "superseded",
+                              "rejected"
+                            ]
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "get_voice_profile"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "version": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "id"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "upsert_voice_profile"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "profile": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "object"
+                            }
+                          }
+                        },
+                        "required": [
+                          "profile"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "approve_voice_profile"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "version": {
+                            "type": "number"
+                          },
+                          "evidence": {
+                            "type": "object"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "version",
+                          "evidence"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
                         "const": "query_goals"
                       },
                       "input": {
@@ -3189,9 +3302,165 @@
                           },
                           "metadata": {
                             "type": "object",
-                            "additionalProperties": {
-                              "type": "object"
-                            }
+                            "properties": {
+                              "writing": {
+                                "type": "object",
+                                "properties": {
+                                  "schemaVersion": {
+                                    "const": 1
+                                  },
+                                  "goal": {
+                                    "type": "string",
+                                    "enum": [
+                                      "replies",
+                                      "reposts",
+                                      "saves",
+                                      "likes",
+                                      "follows",
+                                      "clicks",
+                                      "leads",
+                                      "awareness"
+                                    ]
+                                  },
+                                  "surfaces": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "platform": {
+                                          "type": "string",
+                                          "enum": [
+                                            "x",
+                                            "linkedin",
+                                            "gmail",
+                                            "substack",
+                                            "instagram",
+                                            "facebook",
+                                            "threads",
+                                            "tiktok",
+                                            "youtube",
+                                            "bluesky",
+                                            "telegram",
+                                            "whatsapp"
+                                          ]
+                                        },
+                                        "surface": {
+                                          "type": "string",
+                                          "enum": [
+                                            "x/post",
+                                            "x/thread",
+                                            "x/reply",
+                                            "x/quote",
+                                            "linkedin/post",
+                                            "linkedin/comment",
+                                            "facebook/post",
+                                            "threads/post",
+                                            "threads/thread",
+                                            "instagram/caption",
+                                            "instagram/carousel",
+                                            "tiktok/caption",
+                                            "tiktok/script",
+                                            "youtube/title",
+                                            "youtube/description",
+                                            "youtube/community_post",
+                                            "youtube/hook_script",
+                                            "youtube/thumbnail_brief"
+                                          ]
+                                        },
+                                        "targetId": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "platform",
+                                        "surface"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  },
+                                  "sources": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object"
+                                    }
+                                  },
+                                  "spine": {
+                                    "type": "object",
+                                    "additionalProperties": {
+                                      "type": "object"
+                                    }
+                                  },
+                                  "voiceProfile": {
+                                    "type": "object",
+                                    "properties": {
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "version": {
+                                        "type": "number"
+                                      },
+                                      "hash": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "id",
+                                      "version",
+                                      "hash"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  "voicePrecedence": {
+                                    "type": "string",
+                                    "enum": [
+                                      "voice_first",
+                                      "rules_first"
+                                    ]
+                                  },
+                                  "approvalPolicy": {
+                                    "type": "string",
+                                    "enum": [
+                                      "explicit",
+                                      "auto_low_risk"
+                                    ]
+                                  },
+                                  "runs": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "workflowRunId": {
+                                          "type": "string"
+                                        },
+                                        "mode": {
+                                          "type": "string",
+                                          "enum": [
+                                            "draft",
+                                            "adapt",
+                                            "humanize",
+                                            "revise"
+                                          ]
+                                        },
+                                        "startedAt": {
+                                          "type": "number"
+                                        },
+                                        "rtxThreadSlug": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "workflowRunId",
+                                        "mode",
+                                        "startedAt"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  }
+                                },
+                                "additionalProperties": false
+                              }
+                            },
+                            "additionalProperties": false
                           },
                           "launchedAt": {
                             "type": "number"
@@ -3290,6 +3559,84 @@
                         },
                         "required": [
                           "launchId"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "materialize_variant"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "variantId": {
+                            "type": "string"
+                          },
+                          "approval": {
+                            "type": "object",
+                            "properties": {
+                              "by": {
+                                "const": "user"
+                              },
+                              "evidence": {
+                                "type": "object"
+                              },
+                              "note": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "by",
+                              "evidence"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "variantId"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "revoke_variant_approval"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "variantId": {
+                            "type": "string"
+                          },
+                          "reason": {
+                            "type": "string",
+                            "enum": [
+                              "user",
+                              "voice_superseded"
+                            ]
+                          },
+                          "note": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "variantId",
+                          "reason"
                         ],
                         "additionalProperties": false
                       }
@@ -3970,6 +4317,10 @@
                       "create_content_draft",
                       "update_content_draft",
                       "get_writing_context",
+                      "list_voice_profiles",
+                      "get_voice_profile",
+                      "upsert_voice_profile",
+                      "approve_voice_profile",
                       "query_goals",
                       "create_task",
                       "get_persona",
@@ -4007,6 +4358,8 @@
                       "query_launches",
                       "upsert_launch",
                       "upsert_variant",
+                      "materialize_variant",
+                      "revoke_variant_approval",
                       "semantic_search",
                       "create_simulation_run",
                       "query_simulations",
@@ -4167,6 +4520,6 @@
   ],
   "x-signals-agent-tools": {
     "manifestVersion": "1",
-    "toolCount": 74
+    "toolCount": 80
   }
 }

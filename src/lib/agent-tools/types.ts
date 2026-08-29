@@ -24,6 +24,13 @@ export type AgentToolErrorCode =
   | "VALIDATION_ERROR"
   | "NOT_FOUND"
   | "CONFLICT"
+  | "AUDIT_STALE"
+  | "AUDIT_BLOCKED"
+  | "APPROVAL_REQUIRED"
+  | "CAPABILITY_UNSUPPORTED"
+  | "TARGET_REQUIRED"
+  | "STORE_BUSY"
+  | "STORE_CONFLICT"
   | "EXECUTION_ERROR";
 
 export class AgentToolError extends Error {

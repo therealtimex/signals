@@ -451,9 +451,11 @@ export async function handleQueryGraph(input: z.infer<typeof queryGraphSchema>) 
 }
 
 export async function handleUpsertEdge(input: z.infer<typeof upsertEdgeSchema>) {
-  if (input.edgeType === "published_as") {
-    throw new Error(
-      "published_as edges are created only via upsert_variant publish flow; use upsert_variant with status published",
+  if (["sourced_from", "derived_from", "adapted_from", "materialized_as", "published_as"].includes(input.edgeType)) {
+    throw new AgentToolError("CONFLICT",
+      input.edgeType === "published_as"
+        ? "published_as edges are created only via upsert_variant publish flow"
+        : `${input.edgeType} edges are created only by the Signals writing lifecycle`,
     );
   }
 
@@ -599,6 +601,7 @@ export async function handleUpsertLaunch(input: z.infer<typeof upsertLaunchSchem
     name: launch.name,
     status: launch.status,
     scope: launch.scope,
+    ...(launch.writing ? { writing: launch.writing } : {}),
     message: "Launch upserted.",
   };
 }
@@ -629,6 +632,9 @@ export async function handleUpsertVariant(input: z.infer<typeof upsertVariantSch
     launchId: variant.launchId,
     status: variant.status,
     contentItemId: variant.contentItemId,
+    ...(variant.writing !== undefined ? { writing: variant.writing } : {}),
+    ...(variant.created !== undefined ? { created: variant.created } : {}),
+    ...(variant.lineageEdges ? { lineageEdges: variant.lineageEdges } : {}),
     message: "Variant upserted.",
   };
 }

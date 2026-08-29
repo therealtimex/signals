@@ -21,9 +21,28 @@ describe("smoke: agent tools API", () => {
           "create_content_draft",
           "update_content_draft",
           "get_writing_context",
+          "list_voice_profiles",
+          "get_voice_profile",
+          "upsert_voice_profile",
+          "approve_voice_profile",
+          "materialize_variant",
+          "revoke_variant_approval",
         ].map((name) => expect.objectContaining({ name })),
       ])
     );
+  });
+
+  it("round-trips the empty voice profile store over HTTP", async () => {
+    const response = await smokeFetch("/api/agent-tools/invoke", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tool: "list_voice_profiles", input: {} }),
+    });
+    expect(response.ok).toBe(true);
+    await expect(response.json()).resolves.toMatchObject({
+      success: true,
+      result: { profiles: expect.any(Array), total: expect.any(Number) },
+    });
   });
 
   it("creates and reads an untruncated writing draft over HTTP", async () => {

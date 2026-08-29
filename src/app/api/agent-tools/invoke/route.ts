@@ -49,11 +49,19 @@ export async function POST(request: NextRequest) {
       const status =
         error.code === "TOOL_NOT_FOUND" || error.code === "NOT_FOUND"
           ? 404
-          : error.code === "VALIDATION_ERROR"
+          : error.code === "VALIDATION_ERROR" ||
+              error.code === "CAPABILITY_UNSUPPORTED" ||
+              error.code === "TARGET_REQUIRED"
             ? 400
-            : error.code === "CONFLICT"
+            : error.code === "CONFLICT" ||
+                error.code === "AUDIT_STALE" ||
+                error.code === "AUDIT_BLOCKED" ||
+                error.code === "APPROVAL_REQUIRED" ||
+                error.code === "STORE_CONFLICT"
               ? 409
-              : 500;
+              : error.code === "STORE_BUSY"
+                ? 503
+                : 500;
 
       return NextResponse.json(
         {

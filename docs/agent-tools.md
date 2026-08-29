@@ -59,6 +59,10 @@ Then pass `Authorization: Bearer your-secret-token` on each request.
 | `create_content_draft` | content | Idempotently create one platform-native writing draft with ordered units |
 | `update_content_draft` | content | Revise an editable writing draft with optional optimistic concurrency |
 | `get_writing_context` | content | Read a launch's privacy-filtered sources, targets, variants, and capability rows |
+| `list_voice_profiles` | content | List immutable voice-profile versions and lifecycle states |
+| `get_voice_profile` | content | Read one voice-profile version with authoritative lifecycle projection |
+| `upsert_voice_profile` | content | Register immutable voice content as a draft version |
+| `approve_voice_profile` | content | Approve the latest admissible draft and atomically supersede the prior active version |
 | `query_goals` | goals | List goals |
 | `create_task` | tasks | Create a follow-up task |
 | `get_persona` | contacts | Get active AI persona for a contact |
@@ -95,7 +99,9 @@ Then pass `Authorization: Bearer your-secret-token` on each request.
 | `upsert_niche` | graph | Create or update a niche cluster |
 | `query_launches` | graph | List GTM launches with variant summaries (`variantType`, `predictionConfidence`, `simulatedAt`, `contentItemId` additive fields) and goal links |
 | `upsert_launch` | graph | Create or update a GTM launch |
-| `upsert_variant` | graph | Create or update a launch variant (publish via status) |
+| `upsert_variant` | graph | Create/update a launch variant; writing variants derive audit, approval, capability, and lineage server-side |
+| `materialize_variant` | graph | Create or refresh the one approved content artifact for a current writing variant |
+| `revoke_variant_approval` | graph | Revoke writing approval and return an unqueued approved artifact to draft |
 | `semantic_search` | graph | Top-k semantic search over embedded nodes (query embed via RealtimeX) |
 | `create_simulation_run` | graph | Start a Wind Tunnel simulation run (atomic create + start) |
 | `query_simulations` | graph | List simulation runs with optional agent grounding. With `includeCalibrations: true`, detail payloads include `latestCalibration` and the full per-horizon `calibrations[]` history (same shape as `GET /api/simulations/[id]?includeCalibration=true`). |
@@ -156,6 +162,33 @@ linked variant. The REST route returns `writing_approval_required` for missing o
 `writing_artifact_stale` for snapshot/unit/target drift, and `capability_unsupported` for a
 draft/export-only surface. For approved X threads, the job's `text` and ordered `threadTexts` are
 derived from persisted units; caller-supplied text is ignored.
+
+Writing launches persist a validated, hash-stamped evidence spine in `launches.metadata.writing`.
+For `generationMetadata.kind: "signals-writing"`, `upsert_variant` requires the complete writing
+document and derives the body, audit input hash, verdict, risk tier, approval state, capability,
+and Signals-owned lineage. The legacy `status: "published"` shortcut is unavailable to writing
+variants. `materialize_variant` checks the current spine, audit, approval, target, and ordered
+units before even an idempotent return. It can report `AUDIT_STALE`, `AUDIT_BLOCKED`,
+`APPROVAL_REQUIRED`, `CAPABILITY_UNSUPPORTED`, or `TARGET_REQUIRED`.
+
+Agents own the creative inputs (`platform`, `surface`, target, goal, formula/overlay/core refs,
+voice/spine refs, ordered units, claim map, audit observations, lineage refs, and media IDs).
+Signals overwrites all integrity and lifecycle fields: schema version, audit IDs/input hashes and
+history, verdict, approval/risk, capability, materialized item ID, row body/type/model, and graph
+edges. A create retry with the same launch-scoped `generationMetadata.requestHash` updates the
+same variant. Materialization adopts an unqueued draft whose writing origin names that variant;
+otherwise it creates one item, anchors both `variants.contentItemId` and `materialized_as`, and
+returns an unchanged replay only after revalidating every current snapshot field. Explicit
+revocation returns unqueued artifacts to draft; spine changes revoke all affected variants while
+leaving queued, scheduled, publishing, and published content untouched. Invoke HTTP mappings are
+409 for stale/blocked/approval/conflict errors, 400 for capability/target errors, and 503 for a
+busy voice store.
+
+Voice profiles are immutable version documents under
+`SIGNALS_DATA_DIR/writing/voice-profiles`; one atomically replaced index owns lifecycle state.
+`upsert_voice_profile` can only register a draft. `approve_voice_profile` requires at least three
+admissible, approved, self-authored samples and durable user evidence. Store contention and
+optimistic conflicts are reported as `STORE_BUSY` and `STORE_CONFLICT`.
 
 Platform target tool errors are returned inside the successful invoke envelope as `{ error, code, details? }`. Codes include `TARGET_NOT_FOUND`, `TARGET_CAPABILITY_UNSUPPORTED`, `SESSION_LEASE_HELD`, `LEASE_LOST`, `LOGIN_REQUIRED`, and `TARGET_NOT_ACTIVE`. A shared connection is serialized for the whole operation; separate dedicated connections have independent leases.
 

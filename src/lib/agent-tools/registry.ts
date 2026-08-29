@@ -74,6 +74,20 @@ import {
   updatePublishJobSchema,
 } from "@/lib/agent-tools/publish-handlers";
 import {
+  approveVoiceProfileSchema,
+  getVoiceProfileSchema,
+  handleApproveVoiceProfile,
+  handleGetVoiceProfile,
+  handleListVoiceProfiles,
+  handleMaterializeVariant,
+  handleRevokeVariantApproval,
+  handleUpsertVoiceProfile,
+  listVoiceProfilesSchema,
+  materializeVariantSchema,
+  revokeVariantApprovalSchema,
+  upsertVoiceProfileSchema,
+} from "@/lib/agent-tools/writing-handlers";
+import {
   handleCompletePersonaJob,
   handleGetPersonaJob,
 } from "@/lib/agent-tools/persona-job-handlers";
@@ -383,6 +397,38 @@ export const AGENT_TOOLS: Record<string, AgentToolDefinition> = {
     parameters: zodToParameters(getWritingContextSchema),
     execute: handleGetWritingContext,
   },
+  list_voice_profiles: {
+    name: "list_voice_profiles",
+    description: "List immutable voice profile versions, optionally filtered by lifecycle status.",
+    category: "content",
+    schema: listVoiceProfilesSchema,
+    parameters: zodToParameters(listVoiceProfilesSchema),
+    execute: handleListVoiceProfiles,
+  },
+  get_voice_profile: {
+    name: "get_voice_profile",
+    description: "Read a voice profile version with its authoritative lifecycle projection.",
+    category: "content",
+    schema: getVoiceProfileSchema,
+    parameters: zodToParameters(getVoiceProfileSchema),
+    execute: handleGetVoiceProfile,
+  },
+  upsert_voice_profile: {
+    name: "upsert_voice_profile",
+    description: "Register immutable voice profile content as a draft version. Lifecycle fields are server-owned.",
+    category: "content",
+    schema: upsertVoiceProfileSchema,
+    parameters: zodToParameters(upsertVoiceProfileSchema),
+    execute: handleUpsertVoiceProfile,
+  },
+  approve_voice_profile: {
+    name: "approve_voice_profile",
+    description: "Approve the latest admissible draft voice profile and atomically supersede the prior active version.",
+    category: "content",
+    schema: approveVoiceProfileSchema,
+    parameters: zodToParameters(approveVoiceProfileSchema),
+    execute: handleApproveVoiceProfile,
+  },
   query_goals: {
     name: "query_goals",
     description: "List and filter goals by status or type.",
@@ -688,6 +734,22 @@ export const AGENT_TOOLS: Record<string, AgentToolDefinition> = {
     schema: upsertVariantSchema,
     parameters: zodToParameters(upsertVariantSchema),
     execute: handleUpsertVariant,
+  },
+  materialize_variant: {
+    name: "materialize_variant",
+    description: "Materialize a current audited and approved writing variant into one approved content artifact.",
+    category: "graph",
+    schema: materializeVariantSchema,
+    parameters: zodToParameters(materializeVariantSchema),
+    execute: handleMaterializeVariant,
+  },
+  revoke_variant_approval: {
+    name: "revoke_variant_approval",
+    description: "Revoke a writing variant approval and return its unqueued approved artifact to draft.",
+    category: "graph",
+    schema: revokeVariantApprovalSchema,
+    parameters: zodToParameters(revokeVariantApprovalSchema),
+    execute: handleRevokeVariantApproval,
   },
   semantic_search: {
     name: "semantic_search",
