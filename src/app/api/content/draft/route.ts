@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { PUBLISH_PLATFORM_TARGETS } from "@/lib/publish/payload";
 import { saveComposeDraft } from "@/lib/publish/save-compose-draft";
 
 const draftSchema = z.object({
   body: z.string().min(1),
-  platforms: z.array(z.enum(["x", "linkedin"])).min(1),
+  platforms: z.array(z.enum(PUBLISH_PLATFORM_TARGETS)).min(1),
   draftId: z.string().optional(),
   mediaAssetIds: z.array(z.string()).optional(),
   title: z.string().optional(),

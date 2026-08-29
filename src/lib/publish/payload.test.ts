@@ -1,11 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
+  PUBLISH_PLATFORM_TARGETS,
   normalizePublishJobKind,
   resolveSourcePostUrl,
   validatePublishJobPayload,
 } from "@/lib/publish/payload";
+import { isPlatformTargetPlatform } from "@/lib/platforms/target-identity";
 
 describe("publish payload validation", () => {
+  it("keeps every publish platform registrable as a platform target", () => {
+    expect(PUBLISH_PLATFORM_TARGETS.every(isPlatformTargetPlatform)).toBe(true);
+  });
+
   it("defaults missing kind to original and requires text", () => {
     expect(normalizePublishJobKind(undefined)).toBe("original");
     expect(
