@@ -62,7 +62,7 @@ function findByRequestHash(launchId: string, requestHash: string): Variant | und
     .find((variant) => readGeneration(variant)?.requestHash === requestHash);
 }
 
-function deriveHard(input: { units: VariantWriting["units"]; media?: { assetIds: string[] }; limit: number }) {
+export function deriveHard(input: { units: VariantWriting["units"]; media?: { assetIds: string[] }; limit: number }) {
   const text = input.units.texts.join("\n");
   return {
     units: input.units.count,
@@ -74,7 +74,7 @@ function deriveHard(input: { units: VariantWriting["units"]; media?: { assetIds:
   };
 }
 
-function hardLimit(surface: string): number {
+export function hardLimit(surface: string): number {
   if (surface.startsWith("x/")) return 280;
   if (surface.startsWith("linkedin/")) return 3_000;
   if (surface.startsWith("facebook/")) return 63_206;
