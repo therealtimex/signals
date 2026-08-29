@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import type { OrgSignalScanState } from "@/lib/orgs/signal-scan-state";
 import { companyActionError, type CompanyActionFeedback } from "@/lib/orgs/company-action-errors";
+import { emailCandidateActionSuccessMessage } from "@/lib/orgs/email-candidate-feedback";
 import {
   Table,
   TableBody,
@@ -26,18 +27,6 @@ import type { getOrgRelationshipSummary } from "@/lib/db/queries/org-relationshi
 type RelationshipSummary = ReturnType<typeof getOrgRelationshipSummary>;
 type EmailIntelligence = ReturnType<typeof getOrgEmailIntelligence>;
 type TimelineResult = ReturnType<typeof listOrgTimeline>;
-
-export function emailCandidateActionSuccessMessage(
-  action: "verify" | "invalidate" | "probe" | "correct",
-): string {
-  const labels: Record<typeof action, string> = {
-    verify: "verified",
-    invalidate: "invalidated",
-    probe: "probe completed",
-    correct: "corrected",
-  };
-  return `Candidate ${labels[action]}.`;
-}
 
 function relativeTime(timestamp: number | null): string {
   if (!timestamp) return "No activity yet";

@@ -5,11 +5,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { getOrgEmailIntelligence } from "@/lib/contacts/email-patterns/intelligence";
+import { emailCandidateActionSuccessMessage } from "@/lib/orgs/email-candidate-feedback";
 import {
   CompanyFeed,
   CompanyPeopleTable,
   EmailIntelligenceCard,
-  emailCandidateActionSuccessMessage,
 } from "./company-intelligence-panels";
 
 type EmailIntelligence = ReturnType<typeof getOrgEmailIntelligence>;
