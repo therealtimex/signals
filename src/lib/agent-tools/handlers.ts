@@ -28,7 +28,6 @@ import { resolveActiveTerminalSessionIdForThread } from "@/lib/rtx/runtime-sessi
 import { postWorkflowCompletionThreadMessage } from "@/lib/rtx/workflow-completion-thread";
 import {
   formatDeferredTerminalTeardownNote,
-  scheduleTerminalSessionRelease,
   scheduleWorkflowTerminalSessionRelease,
   stopRunningRtxBrowserSessions,
 } from "@/lib/rtx/resource-teardown";
@@ -820,7 +819,7 @@ export async function handleDispatchFollowOnWorkflow(
         orchestratorThread.workspaceSlug,
         orchestratorThread.threadSlug
       );
-      scheduleTerminalSessionRelease(orchestratorSessionId);
+      scheduleWorkflowTerminalSessionRelease(orchestratorSessionId);
     } catch (err) {
       console.warn(
         "[handleDispatchFollowOnWorkflow] Failed to schedule orchestrator terminal teardown:",

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  finalizeChatLinkedTerminalSession,
   formatAgentLaneTeardownNote,
   releaseAgentLaneResources,
   RESUMABLE_TERMINAL_RELEASE_REASON,
@@ -175,5 +176,31 @@ describe("scheduleTerminalSessionRelease", () => {
       { reason: WORKFLOW_COMPLETED_TERMINAL_RELEASE_REASON }
     );
     vi.useRealTimers();
+  });
+});
+
+describe("finalizeChatLinkedTerminalSession", () => {
+  it("stops browsers and schedules workflow terminal release", async () => {
+    const browserSpy = vi.spyOn(browserSessions, "listRtxBrowserSessions").mockResolvedValue([]);
+    const scheduleSpy = vi
+      .spyOn(runtimeSessions, "waitForTerminalSessionIdle")
+      .mockResolvedValue({ idle: true });
+    vi.spyOn(runtimeSessions, "terminateTerminalRuntimeSession").mockResolvedValue({
+      success: true,
+      terminated: true,
+    });
+
+    const result = await finalizeChatLinkedTerminalSession({
+      terminalSessionId: "cli-agent:session-1",
+      browserSessionNames: ["signals-publish"],
+      stopAllRunningBrowsers: true,
+    });
+
+    expect(browserSpy).toHaveBeenCalled();
+    expect(result.terminalSessionTeardown).toEqual({
+      scheduled: true,
+      sessionId: "cli-agent:session-1",
+    });
+    expect(scheduleSpy).not.toHaveBeenCalled();
   });
 });

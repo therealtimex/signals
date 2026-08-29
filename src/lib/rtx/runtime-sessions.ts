@@ -807,7 +807,8 @@ Signals is already running — do not start or manage Local Apps via pp-cli.
 3. The author's threading/format intent is expressed in the post body. Apply each platform's best practices (e.g., split into a thread on X if the content warrants it; single post on LinkedIn).
 4. Publish deterministically using the skill's publish script against the RealTimeX Browser session "signals-publish". Call \`update_publish_job\` when you start each platform.
 5. After each platform, call \`complete_publish\` with the result (success requires the detected handle, post id, and URL; failures need error + errorCode from: session_expired, captcha, upload_failed, timeout, unknown).
-6. If the browser isn't logged in, say so in this thread and wait for the user to sign in in the RealTimeX Browser window, then retry.
+6. When all targets are terminal, Signals stops browser sessions and schedules release of this publish terminal session after the chat-linked turn finishes — do not continue working in this thread after the job completes.
+7. If the browser isn't logged in, say so in this thread and wait for the user to sign in in the RealTimeX Browser window, then retry.
 
 IMPORTANT: Only publish this job's content. Do not post anything else. Report a one-line summary per platform when done.`;
 }

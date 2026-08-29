@@ -21,6 +21,7 @@ import {
   reconcilePersonaJobCompletionEffects,
   reconcileStalePersonaJobCompletion,
 } from "@/lib/persona/agent-job/service";
+import { releasePersonaJobTerminalSession } from "@/lib/rtx/persona-terminal-teardown";
 import {
   finishPersonaSynthesisPersistence,
   persistPersonaSynthesisRecord,
@@ -125,6 +126,32 @@ function parseSynthesis(
     : personaSynthesisSchema.safeParse(synthesis);
 }
 
+async function attachPersonaJobTerminalTeardown(
+  jobId: string,
+  input: { status: string; summary?: string; error?: string },
+  response: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const job = getPersonaJobById(jobId);
+  if (!job) return response;
+
+  const teardown = await releasePersonaJobTerminalSession(job, input);
+  return {
+    ...response,
+    ...(teardown.terminalSessionTeardown
+      ? { terminalSessionTeardown: teardown.terminalSessionTeardown }
+      : {}),
+    ...(teardown.browserSessionTeardown.stopped.length > 0 ||
+    teardown.browserSessionTeardown.failed.length > 0
+      ? { browserSessionTeardown: teardown.browserSessionTeardown }
+      : {}),
+    ...(teardown.completionThreadMessage.posted
+      ? { completionThreadMessage: teardown.completionThreadMessage }
+      : {}),
+    ...(teardown.skippedSharedSession ? { terminalSessionTeardownSkipped: "shared_session_busy" } : {}),
+    ...(teardown.message ? { message: teardown.message } : {}),
+  };
+}
+
 export async function handleCompletePersonaJob(
   input: z.infer<typeof completePersonaJobSchema>,
 ) {
@@ -164,7 +191,11 @@ export async function handleCompletePersonaJob(
     if (failed?.status === "failed") {
       failWorkflowRun(failed.workflowRunId, error);
     }
-    return { accepted: true, status: failed?.status ?? job.status, error };
+    return attachPersonaJobTerminalTeardown(
+      job.id,
+      { status: failed?.status ?? "failed", error },
+      { accepted: true, status: failed?.status ?? job.status, error },
+    );
   }
 
   const parsed = parseSynthesis(input.synthesis!);
@@ -183,6 +214,17 @@ export async function handleCompletePersonaJob(
     const attemptsRemaining = Math.max(0, PERSONA_AGENT_JOB_MAX_ATTEMPTS - attempts);
     if (updated?.status === "failed") {
       failWorkflowRun(updated.workflowRunId, updated.error ?? synthesisErrors);
+      return attachPersonaJobTerminalTeardown(
+        job.id,
+        { status: "failed", error: updated.error ?? synthesisErrors },
+        {
+          success: false,
+          code: "VALIDATION_ERROR",
+          error: "Persona synthesis output failed validation",
+          details: { synthesisErrors, attemptsRemaining },
+          status: updated.status,
+        },
+      );
     }
     return {
       success: false,
@@ -224,7 +266,11 @@ export async function handleCompletePersonaJob(
     if (failed?.status === "failed") {
       failWorkflowRun(failed.workflowRunId, error);
     }
-    return { success: false, code: "PERSONA_SCOPE_ERROR", error, status: "failed" };
+    return attachPersonaJobTerminalTeardown(
+      claimedJob.id,
+      { status: "failed", error },
+      { success: false, code: "PERSONA_SCOPE_ERROR", error, status: "failed" },
+    );
   }
 
   const qualifiedModel = input.model?.trim() || claimedJob.agentModel || "terminal-agent:unknown";
@@ -285,7 +331,11 @@ export async function handleCompletePersonaJob(
     if (failed?.status === "failed") {
       failWorkflowRun(failed.workflowRunId, message);
     }
-    return { success: false, code: "PERSISTENCE_ERROR", error: message, status: "failed" };
+    return attachPersonaJobTerminalTeardown(
+      claimedJob.id,
+      { status: "failed", error: message },
+      { success: false, code: "PERSISTENCE_ERROR", error: message, status: "failed" },
+    );
   }
 
   reconcilePersonaJobCompletionEffects(completed.id);
@@ -313,10 +363,20 @@ export async function handleCompletePersonaJob(
     embedErrors: derivatives.embedErrors,
   });
 
-  return {
-    accepted: true,
-    personaId: persisted.id,
-    supersededPersonaId: completed.supersededPersonaId,
-    status: "completed",
-  };
+  const summaryParts = [`Archetype: ${persisted.archetype}`];
+  if (derivatives.embedded) summaryParts.push("Indexed for search.");
+  if (derivatives.embedErrors.length > 0) {
+    summaryParts.push(`Indexing warnings: ${derivatives.embedErrors.join("; ")}`);
+  }
+
+  return attachPersonaJobTerminalTeardown(
+    completed.id,
+    { status: "completed", summary: summaryParts.join(" ") },
+    {
+      accepted: true,
+      personaId: persisted.id,
+      supersededPersonaId: completed.supersededPersonaId,
+      status: "completed",
+    },
+  );
 }
