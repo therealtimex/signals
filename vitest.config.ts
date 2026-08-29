@@ -41,6 +41,14 @@ export default defineConfig({
           // Fixture-heavy suites (300-contact profile-pipeline builds) run 1-2s uninstrumented and
           // several times that under coverage, which trips Vitest's 5s default on slower runners.
           testTimeout: 20_000,
+          ...(process.env.CI === "true"
+            ? {
+                // Busy CI runners can miss Vitest worker RPC heartbeats under coverage.
+                maxWorkers: 2,
+                minWorkers: 1,
+                hookTimeout: 60_000,
+              }
+            : {}),
           include: ["src/**/*.test.ts"],
           exclude: [
             "**/node_modules/**",

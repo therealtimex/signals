@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import type { OrgSignalScanState } from "@/lib/orgs/signal-scan-state";
 import { companyActionError, type CompanyActionFeedback } from "@/lib/orgs/company-action-errors";
+import { emailCandidateActionSuccessMessage } from "@/lib/orgs/email-candidate-feedback";
 import {
   Table,
   TableBody,
@@ -229,7 +230,7 @@ export function EmailIntelligenceCard({ orgId, initial }: { orgId: string; initi
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action, ...(action === "correct" ? { address: corrections[candidateId] } : {}) }),
       });
-      if (response.ok) { await refresh(); setMessage(`Candidate ${action === "probe" ? "probe completed" : `${action}ed`}.`); }
+      if (response.ok) { await refresh(); setMessage(emailCandidateActionSuccessMessage(action)); }
       else { const body = await response.json().catch(() => ({})); setMessage(typeof body.error === "string" ? body.error : "Candidate could not be updated."); }
     } catch {
       setMessage("Candidate could not be updated.");
