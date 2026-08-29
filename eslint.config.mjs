@@ -21,6 +21,23 @@ const eslintConfig = defineConfig([
       "react-hooks/purity": "off",
     },
   },
+  {
+    files: ["src/**/*.ts", "src/**/*.tsx"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["**/*.test", "**/*.test.ts", "**/*.test.tsx"],
+              message:
+                "Import shared fixtures from src/test/*, never from another *.test file: importing a test module re-registers its suites in the importer (#370).",
+            },
+          ],
+        },
+      ],
+    },
+  },
 ]);
 
 export default eslintConfig;
