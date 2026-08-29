@@ -1,13 +1,17 @@
 import { desc, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db/client";
-import { variants } from "@/lib/db/schema";
+import { launches, variants } from "@/lib/db/schema";
 import { assertPlatform } from "@/lib/db/platforms";
 import { assertVariantType } from "@/lib/db/variant-types";
 import { createContentItem } from "@/lib/db/queries/content";
 import { getLaunchById } from "@/lib/db/queries/launches";
 import { upsertGraphEdge } from "@/lib/db/queries/graph";
 import type { Variant } from "@/lib/db/types";
+import { isWritingVariant, persistWritingVariant } from "@/lib/writing/variant-writing";
+import type { LineageEdgeSummary } from "@/lib/writing/lineage";
+
+export { isWritingVariant } from "@/lib/writing/variant-writing";
 
 export function listVariantsByLaunchId(launchId: string): Variant[] {
   return db
@@ -24,6 +28,13 @@ export function getVariantById(id: string): Variant | undefined {
 
 export function getVariantByContentItemId(contentItemId: string): Variant | undefined {
   return db.select().from(variants).where(eq(variants.contentItemId, contentItemId)).get();
+}
+
+export function updateWritingVariantLabel(id: string, label: string | null): Variant {
+  const variant = getVariantById(id);
+  if (!variant) throw new Error(`Variant not found: ${id}`);
+  db.update(variants).set({ label, updatedAt: Math.floor(Date.now() / 1000) }).where(eq(variants.id, id)).run();
+  return getVariantById(id)!;
 }
 
 export type UpsertVariantInput = {
@@ -90,7 +101,23 @@ function applyVariantUpdate(
     .run();
 }
 
-export function upsertVariant(input: UpsertVariantInput): Variant {
+export type UpsertVariantResult = Variant & {
+  writing?: boolean;
+  created?: boolean;
+  lineageEdges?: LineageEdgeSummary[];
+};
+
+export function upsertVariant(input: UpsertVariantInput): UpsertVariantResult {
+  const existingForKind = input.id ? getVariantById(input.id) : undefined;
+  if (input.generationMetadata?.kind === "signals-writing" || isWritingVariant(existingForKind)) {
+    const result = persistWritingVariant(input);
+    return {
+      ...result.variant,
+      writing: true,
+      created: result.created,
+      lineageEdges: result.lineageEdges,
+    };
+  }
   if (!getLaunchById(input.launchId)) {
     throw new Error(`Launch not found: ${input.launchId}`);
   }
@@ -183,6 +210,7 @@ export function publishVariant(
   const platform = resolvePublishPlatform(opts?.platform, launch.primaryPlatform);
   const publishedAt = opts?.publishedAt ?? Math.floor(Date.now() / 1000);
   const now = Math.floor(Date.now() / 1000);
+  const writing = isWritingVariant(variant);
   let contentItemId = variant.contentItemId;
 
   if (!contentItemId) {
@@ -214,13 +242,20 @@ export function publishVariant(
       ...(opts?.targetId ? { targetId: opts.targetId } : {}),
     }),
     scope: launch.scope,
-    source: "agent",
+    source: writing ? "signals-writing" : "agent",
   });
 
   db.update(variants)
     .set({ status: "published", updatedAt: now })
     .where(eq(variants.id, variantId))
     .run();
+
+  if (writing && ["generating", "ready", "simulating"].includes(launch.status)) {
+    db.update(launches)
+      .set({ status: "live", launchedAt: launch.launchedAt ?? publishedAt, updatedAt: now })
+      .where(eq(launches.id, launch.id))
+      .run();
+  }
 
   return getVariantById(variantId)!;
 }

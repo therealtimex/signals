@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { launchWritingPatchSchema } from "@/lib/writing/contracts";
 import {
   accountStageSchema,
   companySizeSchema,
@@ -247,7 +248,7 @@ export const upsertLaunchSchema = z.object({
   audienceSpec: z.record(z.unknown()).optional(),
   workflowTemplateId: z.string().optional(),
   scope: z.enum(["shared", "local_only"]).optional(),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.object({ writing: launchWritingPatchSchema.optional() }).passthrough().optional(),
   launchedAt: z.number().int().optional(),
   completedAt: z.number().int().optional(),
 });

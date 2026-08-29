@@ -1,6 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
+import { userApprovalSchema } from "@/lib/writing/contracts";
 import { AgentToolError } from "@/lib/agent-tools/types";
 import { db } from "@/lib/db/client";
 import { PLATFORMS, type Platform } from "@/lib/db/platforms";
@@ -36,6 +37,9 @@ import {
 } from "@/lib/writing/content-writing";
 import { parseSurfaceId, surfaceForDraft, SURFACE_IDS } from "@/lib/writing/surfaces";
 import { readVariantWritingProjection } from "@/lib/writing/variant-writing-projection";
+import { computeAuditInputHash } from "@/lib/writing/hash";
+import { getVoiceProfile, resolveActiveVoiceProfileContext } from "@/lib/writing/voice-profile-store";
+import { getNeighbors } from "@/lib/db/queries/graph";
 
 const MAX_BODY_LENGTH = 65_536;
 const MAX_THREAD_TEXTS = 24;
@@ -113,25 +117,8 @@ type Sensitivity = {
   contextApproval?: true;
 };
 
-const approvalEvidenceSchema = z.discriminatedUnion("kind", [
-  z.object({
-    kind: z.literal("thread_message"),
-    workspaceSlug: z.string().min(1),
-    threadSlug: z.string().min(1),
-    note: z.string().optional(),
-  }),
-  z.object({ kind: z.literal("ui"), route: z.string().min(1) }),
-  z.object({ kind: z.literal("api"), caller: z.string().min(1) }),
-]);
-
-const contextApprovalSchema = z.object({
-  by: z.literal("user"),
-  at: z.number().finite().nonnegative(),
-  evidence: approvalEvidenceSchema,
-});
-
 function hasDurableContextApproval(value: unknown): boolean {
-  return contextApprovalSchema.safeParse(value).success;
+  return userApprovalSchema.safeParse(value).success;
 }
 
 function parseObject(value: unknown): Record<string, unknown> {
@@ -580,6 +567,7 @@ function projectLaunchWriting(
   writing: Record<string, unknown> | null,
   sourceViews: ReturnType<typeof sourceView>[],
   includeSources: boolean,
+  launchScope: string,
 ): Record<string, unknown> | null {
   if (!writing) return null;
   const surfaces = parseArray(writing.surfaces).flatMap((entry) => {
@@ -616,9 +604,71 @@ function projectLaunchWriting(
     ...(typeof writing.approvalPolicy === "string"
       ? { approvalPolicy: writing.approvalPolicy }
       : {}),
+    ...(Object.prototype.hasOwnProperty.call(writing, "voiceProfile")
+      ? { voiceProfile: writing.voiceProfile }
+      : {}),
     runs,
     ...(includeSources ? { sources: sourceViews } : {}),
-    // `spine` intentionally stays omitted until #350 exposes a privacy-safe projection.
+    ...(projectSpine(writing.spine, includeSources, launchScope)
+      ? { spine: projectSpine(writing.spine, includeSources, launchScope) }
+      : {}),
+  };
+}
+
+function projectSpine(
+  value: unknown,
+  includeSources: boolean,
+  launchScope: string,
+) {
+  const spine = parseObject(value);
+  if (!spine.id || !spine.hash) return null;
+  const sourceViews = parseArray(spine.sources).map((source) => sourceView(source, launchScope));
+  const redacted = new Set<string>();
+  for (const source of sourceViews) {
+    if ("redacted" in source && source.redacted && typeof source.id === "string") {
+      redacted.add(source.id);
+    }
+  }
+  const claims = parseArray(spine.claims).map((claim) => ({
+    ...claim,
+    ...(typeof claim.sourceId === "string" && redacted.has(claim.sourceId)
+      ? { text: null, redacted: true }
+      : {}),
+  }));
+  return {
+    schemaVersion: spine.schemaVersion,
+    id: spine.id,
+    launchId: spine.launchId,
+    goal: spine.goal,
+    audience: spine.audience,
+    ...(includeSources ? { sources: sourceViews } : {}),
+    claims,
+    message: spine.message,
+    extractedBy: spine.extractedBy,
+    hash: spine.hash,
+  };
+}
+
+function resolveContextVoice(writing: Record<string, unknown> | null) {
+  const pinned = parseObject(writing?.voiceProfile);
+  if (typeof pinned.id === "string" && typeof pinned.version === "number") {
+    try {
+      const result = getVoiceProfile(pinned.id, pinned.version);
+      return {
+        profile: result.profile,
+        status: result.profile.status === "superseded" ? "pinned_superseded" : "pinned",
+        ...(result.active ? { activeVersion: result.active.version } : {}),
+        candidates: [],
+      };
+    } catch {
+      return { profile: null, status: "missing", candidates: [] };
+    }
+  }
+  const active = resolveActiveVoiceProfileContext();
+  return {
+    profile: active.profile,
+    status: active.profile ? (active.ambiguous ? "ambiguous" : "active") : "none",
+    candidates: active.candidates,
   };
 }
 
@@ -680,7 +730,14 @@ export async function handleGetWritingContext(
       ...(projection?.surface ? { surface: projection.surface } : {}),
       ...(projection?.audit?.verdict ? { auditVerdict: projection.audit.verdict } : {}),
       ...(projection?.approval?.state ? { approvalState: projection.approval.state } : {}),
-      contentItemId: variant.contentItemId,
+      ...(projection?.approval?.riskTier ? { riskTier: projection.approval.riskTier } : {}),
+      auditStale: Boolean(
+        projection?.audit &&
+          projection.audit.inputHash !== computeAuditInputHash(variant.body, projection),
+      ),
+      materializedContentItemId: projection?.materializedContentItemId ?? variant.contentItemId,
+      contentItemStatus: variant.contentItemId ? getContentItem(variant.contentItemId)?.status ?? null : null,
+      lineage: projection?.lineage ?? null,
       updatedAt: variant.updatedAt,
     };
   });
@@ -696,7 +753,8 @@ export async function handleGetWritingContext(
   const briefApproved = briefSensitivity.contextApproval === true;
   const briefRedacted = briefSensitivity.level === "private" && !briefApproved;
   const sourceViews = sources.map((source) => sourceView(source, launch.scope));
-  const writingView = projectLaunchWriting(writing, sourceViews, input.includeSources);
+  const writingView = projectLaunchWriting(writing, sourceViews, input.includeSources, launch.scope);
+  const voice = resolveContextVoice(writing);
 
   return {
     launch: {
@@ -717,7 +775,14 @@ export async function handleGetWritingContext(
     targets,
     capabilities,
     variants,
-    voiceProfile: null,
-    approvalPolicy: getWritingApprovalPolicy(),
+    voiceProfile: voice.profile,
+    voice: {
+      status: voice.status,
+      candidates: voice.candidates,
+      ...("activeVersion" in voice && voice.activeVersion
+        ? { activeVersion: voice.activeVersion }
+        : {}),
+    },
+    approvalPolicy: typeof writing?.approvalPolicy === "string" ? writing.approvalPolicy : getWritingApprovalPolicy(),
   };
 }

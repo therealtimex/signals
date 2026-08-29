@@ -18,6 +18,11 @@ See [`rtx-local-app.example.json`](../rtx-local-app.example.json) for the market
 contract. For source-checkout QA, create a dedicated issue app with
 `scripts/qa/provision-signals-qa-local-app.mjs`; never repoint the canonical **Signals** app.
 
+Back up the entire data directory, not only `data.db`: approved Signals Writing voice profiles are
+immutable files under `writing/voice-profiles/`, with lifecycle state in that directory's
+`index.json`. If a `.store.lock` names another host, never delete it automatically; confirm that
+the other host is no longer using the shared data directory before removing the lock manually.
+
 ## Environment injection (RTX Electron)
 
 `LocalAppsManager` injects these variables when starting Signals:

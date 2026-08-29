@@ -6,6 +6,8 @@ import { launches, variants } from "@/lib/db/schema";
 import { getNeighbors } from "@/lib/db/queries/graph";
 import { listVariantsByLaunchId } from "@/lib/db/queries/variants";
 import type { Launch, PaginatedResult } from "@/lib/db/types";
+import { mergeLaunchMetadata } from "@/lib/writing/launch-writing";
+import { revokeVariantsForSpineChange } from "@/lib/writing/variant-writing";
 
 export type LaunchVariantSummary = {
   id: string;
@@ -136,7 +138,11 @@ function normalizePrimaryPlatform(value: string | null | undefined): string | nu
   return assertPlatform(value);
 }
 
-export function upsertLaunch(input: UpsertLaunchInput): Launch {
+export type UpsertLaunchResult = Launch & {
+  writing?: { spineHash: string | null; revokedVariantIds: string[] };
+};
+
+export function upsertLaunch(input: UpsertLaunchInput): UpsertLaunchResult {
   const now = Math.floor(Date.now() / 1000);
 
   if (input.id) {
@@ -145,8 +151,16 @@ export function upsertLaunch(input: UpsertLaunchInput): Launch {
       throw new Error(`Launch not found: ${input.id}`);
     }
 
-    db.update(launches)
-      .set({
+    const scope = input.scope ?? existing.scope;
+    const merged = mergeLaunchMetadata({
+      existingMetadata: existing.metadata,
+      incomingMetadata: input.metadata,
+      launchId: existing.id,
+      scope,
+    });
+    const revokedVariantIds = db.transaction(() => {
+      db.update(launches)
+        .set({
         name: input.name.trim(),
         brief: input.brief !== undefined ? input.brief : existing.brief,
         status: input.status ?? existing.status,
@@ -161,20 +175,34 @@ export function upsertLaunch(input: UpsertLaunchInput): Launch {
           input.workflowTemplateId !== undefined
             ? input.workflowTemplateId
             : existing.workflowTemplateId,
-        scope: input.scope ?? existing.scope,
-        metadata: input.metadata ? JSON.stringify(input.metadata) : existing.metadata,
+        scope,
+        metadata: JSON.stringify(merged.metadata),
         launchedAt: input.launchedAt !== undefined ? input.launchedAt : existing.launchedAt,
         completedAt:
           input.completedAt !== undefined ? input.completedAt : existing.completedAt,
         updatedAt: now,
-      })
-      .where(eq(launches.id, input.id))
-      .run();
+        })
+        .where(eq(launches.id, existing.id))
+        .run();
+      return merged.spineChanged ? revokeVariantsForSpineChange(existing.id) : [];
+    });
 
-    return getLaunchById(input.id)!;
+    return {
+      ...getLaunchById(input.id)!,
+      ...(merged.writing
+        ? { writing: { spineHash: merged.writing.spine?.hash ?? null, revokedVariantIds } }
+        : {}),
+    };
   }
 
   const id = nanoid();
+  const scope = input.scope ?? "shared";
+  const merged = mergeLaunchMetadata({
+    existingMetadata: {},
+    incomingMetadata: input.metadata,
+    launchId: id,
+    scope,
+  });
   db.insert(launches)
     .values({
       id,
@@ -184,13 +212,18 @@ export function upsertLaunch(input: UpsertLaunchInput): Launch {
       primaryPlatform: normalizePrimaryPlatform(input.primaryPlatform) ?? null,
       audienceSpec: JSON.stringify(input.audienceSpec ?? {}),
       workflowTemplateId: input.workflowTemplateId ?? null,
-      scope: input.scope ?? "shared",
+      scope,
       source: "agent",
-      metadata: JSON.stringify(input.metadata ?? {}),
+      metadata: JSON.stringify(merged.metadata),
       launchedAt: input.launchedAt ?? null,
       completedAt: input.completedAt ?? null,
     })
     .run();
 
-  return getLaunchById(id)!;
+  return {
+    ...getLaunchById(id)!,
+    ...(merged.writing
+      ? { writing: { spineHash: merged.writing.spine?.hash ?? null, revokedVariantIds: [] } }
+      : {}),
+  };
 }

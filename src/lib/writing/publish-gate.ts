@@ -4,6 +4,9 @@ import {
   type ContentWritingMetadata,
 } from "@/lib/writing/content-writing";
 import { readVariantWritingProjection } from "@/lib/writing/variant-writing-projection";
+import { getLaunchById } from "@/lib/db/queries/launches";
+import { readLaunchWriting } from "@/lib/writing/launch-writing";
+import { computeAuditInputHash } from "@/lib/writing/hash";
 
 export const WRITING_APPROVAL_REQUIRED = "WRITING_APPROVAL_REQUIRED";
 export const WRITING_ARTIFACT_STALE = "WRITING_ARTIFACT_STALE";
@@ -49,6 +52,21 @@ export function evaluateWritingPublishGate(args: {
     return approvalRequired("Linked approved variant decision metadata is incomplete.");
   }
   if (!projection.audit) return approvalRequired("Linked variant audit is missing.");
+  if (item.body != null && item.body !== writing.units.texts[0]) return stale("content body mismatch");
+  if (
+    projection.schemaVersion === 1 &&
+    projection.audit.inputHash !== computeAuditInputHash(variant.body, projection)
+  ) {
+    return stale("canonical audit input mismatch");
+  }
+  const launchWriting = readLaunchWriting(getLaunchById(variant.launchId)?.metadata);
+  if (
+    launchWriting?.spine &&
+    projection.spine &&
+    (launchWriting.spine.id !== projection.spine.id || launchWriting.spine.hash !== projection.spine.hash)
+  ) {
+    return stale("launch spine mismatch");
+  }
 
   const snapshot = writing.materialization;
   if (snapshot.auditId !== projection.audit.id) return stale("auditId mismatch");

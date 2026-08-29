@@ -10,6 +10,12 @@ import {
   platformAccounts,
 } from "@/lib/db/schema";
 import type { ContentItem, NewContentItem, ContentPost, NewContentPost, ContentItemWithPost, EngagementMetric, PaginatedResult } from "@/lib/db/types";
+import { variants, graphEdges } from "@/lib/db/schema";
+import { readVariantWritingProjection } from "@/lib/writing/variant-writing-projection";
+
+export class ContentItemLinkedError extends Error {
+  readonly code = "content_item_linked";
+}
 
 export type ContentItemMediaDetail = {
   id: string;
@@ -264,6 +270,24 @@ export function deleteContentItem(id: string): boolean {
   const existing = db.select().from(contentItems).where(eq(contentItems.id, id)).get();
   if (!existing) return false;
 
+  const linked = db.select().from(variants).where(eq(variants.contentItemId, id)).get();
+  if (linked) {
+    if (["queued", "publishing", "published", "scheduled"].includes(existing.status)) {
+      throw new ContentItemLinkedError("Cannot delete content linked to a variant in the publish lane");
+    }
+    db.transaction(() => {
+      const now = Math.floor(Date.now() / 1000);
+      const projection = readVariantWritingProjection(linked);
+      const root = (() => { try { return JSON.parse(linked.metadata ?? "{}"); } catch { return {}; } })();
+      const writing = projection
+        ? { ...root.writing, approval: { ...root.writing.approval, state: "revoked", by: "user", at: now, revokedReason: "user" }, materializedContentItemId: undefined }
+        : undefined;
+      db.update(variants).set({ contentItemId: null, ...(linked.status === "selected" ? { status: "draft" as const } : {}), ...(writing ? { metadata: JSON.stringify({ ...root, writing }) } : {}), updatedAt: now }).where(eq(variants.id, linked.id)).run();
+      db.delete(graphEdges).where(and(eq(graphEdges.srcType, "variant"), eq(graphEdges.srcId, linked.id), eq(graphEdges.dstType, "content"), eq(graphEdges.dstId, id), eq(graphEdges.edgeType, "materialized_as"))).run();
+      db.delete(contentItems).where(eq(contentItems.id, id)).run();
+    });
+    return true;
+  }
   db.delete(contentItems).where(eq(contentItems.id, id)).run();
   return true;
 }

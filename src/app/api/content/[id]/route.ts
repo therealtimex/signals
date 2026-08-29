@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { getContentItem, updateContentItem, deleteContentItem } from "@/lib/db/queries/content";
+import { ContentItemLinkedError, getContentItem, updateContentItem, deleteContentItem } from "@/lib/db/queries/content";
+import { readContentWriting } from "@/lib/writing/content-writing";
 
 const updateContentSchema = z.object({
   title: z.string().optional(),
@@ -34,6 +35,10 @@ export async function PUT(
   try {
     const body = await req.json();
     const data = updateContentSchema.parse(body);
+    const existing = getContentItem(id);
+    if (existing && readContentWriting(existing) && (data.body !== undefined || data.status !== undefined)) {
+      return NextResponse.json({ error: "Writing artifact body and lifecycle are tool-owned", code: "writing_content_locked" }, { status: 409 });
+    }
 
     const updated = updateContentItem(id, data);
     if (!updated) {
@@ -53,7 +58,15 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const deleted = deleteContentItem(id);
+  let deleted: boolean;
+  try {
+    deleted = deleteContentItem(id);
+  } catch (error) {
+    if (error instanceof ContentItemLinkedError) {
+      return NextResponse.json({ error: error.message, code: error.code }, { status: 409 });
+    }
+    throw error;
+  }
   if (!deleted) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }

@@ -35,6 +35,11 @@ Invoke body: `{ "tool": "<name>", "input": { ... } }`
 | `create_content_draft` | Idempotently create a single-platform writing draft with ordered units |
 | `update_content_draft` | Revise an editable writing draft; use `expectedUpdatedAt` for concurrency |
 | `get_writing_context` | Privacy-filtered Launch sources, niches, targets, variants, capabilities, and approval policy |
+| `list_voice_profiles` / `get_voice_profile` | Read immutable voice-profile versions and authoritative lifecycle state |
+| `upsert_voice_profile` | Register new immutable voice content as a draft version |
+| `approve_voice_profile` | Approve the latest admissible draft with durable user evidence |
+| `materialize_variant` | Create or refresh one approved content artifact from a current audited writing variant |
+| `revoke_variant_approval` | Revoke approval and return an unqueued writing artifact to draft |
 | `query_goals` | List goals |
 | `create_task` | Follow-up task |
 | `create_simulation_run` | Wind Tunnel: create + start a simulation run for a variant |
@@ -83,6 +88,20 @@ them. Catch-all and inconclusive probe results remain uncertain.
 4. `complete_simulation_run` with `predictedScore` (0–100), `predictionConfidence` (0–1), and `predictedMetrics` (engagement_metrics keyspace, e.g. `{ "likes": 120 }`). All three are required when completing (default `status`).
 
 Scores and metrics are validated at the query layer. Grounding uses shared-scope CRM data only — no `local_only` rows or `properties_private`.
+
+## Signals Writing flow
+
+1. Read the privacy-filtered spine, voice, target, capability, and variant state with
+   `get_writing_context`.
+2. Persist a complete hash-stamped spine with `upsert_launch`; partial updates deep-merge and
+   preserve durable approvals.
+3. Persist each native draft and structured audit with `upsert_variant` and
+   `generationMetadata.kind: "signals-writing"`. Signals derives audit hashes, verdict, risk,
+   approval, capability, and owned lineage.
+4. Call `materialize_variant` only for a current non-blocked audit. Explicit/high-risk approvals
+   require real user evidence. The tool never queues publishing.
+5. Use `revoke_variant_approval` when the user withdraws approval. Publish only through the
+   separate `send-to-agent` route after materialization.
 
 ## Common input shapes
 

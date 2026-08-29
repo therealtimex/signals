@@ -1,5 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { smokeBaseUrl, smokeFetch, smokeJson } from "./http-client";
+
+const createdContacts: string[] = [];
+const createdGoals: string[] = [];
+
+afterEach(async () => {
+  await Promise.all([
+    ...createdContacts.splice(0).map((id) => smokeFetch(`/api/contacts/${id}`, { method: "DELETE" })),
+    ...createdGoals.splice(0).map((id) => smokeFetch(`/api/goals/${id}`, { method: "DELETE" })),
+  ]);
+});
 
 describe("smoke:core API", () => {
   it("health endpoint returns ok", async () => {
@@ -54,6 +64,7 @@ describe("smoke:core API", () => {
     expect(create.status).toBe(201);
 
     const created = await create.json();
+    createdContacts.push(created.id as string);
     expect(created).toMatchObject({
       name: "Smoke Test Contact",
       firstName: "Smoke",
@@ -113,6 +124,7 @@ describe("smoke:core API", () => {
     expect(create.status).toBe(201);
 
     const goal = await create.json();
+    createdGoals.push(goal.id as string);
     expect(goal).toMatchObject({
       name: "Grow audience",
       goalType: "audience_growth",

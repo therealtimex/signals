@@ -63,7 +63,7 @@ describe("runTemplateViaRtx health preflight", () => {
   it("records a successful writing dispatch on its launch", async () => {
     const launch = upsertLaunch({
       name: "Launch",
-      metadata: { writing: { sources: [], runs: [], preserve: true } },
+      metadata: { writing: { sources: [], runs: [], preserve: true, approvalPolicy: "auto" } },
     });
     const template = createTemplate({
       name: "Platform-native writing",
@@ -123,6 +123,7 @@ describe("runTemplateViaRtx health preflight", () => {
     expect(updated.status).toBe("generating");
     expect(JSON.parse(updated.metadata ?? "{}")).toMatchObject({
       writing: {
+        approvalPolicy: "auto",
         preserve: true,
         runs: [
           {

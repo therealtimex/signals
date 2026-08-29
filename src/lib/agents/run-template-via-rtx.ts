@@ -37,6 +37,7 @@ import {
 } from "@/lib/rtx/workspace-brief-files";
 import type { TemplateThreadResolution } from "@/lib/rtx/template-thread";
 import type { WorkflowType } from "@/lib/workflows/types";
+import { getWritingApprovalPolicy } from "@/lib/settings/writing-approval-policy";
 
 const TEMPLATE_TO_WORKFLOW_TYPE: Record<string, WorkflowType> = {
   prospecting: "search",
@@ -133,6 +134,7 @@ function recordWritingLaunchRun(input: {
       ...metadata,
       writing: {
         ...writing,
+        approvalPolicy: writing.approvalPolicy ?? getWritingApprovalPolicy(),
         runs: [
           ...priorRuns,
           {
