@@ -79,7 +79,7 @@ Gate logic: `scripts/ci/should-publish-marketplace-release.mjs` (`--main` or `--
 
 Marketplace store upload remains manual until RealtimeX #1614 provides publisher automation.
 
-Source layout: `realtimex-plugin/` (manifest, templates, marketplace specs). Skills are copied from `.claude/skills/` at package time. The `signals-publish` skill's `x-publish.cjs` delegates to the host **`agent-browser` CLI** (locked external skill); the plugin zip contains **no** `node_modules`. Source `SKILL.md` paths stay under `.claude/skills/`; packaging rewrites them to `skills/` in the zip.
+Source layout: `realtimex-plugin/` (manifest, templates, marketplace specs). Three skills are copied from `.claude/skills/` at package time: `realtimex-signals`, `signals-writing`, and `signals-publish`. Signals Writing ships one zero-dependency CJS helper; its development reference corpus under `docs-dev/refs` is never packaged. The `signals-publish` skill's `x-publish.cjs` delegates to the host **`agent-browser` CLI** (locked external skill); the plugin zip contains **no** `node_modules`. Source `SKILL.md` paths stay under `.claude/skills/`; packaging rewrites them to `skills/` in the zip.
 
 Plugin validation uses `scripts/vendor/validate-plugin.cjs` (override with `REALTIMEX_PLUGIN_VALIDATOR`). Packaging fails if the validator is missing.
 

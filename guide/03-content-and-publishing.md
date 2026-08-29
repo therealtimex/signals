@@ -58,9 +58,31 @@ Drag and drop images (JPEG, PNG, GIF, WebP up to 5 MB) into the upload zone. The
 - **API Publish** — Publish via platform APIs (requires X API Basic tier at $200/month)
 - **Publish** — Browser-based publishing (free, works with any account)
 
-## Creative assistance (RealTimeX)
+## Writing with your terminal agent
 
-In-app AI Assist, draft generation, and one-click cross-platform adaptation were removed from Signals. Use a **RealTimeX terminal agent** for ideation, drafting, and rewriting, then paste into Compose or save via the agent-tools `create_task` / content workflows. See `docs/rtx-agent-orchestration.md`.
+Start from a Launch and run the **Platform-native writing** template. The RealTimeX terminal agent
+uses your approved voice profile and a source-backed evidence spine to create independent X,
+LinkedIn, and Facebook variants. Each variant is measured, audited, and shown as an approval card
+with its claims, voice drift, risk, and publishing capability.
+
+If no approved voice exists, the agent asks for at least three real, self-authored samples, shows
+the derived profile, and waits for your approval. It then extracts source claims once and drafts
+each platform directly from that shared spine—not by trimming one network's post into another.
+
+Review the full cards and respond with `approve <variantId>`, `revise <instruction>`, or `reject`.
+Approval materializes one inspectable content item. Publishing remains separate: only after you
+say to publish should the item be sent to the publish agent.
+
+| Surface | Writing | Publishing |
+|---|---|---|
+| X post and thread | Draft, audit, approve | Direct |
+| LinkedIn post | Draft, audit, approve | Beta |
+| Facebook post | Draft, audit, approve | Direct |
+| Other surfaces | No writing variant; explicit sketch only | Draft/export only |
+
+The evidence spine prevents unsupported facts, numbers, dates, names, quotes, and citations from
+slipping into a rewrite. A changed spine, body, target, voice, or audit invalidates old approval
+and returns the item for review.
 
 ## Browser-Based Publishing
 

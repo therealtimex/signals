@@ -124,7 +124,7 @@ flows/              RealTimeX agent-flow JSON
 specs/              numbered feature specs (NN-name.md)
 docs/               integration docs (agent-tools, local-app, qa/)
 guide/              end-user guide
-.claude/skills/     project skills (realtimex-signals, signals-publish, react-doctor)
+.claude/skills/     project skills (realtimex-signals, signals-writing, signals-publish, react-doctor)
 test/fixtures/      shared fixtures
 ```
 
@@ -149,6 +149,9 @@ and follow the matching `SKILL.md` when the task fits.
   documented contract and the implementation stay in sync.
 - **`signals-publish/SKILL.md`** — X publishing via RealTimeX Browser over CDP and the
   `complete_publish` callback. Read it before touching `src/lib/publish/` or `src/lib/browser/`.
+- **`signals-writing/SKILL.md`** — evidence spine, voice, platform-overlay, audit, approval, and
+  materialization contract for X/LinkedIn/Facebook writing. Read it before changing writing
+  orchestration or skill records; run `npm run test:writing-skill` after editing the skill.
 
 ## 7) Conventions that actually bite
 

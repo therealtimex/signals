@@ -132,6 +132,7 @@ export function buildWritingBriefSection(input: {
 
   return [
     "Signals Writing execution contract:",
+    "0. Load the signals-writing workspace skill (.claude/skills/signals-writing/SKILL.md) and use its scripts/writing-cli.cjs for ids, unit measurement, verdicts, and prechecks.",
     `Template: ${input.template.name} (${input.template.id})`,
     `Workflow run: ${input.workflowRunId}`,
     `Signals base URL: ${input.signalsBaseUrl}`,
