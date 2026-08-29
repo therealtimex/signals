@@ -228,11 +228,23 @@ Use this workflow when validating Signals changes against the RealTimeX desktop 
    display name **Signals**). Prior loops used separate entries such as `Signals issue-335 QA`;
    follow that pattern (`Signals issue-<N> QA`) so daily dev keeps `SIGNALS_DATA_DIR=~/.signals`.
 
-   For the QA entry, use `npm run dev`, the worktree as the working directory, and an isolated data
-   directory such as `SIGNALS_DATA_DIR=/private/tmp/signals-qa-<run-id>-data`.
+   Provision it through the guarded command; do not call `update-local-app` for **Signals**:
 
-3. Start the Local App from the RealTimeX UI and grant only the manifest permissions required by
-   the test. Signals listens on the port RealTimeX assigns it — commonly `3010`, while a
+   ```bash
+   node scripts/qa/provision-signals-qa-local-app.mjs \
+     --issue <N> \
+     --worktree "$PWD" \
+     --loop-id <loop-id>
+   ```
+
+   The provisioner creates and starts `Signals issue-<N> QA`, uses a launcher that runs `npm run
+   dev` in the issue worktree, pins `SIGNALS_DATA_DIR` under the platform temp directory
+   (`/private/tmp/signals-qa-*` on macOS, `/tmp/signals-qa-*` on Linux), tags the record
+   `signals,qa,ephemeral,issue-<N>`, and writes a receipt containing the exact app id. It refuses
+   `main`, the canonical app id, an unsafe data path, or a pre-existing issue app.
+
+3. If RealTimeX prompts for permissions, grant only those required by the test. Signals listens on
+   the port RealTimeX assigns it — commonly `3010`, while a
    standalone `npm run dev` defaults to `3000`. Read the assigned port from the Local App UI, then
    use that same port for the home URL (`/dashboard`) and the health probe (`/api/health`) before
    exercising the scenario.
@@ -247,22 +259,37 @@ Use this workflow when validating Signals changes against the RealTimeX desktop 
    Do not point `rtxtest dev up` at the Signals repository; it is a Local App, not the RealTimeX
    app repo.
 
-5. After QA, stop the QA Local App from the UI, stop the `yarn dev:all` host, and confirm the
-   Signals port plus `3100`, `3101`, and `9888` are clear.
+5. After QA evidence is captured and **before the terminal QA handoff**, run teardown and the
+   authoritative DB hygiene gate:
+
+   ```bash
+   node scripts/qa/cleanup-signals-qa-local-app.mjs --issue <N>
+   REALTIMEX_RUNTIME=dev \
+     node scripts/qa/verify-signals-local-app-hygiene.mjs --issue <N>
+   ```
+
+   Then stop the `yarn dev:all` host and confirm the Signals port plus `3100`, `3101`, and `9888`
+   are clear. A QA pass is incomplete if either command fails.
 
    **Teardown / config hygiene**
 
-   - Delete or disable the issue-specific QA Local App entry when the loop closes.
+   - Teardown stops and permanently deletes only the receipt-backed, safety-tagged issue QA app.
+     It refuses the canonical app and removes the disposable QA data directory by default.
    - Do **not** leave disposable `SIGNALS_DATA_DIR` paths or worktree `args` on the canonical
-     **Signals** app. If that app was modified, restore it before handoff:
+     **Signals** app. Modifying that record is an incident, not the normal QA workflow. Restore it
+     before handoff with the explicit recovery guard:
 
      ```bash
-     node scripts/qa/provision-signals-local-app.mjs \
-       --db ~/.realtimex.ai/desktop-user-data/dev/users/trungle_rta_vn/storage/realtimex.db
+     REALTIMEX_RUNTIME=dev \
+       node scripts/qa/provision-signals-local-app.mjs \
+         --restore-canonical \
+         --db ~/.realtimex.ai/desktop-user-data/dev/users/trungle_rta_vn/storage/realtimex.db
      ```
 
      (`REALTIMEX_RUNTIME=dev` selects the dev storage root when the script resolves the DB path.)
-   - Disposable `/private/tmp/signals-qa-*` directories may be removed after evidence is captured.
+   - Do not hand off `passed` or close the loop until the hygiene verifier confirms the canonical
+     app points at the canonical checkout with `SIGNALS_DATA_DIR=~/.signals` and no issue QA record
+     remains.
 
 ### Visual evidence for UI changes
 

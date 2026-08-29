@@ -90,7 +90,11 @@ Plugin validation uses `scripts/vendor/validate-plugin.cjs` (override with `REAL
    - Confirms installed plugin id/version matches repo `package.json`
    - When workspace is deployed, compares deployed `x-publish.cjs` sha256 to repo source
 3. **Publish QA (no public post):** `x-publish.cjs --dry-run` after `signals-publish` browser session is on an `https://x.com` tab.
-4. **Local app (dev fallback):** after `npm ci`, run `node scripts/qa/provision-signals-local-app.mjs` to register the private source checkout. Use `npm run test:standalone-artifact` for extracted-archive QA.
+4. **Local app (dev fallback):** register the private source checkout through **Settings → Local
+   Apps**. If the existing canonical dev record is corrupted, recover it explicitly with
+   `node scripts/qa/provision-signals-local-app.mjs --restore-canonical`; normal issue QA uses
+   `scripts/qa/provision-signals-qa-local-app.mjs`. Use `npm run test:standalone-artifact` for
+   extracted-archive QA.
 5. **Flows:** Import `flows/*.agent-flow.json` from the plugin zip via Admin → Agent Flows (until platform auto-import lands).
 6. Start Signals from **Settings → Local Apps**, open provisioned workspace terminal agent.
 

@@ -619,6 +619,10 @@ export async function findTerminalRuntimeSessionById(
   return sessions.find((session) => session.id === id) ?? null;
 }
 
+export const DEFAULT_TERMINAL_SESSION_IDLE_WAIT_DELAYS_MS = [
+  250, 500, 1_000, 2_000, 4_000, 8_000, 14_000,
+] as const;
+
 export async function waitForTerminalSessionIdle(
   sessionId: string,
   options: {
@@ -632,7 +636,8 @@ export async function waitForTerminalSessionIdle(
 
   const env = options.env ?? process.env;
   const fetchImpl = options.fetchImpl ?? fetch;
-  const retryDelaysMs = options.retryDelaysMs ?? [250, 500, 1_000, 2_000, 4_000, 8_000, 14_000];
+  const retryDelaysMs =
+    options.retryDelaysMs ?? [...DEFAULT_TERMINAL_SESSION_IDLE_WAIT_DELAYS_MS];
 
   for (let attempt = 0; attempt <= retryDelaysMs.length; attempt += 1) {
     const session = await findTerminalRuntimeSessionById(id, env, fetchImpl);
@@ -672,10 +677,16 @@ export async function resolveActiveTerminalSessionIdForThread(
   return active[0]?.id ?? sessions[0]?.id ?? null;
 }
 
+export type TerminateTerminalRuntimeSessionOptions = {
+  /** RTX close reason; use idle_timeout_resumable for workflow teardown. */
+  reason?: string;
+};
+
 export async function terminateTerminalRuntimeSession(
   sessionId: string | null | undefined,
   env: EnvLike = process.env,
-  fetchImpl: typeof fetch = fetch
+  fetchImpl: typeof fetch = fetch,
+  options: TerminateTerminalRuntimeSessionOptions = {}
 ): Promise<TerminateTerminalSessionResult> {
   const id = sessionId?.trim();
   if (!id) {
@@ -688,13 +699,16 @@ export async function terminateTerminalRuntimeSession(
     return { success: true, terminated: false };
   }
 
+  const reason = options.reason?.trim();
+  const requestBody = reason ? { reason } : {};
+
   try {
     const response = await fetchImpl(
       `${apiBase}/cli/terminate-terminal-session/${encodeURIComponent(id)}`,
       {
         method: "POST",
         headers: buildAppHeaders(appId),
-        body: JSON.stringify({}),
+        body: JSON.stringify(requestBody),
       }
     );
 

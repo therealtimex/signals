@@ -1,0 +1,8 @@
+{
+  "name": "signals-qa-local-app-launcher",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node launcher.mjs"
+  }
+}

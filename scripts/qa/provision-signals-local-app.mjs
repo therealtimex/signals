@@ -1,11 +1,15 @@
 #!/usr/bin/env node
 /**
- * Upsert the canonical dev Signals Local App into the RealTimeX SQLite database.
- * DEV / QA FALLBACK — production uses marketplace bundle + platform #1614 install.
- * Required before embedded-mode QA when /sdk/register returns "App not found".
+ * INCIDENT RECOVERY ONLY: restore the canonical dev Signals Local App in the
+ * RealTimeX SQLite database. Normal QA must create an issue-scoped app with
+ * provision-signals-qa-local-app.mjs and must never call this script.
  *
  * Usage:
- *   node scripts/qa/provision-signals-local-app.mjs [--db /path/to/realtimex.db]
+ *   node scripts/qa/provision-signals-local-app.mjs --restore-canonical \
+ *     [--db /path/to/realtimex.db]
+ *
+ * Without --db or RTX_DB_PATH, recovery targets only the dev database under
+ * desktop-user-data/dev. Non-dev automatic storage roots are rejected.
  *
  * Environment:
  *   RTX_DB_PATH          Override database path
@@ -15,12 +19,21 @@
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { delimiter, dirname, join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   SIGNALS_NODE_MODULE_ABI,
   SIGNALS_NODE_VERSION_WITH_PREFIX,
 } from "../node-runtime-contract.mjs";
+import { canonicalSignalsRepoRoot } from "./signals-qa-local-app.mjs";
+
+if (!process.argv.includes("--restore-canonical")) {
+  console.error("Refusing to update the canonical Signals Local App without --restore-canonical.");
+  console.error(
+    "Normal QA must use scripts/qa/provision-signals-qa-local-app.mjs instead.",
+  );
+  process.exit(2);
+}
 
 const SIGNALS_APP_ID = "47e45f71-3279-42f5-8e95-731de01b6eae";
 const SIGNALS_PERMISSIONS = [
@@ -32,7 +45,8 @@ const SIGNALS_PERMISSIONS = [
   "desktop.browser",
   "desktop.runtime-sessions",
 ];
-const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+const SCRIPT_REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+const REPO_ROOT = canonicalSignalsRepoRoot(SCRIPT_REPO_ROOT);
 const configuredNodeVersion =
   process.env.REALTIMEX_NPX_NODE_VERSION?.trim() ||
   SIGNALS_NODE_VERSION_WITH_PREFIX;
@@ -119,10 +133,14 @@ function parseDbArg() {
     process.env.REALTIMEX_USER_DATA?.trim() ||
     join(homedir(), ".realtimex.ai", "desktop-user-data");
   const userSegment = process.env.REALTIMEX_USER?.trim() || "trungle_rta_vn";
-  const storageRoot =
-    process.env.REALTIMEX_STORAGE_ROOT?.trim() ||
-    (process.env.REALTIMEX_RUNTIME === "dev" ? "dev" : "app");
-  return join(userData, storageRoot, "users", userSegment, "storage", "realtimex.db");
+  const storageRoot = process.env.REALTIMEX_STORAGE_ROOT?.trim();
+  const runtime = process.env.REALTIMEX_RUNTIME?.trim();
+  if ((storageRoot && storageRoot !== "dev") || (runtime && runtime !== "dev")) {
+    throw new Error(
+      "Canonical Signals recovery defaults to dev storage. Pass --db or RTX_DB_PATH to target another database explicitly.",
+    );
+  }
+  return join(userData, "dev", "users", userSegment, "storage", "realtimex.db");
 }
 
 function sqlQuote(value) {
@@ -156,10 +174,15 @@ if (!existsSync(dbPath)) {
 const storageRoot =
   process.env.REALTIMEX_STORAGE_ROOT?.trim() ||
   (process.env.REALTIMEX_RUNTIME === "dev" ? "dev" : "app");
-const rtxServerPort = storageRoot === "dev" ? "3101" : "3001";
-const rtxBaseUrl =
-  process.env.REALTIMEX_BASE_URL?.trim() ||
-  `http://127.0.0.1:${rtxServerPort}/cli`;
+const resolvedDbPath = resolve(dbPath);
+const dbStorageRoot = resolvedDbPath.includes(`${sep}dev${sep}users${sep}`)
+  ? "dev"
+  : resolvedDbPath.includes(`${sep}app${sep}users${sep}`)
+    ? "app"
+    : null;
+const targetsDevStorage = (dbStorageRoot || storageRoot) === "dev";
+const rtxServerPort = targetsDevStorage ? "3101" : "3001";
+const rtxBaseUrl = `http://127.0.0.1:${rtxServerPort}/cli`;
 
 const npmExecutable = join(
   nodeBinDir,

@@ -441,6 +441,9 @@ describe("terminateTerminalRuntimeSession", () => {
         "http://127.0.0.1:3001/cli/terminate-terminal-session/cli-agent%3Asession-1"
       );
       expect(init?.method).toBe("POST");
+      expect(JSON.parse(String(init?.body))).toEqual({
+        reason: "idle_timeout_resumable",
+      });
       return new Response(JSON.stringify({ success: true }), { status: 200 });
     });
 
@@ -451,7 +454,8 @@ describe("terminateTerminalRuntimeSession", () => {
           RTX_APP_ID: "app-1",
           RTX_API_BASE_URL: "http://127.0.0.1:3001",
         },
-        fetchImpl
+        fetchImpl,
+        { reason: "idle_timeout_resumable" }
       )
     ).resolves.toEqual({ success: true, terminated: true });
   });
