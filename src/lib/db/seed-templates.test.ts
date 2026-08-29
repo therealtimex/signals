@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { getSystemTemplateByName } from "@/lib/db/queries/workflow-templates";
+import { createTemplate, getSystemTemplateByName } from "@/lib/db/queries/workflow-templates";
 import {
   CONTACT_PROFILE_PIPELINE_TEMPLATE_NAME,
+  PLATFORM_NATIVE_WRITING_TEMPLATE_NAME,
   seedTemplates,
 } from "@/lib/db/seed-templates";
 import { workflowTemplates } from "@/lib/db/schema";
@@ -19,6 +20,42 @@ import {
   readProfilePublishConfig,
 } from "@/lib/workflows/profile-publish";
 import { resetCoreTables } from "@/test/db";
+import { isSignalsWritingTemplateConfig } from "@/lib/workflows/signals-writing";
+
+describe("Platform-native writing seed", () => {
+  beforeEach(() => resetCoreTables());
+
+  it("seeds the bounded writing template without retired tool names", () => {
+    seedTemplates();
+    const template = getSystemTemplateByName(PLATFORM_NATIVE_WRITING_TEMPLATE_NAME)!;
+    expect(template.templateType).toBe("content");
+    expect(template.isSystem).toBe(1);
+    expect(template.systemPrompt).not.toMatch(/save_draft|report_progress|search_web/);
+    expect(
+      isSignalsWritingTemplateConfig(
+        JSON.parse(template.config ?? "{}") as Record<string, unknown>,
+      ),
+    ).toBe(true);
+  });
+
+  it("renames and rewrites the legacy Thought Leadership template in place", () => {
+    const legacy = createTemplate({
+      name: "Thought Leadership Posts",
+      templateType: "content",
+      status: "active",
+      config: JSON.stringify({ _seedVersion: 24, topics: ["keep"] }),
+      systemPrompt: "Use search_web, save_draft, and report_progress",
+      isSystem: 1,
+    });
+    seedTemplates();
+    const migrated = getSystemTemplateByName(PLATFORM_NATIVE_WRITING_TEMPLATE_NAME)!;
+    expect(migrated.id).toBe(legacy.id);
+    expect(getSystemTemplateByName("Thought Leadership Posts")).toBeUndefined();
+    const config = JSON.parse(migrated.config ?? "{}") as Record<string, unknown>;
+    expect(config).toMatchObject({ _seedVersion: 25, topics: ["keep"] });
+    expect(isSignalsWritingTemplateConfig(config)).toBe(true);
+  });
+});
 
 describe("Contact profile pipeline seed", () => {
   beforeEach(() => {
@@ -33,7 +70,7 @@ describe("Contact profile pipeline seed", () => {
       pipeline?: { version?: number; steps?: Array<{ id: string; handler: string }> };
     };
 
-    expect(config._seedVersion).toBe(24);
+    expect(config._seedVersion).toBe(25);
     expect(config.pipeline?.version).toBe(2);
     expect(config.pipeline?.steps).toEqual([
       { id: "hydrate", executor: "code", handler: "hydrate_x_profiles" },
@@ -77,7 +114,7 @@ describe("Contact profile pipeline seed", () => {
       };
     };
     expect(config).toMatchObject({
-      _seedVersion: 24,
+      _seedVersion: 25,
       customTopLevel: true,
       pipeline: {
         version: 2,
@@ -191,7 +228,7 @@ describe("Social Intent Patrol seed", () => {
 
     expect(config).not.toHaveProperty("maxPosts");
     expect(config).not.toHaveProperty("durationMinutes");
-    expect(config._seedVersion).toBe(24);
+    expect(config._seedVersion).toBe(25);
     expect(config.maxComments).toBe(8);
     // The card copy is structural — an existing install must not keep describing a shift that
     // still posts to your own timeline.
@@ -284,7 +321,7 @@ describe("Snowball Seed Scout seed", () => {
       snowballSeedScout?: { version?: number; executionKind?: string };
       maxLinksPerRun?: number;
     };
-    expect(config._seedVersion).toBe(24);
+    expect(config._seedVersion).toBe(25);
     expect(config.snowballSeedScout?.executionKind).toBe("heartbeat_shell");
     expect(config.maxLinksPerRun).toBe(5);
   });
@@ -313,7 +350,7 @@ describe("Network Snowball seed", () => {
       maxContacts?: number;
       maxHops?: number;
     };
-    expect(config._seedVersion).toBe(24);
+    expect(config._seedVersion).toBe(25);
     expect(config.networkSnowball?.version).toBe(1);
     expect(config.focus).toBe("investors_and_angels");
     expect(config.maxContacts).toBe(10);
@@ -337,6 +374,6 @@ describe("Network Snowball seed", () => {
 
     expect(updated.systemPrompt).toContain("--workflow-run-id <runId>");
     expect(updated.systemPrompt).toContain("--template-id <templateId>");
-    expect(updatedConfig._seedVersion).toBe(24);
+    expect(updatedConfig._seedVersion).toBe(25);
   });
 });

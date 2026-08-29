@@ -31,6 +31,10 @@ Invoke body: `{ "tool": "<name>", "input": { ... } }`
 | `list_workflow_templates` | Templates available to start |
 | `start_workflow` | Start run from `templateId` |
 | `query_content` | List content items |
+| `get_content` | Untruncated content detail; private email/DM/inbound bodies need a durably approved launch source |
+| `create_content_draft` | Idempotently create a single-platform writing draft with ordered units |
+| `update_content_draft` | Revise an editable writing draft; use `expectedUpdatedAt` for concurrency |
+| `get_writing_context` | Privacy-filtered Launch sources, niches, targets, variants, capabilities, and approval policy |
 | `query_goals` | List goals |
 | `create_task` | Follow-up task |
 | `create_simulation_run` | Wind Tunnel: create + start a simulation run for a variant |

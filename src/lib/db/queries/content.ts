@@ -1,8 +1,32 @@
-import { eq, ne, and, or, desc, count, SQL, like } from "drizzle-orm";
+import { eq, ne, and, or, desc, count, SQL, like, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db/client";
-import { contentItems, contentPosts, engagementMetrics, platformAccounts } from "@/lib/db/schema";
+import {
+  contentItems,
+  contentPosts,
+  engagementMetrics,
+  mediaAssets,
+  mediaAttachments,
+  platformAccounts,
+} from "@/lib/db/schema";
 import type { ContentItem, NewContentItem, ContentPost, NewContentPost, ContentItemWithPost, EngagementMetric, PaginatedResult } from "@/lib/db/types";
+
+export type ContentItemMediaDetail = {
+  id: string;
+  mediaAssetId: string;
+  role: string;
+  sortOrder: number;
+  caption: string | null;
+  mimeType: string;
+  filename: string;
+};
+
+export type ContentItemDetail = {
+  item: ContentItem;
+  post: ContentPost | null;
+  latestMetrics: EngagementMetric | null;
+  media: ContentItemMediaDetail[];
+};
 
 /** Attach post and latest metrics to content items (batch). */
 function attachPostsAndMetrics(items: ContentItem[]): ContentItemWithPost[] {
@@ -146,6 +170,64 @@ export function getContentItem(id: string): ContentItemWithPost | undefined {
   const row = db.select().from(contentItems).where(eq(contentItems.id, id)).get();
   if (!row) return undefined;
   return attachPostsAndMetrics([row])[0];
+}
+
+export function getContentItemDetail(id: string): ContentItemDetail | undefined {
+  const item = db.select().from(contentItems).where(eq(contentItems.id, id)).get();
+  if (!item) return undefined;
+
+  const post =
+    db
+      .select()
+      .from(contentPosts)
+      .where(eq(contentPosts.contentItemId, id))
+      .orderBy(desc(contentPosts.publishedAt), desc(contentPosts.id))
+      .get() ?? null;
+  const latestMetrics = post
+    ? (db
+        .select()
+        .from(engagementMetrics)
+        .where(eq(engagementMetrics.contentPostId, post.id))
+        .orderBy(desc(engagementMetrics.snapshotAt), desc(engagementMetrics.id))
+        .get() ?? null)
+    : null;
+  const media = db
+    .select({
+      id: mediaAttachments.id,
+      mediaAssetId: mediaAttachments.mediaAssetId,
+      role: mediaAttachments.role,
+      sortOrder: mediaAttachments.sortOrder,
+      caption: mediaAttachments.caption,
+      mimeType: mediaAssets.mimeType,
+      filename: mediaAssets.filename,
+    })
+    .from(mediaAttachments)
+    .innerJoin(mediaAssets, eq(mediaAssets.id, mediaAttachments.mediaAssetId))
+    .where(
+      and(
+        eq(mediaAttachments.parentType, "content_item"),
+        eq(mediaAttachments.parentId, id),
+      ),
+    )
+    .orderBy(mediaAttachments.sortOrder, mediaAttachments.createdAt)
+    .all();
+
+  return { item, post, latestMetrics, media };
+}
+
+export function findContentItemByWritingIdempotencyKey(
+  idempotencyKey: string,
+): ContentItem | undefined {
+  return db
+    .select()
+    .from(contentItems)
+    .where(
+      and(
+        sql`json_valid(${contentItems.platformData})`,
+        sql`json_extract(${contentItems.platformData}, '$.writing.idempotencyKey') = ${idempotencyKey}`,
+      ),
+    )
+    .get();
 }
 
 export function createContentItem(

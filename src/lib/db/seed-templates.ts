@@ -1,4 +1,4 @@
-import { eq, and } from "drizzle-orm";
+import { eq, and, or } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { workflowTemplates } from "@/lib/db/schema";
 import { createTemplate } from "@/lib/db/queries/workflow-templates";
@@ -23,13 +23,16 @@ import {
   SNOWBALL_SEED_SCOUT_TEMPLATE_NAME,
   buildSnowballSeedScoutTemplateConfig,
 } from "@/lib/workflows/snowball-seed-scout";
+import { buildWritingTemplateConfig } from "@/lib/workflows/signals-writing";
 
 /** Bump this when seed template prompts change to trigger updates on existing installs. */
-const SEED_VERSION = 24;
+const SEED_VERSION = 25;
 
 export const CONTACT_PROFILE_PIPELINE_TEMPLATE_NAME = "Contact profile pipeline";
 export const COMPANY_PROFILE_ENRICHMENT_TEMPLATE_NAME = "Company Profile Enrichment";
 export const COMPANY_SIGNAL_SCAN_TEMPLATE_NAME = "Company Signal Scan";
+export const PLATFORM_NATIVE_WRITING_TEMPLATE_NAME = "Platform-native writing";
+const LEGACY_THOUGHT_LEADERSHIP_TEMPLATE_NAME = "Thought Leadership Posts";
 
 interface TemplateSeed {
   name: string;
@@ -334,38 +337,32 @@ identities. Find those duplicates and merge them into a single surviving record.
   },
   // --- Phase 6E: New seed templates ---
   {
-    name: "Thought Leadership Posts",
-    description: "Generate and publish thought leadership content on X and LinkedIn. Creates posts aligned with your brand voice and industry expertise.",
+    name: PLATFORM_NATIVE_WRITING_TEMPLATE_NAME,
+    description:
+      "Create evidence-grounded, platform-native drafts with explicit privacy, capability, and approval boundaries.",
     templateType: "content",
     platform: "x",
-    targetPersona: "Your professional audience interested in industry insights and thought leadership",
+    targetPersona: "The audience and niche context named by the selected Signals Launch",
     estimatedCost: 0.20,
-    systemPrompt: `You are a content creation agent for thought leadership.
+    systemPrompt: `You are the platform-native writing agent for Signals.
 
 ## Objective
-Research trending topics and create compelling social media posts.
-Use \`search_web\` to find current trends, news, and discussion topics, then craft
-posts that demonstrate expertise and drive engagement.
-
-If no specific topics are configured, focus on technology, AI, and business trends.
+Turn the selected Launch's approved context into one evidence-grounded draft per configured
+platform surface. Preserve claims and voice while adapting delivery to each platform.
 
 ## Process
-1. Search for trending topics and recent news (use the configured topics if provided)
-2. Identify 3-5 angles for thought leadership content
-3. Draft posts that are insightful, concise, and engaging
-4. For each post, use \`save_draft\` to save it as a content draft (set platformTarget to "x" or "linkedin")
-5. Use \`report_progress\` to summarize what you saved after each batch
-
-Do NOT ask questions — you are autonomous. Make reasonable assumptions and proceed.
+1. Read the Signals Writing execution contract appended to this run brief.
+2. Load the Launch context and obey every source redaction and surface capability.
+3. Draft one native artifact per configured surface using only supported claims.
+4. Persist drafts idempotently through the manifest-backed content tools.
+5. Stop at the approval boundary and report missing evidence or unsupported actions clearly.
 
 ## Rules
-- Keep posts concise: X posts under 280 chars, LinkedIn posts under 1300 chars
-- Include a clear point of view — avoid generic statements
-- Add relevant hashtags (2-3 max)
-- Vary post formats: questions, hot takes, data points, stories
-- Never fabricate statistics or quotes
-- Always use \`save_draft\` to persist each post — do NOT just report them via \`report_progress\``,
-    config: { topics: [], tone: "professional", frequency: "daily" },
+- Never fabricate a fact, statistic, date, name, quote, or citation.
+- Never treat draft support as publish support.
+- Never approve or publish on the operator's behalf.
+- Use a distinct native shape for every requested surface; do not copy one body across platforms.`,
+    config: buildWritingTemplateConfig(),
   },
   {
     name: "Reply to Mentions",
@@ -650,7 +647,12 @@ export function seedTemplates(): { seeded: number; updated: number; skipped: boo
       .from(workflowTemplates)
       .where(
         and(
-          eq(workflowTemplates.name, seed.name),
+          seed.name === PLATFORM_NATIVE_WRITING_TEMPLATE_NAME
+            ? or(
+                eq(workflowTemplates.name, seed.name),
+                eq(workflowTemplates.name, LEGACY_THOUGHT_LEADERSHIP_TEMPLATE_NAME),
+              )
+            : eq(workflowTemplates.name, seed.name),
           eq(workflowTemplates.isSystem, 1)
         )
       )
@@ -664,6 +666,9 @@ export function seedTemplates(): { seeded: number; updated: number; skipped: boo
       if (existingVersion < SEED_VERSION) {
         // Update structural pipeline fields while preserving user-tuned run controls.
         let updatedConfig = { ...existingConfig, _seedVersion: SEED_VERSION };
+        if (seed.name === PLATFORM_NATIVE_WRITING_TEMPLATE_NAME) {
+          updatedConfig = { ...existingConfig, ...seed.config, _seedVersion: SEED_VERSION };
+        }
         if (seed.name === SOCIAL_INTENT_PATROL_TEMPLATE_NAME) {
           // The patrol shift dropped personal-profile posting (#241). A stored `maxPosts` from an
           // older seed would otherwise ride `mergeRunConfig` into the brief's runtime block and
@@ -684,12 +689,16 @@ export function seedTemplates(): { seeded: number; updated: number; skipped: boo
         }
         db.update(workflowTemplates)
           .set({
+            ...(seed.name === PLATFORM_NATIVE_WRITING_TEMPLATE_NAME
+              ? { name: seed.name }
+              : {}),
             systemPrompt: seed.systemPrompt,
             // Descriptions are structural, not operator-tuned: refresh them for the templates
             // whose copy has changed so an existing install does not keep stale card text (it
             // also feeds the brief's `Goal:` line).
             ...(seed.name === CONTACT_PROFILE_PIPELINE_TEMPLATE_NAME ||
-            seed.name === SOCIAL_INTENT_PATROL_TEMPLATE_NAME
+            seed.name === SOCIAL_INTENT_PATROL_TEMPLATE_NAME ||
+            seed.name === PLATFORM_NATIVE_WRITING_TEMPLATE_NAME
               ? { description: seed.description }
               : {}),
             config: JSON.stringify(updatedConfig),

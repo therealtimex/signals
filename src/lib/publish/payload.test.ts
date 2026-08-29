@@ -86,4 +86,29 @@ describe("publish payload validation", () => {
       expect(result.payload.platforms).toEqual(["facebook"]);
     }
   });
+
+  it("normalizes ordered X thread continuations and rejects invalid uses", () => {
+    const result = validatePublishJobPayload({
+      text: "A",
+      threadTexts: [" B ", "C"],
+      platforms: ["x"],
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      payload: { text: "A", threadTexts: ["B", "C"] },
+    });
+    expect(
+      validatePublishJobPayload({
+        text: "A",
+        threadTexts: ["B"],
+        platforms: ["facebook"],
+      }),
+    ).toMatchObject({ ok: false, errorCode: "invalid_request" });
+    expect(
+      validatePublishJobPayload({ text: "A", threadTexts: ["  "], platforms: ["x"] }),
+    ).toMatchObject({ ok: false, errorCode: "invalid_request" });
+    const empty = validatePublishJobPayload({ text: "A", threadTexts: [], platforms: ["x"] });
+    expect(empty.ok).toBe(true);
+    if (empty.ok) expect(empty.payload).not.toHaveProperty("threadTexts");
+  });
 });

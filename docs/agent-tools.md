@@ -55,6 +55,10 @@ Then pass `Authorization: Bearer your-secret-token` on each request.
 | `start_workflow` | workflows | Record a workflow run (failed until migrated to RTX orchestration) |
 | `record_workflow_run_contacts` | workflows | Validate a workflow run/template pair and idempotently add existing contact IDs to the run's durable cohort |
 | `query_content` | content | List content items |
+| `get_content` | content | Read one content item with an untruncated body and durable privacy redaction |
+| `create_content_draft` | content | Idempotently create one platform-native writing draft with ordered units |
+| `update_content_draft` | content | Revise an editable writing draft with optional optimistic concurrency |
+| `get_writing_context` | content | Read a launch's privacy-filtered sources, targets, variants, and capability rows |
 | `query_goals` | goals | List goals |
 | `create_task` | tasks | Create a follow-up task |
 | `get_persona` | contacts | Get active AI persona for a contact |
@@ -128,6 +132,30 @@ validates and persists the result. Automated persona jobs must not call `get_per
 `upsert_persona`; Signals owns their evidence, validation, provenance, and write.
 
 **Publish lane** (`get_publish_job`, `update_publish_job`, `complete_publish`) coordinates CRM publish jobs with RTX terminal agents. Each job target may snapshot `targetId`, `expectedHandle`, and `sessionName`; callbacks should return `targetId` and the preparation `leaseId`. Browser content manipulation runs in the `signals-publish` skill. Signals owns target activation and live identity verification through `prepare_platform_target`.
+
+## Writing content tools
+
+`get_content` is the detail-by-ID complement to `query_content`: it returns the complete body
+instead of the 200-character list preview. Email, DM, and inbound content remains classified
+private. Its body, title, raw platform data, and media are redacted unless `writingSource` names a
+matching source already stored on a Launch with durable `contextApproval`; a caller-supplied flag
+cannot manufacture approval. `get_writing_context` applies the same rule to every launch source
+and forces the brief and all sources private for a `local_only` Launch.
+
+`create_content_draft` accepts one value from the canonical 12-platform registry and stores one
+platform per item. `body` is ordered unit 0; an X or Threads `thread` requires non-empty
+`threadTexts` continuation units. The required `idempotencyKey` returns the original item on
+replay and never overwrites it. Use `update_content_draft` for revisions and pass
+`expectedUpdatedAt` to detect concurrent edits. Only writing items in `draft` or `failed` status
+are editable through this tool.
+
+Draft support is not publish support. Each draft reports its static `capability.publish` state.
+Items carrying `platformData.writing` enter `/api/content/send-to-agent` only after the writing
+pipeline has materialized an `approved` item whose audit and approval snapshot still match its
+linked variant. The REST route returns `writing_approval_required` for missing or revoked approval,
+`writing_artifact_stale` for snapshot/unit/target drift, and `capability_unsupported` for a
+draft/export-only surface. For approved X threads, the job's `text` and ordered `threadTexts` are
+derived from persisted units; caller-supplied text is ignored.
 
 Platform target tool errors are returned inside the successful invoke envelope as `{ error, code, details? }`. Codes include `TARGET_NOT_FOUND`, `TARGET_CAPABILITY_UNSUPPORTED`, `SESSION_LEASE_HELD`, `LEASE_LOST`, `LOGIN_REQUIRED`, and `TARGET_NOT_ACTIVE`. A shared connection is serialized for the whole operation; separate dedicated connections have independent leases.
 
