@@ -1022,26 +1022,23 @@ export async function handleCompleteWorkflowRun(input: z.infer<typeof completeWo
     ...(input.errors ? { errors: JSON.stringify(input.errors) } : {}),
   });
 
-  // Automatically emit completion event and trigger workflow cascading / webhook bridge
-  const eventResult = await emitWorkflowCompletedEvent(input.runId, {
-    summary: input.summary,
-    createdContactIds: cohort.contactIds.length > 0 ? cohort.contactIds : undefined,
-  });
-
-  const completionMessage = await postWorkflowCompletionThreadMessage(
-    updatedRun ?? run,
-    {
+  const [eventResult, completionMessage, browserSessionTeardown] = await Promise.all([
+    emitWorkflowCompletedEvent(input.runId, {
+      summary: input.summary,
+      createdContactIds: cohort.contactIds.length > 0 ? cohort.contactIds : undefined,
+    }),
+    postWorkflowCompletionThreadMessage(updatedRun ?? run, {
       status: input.status,
       summary: input.summary,
       processedItems: updatedRun?.processedItems ?? input.processedItems,
       successItems: updatedRun?.successItems ?? input.successItems,
-    }
-  );
+    }),
+    stopRunningRtxBrowserSessions({
+      stopAllRunning: true,
+    }),
+  ]);
 
   const runtimeSessionId = getRtxRuntimeSessionIdFromRunConfig(run.config);
-  const browserSessionTeardown = await stopRunningRtxBrowserSessions({
-    stopAllRunning: true,
-  });
   const terminalSessionTeardown = scheduleWorkflowTerminalSessionRelease(runtimeSessionId);
   const teardownNote = formatDeferredTerminalTeardownNote({
     terminal: terminalSessionTeardown,
