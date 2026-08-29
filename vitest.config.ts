@@ -21,7 +21,11 @@ export default defineConfig({
     },
   },
   test: {
-    setupFiles: ["./src/test/setup-env.ts", "./src/test/setup.ts"],
+    setupFiles: [
+      "./src/test/setup-env.ts",
+      "./src/test/setup.ts",
+      "./src/test/setup-event-loop-yield.ts",
+    ],
     coverage: {
       provider: "v8",
       include: COVERAGE_INCLUDE,
@@ -43,7 +47,9 @@ export default defineConfig({
           testTimeout: 20_000,
           ...(process.env.CI === "true"
             ? {
-                // Busy CI runners can miss Vitest worker RPC heartbeats under coverage.
+                // CI runners are ~3x slower per test under v8 coverage; cap workers so
+                // fixture-heavy files don't starve each other. (The worker RPC timeout is a
+                // separate mechanism — see src/test/setup-event-loop-yield.ts.)
                 maxWorkers: 2,
                 minWorkers: 1,
                 hookTimeout: 60_000,

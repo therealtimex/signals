@@ -2,9 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { createTemplate } from "@/lib/db/queries/workflow-templates";
 import { createWorkflowRun, getWorkflowRun } from "@/lib/db/queries/workflows";
-import {
-  buildProfilePipelineFixture,
-} from "@/lib/db/queries/profile-pipeline-backlog.test";
+import { buildProfilePipelineFixture } from "@/test/profile-pipeline-fixture";
 import { planProfilePipelineRun } from "@/lib/db/queries/profile-pipeline-backlog";
 import { db } from "@/lib/db/client";
 import { contactIdentities, scheduledJobs, workflowRuns } from "@/lib/db/schema";
