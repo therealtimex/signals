@@ -4,6 +4,7 @@ import { act, createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { getOrgEmailIntelligence } from "@/lib/contacts/email-patterns/intelligence";
 import {
   CompanyFeed,
   CompanyPeopleTable,
@@ -11,7 +12,9 @@ import {
   emailCandidateActionSuccessMessage,
 } from "./company-intelligence-panels";
 
-const emailIntelligenceFixture = {
+type EmailIntelligence = ReturnType<typeof getOrgEmailIntelligence>;
+
+const emailIntelligenceFixture: EmailIntelligence = {
   canInfer: true,
   domain: "acme.test",
   domains: [{ id: "domain-1", orgId: "org-1", domain: "acme.test", kind: "primary", source: "test", mxStatus: "ok", catchAll: "no", mailCheckedAt: 1, mailEvidence: "{}", createdAt: 1, updatedAt: 1 }],
@@ -21,7 +24,7 @@ const emailIntelligenceFixture = {
   candidateCounts: { predicted: 1, uncertain: 0, verified: 0, invalid: 0 },
   evaluatedAt: 1,
   automationEligibility: { storedValue: false, effectiveValue: false, source: "default", envLocked: false },
-} as const;
+};
 
 describe("company intelligence panels", () => {
   it("renders people linking, employment controls, unlinking, and strength evidence", () => {
