@@ -204,6 +204,35 @@ export function scheduleWorkflowTerminalSessionRelease(
   );
 }
 
+/** Stop browsers (optional) and schedule v3 workflow-style terminal release. */
+export async function finalizeChatLinkedTerminalSession(
+  input: {
+    terminalSessionId: string | null | undefined;
+    browserSessionNames?: string[];
+    stopAllRunningBrowsers?: boolean;
+  },
+  env: EnvLike = process.env,
+  fetchImpl: typeof fetch = fetch
+): Promise<{
+  browserSessionTeardown: BrowserSessionTeardownResult;
+  terminalSessionTeardown: ScheduledTerminalSessionRelease;
+}> {
+  const browserSessionTeardown = await stopRunningRtxBrowserSessions(
+    {
+      sessionNames: input.browserSessionNames,
+      stopAllRunning: input.stopAllRunningBrowsers,
+    },
+    env,
+    fetchImpl
+  );
+  const terminalSessionTeardown = scheduleWorkflowTerminalSessionRelease(
+    input.terminalSessionId,
+    env,
+    fetchImpl
+  );
+  return { browserSessionTeardown, terminalSessionTeardown };
+}
+
 export function formatDeferredTerminalTeardownNote(input: {
   terminal: ScheduledTerminalSessionRelease;
   browser: BrowserSessionTeardownResult;

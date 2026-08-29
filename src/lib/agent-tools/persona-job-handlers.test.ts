@@ -20,7 +20,7 @@ import {
 import { getActivePersona, upsertPersona } from "@/lib/db/queries/personas";
 import { createWorkflowRun, getWorkflowRun } from "@/lib/db/queries/workflows";
 import { contactPersonas } from "@/lib/db/schema";
-import * as resourceTeardown from "@/lib/rtx/resource-teardown";
+import * as personaTerminalTeardown from "@/lib/rtx/persona-terminal-teardown";
 import { resetCoreTables } from "@/test/db";
 
 const validSynthesis = {
@@ -40,6 +40,12 @@ describe("PersonaAgentJob agent-tool handlers", () => {
     resetCoreTables();
     vi.restoreAllMocks();
     delete process.env.RTX_APP_ID;
+    vi.spyOn(personaTerminalTeardown, "releasePersonaJobTerminalSession").mockResolvedValue({
+      terminalSessionTeardown: { scheduled: false },
+      browserSessionTeardown: { stopped: [], failed: [] },
+      completionThreadMessage: { posted: false },
+      skippedSharedSession: false,
+    });
   });
 
   afterEach(() => {
@@ -115,6 +121,34 @@ describe("PersonaAgentJob agent-tool handlers", () => {
       errorCode: "synthesis_invalid",
     });
     expect(getWorkflowRun(run.id)?.status).toBe("failed");
+  });
+
+  it("schedules terminal release when a persona job completes with a runtime session", async () => {
+    const releaseSpy = vi.spyOn(personaTerminalTeardown, "releasePersonaJobTerminalSession").mockResolvedValue({
+      terminalSessionTeardown: { scheduled: true, sessionId: "cli-agent:persona-1" },
+      browserSessionTeardown: { stopped: [], failed: [] },
+      completionThreadMessage: { posted: true },
+      skippedSharedSession: false,
+      message: "Terminal session release scheduled after the chat-linked turn finishes.",
+    });
+    const { job } = seedRunningJob("cli-agent:persona-1");
+
+    const completed = await handleCompletePersonaJob({
+      jobId: job.id,
+      success: true,
+      synthesis: validSynthesis,
+    });
+
+    expect(completed).toMatchObject({
+      accepted: true,
+      status: "completed",
+      terminalSessionTeardown: { scheduled: true, sessionId: "cli-agent:persona-1" },
+      completionThreadMessage: { posted: true },
+    });
+    expect(releaseSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ id: job.id, rtxRuntimeSessionId: "cli-agent:persona-1" }),
+      expect.objectContaining({ status: "completed" }),
+    );
   });
 
   it("persists a valid synthesis with frozen provenance and is idempotent", async () => {
@@ -199,7 +233,7 @@ describe("PersonaAgentJob agent-tool handlers", () => {
     expect(getPersonaJobById(job.id)?.status).toBe("completed");
     expect(getWorkflowRun(run.id)?.status).toBe("running");
 
-    const releaseSpy = vi.spyOn(resourceTeardown, "scheduleTerminalSessionRelease");
+    const releaseSpy = vi.spyOn(personaTerminalTeardown, "releasePersonaJobTerminalSession");
 
     expect(await handleGetPersonaJob({ jobId: job.id })).toMatchObject({
       status: "completed",

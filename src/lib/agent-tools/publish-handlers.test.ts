@@ -23,6 +23,7 @@ import {
   releaseSessionLease,
 } from "@/lib/leases/session-lease";
 import * as resourceTeardown from "@/lib/rtx/resource-teardown";
+import * as publishCompletionThread from "@/lib/rtx/publish-completion-thread";
 
 function seedDraftAndJob() {
   const item = createContentItem({
@@ -56,15 +57,18 @@ describe("publish agent-tool handlers", () => {
     vi.restoreAllMocks();
   });
 
-  it("schedules terminal release and stops browsers when the publish job reaches a terminal state", async () => {
+  it("schedules workflow terminal release and stops browsers when the publish job reaches a terminal state", async () => {
     const { job } = seedDraftAndJob();
-    const browserSpy = vi.spyOn(resourceTeardown, "stopRunningRtxBrowserSessions").mockResolvedValue({
-      stopped: ["signals-publish"],
-      failed: [],
+    const browserSpy = vi.spyOn(resourceTeardown, "finalizeChatLinkedTerminalSession").mockResolvedValue({
+      browserSessionTeardown: {
+        stopped: ["signals-publish"],
+        failed: [],
+      },
+      terminalSessionTeardown: { scheduled: true, sessionId: null },
     });
-    const scheduleSpy = vi
-      .spyOn(resourceTeardown, "scheduleTerminalSessionRelease")
-      .mockReturnValue({ scheduled: true, sessionId: null });
+    vi.spyOn(publishCompletionThread, "postPublishCompletionThreadMessage").mockResolvedValue({
+      posted: true,
+    });
 
     const result = await handleCompletePublish({
       jobId: job.id,
@@ -76,13 +80,14 @@ describe("publish agent-tool handlers", () => {
     });
 
     expect(browserSpy).toHaveBeenCalledWith({
-      sessionNames: ["signals-publish"],
-      stopAllRunning: true,
+      terminalSessionId: null,
+      browserSessionNames: ["signals-publish"],
+      stopAllRunningBrowsers: true,
     });
-    expect(scheduleSpy).toHaveBeenCalledWith(null);
     expect(result).toMatchObject({
       browserSessionTeardown: { stopped: ["signals-publish"], failed: [] },
       terminalSessionTeardown: { scheduled: false },
+      completionThreadMessage: { posted: true },
     });
   });
 

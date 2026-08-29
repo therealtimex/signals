@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { db, type DbRunner } from "@/lib/db/client";
 import { personaJobs } from "@/lib/db/schema";
 import type { PersonaJob } from "@/lib/db/types";
@@ -128,6 +128,31 @@ export function getActivePersonaJobForContact(contactId: string): PersonaJobView
     .orderBy(desc(personaJobs.createdAt), desc(sql`rowid`))
     .get();
   return row ? serializePersonaJob(row) : null;
+}
+
+export function hasActivePersonaJobsOnRuntimeSession(
+  sessionId: string,
+  excludeJobId?: string,
+): boolean {
+  const trimmed = sessionId.trim();
+  if (!trimmed) return false;
+
+  const conditions = [
+    eq(personaJobs.rtxRuntimeSessionId, trimmed),
+    inArray(personaJobs.status, [...PERSONA_JOB_ACTIVE_STATUSES]),
+  ];
+  if (excludeJobId?.trim()) {
+    conditions.push(ne(personaJobs.id, excludeJobId.trim()));
+  }
+
+  const row = db
+    .select({ id: personaJobs.id })
+    .from(personaJobs)
+    .where(and(...conditions))
+    .limit(1)
+    .get();
+
+  return !!row;
 }
 
 export function markPersonaJobSuperseded(jobId: string): PersonaJobView | null {

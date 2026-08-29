@@ -39,6 +39,7 @@ import {
   dispatchTerminalAgentViaSendMessage,
   type RuntimeSessionDescriptor,
 } from "@/lib/rtx/runtime-sessions";
+import { releasePersonaJobTerminalSession } from "@/lib/rtx/persona-terminal-teardown";
 import {
   buildPersonaJobBriefRoutingMessage,
   personaJobBriefRelativePath,
@@ -382,6 +383,10 @@ export async function awaitPersonaJob(
       const timedOut = markPersonaJobTimedOut(job.id, message) ?? job;
       if (timedOut.status === "timeout") {
         completeRunAsFailed(timedOut, message);
+        await releasePersonaJobTerminalSession(timedOut, {
+          status: "timeout",
+          error: message,
+        });
       }
       if (timedOut.status === "completing") {
         await new Promise((resolve) => setTimeout(resolve, pollMs));

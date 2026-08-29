@@ -39,6 +39,7 @@ You are executing **one isolated persona synthesis job** for Signals CRM.
 5. If the callback returns validation errors, correct the synthesis and call it again at most once. If you cannot produce a persona, use the same CLI command with \`{"tool":"complete_persona_job","input":{"jobId":"${input.jobId}","success":false,"error":"<reason>"}}\`, replacing the reason placeholder.
 6. Load the \`realtimex-signals\` skill for the callback contract. Do not run \`resolve-base-url.sh\` or \`invoke-tool.sh\` while \`signals-pp-cli\` is available.
 7. Optionally include \`model\` (for example \`claude:claude-fable-5\`) so Signals can record provenance.
+8. After \`complete_persona_job\` succeeds or fails terminally, Signals schedules release of this terminal session when no other persona jobs are active on it — do not continue working in this thread after submission.
 
 ## Output schema (required fields)
 {

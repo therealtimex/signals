@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  finalizeChatLinkedTerminalSession,
   formatAgentLaneTeardownNote,
   releaseAgentLaneResources,
   RESUMABLE_TERMINAL_RELEASE_REASON,
@@ -158,6 +159,49 @@ describe("scheduleTerminalSessionRelease", () => {
     expect(scheduleWorkflowTerminalSessionRelease(null)).toEqual({
       scheduled: true,
       sessionId: null,
+    });
+
+    await Promise.resolve();
+    await vi.runAllTimersAsync();
+
+    expect(waitSpy).toHaveBeenCalledWith("cli-agent:session-1", {
+      env: process.env,
+      fetchImpl: fetch,
+      retryDelaysMs: expect.arrayContaining([250, 14_000, 15_000, 90_000]),
+    });
+    expect(terminateSpy).toHaveBeenCalledWith(
+      "cli-agent:session-1",
+      process.env,
+      fetch,
+      { reason: WORKFLOW_COMPLETED_TERMINAL_RELEASE_REASON }
+    );
+    vi.useRealTimers();
+  });
+});
+
+describe("finalizeChatLinkedTerminalSession", () => {
+  it("stops browsers and schedules workflow terminal release", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(browserSessions, "listRtxBrowserSessions").mockResolvedValue([]);
+    const waitSpy = vi
+      .spyOn(runtimeSessions, "waitForTerminalSessionIdle")
+      .mockResolvedValue({ idle: true });
+    const terminateSpy = vi
+      .spyOn(runtimeSessions, "terminateTerminalRuntimeSession")
+      .mockResolvedValue({
+        success: true,
+        terminated: true,
+      });
+
+    const result = await finalizeChatLinkedTerminalSession({
+      terminalSessionId: "cli-agent:session-1",
+      browserSessionNames: ["signals-publish"],
+      stopAllRunningBrowsers: true,
+    });
+
+    expect(result.terminalSessionTeardown).toEqual({
+      scheduled: true,
+      sessionId: "cli-agent:session-1",
     });
 
     await Promise.resolve();
