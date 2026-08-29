@@ -25,6 +25,7 @@ import { runTemplateViaRtx, getRtxRuntimeSessionIdFromRunConfig } from "@/lib/ag
 import { isRtxEmbedded } from "@/lib/rtx/env";
 import { getOrCreateOrchestratorThread } from "@/lib/rtx/orchestrator-thread";
 import { resolveActiveTerminalSessionIdForThread } from "@/lib/rtx/runtime-sessions";
+import { postWorkflowCompletionThreadMessage } from "@/lib/rtx/workflow-completion-thread";
 import {
   formatDeferredTerminalTeardownNote,
   scheduleTerminalSessionRelease,
@@ -1027,6 +1028,16 @@ export async function handleCompleteWorkflowRun(input: z.infer<typeof completeWo
     createdContactIds: cohort.contactIds.length > 0 ? cohort.contactIds : undefined,
   });
 
+  const completionMessage = await postWorkflowCompletionThreadMessage(
+    updatedRun ?? run,
+    {
+      status: input.status,
+      summary: input.summary,
+      processedItems: updatedRun?.processedItems ?? input.processedItems,
+      successItems: updatedRun?.successItems ?? input.successItems,
+    }
+  );
+
   const runtimeSessionId = getRtxRuntimeSessionIdFromRunConfig(run.config);
   const browserSessionTeardown = await stopRunningRtxBrowserSessions({
     stopAllRunning: true,
@@ -1050,6 +1061,7 @@ export async function handleCompleteWorkflowRun(input: z.infer<typeof completeWo
     terminalSessionTeardown: terminalSessionTeardown.sessionId
       ? { scheduled: true, sessionId: terminalSessionTeardown.sessionId }
       : { scheduled: false },
+    completionThreadMessage: completionMessage,
     browserSessionTeardown,
     message: `Workflow run ${input.runId} marked as ${input.status}. Follow-on cascades and webhook dispatch completed.${teardownNote}`,
   };

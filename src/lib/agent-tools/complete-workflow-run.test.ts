@@ -6,6 +6,7 @@ import { createTemplate } from "@/lib/db/queries/workflow-templates";
 import { handleCompleteWorkflowRun } from "@/lib/agent-tools/handlers";
 import * as workflowEvents from "@/lib/webhooks/workflow-events";
 import * as resourceTeardown from "@/lib/rtx/resource-teardown";
+import * as workflowCompletionThread from "@/lib/rtx/workflow-completion-thread";
 
 const mockWorkflowCompletedEvent: workflowEvents.EmitWorkflowCompletedResult = {
   emitted: true,
@@ -49,6 +50,9 @@ describe("complete_workflow_run terminal teardown", () => {
     vi.spyOn(workflowEvents, "emitWorkflowCompletedEvent").mockResolvedValue(
       mockWorkflowCompletedEvent
     );
+    vi.spyOn(workflowCompletionThread, "postWorkflowCompletionThreadMessage").mockResolvedValue({
+      posted: true,
+    });
 
     const browserSpy = vi.spyOn(resourceTeardown, "stopRunningRtxBrowserSessions").mockResolvedValue({
       stopped: ["network-snowball"],
@@ -81,6 +85,7 @@ describe("complete_workflow_run terminal teardown", () => {
     expect(result.message).toContain(
       "Terminal session release scheduled after the chat-linked turn finishes."
     );
+    expect(workflowCompletionThread.postWorkflowCompletionThreadMessage).toHaveBeenCalled();
     expect(result.message).toContain("Browser sessions stopped: network-snowball.");
   });
 
