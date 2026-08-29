@@ -202,6 +202,10 @@ export function reconcileStalePersonaJobCompletion(jobId: string): PersonaJobVie
   });
   if (failed?.status === "failed") {
     completeRunAsFailed(failed, error);
+    void releasePersonaJobTerminalSession(failed, {
+      status: "failed",
+      error,
+    });
   }
   return getPersonaJobById(job.id);
 }

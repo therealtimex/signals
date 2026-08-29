@@ -151,6 +151,23 @@ export function listWorkflowRuns(opts?: {
   return { data, total };
 }
 
+/** Running template-agent workflow runs that still hold a linked RTX terminal session. */
+export function listRunningTerminalAgentWorkflowRuns(): WorkflowRun[] {
+  return db
+    .select()
+    .from(workflowRuns)
+    .where(
+      and(
+        eq(workflowRuns.status, "running"),
+        sql`${workflowRuns.workflowType} != 'persona'`,
+        sql`json_valid(${workflowRuns.config})`,
+        sql`json_extract(${workflowRuns.config}, '$.rtxRuntimeSessionId') IS NOT NULL`,
+        sql`trim(json_extract(${workflowRuns.config}, '$.rtxRuntimeSessionId')) != ''`,
+      ),
+    )
+    .all();
+}
+
 /**
  * Latest file-import run for a platform (config.platform), regardless of
  * status. Drives last-run stats on the Workflows import card.
