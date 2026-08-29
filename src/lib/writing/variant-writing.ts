@@ -37,6 +37,8 @@ type PersistInput = {
   metadata?: Record<string, unknown>;
 };
 
+const PUBLISH_LANE_STATUSES = new Set(["queued", "publishing", "published", "scheduled"]);
+
 function object(value: unknown): Record<string, unknown> {
   if (typeof value === "string") { try { return object(JSON.parse(value)); } catch { return {}; } }
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -113,6 +115,7 @@ function approvalFor(input: {
       riskTier,
       policy: input.launch.approvalPolicy,
       auditId: input.audit?.id,
+      at: input.now,
       revokedReason: "audit_stale",
     };
   }
@@ -191,6 +194,27 @@ export function persistWritingVariant(input: PersistInput): { variant: Variant; 
   if (!existing && !input.id) existing = findByRequestHash(input.launchId, generationResult.data.requestHash);
   if (input.id && !existing) throw new AgentToolError("NOT_FOUND", `Variant not found: ${input.id}`);
   if (existing && existing.launchId !== input.launchId) fail("Variant launch cannot change", "variant_launch_mismatch", ["launchId"]);
+  if (existing) {
+    const materializedEdge = existing.contentItemId
+      ? undefined
+      : db.select().from(graphEdges).where(and(
+          eq(graphEdges.srcType, "variant"),
+          eq(graphEdges.srcId, existing.id),
+          eq(graphEdges.dstType, "content"),
+          eq(graphEdges.edgeType, "materialized_as"),
+        )).get();
+    const contentItemId = existing.contentItemId ?? materializedEdge?.dstId;
+    const item = contentItemId
+      ? db.select().from(contentItems).where(eq(contentItems.id, contentItemId)).get()
+      : undefined;
+    if (item && PUBLISH_LANE_STATUSES.has(item.status)) {
+      throw new AgentToolError("CONFLICT", `Cannot revise a variant linked to a ${item.status} content item`, {
+        reason: "variant_locked",
+        contentItemId: item.id,
+        status: item.status,
+      });
+    }
+  }
   const variantId = existing?.id ?? nanoid();
   const { spine, targetKind } = validateCrossDocuments({ variantId, body: input.body, writing: writingResult.data, generation: generationResult.data, launch: launchResult.data });
   const now = Math.floor(Date.now() / 1000);
@@ -262,8 +286,6 @@ export function persistWritingVariant(input: PersistInput): { variant: Variant; 
   return { variant: db.select().from(variants).where(eq(variants.id, variantId)).get()!, created, lineageEdges };
 }
 
-const PUBLISH_LANE_STATUSES = new Set(["queued", "publishing", "published", "scheduled"]);
-
 function revokeOne(
   variant: Variant,
   reason: ApprovalState["revokedReason"],
@@ -276,7 +298,17 @@ function revokeOne(
   const inLane = Boolean(item && PUBLISH_LANE_STATUSES.has(item.status));
   if (inLane && !allowPublishLaneStale) return { blocked: true };
   const now = Math.floor(Date.now() / 1000);
-  const writing = { ...parsed.data, approval: { ...parsed.data.approval, state: "revoked" as const, revokedReason: reason, ...(note ? { note } : {}) } };
+  const writing = {
+    ...parsed.data,
+    approval: {
+      ...parsed.data.approval,
+      state: "revoked" as const,
+      ...(reason === "user" ? { by: "user" as const } : {}),
+      at: now,
+      revokedReason: reason,
+      ...(note ? { note } : {}),
+    },
+  };
   db.update(variants).set({ metadata: JSON.stringify({ ...object(variant.metadata), writing }), ...(!inLane && variant.status === "selected" ? { status: "draft" as const } : {}), updatedAt: now }).where(eq(variants.id, variant.id)).run();
   if (!inLane && item?.status === "approved") db.update(contentItems).set({ status: "draft", updatedAt: now }).where(eq(contentItems.id, item.id)).run();
   if (item) {

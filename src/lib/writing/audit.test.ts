@@ -40,6 +40,31 @@ describe("writing audit derivation", () => {
     expect(deriveAuditVerdict(tooLong)).toBe("block");
   });
 
+  it("never voice-skips hard or claim blockers", () => {
+    for (const findingClass of ["hard", "claim"] as const) {
+      const blocked = audit();
+      blocked.findings.push({
+        code: `x/post/${findingClass}/blocked-test`,
+        class: findingClass,
+        severity: "blocker",
+        message: "blocked",
+        skippedForVoice: true,
+      });
+      expect(deriveAuditVerdict(blocked)).toBe("block");
+      expect(validateAuditFindingSemantics(blocked)).toBe("audit_voice_skip_class");
+    }
+  });
+
+  it("warns for known missing and non-verbatim altered claims", () => {
+    const missing = audit();
+    missing.claims.missing.push("clm_claim01");
+    expect(deriveAuditVerdict(missing)).toBe("warn");
+
+    const altered = audit();
+    altered.claims.altered.push("clm_claim01");
+    expect(deriveAuditVerdict(altered)).toBe("warn");
+  });
+
   it("forbids blocker severity on heuristic findings", () => {
     const invalid = audit();
     invalid.findings.push({ code: "x/post/heuristic/hook-test", class: "heuristic", severity: "blocker", message: "hook" });

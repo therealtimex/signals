@@ -276,12 +276,13 @@ export function deleteContentItem(id: string): boolean {
       throw new ContentItemLinkedError("Cannot delete content linked to a variant in the publish lane");
     }
     db.transaction(() => {
+      const now = Math.floor(Date.now() / 1000);
       const projection = readVariantWritingProjection(linked);
       const root = (() => { try { return JSON.parse(linked.metadata ?? "{}"); } catch { return {}; } })();
       const writing = projection
-        ? { ...root.writing, approval: { ...root.writing.approval, state: "revoked", revokedReason: "user" }, materializedContentItemId: undefined }
+        ? { ...root.writing, approval: { ...root.writing.approval, state: "revoked", by: "user", at: now, revokedReason: "user" }, materializedContentItemId: undefined }
         : undefined;
-      db.update(variants).set({ contentItemId: null, ...(linked.status === "selected" ? { status: "draft" as const } : {}), ...(writing ? { metadata: JSON.stringify({ ...root, writing }) } : {}), updatedAt: Math.floor(Date.now() / 1000) }).where(eq(variants.id, linked.id)).run();
+      db.update(variants).set({ contentItemId: null, ...(linked.status === "selected" ? { status: "draft" as const } : {}), ...(writing ? { metadata: JSON.stringify({ ...root, writing }) } : {}), updatedAt: now }).where(eq(variants.id, linked.id)).run();
       db.delete(graphEdges).where(and(eq(graphEdges.srcType, "variant"), eq(graphEdges.srcId, linked.id), eq(graphEdges.dstType, "content"), eq(graphEdges.dstId, id), eq(graphEdges.edgeType, "materialized_as"))).run();
       db.delete(contentItems).where(eq(contentItems.id, id)).run();
     });

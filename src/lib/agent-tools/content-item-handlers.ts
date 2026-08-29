@@ -567,6 +567,7 @@ function projectLaunchWriting(
   writing: Record<string, unknown> | null,
   sourceViews: ReturnType<typeof sourceView>[],
   includeSources: boolean,
+  launchScope: string,
 ): Record<string, unknown> | null {
   if (!writing) return null;
   const surfaces = parseArray(writing.surfaces).flatMap((entry) => {
@@ -608,19 +609,20 @@ function projectLaunchWriting(
       : {}),
     runs,
     ...(includeSources ? { sources: sourceViews } : {}),
-    ...(projectSpine(writing.spine, sourceViews, includeSources)
-      ? { spine: projectSpine(writing.spine, sourceViews, includeSources) }
+    ...(projectSpine(writing.spine, includeSources, launchScope)
+      ? { spine: projectSpine(writing.spine, includeSources, launchScope) }
       : {}),
   };
 }
 
 function projectSpine(
   value: unknown,
-  sourceViews: ReturnType<typeof sourceView>[],
   includeSources: boolean,
+  launchScope: string,
 ) {
   const spine = parseObject(value);
   if (!spine.id || !spine.hash) return null;
+  const sourceViews = parseArray(spine.sources).map((source) => sourceView(source, launchScope));
   const redacted = new Set(
     sourceViews.filter((source) => "redacted" in source && source.redacted).map((source) => source.id),
   );
@@ -748,7 +750,7 @@ export async function handleGetWritingContext(
   const briefApproved = briefSensitivity.contextApproval === true;
   const briefRedacted = briefSensitivity.level === "private" && !briefApproved;
   const sourceViews = sources.map((source) => sourceView(source, launch.scope));
-  const writingView = projectLaunchWriting(writing, sourceViews, input.includeSources);
+  const writingView = projectLaunchWriting(writing, sourceViews, input.includeSources, launch.scope);
   const voice = resolveContextVoice(writing);
 
   return {

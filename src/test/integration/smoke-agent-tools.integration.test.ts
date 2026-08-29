@@ -1,5 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { smokeFetch, smokeJson } from "./http-client";
+
+const createdContactIds: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(createdContactIds.splice(0).map((id) => smokeFetch(`/api/contacts/${id}`, {
+    method: "DELETE",
+  })));
+});
 
 describe("smoke: agent tools API", () => {
   it("manifest lists tools", async () => {
@@ -112,6 +120,7 @@ describe("smoke: agent tools API", () => {
     });
 
     const contactId = created.result.id as string;
+    createdContactIds.push(contactId);
 
     const enrich = await smokeFetch("/api/agent-tools/invoke", {
       method: "POST",

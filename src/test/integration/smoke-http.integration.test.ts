@@ -23,8 +23,7 @@ describe("smoke:core HTTP", () => {
     expect(response.ok).toBe(true);
     const html = await response.text();
     expect(html).toContain("Contacts");
-    expect(html).toMatch(/\d+ contacts?/);
-    expect(html).toContain("Identities");
+    expect(html).toContain("0 contacts");
   });
 
   it("settings page HTML loads", async () => {

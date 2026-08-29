@@ -1,4 +1,6 @@
 import { readFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { resolve } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import { resetCoreTables } from "@/test/db";
 import { __voiceStoreTestHooks, approveVoiceProfile, getVoiceProfile, listVoiceProfiles, upsertVoiceProfile } from "@/lib/writing/voice-profile-store";
@@ -29,6 +31,25 @@ function profile(samples = 3, id = "vp_profile1") {
 }
 
 const evidence = { kind: "api" as const, caller: "voice-test" };
+
+function runVoiceChild(operation: Record<string, unknown>): Promise<{ code: number | null; stdout: string; stderr: string }> {
+  const runner = resolve(process.cwd(), "node_modules/vite-node/vite-node.mjs");
+  const config = resolve(process.cwd(), "vitest.config.ts");
+  const script = resolve(process.cwd(), "src/test/voice-profile-store-child.ts");
+  return new Promise((resolveChild, reject) => {
+    const child = spawn(process.execPath, [runner, "--config", config, script, JSON.stringify(operation)], {
+      cwd: process.cwd(),
+      env: process.env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => { stdout += String(chunk); });
+    child.stderr.on("data", (chunk) => { stderr += String(chunk); });
+    child.on("error", reject);
+    child.on("close", (code) => resolveChild({ code, stdout, stderr }));
+  });
+}
 
 describe("voice profile store", () => {
   beforeEach(() => resetCoreTables());
@@ -78,6 +99,29 @@ describe("voice profile store", () => {
     expect(listVoiceProfiles().map((entry) => entry.version).sort()).toEqual([1, 2, 3]);
   });
 
+  it("serializes coalescing and independent registrations across processes", async () => {
+    const [sameA, sameB, independent] = await Promise.all([
+      runVoiceChild({ mode: "upsert", profile: profile(3, "vp_profile1") }),
+      runVoiceChild({ mode: "upsert", profile: profile(3, "vp_profile1") }),
+      runVoiceChild({ mode: "upsert", profile: profile(3, "vp_profile2") }),
+    ]);
+    for (const result of [sameA, sameB, independent]) {
+      expect(result, result.stderr).toMatchObject({ code: 0 });
+    }
+    expect(listVoiceProfiles().map((entry) => `${entry.id}:${entry.version}`).sort()).toEqual([
+      "vp_profile1:1",
+      "vp_profile2:1",
+    ]);
+
+    const [revisionA, revisionB] = await Promise.all([
+      runVoiceChild({ mode: "upsert", profile: { ...profile(), brand: { notes: "A" } } }),
+      runVoiceChild({ mode: "upsert", profile: { ...profile(), brand: { notes: "B" } } }),
+    ]);
+    expect(revisionA, revisionA.stderr).toMatchObject({ code: 0 });
+    expect(revisionB, revisionB.stderr).toMatchObject({ code: 0 });
+    expect(listVoiceProfiles().filter((entry) => entry.id === "vp_profile1").map((entry) => entry.version).sort()).toEqual([1, 2, 3]);
+  });
+
   it("coalesces against any immutable version, not only the latest", async () => {
     const first = await upsertVoiceProfile(profile());
     await upsertVoiceProfile({ ...profile(), brand: { notes: "revision" } });
@@ -102,6 +146,17 @@ describe("voice profile store", () => {
     const recovered = await upsertVoiceProfile(revision);
     expect(recovered).toMatchObject({ created: true, profile: { version: 2 } });
     expect(readFileSync(orphanPath)).toEqual(bytes);
+  });
+
+  it("recovers a stale cross-process lock and matching orphan after process death", async () => {
+    await upsertVoiceProfile(profile());
+    const revision = { ...profile(), brand: { notes: "cross-process orphan" } };
+    const crashed = await runVoiceChild({ mode: "crash_after_install", profile: revision });
+    expect(crashed.code, crashed.stderr).toBe(86);
+
+    const recovered = await upsertVoiceProfile(revision);
+    expect(recovered).toMatchObject({ created: true, profile: { version: 2 } });
+    expect(listVoiceProfiles().map((entry) => entry.version).sort()).toEqual([1, 2]);
   });
 
   it("ignores attempted lifecycle and source-hash injection", async () => {

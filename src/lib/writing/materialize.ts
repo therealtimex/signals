@@ -32,10 +32,10 @@ function effectiveApproval(input: {
   call?: MaterializeApproval;
   now: number;
 }): ApprovalState {
+  if (input.stored.state === "approved" && input.stored.auditId === input.auditId && input.stored.at && input.stored.by) return input.stored;
   if (input.call) {
     return { ...input.stored, state: "approved", auditId: input.auditId, by: "user", at: input.now, evidence: input.call.evidence, ...(input.call.note ? { note: input.call.note } : {}) };
   }
-  if (input.stored.state === "approved" && input.stored.auditId === input.auditId && input.stored.at && input.stored.by) return input.stored;
   throw new AgentToolError("APPROVAL_REQUIRED", "Current user approval is required");
 }
 

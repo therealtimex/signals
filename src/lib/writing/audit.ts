@@ -1,20 +1,27 @@
 import type { ApprovalState, EvidenceSpine, VariantWriting, WritingAudit } from "@/lib/writing/contracts";
 
 const blockerClasses = new Set(["hard", "claim"]);
+const voiceSkippableClasses = new Set(["voice", "heuristic", "aesthetic"]);
+
+function applies(finding: WritingAudit["findings"][number]): boolean {
+  return !finding.skippedForVoice || !voiceSkippableClasses.has(finding.class);
+}
 
 export function deriveAuditVerdict(
   audit: Pick<WritingAudit, "findings" | "claims"> & Partial<Pick<WritingAudit, "hard" | "voice">>,
   spine?: EvidenceSpine,
 ): WritingAudit["verdict"] {
   const claimById = new Map(spine?.claims.map((claim) => [claim.id, claim]));
-  const blocker = audit.findings.some((finding) => finding.severity === "blocker" && !finding.skippedForVoice) ||
+  const blocker = audit.findings.some((finding) => finding.severity === "blocker" && applies(finding)) ||
     audit.claims.invented.length > 0 ||
     audit.claims.altered.some((id) => claimById.get(id)?.verbatimRequired) ||
     audit.claims.privateIncluded.some((id) => claimById.get(id)?.includeInOutput === false) ||
     Boolean(audit.hard?.chars.some((chars) => chars > audit.hard!.limit));
   if (blocker) return "block";
   return audit.voice?.status === "rules_first" ||
-    audit.findings.some((finding) => finding.severity === "warning" && !finding.skippedForVoice)
+    audit.findings.some((finding) => finding.severity === "warning" && applies(finding)) ||
+    audit.claims.missing.length > 0 ||
+    audit.claims.altered.length > 0
     ? "warn"
     : "pass";
 }
@@ -25,6 +32,7 @@ export function validateAuditFindingSemantics(audit: WritingAudit): string | nul
     const encodedClass = segments.at(-2);
     if (encodedClass !== finding.class) return "audit_severity_class";
     if (finding.severity === "blocker" && !blockerClasses.has(finding.class)) return "audit_severity_class";
+    if (finding.skippedForVoice && blockerClasses.has(finding.class)) return "audit_voice_skip_class";
   }
   return null;
 }
