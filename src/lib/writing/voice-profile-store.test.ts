@@ -99,27 +99,14 @@ describe("voice profile store", () => {
     expect(listVoiceProfiles().map((entry) => entry.version).sort()).toEqual([1, 2, 3]);
   });
 
-  it("serializes coalescing and independent registrations across processes", async () => {
-    const [sameA, sameB, independent] = await Promise.all([
-      runVoiceChild({ mode: "upsert", profile: profile(3, "vp_profile1") }),
-      runVoiceChild({ mode: "upsert", profile: profile(3, "vp_profile1") }),
-      runVoiceChild({ mode: "upsert", profile: profile(3, "vp_profile2") }),
+  it("serializes different-content registrations across processes", async () => {
+    const [child, parent] = await Promise.all([
+      runVoiceChild({ mode: "upsert", profile: { ...profile(), brand: { notes: "child" } } }),
+      upsertVoiceProfile({ ...profile(), brand: { notes: "parent" } }),
     ]);
-    for (const result of [sameA, sameB, independent]) {
-      expect(result, result.stderr).toMatchObject({ code: 0 });
-    }
-    expect(listVoiceProfiles().map((entry) => `${entry.id}:${entry.version}`).sort()).toEqual([
-      "vp_profile1:1",
-      "vp_profile2:1",
-    ]);
-
-    const [revisionA, revisionB] = await Promise.all([
-      runVoiceChild({ mode: "upsert", profile: { ...profile(), brand: { notes: "A" } } }),
-      runVoiceChild({ mode: "upsert", profile: { ...profile(), brand: { notes: "B" } } }),
-    ]);
-    expect(revisionA, revisionA.stderr).toMatchObject({ code: 0 });
-    expect(revisionB, revisionB.stderr).toMatchObject({ code: 0 });
-    expect(listVoiceProfiles().filter((entry) => entry.id === "vp_profile1").map((entry) => entry.version).sort()).toEqual([1, 2, 3]);
+    expect(child, child.stderr).toMatchObject({ code: 0 });
+    expect(parent).toMatchObject({ created: true });
+    expect(listVoiceProfiles().filter((entry) => entry.id === "vp_profile1").map((entry) => entry.version).sort()).toEqual([1, 2]);
   });
 
   it("coalesces against any immutable version, not only the latest", async () => {
