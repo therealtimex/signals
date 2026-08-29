@@ -123,8 +123,10 @@ export async function releaseAgentLaneResources(
 }
 
 export type ScheduledTerminalSessionRelease = {
-  scheduled: true;
+  scheduled: boolean;
   sessionId: string | null;
+  /** Workflow completion keeps the PTY attached instead of scheduling terminate. */
+  retained?: boolean;
 };
 
 export function scheduleTerminalSessionRelease(
@@ -181,22 +183,15 @@ export function scheduleTerminalSessionRelease(
   return { scheduled: true, sessionId };
 }
 
-/** Workflow completion: long idle wait, resumable close, never kill a busy turn. */
+/**
+ * Workflow completion releases browser RAM only. The chat-linked terminal stays
+ * attached so operators can review output and resume; RTX idle policy reclaims PTY later.
+ */
 export function scheduleWorkflowTerminalSessionRelease(
-  terminalSessionId: string | null | undefined,
-  env: EnvLike = process.env,
-  fetchImpl: typeof fetch = fetch
+  terminalSessionId: string | null | undefined
 ): ScheduledTerminalSessionRelease {
-  return scheduleTerminalSessionRelease(
-    terminalSessionId,
-    {
-      reason: RESUMABLE_TERMINAL_RELEASE_REASON,
-      skipTerminateIfBusy: true,
-      extraIdleWaitDelaysMs: [...WORKFLOW_TERMINAL_RELEASE_EXTRA_IDLE_WAIT_MS],
-    },
-    env,
-    fetchImpl
-  );
+  const sessionId = terminalSessionId?.trim() || null;
+  return { scheduled: false, sessionId, retained: Boolean(sessionId) };
 }
 
 export function formatDeferredTerminalTeardownNote(input: {
@@ -205,7 +200,9 @@ export function formatDeferredTerminalTeardownNote(input: {
 }): string {
   const parts: string[] = [];
 
-  if (input.terminal.sessionId) {
+  if (input.terminal.retained) {
+    parts.push("Terminal session retained for review/resume.");
+  } else if (input.terminal.scheduled && input.terminal.sessionId) {
     parts.push("Terminal session release scheduled.");
   }
 

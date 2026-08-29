@@ -1,7 +1,7 @@
 /** Shared teardown copy for workflow and orchestrator agent briefs. */
 
 export const WORKFLOW_TERMINAL_TEARDOWN_AFTER_COMPLETE =
-  "Call complete_workflow_run when finished. Signals stops running browser sessions immediately and schedules release of this workflow's linked terminal session after the chat-linked turn finishes — do not continue working in this thread after completion.";
+  "Call complete_workflow_run when finished. Signals stops running browser sessions immediately and keeps the linked terminal session attached for review/resume — do not continue working in this thread after completion.";
 
 export const ORCHESTRATOR_TERMINAL_TEARDOWN_AFTER_DISPATCH =
   "After a successful dispatch_follow_on_workflow call, Signals automatically schedules release of this orchestrator terminal session. If you finish without dispatching, stop browser sessions and terminate this terminal session with realtimex-pp-cli.";

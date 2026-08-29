@@ -6,7 +6,6 @@ import {
   scheduleTerminalSessionRelease,
   scheduleWorkflowTerminalSessionRelease,
   stopRunningRtxBrowserSessions,
-  WORKFLOW_TERMINAL_RELEASE_EXTRA_IDLE_WAIT_MS,
 } from "@/lib/rtx/resource-teardown";
 import * as browserSessions from "@/lib/rtx/browser-sessions";
 import * as runtimeSessions from "@/lib/rtx/runtime-sessions";
@@ -144,25 +143,16 @@ describe("scheduleTerminalSessionRelease", () => {
     vi.useRealTimers();
   });
 
-  it("uses extended idle wait for workflow completion scheduling", async () => {
-    vi.useFakeTimers();
-    const waitSpy = vi
-      .spyOn(runtimeSessions, "waitForTerminalSessionIdle")
-      .mockResolvedValue({ idle: true });
-    vi.spyOn(runtimeSessions, "terminateTerminalRuntimeSession").mockResolvedValue({
-      success: true,
-      terminated: true,
+  it("uses extended idle wait for workflow completion scheduling", () => {
+    expect(scheduleWorkflowTerminalSessionRelease("cli-agent:session-1")).toEqual({
+      scheduled: false,
+      sessionId: "cli-agent:session-1",
+      retained: true,
     });
-
-    scheduleWorkflowTerminalSessionRelease("cli-agent:session-1");
-    await Promise.resolve();
-    await vi.runAllTimersAsync();
-
-    expect(waitSpy).toHaveBeenCalledWith("cli-agent:session-1", {
-      env: process.env,
-      fetchImpl: fetch,
-      retryDelaysMs: expect.arrayContaining([...WORKFLOW_TERMINAL_RELEASE_EXTRA_IDLE_WAIT_MS]),
+    expect(scheduleWorkflowTerminalSessionRelease(null)).toEqual({
+      scheduled: false,
+      sessionId: null,
+      retained: false,
     });
-    vi.useRealTimers();
   });
 });

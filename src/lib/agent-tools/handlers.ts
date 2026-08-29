@@ -1048,7 +1048,13 @@ export async function handleCompleteWorkflowRun(input: z.infer<typeof completeWo
     cascadeResult: eventResult.cascadeResult,
     routingRecommendation: eventResult.routingRecommendation,
     terminalSessionTeardown: terminalSessionTeardown.sessionId
-      ? { scheduled: true, sessionId: terminalSessionTeardown.sessionId }
+      ? terminalSessionTeardown.retained
+        ? {
+            scheduled: false,
+            sessionId: terminalSessionTeardown.sessionId,
+            retained: true,
+          }
+        : { scheduled: true, sessionId: terminalSessionTeardown.sessionId }
       : { scheduled: false },
     browserSessionTeardown,
     message: `Workflow run ${input.runId} marked as ${input.status}. Follow-on cascades and webhook dispatch completed.${teardownNote}`,
