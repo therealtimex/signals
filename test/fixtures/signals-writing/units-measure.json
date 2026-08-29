@@ -1,0 +1,1 @@
+{"surface":"x/thread","texts":["One #Signal https://example.com","Two 👋"],"media":{"assetIds":["asset_fixture"]},"expected":{"chars":[31,6],"hashtags":1,"links":1,"mediaCount":1,"limit":280}}
