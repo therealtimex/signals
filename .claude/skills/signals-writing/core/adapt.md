@@ -8,14 +8,16 @@ or the original is locked by the publish lane.
 
 - **Revise in place:** same variant `id`, request hash, generation metadata, surface, and lineage.
   Rewrite units, remeasure, reaudit, and upsert. Signals revokes stale approval automatically.
-- **Keep an alternative:** generate a new `vs_` ID, increment the deterministic request-hash
-  counter, set mode `revise` or `humanize`, and record `lineage.derivedFromVariantId`.
-- **Adapt a variant:** create a new variant for the requested surface with mode `adapt`,
-  `derivedFromVariantId`, and source IDs from the shared spine.
+- **Keep an alternative:** omit the top-level variant `id` so Signals allocates it, increment the
+  deterministic request-hash counter, set mode `revise` or `humanize`, and record
+  `lineage.derivedFromVariantId`.
+- **Adapt a variant:** omit the top-level variant `id`; use mode `adapt`, the appropriate
+  `derivedFromVariantId` or adaptation origin, and source IDs from the shared spine.
 - **Adapt a published winner:** set `adaptedFromContentItemId` and, when known,
-  `adaptedFromVariantId`. Query lineage rather than inferring ancestry from body similarity.
+  `adaptedFromVariantId`. Read persisted metadata and real `query_graph` edges rather than
+  inferring ancestry from body similarity.
 - **Locked conflict:** when Signals returns `variant_locked`, preserve the linked variant and create
-  a derived alternative. Never edit the queued/publishing/published artifact.
+  a derived alternative without an `id`. Never edit the queued/publishing/published artifact.
 
 ## Adaptation sequence
 
@@ -36,6 +38,7 @@ or the original is locked by the publish lane.
   metadata unchanged. `generationMetadata` describes creation provenance, not edit history.
 - A derived variant uses mode `revise`, `humanize`, or `adapt` and a request hash of
   `wr1:<runId>:<surface>:<mode>:<n>` where `n` advances only for new alternatives.
+- A derived create omits the top-level variant `id`; only in-place revision sends the stored ID.
 - Revisions never reuse an old audit ID/input hash. Those fields remain server-owned.
 - `body` stays equal to ordered unit 0; thread continuations remain explicit units.
 - The claim map still covers every spine claim and `missing` still means absent proof claims.

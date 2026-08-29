@@ -43,9 +43,9 @@ approved content item and the user separately asks to publish.
 | `voice build` / `voice approve` | `core/voice.md` | `get_writing_context`, `query_content`, `get_content`, `list_voice_profiles`, `get_voice_profile`, `upsert_voice_profile`, `approve_voice_profile` |
 | `spine` | `core/claims.md`, `core/lineage.md` | `get_writing_context`, `get_content`, `upsert_launch` |
 | `draft` | `core/claims.md`, `core/voice.md`, `core/audit.md`, one platform overlay | `upsert_variant` |
-| `adapt` / `revise` / `humanize` | draft loads plus `core/adapt.md` | `upsert_variant` |
+| `adapt` / `revise` / `humanize` | draft loads plus `core/adapt.md` | `get_content`, `query_graph`, `upsert_variant` |
 | `audit` | `core/audit.md`, one platform overlay | `upsert_variant` |
-| `approve` / `export` / `publish` | `core/approval.md`, `core/lineage.md` | `materialize_variant`, `revoke_variant_approval`, REST `send-to-agent` |
+| `approve` / `export` / `publish` | `core/approval.md`, `core/lineage.md` | `get_content`, `query_graph`, `materialize_variant`, `revoke_variant_approval`, REST `send-to-agent` |
 
 Load only `.claude/skills/signals-writing/overlays/x.md`, `linkedin.md`, or `facebook.md` for the
 requested supported surface. Use `.claude/skills/signals-writing/reference.md` for exact payloads.

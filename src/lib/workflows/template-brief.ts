@@ -40,6 +40,7 @@ const TOOLS_BY_TYPE: Record<string, string[]> = {
   content: [
     "query_content",
     "get_content",
+    "query_graph",
     "get_writing_context",
     "list_voice_profiles",
     "get_voice_profile",

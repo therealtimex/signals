@@ -299,9 +299,18 @@ if (!publishSkillMd.includes("skills/signals-publish/scripts/x-publish.cjs")) {
 const writingMarkdownEntries = entries.filter(
   (entry) => entry.startsWith("skills/signals-writing/") && entry.endsWith(".md"),
 );
+const writingMarkdown = new Map();
 for (const entry of writingMarkdownEntries) {
   const markdown = execSync(`unzip -p "${zipPath}" "${entry}"`, { encoding: "utf8" });
+  writingMarkdown.set(entry, markdown);
   if (markdown.includes(".claude/skills/")) errors.push(`${entry} still references .claude/skills paths`);
+}
+const bundledAdapt = writingMarkdown.get("skills/signals-writing/core/adapt.md") ?? "";
+if (/\b(?:variant|alternative)\b[\s\S]{0,160}`vs_`|`vs_`[\s\S]{0,160}\b(?:variant|alternative)\b/i.test(bundledAdapt)) {
+  errors.push("Packaged adaptation guidance assigns voice-sample vs_ IDs to variants");
+}
+if (!bundledAdapt.includes("omit the top-level variant `id`")) {
+  errors.push("Packaged adaptation guidance does not require server-allocated variant IDs");
 }
 if (entries.some((entry) => entry === "docs-dev" || entry.startsWith("docs-dev/"))) {
   errors.push("Plugin zip contains docs-dev reference corpus files");

@@ -32,8 +32,10 @@ the inner spine/audit/units object. The helper reads only files named on its com
    files without inventing hashes.
 6. For each supported surface, produce distinct units from the spine, measure, audit, precheck, and
    call `upsert_variant` with the same launch/spine pin.
-7. Read the persisted variant, audit, approval, capability, and lineage edges; render its card.
-8. Materialize only the selected approved variant. Query lineage to verify the content/variant link.
+7. Read the persisted variant, audit, approval, capability, and returned `lineageEdges`; render its
+   card.
+8. Materialize only the selected approved variant. Verify the returned content item through
+   `get_content`; use `query_graph` from the variant ID when a graph-edge check is needed.
 9. On explicit publish instruction, hand the content item to the REST route; completion is owned by
    the publish job and `signals-publish` callback.
 10. Complete the workflow run with every created ID and any blocker/missing surface.
@@ -45,9 +47,9 @@ a run/surface/mode and reuse it on retries and in-place revisions. Increment onl
 new derived alternative.
 
 When revising in place, send the stored variant ID and original generation metadata. When creating
-an alternative, generate a new variant ID and record `derivedFromVariantId` or adaptation lineage.
-Materialization itself is idempotent: unchanged calls return the same content item; an approved
-unqueued revision refreshes it in place.
+an alternative, omit the top-level variant `id` so Signals allocates it, and record
+`derivedFromVariantId` or adaptation lineage. Materialization itself is idempotent: unchanged calls
+return the same content item; an approved unqueued revision refreshes it in place.
 
 ## Complete launch writing shape
 
@@ -76,11 +78,17 @@ never assume another workflow component recorded run start.
 - `derivedFromVariantId`: prior variant retained as an ancestor for alternative/revision lineage.
 - `adaptedFromVariantId`: a variant whose message was intentionally repurposed.
 - `adaptedFromContentItemId`: a published/materialized content item used as adaptation evidence.
-- Server edges connect launch → variant, variant → source, variant → materialized content, and
-  published content outcomes. Do not manufacture owned graph edges through generic edge tools.
+- Launch membership is the persisted `variant.launchId` relation, not a graph edge.
+- `sourceIds` retains every used source snapshot in writing metadata; only a `content_item` source
+  produces a `sourced_from` graph edge. URL, file, and note sources remain in spine/metadata.
+- Server-owned graph edges cover variant ancestors (`derived_from` / `adapted_from`), eligible
+  content-item sources, materialized content (`materialized_as`), and published outcomes
+  (`published_as`). Do not manufacture these edges through generic edge tools.
 
-For verification, prefer `query_lineage`/content APIs and persisted IDs over body similarity or UI
-labels. A body match is not lineage.
+For verification, use persisted `variant.launchId`, `lineage.sourceIds`, the `lineageEdges` returned
+by `upsert_variant`, and content API results. Call `query_graph` with `nodeType: "variant"`, the
+persisted variant ID, the expected real edge types, and `includeLocalOnly: true` when graph evidence
+is needed. Never expect a graph edge for a URL, file, or note source. A body match is not lineage.
 
 ## Retry discipline
 

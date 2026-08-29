@@ -8,6 +8,7 @@ import { db } from "@/lib/db/client";
 import { browserConnections, contentItems, platformTargets, variants } from "@/lib/db/schema";
 import { getLaunchById } from "@/lib/db/queries/launches";
 import { invokeAgentTool } from "@/lib/agent-tools/invoke";
+import { AGENT_TOOLS } from "@/lib/agent-tools/registry";
 import { approveVoiceProfileSchema, materializeVariantSchema } from "@/lib/agent-tools/writing-handlers";
 import { sendToAgentSchema } from "@/app/api/content/send-to-agent/route";
 import { deriveAuditVerdict, validateAuditFindingSemantics } from "@/lib/writing/audit";
@@ -42,18 +43,19 @@ const json = <T = Record<string, unknown>>(name: string): T => JSON.parse(fs.rea
 const example = (name: string) => extractTaggedBlocks(fs.readFileSync(path.join(skillDir, "reference.md"), "utf8"), `signals-writing:example:${name}`, "reference.md")[0];
 
 type VariantFixture = { platform: "x" | "linkedin" | "facebook"; surface: "x/post" | "x/thread" | "linkedin/post" | "facebook/post"; targetId: string; formulaId: string; texts: string[] };
+type VariantDerivation = { mode: "revise" | "humanize" | "adapt"; requestHash: string; derivedFromVariantId: string };
 
-function variantInput(fixture: VariantFixture, spine = json("spine.json")) {
+function variantInput(fixture: VariantFixture, spine = json("spine.json"), derivation?: VariantDerivation) {
   const units = buildWritingUnits(fixture.texts);
   const hard = helper.measure(fixture.surface, { texts: fixture.texts }).hard;
   return {
     launchId: (spine as { launchId: string }).launchId,
     body: fixture.texts[0],
     generationMetadata: {
-      schemaVersion: 1, kind: "signals-writing", mode: "draft", model: "fixture-model",
+      schemaVersion: 1, kind: "signals-writing", mode: derivation?.mode ?? "draft", model: "fixture-model",
       skill: { name: "signals-writing", version: "1.0.0" },
       agent: { workflowRunId: "run_fixture" },
-      requestHash: `wr1:run_fixture:${fixture.surface}:draft:1`, generatedAt: 1_750_000_001,
+      requestHash: derivation?.requestHash ?? `wr1:run_fixture:${fixture.surface}:draft:1`, generatedAt: 1_750_000_001,
     },
     metadata: { writing: {
       schemaVersion: 1, platform: fixture.platform, surface: fixture.surface, targetId: fixture.targetId,
@@ -61,7 +63,10 @@ function variantInput(fixture: VariantFixture, spine = json("spine.json")) {
       core: { version: 1 }, voiceProfile: null, voicePrecedence: "voice_first",
       spine: { id: (spine as { id: string }).id, hash: (spine as { hash: string }).hash }, units,
       claimMap: [{ claimId: "clm_fixture01", present: true, unit: 0, verbatim: false }],
-      lineage: { sourceIds: ["src_fixture01"] },
+      lineage: {
+        sourceIds: ["src_fixture01"],
+        ...(derivation ? { derivedFromVariantId: derivation.derivedFromVariantId } : {}),
+      },
       audit: {
         schemaVersion: 1, auditedAt: 1_750_000_001,
         auditor: { kind: "agent", skillVersion: "1.0.0", workflowRunId: "run_fixture" },
@@ -112,6 +117,34 @@ describe("signals-writing skill package", () => {
     expect(materializeVariantSchema.safeParse(example("materialize-input")).success).toBe(true);
     expect(approveVoiceProfileSchema.safeParse(example("approve-voice-input")).success).toBe(true);
     expect(sendToAgentSchema.safeParse(example("send-to-agent-body")).success).toBe(true);
+  });
+
+  it("names only registered agent tools in operational prose", () => {
+    const markdownFiles = [
+      "SKILL.md", "reference.md",
+      "core/claims.md", "core/voice.md", "core/audit.md", "core/adapt.md", "core/approval.md", "core/lineage.md",
+      "overlays/README.md", "overlays/x.md", "overlays/linkedin.md", "overlays/facebook.md",
+    ];
+    const nonToolTokens = new Set([
+      "adapted_from", "auto_low_risk", "content_item", "derived_from", "materialized_as", "pinned_superseded",
+      "published_as", "rules_first", "sourced_from", "variant_locked", "voice_first",
+    ]);
+    const mentioned = new Set<string>();
+    const unsupported: string[] = [];
+    for (const relative of markdownFiles) {
+      const text = fs.readFileSync(path.join(skillDir, relative), "utf8");
+      const operational = relative === "SKILL.md"
+        ? text.replace(/## Never do[\s\S]*?(?=\n## |$)/, "")
+        : text;
+      for (const match of operational.matchAll(/`([a-z][a-z0-9]*(?:_[a-z0-9]+)+)`/g)) {
+        const token = match[1];
+        mentioned.add(token);
+        if (!AGENT_TOOLS[token] && !nonToolTokens.has(token)) unsupported.push(`${relative}: ${token}`);
+      }
+    }
+    expect(mentioned).toContain("query_graph");
+    expect(AGENT_TOOLS.query_graph).toBeDefined();
+    expect(unsupported).toEqual([]);
   });
 
   it("matches server hard limits, measurements, and audit verdicts", () => {
@@ -190,6 +223,26 @@ describe("signals-writing fixture integration", () => {
       expect(rightLines.filter((line) => leftLines.has(line)).length / Math.max(leftLines.size, rightLines.length)).toBeLessThanOrEqual(0.5);
     }
     expect(getLaunchById(launch.id)?.status).toBe("ready");
+
+    const original = persisted[0];
+    const alternativeInput = variantInput(
+      { ...fixtures[0], texts: ["A second angle: Aster moved review time from 10 minutes to 6 minutes."] },
+      spine,
+      { mode: "revise", requestHash: "wr1:run_fixture:x/post:revise:2", derivedFromVariantId: original.id },
+    );
+    alternativeInput.launchId = launch.id;
+    expect(alternativeInput).not.toHaveProperty("id");
+    const alternative = await invokeAgentTool("upsert_variant", alternativeInput) as {
+      id: string;
+      created: boolean;
+      lineageEdges: { edgeType: string; srcType: string; srcId: string; dstType: string; dstId: string }[];
+    };
+    expect(alternative).toMatchObject({ created: true });
+    expect(alternative.id).not.toBe(original.id);
+    expect(alternative.lineageEdges).toEqual([{
+      edgeType: "derived_from", srcType: "variant", srcId: alternative.id,
+      dstType: "variant", dstId: original.id,
+    }]);
 
     const thread = persisted[1];
     const materialized = await invokeAgentTool("materialize_variant", { variantId: thread.id }) as { contentItemId: string; created: boolean };
