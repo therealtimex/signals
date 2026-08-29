@@ -623,9 +623,12 @@ function projectSpine(
   const spine = parseObject(value);
   if (!spine.id || !spine.hash) return null;
   const sourceViews = parseArray(spine.sources).map((source) => sourceView(source, launchScope));
-  const redacted = new Set(
-    sourceViews.filter((source) => "redacted" in source && source.redacted).map((source) => source.id),
-  );
+  const redacted = new Set<string>();
+  for (const source of sourceViews) {
+    if ("redacted" in source && source.redacted && typeof source.id === "string") {
+      redacted.add(source.id);
+    }
+  }
   const claims = parseArray(spine.claims).map((claim) => ({
     ...claim,
     ...(typeof claim.sourceId === "string" && redacted.has(claim.sourceId)
