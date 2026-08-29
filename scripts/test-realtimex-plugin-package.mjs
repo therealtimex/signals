@@ -42,6 +42,19 @@ const required = [
   "skills/realtimex-signals/scripts/run-signals-pp-cli.sh",
   "skills/signals-publish/SKILL.md",
   "skills/signals-publish/scripts/x-publish.cjs",
+  "skills/signals-writing/SKILL.md",
+  "skills/signals-writing/reference.md",
+  "skills/signals-writing/core/claims.md",
+  "skills/signals-writing/core/voice.md",
+  "skills/signals-writing/core/audit.md",
+  "skills/signals-writing/core/adapt.md",
+  "skills/signals-writing/core/approval.md",
+  "skills/signals-writing/core/lineage.md",
+  "skills/signals-writing/overlays/README.md",
+  "skills/signals-writing/overlays/x.md",
+  "skills/signals-writing/overlays/linkedin.md",
+  "skills/signals-writing/overlays/facebook.md",
+  "skills/signals-writing/scripts/writing-cli.cjs",
   "tools/signals-pp-cli/README.md",
   "flows/signals-crm-agent-task.agent-flow.json",
   "flows/signals-create-enrich-contact.agent-flow.json",
@@ -100,6 +113,14 @@ if (!manifest.capabilities?.workspace_provisions?.includes("signals")) {
 }
 if (!manifest.capabilities?.workspace_skills?.length) {
   errors.push("Missing workspace_skills");
+}
+const workspaceSkillNames = manifest.capabilities?.workspace_skills?.map((skill) => skill.key) ?? [];
+for (const name of ["realtimex-signals", "signals-writing", "signals-publish"]) {
+  if (!workspaceSkillNames.includes(name)) errors.push(`Missing workspace skill capability: ${name}`);
+}
+const provisionSkills = manifest.provisions?.workspaces?.find((workspace) => workspace.key === "signals")?.skills?.workspace?.include ?? [];
+for (const name of ["realtimex-signals", "signals-writing", "signals-publish"]) {
+  if (!provisionSkills.includes(name)) errors.push(`Missing provisioned workspace skill: ${name}`);
 }
 
 const provisionSlug = manifest.provisions?.workspaces?.find(
@@ -275,6 +296,17 @@ if (!publishSkillMd.includes("skills/signals-publish/scripts/x-publish.cjs")) {
   errors.push("signals-publish SKILL.md missing staged script path");
 }
 
+const writingMarkdownEntries = entries.filter(
+  (entry) => entry.startsWith("skills/signals-writing/") && entry.endsWith(".md"),
+);
+for (const entry of writingMarkdownEntries) {
+  const markdown = execSync(`unzip -p "${zipPath}" "${entry}"`, { encoding: "utf8" });
+  if (markdown.includes(".claude/skills/")) errors.push(`${entry} still references .claude/skills paths`);
+}
+if (entries.some((entry) => entry === "docs-dev" || entry.startsWith("docs-dev/"))) {
+  errors.push("Plugin zip contains docs-dev reference corpus files");
+}
+
 if (entries.some((e) => e.endsWith(".mjs") && !e.includes("node_modules"))) {
   errors.push("Plugin zip contains .mjs files outside node_modules (validator requires CommonJS skill scripts)");
 }
@@ -304,6 +336,16 @@ if (!fs.existsSync(sourcePublishPath)) {
       `Stale bundle: ${bundledPublishPath} sha256 ${zipHash} != source ${sourceHash} (rebuild plugin zip)`
     );
   }
+}
+
+const bundledWritingHelperPath = "skills/signals-writing/scripts/writing-cli.cjs";
+const sourceWritingHelperPath = path.join(root, ".claude/skills/signals-writing/scripts/writing-cli.cjs");
+if (!fs.existsSync(sourceWritingHelperPath)) {
+  errors.push(`Source missing for freshness check: ${sourceWritingHelperPath}`);
+} else {
+  const sourceHash = createHash("sha256").update(fs.readFileSync(sourceWritingHelperPath)).digest("hex");
+  const zipHash = createHash("sha256").update(execSync(`unzip -p "${zipPath}" ${bundledWritingHelperPath}`, { encoding: "buffer", maxBuffer: 16 * 1024 * 1024 })).digest("hex");
+  if (sourceHash !== zipHash) errors.push(`Stale bundle: ${bundledWritingHelperPath} sha256 ${zipHash} != source ${sourceHash} (rebuild plugin zip)`);
 }
 
 if (errors.length) {
