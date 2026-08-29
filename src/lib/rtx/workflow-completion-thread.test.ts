@@ -6,7 +6,7 @@ import {
 import * as runtimeSessions from "@/lib/rtx/runtime-sessions";
 import type { WorkflowRun } from "@/lib/db/types";
 
-const baseRun: WorkflowRun = {
+const baseRun = {
   id: "run_test",
   templateId: "tpl_test",
   workflowType: "enrich",
@@ -26,7 +26,7 @@ const baseRun: WorkflowRun = {
   errors: null,
   createdAt: 1,
   updatedAt: 1,
-};
+} as WorkflowRun;
 
 describe("formatWorkflowCompletionThreadMessage", () => {
   it("includes template name, run id, status, and summary", () => {
