@@ -2,7 +2,7 @@
   "id": "com.realtimex.signals",
   "name": "realtimex-signals",
   "displayName": "Signals",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "kind": "workspace-provision",
   "description": "Local-first social GTM and relationship CRM — workspace, agent skills, flows, and marketplace local app integration for Signals.",
   "author": {
@@ -25,6 +25,13 @@
         "displayName": "Signals Publish",
         "description": "Publish Signals content via RealTimeX Browser and agent-tools.",
         "directory": "skills/signals-publish"
+      },
+      {
+        "key": "signals-writing",
+        "name": "signals-writing",
+        "displayName": "Signals Writing",
+        "description": "Draft, audit, and approve platform-native content from Signals launches.",
+        "directory": "skills/signals-writing"
       }
     ]
   },
@@ -47,7 +54,7 @@
       "key": "SYSTEM_PROMPT",
       "label": "Terminal agent system prompt",
       "type": "text",
-      "default": "You operate Signals CRM through agent-tools and RealTimeX browser sessions. Persist research into Signals via enrich_contact and update_contact. Use realtimex-signals and signals-publish skills."
+      "default": "You operate Signals CRM through agent-tools and RealTimeX browser sessions. Persist research into Signals via enrich_contact and update_contact. Use realtimex-signals for CRM operations, signals-writing for evidence-grounded platform variants and approval, and signals-publish only after a separate explicit publish instruction."
     }
   ],
   "provisions": {
@@ -68,7 +75,7 @@
         },
         "skills": {
           "workspace": {
-            "include": ["realtimex-signals", "signals-publish"]
+            "include": ["realtimex-signals", "signals-writing", "signals-publish"]
           },
           "external": {
             "lock": true,

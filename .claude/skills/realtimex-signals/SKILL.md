@@ -87,6 +87,7 @@ From repo root you can also use `scripts/invoke-agent-tool.sh` with `SIGNALS_BAS
 - User wants CRM analytics, goals, tasks, or workflow status from Signals
 - After browser/LLM research in RTX — persist findings into Signals via `enrich_contact` / `update_contact`
 - Any open-ended Signals request in a chat-linked terminal agent thread
+- Drafting, adapting, humanizing, auditing, or approving platform-native content — also load the `signals-writing` skill
 
 ## When NOT to use
 
@@ -279,6 +280,7 @@ Ensure the Signals Local App is running (RTX **Settings → Local Apps**). See [
 ## Reference
 
 - Tool catalog and enums: [reference.md](./reference.md)
+- Platform-native writing contract: [signals-writing](../signals-writing/SKILL.md)
 - Full API docs: [`docs/agent-tools.md`](../../../docs/agent-tools.md)
 - Automation flows (secondary): [`flows/README.md`](../../../flows/README.md)
 

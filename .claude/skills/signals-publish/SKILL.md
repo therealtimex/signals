@@ -75,5 +75,6 @@ For QA without sending a public post, add `--dry-run` (fills compose fields, ski
 ## Related
 
 - CRM tools: `.claude/skills/realtimex-signals/SKILL.md`
+- Writing approval/materialization: `.claude/skills/signals-writing/SKILL.md` — approved items arrive with publish `text` and `threadTexts` derived from persisted ordered units
 - Selector table + verification invariants: `reference.md`
 - Spec: `specs/publish-via-terminal-agent.md`

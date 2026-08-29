@@ -43,6 +43,10 @@ describe("Signals Writing workflow contract", () => {
     expect(section).toContain("youtube/thumbnail_brief");
     expect(section).toContain("publish=export_only");
     expect(section).toContain("get_writing_context");
+    expect(section).toContain("query_graph");
+    expect(section).toContain("new derived alternatives omit id");
+    expect(section).toContain(".claude/skills/signals-writing/SKILL.md");
+    expect(section).toContain("scripts/writing-cli.cjs");
     expect(section).toContain("upsert_variant");
     expect(section).toContain("materialize_variant");
     expect(section).toContain("list_voice_profiles");

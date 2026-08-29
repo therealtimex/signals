@@ -4,7 +4,7 @@ import { sendContentToAgent } from "@/lib/publish/send-to-agent";
 import { PUBLISH_JOB_KINDS, PUBLISH_PLATFORM_TARGETS } from "@/lib/publish/payload";
 import { resolveSignalsBaseUrlFromRequest } from "@/lib/rtx/resolve-signals-base-url";
 
-const sendToAgentSchema = z
+export const sendToAgentSchema = z
   .object({
     contentItemId: z.string(),
     platforms: z.array(z.enum(PUBLISH_PLATFORM_TARGETS)).default([]),

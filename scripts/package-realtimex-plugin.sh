@@ -85,9 +85,12 @@ rsync -a --exclude node_modules --exclude '*.mjs' \
   "${ROOT}/.claude/skills/realtimex-signals/" "$STAGING/skills/realtimex-signals/"
 rsync -a --exclude node_modules --exclude 'package-lock.json' --exclude '*.mjs' \
   "${ROOT}/.claude/skills/signals-publish/" "$STAGING/skills/signals-publish/"
+rsync -a --exclude node_modules --exclude 'package-lock.json' --exclude '*.mjs' \
+  "${ROOT}/.claude/skills/signals-writing/" "$STAGING/skills/signals-writing/"
 
 chmod +x "$STAGING/skills/realtimex-signals/scripts/"*.sh 2>/dev/null || true
 chmod +x "$STAGING/skills/signals-publish/scripts/"*.cjs 2>/dev/null || true
+chmod +x "$STAGING/skills/signals-writing/scripts/"*.cjs 2>/dev/null || true
 
 echo "==> Staging thin signals-pp-cli npm pointer (no bundled binaries)..."
 mkdir -p "$STAGING/tools/signals-pp-cli"
@@ -97,15 +100,8 @@ if [[ -d "${ROOT}/tools/signals-pp-cli/bin" ]]; then
   echo "==> Thin plugin: skipping tools/signals-pp-cli/bin (use npm @realtimex/signals-pp-cli@cliVersion)"
 fi
 
-if [[ -f "$STAGING/skills/realtimex-signals/SKILL.md" ]]; then
-  perl -pi -e 's|\.claude/skills/realtimex-signals|skills/realtimex-signals|g' \
-    "$STAGING/skills/realtimex-signals/SKILL.md"
-fi
-
-if [[ -f "$STAGING/skills/signals-publish/SKILL.md" ]]; then
-  perl -pi -e 's|\.claude/skills/signals-publish|skills/signals-publish|g' \
-    "$STAGING/skills/signals-publish/SKILL.md"
-fi
+find "$STAGING/skills" -type f -name '*.md' -exec \
+  perl -pi -e 's|\.claude/skills/|skills/|g' {} +
 
 cp "$RELEASE_MANIFEST" "$STAGING/marketplace/release-manifest.json"
 if [[ -f "$RELEASE_SIGNATURE" ]]; then

@@ -21,7 +21,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..", "..");
 const DEFAULT_PLUGIN_ID = "79f6f094-a15f-4af0-8dbb-605552701218";
 const WORKSPACE_SLUG = "f3a8c2e1-4d5b-4a7c-8e9f-0a1b2c3d4e5f";
-const REQUIRED_SKILLS = ["realtimex-signals", "signals-publish"];
+const REQUIRED_SKILLS = ["realtimex-signals", "signals-writing", "signals-publish"];
 const SOURCE_PUBLISH = path.join(
   repoRoot,
   ".claude/skills/signals-publish/scripts/x-publish.cjs"
