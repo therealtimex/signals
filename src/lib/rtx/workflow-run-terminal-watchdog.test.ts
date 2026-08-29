@@ -3,6 +3,9 @@ import { createWorkflowRun, getWorkflowRun } from "@/lib/db/queries/workflows";
 import { createTemplate } from "@/lib/db/queries/workflow-templates";
 import * as resourceTeardown from "@/lib/rtx/resource-teardown";
 import * as workflowCompletionThread from "@/lib/rtx/workflow-completion-thread";
+import * as browserSessions from "@/lib/rtx/browser-sessions";
+import * as runtimeSessions from "@/lib/rtx/runtime-sessions";
+import { WORKFLOW_COMPLETED_TERMINAL_RELEASE_REASON } from "@/lib/rtx/terminal-teardown";
 import {
   isWorkflowRunTerminalTimeout,
   releaseStaleWorkflowTerminalRuns,
@@ -119,5 +122,56 @@ describe("workflow-run terminal watchdog", () => {
     expect(sweep.scanned).toBe(2);
     expect(sweep.released).toEqual([stale.id]);
     expect(releaseSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("drains deferred terminal release after timing out a workflow run", async () => {
+    vi.useFakeTimers();
+    const template = createTemplate({
+      name: "Company Profile Enrichment",
+      templateType: "enrichment",
+      status: "active",
+    });
+    const run = createWorkflowRun({
+      templateId: template.id,
+      workflowType: "enrich",
+      status: "running",
+      trigger: "template",
+      startedAt: Math.floor(Date.now() / 1000) - 8 * 60 * 60,
+      config: JSON.stringify({
+        rtxRuntimeSessionId: "cli-agent:timed-out-workflow",
+        rtxWorkspaceSlug: "signals",
+        rtxThreadSlug: "enrichment-thread",
+      }),
+    });
+
+    vi.spyOn(browserSessions, "listRtxBrowserSessions").mockResolvedValue([]);
+    const waitSpy = vi
+      .spyOn(runtimeSessions, "waitForTerminalSessionIdle")
+      .mockResolvedValue({ idle: true });
+    const terminateSpy = vi
+      .spyOn(runtimeSessions, "terminateTerminalRuntimeSession")
+      .mockResolvedValue({ success: true, terminated: true });
+    vi.spyOn(workflowCompletionThread, "postWorkflowCompletionThreadMessage").mockResolvedValue({
+      posted: true,
+    });
+
+    const result = await releaseTimedOutWorkflowTerminalRun(run.id);
+    expect(result).toMatchObject({ released: true, runId: run.id });
+
+    await Promise.resolve();
+    await vi.runAllTimersAsync();
+
+    expect(waitSpy).toHaveBeenCalledWith("cli-agent:timed-out-workflow", {
+      env: process.env,
+      fetchImpl: fetch,
+      retryDelaysMs: expect.arrayContaining([250, 14_000, 15_000, 90_000]),
+    });
+    expect(terminateSpy).toHaveBeenCalledWith(
+      "cli-agent:timed-out-workflow",
+      process.env,
+      fetch,
+      { reason: WORKFLOW_COMPLETED_TERMINAL_RELEASE_REASON },
+    );
+    vi.useRealTimers();
   });
 });

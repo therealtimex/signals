@@ -119,12 +119,21 @@ export function stopScheduler(): void {
   initialized = false;
 }
 
+function shouldRunWorkflowTerminalSweep(): boolean {
+  return (
+    process.env.VITEST_WORKER_ID === undefined &&
+    process.env.VITEST_POOL_ID === undefined
+  );
+}
+
 /** Check for due jobs and execute them. */
 function checkDueJobs(): void {
   try {
-    void releaseStaleWorkflowTerminalRuns().catch((err) => {
-      console.warn("[scheduler] Stale workflow terminal release sweep failed:", err);
-    });
+    if (shouldRunWorkflowTerminalSweep()) {
+      void releaseStaleWorkflowTerminalRuns().catch((err) => {
+        console.warn("[scheduler] Stale workflow terminal release sweep failed:", err);
+      });
+    }
 
     const dueJobs = getDueJobs();
     if (dueJobs.length > 0) {
