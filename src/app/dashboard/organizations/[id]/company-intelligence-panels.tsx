@@ -27,6 +27,18 @@ type RelationshipSummary = ReturnType<typeof getOrgRelationshipSummary>;
 type EmailIntelligence = ReturnType<typeof getOrgEmailIntelligence>;
 type TimelineResult = ReturnType<typeof listOrgTimeline>;
 
+export function emailCandidateActionSuccessMessage(
+  action: "verify" | "invalidate" | "probe" | "correct",
+): string {
+  const labels: Record<typeof action, string> = {
+    verify: "verified",
+    invalidate: "invalidated",
+    probe: "probe completed",
+    correct: "corrected",
+  };
+  return `Candidate ${labels[action]}.`;
+}
+
 function relativeTime(timestamp: number | null): string {
   if (!timestamp) return "No activity yet";
   const seconds = Math.max(0, Math.floor(Date.now() / 1000) - timestamp);
@@ -229,7 +241,7 @@ export function EmailIntelligenceCard({ orgId, initial }: { orgId: string; initi
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action, ...(action === "correct" ? { address: corrections[candidateId] } : {}) }),
       });
-      if (response.ok) { await refresh(); setMessage(`Candidate ${action === "probe" ? "probe completed" : `${action}ed`}.`); }
+      if (response.ok) { await refresh(); setMessage(emailCandidateActionSuccessMessage(action)); }
       else { const body = await response.json().catch(() => ({})); setMessage(typeof body.error === "string" ? body.error : "Candidate could not be updated."); }
     } catch {
       setMessage("Candidate could not be updated.");

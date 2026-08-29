@@ -4,7 +4,24 @@ import { act, createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CompanyFeed, CompanyPeopleTable, EmailIntelligenceCard } from "./company-intelligence-panels";
+import {
+  CompanyFeed,
+  CompanyPeopleTable,
+  EmailIntelligenceCard,
+  emailCandidateActionSuccessMessage,
+} from "./company-intelligence-panels";
+
+const emailIntelligenceFixture = {
+  canInfer: true,
+  domain: "acme.test",
+  domains: [{ id: "domain-1", orgId: "org-1", domain: "acme.test", kind: "primary", source: "test", mxStatus: "ok", catchAll: "no", mailCheckedAt: 1, mailEvidence: "{}", createdAt: 1, updatedAt: 1 }],
+  patterns: [{ id: "pattern-1", orgId: "org-1", pattern: "{first}.{last}", rank: 1, confidence: "high", score: 1, matchCount: 2, sampleCount: 2, evidence: "[]", isSelected: true, source: "test", evaluatedAt: 1, createdAt: 1, updatedAt: 1 }],
+  selected: { id: "pattern-1", orgId: "org-1", pattern: "{first}.{last}", rank: 1, confidence: "high", score: 1, matchCount: 2, sampleCount: 2, evidence: "[]", isSelected: true, source: "test", evaluatedAt: 1, createdAt: 1, updatedAt: 1 },
+  candidates: [{ id: "candidate-1", contactId: "contact-1", orgId: "org-1", address: "ada@acme.test", addressNormalized: "ada@acme.test", pattern: "{first}", status: "predicted", confidence: "high", evidence: "{}", source: "test", verificationMethod: null, verifiedAt: null, checkedAt: null, probeAttempts: 0, promotedChannelId: null, createdAt: 1, updatedAt: 1, sendable: false, reason: "predicted_email_disabled" }],
+  candidateCounts: { predicted: 1, uncertain: 0, verified: 0, invalid: 0 },
+  evaluatedAt: 1,
+  automationEligibility: { storedValue: false, effectiveValue: false, source: "default", envLocked: false },
+} as const;
 
 describe("company intelligence panels", () => {
   it("renders people linking, employment controls, unlinking, and strength evidence", () => {
@@ -31,15 +48,7 @@ describe("company intelligence panels", () => {
   it("renders ranked pattern evidence and every candidate correction action", () => {
     const markup = renderToStaticMarkup(createElement(EmailIntelligenceCard, {
       orgId: "org-1",
-      initial: {
-        canInfer: true, domain: "acme.test",
-        domains: [{ id: "domain-1", orgId: "org-1", domain: "acme.test", kind: "primary", source: "test", mxStatus: "ok", catchAll: "no", mailCheckedAt: 1, mailEvidence: "{}", createdAt: 1, updatedAt: 1 }],
-        patterns: [{ id: "pattern-1", orgId: "org-1", pattern: "{first}.{last}", rank: 1, confidence: "high", score: 1, matchCount: 2, sampleCount: 2, evidence: "[]", isSelected: true, source: "test", evaluatedAt: 1, createdAt: 1, updatedAt: 1 }],
-        selected: { id: "pattern-1", orgId: "org-1", pattern: "{first}.{last}", rank: 1, confidence: "high", score: 1, matchCount: 2, sampleCount: 2, evidence: "[]", isSelected: true, source: "test", evaluatedAt: 1, createdAt: 1, updatedAt: 1 },
-        candidates: [{ id: "candidate-1", contactId: "contact-1", orgId: "org-1", address: "ada@acme.test", addressNormalized: "ada@acme.test", pattern: "{first}", status: "predicted", confidence: "high", evidence: "{}", source: "test", verificationMethod: null, verifiedAt: null, checkedAt: null, probeAttempts: 0, promotedChannelId: null, createdAt: 1, updatedAt: 1, sendable: false, reason: "predicted_email_disabled" }],
-        candidateCounts: { predicted: 1, uncertain: 0, verified: 0, invalid: 0 }, evaluatedAt: 1,
-        automationEligibility: { storedValue: false, effectiveValue: false, source: "default", envLocked: false },
-      },
+      initial: emailIntelligenceFixture,
     }));
     for (const text of ["Ranked alternatives", "Inspect evidence", "Use pattern", "Verify", "Invalidate", "Probe", "Correct"]) {
       expect(markup).toContain(text);
@@ -134,5 +143,61 @@ describe("company feed actions", () => {
     expect(container.querySelector('[role="status"]')?.textContent).toBe(
       "Notes are read-only for this company",
     );
+  });
+});
+
+describe("email intelligence candidate actions", () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  beforeEach(() => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(() => {
+    act(() => root.unmount());
+    container.remove();
+    vi.unstubAllGlobals();
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = false;
+  });
+
+  it("shows verified after a successful candidate verify action", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string | URL, init?: RequestInit) => {
+      const path = typeof url === "string" ? url : url.toString();
+      if (path.includes("/api/email-candidates/") && init?.method === "PATCH") {
+        return new Response(JSON.stringify({}), { status: 200 });
+      }
+      if (path.includes("/api/orgs/org-1/email-intelligence")) {
+        return new Response(JSON.stringify(emailIntelligenceFixture), { status: 200 });
+      }
+      return new Response("{}", { status: 404 });
+    }));
+
+    await act(async () => {
+      root.render(createElement(EmailIntelligenceCard, { orgId: "org-1", initial: emailIntelligenceFixture }));
+    });
+    await act(async () => {
+      const verifyButton = [...container.querySelectorAll<HTMLButtonElement>("button")]
+        .find((candidate) => candidate.textContent === "Verify")!;
+      verifyButton.click();
+      await Promise.resolve();
+    });
+    expect(container.querySelector('[role="status"]')?.textContent).toBe("Candidate verified.");
+  });
+});
+
+describe("emailCandidateActionSuccessMessage", () => {
+  it("uses verified for verify actions", () => {
+    expect(emailCandidateActionSuccessMessage("verify")).toBe("Candidate verified.");
+    expect(emailCandidateActionSuccessMessage("verify")).not.toContain("verifyed");
+  });
+
+  it("preserves other candidate-action messages", () => {
+    expect(emailCandidateActionSuccessMessage("invalidate")).toBe("Candidate invalidated.");
+    expect(emailCandidateActionSuccessMessage("probe")).toBe("Candidate probe completed.");
+    expect(emailCandidateActionSuccessMessage("correct")).toBe("Candidate corrected.");
   });
 });
