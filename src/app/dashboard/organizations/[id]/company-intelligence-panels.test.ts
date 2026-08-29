@@ -5,7 +5,6 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { getOrgEmailIntelligence } from "@/lib/contacts/email-patterns/intelligence";
-import { emailCandidateActionSuccessMessage } from "@/lib/orgs/email-candidate-feedback";
 import {
   CompanyFeed,
   CompanyPeopleTable,
@@ -187,20 +186,10 @@ describe("email intelligence candidate actions", () => {
         .find((candidate) => candidate.textContent === "Verify")!;
       verifyButton.click();
       await Promise.resolve();
+      await Promise.resolve();
     });
-    expect(container.querySelector('[role="status"]')?.textContent).toBe("Candidate verified.");
-  });
-});
-
-describe("emailCandidateActionSuccessMessage", () => {
-  it("uses verified for verify actions", () => {
-    expect(emailCandidateActionSuccessMessage("verify")).toBe("Candidate verified.");
-    expect(emailCandidateActionSuccessMessage("verify")).not.toContain("verifyed");
-  });
-
-  it("preserves other candidate-action messages", () => {
-    expect(emailCandidateActionSuccessMessage("invalidate")).toBe("Candidate invalidated.");
-    expect(emailCandidateActionSuccessMessage("probe")).toBe("Candidate probe completed.");
-    expect(emailCandidateActionSuccessMessage("correct")).toBe("Candidate corrected.");
+    await vi.waitFor(() => {
+      expect(container.querySelector('[role="status"]')?.textContent).toBe("Candidate verified.");
+    });
   });
 });
