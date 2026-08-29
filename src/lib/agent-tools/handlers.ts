@@ -25,8 +25,10 @@ import { runTemplateViaRtx, getRtxRuntimeSessionIdFromRunConfig } from "@/lib/ag
 import { isRtxEmbedded } from "@/lib/rtx/env";
 import { getOrCreateOrchestratorThread } from "@/lib/rtx/orchestrator-thread";
 import { resolveActiveTerminalSessionIdForThread } from "@/lib/rtx/runtime-sessions";
+import { postOrchestratorDispatchThreadMessage } from "@/lib/rtx/orchestrator-completion-thread";
 import { postWorkflowCompletionThreadMessage } from "@/lib/rtx/workflow-completion-thread";
 import {
+  finalizeChatLinkedTerminalSession,
   formatDeferredTerminalTeardownNote,
   scheduleWorkflowTerminalSessionRelease,
   stopRunningRtxBrowserSessions,
@@ -794,6 +796,26 @@ export async function handleDispatchFollowOnWorkflow(
     overrideAction: input.followOnAction,
   });
 
+  const response: {
+    success: boolean;
+    childRunId: string | undefined;
+    targetTemplateName: string | undefined;
+    followOnAction: typeof result.followOnAction;
+    reason: string | undefined;
+    terminalSessionTeardown?: { scheduled: true; sessionId: string } | { scheduled: false };
+    browserSessionTeardown?: Awaited<
+      ReturnType<typeof finalizeChatLinkedTerminalSession>
+    >["browserSessionTeardown"];
+    completionThreadMessage?: { posted: boolean; error?: string };
+    message?: string;
+  } = {
+    success: result.triggered,
+    childRunId: result.childRunId,
+    targetTemplateName: result.targetTemplateName,
+    followOnAction: result.followOnAction,
+    reason: result.reason,
+  };
+
   if (result.triggered && result.childRunIds && result.childRunIds.length > 0 && isRtxEmbedded()) {
     await Promise.all(
       result.childRunIds.map(async (childRunId) => {
@@ -819,7 +841,37 @@ export async function handleDispatchFollowOnWorkflow(
         orchestratorThread.workspaceSlug,
         orchestratorThread.threadSlug
       );
-      scheduleWorkflowTerminalSessionRelease(orchestratorSessionId);
+      const [resourceTeardown, completionThreadMessage] = await Promise.all([
+        finalizeChatLinkedTerminalSession({
+          terminalSessionId: orchestratorSessionId,
+          stopAllRunningBrowsers: true,
+        }),
+        postOrchestratorDispatchThreadMessage({
+          workspaceSlug: orchestratorThread.workspaceSlug,
+          threadSlug: orchestratorThread.threadSlug,
+          parentRunId: input.parentWorkflowRunId,
+          followOnAction: result.followOnAction,
+          targetTemplateName: result.targetTemplateName,
+          childRunIds: result.childRunIds ?? [],
+        }),
+      ]);
+      const teardownNote = formatDeferredTerminalTeardownNote({
+        terminal: resourceTeardown.terminalSessionTeardown,
+        browser: resourceTeardown.browserSessionTeardown,
+      });
+      response.terminalSessionTeardown = resourceTeardown.terminalSessionTeardown.sessionId
+        ? {
+            scheduled: true,
+            sessionId: resourceTeardown.terminalSessionTeardown.sessionId,
+          }
+        : { scheduled: false };
+      response.browserSessionTeardown = resourceTeardown.browserSessionTeardown;
+      if (completionThreadMessage.posted) {
+        response.completionThreadMessage = completionThreadMessage;
+      }
+      if (teardownNote) {
+        response.message = teardownNote.trim();
+      }
     } catch (err) {
       console.warn(
         "[handleDispatchFollowOnWorkflow] Failed to schedule orchestrator terminal teardown:",
@@ -828,13 +880,7 @@ export async function handleDispatchFollowOnWorkflow(
     }
   }
 
-  return {
-    success: result.triggered,
-    childRunId: result.childRunId,
-    targetTemplateName: result.targetTemplateName,
-    followOnAction: result.followOnAction,
-    reason: result.reason,
-  };
+  return response;
 }
 
 export async function handleQueryContent(input: z.infer<typeof queryContentSchema>) {

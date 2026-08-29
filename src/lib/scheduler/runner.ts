@@ -28,6 +28,7 @@ import {
   DEDUPE_MERGE_JOB_TYPE,
   runScheduledDedupeMerge,
 } from "@/lib/contacts/dedupe/scheduled-merge";
+import { releaseStaleWorkflowTerminalRuns } from "@/lib/rtx/workflow-run-terminal-watchdog";
 import { runPipelineTemplate } from "@/lib/workflows/pipeline/run-pipeline-template";
 import type { WorkflowType } from "@/lib/workflows/types";
 
@@ -118,9 +119,22 @@ export function stopScheduler(): void {
   initialized = false;
 }
 
+function shouldRunWorkflowTerminalSweep(): boolean {
+  return (
+    process.env.VITEST_WORKER_ID === undefined &&
+    process.env.VITEST_POOL_ID === undefined
+  );
+}
+
 /** Check for due jobs and execute them. */
 function checkDueJobs(): void {
   try {
+    if (shouldRunWorkflowTerminalSweep()) {
+      void releaseStaleWorkflowTerminalRuns().catch((err) => {
+        console.warn("[scheduler] Stale workflow terminal release sweep failed:", err);
+      });
+    }
+
     const dueJobs = getDueJobs();
     if (dueJobs.length > 0) {
       console.log(`[scheduler] Found ${dueJobs.length} due job(s)`);

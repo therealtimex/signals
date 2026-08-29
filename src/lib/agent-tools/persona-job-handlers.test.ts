@@ -16,10 +16,12 @@ import {
   markPersonaJobCompleted,
   markPersonaJobRunning,
   markPersonaJobTimedOut,
+  PERSONA_JOB_COMPLETION_LEASE_MS,
 } from "@/lib/db/queries/persona-jobs";
 import { getActivePersona, upsertPersona } from "@/lib/db/queries/personas";
 import { createWorkflowRun, getWorkflowRun } from "@/lib/db/queries/workflows";
-import { contactPersonas } from "@/lib/db/schema";
+import { contactPersonas, personaJobs } from "@/lib/db/schema";
+import { reconcileStalePersonaJobCompletion } from "@/lib/persona/agent-job/service";
 import * as personaTerminalTeardown from "@/lib/rtx/persona-terminal-teardown";
 import { resetCoreTables } from "@/test/db";
 
@@ -250,6 +252,34 @@ describe("PersonaAgentJob agent-tool handlers", () => {
       status: "completed",
     });
     expect(releaseSpy).not.toHaveBeenCalled();
+  });
+
+  it("releases the terminal session when stale completion reconciliation fails", async () => {
+    const { job } = seedRunningJob("cli-agent:stale-persona");
+    expect(claimPersonaJobCompletion(job.id).claimed).toBe(true);
+    db.update(personaJobs)
+      .set({
+        updatedAt: Math.floor((Date.now() - PERSONA_JOB_COMPLETION_LEASE_MS - 1_000) / 1_000),
+      })
+      .where(eq(personaJobs.id, job.id))
+      .run();
+
+    const releaseSpy = vi
+      .spyOn(personaTerminalTeardown, "releasePersonaJobTerminalSession")
+      .mockResolvedValue({
+        terminalSessionTeardown: { scheduled: true, sessionId: "cli-agent:stale-persona" },
+        browserSessionTeardown: { stopped: [], failed: [] },
+        completionThreadMessage: { posted: true },
+        skippedSharedSession: false,
+      });
+
+    const reconciled = reconcileStalePersonaJobCompletion(job.id);
+    expect(reconciled?.status).toBe("failed");
+    await Promise.resolve();
+    expect(releaseSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ id: job.id }),
+      expect.objectContaining({ status: "failed" }),
+    );
   });
 
   it("accepts a valid callback after the waiter marked the job timed out", async () => {
