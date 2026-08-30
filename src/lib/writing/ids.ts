@@ -1,6 +1,16 @@
 import { nanoid } from "nanoid";
 
-export const WRITING_ID_PREFIXES = ["spn", "clm", "src", "aud", "vp", "vs"] as const;
+export const WRITING_ID_PREFIXES = [
+  "spn",
+  "clm",
+  "src",
+  "aud",
+  "vp",
+  "vs",
+  "prp",
+  "pb",
+  "pm",
+] as const;
 export type WritingIdPrefix = (typeof WRITING_ID_PREFIXES)[number];
 
 export function newWritingId(prefix: WritingIdPrefix): string {

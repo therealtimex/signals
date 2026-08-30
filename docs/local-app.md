@@ -18,10 +18,17 @@ See [`rtx-local-app.example.json`](../rtx-local-app.example.json) for the market
 contract. For source-checkout QA, create a dedicated issue app with
 `scripts/qa/provision-signals-qa-local-app.mjs`; never repoint the canonical **Signals** app.
 
-Back up the entire data directory, not only `data.db`: approved Signals Writing voice profiles are
+Back up the entire data directory, not only `data.db`: approved voice-evidence profiles are
 immutable files under `writing/voice-profiles/`, with lifecycle state in that directory's
-`index.json`. If a `.store.lock` names another host, never delete it automatically; confirm that
+`index.json`; user-authored Personality statements and later projection state live under
+`personality/`. If a `.store.lock` names another host, never delete it automatically; confirm that
 the other host is no longer using the shared data directory before removing the lock manually.
+
+Voice selection is owner-isolated. Signals no longer falls back to another contact's approved
+profile, and legacy approved profiles with `ownerContactId: null` are reported as
+`unclaimed_only`, never activated. To claim one, register a new version with
+`upsert_voice_profile(ownerContactId=<self contact id>)`, then call `approve_voice_profile` with
+durable user evidence. No profile is silently backfilled.
 
 ## Environment injection (RTX Electron)
 

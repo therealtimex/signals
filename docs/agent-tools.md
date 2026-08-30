@@ -63,6 +63,7 @@ Then pass `Authorization: Bearer your-secret-token` on each request.
 | `get_voice_profile` | content | Read one voice-profile version with authoritative lifecycle projection |
 | `upsert_voice_profile` | content | Register immutable voice content as a draft version |
 | `approve_voice_profile` | content | Approve the latest admissible draft and atomically supersede the prior active version |
+| `upsert_personality_statements` | content | Store verbatim user-authored values and boundaries for Personality projection |
 | `query_goals` | goals | List goals |
 | `create_task` | tasks | Create a follow-up task |
 | `get_persona` | contacts | Get active AI persona for a contact |
@@ -184,11 +185,26 @@ leaving queued, scheduled, publishing, and published content untouched. Invoke H
 409 for stale/blocked/approval/conflict errors, 400 for capability/target errors, and 503 for a
 busy voice store.
 
-Voice profiles are immutable version documents under
+Voice profiles are an approved voice-evidence source stored as immutable version documents under
 `SIGNALS_DATA_DIR/writing/voice-profiles`; one atomically replaced index owns lifecycle state.
 `upsert_voice_profile` can only register a draft. `approve_voice_profile` requires at least three
 admissible, approved, self-authored samples and durable user evidence. Store contention and
 optimistic conflicts are reported as `STORE_BUSY` and `STORE_CONFLICT`.
+
+Personality source preview is read-only in this release. `GET /api/personality/sources` projects
+only the self contact's public ARPP fields, one explicitly selected self-owned organization, an
+approved voice profile owned by that self contact, and statements stored by
+`upsert_personality_statements` or `PUT /api/personality/statements`. The response includes the
+strict source snapshot, content-based source hash, revisions, and deterministic block bodies; it
+does not read or write a RealTimeX workspace. Select the represented organization through
+`GET/PUT /api/personality/represented-org`; agent tools cannot change that selection.
+
+Voice resolution no longer falls back to a profile owned by another contact or to an unclaimed
+profile. When approved profiles with `ownerContactId: null` are the only candidates,
+`get_writing_context.voice.status` is `unclaimed_only` and returns their refs without activating
+one. Claim a profile by sending its content through `upsert_voice_profile` with
+`ownerContactId` set to the self contact, then approve the newly created version with
+`approve_voice_profile`. There is no implicit backfill or separate claim tool.
 
 Platform target tool errors are returned inside the successful invoke envelope as `{ error, code, details? }`. Codes include `TARGET_NOT_FOUND`, `TARGET_CAPABILITY_UNSUPPORTED`, `SESSION_LEASE_HELD`, `LEASE_LOST`, `LOGIN_REQUIRED`, and `TARGET_NOT_ACTIVE`. A shared connection is serialized for the whole operation; separate dedicated connections have independent leases.
 

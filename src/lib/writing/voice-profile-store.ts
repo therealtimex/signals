@@ -284,16 +284,44 @@ export function listVoiceProfiles(status?: VoiceProfile["status"]): VoiceProfile
   return result;
 }
 
+export type VoiceProfileRef = Pick<VoiceProfile, "id" | "version" | "hash" | "label">;
+
+function voiceProfileRef(profile: VoiceProfile): VoiceProfileRef {
+  return {
+    id: profile.id,
+    version: profile.version,
+    hash: profile.hash,
+    label: profile.label,
+  };
+}
+
+function compareVoiceProfilesNewest(left: VoiceProfile, right: VoiceProfile): number {
+  const byApproval = (right.approval?.at ?? 0) - (left.approval?.at ?? 0);
+  if (byApproval !== 0) return byApproval;
+  if (left.id !== right.id) return left.id < right.id ? -1 : 1;
+  return right.version - left.version;
+}
+
+export function listUnclaimedVoiceProfiles(): VoiceProfileRef[] {
+  return listVoiceProfiles("approved")
+    .filter((profile) => profile.ownerContactId === null)
+    .sort(compareVoiceProfilesNewest)
+    .map(voiceProfileRef);
+}
+
 export function getActiveVoiceProfileFor(input: { ownerContactId?: string | null; label?: string } = {}): VoiceProfile | null {
   const index = readIndex();
   const all = Object.values(index.activeByOwnerLabel)
-    .map((candidate) => projectProfile(index, candidate.id, candidate.version))
-    .filter((profile) => profile.status === "approved")
-    .sort((a, b) => (b.approval?.at ?? 0) - (a.approval?.at ?? 0));
+    .flatMap((candidate) => {
+      const profile = projectProfile(index, candidate.id, candidate.version);
+      return profile.status === "approved" ? [profile] : [];
+    })
+    .sort(compareVoiceProfilesNewest);
   const ownerContactId = input.ownerContactId === undefined ? getOwnerContactId() : input.ownerContactId;
+  if (ownerContactId === null) return null;
   return all.find((profile) =>
     profile.ownerContactId === ownerContactId && (!input.label || profile.label === input.label)
-  ) ?? all.find((profile) => !input.label || profile.label === input.label) ?? null;
+  ) ?? null;
 }
 
 export function getActiveVoiceProfile(ownerContactId = getOwnerContactId()): VoiceProfile | null {
@@ -301,13 +329,33 @@ export function getActiveVoiceProfile(ownerContactId = getOwnerContactId()): Voi
 }
 
 export function resolveActiveVoiceProfileContext(ownerContactId = getOwnerContactId()) {
+  if (ownerContactId === null) {
+    return {
+      status: "none" as const,
+      profile: null,
+      candidates: [] as VoiceProfileRef[],
+      unclaimed: [] as VoiceProfileRef[],
+      ambiguous: false,
+    };
+  }
   const profiles = listVoiceProfiles("approved")
-    .sort((a, b) => (b.approval?.at ?? 0) - (a.approval?.at ?? 0));
-  const preferred = profiles.filter((profile) => profile.ownerContactId === ownerContactId);
-  const pool = preferred.length ? preferred : profiles;
+    .sort(compareVoiceProfilesNewest);
+  const pool = profiles.filter((profile) => profile.ownerContactId === ownerContactId);
+  if (pool.length === 0) {
+    const unclaimed = listUnclaimedVoiceProfiles();
+    return {
+      status: unclaimed.length > 0 ? "unclaimed_only" as const : "none" as const,
+      profile: null,
+      candidates: unclaimed,
+      unclaimed,
+      ambiguous: false,
+    };
+  }
   return {
-    profile: pool[0] ?? null,
-    candidates: pool.map((profile) => ({ id: profile.id, version: profile.version, hash: profile.hash, label: profile.label })),
+    status: "active" as const,
+    profile: pool[0],
+    candidates: pool.map(voiceProfileRef),
+    unclaimed: [] as VoiceProfileRef[],
     ambiguous: pool.length > 1,
   };
 }

@@ -5,6 +5,7 @@ import { browserConnections, contentItems, contentPosts, graphEdges, launches, p
 import { getLaunchById } from "@/lib/db/queries/launches";
 import { createContentItem, deleteContentItem } from "@/lib/db/queries/content";
 import { createPublishJob } from "@/lib/db/queries/publish-jobs";
+import { createContact } from "@/lib/db/queries/contacts";
 import { invokeAgentTool } from "@/lib/agent-tools/invoke";
 import { handleCompletePublish } from "@/lib/agent-tools/publish-handlers";
 import { resetCoreTables } from "@/test/db";
@@ -439,7 +440,10 @@ describe("writing lifecycle agent tools", () => {
   });
 
   it("returns the current spine, active voice, and stored lifecycle projection", async () => {
-    const first = await invokeAgentTool("upsert_voice_profile", { profile: voiceProfile() }) as {
+    const self = createContact({ name: "Signals Owner", isSelf: true });
+    const first = await invokeAgentTool("upsert_voice_profile", {
+      profile: { ...voiceProfile(), ownerContactId: self.id },
+    }) as {
       profile: { id: string; version: number; hash: string };
     };
     await invokeAgentTool("approve_voice_profile", {
@@ -481,7 +485,9 @@ describe("writing lifecycle agent tools", () => {
       name: launchRow.name,
       metadata: { writing: { voiceProfile: first.profile } },
     });
-    const second = await invokeAgentTool("upsert_voice_profile", { profile: voiceProfile("revision") }) as {
+    const second = await invokeAgentTool("upsert_voice_profile", {
+      profile: { ...voiceProfile("revision"), ownerContactId: self.id },
+    }) as {
       profile: { id: string; version: number; hash: string };
     };
     await invokeAgentTool("approve_voice_profile", {

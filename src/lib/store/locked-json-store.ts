@@ -6,7 +6,9 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  realpathSync,
   renameSync,
+  rmSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -39,6 +41,15 @@ export type CommitIndexOptions = JsonWriteOptions & {
 };
 
 const mutexes = new Map<string, Promise<void>>();
+
+export function ensureStoreDirectory(path: string): string {
+  mkdirSync(path, { recursive: true });
+  return realpathSync(path);
+}
+
+export function resetStoreDirectory(path: string): void {
+  if (existsSync(path)) rmSync(path, { recursive: true, force: true });
+}
 
 export function processAlive(pid: number): boolean {
   try {

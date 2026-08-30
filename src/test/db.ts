@@ -45,11 +45,13 @@ import {
   tasks,
 } from "@/lib/db/schema";
 import { resetWritingStore } from "@/lib/writing/voice-profile-store";
+import { resetPersonalityStore } from "@/lib/personality/store-paths";
 export { resetWritingStore } from "@/lib/writing/voice-profile-store";
 
 /** Clear core tables used by unit tests (child rows first). */
 export function resetCoreTables(): void {
   resetWritingStore();
+  resetPersonalityStore();
   db.delete(snowballSeedLedger).run();
   db.delete(tasks).run();
   db.delete(contactEmailCandidates).run();
