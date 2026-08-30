@@ -42,7 +42,6 @@ import {
   Archive,
   RotateCcw,
   Sparkles,
-  Loader2,
   Pencil,
 } from "lucide-react";
 import Link from "next/link";
@@ -68,6 +67,8 @@ import { AgentProfileView } from "@/components/agent-profile-view";
 import { SnowballDialog } from "@/components/snowball-dialog";
 import { formatWebsiteLabel, hrefForWebsite, isRedundantHeadline } from "@/lib/contact-detail-format";
 import type { ArppPersonDocument } from "@/lib/arpp/types";
+import { shouldRunWebResearch } from "@/lib/contacts/web-research-router";
+import { EnrichContactButton } from "./enrich-contact-button";
 
 const platformLabels: Record<string, string> = {
   x: "X / Twitter",
@@ -114,40 +115,11 @@ export function ContactDetailClient({
   const [snowballOpen, setSnowballOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [pipelineRunning, setPipelineRunning] = useState(false);
-  const [pipelineError, setPipelineError] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [selfSaving, setSelfSaving] = useState(false);
   const formChanges = useRef<Record<string, string>>({});
   const channelsData = useRef<DraftContactChannel[] | null>(null);
   const employmentsData = useRef<DraftContactEmployment[] | null>(null);
-
-  async function handleRunProfilePipeline() {
-    if (!profilePipelineTemplateId) return;
-    setPipelineRunning(true);
-    setPipelineError(null);
-    try {
-      const res = await fetch(`/api/workflows/templates/${profilePipelineTemplateId}/run`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ config: { contactIds: [contact.id] } }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setPipelineError(
-          typeof data.error === "string" ? data.error : "Failed to start profile pipeline",
-        );
-        return;
-      }
-      if (data.workflowRunId) {
-        router.push(`/dashboard/workflows/${data.workflowRunId}`);
-      }
-    } catch {
-      setPipelineError("Failed to start profile pipeline");
-    } finally {
-      setPipelineRunning(false);
-    }
-  }
 
   async function handleToggleSelf(nextValue: boolean) {
     setSelfSaving(true);
@@ -269,7 +241,11 @@ export function ContactDetailClient({
   const primaryIdentity =
     contact.identities.find((id) => id.isPrimary) ?? contact.identities[0];
   const openTaskCount = tasks.filter((task) => task.status !== "done").length;
-  const canEnrich = !contactArchived && !contact.isSelf && Boolean(profilePipelineTemplateId);
+  const needsWebResearch = shouldRunWebResearch(contact, agentProfile);
+  const canEnrich =
+    !contactArchived &&
+    !contact.isSelf &&
+    (needsWebResearch || Boolean(profilePipelineTemplateId));
   const thinProfile = contact.enrichmentScore < 60 && !contact.isSelf;
   const showHeadline = !isRedundantHeadline(contact.headline, contact.title, contact.company);
   const metaItems: { key: string; node: ReactNode }[] = [];
@@ -465,22 +441,12 @@ export function ContactDetailClient({
             </Button>
           ) : null}
           {canEnrich ? (
-            <Button
-              size="sm"
-              onClick={() => void handleRunProfilePipeline()}
-              disabled={pipelineRunning}
-            >
-              {pipelineRunning ? (
-                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Sparkles className="mr-1.5 h-3.5 w-3.5" />
-              )}
-              Enrich profile
-            </Button>
+            <EnrichContactButton
+              contactId={contact.id}
+              needsWebResearch={needsWebResearch}
+              profilePipelineTemplateId={profilePipelineTemplateId}
+            />
           ) : null}
-          {pipelineError && (
-            <span className="text-xs text-destructive">{pipelineError}</span>
-          )}
         </div>
       </div>
 
@@ -498,9 +464,14 @@ export function ContactDetailClient({
         <TabsContent value="details" className="space-y-4">
           <ContactProfileSection
             contact={contact}
-            canEnrich={canEnrich}
             onEdit={() => setEditOpen(true)}
-            onEnrich={() => void handleRunProfilePipeline()}
+            enrichAction={canEnrich ? (
+              <EnrichContactButton
+                contactId={contact.id}
+                needsWebResearch={needsWebResearch}
+                profilePipelineTemplateId={profilePipelineTemplateId}
+              />
+            ) : undefined}
           />
           <ContactRelationshipSection
             contactId={contact.id}

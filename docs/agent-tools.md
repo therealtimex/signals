@@ -53,6 +53,8 @@ Then pass `Authorization: Bearer your-secret-token` on each request.
 | `query_workflows` | workflows | List workflow runs |
 | `list_workflow_templates` | workflows | List startable templates |
 | `start_workflow` | workflows | Record a workflow run (failed until migrated to RTX orchestration) |
+| `dispatch_follow_on_workflow` | workflows | Cascade a completed parent run into a configured follow-on workflow |
+| `complete_workflow_run` | workflows | Persist terminal status and structured results, then dispatch configured or conditional cascades |
 | `record_workflow_run_contacts` | workflows | Validate a workflow run/template pair and idempotently add existing contact IDs to the run's durable cohort |
 | `query_content` | content | List content items |
 | `get_content` | content | Read one content item with an untruncated body and durable privacy redaction |
@@ -123,6 +125,15 @@ Company profile agents should call `get_org` before research, write cited fields
 `update_org.fieldSources`, and use `upsert_org_identity` for verified social profiles. The
 dashboard and agent tools share the same normalized company DTO; raw source tags remain
 secondary provenance details rather than user-facing labels.
+
+Contact web research is a seeded **Contact Web Research** template, dispatched from
+`POST /api/contacts/:id/web-research`; it is not a new search agent tool. The RTX terminal agent
+collects and visits scored candidates through RealTimeX Browser, then composes existing tools:
+`get_contact`, `get_contact_arpp`, `upsert_contact_identity`, `enrich_contact`,
+`link_contact_to_org`, `log_interaction`, and `complete_workflow_run`. Its structured completion
+result may include `fieldsUpdated`, `unresolvedFields`, `identityLinked`, `visitedUrls`,
+`serpCandidates`, `ambiguous`, `partial`, and `message`. `identityLinked: true` conditionally
+cascades that contact into Contact profile pipeline.
 
 Predicted business emails live only in `contact_email_candidates`; they are not contact channels
 and are excluded from outreach by default. Use `update_email_candidate` with explicit evidence to

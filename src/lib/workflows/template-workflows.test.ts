@@ -8,6 +8,7 @@ import { buildAgentWorkflowBrief, getTemplateToolsHint } from "@/lib/workflows/t
 import { buildSocialPatrolTemplateConfig } from "@/lib/workflows/social-patrol";
 import { buildProfilePublishTemplateConfig } from "@/lib/workflows/profile-publish";
 import { serializeTemplateForUi } from "@/lib/workflows/template-serializer";
+import { buildContactWebResearchTemplateConfig } from "@/lib/workflows/contact-web-research";
 
 describe("template-config", () => {
   it("builds prospecting limits into config JSON", () => {
@@ -185,6 +186,44 @@ describe("template-brief", () => {
     expect(brief).toContain("Lead VCs, participating funds, and angel investors");
     expect(brief).toContain("Anti-Hallucination & Bot Filter Gate");
     expect(brief).not.toContain("Social Intent Patrol execution contract");
+  });
+
+  it("appends the contact web research contract and focused tool hints", () => {
+    const config = { ...buildContactWebResearchTemplateConfig(), contactId: "contact-1" };
+    const brief = buildAgentWorkflowBrief({
+      template: {
+        id: "tpl_contact_web",
+        name: "Contact Web Research",
+        description: "Research a sparse contact",
+        templateType: "enrichment",
+        platform: null,
+        systemPrompt: "Use scored browser research.",
+        targetPersona: "Sparse contacts",
+      },
+      workflowRunId: "run_contact_web",
+      config,
+      signalsBaseUrl: "http://localhost:3010",
+      contactWebResearchContext: {
+        contact: {
+          id: "contact-1",
+          name: "Ryan Carson",
+          company: "Untangle",
+          title: "Founder & CEO",
+          headline: null,
+          location: null,
+          website: null,
+          profileUrl: null,
+          enrichmentScore: 20,
+          identities: [],
+        },
+        arppMissing: ["sameAs (linked public profile)"],
+      },
+    });
+
+    expect(brief).toContain("Contact web research execution contract");
+    expect(brief).toContain("workflow-runs/run_contact_web/serp-candidates.json");
+    expect(brief).toContain("get_contact, get_contact_arpp, upsert_contact_identity");
+    expect(getTemplateToolsHint("enrichment", config)).toContain("complete_workflow_run");
   });
 });
 

@@ -211,4 +211,46 @@ describe("complete_workflow_run terminal teardown", () => {
     expect(result.processedItems).toBe(1);
     expect(getWorkflowRun(run.id)?.processedItems).toBe(1);
   });
+
+  it("persists structured workflow result fields", async () => {
+    const run = createWorkflowRun({
+      workflowType: "enrich",
+      status: "running",
+      trigger: "template",
+    });
+    vi.spyOn(workflowEvents, "emitWorkflowCompletedEvent").mockResolvedValue(
+      mockWorkflowCompletedEvent,
+    );
+    vi.spyOn(workflowCompletionThread, "postWorkflowCompletionThreadMessage").mockResolvedValue({
+      posted: true,
+    });
+    vi.spyOn(resourceTeardown, "stopRunningRtxBrowserSessions").mockResolvedValue({
+      stopped: [],
+      failed: [],
+    });
+    vi.spyOn(resourceTeardown, "scheduleWorkflowTerminalSessionRelease").mockReturnValue({
+      scheduled: true,
+      sessionId: null,
+    });
+
+    await handleCompleteWorkflowRun({
+      runId: run.id,
+      status: "completed",
+      result: {
+        fieldsUpdated: ["bio"],
+        unresolvedFields: ["experience"],
+        identityLinked: true,
+        visitedUrls: ["https://www.linkedin.com/in/example"],
+        ambiguous: false,
+        partial: true,
+      },
+    });
+
+    expect(JSON.parse(getWorkflowRun(run.id)?.result ?? "{}")).toMatchObject({
+      fieldsUpdated: ["bio"],
+      unresolvedFields: ["experience"],
+      identityLinked: true,
+      partial: true,
+    });
+  });
 });
