@@ -16,9 +16,8 @@ import {
   type SessionLeaseIntent,
 } from "@/lib/leases/session-lease";
 import {
-  detectPlatformHandle,
   getPlatformHomeUrl,
-  probePlatformLogin,
+  probeAuthenticatedPlatformIdentity,
   withPlatformBrowserPage,
 } from "@/lib/platforms/browser-connection";
 import { getPlatformTargetAdapter } from "@/lib/platforms/target-adapters";
@@ -219,20 +218,12 @@ export async function prepareCurrentPlatformTarget(
     const liveIdentity = await withPlatformBrowserPage(
       input.platform,
       RTX_PUBLISH_SESSION_NAME,
-      async (page) => {
-        const loginSurfaceDetected = await probePlatformLogin(
+      (page) =>
+        probeAuthenticatedPlatformIdentity(
           input.platform,
           page,
           CURRENT_TARGET_LOGIN_TIMEOUT_MS,
-        );
-        const detectedHandle = loginSurfaceDetected
-          ? await detectPlatformHandle(input.platform, page, page.url())
-          : null;
-        return {
-          loggedIn: loginSurfaceDetected && detectedHandle !== null,
-          detectedHandle,
-        };
-      },
+        ),
       env,
       fetchImpl,
     ).catch((error) => {

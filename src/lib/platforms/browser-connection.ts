@@ -373,6 +373,29 @@ function platformUrlChecks(
   }
 }
 
+/** Auth challenges are terminal evidence, unlike a login URL that may still redirect. */
+function isPlatformAuthChallengeUrl(
+  platform: SocialPlatform,
+  rawUrl: string,
+): boolean {
+  try {
+    const path = new URL(rawUrl).pathname.toLowerCase();
+    if (platform === "linkedin") {
+      return path.includes("/checkpoint") || path.includes("/authwall");
+    }
+    if (platform === "facebook") {
+      return (
+        path.includes("/checkpoint") ||
+        path.includes("/recover") ||
+        path.includes("/authwall")
+      );
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 export function extractXHandleFromProfileHref(href: string | null | undefined): string | null {
   if (!href?.startsWith("/") || href.includes("/status/")) return null;
   const segment = href.replace(/^\//, "").split("/")[0];
@@ -540,6 +563,53 @@ export async function probePlatformLogin(
     if (await isAnySelectorVisible(page, LOGGED_IN_SELECTORS[platform])) return true;
     if (loggedOut && Date.now() - start >= PROBE_REDIRECT_GRACE_MS) return false;
     if (Date.now() >= deadline) return false;
+
+    await sleep(PROBE_POLL_MS);
+  }
+}
+
+export type AuthenticatedPlatformIdentity = {
+  loggedIn: boolean;
+  detectedHandle: string | null;
+};
+
+/**
+ * Poll for the account-owned identity required to bind work to the live session.
+ * A platform URL can become visible before client-rendered account navigation,
+ * so URL-positive login evidence alone is not a complete identity verdict.
+ */
+export async function probeAuthenticatedPlatformIdentity(
+  platform: SocialPlatform,
+  page: Page,
+  timeoutMs: number,
+): Promise<AuthenticatedPlatformIdentity> {
+  const start = Date.now();
+  const deadline = start + timeoutMs;
+
+  for (;;) {
+    if (await isAnySelectorVisible(page, LOGGED_OUT_SELECTORS[platform])) {
+      return { loggedIn: false, detectedHandle: null };
+    }
+
+    const pageUrl = page.url();
+    const { loggedIn, loggedOut } = platformUrlChecks(platform, pageUrl);
+    if (loggedOut && isPlatformAuthChallengeUrl(platform, pageUrl)) {
+      return { loggedIn: false, detectedHandle: null };
+    }
+
+    const loginSurfaceDetected =
+      loggedIn || (await isAnySelectorVisible(page, LOGGED_IN_SELECTORS[platform]));
+    if (loginSurfaceDetected) {
+      const detectedHandle = await detectPlatformHandle(platform, page, pageUrl);
+      if (detectedHandle) return { loggedIn: true, detectedHandle };
+    }
+
+    if (loggedOut && Date.now() - start >= PROBE_REDIRECT_GRACE_MS) {
+      return { loggedIn: false, detectedHandle: null };
+    }
+    if (Date.now() >= deadline) {
+      return { loggedIn: false, detectedHandle: null };
+    }
 
     await sleep(PROBE_POLL_MS);
   }

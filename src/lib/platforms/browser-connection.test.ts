@@ -24,6 +24,7 @@ import {
   isXLoggedInUrl,
   isXLoggedOutUrl,
   openPlatformBrowserSession,
+  probeAuthenticatedPlatformIdentity,
   probePlatformLogin,
   urlMatchesPlatformHost,
   validatePlatformBrowserSession,
@@ -353,14 +354,24 @@ describe("publish session guardrails", () => {
   /** Minimal stand-in for a CDP page: URL, selector visibility, and hrefs. */
   function fakePage(
     url: string,
-    { visible = [] as string[], hrefs = {} as Record<string, string> } = {}
+    {
+      visible = [] as string[],
+      hrefs = {} as Record<string, string>,
+      isVisible,
+      getHref,
+    }: {
+      visible?: string[];
+      hrefs?: Record<string, string>;
+      isVisible?: (selector: string) => boolean;
+      getHref?: (selector: string) => string | null;
+    } = {},
   ) {
     return {
       url: () => url,
       locator: (selector: string) => ({
         first: () => ({
-          isVisible: async () => visible.includes(selector),
-          getAttribute: async () => hrefs[selector] ?? null,
+          isVisible: async () => isVisible?.(selector) ?? visible.includes(selector),
+          getAttribute: async () => getHref?.(selector) ?? hrefs[selector] ?? null,
         }),
       }),
     };
@@ -515,6 +526,52 @@ describe("publish session guardrails", () => {
     await expect(
       detectPlatformHandle("linkedin", page as never, page.url()),
     ).resolves.toBe("/in/session-owner");
+  });
+
+  it("waits for LinkedIn self navigation after the authenticated feed URL appears", async () => {
+    vi.useFakeTimers();
+    try {
+      let navChecks = 0;
+      const page = fakePage("https://www.linkedin.com/feed/", {
+        isVisible: (selector) => {
+          if (selector !== ".global-nav__me") return false;
+          navChecks += 1;
+          return navChecks >= 2;
+        },
+        getHref: (selector) =>
+          navChecks >= 2 && selector === '.global-nav__me a[href*="/in/"]'
+            ? "/in/session-owner"
+            : null,
+      });
+
+      const identity = probeAuthenticatedPlatformIdentity(
+        "linkedin",
+        page as never,
+        1_000,
+      );
+      await vi.advanceTimersByTimeAsync(250);
+
+      await expect(identity).resolves.toEqual({
+        loggedIn: true,
+        detectedHandle: "/in/session-owner",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("rejects a LinkedIn authwall without waiting for the identity timeout", async () => {
+    vi.useFakeTimers();
+    try {
+      const page = fakePage("https://www.linkedin.com/authwall?trk=guest_homepage-basic_nav-header-signin");
+
+      await expect(
+        probeAuthenticatedPlatformIdentity("linkedin", page as never, 8_000),
+      ).resolves.toEqual({ loggedIn: false, detectedHandle: null });
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("requests a platform tab when the session has none, then validates", async () => {
