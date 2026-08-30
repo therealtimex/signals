@@ -4,6 +4,7 @@
 **Issue:** [#347](https://github.com/therealtimex/signals/issues/347) · **Epic:** [#346](https://github.com/therealtimex/signals/issues/346)
 **Base:** `main` @ `acd239f`
 **Companion artifacts:** `docs-dev/refs/manifest.json` (corpus manifest), `docs-dev/refs/README.md`, `scripts/verify-writing-corpus-manifest.mjs`
+**Amended by:** [#373](https://github.com/therealtimex/signals/issues/373) `specs/personality-projection.md` (2026-08-30) — the RealTimeX workspace Personality is the canonical live identity/voice; D5 / ADR-347-4 keep the voice-profile store as the approved voice-evidence *source*, no longer as the canonical voice.
 
 This document is the durable contract for the writing system. It settles the architecture,
 data contracts, rule classification, corpus adoption policy, and the dependency order for
@@ -20,7 +21,7 @@ validator.
 | D2 | Creative orchestration runs in RealTimeX terminal agents dispatched from a Signals workflow template. Signals exposes data tools only; no `/api/content/ai-generate` and no in-app LLM loop. | Preserves `docs/rtx-agent-orchestration.md`; RTX offers no thread-history read, so results land through tools (ADR-314-1 pattern). |
 | D3 | **Launch = writing run and brief container. Variant = one platform/surface-native draft. Content Item = one approved, single-platform publishable artifact. Publish job = the existing execution lane.** | Reuses every GTM primitive; the legacy one-body/many-platforms Compose path is untouched (#354 only fixes its validation). |
 | D4 | Metadata-first persistence: contracts are versioned JSON in `launches.metadata.writing`, `variants.metadata.writing`, `variants.generationMetadata`, `content_items.platformData.writing`, plus typed `graph_edges` for lineage. No migration in the MVP. | `AGENTS.md` §8 gates migrations on owner sign-off; every MVP query is by id or 1-hop edge, which existing columns serve. |
-| D5 | Voice profiles are Signals-owned JSON documents in a file store under `SIGNALS_DATA_DIR/writing/voice-profiles/`, versioned and approval-gated; a `voice_profiles` table is a named later step with stated triggers. | Signals must own the store (UI and `get_writing_context` read it) without a migration; the media-assets precedent already keeps files under the data dir. |
+| D5 | Voice profiles are Signals-owned JSON documents in a file store under `SIGNALS_DATA_DIR/writing/voice-profiles/`, versioned and approval-gated; a `voice_profiles` table is a named later step with stated triggers. **Amended by ADR-373-1:** the store is the approved voice-*evidence* source that proposes `VOICE.md`; the RealTimeX workspace Personality is the canonical live voice once a binding is applied (`specs/personality-projection.md`). | Signals must own the evidence store (UI and `get_writing_context` read it) without a migration; agents read the workspace Personality natively, so the live voice must be the file they actually read. |
 | D6 | Five rule classes with fixed precedence: `hard` > `claim` > `voice` > `heuristic` > `aesthetic`. Only `hard` and `claim` findings can block. Approved voice evidence beats heuristics and aesthetics unless the request sets `voicePrecedence: "rules_first"`. | The epic requires voice from real samples to win over generic style rules; platform limits and claim integrity are the only non-negotiables. |
 | D7 | Every factual claim is a `PreservedClaim` with a source locator; drafts carry a claim map; the audit blocks on invented or altered claims. | "Never invent names, facts, numbers, dates, quotations, citations" must be testable, not aspirational. |
 | D8 | Explicit approval is the default and is a user decision recorded on the variant; `writingApprovalPolicy` in `config.json` can relax to `auto_low_risk`, which still never publishes. | Risk relaxation is deliberate configuration (same mechanism as `personaGenerationMode`, ADR-314-2). |
@@ -104,6 +105,7 @@ Division of responsibility:
 |---|---|---|
 | Brief, sources, audience spec, goal, approval policy | Signals (Launch + config) | Source of truth |
 | Voice profile document, sample provenance, approval state | Signals file store via tools | UI and context reads need it; agent must not own durable state |
+| Live identity, values, boundaries, voice used at decision time | RealTimeX workspace Personality (`IDENTITY.md`, `SOUL.md`, `VOICE.md`, `BRAND.md`), fed by approval-gated managed blocks from Signals | ADR-373-1; agents read these files natively from `cwd`; variants record the Personality binding they were produced under (`specs/personality-projection.md` §6) |
 | Spine extraction, drafting, humanizing, auditing, approval card | Agent + `signals-writing` skill | LLM judgment; contracts fix the shapes, not the prose |
 | Variant persistence, claim map, audit record, lineage edges | Signals via `upsert_variant` (validated) | Invariants enforced at the source of truth |
 | Materialization to an approved content item | Signals `materialize_variant` | One platform per content item, idempotent, approval evidence recorded |
@@ -127,7 +129,8 @@ Launch & Deploy (publish lane, engagement) downstream. It owns three concepts an
 | **Writing run** | `launches` row (`metadata.writing`) + `workflow_runs` row | Brief, goal, audience spec, source refs, voice ref, spine, run history; status `draft → generating → ready → live → completed` | A per-platform body |
 | **Platform-native variant** | `variants` row (`metadata.writing`, `generationMetadata`) | Exactly one `platform/surface` draft with claim map, audit, approval, lineage | A comma-joined multi-platform target |
 | **Approved artifact** | `content_items` row, `status: approved`, single `platformTarget` | What the publish lane consumes; `platformData.writing` carries the back-reference | Created by the agent directly |
-| **Voice profile** | JSON document in `SIGNALS_DATA_DIR/writing/voice-profiles/` | Approved author fingerprint + sample provenance, versioned | Stored on `contact_personas` |
+| **Voice profile** | JSON document in `SIGNALS_DATA_DIR/writing/voice-profiles/` | Approved author fingerprint + sample provenance, versioned; the evidence source for the Personality `VOICE.md` block (ADR-373-1) | Stored on `contact_personas`; treated as the live voice when a Personality binding is active; resolved from another owner's profile |
+| **Personality binding** | `SIGNALS_DATA_DIR/personality/index.json` (`specs/personality-projection.md` §5) | Which workspace Personality revision a variant was written under (`metadata.writing.personality`) | Written by the agent; reverse-derived from workspace file edits |
 | **Evidence spine** | `launches.metadata.writing.spine` (latest) and per-variant snapshot hash | Sources, preserved claims, core message | Re-derived silently after approval |
 | Source material | `content_items` (imported/authored), URLs, files, notes as `SourceRef` | Provenance root of every claim | Fabricated |
 | Audience | `launches.audienceSpec` (`nicheIds`, `sampleSize`), `niches`, `contact_personas` | Cohort context for drafting and Wind Tunnel | Author voice |
@@ -486,7 +489,7 @@ type ApprovalState = {
   at?: number;
   evidence?: ApprovalEvidence;
   note?: string;
-  revokedReason?: "spine_changed" | "audit_stale" | "user" | "voice_superseded";
+  revokedReason?: "spine_changed" | "audit_stale" | "user" | "voice_superseded" | "personality_stale";  // personality_stale added by ADR-373-7
 };
 ```
 
@@ -1093,7 +1096,7 @@ and its drift-fixture self-test are part of `npm run check`.
 **Status:** Accepted. **Context:** `AGENTS.md` gates migrations; every MVP access is by id or 1-hop edge. **Options:** (a) tables now — rejected: sign-off cost before the contracts have been exercised; (b) JSON contracts in existing columns + typed edges, validated by Zod — chosen. **Consequences:** contracts carry `schemaVersion`; `metadata.writing` validation only applies to `signals-writing` producers; §7.4 lists the concrete triggers that justify a later migration, and each JSON document is designed as a straight projection of that future row.
 
 ### ADR-347-4: Voice profiles live in a Signals-owned file store now; a `voice_profiles` table later
-**Status:** Accepted. **Context:** The corpus keeps voice in a skill-local markdown file that is agent-owned and unreadable by the app; N9 forbids `contact_personas`; `config.json` is for scalars. **Options:** (a) agent workspace files — rejected: Signals cannot read them for context or UI, no versioning; (b) `config.json` — rejected: not versioned, wrong tool; (c) table now — rejected per ADR-347-3; (d) versioned JSON documents under `SIGNALS_DATA_DIR/writing/voice-profiles/` behind tools — chosen. **Consequences:** V1–V7 are enforced in one module; the row shape for the eventual table is fixed today; backups must include the directory (documented in `docs/local-app.md` by #350).
+**Status:** Accepted — **amended by ADR-373-1** (`specs/personality-projection.md`): the storage decision stands; the store is the approved voice-evidence source that proposes the workspace `VOICE.md` block, and the RealTimeX workspace Personality is the canonical live voice after a binding is applied. Cross-owner fallback in active-profile resolution is removed by ADR-373-8. **Context:** The corpus keeps voice in a skill-local markdown file that is agent-owned and unreadable by the app; N9 forbids `contact_personas`; `config.json` is for scalars. **Options:** (a) agent workspace files — rejected: Signals cannot read them for context or UI, no versioning; (b) `config.json` — rejected: not versioned, wrong tool; (c) table now — rejected per ADR-347-3; (d) versioned JSON documents under `SIGNALS_DATA_DIR/writing/voice-profiles/` behind tools — chosen. **Consequences:** V1–V7 are enforced in one module; the row shape for the eventual table is fixed today; backups must include the directory (documented in `docs/local-app.md` by #350).
 
 ### ADR-347-5: Explicit approval by default; `auto_low_risk` is user configuration that never publishes
 **Status:** Accepted. **Context:** N7. **Options:** (a) approval toggle per run — rejected: per-call flags let agents disagree with the user (same reasoning as ADR-314-2); (b) global policy resolved env → `config.json` → default, tiers derived from the audit — chosen. **Consequences:** `high` always needs the user; policy-approved variants still require a separate publish instruction; the approval record carries the policy in force.
