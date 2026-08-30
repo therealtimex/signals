@@ -1050,6 +1050,7 @@ export async function handleCompleteWorkflowRun(input: z.infer<typeof completeWo
   const cohort = resolveRunCohort(run, input.createdContactIds);
   const resultJson = JSON.stringify({
     ...existingResult,
+    ...(input.result ?? {}),
     ...(input.summary ? { summary: input.summary } : {}),
     ...(cohort.contactIds.length > 0 ? { createdContactIds: cohort.contactIds } : {}),
   });

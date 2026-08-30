@@ -25,9 +25,12 @@ import { getSignalsRtxWorkspaceSlug } from "@/lib/rtx/cli-provisioning";
 import { dispatchTerminalAgentViaSendMessage } from "@/lib/rtx/runtime-sessions";
 import { runTemplateViaRtx, getRtxRefsFromRunConfig } from "@/lib/agents/run-template-via-rtx";
 import { isRtxEmbedded } from "@/lib/rtx/env";
-import { getWorkflowRun } from "@/lib/db/queries/workflows";
+import { getWorkflowRun, updateWorkflowRun } from "@/lib/db/queries/workflows";
 import { resolveOutboundWorkflowWebhookUrl } from "@/lib/webhooks/rtx-webhook-url";
 import { resolveRunCohort } from "@/lib/workflows/run-cohort";
+import { resolveContactWebResearchCascadeTarget } from "@/lib/workflows/contact-web-research";
+import { runPipelineTemplate } from "@/lib/workflows/pipeline/run-pipeline-template";
+import { parseTemplateConfig } from "@/lib/workflows/template-config";
 
 export interface WorkflowCompletedEventPayload {
   event: "workflow.completed";
@@ -60,6 +63,73 @@ export interface EmitWorkflowCompletedResult {
 
 export interface OutboundWebhookHeaders {
   [header: string]: string;
+}
+
+function parseJsonObject(value: string | null): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(value ?? "{}");
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+async function launchImmediateCascadeChild(childRunId: string): Promise<void> {
+  try {
+    const childRun = getWorkflowRun(childRunId);
+    if (!childRun?.templateId) return;
+
+    const childConfig = parseJsonObject(childRun.config);
+    const childTemplate = db
+      .select()
+      .from(workflowTemplates)
+      .where(eq(workflowTemplates.id, childRun.templateId))
+      .get();
+    const childTemplateConfig = parseTemplateConfig(childTemplate?.config);
+    if (childTemplateConfig.pipeline) {
+      const targetContactIds = Array.isArray(childConfig.targetContactIds)
+        ? childConfig.targetContactIds.filter(
+            (contactId): contactId is string =>
+              typeof contactId === "string" && contactId.trim().length > 0,
+          )
+        : [];
+      if (targetContactIds.length === 0) {
+        throw new Error("Pipeline cascade has no target contacts");
+      }
+      const pipelineResult = await runPipelineTemplate({
+        templateId: childRun.templateId,
+        input: { contactIds: targetContactIds },
+        existingRunId: childRun.id,
+      });
+      if (!pipelineResult.success) {
+        throw new Error(pipelineResult.error);
+      }
+      return;
+    }
+
+    const agentResult = await runTemplateViaRtx({
+      templateId: childRun.templateId,
+      config: childConfig,
+      existingRunId: childRun.id,
+    });
+    if (!agentResult.success) {
+      throw new Error(agentResult.error);
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    updateWorkflowRun(childRunId, {
+      status: "failed",
+      completedAt: Math.floor(Date.now() / 1000),
+      errors: JSON.stringify([message]),
+      errorItems: 1,
+    });
+    console.warn(
+      `[emitWorkflowCompletedEvent] Failed to launch RTX child workflow ${childRunId}:`,
+      err,
+    );
+  }
 }
 
 /**
@@ -244,10 +314,27 @@ export async function emitWorkflowCompletedEvent(
     ? db.select().from(workflowTemplates).where(eq(workflowTemplates.id, run.templateId)).get()
     : null;
 
-  const rawConfig = JSON.parse(run.config ?? "{}") as Record<string, unknown>;
-  const cascadeConfig = readWorkflowCascadeConfig(rawConfig);
+  const rawConfig = parseJsonObject(run.config);
+  const storedResult = parseJsonObject(run.result);
+  const configuredCascade = readWorkflowCascadeConfig(rawConfig);
+  const contactWebResearchTarget = run.status === "completed"
+    ? resolveContactWebResearchCascadeTarget(rawConfig, storedResult)
+    : null;
+  const cascadeConfig: WorkflowCascadeConfig = contactWebResearchTarget
+    ? {
+        ...configuredCascade,
+        followOnActions: [
+          ...new Set([...configuredCascade.followOnActions, "profile_pipeline" as const]),
+        ],
+        cascadePolicy: "immediate",
+        targetContactIds: [contactWebResearchTarget],
+      }
+    : configuredCascade;
 
   const { contactIds: createdContactIds } = resolveRunCohort(run, options?.createdContactIds);
+  const cascadeContactIds = contactWebResearchTarget
+    ? [contactWebResearchTarget]
+    : createdContactIds;
 
   const eventPayload: WorkflowCompletedEventPayload = {
     event: "workflow.completed",
@@ -271,7 +358,7 @@ export async function emitWorkflowCompletedEvent(
   let routingRecommendation: { suggestedAction: "nurture" | "patrol" | "profile_pipeline" | "review"; rationale: string } | undefined;
 
   if (cascadeConfig.followOnActions.includes("agentic_router")) {
-    routingRecommendation = evaluateAgenticRouting(createdContactIds);
+    routingRecommendation = evaluateAgenticRouting(cascadeContactIds);
     cascadeResult = {
       triggered: true,
       followOnActions: cascadeConfig.followOnActions,
@@ -281,26 +368,12 @@ export async function emitWorkflowCompletedEvent(
   } else if (cascadeConfig.followOnActions.length > 0 && cascadeConfig.cascadePolicy === "immediate") {
     cascadeResult = dispatchWorkflowCascade({
       parentRunId: runId,
-      createdContactIds,
+      createdContactIds: cascadeContactIds,
       overrideActions: cascadeConfig.followOnActions,
     });
 
     if (cascadeResult.triggered && cascadeResult.childRunIds && isRtxEmbedded()) {
-      for (const childRunId of cascadeResult.childRunIds) {
-        try {
-          const childRun = getWorkflowRun(childRunId);
-          if (childRun && childRun.templateId) {
-            const childConfig = JSON.parse(childRun.config ?? "{}") as Record<string, unknown>;
-            await runTemplateViaRtx({
-              templateId: childRun.templateId,
-              config: childConfig,
-              existingRunId: childRun.id,
-            });
-          }
-        } catch (err) {
-          console.warn(`[emitWorkflowCompletedEvent] Failed to launch RTX child workflow ${childRunId}:`, err);
-        }
-      }
+      await Promise.all(cascadeResult.childRunIds.map(launchImmediateCascadeChild));
     }
   }
 

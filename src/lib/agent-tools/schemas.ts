@@ -329,6 +329,31 @@ export const completeWorkflowRunSchema = z.object({
   createdContactIds: z.array(z.string()).optional().describe("IDs of newly created/discovered contacts in this run"),
   summary: z.string().optional().describe("Summary of the run results and mapped cluster"),
   errors: z.array(z.string()).optional().describe("Any error messages encountered during the run"),
+  result: z
+    .object({
+      fieldsUpdated: z.array(z.string()).optional(),
+      unresolvedFields: z.array(z.string()).optional(),
+      identityLinked: z.boolean().optional(),
+      visitedUrls: z.array(z.string().url()).optional(),
+      serpCandidates: z
+        .array(
+          z
+            .object({
+              url: z.string().url(),
+              totalScore: z.number(),
+              reason: z.string(),
+            })
+            .passthrough(),
+        )
+        .max(20)
+        .optional(),
+      ambiguous: z.boolean().optional(),
+      partial: z.boolean().optional(),
+      message: z.string().optional(),
+    })
+    .passthrough()
+    .optional()
+    .describe("Structured workflow-specific result fields persisted on the run"),
 });
 
 export const recordWorkflowRunContactsSchema = z.object({

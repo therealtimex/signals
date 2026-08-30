@@ -1,6 +1,10 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resetCoreTables } from "@/test/db";
-import { createWorkflowRun } from "@/lib/db/queries/workflows";
+import {
+  createWorkflowRun,
+  getWorkflowRun,
+  listWorkflowSteps,
+} from "@/lib/db/queries/workflows";
 import { createTemplate } from "@/lib/db/queries/workflow-templates";
 import { createContact } from "@/lib/db/queries/contacts";
 import { createIdentity } from "@/lib/db/queries/identities";
@@ -9,10 +13,12 @@ import {
   emitWorkflowCompletedEvent,
   evaluateAgenticRouting,
 } from "@/lib/webhooks/workflow-events";
+import { PIPELINE_STEP_HANDLERS } from "@/lib/workflows/pipeline/handlers";
 
 describe("Workflow Events & Agentic Router", () => {
   beforeEach(() => {
     resetCoreTables();
+    vi.restoreAllMocks();
   });
 
   it("evaluates agentic routing for investor heavy cohort", () => {
@@ -87,6 +93,122 @@ describe("Workflow Events & Agentic Router", () => {
     expect(result.cascadeResult?.triggered).toBe(true);
     expect(result.cascadeResult?.childRunIds).toHaveLength(1);
     expect(result.cascadeResult?.targetTemplateNames).toContain("Contact Relationship Nurture");
+  });
+
+  it("auto-chains the profile pipeline when contact web research links an identity", async () => {
+    vi.spyOn(await import("@/lib/rtx/env"), "isRtxEmbedded").mockReturnValue(true);
+    vi.spyOn(await import("@/lib/rtx/cli-provisioning"), "ensureRtxWorkspace").mockResolvedValue(
+      "signals",
+    );
+    vi.spyOn(
+      await import("@/lib/rtx/cli-provisioning"),
+      "createRtxPublishThread",
+    ).mockResolvedValue("pipeline-thread");
+    vi.spyOn(
+      await import("@/lib/rtx/runtime-sessions"),
+      "appendRtxThreadMessage",
+    ).mockResolvedValue({ success: true });
+    const terminalAgentRunner = vi
+      .spyOn(await import("@/lib/agents/run-template-via-rtx"), "runTemplateViaRtx")
+      .mockResolvedValue({
+        success: false,
+        error: "Pipeline templates must not use the terminal-agent runner",
+        errorCode: "wrong_runner",
+        httpStatus: 500,
+      });
+    vi.spyOn(PIPELINE_STEP_HANDLERS, "enrich_contact_avatars").mockImplementation(
+      async (contactIds) => ({
+        stepId: "avatar",
+        outcomes: contactIds.map((contactId) => ({
+          contactId,
+          status: "skipped" as const,
+          reason: "not_found",
+        })),
+        aborted: false,
+      }),
+    );
+
+    createTemplate({
+      name: "Contact profile pipeline",
+      templateType: "enrichment",
+      status: "active",
+      config: JSON.stringify({
+        pipeline: {
+          version: 2,
+          planner: "contact_profile",
+          batchSize: 20,
+          steps: [
+            {
+              id: "avatar",
+              executor: "code",
+              handler: "enrich_contact_avatars",
+            },
+          ],
+        },
+      }),
+    });
+    const webTemplate = createTemplate({
+      name: "Contact Web Research",
+      templateType: "enrichment",
+      status: "active",
+    });
+    const contact = createContact({ name: "Researched Contact" });
+    const parentRun = createWorkflowRun({
+      templateId: webTemplate.id,
+      workflowType: "enrich",
+      status: "completed",
+      trigger: "template",
+      config: JSON.stringify({ contactWebResearch: { version: 1 }, contactId: contact.id }),
+      result: JSON.stringify({ identityLinked: true }),
+    });
+
+    const result = await emitWorkflowCompletedEvent(parentRun.id);
+
+    expect(result.cascadeResult).toMatchObject({
+      triggered: true,
+      followOnAction: "profile_pipeline",
+      targetTemplateName: "Contact profile pipeline",
+    });
+    const child = getWorkflowRun(result.cascadeResult!.childRunId!)!;
+    expect(child.parentWorkflowId).toBe(parentRun.id);
+    expect(JSON.parse(child.config ?? "{}")).toMatchObject({
+      targetContactIds: [contact.id],
+      selectedContactIds: [contact.id],
+    });
+    expect(listWorkflowSteps(child.id).some((step) => step.tool === "profile_pipeline_planner"))
+      .toBe(true);
+    await vi.waitFor(() => {
+      expect(
+        listWorkflowSteps(child.id).some((step) => step.tool === "profile_pipeline_summary"),
+      ).toBe(true);
+    });
+    expect(terminalAgentRunner).not.toHaveBeenCalled();
+  });
+
+  it("does not auto-chain when web research leaves identity unresolved", async () => {
+    createTemplate({
+      name: "Contact profile pipeline",
+      templateType: "enrichment",
+      status: "active",
+    });
+    const webTemplate = createTemplate({
+      name: "Contact Web Research",
+      templateType: "enrichment",
+      status: "active",
+    });
+    const contact = createContact({ name: "Ambiguous Contact" });
+    const parentRun = createWorkflowRun({
+      templateId: webTemplate.id,
+      workflowType: "enrich",
+      status: "completed",
+      trigger: "template",
+      config: JSON.stringify({ contactWebResearch: { version: 1 }, contactId: contact.id }),
+      result: JSON.stringify({ identityLinked: false, ambiguous: true, partial: true }),
+    });
+
+    const result = await emitWorkflowCompletedEvent(parentRun.id);
+
+    expect(result.cascadeResult).toBeUndefined();
   });
 
   it("emits event with agentic router recommendation", async () => {
@@ -247,7 +369,11 @@ describe("Workflow Events & Agentic Router", () => {
 
   it("resolves agentic router webhook URL from REALTIMEX_BASE_URL", async () => {
     const previousBaseUrl = process.env.REALTIMEX_BASE_URL;
+    const previousApiBaseUrl = process.env.RTX_API_BASE_URL;
+    const previousServerUrl = process.env.SERVER_URL;
     process.env.REALTIMEX_BASE_URL = "http://127.0.0.1:3101/cli";
+    delete process.env.RTX_API_BASE_URL;
+    delete process.env.SERVER_URL;
 
     try {
       const template = createTemplate({
@@ -286,6 +412,16 @@ describe("Workflow Events & Agentic Router", () => {
         delete process.env.REALTIMEX_BASE_URL;
       } else {
         process.env.REALTIMEX_BASE_URL = previousBaseUrl;
+      }
+      if (previousApiBaseUrl === undefined) {
+        delete process.env.RTX_API_BASE_URL;
+      } else {
+        process.env.RTX_API_BASE_URL = previousApiBaseUrl;
+      }
+      if (previousServerUrl === undefined) {
+        delete process.env.SERVER_URL;
+      } else {
+        process.env.SERVER_URL = previousServerUrl;
       }
     }
   });

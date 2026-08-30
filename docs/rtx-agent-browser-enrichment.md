@@ -28,6 +28,45 @@ export SIGNALS_AGENT_TOOL_TOKEN="your-secret-token"
 
 ## Workflow (terminal agent)
 
+### Contact Web Research from contact detail
+
+The contact detail **Enrich profile** action is a smart router:
+
+- Contacts with no active identity, `enrichmentScore < 40`, or an empty ARPP `sameAs` launch the
+  seeded **Contact Web Research** template through `runTemplateViaRtx`.
+- Rich contacts with a linked identity stay on **Contact profile pipeline** for X hydration,
+  avatars, and persona synthesis.
+- A successful web-research result with `identityLinked: true` immediately cascades the same
+  contact into Contact profile pipeline.
+
+The web-research run uses `get_contact_arpp` as its v1 gap checklist (`sameAs`, biography/headline,
+and experience). It is identity-first: an existing primary profile URL is opened before Google.
+Otherwise the generated brief provides a deterministic primary query and one quoted LinkedIn
+refinement.
+
+Before opening any result, the agent must snapshot the SERP and write
+`workflow-runs/{runId}/serp-candidates.json`. Signals owns the scoring rules: LinkedIn `/in/`
+`+100`, X profile `+80`, matching company domain `+70`, Crunchbase person `+50`,
+Wikipedia/Wikidata person `+40`, and news/directories `-50`, plus name/company/role text matches
+and a `-80` wrong-person penalty. Only candidates scoring at least 60 may be visited; SERP position
+is not a selection rule. AI Overview citations are candidate URLs, never evidence until opened.
+
+Ambiguous or sub-threshold results get one refined search and a second triage. Remaining ambiguity
+must complete without `upsert_contact_identity`, with `ambiguous: true` and `partial: true`. The
+total budget is two Google searches, three post-SERP page visits, two registrable domains, and
+about 90 seconds.
+
+Dashboard endpoints:
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/api/contacts/:id/web-research` | Poll the latest run state and structured result |
+| `POST` | `/api/contacts/:id/web-research` | Launch Contact Web Research (`202`) or reject a duplicate pending run (`409`) |
+
+The completion callback stores `fieldsUpdated`, `unresolvedFields`, `identityLinked`,
+`visitedUrls`, `serpCandidates`, `ambiguous`, `partial`, and `message` under the workflow run
+result. Only facts from visited pages may be written back.
+
 ### 1. Select contacts to enrich
 
 ```bash
@@ -98,7 +137,9 @@ curl -s http://127.0.0.1:3000/api/agent-tools/invoke \
 ## Signals UI behavior
 
 - **Automation → Workflows → Enrich Profiles (RTX)** shows migration guidance on the Workflows tab. It does not queue or run in-app enrichment.
-- **Contact detail → Enrich profile** runs the Contact Profile Pipeline for that contact. The legacy in-app `RTX enrich` button was removed; it only rendered this migration message.
+- **Contact detail → Enrich profile** launches Contact Web Research for sparse or identity-less
+  contacts and Contact Profile Pipeline for rich linked contacts. The legacy in-app `RTX enrich`
+  button remains removed.
 - **Settings → Browser Session** remains for **publish/engage**, not in-app enrichment.
 
 ## Related docs

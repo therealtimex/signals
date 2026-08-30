@@ -1176,6 +1176,65 @@
                             "items": {
                               "type": "string"
                             }
+                          },
+                          "result": {
+                            "type": "object",
+                            "properties": {
+                              "fieldsUpdated": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "unresolvedFields": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "identityLinked": {
+                                "type": "boolean"
+                              },
+                              "visitedUrls": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "serpCandidates": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "url": {
+                                      "type": "string"
+                                    },
+                                    "totalScore": {
+                                      "type": "number"
+                                    },
+                                    "reason": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "url",
+                                    "totalScore",
+                                    "reason"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "ambiguous": {
+                                "type": "boolean"
+                              },
+                              "partial": {
+                                "type": "boolean"
+                              },
+                              "message": {
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": false
                           }
                         },
                         "required": [

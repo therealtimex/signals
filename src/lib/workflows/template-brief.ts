@@ -22,6 +22,12 @@ import {
   buildWritingBriefSection,
   isSignalsWritingTemplateConfig,
 } from "@/lib/workflows/signals-writing";
+import {
+  CONTACT_WEB_RESEARCH_TOOLS,
+  buildContactWebResearchBriefSection,
+  isContactWebResearchTemplateConfig,
+  type ContactWebResearchBriefContext,
+} from "@/lib/workflows/contact-web-research";
 
 const CATEGORY_LABELS: Record<string, string> = {
   prospecting: "Search",
@@ -60,7 +66,13 @@ const TOOLS_BY_TYPE: Record<string, string[]> = {
   nurture: ["query_contacts", "get_contact", "update_contact", "query_goals", "create_task"],
 };
 
-export function getTemplateToolsHint(templateType: string): string[] {
+export function getTemplateToolsHint(
+  templateType: string,
+  config?: Record<string, unknown>,
+): string[] {
+  if (config && isContactWebResearchTemplateConfig(config)) {
+    return [...CONTACT_WEB_RESEARCH_TOOLS];
+  }
   return TOOLS_BY_TYPE[templateType] ?? ["query_contacts", "create_task"];
 }
 
@@ -110,10 +122,11 @@ export function buildAgentWorkflowBrief(input: {
   config: Record<string, unknown>;
   signalsBaseUrl: string;
   systemPromptOverride?: string;
+  contactWebResearchContext?: ContactWebResearchBriefContext;
 }): string {
   const category = CATEGORY_LABELS[input.template.templateType] ?? input.template.templateType;
   const instructions = input.systemPromptOverride?.trim() || input.template.systemPrompt?.trim();
-  const tools = getTemplateToolsHint(input.template.templateType).join(", ");
+  const tools = getTemplateToolsHint(input.template.templateType, input.config).join(", ");
   const configJson = JSON.stringify(stripInternalConfigKeys(input.config), null, 2);
   const patrolContract = isSocialPatrolTemplateConfig(input.config)
     ? `${buildSocialPatrolBriefSection({
@@ -152,6 +165,15 @@ export function buildAgentWorkflowBrief(input: {
         signalsBaseUrl: input.signalsBaseUrl,
       })}\n`
     : null;
+  const contactWebResearchContract =
+    isContactWebResearchTemplateConfig(input.config) && input.contactWebResearchContext
+      ? `${buildContactWebResearchBriefSection({
+          workflowRunId: input.workflowRunId,
+          config: input.config,
+          signalsBaseUrl: input.signalsBaseUrl,
+          context: input.contactWebResearchContext,
+        })}\n`
+      : null;
 
   const sections = [
     `You are executing the Signals agent workflow template "${input.template.name}".`,
@@ -204,6 +226,7 @@ export function buildAgentWorkflowBrief(input: {
     nurtureContract,
     snowballContract,
     writingContract,
+    contactWebResearchContract,
     "Do not call legacy in-process workflow runners. This thread is the execution lane.",
   ];
 

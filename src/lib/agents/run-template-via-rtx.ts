@@ -38,6 +38,13 @@ import {
 import type { TemplateThreadResolution } from "@/lib/rtx/template-thread";
 import type { WorkflowType } from "@/lib/workflows/types";
 import { getWritingApprovalPolicy } from "@/lib/settings/writing-approval-policy";
+import { getContactById } from "@/lib/db/queries/contacts";
+import { loadAndProjectContactToArpp } from "@/lib/arpp/load";
+import {
+  getContactWebResearchArppMissing,
+  isContactWebResearchTemplateConfig,
+  type ContactWebResearchBriefContext,
+} from "@/lib/workflows/contact-web-research";
 
 const TEMPLATE_TO_WORKFLOW_TYPE: Record<string, WorkflowType> = {
   prospecting: "search",
@@ -353,12 +360,30 @@ export async function runTemplateViaRtx(
       }
     }
 
+    let contactWebResearchContext: ContactWebResearchBriefContext | undefined;
+    if (
+      isContactWebResearchTemplateConfig(runtimeConfig) &&
+      typeof runtimeConfig.contactId === "string"
+    ) {
+      const contact = getContactById(runtimeConfig.contactId);
+      const arpp = loadAndProjectContactToArpp(runtimeConfig.contactId, {
+        visibility: "internal",
+      });
+      if (contact && arpp) {
+        contactWebResearchContext = {
+          contact,
+          arppMissing: getContactWebResearchArppMissing(arpp),
+        };
+      }
+    }
+
     const brief = buildAgentWorkflowBrief({
       template,
       workflowRunId: run.id,
       config: runtimeConfig,
       signalsBaseUrl,
       systemPromptOverride: input.systemPrompt,
+      contactWebResearchContext,
     });
 
     const briefPath = workflowRunBriefRelativePath(run.id);

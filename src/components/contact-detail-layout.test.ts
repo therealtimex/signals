@@ -288,6 +288,19 @@ describe("ContactDetailClient details layout", () => {
       }),
     );
     expect(html).toContain("This profile is still thin");
+    expect(html).toContain('data-enrichment-route="web-research"');
+  });
+
+  it("routes a rich linked contact to the profile pipeline", () => {
+    const html = renderToStaticMarkup(
+      createElement(ContactDetailClient, {
+        contact: contactFixture,
+        tasks: [],
+        explore: exploreFixture,
+        profilePipelineTemplateId: "tmpl-1",
+      }),
+    );
+    expect(html).toContain('data-enrichment-route="profile-pipeline"');
   });
 
   it("shows actionable empty-state controls for a sparse profile", () => {
@@ -311,6 +324,9 @@ describe("ContactDetailClient details layout", () => {
     expect(html).toContain("Profile details are still sparse");
     expect(html).toContain("Edit profile");
     expect(html).toContain("Enrich profile");
+    const wrapper = document.createElement("div");
+    wrapper.innerHTML = html;
+    expect(wrapper.querySelectorAll("[data-enrichment-route]")).toHaveLength(1);
   });
 });
 

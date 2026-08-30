@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { BriefcaseBusiness, Pencil, Sparkles } from "lucide-react";
+import { BriefcaseBusiness, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { ContactWithIdentities } from "@/lib/db/types";
@@ -36,14 +36,10 @@ function formatEmploymentPeriod(employment: ContactWithIdentities["employments"]
 
 export function ContactProfileSection({
   contact,
-  canEnrich,
   onEdit,
-  onEnrich,
 }: {
   contact: ContactWithIdentities;
-  canEnrich: boolean;
   onEdit: () => void;
-  onEnrich: () => void;
 }) {
   const hasProfileDetails = Boolean(
     contact.profile.bio || contact.profile.headline || contact.employments.length > 0,
@@ -130,11 +126,6 @@ export function ContactProfileSection({
               <Button variant="outline" size="sm" onClick={onEdit}>
                 <Pencil className="size-3.5" /> Edit profile
               </Button>
-              {canEnrich ? (
-                <Button size="sm" onClick={onEnrich}>
-                  <Sparkles className="size-3.5" /> Enrich profile
-                </Button>
-              ) : null}
             </div>
           </div>
         )}
