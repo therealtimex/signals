@@ -24,6 +24,7 @@ import { Loader2, Send } from "lucide-react";
 import type { MediaThumbnailItem } from "@/components/media-thumbnail-grid";
 import { validateMediaFile, validateMediaSet } from "@/lib/media/constraints";
 import { sendToAgentErrorMessage } from "@/lib/publish/client-errors";
+import { isPublishPlatformTarget } from "@/lib/publish/payload";
 import type { PublishPlatformTarget } from "@/lib/publish/types";
 import { cn } from "@/lib/utils";
 
@@ -90,7 +91,7 @@ function parsePlatformTarget(value: string | null | undefined): Platform[] {
   const parts = value
     .split(",")
     .map((p) => p.trim())
-    .filter((p): p is Platform => p === "x" || p === "linkedin" || p === "facebook");
+    .filter(isPublishPlatformTarget);
   return parts.length > 0 ? parts : ["x"];
 }
 
