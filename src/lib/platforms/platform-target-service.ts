@@ -220,15 +220,18 @@ export async function prepareCurrentPlatformTarget(
       input.platform,
       RTX_PUBLISH_SESSION_NAME,
       async (page) => {
-        const loggedIn = await probePlatformLogin(
+        const loginSurfaceDetected = await probePlatformLogin(
           input.platform,
           page,
           CURRENT_TARGET_LOGIN_TIMEOUT_MS,
         );
-        const detectedHandle = loggedIn
+        const detectedHandle = loginSurfaceDetected
           ? await detectPlatformHandle(input.platform, page, page.url())
           : null;
-        return { loggedIn, detectedHandle };
+        return {
+          loggedIn: loginSurfaceDetected && detectedHandle !== null,
+          detectedHandle,
+        };
       },
       env,
       fetchImpl,

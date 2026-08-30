@@ -9,6 +9,7 @@ import {
   buildPublishSessionAllowedOrigins,
   buildPublishSessionGuardrails,
   buildSocialPlatformConnectionPayload,
+  detectPlatformHandle,
   extractFacebookProfileSlugFromUrl,
   extractLinkedInVanityFromUrl,
   extractXHandleFromProfileHref,
@@ -23,6 +24,7 @@ import {
   isXLoggedInUrl,
   isXLoggedOutUrl,
   openPlatformBrowserSession,
+  probePlatformLogin,
   urlMatchesPlatformHost,
   validatePlatformBrowserSession,
 } from "@/lib/platforms/browser-connection";
@@ -46,9 +48,9 @@ describe("rtx browser session helpers", () => {
     );
   });
 
-  it("detects authenticated LinkedIn URLs including profile pages", () => {
+  it("does not treat public LinkedIn profile URLs as authentication evidence", () => {
     expect(isLinkedInLoggedInUrl("https://www.linkedin.com/feed/")).toBe(true);
-    expect(isLinkedInLoggedInUrl("https://www.linkedin.com/in/jane-doe")).toBe(true);
+    expect(isLinkedInLoggedInUrl("https://www.linkedin.com/in/jane-doe")).toBe(false);
     expect(isLinkedInLoggedInUrl("https://www.linkedin.com/login")).toBe(false);
     expect(isLinkedInLoggedInUrl("https://www.linkedin.com/checkpoint/challenge")).toBe(
       false
@@ -494,6 +496,27 @@ describe("publish session guardrails", () => {
     expect(result.isValid).toBe(true);
   });
 
+  it("rejects a public LinkedIn profile URL as the authenticated session identity", async () => {
+    const page = fakePage("https://www.linkedin.com/in/alice");
+
+    await expect(probePlatformLogin("linkedin", page as never, 0)).resolves.toBe(false);
+    await expect(
+      detectPlatformHandle("linkedin", page as never, page.url()),
+    ).resolves.toBe(null);
+  });
+
+  it("reads LinkedIn identity only from authenticated navigation, not the viewed profile", async () => {
+    const page = fakePage("https://www.linkedin.com/in/alice", {
+      visible: [".global-nav__me"],
+      hrefs: { '.global-nav__me a[href*="/in/"]': "/in/session-owner" },
+    });
+
+    await expect(probePlatformLogin("linkedin", page as never, 0)).resolves.toBe(true);
+    await expect(
+      detectPlatformHandle("linkedin", page as never, page.url()),
+    ).resolves.toBe("/in/session-owner");
+  });
+
   it("requests a platform tab when the session has none, then validates", async () => {
     const { fetchImpl, calls, find } = mockRtxCli([
       { sessionName: "signals-publish", running: true, remoteDebugPort: 9223 },
@@ -518,6 +541,7 @@ describe("publish session guardrails", () => {
       if (url.includes("/cli/start-browser-session/") && body?.url) {
         open.push(
           fakePage("https://www.linkedin.com/feed/", {
+            visible: [".global-nav__me"],
             hrefs: { 'a.global-nav__primary-link[href*="/in/"]': "/in/jane-doe" },
           })
         );

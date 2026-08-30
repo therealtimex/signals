@@ -16,6 +16,9 @@ boundary for research and must not block a run merely because they name an older
   LinkedIn and then X inside `signals-publish`, registers or refreshes the detected live identity,
   and binds the browse lease to that target before dispatch.
 - A stale default target is ignored. The live session identity is recorded as `source: "session"`.
+- LinkedIn identity requires positive authenticated navigation plus its self-profile link. A public
+  `/in/*` page is never authentication evidence and its vanity must not be registered as the
+  session owner.
 - An explicit target override remains exact and fail-closed for callers that intentionally pin an
   identity.
 - Preflight still never creates a substitute browser profile. If neither LinkedIn nor X is signed

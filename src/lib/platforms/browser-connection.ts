@@ -139,6 +139,18 @@ const LOGGED_OUT_SELECTORS: Record<SocialPlatform, string[]> = {
   ],
 };
 
+const LINKEDIN_AUTHENTICATED_NAV_SELECTORS = [
+  ".global-nav__me",
+  '[data-test-icon="nav-home-icon"]',
+  'nav[aria-label="Primary"]',
+] as const;
+
+const LINKEDIN_SELF_PROFILE_LINK_SELECTORS = [
+  '.global-nav__me a[href*="/in/"]',
+  'button.global-nav__me a[href*="/in/"]',
+  'a.global-nav__primary-link[href*="/in/"]',
+] as const;
+
 function asBrowserPlatform(platform: SocialPlatform): BrowserPlatform {
   return platform;
 }
@@ -192,7 +204,6 @@ export function isLinkedInLoggedInUrl(rawUrl: string): boolean {
     const path = new URL(rawUrl).pathname.toLowerCase();
     return (
       path.startsWith("/feed") ||
-      path.startsWith("/in/") ||
       path.startsWith("/mynetwork") ||
       path.startsWith("/notifications") ||
       path.startsWith("/messaging") ||
@@ -623,14 +634,13 @@ export async function detectPlatformHandle(
     return pageSlug ? formatFacebookHandle(pageSlug) : null;
   }
 
-  const navSelectors = [
-    'a.global-nav__primary-link[href*="/in/"]',
-    '.global-nav__me a[href*="/in/"]',
-    'button.global-nav__me a[href*="/in/"]',
-    'nav a[href*="/in/"]',
-  ];
+  const authenticatedNavigationVisible = await isAnySelectorVisible(
+    page,
+    [...LINKEDIN_AUTHENTICATED_NAV_SELECTORS],
+  );
+  if (!authenticatedNavigationVisible) return null;
 
-  for (const selector of navSelectors) {
+  for (const selector of LINKEDIN_SELF_PROFILE_LINK_SELECTORS) {
     const href = await page
       .locator(selector)
       .first()
@@ -639,9 +649,7 @@ export async function detectPlatformHandle(
     const vanity = extractLinkedInVanityFromUrl(href ?? "");
     if (vanity) return formatLinkedInHandle(vanity);
   }
-
-  const pageVanity = extractLinkedInVanityFromUrl(pageUrl);
-  return pageVanity ? formatLinkedInHandle(pageVanity) : null;
+  return null;
 }
 
 /**

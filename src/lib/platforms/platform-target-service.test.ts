@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const adapterMocks = vi.hoisted(() => ({ activate: vi.fn() }));
 const browserMocks = vi.hoisted(() => ({
   detectPlatformHandle: vi.fn(),
+  pageUrl: vi.fn(),
   probePlatformLogin: vi.fn(),
 }));
 
@@ -16,7 +17,7 @@ vi.mock("@/lib/platforms/browser-connection", () => ({
     _platform: string,
     _sessionName: string,
     callback: (page: object) => unknown,
-  ) => callback({ url: () => "https://www.linkedin.com/feed/" }),
+  ) => callback({ url: browserMocks.pageUrl }),
   getPlatformHomeUrl: (platform: string) => `https://www.${platform}.com/`,
   probePlatformLogin: browserMocks.probePlatformLogin,
 }));
@@ -39,6 +40,8 @@ describe("preparePlatformTarget login classification", () => {
     resetCoreTables();
     adapterMocks.activate.mockReset();
     browserMocks.detectPlatformHandle.mockReset();
+    browserMocks.pageUrl.mockReset();
+    browserMocks.pageUrl.mockReturnValue("https://www.linkedin.com/feed/");
     browserMocks.probePlatformLogin.mockReset();
   });
 
@@ -127,6 +130,28 @@ describe("preparePlatformTarget login classification", () => {
       }),
     ).rejects.toMatchObject({ code: "LOGIN_REQUIRED" });
     expect(browserMocks.detectPlatformHandle).not.toHaveBeenCalled();
+    expect(getSessionLease(connection.id)).toBeUndefined();
+  });
+
+  it("rejects a public LinkedIn profile tab with no authenticated self identity", async () => {
+    const connection = ensureBrowserConnection({ sessionName: "signals-publish" });
+    browserMocks.pageUrl.mockReturnValue("https://www.linkedin.com/in/alice");
+    browserMocks.probePlatformLogin.mockResolvedValue(true);
+    browserMocks.detectPlatformHandle.mockResolvedValue(null);
+
+    await expect(
+      prepareCurrentPlatformTarget({
+        platform: "linkedin",
+        intent: "browse",
+        holder: "contact-web-research:run-public-profile",
+      }),
+    ).rejects.toMatchObject({ code: "LOGIN_REQUIRED" });
+    expect(browserMocks.detectPlatformHandle).toHaveBeenCalledWith(
+      "linkedin",
+      expect.anything(),
+      "https://www.linkedin.com/in/alice",
+    );
+    expect(listPlatformTargets({ platform: "linkedin" })).toEqual([]);
     expect(getSessionLease(connection.id)).toBeUndefined();
   });
 });
