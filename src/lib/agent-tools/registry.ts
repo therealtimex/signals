@@ -183,6 +183,10 @@ import {
   updateContentDraftSchema,
 } from "@/lib/agent-tools/content-item-handlers";
 import type { AgentToolDefinition } from "@/lib/agent-tools/types";
+import {
+  handleUpsertPersonalityStatements,
+  upsertPersonalityStatementsSchema,
+} from "@/lib/agent-tools/personality-handlers";
 
 export const AGENT_TOOL_VERSION = "1";
 
@@ -428,6 +432,15 @@ export const AGENT_TOOLS: Record<string, AgentToolDefinition> = {
     schema: approveVoiceProfileSchema,
     parameters: zodToParameters(approveVoiceProfileSchema),
     execute: handleApproveVoiceProfile,
+  },
+  upsert_personality_statements: {
+    name: "upsert_personality_statements",
+    description:
+      "Store user-authored values and boundaries for Personality projection. Text is persisted verbatim; this tool does not project or publish it.",
+    category: "content",
+    schema: upsertPersonalityStatementsSchema,
+    parameters: zodToParameters(upsertPersonalityStatementsSchema),
+    execute: handleUpsertPersonalityStatements,
   },
   query_goals: {
     name: "query_goals",

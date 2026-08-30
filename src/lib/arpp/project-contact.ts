@@ -42,7 +42,7 @@ function isSharedEmployment(
   return org?.scope === "shared";
 }
 
-function projectIdentityToProfile(identity: ContactIdentity): ArppProfile | null {
+export function projectIdentityToArppProfile(identity: ContactIdentity): ArppProfile | null {
   const url = identity.platformUrl ?? identity.websiteUrl;
   if (!url) return null;
   return {
@@ -100,7 +100,7 @@ function buildExperience(
   return experience;
 }
 
-function visibleEmployments(
+export function visibleContactEmployments(
   contact: ContactDTO,
   orgsById: Map<string, Org>,
   visibility: "internal" | "public",
@@ -114,7 +114,7 @@ function visibleEmployments(
   return visible;
 }
 
-function resolveCurrentEmployment(
+export function resolveCurrentContactEmployment(
   employments: ContactEmploymentDTO[],
 ): ContactEmploymentDTO | undefined {
   let selected: ContactEmploymentDTO | undefined;
@@ -164,7 +164,7 @@ export function projectContactToArpp(
 
   const activeIdentities = contact.identities.filter((identity) => identity.isActive);
   const profiles = activeIdentities
-    .map(projectIdentityToProfile)
+    .map(projectIdentityToArppProfile)
     .filter((profile): profile is ArppProfile => profile !== null);
 
   const primaryIdentity =
@@ -189,12 +189,12 @@ export function projectContactToArpp(
   }
 
   const orgIriPrefix = opts?.baseIriPrefix?.replace(/:contact$/, ":org") ?? "signals:org";
-  const employments = visibleEmployments(contact, orgsById, visibility);
+  const employments = visibleContactEmployments(contact, orgsById, visibility);
   const experience = buildExperience(employments, orgsById, orgIriPrefix);
   const sameAs = collectSameAs(contact, profiles);
   const jobTitle =
     visibility === "public"
-      ? resolveCurrentEmployment(employments)?.title ?? null
+      ? resolveCurrentContactEmployment(employments)?.title ?? null
       : contact.currentEmployment?.title ?? contact.title;
 
   const doc: ArppPersonDocument = {

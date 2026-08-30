@@ -4,6 +4,9 @@ import { isWritingId, newWritingId, parseFormulaId, parseOverlayId, parseRuleId 
 describe("writing identifiers", () => {
   it("generates namespaced ids and parses closed writing grammars", () => {
     expect(isWritingId("aud", newWritingId("aud"))).toBe(true);
+    expect(isWritingId("prp", newWritingId("prp"))).toBe(true);
+    expect(isWritingId("pb", newWritingId("pb"))).toBe(true);
+    expect(isWritingId("pm", newWritingId("pm"))).toBe(true);
     expect(isWritingId("aud", "aud_short")).toBe(false);
     expect(parseFormulaId("x/post/one-liner@1")).toBe("x/post/one-liner@1");
     expect(parseFormulaId("X1")).toBeNull();

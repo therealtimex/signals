@@ -1614,6 +1614,40 @@
                     "type": "object",
                     "properties": {
                       "tool": {
+                        "const": "upsert_personality_statements"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "values": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "boundaries": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "required": [
+                          "values",
+                          "boundaries"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
                         "const": "query_goals"
                       },
                       "input": {
@@ -4321,6 +4355,7 @@
                       "get_voice_profile",
                       "upsert_voice_profile",
                       "approve_voice_profile",
+                      "upsert_personality_statements",
                       "query_goals",
                       "create_task",
                       "get_persona",
@@ -4520,6 +4555,6 @@
   ],
   "x-signals-agent-tools": {
     "manifestVersion": "1",
-    "toolCount": 80
+    "toolCount": 81
   }
 }

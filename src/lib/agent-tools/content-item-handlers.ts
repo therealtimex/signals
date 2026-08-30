@@ -667,7 +667,11 @@ function resolveContextVoice(writing: Record<string, unknown> | null) {
   const active = resolveActiveVoiceProfileContext();
   return {
     profile: active.profile,
-    status: active.profile ? (active.ambiguous ? "ambiguous" : "active") : "none",
+    status: active.status === "unclaimed_only"
+      ? "unclaimed_only"
+      : active.profile
+        ? (active.ambiguous ? "ambiguous" : "active")
+        : "none",
     candidates: active.candidates,
   };
 }

@@ -10,6 +10,9 @@ export type SignalsConfig = {
   writingApprovalPolicy?: "explicit" | "auto_low_risk";
   emailSmtpProbeEnabled?: boolean;
   allowPredictedEmailInAutomation?: boolean;
+  personalityProjection?: {
+    representedOrgId: string | null;
+  };
   [key: string]: unknown;
 };
 
@@ -17,6 +20,14 @@ function resolveConfigPath(): string {
   const dataDir =
     process.env.SIGNALS_DATA_DIR?.replace(/^~/, homedir()) ?? join(homedir(), ".signals");
   return join(dataDir, "config.json");
+}
+
+export function getRepresentedOrgId(): string | null {
+  return readSignalsConfig().personalityProjection?.representedOrgId ?? null;
+}
+
+export function setRepresentedOrgId(representedOrgId: string | null): SignalsConfig {
+  return updateSignalsConfig({ personalityProjection: { representedOrgId } });
 }
 
 export function readSignalsConfig(): SignalsConfig {
