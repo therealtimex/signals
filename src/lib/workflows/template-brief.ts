@@ -23,6 +23,7 @@ import {
   isSignalsWritingTemplateConfig,
 } from "@/lib/workflows/signals-writing";
 import {
+  CONTACT_WEB_RESEARCH_THREAD_NAME,
   CONTACT_WEB_RESEARCH_TOOLS,
   buildContactWebResearchBriefSection,
   isContactWebResearchTemplateConfig,
@@ -94,6 +95,14 @@ export function formatRunLabelPrefix(runNumber?: number): string {
 
 export function buildTemplateThreadName(templateName: string): string {
   return templateName.trim().slice(0, 60) || "Workflow";
+}
+
+export function resolveTemplateThreadName(
+  template: Pick<WorkflowTemplate, "name" | "config">,
+): string {
+  return isContactWebResearchTemplateConfig(parseTemplateConfig(template.config))
+    ? CONTACT_WEB_RESEARCH_THREAD_NAME
+    : buildTemplateThreadName(template.name);
 }
 
 /**

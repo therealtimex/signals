@@ -12,6 +12,14 @@ import {
   releaseTimedOutWorkflowTerminalRun,
 } from "@/lib/rtx/workflow-run-terminal-watchdog";
 import { resetCoreTables } from "@/test/db";
+import {
+  ensureBrowserConnection,
+  registerPlatformTarget,
+} from "@/lib/db/queries/platform-targets";
+import {
+  acquireSessionLease,
+  getSessionLeaseById,
+} from "@/lib/leases/session-lease";
 
 describe("workflow-run terminal watchdog", () => {
   beforeEach(() => {
@@ -173,5 +181,62 @@ describe("workflow-run terminal watchdog", () => {
       { reason: WORKFLOW_COMPLETED_TERMINAL_RELEASE_REASON },
     );
     vi.useRealTimers();
+  });
+
+  it("releases a timed-out contact research lease after browser teardown", async () => {
+    const connection = ensureBrowserConnection({ sessionName: "signals-publish" });
+    const target = registerPlatformTarget({
+      connectionId: connection.id,
+      platform: "linkedin",
+      kind: "profile",
+      name: "/in/current",
+      handle: "/in/current",
+      capabilities: ["browse", "publish"],
+      source: "test",
+    });
+    const lease = acquireSessionLease(connection.id, {
+      holder: "contact-web-research:timed-out",
+      targetId: target.id,
+      intent: "browse",
+      ttlSeconds: 600,
+    });
+    const run = createWorkflowRun({
+      workflowType: "enrich",
+      status: "running",
+      trigger: "template",
+      startedAt: Math.floor(Date.now() / 1000) - 8 * 60 * 60,
+      config: JSON.stringify({
+        contactWebResearch: { version: 1 },
+        rtxRuntimeSessionId: "cli-agent:research-timeout",
+        researchTarget: {
+          targetId: target.id,
+          platform: "linkedin",
+          source: "default",
+          sessionName: "signals-publish",
+          startUrl: "https://www.linkedin.com/in/current",
+          expectedHandle: "/in/current",
+          verifiedHandle: "/in/current",
+          leaseId: lease.leaseId,
+          leaseExpiresAt: lease.expiresAt,
+          preparedAt: Math.floor(Date.now() / 1000),
+        },
+      }),
+    });
+
+    vi.spyOn(resourceTeardown, "finalizeChatLinkedTerminalSession").mockResolvedValue({
+      browserSessionTeardown: { stopped: ["signals-publish"], failed: [] },
+      terminalSessionTeardown: {
+        scheduled: true,
+        sessionId: "cli-agent:research-timeout",
+      },
+    });
+    vi.spyOn(workflowCompletionThread, "postWorkflowCompletionThreadMessage").mockResolvedValue({
+      posted: true,
+    });
+
+    await expect(releaseTimedOutWorkflowTerminalRun(run.id)).resolves.toMatchObject({
+      released: true,
+    });
+    expect(getSessionLeaseById(lease.leaseId)).toBeUndefined();
   });
 });

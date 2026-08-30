@@ -29,8 +29,8 @@ import { isRtxEmbedded, type EnvLike } from "@/lib/rtx/env";
 import { appendRtxThreadMessage } from "@/lib/rtx/runtime-sessions";
 import { ensureProfilePipelineDrainJob } from "@/lib/db/profile-pipeline-drain";
 import {
-  buildTemplateThreadName,
   formatRunLabelPrefix,
+  resolveTemplateThreadName,
 } from "@/lib/workflows/template-brief";
 import { PIPELINE_STEP_HANDLERS } from "@/lib/workflows/pipeline/handlers";
 import {
@@ -561,7 +561,7 @@ export async function runPipelineTemplate(
           {
             template,
             workspaceSlug,
-            threadName: buildTemplateThreadName(template.name),
+            threadName: resolveTemplateThreadName(template),
             freshThread: input.freshThread,
           },
           env,

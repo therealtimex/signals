@@ -25,10 +25,16 @@ function makeTemplate(rtxThreadSlug: string | null = null) {
   return template;
 }
 
-/** Minimal RTX CLI API stub: `get-thread` presence + `create-thread`. */
-function stubRtxApi(options: { getThreadStatus?: number; createdSlug?: string }) {
+/** Minimal RTX CLI API stub: thread lookup, create, and rename. */
+function stubRtxApi(options: {
+  getThreadStatus?: number;
+  getThreadName?: string | null;
+  createdSlug?: string;
+  renameStatus?: number;
+}) {
   const calls: string[] = [];
   const createdNames: string[] = [];
+  const renamedNames: string[] = [];
   const fetchImpl = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
     calls.push(url);
@@ -37,7 +43,25 @@ function stubRtxApi(options: { getThreadStatus?: number; createdSlug?: string })
       return {
         ok: status >= 200 && status < 300,
         status,
-        json: async () => ({}),
+        json: async () => ({
+          thread: {
+            name:
+              options.getThreadName === undefined
+                ? "Top AI Influencers"
+                : options.getThreadName,
+          },
+        }),
+      };
+    }
+    if (url.includes("/cli/rename-thread/")) {
+      renamedNames.push(
+        JSON.parse(String((init as RequestInit | undefined)?.body ?? "{}")).name,
+      );
+      const status = options.renameStatus ?? 200;
+      return {
+        ok: status >= 200 && status < 300,
+        status,
+        json: async () => status >= 400 ? { error: "rename failed" } : { success: true },
       };
     }
     if (url.includes("/cli/create-thread/")) {
@@ -53,7 +77,7 @@ function stubRtxApi(options: { getThreadStatus?: number; createdSlug?: string })
     throw new Error(`unexpected fetch: ${url}`);
   }) as unknown as typeof fetch;
 
-  return { fetchImpl, calls, createdNames };
+  return { fetchImpl, calls, createdNames, renamedNames };
 }
 
 describe("getOrCreateTemplateThread", () => {
@@ -71,7 +95,13 @@ describe("getOrCreateTemplateThread", () => {
       fetchImpl,
     );
 
-    expect(result).toEqual({ threadSlug: "thread-abc", resolution: "created" });
+    expect(result).toMatchObject({
+      threadSlug: "thread-abc",
+      resolution: "created",
+      threadName: "Top AI Influencers",
+      renameAttempted: false,
+      renamed: false,
+    });
     expect(getTemplate(template.id)?.rtxThreadSlug).toBe("thread-abc");
     expect(calls.some((url) => url.includes("/cli/get-thread/"))).toBe(false);
   });
@@ -90,7 +120,12 @@ describe("getOrCreateTemplateThread", () => {
       fetchImpl,
     );
 
-    expect(result).toEqual({ threadSlug: "thread-abc", resolution: "reused" });
+    expect(result).toMatchObject({
+      threadSlug: "thread-abc",
+      resolution: "reused",
+      renameAttempted: false,
+      renamed: false,
+    });
     expect(calls.some((url) => url.includes("/cli/create-thread/"))).toBe(false);
     expect(getTemplate(template.id)?.rtxThreadSlug).toBe("thread-abc");
   });
@@ -112,7 +147,7 @@ describe("getOrCreateTemplateThread", () => {
       fetchImpl,
     );
 
-    expect(result).toEqual({ threadSlug: "thread-fresh", resolution: "recreated" });
+    expect(result).toMatchObject({ threadSlug: "thread-fresh", resolution: "recreated" });
     expect(getTemplate(template.id)?.rtxThreadSlug).toBe("thread-fresh");
   });
 
@@ -130,7 +165,11 @@ describe("getOrCreateTemplateThread", () => {
       fetchImpl,
     );
 
-    expect(result).toEqual({ threadSlug: "thread-abc", resolution: "reused" });
+    expect(result).toMatchObject({
+      threadSlug: "thread-abc",
+      resolution: "reused",
+      renameAttempted: false,
+    });
     expect(calls.some((url) => url.includes("/cli/create-thread/"))).toBe(false);
   });
 
@@ -149,7 +188,7 @@ describe("getOrCreateTemplateThread", () => {
       fetchImpl,
     );
 
-    expect(result).toEqual({ threadSlug: "thread-oneoff", resolution: "fresh" });
+    expect(result).toMatchObject({ threadSlug: "thread-oneoff", resolution: "fresh" });
     expect(getTemplate(template.id)?.rtxThreadSlug).toBe("thread-abc");
     expect(calls.some((url) => url.includes("/cli/get-thread/"))).toBe(false);
     expect(createdNames).toEqual(["Top AI Influencers — one-off"]);
@@ -176,8 +215,62 @@ describe("getOrCreateTemplateThread", () => {
       fetchImpl,
     );
 
-    expect(result).toEqual({ threadSlug: "thread-winner", resolution: "reused" });
+    expect(result).toMatchObject({ threadSlug: "thread-winner", resolution: "reused" });
     expect(getTemplate(template.id)?.rtxThreadSlug).toBe("thread-winner");
     vi.restoreAllMocks();
+  });
+
+  it("renames a reused thread in place without changing its slug", async () => {
+    const template = makeTemplate("thread-abc");
+    const { fetchImpl, renamedNames } = stubRtxApi({
+      getThreadName: "Contact Web Research",
+    });
+
+    const result = await getOrCreateTemplateThread(
+      {
+        template,
+        workspaceSlug: "signals",
+        threadName: "Contact Enrich Profile",
+      },
+      ENV,
+      fetchImpl,
+    );
+
+    expect(result).toMatchObject({
+      threadSlug: "thread-abc",
+      resolution: "reused",
+      threadName: "Contact Enrich Profile",
+      renameAttempted: true,
+      renamed: true,
+    });
+    expect(renamedNames).toEqual(["Contact Enrich Profile"]);
+    expect(getTemplate(template.id)?.rtxThreadSlug).toBe("thread-abc");
+  });
+
+  it("keeps dispatching on the bound slug when rename fails", async () => {
+    const template = makeTemplate("thread-abc");
+    const { fetchImpl } = stubRtxApi({
+      getThreadName: "Contact Web Research",
+      renameStatus: 500,
+    });
+
+    const result = await getOrCreateTemplateThread(
+      {
+        template,
+        workspaceSlug: "signals",
+        threadName: "Contact Enrich Profile",
+      },
+      ENV,
+      fetchImpl,
+    );
+
+    expect(result).toMatchObject({
+      threadSlug: "thread-abc",
+      resolution: "reused",
+      renameAttempted: true,
+      renamed: false,
+      renameError: "rename failed",
+    });
+    expect(getTemplate(template.id)?.rtxThreadSlug).toBe("thread-abc");
   });
 });

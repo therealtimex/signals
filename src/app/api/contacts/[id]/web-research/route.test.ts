@@ -84,4 +84,39 @@ describe("/api/contacts/[id]/web-research", () => {
     await expect(response.json()).resolves.toMatchObject({ code: "ENRICHMENT_IN_PROGRESS" });
     expect(mockedRunTemplate).not.toHaveBeenCalled();
   });
+
+  it("maps an unavailable authenticated target to an actionable 409", async () => {
+    const contact = createContact({ name: "Needs Browser Login" });
+    mockedRunTemplate.mockResolvedValueOnce({
+      success: false,
+      error: "LinkedIn is signed out. Open Settings → Platform connections.",
+      errorCode: "research_target_unavailable",
+      httpStatus: 409,
+      workflowRunId: "run-target-failed",
+      details: {
+        reason: "LOGIN_REQUIRED",
+        targetId: "target-linkedin",
+        settingsPath: "/dashboard/settings?tab=platforms",
+        settingsTab: "Platform connections",
+      },
+    });
+
+    const response = await POST(
+      new NextRequest(
+        `http://127.0.0.1:3000/api/contacts/${contact.id}/web-research`,
+        { method: "POST" },
+      ),
+      { params: Promise.resolve({ id: contact.id }) },
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      code: "RESEARCH_TARGET_UNAVAILABLE",
+      details: {
+        reason: "LOGIN_REQUIRED",
+        settingsPath: "/dashboard/settings?tab=platforms",
+        workflowRunId: "run-target-failed",
+      },
+    });
+  });
 });

@@ -158,4 +158,56 @@ describe("smoke: agent tools API", () => {
       code: "TOOL_NOT_FOUND",
     });
   });
+
+  it("rejects LinkedIn auth walls and accepts a real profile URL over HTTP", async () => {
+    const create = await smokeFetch("/api/agent-tools/invoke", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        tool: "create_contact",
+        input: { name: "Authwall API Guard" },
+      }),
+    });
+    const created = await create.json();
+    const contactId = created.result.id as string;
+    createdContactIds.push(contactId);
+
+    const blocked = await smokeFetch("/api/agent-tools/invoke", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        tool: "upsert_contact_identity",
+        input: {
+          contactId,
+          platform: "linkedin",
+          platformUserId: "authwall-api-guard",
+          platformUrl: "https://www.linkedin.com/authwall?trk=foo",
+        },
+      }),
+    });
+    expect(blocked.status).toBe(400);
+    await expect(blocked.json()).resolves.toMatchObject({
+      success: false,
+      code: "VALIDATION_ERROR",
+    });
+
+    const accepted = await smokeFetch("/api/agent-tools/invoke", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        tool: "upsert_contact_identity",
+        input: {
+          contactId,
+          platform: "linkedin",
+          platformUserId: "real-profile-api-guard",
+          platformUrl: "https://www.linkedin.com/in/real-profile-api-guard",
+        },
+      }),
+    });
+    expect(accepted.ok).toBe(true);
+    await expect(accepted.json()).resolves.toMatchObject({
+      success: true,
+      result: { platformUserId: "real-profile-api-guard" },
+    });
+  });
 });

@@ -335,6 +335,7 @@ export const completeWorkflowRunSchema = z.object({
       unresolvedFields: z.array(z.string()).optional(),
       identityLinked: z.boolean().optional(),
       visitedUrls: z.array(z.string().url()).optional(),
+      blockedUrls: z.array(z.string().url()).max(20).optional(),
       serpCandidates: z
         .array(
           z

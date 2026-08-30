@@ -540,27 +540,64 @@ async function resolveDedicatedDispatchThreadUncached(
  */
 export type RtxThreadPresence = "exists" | "missing" | "unknown";
 
+export type RtxThreadLookup = {
+  presence: RtxThreadPresence;
+  name: string | null;
+};
+
+export async function getRtxThread(
+  workspaceSlug: string,
+  threadSlug: string,
+  env: EnvLike = process.env,
+  fetchImpl: typeof fetch = fetch
+): Promise<RtxThreadLookup> {
+  if (!workspaceSlug.trim() || !threadSlug.trim()) {
+    return { presence: "missing", name: null };
+  }
+
+  try {
+    const { response, body } = await rtxCliRequest(
+      `/cli/get-thread/${encodeURIComponent(workspaceSlug)}/${encodeURIComponent(threadSlug)}`,
+      { method: "GET" },
+      env,
+      fetchImpl
+    );
+    if (response.ok) {
+      const thread = body.thread as { name?: unknown } | undefined;
+      return {
+        presence: "exists",
+        name: typeof thread?.name === "string" ? thread.name : null,
+      };
+    }
+    if (response.status === 404) return { presence: "missing", name: null };
+    return { presence: "unknown", name: null };
+  } catch {
+    return { presence: "unknown", name: null };
+  }
+}
+
 export async function getRtxThreadPresence(
   workspaceSlug: string,
   threadSlug: string,
   env: EnvLike = process.env,
   fetchImpl: typeof fetch = fetch
 ): Promise<RtxThreadPresence> {
-  if (!workspaceSlug.trim() || !threadSlug.trim()) return "missing";
+  return (await getRtxThread(workspaceSlug, threadSlug, env, fetchImpl)).presence;
+}
 
-  try {
-    const { response } = await rtxCliRequest(
-      `/cli/get-thread/${encodeURIComponent(workspaceSlug)}/${encodeURIComponent(threadSlug)}`,
-      { method: "GET" },
-      env,
-      fetchImpl
-    );
-    if (response.ok) return "exists";
-    if (response.status === 404) return "missing";
-    return "unknown";
-  } catch {
-    return "unknown";
-  }
+export async function renameRtxThread(
+  workspaceSlug: string,
+  threadSlug: string,
+  name: string,
+  env: EnvLike = process.env,
+  fetchImpl: typeof fetch = fetch,
+): Promise<void> {
+  await rtxCliRequestOk(
+    `/cli/rename-thread/${encodeURIComponent(workspaceSlug)}/${encodeURIComponent(threadSlug)}`,
+    { method: "POST", body: JSON.stringify({ name }) },
+    env,
+    fetchImpl,
+  );
 }
 
 export function buildPublishThreadName(title: string | null | undefined): string {
