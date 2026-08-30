@@ -24,7 +24,7 @@ account access.
 | D6 | **Signals never writes Personality files directly.** Apply uses a prerequisite RealTimeX SDK batch endpoint whose per-workspace writer coordinator is shared by the Personality UI and Local Apps. The UI PUT is upgraded to require the hash/etag returned when its editor loaded; the host revalidates every writer's expected whole-file hashes while holding the coordinator, writes/compensates as one durable transaction, and returns committed hashes. No terminal agent or LLM is in the write path. | A shared lock around a still-blind UI is insufficient: a stale UI save could wait and then overwrite the transaction. Every supported writer must coordinate **and** compare its read revision before Signals can ship apply. |
 | D7 | A binding is exact: `{ workspaceSlug, workspaceId?, workspaceDir (realpath), selfContactId, representedOrgId, sourceHash, sourceRevisions, files[{path, fileHash, blockHash}], personalityHash, approval, appliedAt }`. `personalityHash` covers the exact whole bytes (managed + unmanaged) of the four social Personality files. Proposal and apply refuse a workspace whose slug, directory realpath, self contact, or expected file revision differs. | "Exact workspace + exact effective Personality revision" keeps voices from crossing workspaces and makes user prose part of the artifact boundary. |
 | D8 | After application the whole social Personality is authoritative. Any manual change to managed **or unmanaged** bytes is `drifted`; bound artifacts fail lazy stale checks until the user approves a new projection that preserves/adopts unmanaged prose, corrects managed blocks from sources, and creates a new binding revision. Personality edits are never reverse-written into contacts, orgs, or voice profiles. | Facts flow one way, while user-authored workspace prose still changes the voice agents actually read and therefore must change the revision. |
-| D9 | Writing variants record the Personality binding they were produced under (`metadata.writing.personality`). A new binding revokes pending approvals of variants bound to an older binding (`revokedReason: "personality_stale"`); `materialize_variant` and the G5 publish gate reject stale bindings. Queued/published artifacts are untouched. | Same mechanism as spine changes (§5.6 of the writing spec); no new state machine. |
+| D9 | Writing variants record the Personality binding they were produced under (`metadata.writing.personality`), and audits snapshot the current allowlisted Personality source hash. A new binding/whole-file drift revokes pending approval as `personality_stale`; a later source hash invalidates the old audit/approval as `personality_source_stale` until a warned re-audit and fresh explicit approval. `materialize_variant` and G5 enforce both revisions; queued/published artifacts are untouched. | Same approval/audit invalidation mechanism as spine changes (§5.6 of the writing spec); no new state machine. |
 | D10 | One workspace represents exactly one self contact and at most one org. The cross-owner fallback in voice-profile resolution is removed; profiles owned by another contact or by nobody are never eligible. Every legacy or new platform target defaults to `unbound` unless ownership is verifiably derived; assigning a concrete `{ kind: "self", contactId }` or `{ kind: "org", orgId }` requires explicit user evidence. Different people or incompatible brands use different workspaces (and, today, different `SIGNALS_DATA_DIR`s). | "Incompatible voices cannot silently share a Personality" is enforced at the binding, the voice resolver, and an explicit target decision. |
 | D11 | Persistence is a Signals file store under `SIGNALS_DATA_DIR/personality/` (immutable proposals, atomically committed index, one lock) plus scalar keys in `config.json`. No DDL. New agent tools and REST routes only; no existing tool input schema changes. | Same reasoning as ADR-347-3/-4 and ADR-350-1; the store is a straight projection of any future table. |
 | D12 | The presence mandate contract is defined with exactly one legal mode, `assist_only`, pinned by a static test. Adding any other mode requires a new ADR and owner sign-off. | The direction is agentic presence; this issue explicitly does not enable it. |
@@ -316,6 +316,7 @@ type PersonalityProposalRecord = {
   approval: { by: "user"; at: number; evidence: ApprovalEvidence } | null;
   attempt: {
     bindingId: `pb_${string}`;      // always equals immutable proposal.proposedBindingId
+    attemptNo: number;              // monotonic per proposal; starts at 1
     hostTransactionId: string;
     phase: "prepared" | "submitted" | "committing";
     startedAt: number;
@@ -390,13 +391,16 @@ approval: { by: "user"; at: number; evidence: ApprovalEvidence }   // same schem
 - UI: `POST /api/personality/proposals/:id/approve` with `{ kind: "ui", route }`.
 - Agent: `approve_personality_projection` with `{ kind: "thread_message", workspaceSlug, threadSlug, note }` — the agent must render the diff card (§5.6) first, and the same MVP caveat as the writing spec §12.1 applies (the thread is auditable; the UI path is preferred).
 - There is **no** policy-based approval for Personality; `writingApprovalPolicy` does not apply.
-- The immutable proposal document is never rewritten. Approval evidence, the active apply attempt,
-  and failure details are generation-checked fields in its `PersonalityProposalRecord` (§5.1).
+- The immutable proposal document is never rewritten. Approval evidence, the active apply attempt
+  (or retained latest terminal attempt), and failure details are generation-checked fields in its
+  `PersonalityProposalRecord` (§5.1).
 - Approval and apply happen in one call (like `materialize_variant`): approve validates, persists
   the user evidence, then applies (§5.4). A pre-mutation host CAS conflict makes the proposal
   `stale`; a host write/verification/recovery failure makes it `apply_failed` and retains approval
-  for explicit retry. `retry_personality_projection` reuses the immutable exact file request and
-  its idempotent host transaction id; it never refreshes CAS tokens or rewrites proposal bytes.
+  for explicit retry. A retry resumes the same host transaction id only while that attempt is
+  nonterminal. After a host proves `restored_failure`, the next explicit retry revalidates the
+  immutable proposal's original CAS tokens and allocates a fresh attempt-scoped host transaction
+  id; it never refreshes CAS tokens, rewrites proposal bytes, or allocates a new binding id.
 
 ### 5.4 Apply algorithm (host-coordinated compare-and-swap, verify, compensate)
 
@@ -435,15 +439,20 @@ Under the Signals personality store lock (`STORE_BUSY` after the bounded wait):
    `proposal.proposedBindingId`; recompute every proposed block/file hash and `proposalHash`. A
    mismatch is `STORE_CORRUPT` before any host call.
 4. Journal: generation-check and commit the proposal record as `applying`, with
-   `bindingId = proposedBindingId`, deterministic
-   `hostTransactionId = personality:<workspaceKey>:<proposalId>`, and phase `prepared`. This is
-   durable before the host request.
+   `bindingId = proposedBindingId`, the next monotonic `attemptNo`, deterministic
+   `hostTransactionId = personality:<workspaceKey>:<proposalId>:attempt:<attemptNo>`, and phase
+   `prepared`. This is durable before the host request. The first apply uses attempt 1. A durable
+   `approved` record with `attempt: null` (crash after approval persistence but before this step)
+   resumes here on a repeated approve or explicit retry after revalidating every original
+   `currentFileHash`.
 5. Set phase `submitted` and call the host transaction with every touched file's exact immutable
    `currentFileHash`, `proposedFile`, and `proposedFileHash`. A host `409 file_changed` is known to
    occur before mutation: mark the proposal `stale`, clear the attempt, return `STORE_CONFLICT` /
-   `file_changed`, and require a new reviewed proposal. A host `restored_failure` becomes
-   `apply_failed`; `recovery_required` records the transaction id and blocks new applies until
-   explicit retry resolves the host journal. No binding commits for either failure.
+   `file_changed`, and require a new reviewed proposal. A host `restored_failure` is terminal for
+   that host transaction, becomes `apply_failed`, and retains the terminal attempt plus approval;
+   a later explicit retry may allocate attempt N+1 only after all original CAS tokens still match.
+   `recovery_required` records the current transaction id and blocks any new attempt until explicit
+   retry resolves that host journal. No binding commits for either failure.
 6. On host `committed`, require the returned path set and hashes to equal the immutable proposal.
    Any impossible response mismatch is `apply_failed / host_verification_mismatch` and invokes
    the host transaction's compensation/recovery operation; Signals never repairs files itself.
@@ -478,11 +487,16 @@ type PersonalityBinding = {
    binding; there is deliberately no new active binding for them to match.
 
 Crash recovery: under the store lock, `retry_personality_projection` inspects the durable Signals
-attempt and queries its exact host transaction id. `committed` finishes the generation-checked
-binding commit after rechecking returned hashes; `not_started` resubmits the immutable request;
-`restored` becomes `apply_failed`; `recovery_required` asks the host to compensate/complete its
-own journal and keeps the workspace blocked until a terminal status is proven. Startup does not
-mutate a workspace automatically; recovery runs only from the explicit retry path.
+state. `approved` with `attempt: null` revalidates every immutable `currentFileHash` and starts
+attempt 1. An `applying` nonterminal attempt always queries and resumes its exact transaction id:
+`committed` finishes the generation-checked binding commit after rechecking returned hashes;
+`not_started` resubmits the immutable request; `prepared`/`submitted` remains the same attempt;
+`recovery_required` asks the host to compensate/complete its own journal and keeps the workspace
+blocked. `restored_failure` is recorded as terminal `apply_failed`; only a subsequent
+explicit retry may revalidate the original CAS tokens and allocate attempt N+1. Replaying the old
+id is expected to replay its terminal result and is never treated as a new apply. Startup does not
+mutate a workspace automatically; all recovery and new-attempt allocation run only from an
+explicit repeated approve/retry call.
 
 Atomicity statement: a multi-file POSIX write is not physically atomic. For all supported
 RealTimeX Personality writers, the shared host coordinator makes expected-hash validation and the
@@ -540,6 +554,7 @@ diff and drift. `get_personality_binding` and `get_writing_context.personality` 
 type PersonalityStatus = {
   workspace: { slug: string; dir: string | null };
   binding: Pick<PersonalityBinding, "id" | "sourceHash" | "personalityHash" | "appliedAt" | "identity" | "files"> | null;
+  currentSourceHash: string | null;  // rebuilt allowlisted source snapshot; null when unbound/unavailable
   status: "bound" | "source_stale" | "drifted" | "unbound" | "unavailable";
   detail?: {
     sourceStale?: { self?: boolean; org?: boolean; voice?: boolean; statements?: boolean };  // hash comparisons
@@ -606,24 +621,49 @@ personality?: { bindingId: `pb_${string}`; personalityHash: string; workspaceSlu
   transaction as spine-change revocation). Legacy variants with `personality: null` are **not**
   revoked by the first binding (they were never bound); they are flagged `personality: "unbound"` in
   context and Studio.
+- Every new writing audit for a bound variant persists an additive snapshot:
+
+```ts
+WritingAudit.personality?: {
+  bindingId: `pb_${string}`;
+  personalityHash: string;
+  bindingSourceHash: string;
+  currentSourceHash: string;
+  statusAtAudit: "bound" | "source_stale";
+} | null;
+```
+
+  The server derives and stamps this snapshot when accepting the audit; caller-supplied values
+  cannot override it. Auditing refuses `drifted`/`unavailable`/binding-hash mismatch. It may
+  knowingly audit a `source_stale` binding because the exact canonical workspace bytes are
+  unchanged, but the server records the rebuilt source hash and inserts the deterministic warning
+  `core/voice/personality-source-stale` before verdict/risk derivation. That audit is the explicit
+  re-audit required by P4; its warning makes the approval risk at least `medium`, so policy cannot
+  silently re-approve it.
 - Lazy checks: audit/approval, `materialize_variant`, and G5 each recompute current
-  `PersonalityStatus`; `materialize_variant` requires `personality.bindingId === active binding id`,
-  `personality.personalityHash === active binding.personalityHash`, and
-  `status ∈ {bound, source_stale}` (a `drifted` workspace blocks materialization with
-  `AUDIT_STALE` / `personality_drifted` until re-applied or rolled back; `source_stale` only warns —
-  facts changed, the exact voice bytes the agent used are still what the workspace says). A
-  pending audit/approval under `drifted` is stale and must be re-run after the new binding. G5
-  rejects a writing item whose materialization snapshot's binding/hash is no longer active **or**
-  whose current effective Personality is drifted with `WRITING_ARTIFACT_STALE`.
-  Queued/publishing/published items are never mutated.
+  `PersonalityStatus`. An existing audit is stale if its Personality binding/hash no longer equals
+  the active binding, the workspace is `drifted`/`unavailable`, **or** its
+  `personality.currentSourceHash !== PersonalityStatus.currentSourceHash`. The effective approval
+  is revoked even if the stored row still says `approved`; the first mutation-capable gate persists
+  `revokedReason: "personality_source_stale"` for a source-hash mismatch (otherwise
+  `"personality_stale"`) and returns an unqueued materialized `approved` item to `draft` in the
+  same transaction. Read-only context reports the same effective stale/revoked state.
+- `materialize_variant` may accept `status: "source_stale"` only when the current audit carries the
+  exact current source hash as above and has a fresh approval tied to that audit id. G5 applies the
+  same proof before queueing. Thus a source change always invalidates the older audit/approval,
+  while a deliberate re-audit may retain the still-canonical Personality bytes until the user
+  approves a new projection. Queued/publishing/published items are never mutated.
 
 ### 6.3 Stale sources
 
 `source_stale` is computed on read by rebuilding the source snapshot and comparing per-source hashes
 against the binding. It surfaces as: a Settings banner with "Review new proposal", a
 `get_writing_context.personality.status` value the skill echoes on its approval card, and a
-warning-class audit finding `core/voice/personality-source-stale` the skill records. It does not
-revoke anything by itself — the user decides whether to re-project.
+warning-class audit finding `core/voice/personality-source-stale` on a new audit. The status does
+not rewrite Personality or force a new projection, but a changed `currentSourceHash` makes every
+older audit and approval ineffective until the variant is re-audited and explicitly re-approved.
+The user may knowingly retain the unchanged canonical Personality bytes or separately approve a
+new projection; either choice remains explicit.
 
 ---
 
@@ -762,7 +802,9 @@ provisioned slug as `SIGNALS_RTX_WORKSPACE_SLUG` automatically.
 ### 9.3 Writing runs, drafts, approvals
 
 - Additive `metadata.writing.personality`; legacy variants unchanged and never revoked by the
-  first binding. `revokedReason` enum widens with `personality_stale` (enum widening only).
+  first binding. `WritingAudit.personality` is additive and legacy-unbound audits omit it.
+  `revokedReason` widens with `personality_stale` and `personality_source_stale` (enum widening
+  only).
 - `materialize_variant`/G5 checks apply only to variants that carry a binding.
 - `AttributionKey` gains optional `personalityBindingId` (null for legacy); #352 must not pool
   across bindings when both are present.
@@ -808,10 +850,10 @@ guarantee and surface as host `recovery_required` if they produce an unexpected 
 | X7 | Statements are rendered verbatim and only from `statements.json`; a statement > 280 chars or > 12 items is rejected. | unit | A |
 | W1 | Proposal against a file with unmanaged prose before and after the block preserves that prose byte-for-byte (CRLF fixture included) and the diff touches only the block. | unit | B |
 | W2 | Host batch CAS with any changed `currentFileHash` → `STORE_CONFLICT` / `file_changed`, no host mutation, proposal `stale` (not `apply_failed`). | integration | B/G |
-| W3 | Apply verifies the host's committed path/hash set against every immutable `proposedFileHash`; an injected write mismatch is host-compensated and leaves the proposal `apply_failed` with no binding. | fault injection | B/G |
+| W3 | Apply verifies the host's committed path/hash set against every immutable `proposedFileHash`; an injected write mismatch is host-compensated and leaves attempt N terminal `apply_failed` with no binding. Replaying its transaction id returns the same `restored_failure`; an explicit retry revalidates the original CAS tokens, allocates attempt N+1, and can commit the same immutable proposal bytes. | fault injection | B/G |
 | W4 | Two concurrent applies for one workspace serialize; the second sees `STORE_CONFLICT` or `STORE_BUSY`, never a mixed state; index generation increments once. | multi-process | B |
 | W5 | Workspace mismatch (slug ok, realpath differs; or symlink ancestor) → `CONFLICT` / `workspace_mismatch`; unresolvable storage dir → `WORKSPACE_UNAVAILABLE`. | unit | B |
-| W6 | Crash injection after every host rename and before each Signals/host journal commit leaves either host-verified before-images with no new binding or exact proposal files committed on retry. Every applied file marker names `proposedBindingId`; retry never rewrites reviewed bytes or allocates another id. | fault injection | B/G |
+| W6 | Crash injection after approval persistence, after every host rename, and before each Signals/host journal commit leaves either `approved` with `attempt: null`, host-verified before-images with no new binding, or exact proposal files committed on retry. Nonterminal recovery reuses its attempt id; only a terminal compensated failure allocates the next host attempt id. Every applied marker names the one `proposedBindingId`; retry never rewrites reviewed bytes or allocates another proposal/binding id. | fault injection | B/G |
 | W7 | Rollback preserves unmanaged prose edited after the target binding, restores historical block bodies under the rollback proposal's new binding marker, and records matching marker provenance after retry. Unbind removes all blocks, deletes fully-managed files, keeps unmanaged content, records its audit binding, and leaves `active: null`. | unit | B |
 | W8 | Editing managed bytes, unmanaged `VOICE.md`/`SOUL.md` prose, a marker binding id, deleting/duplicating a block, or deleting a file each yields `drifted` with the right reason and changes the effective whole-file hash. A new approved projection shows `driftDiff`, preserves/adopts unmanaged prose, corrects managed bytes, and commits a new binding/hash. `source_stale` reflects source content changes and ignores a bare `updatedAt` touch. | unit | B |
 | W9 | `AGENTS.md` pointer block is proposed only when the file lacks references; a missing `CLAUDE.md` becomes a symlink; an existing regular `CLAUDE.md` is untouched with a warning. | unit | B |
@@ -822,6 +864,7 @@ guarantee and surface as host `recovery_required` if they produce an unexpected 
 | C4 | `get_writing_context.personality` and `get_personality_binding` agree byte-for-byte on status for the same workspace state. | tool | C |
 | C5 | `PRESENCE_MANDATE_MODES` equals `["assist_only"]`; a mandate with `cadence !== null`, `approvalPolicy !== "explicit"`, or an action outside `draft|audit|propose_reply` fails validation; no code path creates publish jobs from a mandate. | static + unit | C/F |
 | C6 | Two legacy `account`/`profile` targets default to `unbound`. Assigning one to the exact self and one to another contact/org requires distinct user evidence; only the exact bound identity is compatible, and unbind/rebind to a different self never reinterprets the old decision. | tool + unit | C |
+| C7 | After a bound variant is audited and approved, changing any allowlisted Personality source changes `currentSourceHash`, makes the old audit/effective approval stale, returns an unqueued approved item to `draft`, and blocks materialization/G5. A new audit against the unchanged `source_stale` binding records the new source hash + warning and may materialize only after fresh explicit approval; a second source change stales it again. | tool + route | C |
 | G1 | UI reads return an etag/hash and UI saves require it. With UI and SDK paths on the same host coordinator, the exact `read expected hashes → external UI save → SDK commit` fault interleaving lets exactly one stale-revision writer commit; the second revalidates to pre-mutation `file_changed`. Neither writer's bytes are silently lost. | RealTimeX integration | G |
 | D1 | The skill's proposal and approval cards contain only persisted fields; the packaged plugin zip contains the template `AGENTS.md` Personality section; `signals-writing` 0.3.0 passes `bindingId` and never writes `*.md` in the workspace root. | package + fixture | D |
 | E1 | Settings diff view renders managed vs unmanaged regions from the proposal's `files[]` only; Approve is disabled for `noop`/`superseded`/`stale`. | component | E |
@@ -850,7 +893,7 @@ guarantee and surface as host `recovery_required` if they produce an unexpected 
 **Status:** Accepted. **Context:** Restoring whole files from a before-image would overwrite unmanaged prose written after the binding. **Options:** (a) snapshot restore — rejected; (b) a `rollback`/`unbind` proposal carrying historical block bodies from the target binding's retained immutable proposal, wrapping them in the new proposal-time binding marker, and preserving current unmanaged bytes — chosen. **Consequences:** one write path to test; retained proposals contain exact bound file baselines; history is bounded to 50; host before-images serve failure compensation only.
 
 ### ADR-373-7: Artifact binding, eager revocation on rebinding, lazy gates
-**Status:** Accepted. **Context:** The writing system already revokes on spine change and gates at audit/materialization/G5, while agents consume managed and unmanaged Personality prose. **Options:** (a) hash managed blocks only — rejected because a manual `VOICE.md`/`SOUL.md` prose edit changes the live voice invisibly; (b) additive `metadata.writing.personality` carrying a fixed-order whole-file hash, eager revoke at rebind, and lazy current-file checks at audit/materialization/G5 — chosen. **Consequences:** `revokedReason: personality_stale`; any whole social-Personality edit is `drifted` until explicitly reprojected into a new binding; `source_stale` warns; legacy unbound variants are grandfathered.
+**Status:** Accepted. **Context:** The writing system already revokes on spine change and gates at audit/materialization/G5, while agents consume managed and unmanaged Personality prose. **Options:** (a) hash managed blocks only — rejected because a manual `VOICE.md`/`SOUL.md` prose edit changes the live voice invisibly; (b) additive `metadata.writing.personality` carrying a fixed-order whole-file hash, eager revoke at rebind, and lazy current-file plus current-source checks at audit/materialization/G5 — chosen. **Consequences:** `revokedReason` gains `personality_stale` and `personality_source_stale`; any whole social-Personality edit is `drifted` until explicitly reprojected into a new binding; `source_stale` invalidates older audits/approvals but a freshly warned, explicitly re-approved audit may retain the unchanged canonical bytes; legacy unbound variants are grandfathered.
 
 ### ADR-373-8: One self and at most one org per workspace; no cross-owner voice fallback; target representation in metadata
 **Status:** Accepted. **Context:** `getActiveVoiceProfileFor` falls back to another owner's profile; targets carry no authoritative identity link; even `account`/`profile` can belong to another person, and a relative `"self"` decision could silently change meaning after rebinding. **Options:** (a) infer by target kind — rejected; (b) concrete `{contactId|orgId}` representation metadata, default all unknown/legacy targets to `unbound`, require explicit user evidence, remove voice fallback, and gate materialization — chosen. **Consequences:** two people = two workspaces (and two data dirs today); no target becomes compatible by migration or rebinding accident; target-bound Personality remains a later option.
@@ -881,7 +924,7 @@ Child issues (file from these bodies; each gets its own loop; none expands the #
 | 1 | **A** | Personality sources, exclusions, and deterministic renderers | `src/lib/personality/{sources,render,snapshot,statements}.ts`, `contracts.ts` (Zod: statements, snapshot, proposal, binding, status, mandate), config key `personalityProjection { representedOrgId }`, voice-resolver fallback removal + `unclaimed_only`, `upsert_personality_statements` + `GET/PUT /api/personality/statements`, docs | X1–X7, voice regression |
 | 1 | **G** | RealTimeX Personality shared-writer transaction API | In `realtimex-ai-app`: UI read etag/hash + required expected hash on save; one per-workspace coordinator used by UI PUT and new `x-app-id` SDK batch endpoint; all-file expected-hash validation; durable before-image journal; fixed-order write/verify/compensate; idempotent transaction status/recovery; Local App permission | G1 + host crash/authorization tests |
 | 2 | **B** | Personality projection store: propose, approve/apply, rollback, drift | `src/lib/personality/{store,workspace,diff,apply}.ts`, exact immutable `proposedFile` + proposal-time binding ids, RealTimeX G client (no direct writes), `AGENTS.md` pointer + `CLAUDE.md` shim request, tools `get_personality_binding`, `propose_personality_projection`, `approve_personality_projection`, `retry_personality_projection`, `rollback_personality_projection`, `unbind_personality_projection`, REST `/api/personality/{binding,proposals,proposals/:id/approve|reject,rollback,unbind}`, `WORKSPACE_UNAVAILABLE`, docs/OpenAPI/backup note | W1–W10 |
-| 3 | **C** | Bind writing artifacts to Personality; stale re-audit; target representation | `metadata.writing.personality` (contracts + canonical `inputHash` field list), whole-file drift gates at audit/materialize/G5, eager revoke on rebinding, `get_writing_context.personality` + `voice.status` values + concrete `targets[].represents`, explicitly user-evidenced `set_target_representation` + REST, `AttributionKey.personalityBindingId`, `revokedReason: personality_stale` | C1–C6, S1 |
+| 3 | **C** | Bind writing artifacts to Personality; stale re-audit; target representation | `metadata.writing.personality` (contracts + canonical `inputHash` field list), `WritingAudit.personality` current-source snapshot, whole-file/source drift gates at audit/materialize/G5, eager revoke on rebinding, lazy source-stale revocation, `get_writing_context.personality` + `voice.status` values + concrete `targets[].represents`, explicitly user-evidenced `set_target_representation` + REST, `AttributionKey.personalityBindingId`, `revokedReason: personality_stale|personality_source_stale` | C1–C7, S1 |
 | 3′ | **F** | Presence mandate contract (dormant) | `mandates.json` store, `PRESENCE_MANDATE_MODES`, `get_presence_mandate`/`upsert_presence_mandate` (assist_only only), `get_writing_context.mandate`, ledger read-model type only | C5 |
 | 4 | **D** | `signals-writing` 0.3.0: Personality-first drafting, proposal/approval cards; plugin template | `SKILL.md`/`core/voice.md`/`core/approval.md` updates, `personality` in `reference.md`, cards, `templates/signals/AGENTS.md` Personality section, package test, version `0.2.4` | D1, R7/R8 still green |
 | 5 | **E** | Settings → Personality: workspace status, diff review, approve/rollback, statements, org picker, target table | routes/components over B/C REST; no new writing state | E1 |
