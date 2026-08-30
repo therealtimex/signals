@@ -4,6 +4,7 @@
 **Issue:** [#347](https://github.com/therealtimex/signals/issues/347) · **Epic:** [#346](https://github.com/therealtimex/signals/issues/346)
 **Base:** `main` @ `acd239f`
 **Companion artifacts:** `docs-dev/refs/manifest.json` (corpus manifest), `docs-dev/refs/README.md`, `scripts/verify-writing-corpus-manifest.mjs`
+**Amended by:** [#373](https://github.com/therealtimex/signals/issues/373) `specs/personality-projection.md` (2026-08-30) — the RealTimeX workspace Personality is the canonical live identity/voice; D5 / ADR-347-4 keep the voice-profile store as the approved voice-evidence *source*, no longer as the canonical voice.
 
 This document is the durable contract for the writing system. It settles the architecture,
 data contracts, rule classification, corpus adoption policy, and the dependency order for
@@ -20,7 +21,7 @@ validator.
 | D2 | Creative orchestration runs in RealTimeX terminal agents dispatched from a Signals workflow template. Signals exposes data tools only; no `/api/content/ai-generate` and no in-app LLM loop. | Preserves `docs/rtx-agent-orchestration.md`; RTX offers no thread-history read, so results land through tools (ADR-314-1 pattern). |
 | D3 | **Launch = writing run and brief container. Variant = one platform/surface-native draft. Content Item = one approved, single-platform publishable artifact. Publish job = the existing execution lane.** | Reuses every GTM primitive; the legacy one-body/many-platforms Compose path is untouched (#354 only fixes its validation). |
 | D4 | Metadata-first persistence: contracts are versioned JSON in `launches.metadata.writing`, `variants.metadata.writing`, `variants.generationMetadata`, `content_items.platformData.writing`, plus typed `graph_edges` for lineage. No migration in the MVP. | `AGENTS.md` §8 gates migrations on owner sign-off; every MVP query is by id or 1-hop edge, which existing columns serve. |
-| D5 | Voice profiles are Signals-owned JSON documents in a file store under `SIGNALS_DATA_DIR/writing/voice-profiles/`, versioned and approval-gated; a `voice_profiles` table is a named later step with stated triggers. | Signals must own the store (UI and `get_writing_context` read it) without a migration; the media-assets precedent already keeps files under the data dir. |
+| D5 | Voice profiles are Signals-owned JSON documents in a file store under `SIGNALS_DATA_DIR/writing/voice-profiles/`, versioned and approval-gated; a `voice_profiles` table is a named later step with stated triggers. **Amended by ADR-373-1:** the store is the approved voice-*evidence* source that proposes `VOICE.md`; the RealTimeX workspace Personality is the canonical live voice once a binding is applied (`specs/personality-projection.md`). | Signals must own the evidence store (UI and `get_writing_context` read it) without a migration; agents read the workspace Personality natively, so the live voice must be the file they actually read. |
 | D6 | Five rule classes with fixed precedence: `hard` > `claim` > `voice` > `heuristic` > `aesthetic`. Only `hard` and `claim` findings can block. Approved voice evidence beats heuristics and aesthetics unless the request sets `voicePrecedence: "rules_first"`. | The epic requires voice from real samples to win over generic style rules; platform limits and claim integrity are the only non-negotiables. |
 | D7 | Every factual claim is a `PreservedClaim` with a source locator; drafts carry a claim map; the audit blocks on invented or altered claims. | "Never invent names, facts, numbers, dates, quotations, citations" must be testable, not aspirational. |
 | D8 | Explicit approval is the default and is a user decision recorded on the variant; `writingApprovalPolicy` in `config.json` can relax to `auto_low_risk`, which still never publishes. | Risk relaxation is deliberate configuration (same mechanism as `personaGenerationMode`, ADR-314-2). |
@@ -104,6 +105,7 @@ Division of responsibility:
 |---|---|---|
 | Brief, sources, audience spec, goal, approval policy | Signals (Launch + config) | Source of truth |
 | Voice profile document, sample provenance, approval state | Signals file store via tools | UI and context reads need it; agent must not own durable state |
+| Live identity, values, boundaries, voice used at decision time | RealTimeX workspace Personality (`IDENTITY.md`, `SOUL.md`, `VOICE.md`, `BRAND.md`), fed by approval-gated managed blocks from Signals | ADR-373-1; agents read these files natively from `cwd`; variants record the Personality binding they were produced under (`specs/personality-projection.md` §6) |
 | Spine extraction, drafting, humanizing, auditing, approval card | Agent + `signals-writing` skill | LLM judgment; contracts fix the shapes, not the prose |
 | Variant persistence, claim map, audit record, lineage edges | Signals via `upsert_variant` (validated) | Invariants enforced at the source of truth |
 | Materialization to an approved content item | Signals `materialize_variant` | One platform per content item, idempotent, approval evidence recorded |
@@ -127,7 +129,8 @@ Launch & Deploy (publish lane, engagement) downstream. It owns three concepts an
 | **Writing run** | `launches` row (`metadata.writing`) + `workflow_runs` row | Brief, goal, audience spec, source refs, voice ref, spine, run history; status `draft → generating → ready → live → completed` | A per-platform body |
 | **Platform-native variant** | `variants` row (`metadata.writing`, `generationMetadata`) | Exactly one `platform/surface` draft with claim map, audit, approval, lineage | A comma-joined multi-platform target |
 | **Approved artifact** | `content_items` row, `status: approved`, single `platformTarget` | What the publish lane consumes; `platformData.writing` carries the back-reference | Created by the agent directly |
-| **Voice profile** | JSON document in `SIGNALS_DATA_DIR/writing/voice-profiles/` | Approved author fingerprint + sample provenance, versioned | Stored on `contact_personas` |
+| **Voice profile** | JSON document in `SIGNALS_DATA_DIR/writing/voice-profiles/` | Approved author fingerprint + sample provenance, versioned; the evidence source for the Personality `VOICE.md` block (ADR-373-1) | Stored on `contact_personas`; treated as the live voice when a Personality binding is active; resolved from another owner's profile |
+| **Personality binding** | `SIGNALS_DATA_DIR/personality/index.json` (`specs/personality-projection.md` §5) | Which workspace Personality revision a variant was written under (`metadata.writing.personality`) | Written by the agent; reverse-derived from workspace file edits |
 | **Evidence spine** | `launches.metadata.writing.spine` (latest) and per-variant snapshot hash | Sources, preserved claims, core message | Re-derived silently after approval |
 | Source material | `content_items` (imported/authored), URLs, files, notes as `SourceRef` | Provenance root of every claim | Fabricated |
 | Audience | `launches.audienceSpec` (`nicheIds`, `sampleSize`), `niches`, `contact_personas` | Cohort context for drafting and Wind Tunnel | Author voice |
@@ -384,6 +387,7 @@ type VariantWriting = {
   formulaId: FormulaId;
   overlay: { id: string; version: number };  core: { version: number };
   voiceProfile: { id: string; version: number; hash: string } | null;
+  personality?: { bindingId: `pb_${string}`; personalityHash: string; workspaceSlug: string } | null;
   voicePrecedence: "voice_first" | "rules_first";
   spine: { id: `spn_${string}`; hash: string };
   units: { texts: [string, ...string[]]; count: number; chars: number[] }; // canonical ordered units
@@ -413,6 +417,12 @@ type VariantGeneration = {
 `upsert_variant` (#350) validates `metadata.writing` and `generationMetadata` whenever
 `generationMetadata.kind === "signals-writing"`; other producers (manual dialog, older agents)
 are untouched. Validation failures return `VALIDATION_ERROR` with the Zod path.
+Under ADR-373-7, an agent supplies only `personality.bindingId`; the server requires the active
+binding, stamps its whole-file `personalityHash` and workspace slug, and rejects a stale id. Skill
+versions before `0.3.0` may omit the field and remain legacy-unbound; canonicalization preserves
+their old audit hashes as specified in §5.5. Skill `>= 0.3.0` requires a binding whenever the
+workspace has one. The full drift/revocation/migration contract is normative in
+`specs/personality-projection.md` §6.
 
 `units.texts` is the canonical authored payload. `count` must equal `texts.length`, every
 `chars[i]` is derived from `texts[i]`, and `variants.body` must equal `texts[0]`. A post has one
@@ -454,21 +464,38 @@ type WritingAudit = {
   hard: { units: number; chars: number[]; limit: number; hashtags: number; links: number; mediaCount: number };
   voice: { status: "applied" | "none" | "rules_first"; profileId?: string; version?: number;
            driftScore?: number; protectedQuirksKept?: boolean; skipped: RuleId[] };
+  personality?: {                                    // additive; absent/null for legacy-unbound audits
+    bindingId: `pb_${string}`;
+    personalityHash: string;                         // exact whole-file revision used by the variant
+    bindingSourceHash: string;                       // sources from which that binding was projected
+    currentSourceHash: string;                       // rebuilt allowlisted sources at audit time
+    statusAtAudit: "bound" | "source_stale";
+  } | null;
   heuristics: { applied: RuleId[]; conflicts: RuleId[]; skippedForVoice: RuleId[] };
 };
 ```
 
+For a Personality-bound audit, the server resolves and stamps `audit.personality`; caller values
+cannot override it. If the current status is `source_stale`, the server also inserts the
+deterministic `core/voice/personality-source-stale` warning before deriving verdict and risk.
+`drifted`, unavailable, or binding/hash-mismatched Personality cannot be audited.
+
 Verdict derivation (deterministic, tested):
 
 - `block` if any finding has `severity: "blocker"`. Blockers are exactly: any `hard` violation; any `claims.invented`; any `claims.altered` whose claim is `verbatimRequired`; any `claims.privateIncluded` whose claim has `includeInOutput: false`; a publish-capable surface with no resolvable `targetId` at materialization time.
-- `warn` if no blockers and any `warning` (missing non-verbatim claim, voice drift ≥ 0.4, heuristic conflict, `rules_first` used).
+- `warn` if no blockers and any `warning` (missing non-verbatim claim, voice drift ≥ 0.4,
+  heuristic conflict, `rules_first` used, or `core/voice/personality-source-stale`).
 - `pass` otherwise. `info` findings never change the verdict.
 - `inputHash` is SHA-256 over canonical JSON (sorted object keys) containing the variant `body`
   and these `metadata.writing` fields: `platform`, `surface`, `targetId`, `goal`, `formulaId`,
-  `overlay`, `core`, `voiceProfile`, `voicePrecedence`, `spine`, `units`, and `claimMap`.
+  `overlay`, `core`, `voiceProfile`, `personality`, `voicePrecedence`, `spine`, `units`, and
+  `claimMap`.
   It deliberately excludes audit/approval/lineage/materialization state, row status/timestamps,
   capability snapshots, and Wind Tunnel predictions. Materialization recomputes this hash and
   refuses a mismatch as `AUDIT_STALE`; an optional simulation of unchanged writing stays valid.
+  Canonicalization drops absent/`undefined` keys. Therefore a legacy variant that never carried
+  `personality` hashes byte-for-byte under the pre-ADR-373 field set; new variants carrying
+  `personality: null` or a binding include that explicit value.
 
 ### 5.6 Approval and risk state
 
@@ -486,7 +513,8 @@ type ApprovalState = {
   at?: number;
   evidence?: ApprovalEvidence;
   note?: string;
-  revokedReason?: "spine_changed" | "audit_stale" | "user" | "voice_superseded";
+  revokedReason?: "spine_changed" | "audit_stale" | "user" | "voice_superseded" |
+    "personality_stale" | "personality_source_stale";  // Personality reasons added by ADR-373-7
 };
 ```
 
@@ -500,8 +528,10 @@ Policy resolution (ADR-347-5): `SIGNALS_WRITING_APPROVAL_POLICY` env → `config
 time and materialized as `approved` content items — they are still never sent to the publish lane
 automatically. `high` always requires the user regardless of policy. Approval is revoked (and the
 content item, if still `approved`, is returned to `draft`) when the spine hash changes, the audit
-becomes stale, or the voice profile version used is superseded and the user asked for
-re-validation.
+becomes stale, the bound Personality revision drifts/changes, or the current allowlisted
+Personality source hash differs from the audit's `personality.currentSourceHash`; the last case
+uses `personality_source_stale` and requires a new warned audit plus fresh explicit approval. A
+voice-profile supersession revokes only when the user asked for re-validation.
 
 ### 5.7 Generation and adaptation lineage
 
@@ -558,7 +588,7 @@ Gates (each has a required test):
 - G2 — `create_content_draft` accepts any registry platform (drafts are allowed everywhere) but stamps `platformData.writing.capability.publish` so UI and agents render the honest state.
 - G3 — `materialize_variant` for a `draft_only`/`export_only` surface succeeds (content item `approved`) and returns `nextAction: "export"`; for `unsupported` it fails with `CAPABILITY_UNSUPPORTED`.
 - G4 — `get_writing_context` returns the capability row for every requested surface; the skill must refuse to claim publishing for anything not `direct`/`beta`.
-- G5 — A content item with `platformData.writing` enters `send-to-agent` only when its item status is exactly `approved`, its linked variant still has an approved current audit, and `{ auditId, inputHash, approvalAt, approvalBy }` exactly matches the materialization snapshot. Missing/revoked approval returns `WRITING_APPROVAL_REQUIRED`; any audit, units, target, or snapshot mismatch returns `WRITING_ARTIFACT_STALE`. Validation, publish-job creation, and the transition to `queued` occur in one transaction, so revocation cannot race the gate. A launch failure restores a writing item to `approved` (legacy items keep their existing retry behavior).
+- G5 — A content item with `platformData.writing` enters `send-to-agent` only when its item status is exactly `approved`, its linked variant still has an approved current audit, and `{ auditId, inputHash, approvalAt, approvalBy }` exactly matches the materialization snapshot. When the snapshot carries `personality`, resolve `PersonalityStatus` before queueing: its binding id and whole-file hash must still be active, status must be `bound` or `source_stale`, the target must remain in `compatibleTargets`, and the linked audit's Personality binding/hash/current-source snapshot must equal that status. A `source_stale` binding is valid only after a new warned audit captured the current source hash and received fresh explicit approval. Missing/revoked approval returns `WRITING_APPROVAL_REQUIRED`; any audit, units, target, Personality/source, drift, or snapshot mismatch returns `WRITING_ARTIFACT_STALE`. Validation, publish-job creation, and the transition to `queued` occur in one transaction, so revocation cannot race the gate. A launch failure restores a writing item to `approved` (legacy items keep their existing retry behavior).
 - G6 — The REST input and `PublishJobPayload` carry `threadTexts?: string[]`. For a writing item, `send-to-agent` derives `text` and `threadTexts` from persisted canonical units and never trusts caller-supplied text. `threadTexts` is non-empty only for `platformTarget: "x"`, `contentType: "thread"`, and `kind: "original"`; `signals-publish` receives it unchanged.
 
 ### 5.9 Outcome attribution and calibration linkage
@@ -568,6 +598,7 @@ type AttributionKey = {
   platform: Platform; surface: SurfaceId; goal: WritingGoal;
   formulaId: FormulaId; overlayVersion: number; coreVersion: number;
   voiceProfileId: string | null; voiceProfileVersion: number | null;
+  personalityBindingId?: string | null;  // absent/null for legacy; never pool distinct non-null bindings
   audienceCohort: string;            // sorted nicheIds joined by "+", or "unspecified"
   launchId: string; variantId: string; contentItemId: string; contentPostId: string; targetId?: string;
 };
@@ -814,7 +845,7 @@ snapshotted `SourceRef` policy. Writes inherit the launch scope. The writing ski
 | `VariantWriting`, `WritingAudit`, `ApprovalState` | `variants.metadata.writing` | `auditHistory` capped at 5 |
 | `VariantGeneration` | `variants.generationMetadata`; `variants.generationModel` mirrors `model` | |
 | `VoiceProfileVersionDocument` + `VoiceProfileIndex` | immutable `SIGNALS_DATA_DIR/writing/voice-profiles/<id>/v<version>.json` + one atomically replaced `voice-profiles/index.json` | index is the lifecycle authority; one cross-process store lock serializes all mutations; `resetCoreTables()` gets a sibling `resetWritingStore()` for tests |
-| Materialized artifact | `content_items` (`status: approved`, `platformTarget: <platform>`, `contentType`, `body: units.texts[0]`, `aiGenerated: true`, `generationPrompt: null`) + `platformData.writing = { variantId, launchId, surface, targetId, units, voiceProfile, formulaId, overlay, approval, capability, materialization: { auditId, inputHash, approvalAt, approvalBy } }` | one row per variant per platform; ordered units and approval snapshot are publish-gate inputs |
+| Materialized artifact | `content_items` (`status: approved`, `platformTarget: <platform>`, `contentType`, `body: units.texts[0]`, `aiGenerated: true`, `generationPrompt: null`) + `platformData.writing = { variantId, launchId, surface, targetId, units, voiceProfile, personality, formulaId, overlay, approval, capability, materialization: { auditId, inputHash, approvalAt, approvalBy } }` | one row per variant per platform; ordered units, Personality binding/hash when present, and approval snapshot are publish-gate inputs |
 | Lineage | `graph_edges` per §5.7 | created in the same transaction as the triggering write |
 | Capability registry | `src/lib/writing/capabilities.ts` (static) | G1 static test |
 | Surfaces / rule id helpers | `src/lib/writing/surfaces.ts`, `src/lib/writing/ids.ts` | shared by tools, UI, and the overlay packaging test |
@@ -826,24 +857,38 @@ snapshotted `SourceRef` policy. Writes inherit the launch scope. The writing ski
 2. Require `metadata.writing.audit` present, recompute the canonical audit input hash from §5.5,
    require it to equal `audit.inputHash` (else `AUDIT_STALE`), and require `verdict !== "block"`
    (else `AUDIT_BLOCKED`).
-3. Resolve an effective approval tied to `audit.id`: reuse a stored current approval, accept the
+3. When `metadata.writing.personality` carries a binding, resolve the current
+   `PersonalityStatus` before approval or any idempotent return. Require its active binding id and
+   whole-file hash to equal the variant, require `status ∈ {bound, source_stale}`, and require the
+   audit's additive Personality snapshot to match the active binding/hash and
+   `PersonalityStatus.currentSourceHash`. A `source_stale` status additionally requires
+   `audit.personality.statusAtAudit === "source_stale"` and the
+   `core/voice/personality-source-stale` warning, proving this is a new audit that knowingly
+   retained unchanged canonical bytes. On binding/hash/drift/source mismatch, perform the
+   unqueued revoke/draft transition below (`personality_stale` or
+   `personality_source_stale`) and return `AUDIT_STALE`; legacy `personality: null` variants skip
+   this additive gate.
+4. Resolve an effective approval tied to `audit.id`: reuse a stored current approval, accept the
    call's user evidence as a `pending/revoked → approved` decision, or use the `auto_low_risk`
    approval already created at audit time. If `riskTier !== "low"` or policy is `explicit`, the
    effective decision must be `by: "user"` with evidence (else `APPROVAL_REQUIRED`). Persist that
    effective approval only in the create/update transaction below.
-4. Resolve capability for `platform/surface`; `unsupported` → `CAPABILITY_UNSUPPORTED`; if
+5. Resolve capability for `platform/surface`; `unsupported` → `CAPABILITY_UNSUPPORTED`; if
    `publish ∈ {direct, beta}` require `targetId` resolvable via `platform_targets` (else
-   `TARGET_REQUIRED`). Validate the ordered-unit invariants from §5.4.
-5. Only after steps 2–4, look up `materialized_as`. If its item and materialization snapshot exactly
-   match the current audit, approval, target, and canonical units, return it (`created: false,
-   updated: false`). This is the sole idempotent-return path.
-6. If an edge exists but its snapshot is old, reject `queued`/`publishing`/`published` items with
+   `TARGET_REQUIRED`). For a Personality-bound variant, also require `targetId` in the resolved
+   status's `compatibleTargets` (else `CONFLICT` / `target_identity_mismatch`). Validate the
+   ordered-unit invariants from §5.4.
+6. Only after steps 2–5, look up `materialized_as`. If its item and complete materialization
+   snapshot exactly match the current audit, approval, target, canonical units, and Personality
+   binding/hash, return it (`created: false, updated: false`). This is the sole idempotent-return
+   path.
+7. If an edge exists but its snapshot is old, reject `queued`/`publishing`/`published` items with
    `CONFLICT`; a published artifact is revised as a new variant, never mutated. For an unqueued
    `draft`/`failed`/`approved` item, replace body/title/ordered units/media/target and the complete
    writing snapshot in place, then restore `status: "approved"` (`created: false, updated: true`).
-7. Otherwise create the content item with unit 0 as `body`, all ordered units under
+8. Otherwise create the content item with unit 0 as `body`, all ordered units under
    `platformData.writing`, a single `platformTarget`, and `status: "approved"`.
-8. The create/update path is one transaction with media links, `variants.contentItemId`, variant
+9. The create/update path is one transaction with media links, `variants.contentItemId`, variant
    `status: "selected"`, `metadata.writing.materializedContentItemId`, and an insert/update of the
    `materialized_as` edge properties. Return `nextAction: "publish"` for `direct`/`beta`, `"export"`
    otherwise.
@@ -887,10 +932,16 @@ registration, zero active versions, or two active versions for one owner/label.
 in one transaction. A spine hash change performs the same revoke/draft transition for unqueued
 items; an already queued or published artifact is not mutated, but the variant is marked stale so
 it cannot be materialized or sent again. After editing, the variant needs a new matching audit and
-approval; step 6 above then refreshes the same unqueued content item. Superseding a voice profile
-does not auto-revoke; it flags `voice: { superseded: true }` in the context for the next audit.
-G5 independently rejects every writing item whose linked approval is revoked, missing, or stale,
-even if a corrupted/manual row still says `status: "approved"`.
+approval; step 7 above then refreshes the same unqueued content item. A Personality binding/hash or
+whole-file drift mismatch performs that same transition with `personality_stale`. A changed current
+Personality source hash performs it with `personality_source_stale`; a read-only context reports
+the same effective revoked state, and the first mutation-capable audit/materialization/G5 path
+persists the revoke/draft transaction. A new audit may retain a `source_stale` binding only by
+recording the current source hash and warning, after which fresh explicit approval is required.
+Superseding a voice profile does not auto-revoke; it flags `voice: { superseded: true }` in the
+context for the next audit. G5 independently resolves the current Personality and rejects every
+writing item whose linked approval or audit/Personality/source snapshot is revoked, missing, or
+stale, even if a corrupted/manual row still says `status: "approved"`.
 
 **Migration-free boundary and later triggers (ADR-347-3/4).** Nothing above needs DDL. A migration
 becomes justified — and gets its own ADR and owner sign-off — when one of these appears:
@@ -963,16 +1014,16 @@ Each requirement names the issue that owns its test.
 | R7 | Under `voice_first`, an audit finding for a heuristic/aesthetic rule that targets a protected quirk is marked `skippedForVoice` and does not affect the verdict; under `rules_first` it applies and `voice.status = "rules_first"` is recorded. | skill packaging test with fixture drafts + unit for verdict derivation | #348/#350 |
 | R8 | One template run with three surfaces yields three variants with distinct `platform/surface`, identical `spine.hash`, and bodies that differ (not prefix/suffix copies). | skill integration fixture | #348 |
 | R9 | `create_content_draft` rejects comma-joined or unknown platforms; accepts any registry platform; stamps `capability.publish`. | route/tool | #349 |
-| R10 | `send-to-agent` rejects a content item whose platform is not `direct`/`beta` (`CAPABILITY_UNSUPPORTED`), rejects writing items that are not currently approved or whose audit/materialization snapshot is stale, and the registry's publish-capable set equals `PUBLISH_PLATFORM_TARGETS` (static test). | unit | #349/#350 |
-| R11 | `materialize_variant` validates audit/approval before its idempotent return; an unchanged second call returns the same item (`created: false, updated: false`), while a revised/re-audited/re-approved unqueued variant refreshes that item (`updated: true`). It refuses a stale canonical `inputHash`, does not stale for Wind Tunnel prediction/status-only changes, never mutates queued/published artifacts, and requires a resolvable target for publish-capable surfaces. | tool | #350 |
+| R10 | `send-to-agent` rejects a content item whose platform is not `direct`/`beta` (`CAPABILITY_UNSUPPORTED`), rejects writing items that are not currently approved or whose audit/materialization/Personality/current-source snapshot is stale, and the registry's publish-capable set equals `PUBLISH_PLATFORM_TARGETS` (static test). A freshly re-audited `source_stale` binding passes only when its audit captured the current source hash and received explicit approval. | unit | #349/#350/#373-C |
+| R11 | `materialize_variant` validates audit, active Personality binding/hash/current whole-file status, audit-time source hash, target compatibility, and approval before its idempotent return; an unchanged second call returns the same item (`created: false, updated: false`), while a revised/re-audited/re-approved unqueued variant refreshes that item (`updated: true`). It refuses a stale canonical `inputHash`, revokes an older audit/approval after source drift, does not stale for Wind Tunnel prediction/status-only changes, never mutates queued/published artifacts, and requires a resolvable compatible target for publish-capable surfaces. | tool | #350/#373-C |
 | R12 | Under `explicit` policy, `materialize_variant` without `approval.by = "user"` fails with `APPROVAL_REQUIRED`; under `auto_low_risk` it succeeds for `low` tier only and never enqueues a publish job. | tool | #350 |
 | R13 | Materialization produces a content item with a single `platformTarget` and `status: approved`; an X thread fixture with units `[A, B, C]` materializes `body: A`, persists `[A, B, C]`, creates a publish payload with `text: A` and `threadTexts: [B, C]`, and reaches `signals-publish` in that order. Completing publish flips the variant to `published` and adds `published_as` with `targetId`. | integration (publish handlers) | #349/#350 |
 | R14 | Lineage query: `content_post → content_item → variant → launch → sources` resolves for a published writing variant via edges only. | query test | #350 |
-| R15 | Changing the spine hash revokes approvals and returns unqueued approved items to `draft`; queued/published items are untouched. Re-approval updates the unqueued item, and `send-to-agent` rejects a manually re-approved-status row while the linked variant remains revoked/stale. | unit | #349/#350 |
+| R15 | Changing the spine hash, active Personality binding/bytes, or current Personality source hash revokes approvals and returns unqueued approved items to `draft`; queued/published items are untouched. Source drift requires a new warned audit plus explicit approval. Re-approval updates the unqueued item, and `send-to-agent` rejects a manually re-approved-status row while the linked variant remains revoked/stale. | unit | #349/#350/#373-C |
 | R16 | `get_content` returns the untruncated body for a 10 kB item; `query_content` still truncates to 200 chars. | tool | #349 |
 | R17 | The packaged plugin zip contains `skills/signals-writing/**` and no `docs-dev/**`; overlay files pass the record-format check. | package test | #348 |
 | R18 | The brief section for a `signalsWriting` template lists capability rows and never lists a removed tool name. | unit | #349 |
-| R19 | Attribution key derivation is deterministic and cohorts are not pooled across platform/goal; sparse keys yield `insufficient_evidence`. | unit | #352 |
+| R19 | Attribution key derivation is deterministic and cohorts are not pooled across platform/goal or distinct non-null Personality binding ids; absent legacy ids normalize to null, and sparse keys yield `insufficient_evidence`. | unit | #352 |
 | R20 | `docs-dev/refs/manifest.json` validates against the on-disk corpus (`npm run verify:writing-corpus`). | script (this PR) | #347 |
 
 ---
@@ -1093,7 +1144,7 @@ and its drift-fixture self-test are part of `npm run check`.
 **Status:** Accepted. **Context:** `AGENTS.md` gates migrations; every MVP access is by id or 1-hop edge. **Options:** (a) tables now — rejected: sign-off cost before the contracts have been exercised; (b) JSON contracts in existing columns + typed edges, validated by Zod — chosen. **Consequences:** contracts carry `schemaVersion`; `metadata.writing` validation only applies to `signals-writing` producers; §7.4 lists the concrete triggers that justify a later migration, and each JSON document is designed as a straight projection of that future row.
 
 ### ADR-347-4: Voice profiles live in a Signals-owned file store now; a `voice_profiles` table later
-**Status:** Accepted. **Context:** The corpus keeps voice in a skill-local markdown file that is agent-owned and unreadable by the app; N9 forbids `contact_personas`; `config.json` is for scalars. **Options:** (a) agent workspace files — rejected: Signals cannot read them for context or UI, no versioning; (b) `config.json` — rejected: not versioned, wrong tool; (c) table now — rejected per ADR-347-3; (d) versioned JSON documents under `SIGNALS_DATA_DIR/writing/voice-profiles/` behind tools — chosen. **Consequences:** V1–V7 are enforced in one module; the row shape for the eventual table is fixed today; backups must include the directory (documented in `docs/local-app.md` by #350).
+**Status:** Accepted — **amended by ADR-373-1** (`specs/personality-projection.md`): the storage decision stands; the store is the approved voice-evidence source that proposes the workspace `VOICE.md` block, and the RealTimeX workspace Personality is the canonical live voice after a binding is applied. Cross-owner fallback in active-profile resolution is removed by ADR-373-8. **Context:** The corpus keeps voice in a skill-local markdown file that is agent-owned and unreadable by the app; N9 forbids `contact_personas`; `config.json` is for scalars. **Options:** (a) agent workspace files — rejected: Signals cannot read them for context or UI, no versioning; (b) `config.json` — rejected: not versioned, wrong tool; (c) table now — rejected per ADR-347-3; (d) versioned JSON documents under `SIGNALS_DATA_DIR/writing/voice-profiles/` behind tools — chosen. **Consequences:** V1–V7 are enforced in one module; the row shape for the eventual table is fixed today; backups must include the directory (documented in `docs/local-app.md` by #350).
 
 ### ADR-347-5: Explicit approval by default; `auto_low_risk` is user configuration that never publishes
 **Status:** Accepted. **Context:** N7. **Options:** (a) approval toggle per run — rejected: per-call flags let agents disagree with the user (same reasoning as ADR-314-2); (b) global policy resolved env → `config.json` → default, tiers derived from the audit — chosen. **Consequences:** `high` always needs the user; policy-approved variants still require a separate publish instruction; the approval record carries the policy in force.
