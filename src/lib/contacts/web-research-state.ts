@@ -45,6 +45,16 @@ function stringArray(value: unknown): string[] {
     : [];
 }
 
+function hasSerializedErrors(value: string | null): boolean {
+  if (!value) return false;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return !Array.isArray(parsed) || parsed.length > 0;
+  } catch {
+    return true;
+  }
+}
+
 function parseSerpCandidates(
   value: unknown,
 ): ContactWebResearchState["serpCandidates"] {
@@ -72,7 +82,7 @@ export function getContactWebResearchState(contactId: string): ContactWebResearc
 
   const result = parseObject(run.result);
   const unresolvedFields = stringArray(result.unresolvedFields);
-  const errors = stringArray(result.errors).length > 0 || Boolean(run.errors);
+  const errors = stringArray(result.errors).length > 0 || hasSerializedErrors(run.errors);
   let status: ContactWebResearchState["status"];
   if (run.status === "pending" || run.status === "running" || run.status === "paused") {
     status = "pending";

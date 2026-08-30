@@ -75,6 +75,51 @@ describe("contact web research state", () => {
       ],
     });
   });
+
+  it("reports a completed run with serialized empty errors as succeeded", () => {
+    seedTemplates();
+    const template = getSystemTemplateByName(CONTACT_WEB_RESEARCH_TEMPLATE_NAME)!;
+    createWorkflowRun({
+      templateId: template.id,
+      workflowType: "enrich",
+      status: "completed",
+      trigger: "template",
+      config: JSON.stringify({ contactId: "contact-1" }),
+      result: JSON.stringify({
+        fieldsUpdated: ["bio", "title"],
+        unresolvedFields: [],
+        identityLinked: true,
+        ambiguous: false,
+        partial: false,
+        errors: [],
+      }),
+      errors: "[]",
+    });
+
+    expect(getContactWebResearchState("contact-1")).toMatchObject({
+      status: "succeeded",
+      fieldsUpdated: ["bio", "title"],
+      unresolvedFields: [],
+      identityLinked: true,
+      ambiguous: false,
+    });
+  });
+
+  it("reports a completed run with serialized workflow errors as partial", () => {
+    seedTemplates();
+    const template = getSystemTemplateByName(CONTACT_WEB_RESEARCH_TEMPLATE_NAME)!;
+    createWorkflowRun({
+      templateId: template.id,
+      workflowType: "enrich",
+      status: "completed",
+      trigger: "template",
+      config: JSON.stringify({ contactId: "contact-1" }),
+      result: JSON.stringify({ partial: false, errors: [] }),
+      errors: JSON.stringify(["One source failed"]),
+    });
+
+    expect(getContactWebResearchState("contact-1").status).toBe("partial");
+  });
 });
 
 describe("shouldRunWebResearch", () => {
