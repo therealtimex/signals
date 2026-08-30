@@ -13,6 +13,7 @@ import { getTemplate, updateTemplate } from "@/lib/db/queries/workflow-templates
 import {
   createWorkflowRun,
   createWorkflowStep,
+  getWorkflowRun,
   nextStepIndex,
   updateWorkflowRun,
 } from "@/lib/db/queries/workflows";
@@ -75,6 +76,8 @@ const STEP_LABELS: Record<string, string> = {
 export type RunPipelineTemplateInput = {
   templateId: string;
   input?: ProfilePipelineRunInput;
+  /** Adopt a pending cascade child instead of creating a second workflow run. */
+  existingRunId?: string;
   trigger?: "template" | "scheduled";
   fetchImpl?: typeof fetch;
   env?: EnvLike;
@@ -140,6 +143,17 @@ function parseRunErrors(raw: string | null | undefined): string[] {
 
 function mergeRunErrors(existing: string | null | undefined, message: string): string {
   return JSON.stringify([...parseRunErrors(existing), message]);
+}
+
+function parseRunConfig(raw: string | null | undefined): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(raw ?? "{}");
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
 }
 
 function formatKickoffMessage(plan: ProfilePipelineRunPlan): string {
@@ -400,6 +414,26 @@ export async function runPipelineTemplate(
     };
   }
 
+  const existingRun = input.existingRunId
+    ? getWorkflowRun(input.existingRunId)
+    : undefined;
+  if (input.existingRunId && !existingRun) {
+    return {
+      success: false,
+      error: "Existing workflow run not found",
+      errorCode: "not_found",
+      httpStatus: 404,
+    };
+  }
+  if (existingRun?.templateId !== undefined && existingRun.templateId !== template.id) {
+    return {
+      success: false,
+      error: "Existing workflow run does not belong to this pipeline template",
+      errorCode: "VALIDATION_ERROR",
+      httpStatus: 400,
+    };
+  }
+
   const pipelineValidation = getValidatedPipelineFromTemplate(template.config);
   if (!pipelineValidation.success) {
     return {
@@ -475,16 +509,28 @@ export async function runPipelineTemplate(
     forcePersona,
     rtxRuntimeSessionId: null,
   };
+  const persistedConfig = {
+    ...(existingRun ? parseRunConfig(existingRun.config) : {}),
+    ...storedConfig,
+  };
 
-  const run = createWorkflowRun({
-    templateId: template.id,
-    workflowType,
-    status: "running",
-    config: JSON.stringify(storedConfig),
-    trigger,
-    startedAt: now,
-    totalItems: plan.selectedContactIds.length,
-  });
+  const run = existingRun
+    ? updateWorkflowRun(existingRun.id, {
+        status: "running",
+        config: JSON.stringify(persistedConfig),
+        startedAt: now,
+        completedAt: null,
+        totalItems: plan.selectedContactIds.length,
+      }) ?? existingRun
+    : createWorkflowRun({
+        templateId: template.id,
+        workflowType,
+        status: "running",
+        config: JSON.stringify(persistedConfig),
+        trigger,
+        startedAt: now,
+        totalItems: plan.selectedContactIds.length,
+      });
 
   createWorkflowStep({
     workflowRunId: run.id,
@@ -526,7 +572,7 @@ export async function runPipelineTemplate(
 
       updateWorkflowRun(run.id, {
         config: JSON.stringify({
-          ...storedConfig,
+          ...persistedConfig,
           rtxWorkspaceSlug: workspaceSlug,
           rtxThreadSlug: threadSlug,
           rtxRuntimeSessionId: null,

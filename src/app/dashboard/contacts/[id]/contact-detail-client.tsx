@@ -465,13 +465,6 @@ export function ContactDetailClient({
           <ContactProfileSection
             contact={contact}
             onEdit={() => setEditOpen(true)}
-            enrichAction={canEnrich ? (
-              <EnrichContactButton
-                contactId={contact.id}
-                needsWebResearch={needsWebResearch}
-                profilePipelineTemplateId={profilePipelineTemplateId}
-              />
-            ) : undefined}
           />
           <ContactRelationshipSection
             contactId={contact.id}

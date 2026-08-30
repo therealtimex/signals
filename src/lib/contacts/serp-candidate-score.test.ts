@@ -44,7 +44,43 @@ describe("scoreSerpCandidates", () => {
 
     expect(result.candidates[0].textScore).toBe(-40);
     expect(result.candidates[0].reason).toContain("different-person penalty");
-    expect(result.ambiguous).toBe(false);
+    expect(result.ambiguous).toBe(true);
+  });
+
+  it("penalizes a conflicting surname even when the first name overlaps", () => {
+    const result = scoreSerpCandidates(contact, [
+      {
+        url: "https://www.linkedin.com/in/ryan-reynolds/",
+        title: "Ryan Reynolds - Founder & CEO",
+        snippet: "Founder & CEO at Untangle",
+      },
+    ]);
+
+    expect(result.candidates[0]).toMatchObject({
+      urlScore: 100,
+      textScore: -40,
+      totalScore: 60,
+    });
+    expect(result.candidates[0].reason).toContain("different-person penalty");
+    expect(result.ambiguous).toBe(true);
+  });
+
+  it("penalizes people-also-search sources independently of the profile URL", () => {
+    const result = scoreSerpCandidates(contact, [
+      {
+        url: "https://www.linkedin.com/in/ryancarson/",
+        title: "Ryan Carson - Founder & CEO",
+        snippet: "Founder & CEO at Untangle",
+        source: "people_also_search",
+      },
+    ]);
+
+    expect(result.candidates[0]).toMatchObject({
+      urlScore: 50,
+      textScore: 70,
+      totalScore: 120,
+    });
+    expect(result.candidates[0].reason).toContain("news/directory penalty");
   });
 
   it("marks close profile candidates as ambiguous for refined triage", () => {

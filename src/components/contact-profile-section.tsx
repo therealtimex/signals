@@ -1,6 +1,5 @@
 "use client";
 
-import type { ReactNode } from "react";
 import Link from "next/link";
 import { BriefcaseBusiness, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -38,11 +37,9 @@ function formatEmploymentPeriod(employment: ContactWithIdentities["employments"]
 export function ContactProfileSection({
   contact,
   onEdit,
-  enrichAction,
 }: {
   contact: ContactWithIdentities;
   onEdit: () => void;
-  enrichAction?: ReactNode;
 }) {
   const hasProfileDetails = Boolean(
     contact.profile.bio || contact.profile.headline || contact.employments.length > 0,
@@ -129,7 +126,6 @@ export function ContactProfileSection({
               <Button variant="outline" size="sm" onClick={onEdit}>
                 <Pencil className="size-3.5" /> Edit profile
               </Button>
-              {enrichAction}
             </div>
           </div>
         )}

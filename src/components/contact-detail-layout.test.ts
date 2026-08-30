@@ -324,6 +324,9 @@ describe("ContactDetailClient details layout", () => {
     expect(html).toContain("Profile details are still sparse");
     expect(html).toContain("Edit profile");
     expect(html).toContain("Enrich profile");
+    const wrapper = document.createElement("div");
+    wrapper.innerHTML = html;
+    expect(wrapper.querySelectorAll("[data-enrichment-route]")).toHaveLength(1);
   });
 });
 

@@ -16,6 +16,7 @@ export type ScoredSerpCandidate = SerpCandidate & {
   urlScore: number;
   textScore: number;
   totalScore: number;
+  differentPerson: boolean;
   reason: string;
 };
 
@@ -128,9 +129,14 @@ function hasDifferentProfilePerson(candidateTitle: string, contactName: string):
   const leadWords = normalizedWords(titleLead).slice(0, 4);
   const nameWords = normalizedWords(contactName);
   if (leadWords.length < 2 || nameWords.length < 2) return false;
-  const fullName = nameWords.join(" ");
-  if (leadWords.join(" ").includes(fullName)) return false;
-  return !nameWords.some((word) => leadWords.includes(word));
+  const firstName = nameWords[0];
+  const lastName = nameWords[nameWords.length - 1];
+  return !leadWords.includes(firstName) || !leadWords.includes(lastName);
+}
+
+function isLowValueSerpSource(source: string | null | undefined): boolean {
+  const normalized = normalizedText(source);
+  return normalized.includes("people also search") || normalized.includes("directory");
 }
 
 function scoreCandidate(
@@ -168,7 +174,7 @@ function scoreCandidate(
 
   if (
     url &&
-    (NEWS_OR_DIRECTORY_HOSTS.some(
+    (isLowValueSerpSource(candidate.source) || NEWS_OR_DIRECTORY_HOSTS.some(
       (host) => url.hostname === host || url.hostname.endsWith(`.${host}`),
     ) || /\/(news|people|directory|search)\//.test(url.pathname.toLowerCase()))
   ) {
@@ -200,7 +206,9 @@ function scoreCandidate(
     reasons.push("role in snippet");
   }
 
-  if (isProfileCandidate(url) && hasDifferentProfilePerson(candidate.title ?? "", contact.name)) {
+  const differentPerson =
+    isProfileCandidate(url) && hasDifferentProfilePerson(candidate.title ?? "", contact.name);
+  if (differentPerson) {
     textScore -= 80;
     reasons.push("different-person penalty");
   }
@@ -210,6 +218,7 @@ function scoreCandidate(
     urlScore,
     textScore,
     totalScore: urlScore + textScore,
+    differentPerson,
     reason: reasons.join("; ") || "no positive match signals",
   };
 }
@@ -219,7 +228,9 @@ export function isSerpCandidateSetAmbiguous(
   threshold = 60,
   tieWindow = 15,
 ): boolean {
-  const eligible = candidates.filter((candidate) => candidate.totalScore >= threshold);
+  const eligible = candidates.filter(
+    (candidate) => candidate.totalScore >= threshold && !candidate.differentPerson,
+  );
   if (eligible.length === 0) return true;
   if (eligible.length < 2) return false;
 
