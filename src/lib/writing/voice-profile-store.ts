@@ -1,24 +1,20 @@
 import {
-  closeSync,
   existsSync,
-  fsyncSync,
-  linkSync,
   mkdirSync,
-  openSync,
   readFileSync,
   realpathSync,
-  renameSync,
   rmSync,
-  unlinkSync,
-  writeFileSync,
 } from "node:fs";
-import { hostname } from "node:os";
-import { dirname, join } from "node:path";
-import { nanoid } from "nanoid";
+import { join } from "node:path";
 import { dataDir } from "@/lib/db/client";
 import { getOwnerContactId } from "@/lib/db/queries/contacts";
 import { getContentItem } from "@/lib/db/queries/content";
 import { AgentToolError } from "@/lib/agent-tools/types";
+import {
+  commitIndex as commitStoreIndex,
+  installImmutable as installImmutableJson,
+  withStoreLock,
+} from "@/lib/store/locked-json-store";
 import {
   type ApprovalEvidence,
   type VoiceProfile,
@@ -27,7 +23,7 @@ import {
   voiceProfileInputSchema,
   voiceProfileVersionDocumentSchema,
 } from "@/lib/writing/contracts";
-import { canonicalJson, computeVoiceProfileHash, sha256, sha256Canonical } from "@/lib/writing/hash";
+import { computeVoiceProfileHash, sha256, sha256Canonical } from "@/lib/writing/hash";
 import { newWritingId } from "@/lib/writing/ids";
 
 type VersionIndex = {
@@ -57,7 +53,6 @@ const EMPTY_INDEX: VoiceProfileIndex = {
   activeByOwnerLabel: {},
   updatedAt: 0,
 };
-const mutexes = new Map<string, Promise<void>>();
 export const __voiceStoreTestHooks: {
   beforeInstall?: (path: string) => void;
   afterInstall?: (path: string) => void;
@@ -90,129 +85,24 @@ function ownerLabelKey(ownerContactId: string | null, label: string): string {
   return sha256Canonical([ownerContactId, label]);
 }
 
-function processAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === "EPERM";
-  }
-}
-
-function wait(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
-}
-
-async function acquireFileLock(dir: string): Promise<() => void> {
-  const path = join(dir, ".store.lock");
-  const owner = { pid: process.pid, hostname: hostname(), token: nanoid(), acquiredAt: Math.floor(Date.now() / 1000) };
-  const deadline = Date.now() + 5_000;
-  let delay = 25;
-  let observedOwner: { pid?: number; hostname?: string; acquiredAt?: number } | undefined;
-  while (Date.now() < deadline) {
-    try {
-      const fd = openSync(path, "wx", 0o600);
-      writeFileSync(fd, canonicalJson(owner));
-      fsyncSync(fd);
-      closeSync(fd);
-      return () => {
-        try {
-          const current = JSON.parse(readFileSync(path, "utf8")) as { token?: string };
-          if (current.token === owner.token) unlinkSync(path);
-        } catch {
-          // Another recovery path already removed it.
-        }
-      };
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      try {
-        const current = JSON.parse(readFileSync(path, "utf8")) as { pid?: number; hostname?: string; acquiredAt?: number };
-        observedOwner = current;
-        if (current.hostname === hostname() && Number.isInteger(current.pid) && !processAlive(current.pid!)) {
-          unlinkSync(path);
-          continue;
-        }
-      } catch {
-        // An unreadable lock cannot be proven stale.
-      }
-      const remaining = deadline - Date.now();
-      if (remaining > 0) await wait(Math.min(delay, remaining));
-      delay = Math.min(250, delay * 2);
-    }
-  }
-  throw new AgentToolError("STORE_BUSY", "Voice profile store is busy", {
-    ...(observedOwner
-      ? { owner: { pid: observedOwner.pid, hostname: observedOwner.hostname, acquiredAt: observedOwner.acquiredAt } }
-      : {}),
-  });
-}
-
 export async function withVoiceProfileStoreLock<T>(operation: () => Promise<T> | T): Promise<T> {
   const dir = storeDir();
-  const previous = mutexes.get(dir) ?? Promise.resolve();
-  let releaseMutex!: () => void;
-  const current = new Promise<void>((resolve) => { releaseMutex = resolve; });
-  const tail = previous.then(() => current);
-  mutexes.set(dir, tail);
-  await previous;
-  let releaseFile: (() => void) | undefined;
-  try {
-    releaseFile = await acquireFileLock(dir);
-    return await operation();
-  } finally {
-    releaseFile?.();
-    releaseMutex();
-    if (mutexes.get(dir) === tail) mutexes.delete(dir);
-  }
-}
-
-function fsyncDirectory(path: string): void {
-  const fd = openSync(path, "r");
-  try { fsyncSync(fd); } finally { closeSync(fd); }
+  return withStoreLock(dir, dir, operation, { busyMessage: "Voice profile store is busy" });
 }
 
 function installImmutable(path: string, value: unknown): void {
-  mkdirSync(dirname(path), { recursive: true });
-  __voiceStoreTestHooks.beforeInstall?.(path);
-  const temp = `${path}.${process.pid}.${nanoid()}.tmp`;
-  const fd = openSync(temp, "wx", 0o600);
-  try {
-    writeFileSync(fd, `${canonicalJson(value)}\n`);
-    fsyncSync(fd);
-  } finally {
-    closeSync(fd);
-  }
-  try {
-    linkSync(temp, path);
-  } finally {
-    unlinkSync(temp);
-  }
-  fsyncDirectory(dirname(path));
-  __voiceStoreTestHooks.afterInstall?.(path);
+  installImmutableJson(path, value, {
+    beforeWrite: __voiceStoreTestHooks.beforeInstall,
+    afterWrite: __voiceStoreTestHooks.afterInstall,
+  });
 }
 
 function commitIndex(base: VoiceProfileIndex, next: VoiceProfileIndex): void {
-  const current = readIndex();
-  if (current.generation !== base.generation || sha256Canonical(current) !== sha256Canonical(base)) {
-    throw new AgentToolError("STORE_CONFLICT", "Voice profile index changed during commit");
-  }
-  const path = indexPath();
-  const temp = `${path}.${process.pid}.${nanoid()}.tmp`;
-  const fd = openSync(temp, "wx", 0o600);
-  try {
-    writeFileSync(fd, `${canonicalJson(next)}\n`);
-    fsyncSync(fd);
-  } finally {
-    closeSync(fd);
-  }
-  try {
-    __voiceStoreTestHooks.beforeIndexCommit?.(path);
-    renameSync(temp, path);
-  } catch (error) {
-    if (existsSync(temp)) unlinkSync(temp);
-    throw error;
-  }
-  fsyncDirectory(dirname(path));
+  commitStoreIndex(readIndex, base, next, {
+    path: indexPath(),
+    conflictMessage: "Voice profile index changed during commit",
+    beforeWrite: __voiceStoreTestHooks.beforeIndexCommit,
+  });
 }
 
 function readDocument(id: string, version: number): VoiceProfileVersionDocument {
