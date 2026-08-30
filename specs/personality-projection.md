@@ -262,12 +262,33 @@ type PersonalityIndex = {
     active: PersonalityBinding | null;
     history: PersonalityBinding[];          // newest first, ≤ 50; older entries pruned with their snapshots
   }>;
-  proposals: Record<`prp_${string}`, { state: ProposalState; workspaceKey: WorkspaceKey; at: number }>;
+  proposals: Record<`prp_${string}`, PersonalityProposalRecord>;
   updatedAt: number;
 };
 
-type ProposalState = "proposed" | "approved" | "applied" | "apply_failed" | "rejected" | "superseded" | "stale";
+type ProposalState = "proposed" | "approved" | "applying" | "applied" | "apply_failed" | "rejected" | "superseded" | "stale";
+type PersonalityProposalRecord = {
+  state: ProposalState;
+  workspaceKey: WorkspaceKey;
+  updatedAt: number;
+  approval: { by: "user"; at: number; evidence: ApprovalEvidence } | null;
+  attempt: {
+    bindingId: `pb_${string}`;
+    snapshotDir: string;
+    phase: "snapshotted" | "writing" | "verifying" | "committing";
+    paths: string[];
+    claudeShimCreated: boolean;
+    startedAt: number;
+  } | null;
+  failure: { step: string; reason: string; restoreFailed?: { path: string; reason: string }[] } | null;
+};
 ```
+
+Proposal documents remain immutable; this index record is the mutable state machine and durable
+apply journal. Approval evidence and failure/retry state live here until a successful binding
+copies the approval into `PersonalityBinding`. An immutable proposal referenced by any retained
+binding/history entry is retained with that entry; pruning a history entry prunes its proposal
+only when no other retained binding references it.
 
 ### 5.2 Proposal document (immutable)
 
@@ -279,7 +300,7 @@ type PersonalityProposal = {
   workspace: { slug: string; id: string | null; dir: string /* realpath */; key: WorkspaceKey };
   identity: { selfContactId: string; representedOrgId: string | null };
   basedOnBindingId: `pb_${string}` | null;       // active binding when proposed
-  sourceSnapshot: PersonalitySourceSnapshot;      // rollback/unbind: the previous binding's snapshot / null
+  sourceSnapshot: PersonalitySourceSnapshot | null; // rollback: target binding's source snapshot; unbind: null
   sourceHash: string;
   files: {
     path: "IDENTITY.md" | "SOUL.md" | "VOICE.md" | "BRAND.md" | "AGENTS.md";
@@ -317,7 +338,14 @@ approval: { by: "user"; at: number; evidence: ApprovalEvidence }   // same schem
 - UI: `POST /api/personality/proposals/:id/approve` with `{ kind: "ui", route }`.
 - Agent: `approve_personality_projection` with `{ kind: "thread_message", workspaceSlug, threadSlug, note }` — the agent must render the diff card (§5.6) first, and the same MVP caveat as the writing spec §12.1 applies (the thread is auditable; the UI path is preferred).
 - There is **no** policy-based approval for Personality; `writingApprovalPolicy` does not apply.
-- Approval and apply happen in one call (like `materialize_variant`): approve validates, then applies (§5.4). If apply fails, the proposal is `apply_failed` and keeps its approval evidence for the retry (`retry_personality_projection` re-runs §5.4 with fresh CAS tokens only if the current files still match; otherwise → `stale`).
+- The immutable proposal document is never rewritten. Approval evidence, the active apply attempt,
+  and failure details are generation-checked fields in its `PersonalityProposalRecord` (§5.1).
+- Approval and apply happen in one call (like `materialize_variant`): approve validates, persists
+  the user evidence, then applies (§5.4). If apply fails, the proposal is `apply_failed` and keeps
+  its approval evidence for retry. `retry_personality_projection` reuses the immutable proposal's
+  CAS tokens only when every current file still matches them (normally after successful
+  compensation); otherwise the proposal becomes `stale` and the user must create and review a new
+  proposal.
 
 ### 5.4 Apply algorithm (compare-and-swap, verify, compensate)
 
@@ -325,10 +353,24 @@ Under the personality store lock (`STORE_BUSY` after the bounded wait):
 
 1. Resolve the workspace: `getSignalsRtxWorkspaceSlug(env)` → `GET /cli/get-workspace/:slug` (id, slug) → `resolveRtxWorkspaceWorkingDir` → `realpath`. Require slug, id (when previously recorded), and realpath to equal the proposal's `workspace`; require the realpath to be inside `resolveRtxStorageDir()/working-data/` with no symlink ancestor (mirror RealTimeX's containment rule). Else `CONFLICT` / `workspace_mismatch`; unresolvable directory → `WORKSPACE_UNAVAILABLE` (503).
 2. Identity guard: if an active binding exists and its `selfContactId` differs from the proposal's → `CONFLICT` / `identity_mismatch` (the user must `unbind` first, §5.5).
-3. Snapshot: copy every touched file that exists into `snapshots/<pb_id>/` and fsync.
-4. For each file, in a fixed order (`AGENTS.md`, `IDENTITY.md`, `SOUL.md`, `VOICE.md`, `BRAND.md`): re-read; require `sha256(current) === currentFileHash` (and non-existence when `exists: false`); else abort → step 7 with `STORE_CONFLICT` / `file_changed`. Write the new content to a unique sibling temp file, fsync, and `rename` over the target (or `unlink` for deletion). The window between re-read and rename is the residual race with RealTimeX's own blind PUT; it is bounded by one file write and caught by step 5.
-5. Verify: re-read every touched file and require `sha256 === proposedFileHash` (or absence). Create the `CLAUDE.md` symlink if requested and absent.
-6. Commit the binding (generation-checked index replace):
+3. Snapshot: allocate the next `pb_id`, copy every touched file that exists into
+   `snapshots/<pb_id>/`, record absence explicitly in a snapshot manifest, and fsync.
+4. Journal: generation-check and commit the proposal record as `applying` with the binding id,
+   snapshot directory, touched paths, phase `snapshotted`, and `claudeShimCreated: false`. The
+   journal is durable before the first workspace mutation.
+5. For each file, in a fixed order (`AGENTS.md`, `IDENTITY.md`, `SOUL.md`, `VOICE.md`, `BRAND.md`):
+   set phase `writing`; re-read; require `sha256(current) === currentFileHash` (and non-existence
+   when `exists: false`); else abort → step 8 with `STORE_CONFLICT` / `file_changed`. Write the new
+   content to a unique sibling temp file, fsync, and `rename` over the target (or `unlink` for
+   deletion). The window between re-read and rename is the residual race with RealTimeX's own
+   blind PUT; it is bounded by one file write and caught by step 6.
+6. Verify: set phase `verifying`; re-read every touched file and require
+   `sha256 === proposedFileHash` (or absence). Create the `CLAUDE.md` symlink if requested and
+   absent, then persist `claudeShimCreated: true`; if any later step fails, compensation removes
+   only a shim created by this attempt. An existing regular file or pre-existing symlink is never
+   changed.
+7. Set phase `committing` and commit the binding and terminal proposal state in one
+   generation-checked index replace:
 
 ```ts
 type PersonalityBinding = {
@@ -349,31 +391,51 @@ type PersonalityBinding = {
 };
 ```
 
-   The previous active binding moves to `history[0]`. The proposal becomes `applied`.
-7. On any failure after step 3: restore every touched file from the snapshot with the same
+   For a projection or rollback, the previous active binding moves to `history[0]`, the new
+   binding becomes `active`, and the proposal becomes `applied`. For an unbind, both the previous
+   binding and the new unbind audit binding move to history, `active` becomes `null`, and the
+   proposal becomes `applied`; this is what permits a later proposal for a different self contact.
+8. On any failure after step 3: restore every touched file from the snapshot with the same
    temp+rename discipline, verify, mark the proposal `apply_failed` with `{ step, reason }`, and
-   keep the snapshot. If the restore itself fails, the proposal records `restore_failed` with the
-   per-file state and the UI shows a manual-recovery panel listing snapshot paths; nothing else is
-   mutated.
-8. After commit (outside the lock, in the DB): revoke pending writing approvals bound to any older
-   binding of this workspace (§6.2).
+   keep the snapshot. Remove `CLAUDE.md` only when this attempt created it. If the restore itself
+   fails, the proposal remains `apply_failed`, records the per-file state in
+   `failure.restoreFailed`, and the UI shows a manual-recovery panel listing snapshot paths; no
+   binding commits.
+9. After commit (outside the lock, in the DB): revoke pending writing approvals bound to any older
+   binding of this workspace (§6.2). An unbind also revokes artifacts bound to the removed active
+   binding; there is deliberately no new active binding for them to match.
 
-Atomicity statement: a multi-file write cannot be atomic on POSIX; the guarantee is *no partial
-state survives* — either every file verifies against the proposal and the binding commits, or
-every file is restored and no binding commits. Tests inject failures at each step (§10, W6).
+Crash recovery: under the store lock, `retry_personality_projection` first inspects any durable
+`applying` journal. For each touched path the current hash must equal either that proposal's
+`currentFileHash` or `proposedFileHash`. When all hashes are in that closed set, retry completes
+the remaining writes forward, verifies, and commits the binding; this makes interruption after
+any rename recoverable without guessing. An unexpected third hash means an external editor raced
+the attempt: files still equal to the proposal's output are compensated from the snapshot, the
+proposal becomes `apply_failed` (with `failure.restoreFailed` when compensation cannot be proven),
+and a new proposal is required. Startup does not mutate a workspace automatically; recovery runs
+only from the explicit retry path.
+
+Atomicity statement: a multi-file write cannot be atomic on POSIX. With no concurrent external
+writer and a writable snapshot, no partial state survives — either every file verifies and the
+binding commits, or every file is restored and no binding commits. An external third hash or a
+restore failure is not hidden behind that guarantee: it is recorded in the proposal's
+`apply_failed` detail, blocks new applies, and requires the surfaced manual-recovery path. Tests
+inject failures at each step (§10, W6).
 
 ### 5.5 Rollback and unbind
 
 - `rollback_personality_projection { bindingId }` creates a `kind: "rollback"` proposal whose
-  `proposedBlock` per file is that binding's block content (read from `snapshots/<bindingId>` for the
-  files it changed, or from the binding's recorded block hashes when the current block still matches)
-  and whose `currentFileHash` is the *current* file. It therefore preserves unmanaged content
-  edited after the target binding and goes through the same approve/apply path. Rolling back to
-  "no binding" is `kind: "unbind"`: every managed block is removed, `AGENTS.md`'s `index` block is
-  removed, files that become empty are deleted, and the active binding becomes an `unbind` binding
-  (history keeps everything).
+  `proposedBlock` per file is read from the target binding's immutable proposal
+  (`proposals/<binding.proposalId>.json`). Pre-apply snapshots do **not** contain the target
+  binding's applied blocks and are never used as their source. The rollback proposal's
+  `currentFileHash` is the *current* file, so it preserves unmanaged content edited after the
+  target binding and goes through the same approve/apply path. Rolling back to "no binding" is
+  `kind: "unbind"`: every managed block is removed, `AGENTS.md`'s `index` block is removed, files
+  that become empty are deleted, the previous binding plus the unbind audit binding stay in
+  history, and `active` becomes `null`.
 - Rollback never restores unmanaged bytes from a snapshot (that would overwrite the user's later
-  prose); snapshots exist for apply-failure compensation and for reading old block contents.
+  prose); snapshots exist only for apply-failure compensation. Retained immutable proposals are
+  the source of historical managed blocks.
 
 ### 5.6 Review surfaces
 
@@ -615,7 +677,7 @@ the workspace Personality while approving a proposal. A RealTimeX-side write API
 | W4 | Two concurrent applies for one workspace serialize; the second sees `STORE_CONFLICT` or `STORE_BUSY`, never a mixed state; index generation increments once. | multi-process | B |
 | W5 | Workspace mismatch (slug ok, realpath differs; or symlink ancestor) → `CONFLICT` / `workspace_mismatch`; unresolvable storage dir → `WORKSPACE_UNAVAILABLE`. | unit | B |
 | W6 | Crash injection after each rename and before index commit leaves either fully-restored files with no new binding, or fully-applied files with the binding committed on retry (retry re-verifies file hashes). | fault injection | B |
-| W7 | Rollback proposal restores the previous block while keeping unmanaged prose edited after the target binding; unbind removes all blocks, deletes fully-managed files, keeps files with unmanaged content. | unit | B |
+| W7 | Rollback proposal restores the previous block while keeping unmanaged prose edited after the target binding; unbind removes all blocks, deletes fully-managed files, keeps files with unmanaged content, records the unbind in history, and leaves `active: null` so another self can bind. | unit | B |
 | W8 | Drift detection: editing a managed block, deleting a block, deleting a file, duplicating a block each yield `drifted` with the right reason; `source_stale` reflects per-source hash changes and ignores a bare `updatedAt` touch. | unit | B |
 | W9 | `AGENTS.md` pointer block is proposed only when the file lacks references; a missing `CLAUDE.md` becomes a symlink; an existing regular `CLAUDE.md` is untouched with a warning. | unit | B |
 | W10 | Approval requires `by: "user"` with evidence; `noop` proposals cannot be approved; approving a `superseded` proposal → `CONFLICT`. | tool | B |
@@ -648,7 +710,7 @@ the workspace Personality while approving a proposal. A RealTimeX-side write API
 **Status:** Accepted. **Context:** Slugs are stable but the runtime default and the plugin slug can name different workspaces; Local Apps get no host binding. **Options:** (a) bind by slug only — rejected: a re-pointed `STORAGE_DIR` or a different desktop user would apply to the wrong directory; (b) bind by slug, id (when RealTimeX returns it), realpath, and identity, refusing any mismatch — chosen. **Consequences:** moving Signals to another machine/user requires an explicit re-bind (unbind + propose); the same resolver as dispatch is an invariant.
 
 ### ADR-373-6: Rollback is a proposal
-**Status:** Accepted. **Context:** Restoring whole files from a snapshot would overwrite unmanaged prose written after the binding. **Options:** (a) snapshot restore — rejected; (b) a `rollback`/`unbind` proposal carrying the previous block contents through the same approve/apply path — chosen. **Consequences:** one write path to test; history is append-only; snapshots serve compensation and old-block reads only.
+**Status:** Accepted. **Context:** Restoring whole files from a snapshot would overwrite unmanaged prose written after the binding. **Options:** (a) snapshot restore — rejected; (b) a `rollback`/`unbind` proposal carrying the previous block contents from the target binding's retained immutable proposal through the same approve/apply path — chosen. **Consequences:** one write path to test; retained binding records are immutable and history is bounded to 50; snapshots serve compensation only.
 
 ### ADR-373-7: Artifact binding, eager revocation on rebinding, lazy gates
 **Status:** Accepted. **Context:** The writing system already revokes on spine change and gates at materialization and G5. **Options:** (a) a personality revision inside the audit `inputHash` only — rejected: the variant's own ref never changes, so staleness needs an explicit comparison; (b) additive `metadata.writing.personality`, eager revoke at apply, lazy checks at materialize/G5 — chosen. **Consequences:** `revokedReason: personality_stale`; `drifted` blocks materialization, `source_stale` warns; legacy unbound variants are grandfathered.
