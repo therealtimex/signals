@@ -109,6 +109,9 @@ describe("personality contracts", () => {
     expect(markerStart("voice", "pb_binding1", HASH)).toBe(
       "<!-- signals:personality:voice:start v=1 binding=pb_binding1 source=aaaaaaaaaaaa -->",
     );
+    expect(markerStart("index", "pb_binding1", HASH)).toBe(
+      "<!-- signals:personality:index:start v=1 binding=pb_binding1 -->",
+    );
     expect(markerEnd("voice")).toBe("<!-- signals:personality:voice:end -->");
     expect(PRESENCE_MANDATE_MODES).toEqual(["assist_only"]);
 

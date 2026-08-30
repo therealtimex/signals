@@ -6,11 +6,12 @@ import { createContact, updateContact } from "@/lib/db/queries/contacts";
 import { createOrgIdentity } from "@/lib/db/queries/org-identities";
 import { createOrg } from "@/lib/db/queries/orgs";
 import { contacts, orgDomains, orgEmailPatterns, orgs } from "@/lib/db/schema";
-import { renderPersonalityBlocks } from "@/lib/personality/render";
+import { renderPersonalityBlocks, renderVoiceBlock } from "@/lib/personality/render";
 import { buildSourceSnapshot, computeSourceHash } from "@/lib/personality/snapshot";
 import {
   loadPersonalitySourceBundle,
   loadPersonalitySources,
+  toRenderedVoiceInput,
 } from "@/lib/personality/sources";
 import { upsertPersonalityStatements } from "@/lib/personality/statements";
 import { setRepresentedOrgId } from "@/lib/settings/signals-config";
@@ -21,6 +22,8 @@ import {
 } from "@/lib/writing/voice-profile-store";
 
 const SENTINEL = "SENTINEL_PRIVATE_FIELD";
+const UNAPPROVED_SIGNATURE_SENTINEL = "SENTINEL_UNAPPROVED_SIGNATURE";
+const EXCLUDED_SIGNATURE_SENTINEL = "SENTINEL_EXCLUDED_SIGNATURE";
 
 function voiceProfile(ownerContactId: string) {
   return {
@@ -217,6 +220,52 @@ describe("personality represented source adapters", () => {
         details: { reason: "org_not_represented" },
       }),
     );
+  });
+
+  it("excludes signature lines sourced from unapproved or excluded samples", async () => {
+    const self = createContact({ name: "Self", isSelf: true });
+    const input = voiceProfile(self.id);
+    const draft = await upsertVoiceProfile({
+      ...input,
+      samples: [
+        ...input.samples,
+        {
+          id: "vs_unapproved1",
+          text: UNAPPROVED_SIGNATURE_SENTINEL,
+          source: { kind: "pasted", pastedAt: 30 },
+          authorship: "self",
+          approved: false,
+        },
+        {
+          id: "vs_excluded01",
+          text: EXCLUDED_SIGNATURE_SENTINEL,
+          source: { kind: "pasted", pastedAt: 31 },
+          authorship: "self",
+          approved: true,
+          excludedReason: "user_removed",
+        },
+      ],
+      signatureLines: [
+        ...input.signatureLines,
+        { text: UNAPPROVED_SIGNATURE_SENTINEL, sampleId: "vs_unapproved1" },
+        { text: EXCLUDED_SIGNATURE_SENTINEL, sampleId: "vs_excluded01" },
+      ],
+    });
+    const approved = await approveVoiceProfile({
+      id: draft.profile.id,
+      version: draft.profile.version,
+      evidence: { kind: "api", caller: "personality-test" },
+    });
+    const rendered = toRenderedVoiceInput(approved);
+    const body = renderVoiceBlock(rendered).body;
+
+    expect(rendered.signatureLines).toEqual([
+      { id: "vs_personality0", text: "approved line" },
+    ]);
+    expect(JSON.stringify(rendered)).not.toContain(UNAPPROVED_SIGNATURE_SENTINEL);
+    expect(JSON.stringify(rendered)).not.toContain(EXCLUDED_SIGNATURE_SENTINEL);
+    expect(body).not.toContain(UNAPPROVED_SIGNATURE_SENTINEL);
+    expect(body).not.toContain(EXCLUDED_SIGNATURE_SENTINEL);
   });
 
   it("requires the single isSelf contact and validates pinned voice ownership", async () => {

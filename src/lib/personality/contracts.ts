@@ -34,7 +34,8 @@ export function markerStart(
   bindingId: `pb_${string}`,
   sourceHash: string,
 ): string {
-  return `<!-- signals:personality:${section}:start v=1 binding=${bindingId} source=${sourceHash.slice(0, 12)} -->`;
+  const source = section === "index" ? "" : ` source=${sourceHash.slice(0, 12)}`;
+  return `<!-- signals:personality:${section}:start v=1 binding=${bindingId}${source} -->`;
 }
 
 export function markerEnd(section: PersonalitySection): string {

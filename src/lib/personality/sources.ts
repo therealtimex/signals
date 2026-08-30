@@ -153,6 +153,7 @@ export function toRenderedVoiceInput(profile: VoiceProfile): RenderedVoiceInput 
     sample.approved
     && !sample.excludedReason
     && sample.authorship === "self");
+  const admissibleSampleIds = new Set(admissible.map((sample) => sample.id));
   return brandRenderedVoiceInput({
     profile: {
       id: profile.id,
@@ -180,7 +181,9 @@ export function toRenderedVoiceInput(profile: VoiceProfile): RenderedVoiceInput 
     protectedQuirks: profile.fingerprint.protectedQuirks.slice(0, ARRAY_LIMIT),
     taboo: profile.fingerprint.taboo.slice(0, ARRAY_LIMIT),
     signatureLines: profile.signatureLines
-      .map((line) => ({ id: line.sampleId, text: line.text }))
+      .flatMap((line) => admissibleSampleIds.has(line.sampleId)
+        ? [{ id: line.sampleId, text: line.text }]
+        : [])
       .sort((left, right) => compareText(left.id, right.id))
       .slice(0, ARRAY_LIMIT),
     exemplars: admissible
