@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const platformTargetServiceMocks = vi.hoisted(() => ({
+  prepareCurrentPlatformTarget: vi.fn(),
   preparePlatformTarget: vi.fn(),
   releasePreparedPlatformTarget: vi.fn(),
 }));
@@ -45,25 +46,17 @@ describe("contact web research target selection", () => {
     vi.clearAllMocks();
   });
 
-  it("prefers an explicit target, then LinkedIn default, with X only as an eligibility fallback", () => {
+  it("honors an explicit target but does not select stored defaults for the inherited-session path", () => {
     const x = registerTarget({ platform: "x", handle: "@current" });
-    const linkedin = registerTarget({ platform: "linkedin", handle: "/in/current" });
+    registerTarget({ platform: "linkedin", handle: "/in/stale-default" });
 
     expect(selectContactWebResearchTarget({ targetId: x.id })).toEqual({
       ok: true,
       selection: { targetId: x.id, platform: "x", source: "config" },
     });
-    expect(selectContactWebResearchTarget({})).toEqual({
-      ok: true,
-      selection: { targetId: linkedin.id, platform: "linkedin", source: "default" },
-    });
-
-    resetCoreTables();
-    registerTarget({ platform: "linkedin", handle: "/in/no-browse", capabilities: ["publish"] });
-    const fallback = registerTarget({ platform: "x", handle: "@fallback" });
-    expect(selectContactWebResearchTarget({})).toEqual({
-      ok: true,
-      selection: { targetId: fallback.id, platform: "x", source: "default" },
+    expect(selectContactWebResearchTarget({})).toMatchObject({
+      ok: false,
+      error: { code: "NO_RESEARCH_TARGET" },
     });
   });
 
@@ -114,7 +107,77 @@ describe("contact web research target selection", () => {
     expect(describeResearchTargetError(selected.error)).toBe(selected.error.message);
   });
 
-  it("freezes a prepared target and maps platform errors without trying another target", async () => {
+  it("inherits the live LinkedIn identity from signals-publish instead of a stale default", async () => {
+    registerTarget({ platform: "linkedin", handle: "/in/stale-default" });
+    platformTargetServiceMocks.prepareCurrentPlatformTarget.mockResolvedValueOnce({
+      targetId: "target-live-linkedin",
+      platform: "linkedin",
+      kind: "profile",
+      sessionName: "signals-publish",
+      startUrl: "https://www.linkedin.com/in/live",
+      expectedHandle: "/in/live",
+      verified: true,
+      verifiedHandle: "/in/live",
+      activation: { switched: false },
+      lease: { leaseId: "lease-live", expiresAt: 1_800_000_000 },
+    });
+
+    await expect(
+      prepareContactWebResearchTarget({ config: {}, workflowRunId: "run-live" }),
+    ).resolves.toMatchObject({
+      ok: true,
+      target: {
+        targetId: "target-live-linkedin",
+        platform: "linkedin",
+        source: "session",
+        sessionName: "signals-publish",
+        leaseId: "lease-live",
+      },
+    });
+    expect(platformTargetServiceMocks.prepareCurrentPlatformTarget).toHaveBeenCalledWith(
+      expect.objectContaining({
+        platform: "linkedin",
+        intent: "browse",
+        holder: "contact-web-research:run-live",
+        leaseTtlSeconds: 600,
+      }),
+      expect.anything(),
+      expect.anything(),
+    );
+    expect(platformTargetServiceMocks.preparePlatformTarget).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the live X identity only when LinkedIn is signed out", async () => {
+    platformTargetServiceMocks.prepareCurrentPlatformTarget
+      .mockRejectedValueOnce(new PlatformTargetError("LOGIN_REQUIRED", "signed out"))
+      .mockResolvedValueOnce({
+        targetId: "target-live-x",
+        platform: "x",
+        kind: "account",
+        sessionName: "signals-publish",
+        startUrl: "https://x.com/live",
+        expectedHandle: "@live",
+        verified: true,
+        verifiedHandle: "@live",
+        activation: { switched: false },
+        lease: { leaseId: "lease-x", expiresAt: 1_800_000_000 },
+      });
+
+    await expect(
+      prepareContactWebResearchTarget({ config: {}, workflowRunId: "run-x" }),
+    ).resolves.toMatchObject({
+      ok: true,
+      target: { platform: "x", source: "session", sessionName: "signals-publish" },
+    });
+    expect(platformTargetServiceMocks.prepareCurrentPlatformTarget).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ platform: "x" }),
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  it("keeps an explicit target exact and maps its preparation errors", async () => {
     const linkedin = registerTarget({ platform: "linkedin", handle: "/in/current" });
     platformTargetServiceMocks.preparePlatformTarget.mockResolvedValueOnce({
       targetId: linkedin.id,
@@ -130,13 +193,13 @@ describe("contact web research target selection", () => {
     });
 
     await expect(
-      prepareContactWebResearchTarget({ config: {}, workflowRunId: "run-1" }),
+      prepareContactWebResearchTarget({ config: { targetId: linkedin.id }, workflowRunId: "run-1" }),
     ).resolves.toMatchObject({
       ok: true,
       target: {
         targetId: linkedin.id,
         platform: "linkedin",
-        source: "default",
+        source: "config",
         sessionName: "signals-publish",
         leaseId: "lease-1",
       },
@@ -156,10 +219,26 @@ describe("contact web research target selection", () => {
       new PlatformTargetError("LOGIN_REQUIRED", "signed out", { detectedHandle: null }),
     );
     await expect(
-      prepareContactWebResearchTarget({ config: {}, workflowRunId: "run-2" }),
+      prepareContactWebResearchTarget({ config: { targetId: linkedin.id }, workflowRunId: "run-2" }),
     ).resolves.toMatchObject({
       ok: false,
       error: { code: "LOGIN_REQUIRED", message: expect.stringContaining("Platform connections") },
+    });
+  });
+
+  it("returns an actionable error when neither platform is authenticated in signals-publish", async () => {
+    platformTargetServiceMocks.prepareCurrentPlatformTarget.mockRejectedValue(
+      new PlatformTargetError("LOGIN_REQUIRED", "signed out"),
+    );
+
+    await expect(
+      prepareContactWebResearchTarget({ config: {}, workflowRunId: "run-none" }),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: {
+        code: "NO_RESEARCH_TARGET",
+        message: expect.stringContaining("signals-publish"),
+      },
     });
   });
 });

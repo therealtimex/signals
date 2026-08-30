@@ -4,8 +4,8 @@ import {
   getBrowserConnectionById,
   getPlatformTargetById,
   markPlatformTargetVerified,
-  resolveTargetById,
   registerPlatformTarget,
+  resolveTargetById,
   toPlatformTargetView,
 } from "@/lib/db/queries/platform-targets";
 import {
@@ -15,10 +15,19 @@ import {
   renewSessionLease,
   type SessionLeaseIntent,
 } from "@/lib/leases/session-lease";
-import { withPlatformBrowserPage, getPlatformHomeUrl } from "@/lib/platforms/browser-connection";
+import {
+  detectPlatformHandle,
+  getPlatformHomeUrl,
+  probePlatformLogin,
+  withPlatformBrowserPage,
+} from "@/lib/platforms/browser-connection";
 import { getPlatformTargetAdapter } from "@/lib/platforms/target-adapters";
 import { PlatformTargetError } from "@/lib/platforms/target-errors";
-import type { PlatformTargetPlatform } from "@/lib/platforms/target-identity";
+import {
+  defaultTargetCapabilities,
+  defaultTargetKind,
+  type PlatformTargetPlatform,
+} from "@/lib/platforms/target-identity";
 import { RTX_PUBLISH_SESSION_NAME } from "@/lib/publish/constants";
 import type { EnvLike } from "@/lib/rtx/env";
 
@@ -29,6 +38,26 @@ export type PreparePlatformTargetInput = {
   leaseTtlSeconds?: number;
   holder?: string;
 };
+
+export type PrepareCurrentPlatformTargetInput = {
+  platform: PlatformTargetPlatform;
+  intent: "browse" | "publish";
+  leaseTtlSeconds?: number;
+  holder?: string;
+};
+
+const CURRENT_TARGET_LOGIN_TIMEOUT_MS = 8_000;
+
+function currentTargetCanonicalUrl(
+  platform: PlatformTargetPlatform,
+  handle: string,
+): string {
+  if (platform === "x") return `https://x.com/${handle.replace(/^@/, "")}`;
+  if (platform === "linkedin") {
+    return `https://www.linkedin.com/${handle.replace(/^\//, "")}`;
+  }
+  return `https://www.facebook.com/${handle.replace(/^\//, "")}`;
+}
 
 function requireActiveTarget(targetId: string) {
   const raw = getPlatformTargetById(targetId);
@@ -152,6 +181,126 @@ export async function preparePlatformTarget(
       verifiedHandle: activation.detectedHandle,
       activation: { switched: activation.switched },
       lease: { leaseId: lease.leaseId, expiresAt: lease.expiresAt },
+    };
+  } catch (error) {
+    try {
+      releaseSessionLease(lease.leaseId);
+    } catch {
+      // A stolen/expired lease is already released from this holder's perspective.
+    }
+    throw error;
+  }
+}
+
+/**
+ * Bind work to the identity that is authenticated in Signals' shared browser
+ * profile right now. The lease is acquired before inspecting the browser and
+ * then re-entered with the detected target ID, so selection and preparation
+ * cannot race another workflow using the same profile.
+ */
+export async function prepareCurrentPlatformTarget(
+  input: PrepareCurrentPlatformTargetInput,
+  env: EnvLike = process.env,
+  fetchImpl: typeof fetch = fetch,
+) {
+  const connection = ensureBrowserConnection({
+    sessionName: RTX_PUBLISH_SESSION_NAME,
+    kind: "shared",
+    source: "platform-target-current-session",
+  });
+  const holder = input.holder?.trim() || `agent:${nanoid()}`;
+  const lease = acquireSessionLease(connection.id, {
+    holder,
+    intent: input.intent,
+    ttlSeconds: input.leaseTtlSeconds,
+  });
+
+  try {
+    const liveIdentity = await withPlatformBrowserPage(
+      input.platform,
+      RTX_PUBLISH_SESSION_NAME,
+      async (page) => {
+        const loggedIn = await probePlatformLogin(
+          input.platform,
+          page,
+          CURRENT_TARGET_LOGIN_TIMEOUT_MS,
+        );
+        const detectedHandle = loggedIn
+          ? await detectPlatformHandle(input.platform, page, page.url())
+          : null;
+        return { loggedIn, detectedHandle };
+      },
+      env,
+      fetchImpl,
+    ).catch((error) => {
+      if (error instanceof PlatformTargetError) throw error;
+      throw new PlatformTargetError(
+        "CONNECTION_UNAVAILABLE",
+        error instanceof Error ? error.message : "Browser connection is unavailable",
+        { connectionId: connection.id, sessionName: RTX_PUBLISH_SESSION_NAME },
+      );
+    });
+
+    if (!liveIdentity.loggedIn) {
+      throw new PlatformTargetError(
+        "LOGIN_REQUIRED",
+        `Login is required for ${input.platform} in ${RTX_PUBLISH_SESSION_NAME}`,
+        {
+          connectionId: connection.id,
+          sessionName: RTX_PUBLISH_SESSION_NAME,
+          platform: input.platform,
+        },
+      );
+    }
+    if (!liveIdentity.detectedHandle) {
+      throw new PlatformTargetError(
+        "TARGET_NOT_ACTIVE",
+        `Could not detect the authenticated ${input.platform} identity in ${RTX_PUBLISH_SESSION_NAME}`,
+        {
+          connectionId: connection.id,
+          sessionName: RTX_PUBLISH_SESSION_NAME,
+          platform: input.platform,
+        },
+      );
+    }
+
+    const target = registerPlatformTarget({
+      connectionId: connection.id,
+      platform: input.platform,
+      kind: defaultTargetKind(input.platform),
+      name: liveIdentity.detectedHandle,
+      handle: liveIdentity.detectedHandle,
+      canonicalUrl: currentTargetCanonicalUrl(input.platform, liveIdentity.detectedHandle),
+      capabilities: defaultTargetCapabilities(input.platform),
+      source: "platform-target-current-session",
+    });
+    const targetView = toPlatformTargetView(target);
+    if (!targetView.capabilities.includes(input.intent)) {
+      throw new PlatformTargetError(
+        "TARGET_CAPABILITY_UNSUPPORTED",
+        `${target.platform} ${target.kind} target does not support ${input.intent}`,
+        { targetId: target.id, intent: input.intent },
+      );
+    }
+
+    const boundLease = acquireSessionLease(connection.id, {
+      holder,
+      targetId: target.id,
+      intent: input.intent,
+      ttlSeconds: input.leaseTtlSeconds,
+    });
+    markPlatformTargetVerified(target.id);
+    return {
+      targetId: target.id,
+      platform: target.platform,
+      kind: target.kind,
+      sessionName: RTX_PUBLISH_SESSION_NAME,
+      startUrl: target.canonicalUrl ?? getPlatformHomeUrl(input.platform),
+      expectedHandle: target.handle,
+      verified: true,
+      verifiedHandle: liveIdentity.detectedHandle,
+      activation: { switched: false },
+      lease: { leaseId: boundLease.leaseId, expiresAt: boundLease.expiresAt },
     };
   } catch (error) {
     try {
