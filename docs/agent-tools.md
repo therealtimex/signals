@@ -129,12 +129,19 @@ secondary provenance details rather than user-facing labels.
 
 Contact web research is a seeded **Contact Web Research** template, dispatched from
 `POST /api/contacts/:id/web-research`; it is not a new search agent tool. The RTX terminal agent
-collects and visits scored candidates through RealTimeX Browser, then composes existing tools:
+works in the persistent **Contact Enrich Profile** thread. Before dispatch, Signals selects the
+default LinkedIn browse target (falling back to X only when LinkedIn has no eligible target),
+prepares and leases its exact authenticated RealTimeX Browser session, and freezes that target,
+session name, verified handle, start URL, and lease into the run brief. The agent attaches to that
+already-running session; it must not create or substitute a profile. It then collects and visits
+scored candidates and composes existing tools:
 `get_contact`, `get_contact_arpp`, `upsert_contact_identity`, `enrich_contact`,
 `link_contact_to_org`, `log_interaction`, and `complete_workflow_run`. Its structured completion
-result may include `fieldsUpdated`, `unresolvedFields`, `identityLinked`, `visitedUrls`,
+result may include `fieldsUpdated`, `unresolvedFields`, `identityLinked`, `visitedUrls`, `blockedUrls`,
 `serpCandidates`, `ambiguous`, `partial`, and `message`. `identityLinked: true` conditionally
-cascades that contact into Contact profile pipeline.
+cascades that contact into Contact profile pipeline. Login, auth-wall, and CAPTCHA URLs are never
+identity evidence. `complete_workflow_run` returns a `leaseRelease` outcome for this lane after
+browser teardown and before cascade dispatch.
 
 Predicted business emails live only in `contact_email_candidates`; they are not contact channels
 and are excluded from outreach by default. Use `update_email_candidate` with explicit evidence to

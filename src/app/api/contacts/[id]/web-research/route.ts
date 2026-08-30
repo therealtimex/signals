@@ -57,13 +57,21 @@ export async function POST(
   });
   if (!result.success) {
     const unavailable = result.errorCode === "standalone" || result.errorCode === "rtx_unavailable";
+    const researchTargetUnavailable = result.errorCode === "research_target_unavailable";
     return NextResponse.json(
       {
         error: unavailable ? "Contact web research is available inside RealTimeX" : result.error,
-        code: unavailable ? "RTX_UNAVAILABLE" : result.errorCode,
-        details: { workflowRunId: result.workflowRunId ?? null },
+        code: unavailable
+          ? "RTX_UNAVAILABLE"
+          : researchTargetUnavailable
+            ? "RESEARCH_TARGET_UNAVAILABLE"
+            : result.errorCode,
+        details: {
+          ...(result.details ?? {}),
+          workflowRunId: result.workflowRunId ?? null,
+        },
       },
-      { status: unavailable ? 503 : result.httpStatus },
+      { status: unavailable ? 503 : researchTargetUnavailable ? 409 : result.httpStatus },
     );
   }
 

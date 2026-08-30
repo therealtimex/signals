@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type ComponentProps } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Loader2, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -14,6 +15,7 @@ const idle: ContactWebResearchState = {
   unresolvedFields: [],
   identityLinked: false,
   visitedUrls: [],
+  blockedUrls: [],
   ambiguous: false,
   serpCandidates: [],
   message: null,
@@ -40,6 +42,7 @@ export function EnrichContactButton({
   const [state, setState] = useState<ContactWebResearchState>(idle);
   const [pipelineRunning, setPipelineRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [repairHref, setRepairHref] = useState<string | null>(null);
   const statusRef = useRef<ContactWebResearchState["status"]>("idle");
 
   const refresh = useCallback(async () => {
@@ -66,6 +69,7 @@ export function EnrichContactButton({
 
   async function startWebResearch() {
     setError(null);
+    setRepairHref(null);
     statusRef.current = "pending";
     setState((current) => ({ ...current, status: "pending" }));
     const response = await fetch(`/api/contacts/${contactId}/web-research`, { method: "POST" });
@@ -74,6 +78,14 @@ export function EnrichContactButton({
       statusRef.current = "failed";
       setState((current) => ({ ...current, status: "failed" }));
       setError(typeof body.error === "string" ? body.error : "Could not start enrichment.");
+      if (body.code === "RESEARCH_TARGET_UNAVAILABLE") {
+        const details = body.details as Record<string, unknown> | undefined;
+        setRepairHref(
+          typeof details?.settingsPath === "string"
+            ? details.settingsPath
+            : "/dashboard/settings?tab=platforms",
+        );
+      }
       return;
     }
     await refresh();
@@ -83,6 +95,7 @@ export function EnrichContactButton({
     if (!profilePipelineTemplateId) return;
     setPipelineRunning(true);
     setError(null);
+    setRepairHref(null);
     try {
       const response = await fetch(`/api/workflows/templates/${profilePipelineTemplateId}/run`, {
         method: "POST",
@@ -139,9 +152,14 @@ export function EnrichContactButton({
         </p>
       ) : null}
       {error ? (
-        <p className="max-w-56 text-xs text-destructive" role="alert">
-          {error}
-        </p>
+        <div className="max-w-56 text-xs text-destructive" role="alert">
+          <p>{error}</p>
+          {repairHref ? (
+            <Link className="font-medium underline underline-offset-2" href={repairHref}>
+              Open Platform connections
+            </Link>
+          ) : null}
+        </div>
       ) : null}
     </div>
   );

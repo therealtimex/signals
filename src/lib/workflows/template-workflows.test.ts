@@ -217,6 +217,18 @@ describe("template-brief", () => {
           identities: [],
         },
         arppMissing: ["sameAs (linked public profile)"],
+        researchTarget: {
+          targetId: "target-linkedin",
+          platform: "linkedin",
+          source: "default",
+          sessionName: "signals-publish",
+          startUrl: "https://www.linkedin.com/in/current",
+          expectedHandle: "/in/current",
+          verifiedHandle: "/in/current",
+          leaseId: "lease-research",
+          leaseExpiresAt: 1_800_000_000,
+          preparedAt: 1_799_999_400,
+        },
       },
     });
 

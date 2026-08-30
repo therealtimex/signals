@@ -73,8 +73,60 @@ import {
   resolveRunCohort,
   RunCohortError,
 } from "@/lib/workflows/run-cohort";
+import {
+  classifyResearchPageUrl,
+  isBlockedResearchUrl,
+} from "@/lib/contacts/web-research-page-state";
+import { isContactWebResearchTemplateConfig } from "@/lib/workflows/contact-web-research";
+import {
+  getContactWebResearchTargetFromRunConfig,
+  releaseContactWebResearchTargetFromRunConfig,
+  type ContactWebResearchTargetPlatform,
+} from "@/lib/workflows/contact-web-research-target";
 
 const DEFAULT_PAGE_SIZE = 20;
+
+function parseJsonObject(value: string | null | undefined): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(value ?? "{}");
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function parseSerializedStrings(value: string | null | undefined): string[] {
+  try {
+    const parsed = JSON.parse(value ?? "[]");
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is string => typeof item === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function uniqueStrings(values: Array<string | undefined>): string[] {
+  return [...new Set(values.filter((value): value is string => !!value))];
+}
+
+function isTargetPlatformBlockedUrl(
+  value: string,
+  platform: ContactWebResearchTargetPlatform,
+): boolean {
+  if (classifyResearchPageUrl(value) === "content") return false;
+  try {
+    const host = new URL(value).hostname.toLowerCase();
+    const matches = (domain: string) => host === domain || host.endsWith(`.${domain}`);
+    return platform === "linkedin"
+      ? matches("linkedin.com")
+      : matches("x.com") || matches("twitter.com");
+  } catch {
+    return false;
+  }
+}
 
 function platformClaimConflict(
   platform: string,
@@ -562,6 +614,18 @@ export async function handleUpsertContactIdentity(
     }
     platformUrl = undefined;
   }
+  for (const [field, value] of [
+    ["platformUrl", platformUrl],
+    ["websiteUrl", input.websiteUrl?.trim() || undefined],
+  ] as const) {
+    if (value && isBlockedResearchUrl(value)) {
+      throw new AgentToolError(
+        "VALIDATION_ERROR",
+        `${field} is a login/auth-wall URL, not a profile page`,
+        { field, url: value },
+      );
+    }
+  }
 
   const sharedFields = {
     platformHandle: input.platformHandle,
@@ -1034,29 +1098,61 @@ export async function handleUpsertPersona(input: z.infer<typeof upsertPersonaSch
 export async function handleCompleteWorkflowRun(input: z.infer<typeof completeWorkflowRunSchema>) {
   const run = getWorkflowRun(input.runId);
   if (!run) {
-    return { error: `Workflow run ${input.runId} not found` };
+    return { success: false as const, error: `Workflow run ${input.runId} not found` };
   }
 
   const completedAt = Math.floor(Date.now() / 1000);
-  let existingResult: Record<string, unknown> = {};
-  try {
-    const parsed: unknown = JSON.parse(run.result ?? "{}");
-    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
-      existingResult = parsed as Record<string, unknown>;
+  const existingResult = parseJsonObject(run.result);
+  const runConfig = parseJsonObject(run.config);
+  const isContactResearch = isContactWebResearchTemplateConfig(runConfig);
+  const preparedTarget = getContactWebResearchTargetFromRunConfig(run.config);
+  const callbackResult: Record<string, unknown> = { ...(input.result ?? {}) };
+  let effectiveStatus = input.status;
+  let normalizedErrors = uniqueStrings([
+    ...parseSerializedStrings(run.errors),
+    ...(input.errors ?? []),
+  ]);
+
+  if (isContactResearch) {
+    const visitedUrls = Array.isArray(callbackResult.visitedUrls)
+      ? callbackResult.visitedUrls.filter((url): url is string => typeof url === "string")
+      : [];
+    const explicitBlockedUrls = Array.isArray(callbackResult.blockedUrls)
+      ? callbackResult.blockedUrls.filter((url): url is string => typeof url === "string")
+      : [];
+    const blockedUrls = uniqueStrings([
+      ...explicitBlockedUrls,
+      ...visitedUrls.filter(isBlockedResearchUrl),
+    ]);
+    if (blockedUrls.length > 0) {
+      callbackResult.blockedUrls = blockedUrls;
+      callbackResult.partial = true;
+      normalizedErrors = uniqueStrings([
+        ...normalizedErrors,
+        ...blockedUrls.map((url) => `source_blocked:${url}`),
+      ]);
+      if (
+        effectiveStatus === "completed" &&
+        preparedTarget &&
+        blockedUrls.some((url) => isTargetPlatformBlockedUrl(url, preparedTarget.platform))
+      ) {
+        effectiveStatus = "failed";
+      }
+    } else {
+      callbackResult.blockedUrls = [];
     }
-  } catch {
-    // Malformed legacy result JSON must not block workflow completion.
   }
+
   const cohort = resolveRunCohort(run, input.createdContactIds);
   const resultJson = JSON.stringify({
     ...existingResult,
-    ...(input.result ?? {}),
+    ...callbackResult,
     ...(input.summary ? { summary: input.summary } : {}),
     ...(cohort.contactIds.length > 0 ? { createdContactIds: cohort.contactIds } : {}),
   });
 
   const updatedRun = updateWorkflowRun(input.runId, {
-    status: input.status,
+    status: effectiveStatus,
     completedAt,
     ...(input.processedItems !== undefined
       ? { processedItems: input.processedItems }
@@ -1065,24 +1161,42 @@ export async function handleCompleteWorkflowRun(input: z.infer<typeof completeWo
         : {}),
     ...(input.successItems !== undefined ? { successItems: input.successItems } : {}),
     result: resultJson,
-    ...(input.errors ? { errors: JSON.stringify(input.errors) } : {}),
+    ...(isContactResearch || input.errors
+      ? {
+          errors: JSON.stringify(normalizedErrors),
+          errorItems: normalizedErrors.length,
+        }
+      : {}),
   });
 
-  const [eventResult, completionMessage, browserSessionTeardown] = await Promise.all([
+  let browserSessionTeardown: Awaited<ReturnType<typeof stopRunningRtxBrowserSessions>> | null =
+    null;
+  let leaseRelease: ReturnType<typeof releaseContactWebResearchTargetFromRunConfig> = null;
+  if (isContactResearch) {
+    try {
+      browserSessionTeardown = await stopRunningRtxBrowserSessions({ stopAllRunning: true });
+    } finally {
+      leaseRelease = releaseContactWebResearchTargetFromRunConfig(run.config);
+    }
+  }
+
+  const [eventResult, completionMessage, parallelBrowserTeardown] = await Promise.all([
     emitWorkflowCompletedEvent(input.runId, {
       summary: input.summary,
       createdContactIds: cohort.contactIds.length > 0 ? cohort.contactIds : undefined,
     }),
     postWorkflowCompletionThreadMessage(updatedRun ?? run, {
-      status: input.status,
+      status: effectiveStatus,
       summary: input.summary,
       processedItems: updatedRun?.processedItems ?? input.processedItems,
       successItems: updatedRun?.successItems ?? input.successItems,
     }),
-    stopRunningRtxBrowserSessions({
-      stopAllRunning: true,
-    }),
+    isContactResearch
+      ? Promise.resolve(null)
+      : stopRunningRtxBrowserSessions({ stopAllRunning: true }),
   ]);
+  browserSessionTeardown ??= parallelBrowserTeardown;
+  browserSessionTeardown ??= { stopped: [], failed: [] };
 
   const runtimeSessionId = getRtxRuntimeSessionIdFromRunConfig(run.config);
   const terminalSessionTeardown = scheduleWorkflowTerminalSessionRelease(runtimeSessionId);
@@ -1092,9 +1206,9 @@ export async function handleCompleteWorkflowRun(input: z.infer<typeof completeWo
   });
 
   return {
-    success: true,
+    success: true as const,
     runId: updatedRun?.id ?? input.runId,
-    status: updatedRun?.status ?? input.status,
+    status: updatedRun?.status ?? effectiveStatus,
     completedAt: updatedRun?.completedAt ?? completedAt,
     processedItems: updatedRun?.processedItems ?? input.processedItems ?? 0,
     createdContactIds: cohort.contactIds,
@@ -1106,7 +1220,8 @@ export async function handleCompleteWorkflowRun(input: z.infer<typeof completeWo
       : { scheduled: false },
     completionThreadMessage: completionMessage,
     browserSessionTeardown,
-    message: `Workflow run ${input.runId} marked as ${input.status}. Follow-on cascades and webhook dispatch completed.${teardownNote}`,
+    ...(isContactResearch ? { leaseRelease } : {}),
+    message: `Workflow run ${input.runId} marked as ${effectiveStatus}. Follow-on cascades and webhook dispatch completed.${teardownNote}`,
   };
 }
 

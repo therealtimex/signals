@@ -8,6 +8,8 @@ import {
 } from "@/lib/workflows/contact-web-research";
 import type { ArppPersonDocument } from "@/lib/arpp/types";
 import type { ContactWebResearchBriefContact } from "@/lib/workflows/contact-web-research";
+import type { ContactWebResearchPreparedTarget } from "@/lib/workflows/contact-web-research-target";
+import { resolveTemplateThreadName } from "@/lib/workflows/template-brief";
 
 const contact: ContactWebResearchBriefContact = {
   id: "contact-1",
@@ -20,6 +22,19 @@ const contact: ContactWebResearchBriefContact = {
   profileUrl: null,
   enrichmentScore: 20,
   identities: [],
+};
+
+const researchTarget: ContactWebResearchPreparedTarget = {
+  targetId: "target-linkedin",
+  platform: "linkedin",
+  source: "default",
+  sessionName: "signals-publish",
+  startUrl: "https://www.linkedin.com/in/current",
+  expectedHandle: "/in/current",
+  verifiedHandle: "/in/current",
+  leaseId: "lease-research",
+  leaseExpiresAt: 1_800_000_000,
+  preparedAt: 1_799_999_400,
 };
 
 describe("Contact Web Research workflow contract", () => {
@@ -37,7 +52,11 @@ describe("Contact Web Research workflow contract", () => {
       workflowRunId: "run-1",
       config: { ...buildContactWebResearchTemplateConfig(), contactId: contact.id },
       signalsBaseUrl: "http://127.0.0.1:3010",
-      context: { contact, arppMissing: ["sameAs", "biography", "experience"] },
+      context: {
+        contact,
+        arppMissing: ["sameAs", "biography", "experience"],
+        researchTarget,
+      },
     });
 
     expect(brief).toContain("Contact ID: contact-1");
@@ -49,6 +68,14 @@ describe("Contact Web Research workflow contract", () => {
     expect(brief).toContain('"Ryan Carson" "Untangle" linkedin');
     expect(brief).toContain("complete_workflow_run.result");
     expect(brief).toContain("No direct profile URL is linked");
+    expect(brief).toContain("Session name: signals-publish");
+    expect(brief).toContain("Target ID: target-linkedin");
+    expect(brief).toContain("Lease ID: lease-research");
+    expect(brief).toContain("--compact=false");
+    expect(brief).toContain("Ignore devtools://");
+    expect(brief).toContain("Never run create-browser-session");
+    expect(brief).toContain("result.blockedUrls");
+    expect(brief).not.toContain("Open this in RealTimeX Browser");
   });
 
   it("puts a linked profile ahead of Google", () => {
@@ -59,11 +86,24 @@ describe("Contact Web Research workflow contract", () => {
       context: {
         contact: { ...contact, profileUrl: "https://www.linkedin.com/in/ryancarson" },
         arppMissing: [],
+        researchTarget,
       },
     });
 
     expect(brief).toContain(
-      "Open this existing verified profile before Google: https://www.linkedin.com/in/ryancarson",
+      "Open this existing verified profile in the attached signals-publish session via agent-browser before Google: https://www.linkedin.com/in/ryancarson",
+    );
+  });
+
+  it("uses the user-facing enrichment thread name without renaming the technical template", () => {
+    expect(
+      resolveTemplateThreadName({
+        name: "Contact Web Research",
+        config: JSON.stringify(buildContactWebResearchTemplateConfig()),
+      }),
+    ).toBe("Contact Enrich Profile");
+    expect(resolveTemplateThreadName({ name: "Other workflow", config: "{}" })).toBe(
+      "Other workflow",
     );
   });
 

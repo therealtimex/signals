@@ -13,6 +13,7 @@ import {
   formatDeferredTerminalTeardownNote,
 } from "@/lib/rtx/resource-teardown";
 import { postWorkflowCompletionThreadMessage } from "@/lib/rtx/workflow-completion-thread";
+import { releaseContactWebResearchTargetFromRunConfig } from "@/lib/workflows/contact-web-research-target";
 
 export const DEFAULT_WORKFLOW_TERMINAL_RUN_TIMEOUT_MS = 4 * 60 * 60 * 1000;
 export const WORKFLOW_TERMINAL_RUN_TIMEOUT_ENV = "WORKFLOW_TERMINAL_RUN_TIMEOUT_MS";
@@ -88,6 +89,7 @@ export async function releaseTimedOutWorkflowTerminalRun(
       summary: TIMEOUT_SUMMARY,
     }, env, fetchImpl),
   ]);
+  releaseContactWebResearchTargetFromRunConfig(run.config);
 
   const teardownNote = formatDeferredTerminalTeardownNote({
     terminal: resourceTeardown.terminalSessionTeardown,

@@ -5,6 +5,7 @@
 **Base:** `main` @ `a3f3371` (ARPP/AROO #358)
 **Parents:** [`arpp-signals-projection.md`](./arpp-signals-projection.md), [`agent-readable-person-profile.md`](./agent-readable-person-profile.md), [`docs/rtx-agent-browser-enrichment.md`](../docs/rtx-agent-browser-enrichment.md)
 **Mirror:** Company Profile Enrichment (`COMPANY_PROFILE_ENRICHMENT_TEMPLATE_NAME`, `POST /api/orgs/:id/enrich`)
+**Authenticated target follow-up:** [`contact-enrich-profile-authenticated-target.md`](./contact-enrich-profile-authenticated-target.md) (#384)
 
 ---
 
@@ -39,6 +40,9 @@ Replace the single **Enrich profile** action with a router (one primary button; 
 ```ts
 export const CONTACT_WEB_RESEARCH_TEMPLATE_NAME = "Contact Web Research";
 ```
+
+The technical template name remains **Contact Web Research**. Its persistent RealTimeX thread is
+displayed as **Contact Enrich Profile** and is converged in place on every run; see ADR-384-9.
 
 | Field | Value |
 |-------|--------|

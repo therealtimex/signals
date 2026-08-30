@@ -1201,6 +1201,12 @@
                                   "type": "string"
                                 }
                               },
+                              "blockedUrls": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
                               "serpCandidates": {
                                 "type": "array",
                                 "items": {

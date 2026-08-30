@@ -27,6 +27,7 @@ export const linkedinTargetAdapter: PlatformTargetAdapter = {
   async activate(page, target) {
     const verification = await verifyDetectedTarget("linkedin", page, target);
     if (verification.active) return { ...verification, switched: false };
+    if (!verification.loggedIn) return { ...verification, switched: false };
     throw new PlatformTargetError(
       "TARGET_ACTIVATION_UNSUPPORTED",
       "LinkedIn account switching is not supported in a shared browser session; use a dedicated connection or sign in manually",

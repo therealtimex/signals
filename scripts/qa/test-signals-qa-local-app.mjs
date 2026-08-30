@@ -137,7 +137,8 @@ const launcherPackage = JSON.parse(
   readFileSync(join(scriptDir, "signals-qa-local-app-launcher", "package.json"), "utf8"),
 );
 assert.equal(launcherPackage.scripts.start, "node launcher.mjs");
-assert.equal(repoRoot.endsWith("signals"), true);
+const repoPackage = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8"));
+assert.equal(repoPackage.name, "@realtimex/signals");
 
 const lifecycleRoot = mkdtempSync(join(tmpdir(), "signals-qa-local-app-test-"));
 const lifecycleIssue = String(Date.now());

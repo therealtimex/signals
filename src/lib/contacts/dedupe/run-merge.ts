@@ -13,8 +13,8 @@ import { isRtxEmbedded, type EnvLike } from "@/lib/rtx/env";
 import { appendRtxThreadMessage } from "@/lib/rtx/runtime-sessions";
 import { getOrCreateTemplateThread } from "@/lib/rtx/template-thread";
 import {
-  buildTemplateThreadName,
   formatRunLabelPrefix,
+  resolveTemplateThreadName,
 } from "@/lib/workflows/template-brief";
 import {
   MergeContactsError,
@@ -165,7 +165,7 @@ export async function runDedupeMerge(
         {
           template,
           workspaceSlug,
-          threadName: buildTemplateThreadName(template.name),
+          threadName: resolveTemplateThreadName(template),
         },
         env,
         fetchImpl

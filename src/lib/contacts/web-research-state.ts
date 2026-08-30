@@ -10,6 +10,7 @@ export type ContactWebResearchState = {
   unresolvedFields: string[];
   identityLinked: boolean;
   visitedUrls: string[];
+  blockedUrls: string[];
   ambiguous: boolean;
   serpCandidates: Array<{ url: string; totalScore: number; reason: string }>;
   message: string | null;
@@ -23,6 +24,7 @@ const IDLE_STATE: ContactWebResearchState = {
   unresolvedFields: [],
   identityLinked: false,
   visitedUrls: [],
+  blockedUrls: [],
   ambiguous: false,
   serpCandidates: [],
   message: null,
@@ -107,6 +109,7 @@ export function getContactWebResearchState(contactId: string): ContactWebResearc
     unresolvedFields,
     identityLinked: result.identityLinked === true,
     visitedUrls: stringArray(result.visitedUrls),
+    blockedUrls: stringArray(result.blockedUrls),
     ambiguous: result.ambiguous === true,
     serpCandidates: parseSerpCandidates(result.serpCandidates),
     message: typeof result.message === "string" ? result.message : null,

@@ -16,8 +16,8 @@ import {
 } from "@/lib/workflows/signals-writing";
 import {
   buildAgentWorkflowBrief,
-  buildTemplateThreadName,
   mergeRunConfig,
+  resolveTemplateThreadName,
 } from "@/lib/workflows/template-brief";
 import {
   ensureRtxWorkspace,
@@ -45,6 +45,12 @@ import {
   isContactWebResearchTemplateConfig,
   type ContactWebResearchBriefContext,
 } from "@/lib/workflows/contact-web-research";
+import {
+  CONTACT_WEB_RESEARCH_SETTINGS_PATH,
+  prepareContactWebResearchTarget,
+  releaseContactWebResearchTarget,
+  type ContactWebResearchPreparedTarget,
+} from "@/lib/workflows/contact-web-research-target";
 
 const TEMPLATE_TO_WORKFLOW_TYPE: Record<string, WorkflowType> = {
   prospecting: "search",
@@ -84,6 +90,7 @@ export type RunTemplateViaRtxResult =
       errorCode: string;
       httpStatus: number;
       workflowRunId?: string;
+      details?: Record<string, unknown>;
     };
 
 function buildStoredRunConfig(
@@ -328,6 +335,15 @@ export async function runTemplateViaRtx(
     };
   }
 
+  let preparedLeaseId: string | null = null;
+  let dispatchAccepted = false;
+  const releaseLauncherOwnedLease = () => {
+    if (!preparedLeaseId) return null;
+    const leaseId = preparedLeaseId;
+    preparedLeaseId = null;
+    return releaseContactWebResearchTarget(leaseId);
+  };
+
   try {
     const workspaceSlug = await ensureRtxWorkspace(
       getSignalsRtxWorkspaceSlug(env),
@@ -335,17 +351,17 @@ export async function runTemplateViaRtx(
       env,
       fetchImpl
     );
-    const { threadSlug, resolution: threadResolution } =
-      await getOrCreateTemplateThread(
+    const thread = await getOrCreateTemplateThread(
         {
           template,
           workspaceSlug,
-          threadName: buildTemplateThreadName(template.name),
+          threadName: resolveTemplateThreadName(template),
           freshThread: input.freshThread,
         },
         env,
         fetchImpl
       );
+    const { threadSlug, resolution: threadResolution } = thread;
 
     let runtimeConfig = { ...mergedConfig };
     if (typeof mergedConfig.targetId === "string" && !mergedConfig.targetPlatform) {
@@ -360,11 +376,66 @@ export async function runTemplateViaRtx(
       }
     }
 
+    let researchTarget: ContactWebResearchPreparedTarget | undefined;
+    if (isContactWebResearchTemplateConfig(runtimeConfig)) {
+      const prepared = await prepareContactWebResearchTarget(
+        { config: runtimeConfig, workflowRunId: run.id },
+        env,
+        fetchImpl,
+      );
+      if (!prepared.ok) {
+        const completedAt = Math.floor(Date.now() / 1000);
+        updateWorkflowRun(run.id, {
+          status: "failed",
+          completedAt,
+          errors: JSON.stringify([prepared.error.message]),
+          errorItems: 1,
+          result: JSON.stringify({
+            message: prepared.error.message,
+            partial: true,
+            blocked: prepared.error.code,
+          }),
+        });
+        createWorkflowStep({
+          workflowRunId: run.id,
+          stepIndex: nextStepIndex(run.id),
+          stepType: "error",
+          status: "failed",
+          tool: "platform_target_preflight",
+          error: prepared.error.message,
+          output: JSON.stringify({
+            code: prepared.error.code,
+            ...(prepared.error.details ?? {}),
+          }),
+          durationMs: 0,
+        });
+        return {
+          success: false,
+          error: prepared.error.message,
+          errorCode: "research_target_unavailable",
+          httpStatus: 409,
+          workflowRunId: run.id,
+          details: {
+            reason: prepared.error.code,
+            ...(prepared.error.details ?? {}),
+            settingsPath: CONTACT_WEB_RESEARCH_SETTINGS_PATH,
+            settingsTab: "Platform connections",
+          },
+        };
+      }
+      researchTarget = prepared.target;
+      preparedLeaseId = researchTarget.leaseId;
+      runtimeConfig = { ...runtimeConfig, researchTarget };
+      updateWorkflowRun(run.id, {
+        config: buildStoredRunConfig(template, runtimeConfig, {
+          workspaceSlug,
+          threadSlug,
+        }),
+      });
+    }
+
     let contactWebResearchContext: ContactWebResearchBriefContext | undefined;
-    if (
-      isContactWebResearchTemplateConfig(runtimeConfig) &&
-      typeof runtimeConfig.contactId === "string"
-    ) {
+    if (researchTarget && typeof runtimeConfig.contactId === "string") {
       const contact = getContactById(runtimeConfig.contactId);
       const arpp = loadAndProjectContactToArpp(runtimeConfig.contactId, {
         visibility: "internal",
@@ -373,8 +444,12 @@ export async function runTemplateViaRtx(
         contactWebResearchContext = {
           contact,
           arppMissing: getContactWebResearchArppMissing(arpp),
+          researchTarget,
         };
       }
+    }
+    if (researchTarget && !contactWebResearchContext) {
+      throw new Error("Contact research context is unavailable");
     }
 
     const brief = buildAgentWorkflowBrief({
@@ -414,7 +489,12 @@ export async function runTemplateViaRtx(
     );
 
     if (!launch.success) {
-      const errorMessage = launch.error;
+      let errorMessage = launch.error;
+      try {
+        releaseLauncherOwnedLease();
+      } catch (error) {
+        errorMessage += ` Lease cleanup failed: ${error instanceof Error ? error.message : "unknown error"}`;
+      }
       updateWorkflowRun(run.id, {
         status: "failed",
         completedAt: now,
@@ -450,6 +530,7 @@ export async function runTemplateViaRtx(
         workflowRunId: run.id,
       };
     }
+    dispatchAccepted = true;
 
     const resolvedWorkspace = launch.descriptor.linkage?.workspaceSlug ?? workspaceSlug;
     const resolvedThread = launch.descriptor.linkage?.threadSlug ?? threadSlug;
@@ -462,7 +543,7 @@ export async function runTemplateViaRtx(
     });
 
     const updatedRun = updateWorkflowRun(run.id, {
-      config: buildStoredRunConfig(template, mergedConfig, {
+      config: buildStoredRunConfig(template, runtimeConfig, {
         workspaceSlug: resolvedWorkspace,
         threadSlug: resolvedThread,
         runtimeSessionId: launch.descriptor.id,
@@ -479,6 +560,10 @@ export async function runTemplateViaRtx(
       output: JSON.stringify({
         runtimeSessionId: launch.descriptor.id,
         threadResolution,
+        threadName: thread.threadName,
+        renameAttempted: thread.renameAttempted,
+        renamed: thread.renamed,
+        ...(thread.renameError ? { renameError: thread.renameError } : {}),
       }),
       durationMs: 0,
     });
@@ -508,7 +593,14 @@ export async function runTemplateViaRtx(
       workflowRun: updatedRun ?? run,
     };
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Launch failed";
+    let message = error instanceof Error ? error.message : "Launch failed";
+    if (!dispatchAccepted) {
+      try {
+        releaseLauncherOwnedLease();
+      } catch (releaseError) {
+        message += ` Lease cleanup failed: ${releaseError instanceof Error ? releaseError.message : "unknown error"}`;
+      }
+    }
     updateWorkflowRun(run.id, {
       status: "failed",
       completedAt: now,

@@ -341,7 +341,7 @@ export const AGENT_TOOLS: Record<string, AgentToolDefinition> = {
   complete_workflow_run: {
     name: "complete_workflow_run",
     description:
-      "Mark a workflow run as completed, update processed counts, and trigger automated follow-on cascading and webhook dispatch.",
+      "Mark a workflow run as completed, persist structured results, release any prepared contact-research browser lease, and trigger automated follow-on cascading and webhook dispatch.",
     category: "workflows",
     schema: completeWorkflowRunSchema,
     parameters: zodToParameters(completeWorkflowRunSchema),

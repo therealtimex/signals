@@ -443,6 +443,41 @@ describe("invokeAgentTool", () => {
     });
   });
 
+  it("rejects login and auth-wall URLs as identity evidence", async () => {
+    const created = await invokeAgentTool("create_contact", { name: "Authwall Guard" });
+    const contactId = (created as { id: string }).id;
+
+    await expect(
+      invokeAgentTool("upsert_contact_identity", {
+        contactId,
+        platform: "linkedin",
+        platformUserId: "authwall-guard",
+        platformUrl: "https://www.linkedin.com/authwall?trk=foo",
+      }),
+    ).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+      message: expect.stringContaining("login/auth-wall URL"),
+    } satisfies Partial<AgentToolError>);
+
+    await expect(
+      invokeAgentTool("upsert_contact_identity", {
+        contactId,
+        platform: "linkedin",
+        platformUserId: "login-guard",
+        websiteUrl: "https://www.linkedin.com/login",
+      }),
+    ).rejects.toMatchObject({ code: "VALIDATION_ERROR" } satisfies Partial<AgentToolError>);
+
+    await expect(
+      invokeAgentTool("upsert_contact_identity", {
+        contactId,
+        platform: "linkedin",
+        platformUserId: "real-profile",
+        platformUrl: "https://www.linkedin.com/in/real-profile",
+      }),
+    ).resolves.toMatchObject({ platformUserId: "real-profile" });
+  });
+
   it("re-upserts the same platform identity idempotently", async () => {
     const created = await invokeAgentTool("create_contact", { name: "Dup Identity" });
     const contactId = (created as { id: string }).id;

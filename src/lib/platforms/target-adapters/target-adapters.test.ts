@@ -72,6 +72,15 @@ describe("platform target adapters", () => {
     ).rejects.toMatchObject({ code: "TARGET_ACTIVATION_UNSUPPORTED" });
   });
 
+  it("reports a signed-out LinkedIn session instead of a switching error", async () => {
+    browserConnectionMocks.probePlatformLogin.mockResolvedValue(false);
+    browserConnectionMocks.detectPlatformHandle.mockResolvedValue(null);
+
+    await expect(
+      linkedinTargetAdapter.activate(page, target("linkedin", "/in/current", "current")),
+    ).resolves.toMatchObject({ loggedIn: false, active: false, switched: false });
+  });
+
   it("does not discover Facebook targets from a logged-out page", async () => {
     browserConnectionMocks.probePlatformLogin.mockResolvedValue(false);
 

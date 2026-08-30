@@ -55,6 +55,7 @@ describe("contact web research state", () => {
         unresolvedFields: ["experience"],
         identityLinked: true,
         visitedUrls: ["https://www.linkedin.com/in/ryan"],
+        blockedUrls: ["https://www.google.com/sorry/index"],
         ambiguous: false,
         partial: true,
         serpCandidates: [
@@ -70,6 +71,7 @@ describe("contact web research state", () => {
       unresolvedFields: ["experience"],
       identityLinked: true,
       visitedUrls: ["https://www.linkedin.com/in/ryan"],
+      blockedUrls: ["https://www.google.com/sorry/index"],
       serpCandidates: [
         { url: "https://www.linkedin.com/in/ryan", totalScore: 155, reason: "linkedin" },
       ],
