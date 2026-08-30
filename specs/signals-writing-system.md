@@ -387,6 +387,7 @@ type VariantWriting = {
   formulaId: FormulaId;
   overlay: { id: string; version: number };  core: { version: number };
   voiceProfile: { id: string; version: number; hash: string } | null;
+  personality?: { bindingId: `pb_${string}`; personalityHash: string; workspaceSlug: string } | null;
   voicePrecedence: "voice_first" | "rules_first";
   spine: { id: `spn_${string}`; hash: string };
   units: { texts: [string, ...string[]]; count: number; chars: number[] }; // canonical ordered units
@@ -416,6 +417,12 @@ type VariantGeneration = {
 `upsert_variant` (#350) validates `metadata.writing` and `generationMetadata` whenever
 `generationMetadata.kind === "signals-writing"`; other producers (manual dialog, older agents)
 are untouched. Validation failures return `VALIDATION_ERROR` with the Zod path.
+Under ADR-373-7, an agent supplies only `personality.bindingId`; the server requires the active
+binding, stamps its whole-file `personalityHash` and workspace slug, and rejects a stale id. Skill
+versions before `0.3.0` may omit the field and remain legacy-unbound; canonicalization preserves
+their old audit hashes as specified in §5.5. Skill `>= 0.3.0` requires a binding whenever the
+workspace has one. The full drift/revocation/migration contract is normative in
+`specs/personality-projection.md` §6.
 
 `units.texts` is the canonical authored payload. `count` must equal `texts.length`, every
 `chars[i]` is derived from `texts[i]`, and `variants.body` must equal `texts[0]`. A post has one
@@ -468,10 +475,14 @@ Verdict derivation (deterministic, tested):
 - `pass` otherwise. `info` findings never change the verdict.
 - `inputHash` is SHA-256 over canonical JSON (sorted object keys) containing the variant `body`
   and these `metadata.writing` fields: `platform`, `surface`, `targetId`, `goal`, `formulaId`,
-  `overlay`, `core`, `voiceProfile`, `voicePrecedence`, `spine`, `units`, and `claimMap`.
+  `overlay`, `core`, `voiceProfile`, `personality`, `voicePrecedence`, `spine`, `units`, and
+  `claimMap`.
   It deliberately excludes audit/approval/lineage/materialization state, row status/timestamps,
   capability snapshots, and Wind Tunnel predictions. Materialization recomputes this hash and
   refuses a mismatch as `AUDIT_STALE`; an optional simulation of unchanged writing stays valid.
+  Canonicalization drops absent/`undefined` keys. Therefore a legacy variant that never carried
+  `personality` hashes byte-for-byte under the pre-ADR-373 field set; new variants carrying
+  `personality: null` or a binding include that explicit value.
 
 ### 5.6 Approval and risk state
 
@@ -561,7 +572,7 @@ Gates (each has a required test):
 - G2 — `create_content_draft` accepts any registry platform (drafts are allowed everywhere) but stamps `platformData.writing.capability.publish` so UI and agents render the honest state.
 - G3 — `materialize_variant` for a `draft_only`/`export_only` surface succeeds (content item `approved`) and returns `nextAction: "export"`; for `unsupported` it fails with `CAPABILITY_UNSUPPORTED`.
 - G4 — `get_writing_context` returns the capability row for every requested surface; the skill must refuse to claim publishing for anything not `direct`/`beta`.
-- G5 — A content item with `platformData.writing` enters `send-to-agent` only when its item status is exactly `approved`, its linked variant still has an approved current audit, and `{ auditId, inputHash, approvalAt, approvalBy }` exactly matches the materialization snapshot. Missing/revoked approval returns `WRITING_APPROVAL_REQUIRED`; any audit, units, target, or snapshot mismatch returns `WRITING_ARTIFACT_STALE`. Validation, publish-job creation, and the transition to `queued` occur in one transaction, so revocation cannot race the gate. A launch failure restores a writing item to `approved` (legacy items keep their existing retry behavior).
+- G5 — A content item with `platformData.writing` enters `send-to-agent` only when its item status is exactly `approved`, its linked variant still has an approved current audit, and `{ auditId, inputHash, approvalAt, approvalBy }` exactly matches the materialization snapshot. When the snapshot carries `personality`, its binding id and whole-file hash must still be active and current workspace status must not be `drifted`; otherwise the artifact is stale. Missing/revoked approval returns `WRITING_APPROVAL_REQUIRED`; any audit, units, target, Personality, or snapshot mismatch returns `WRITING_ARTIFACT_STALE`. Validation, publish-job creation, and the transition to `queued` occur in one transaction, so revocation cannot race the gate. A launch failure restores a writing item to `approved` (legacy items keep their existing retry behavior).
 - G6 — The REST input and `PublishJobPayload` carry `threadTexts?: string[]`. For a writing item, `send-to-agent` derives `text` and `threadTexts` from persisted canonical units and never trusts caller-supplied text. `threadTexts` is non-empty only for `platformTarget: "x"`, `contentType: "thread"`, and `kind: "original"`; `signals-publish` receives it unchanged.
 
 ### 5.9 Outcome attribution and calibration linkage
@@ -817,7 +828,7 @@ snapshotted `SourceRef` policy. Writes inherit the launch scope. The writing ski
 | `VariantWriting`, `WritingAudit`, `ApprovalState` | `variants.metadata.writing` | `auditHistory` capped at 5 |
 | `VariantGeneration` | `variants.generationMetadata`; `variants.generationModel` mirrors `model` | |
 | `VoiceProfileVersionDocument` + `VoiceProfileIndex` | immutable `SIGNALS_DATA_DIR/writing/voice-profiles/<id>/v<version>.json` + one atomically replaced `voice-profiles/index.json` | index is the lifecycle authority; one cross-process store lock serializes all mutations; `resetCoreTables()` gets a sibling `resetWritingStore()` for tests |
-| Materialized artifact | `content_items` (`status: approved`, `platformTarget: <platform>`, `contentType`, `body: units.texts[0]`, `aiGenerated: true`, `generationPrompt: null`) + `platformData.writing = { variantId, launchId, surface, targetId, units, voiceProfile, formulaId, overlay, approval, capability, materialization: { auditId, inputHash, approvalAt, approvalBy } }` | one row per variant per platform; ordered units and approval snapshot are publish-gate inputs |
+| Materialized artifact | `content_items` (`status: approved`, `platformTarget: <platform>`, `contentType`, `body: units.texts[0]`, `aiGenerated: true`, `generationPrompt: null`) + `platformData.writing = { variantId, launchId, surface, targetId, units, voiceProfile, personality, formulaId, overlay, approval, capability, materialization: { auditId, inputHash, approvalAt, approvalBy } }` | one row per variant per platform; ordered units, Personality binding/hash when present, and approval snapshot are publish-gate inputs |
 | Lineage | `graph_edges` per §5.7 | created in the same transaction as the triggering write |
 | Capability registry | `src/lib/writing/capabilities.ts` (static) | G1 static test |
 | Surfaces / rule id helpers | `src/lib/writing/surfaces.ts`, `src/lib/writing/ids.ts` | shared by tools, UI, and the overlay packaging test |
