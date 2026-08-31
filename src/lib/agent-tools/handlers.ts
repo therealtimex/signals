@@ -64,6 +64,7 @@ import type { z } from "zod";
 import type { ContactIdentity } from "@/lib/db/types";
 import { assertPlatform } from "@/lib/db/platforms";
 import { validateIdentityAvatarUrl } from "@/lib/contact-avatar-client";
+import { identityProfileHref } from "@/lib/contact-identity-handle";
 import { validateWorkflowRunAndTemplateIds } from "@/lib/db/creation-provenance-input";
 import { CreatedSourceDetailFilterError } from "@/lib/db/creation-sources";
 import { AgentToolError } from "@/lib/agent-tools/types";
@@ -77,7 +78,10 @@ import {
   classifyResearchPageUrl,
   isBlockedResearchUrl,
 } from "@/lib/contacts/web-research-page-state";
-import { isContactWebResearchTemplateConfig } from "@/lib/workflows/contact-web-research";
+import {
+  auditContactWebResearchCompletion,
+  isContactWebResearchTemplateConfig,
+} from "@/lib/workflows/contact-web-research";
 import {
   getContactWebResearchTargetFromRunConfig,
   releaseContactWebResearchTargetFromRunConfig,
@@ -597,6 +601,18 @@ export async function handleUpsertContactIdentity(
     throw new AgentToolError("NOT_FOUND", `Contact not found: ${input.contactId}`);
   }
 
+  let existingIdentity: ContactIdentity | undefined;
+  if (input.id) {
+    existingIdentity = getIdentityById(input.id);
+    if (!existingIdentity || existingIdentity.contactId !== input.contactId) {
+      throw new AgentToolError("NOT_FOUND", `Identity not found for contact: ${input.id}`);
+    }
+  }
+  const identityPlatform = input.platform
+    ? assertPlatform(input.platform)
+    : existingIdentity?.platform;
+  const identityHandle = input.platformHandle ?? existingIdentity?.platformHandle;
+
   let avatarUrl: string | undefined;
   try {
     avatarUrl = validateIdentityAvatarUrl(input.avatarUrl);
@@ -613,6 +629,13 @@ export async function handleUpsertContactIdentity(
       avatarUrl = platformUrl;
     }
     platformUrl = undefined;
+  }
+  if (!platformUrl && identityPlatform && identityHandle) {
+    const canonicalUrl = identityProfileHref({
+      platform: identityPlatform,
+      platformHandle: identityHandle,
+    });
+    if (canonicalUrl?.startsWith("http")) platformUrl = canonicalUrl;
   }
   for (const [field, value] of [
     ["platformUrl", platformUrl],
@@ -650,12 +673,8 @@ export async function handleUpsertContactIdentity(
 
   let identity: ContactIdentity | undefined;
   if (input.id) {
-    const existing = getIdentityById(input.id);
-    if (!existing || existing.contactId !== input.contactId) {
-      throw new AgentToolError("NOT_FOUND", `Identity not found for contact: ${input.id}`);
-    }
-
-    const platform = input.platform ? assertPlatform(input.platform) : existing.platform;
+    const existing = existingIdentity!;
+    const platform = identityPlatform!;
     const platformUserId = input.platformUserId ?? existing.platformUserId;
     const claim = resolvePlatformClaim(platform, platformUserId);
     if (
@@ -1140,6 +1159,15 @@ export async function handleCompleteWorkflowRun(input: z.infer<typeof completeWo
       }
     } else {
       callbackResult.blockedUrls = [];
+    }
+
+    if (effectiveStatus === "completed") {
+      const audit = auditContactWebResearchCompletion(runConfig, callbackResult);
+      if (audit.errors.length > 0) {
+        callbackResult.unresolvedFields = audit.unresolvedFields;
+        callbackResult.partial = audit.partial;
+        normalizedErrors = uniqueStrings([...normalizedErrors, ...audit.errors]);
+      }
     }
   }
 

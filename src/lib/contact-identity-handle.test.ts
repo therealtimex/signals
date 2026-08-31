@@ -69,6 +69,19 @@ describe("identityProfileHref", () => {
     expect(identityProfileHref({ platform: "x", platformHandle: null, platformUrl: null })).toBeNull();
     expect(identityProfileHref({ platform: "whatsapp", platformHandle: "qa" })).toBeNull();
   });
+
+  it("does not invent profile URLs from display names or malformed handles", () => {
+    expect(
+      identityProfileHref({ platform: "linkedin", platformHandle: "William Isaac Beckes" }),
+    ).toBeNull();
+    expect(identityProfileHref({ platform: "x", platformHandle: "William Beckes" })).toBeNull();
+    expect(
+      identityProfileHref({
+        platform: "linkedin",
+        platformHandle: "https://example.com/in/williamisaacbeckes",
+      }),
+    ).toBeNull();
+  });
 });
 
 describe("normalizePlatformHandle", () => {

@@ -131,6 +131,42 @@ export const enrichContactSchema = z.object({
   bio: z.string().optional(),
   tags: z.array(z.string()).optional(),
   metadata: z.record(z.unknown()).optional(),
+  observedEmails: z
+    .array(
+      z.object({
+        address: z.string().trim().email(),
+        evidenceUrl: z.string().url(),
+        evidenceText: z.string().trim().min(1).max(2_000),
+        sourcePlatform: platform.optional(),
+      }),
+    )
+    .max(20)
+    .optional(),
+  employmentObservations: z
+    .array(
+      z.object({
+        orgName: z.string().trim().min(1).max(240),
+        title: z.string().trim().max(500).nullable().optional(),
+        startedAt: z
+          .number()
+          .int()
+          .nullable()
+          .optional()
+          .describe("UTC Unix seconds; omit when the profile date is too vague to normalize"),
+        endedAt: z
+          .number()
+          .int()
+          .nullable()
+          .optional()
+          .describe("UTC Unix seconds; omit for current roles or vague profile dates"),
+        isCurrent: z.boolean(),
+        evidenceUrl: z.string().url(),
+        evidenceText: z.string().trim().min(1).max(2_000).optional(),
+        sourcePlatform: platform.optional(),
+      }),
+    )
+    .max(50)
+    .optional(),
 });
 
 export const archiveContactSchema = z.object({
@@ -334,6 +370,13 @@ export const completeWorkflowRunSchema = z.object({
       fieldsUpdated: z.array(z.string()).optional(),
       unresolvedFields: z.array(z.string()).optional(),
       identityLinked: z.boolean().optional(),
+      verifiedProfileUrls: z.array(z.string().url()).max(20).optional(),
+      profileSectionsInspected: z
+        .array(z.enum(["linkedin_about", "linkedin_contact_info", "linkedin_experience"]))
+        .max(20)
+        .optional(),
+      emailsObserved: z.number().int().nonnegative().optional(),
+      experiencesUpserted: z.number().int().nonnegative().optional(),
       visitedUrls: z.array(z.string().url()).optional(),
       blockedUrls: z.array(z.string().url()).max(20).optional(),
       serpCandidates: z

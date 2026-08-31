@@ -36,9 +36,21 @@ function storedHttpUrl(value: string | null | undefined): string | null {
   return null;
 }
 
-function linkedInHref(handle: string): string {
-  if (/^https?:\/\//i.test(handle)) return handle;
+function linkedInHref(handle: string): string | null {
+  if (/^https?:\/\//i.test(handle)) {
+    try {
+      const url = new URL(handle);
+      const host = url.hostname.toLowerCase();
+      return (host === "linkedin.com" || host.endsWith(".linkedin.com")) &&
+        /^\/in\/[A-Za-z0-9][A-Za-z0-9_-]*\/?$/.test(url.pathname)
+        ? handle
+        : null;
+    } catch {
+      return null;
+    }
+  }
   const vanity = handle.replace(/^\/?(in\/)?/i, "").replace(/\/$/, "");
+  if (!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(vanity)) return null;
   return `https://www.linkedin.com/in/${vanity}`;
 }
 
@@ -58,7 +70,7 @@ export function identityProfileHref(identity: {
 
   switch (identity.platform) {
     case "x":
-      return `https://x.com/${handle}`;
+      return /^[A-Za-z0-9_]{1,15}$/.test(handle) ? `https://x.com/${handle}` : null;
     case "linkedin":
       return linkedInHref(handle);
     case "gmail":

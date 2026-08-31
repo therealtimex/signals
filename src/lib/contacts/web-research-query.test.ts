@@ -40,10 +40,45 @@ describe("contact web research queries", () => {
   });
 
   it("builds a quoted refined LinkedIn query and an encoded Google URL", () => {
-    const query = buildContactWebResearchRefinedQuery("Ryan Carson", "Untangle");
+    const query = buildContactWebResearchRefinedQuery({
+      name: "Ryan Carson",
+      company: "Untangle",
+    });
     expect(query).toBe('"Ryan Carson" "Untangle" linkedin');
     expect(buildGoogleSearchUrl(query)).toBe(
       "https://www.google.com/search?q=%22Ryan%20Carson%22%20%22Untangle%22%20linkedin",
+    );
+  });
+
+  it("carries active known handles into generic and LinkedIn fallback searches", () => {
+    const input = {
+      name: "William",
+      company: "Latitude.so",
+      title: "Developer Relations",
+      identities: [
+        {
+          platform: "x",
+          platformHandle: "WillyDevRel",
+          isActive: 1,
+        },
+        {
+          platform: "linkedin",
+          platformHandle: "/in/williamisaacbeckes",
+          isActive: true,
+        },
+        {
+          platform: "x",
+          platformHandle: "stale-handle",
+          isActive: 0,
+        },
+      ],
+    };
+
+    expect(buildContactWebResearchQuery(input)).toBe(
+      "William Latitude.so · Developer Relations @WillyDevRel williamisaacbeckes",
+    );
+    expect(buildContactWebResearchRefinedQuery(input)).toBe(
+      '"William" "Latitude.so" "@WillyDevRel" "williamisaacbeckes" linkedin',
     );
   });
 });

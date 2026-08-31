@@ -254,7 +254,7 @@ export const AGENT_TOOLS: Record<string, AgentToolDefinition> = {
   enrich_contact: {
     name: "enrich_contact",
     description:
-      "Fill missing contact fields without overwriting existing data. Recalculates enrichment score.",
+      "Fill missing contact fields without overwriting existing data, add visible employment observations, and record explicitly self-published email addresses with source evidence. Recalculates enrichment score.",
     category: "contacts",
     schema: enrichContactSchema,
     parameters: zodToParameters(enrichContactSchema),

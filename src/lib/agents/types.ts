@@ -47,6 +47,8 @@ export interface EnrichContactResult {
   fieldsUpdated: string[];
   previousScore: number;
   newScore: number;
+  emailsObserved: number;
+  experiencesUpserted: number;
 }
 
 /** Result of engaging with a post via browser automation. */

@@ -27,7 +27,7 @@ import { buildWritingTemplateConfig } from "@/lib/workflows/signals-writing";
 import { buildContactWebResearchTemplateConfig } from "@/lib/workflows/contact-web-research";
 
 /** Bump this when seed template prompts change to trigger updates on existing installs. */
-const SEED_VERSION = 27;
+const SEED_VERSION = 28;
 
 export const CONTACT_PROFILE_PIPELINE_TEMPLATE_NAME = "Contact profile pipeline";
 export const CONTACT_WEB_RESEARCH_TEMPLATE_NAME = "Contact Web Research";
@@ -59,17 +59,21 @@ const SEED_TEMPLATES: TemplateSeed[] = [
 
 ## Contract
 1. Read config.contactId and call get_contact, then get_contact_arpp with visibility=internal before browsing.
-2. Note signals.conformance and the v1 ARPP gaps: sameAs, biography/headline, and experience. Aim for at least one linked public profile plus biography or headline.
+2. Note signals.conformance and the v2 ARPP gaps: sameAs, biography/headline, and experience. A non-empty experience list is a gap signal only; it does not mean the verified LinkedIn career history has been mined.
 3. Identity-first: open an existing profileUrl or primary identity URL before Google. Search only if direct evidence fails or identity remains unlinked.
 4. Use only the brief's exact Session name and attach with agent-browser to its already-running remoteDebugPort. Never create, start, stop, delete, or substitute a browser profile. Hop 0a opens the pre-filled Google URL in that attached session. Do not use Signals in-process Serper or Tavily.
 5. Hop 0b: snapshot the SERP, extract visible result and AI Overview cited URLs, write a scored workflow-runs/{runId}/serp-candidates.json candidate list, and apply the brief's deterministic URL and text scores before opening profiles.
 6. Hop 1: visit only candidates with totalScore >= 60, never mechanical SERP positions. Prefer LinkedIn /in/ or X and call upsert_contact_identity only after name plus company/role evidence confirms the same human.
 7. When no candidate clears 60 or close candidates remain ambiguous, run the one refined search from the brief and re-triage. If still ambiguous, do not link an identity and report ambiguous=true.
-8. Hop 2 is optional: visit a company /about or /team page only while employment is missing. Use link_contact_to_org and get_org_aroo when an org is known.
-9. Fill scalar gaps with enrich_contact and never overwrite non-empty fields. Log provenance with log_interaction and the visited URLs.
-10. Respect the brief caps: two Google searches, three page visits, two registrable domains, and about 90 seconds.
-11. Treat LinkedIn authwall/login/checkpoint pages, Google CAPTCHA/reCAPTCHA, accounts.google.com, and X login pages as source failures, never evidence. Record them in result.blockedUrls. If auth is lost on the prepared target platform, fail the run; otherwise continue partial.
-12. Always call complete_workflow_run before ending. Pass result.fieldsUpdated, unresolvedFields, identityLinked, visitedUrls, blockedUrls, serpCandidates, ambiguous, partial, and message. Do not manually release the normal lease; completion owns teardown and release. Set partial=true after source failure, exhausted budget without identity, or unresolved ambiguity.`,
+8. Before leaving every matching LinkedIn /in/ profile, inspect visible About, Contact info when available, and the complete visible Experience section, including the same-profile Show all experiences control and its resulting details view. Existing identity or employment rows do not satisfy this gate.
+9. Mine all visible LinkedIn roles with enrich_contact.employmentObservations. Include organization, title, current/former state, evidence URL, and dates as UTC Unix seconds only when explicitly shown precisely enough. This is additive: enrich incomplete matching roles and never delete history absent from the page.
+10. Mine exact email addresses explicitly self-published by the person in About or Contact info with enrich_contact.observedEmails. Include the exact visible sentence and evidence URL. Never infer email, and never represent source confirmation as mailbox/deliverability verification.
+11. Hop 2 is optional: visit a company /about or /team page only while employment is missing after LinkedIn mining. Use link_contact_to_org and get_org_aroo when an org is known.
+12. Fill scalar gaps with enrich_contact and never overwrite non-empty scalar fields. Log provenance with log_interaction and the visited URLs.
+13. Respect the brief caps: two Google searches, three page visits, two registrable domains, and about 120 seconds. Same-profile section expansion is not another page visit.
+14. Treat LinkedIn authwall/login/checkpoint pages, Google CAPTCHA/reCAPTCHA, accounts.google.com, and X login pages as source failures, never evidence. Record them in result.blockedUrls. If auth is lost on the prepared target platform, fail the run; otherwise continue partial.
+15. Identity linking or bio/headline enrichment alone cannot complete a run while required sections on a verified LinkedIn profile remain uninspected. If a section is inaccessible, name it in unresolvedFields and set partial=true.
+16. Always call complete_workflow_run before ending. Pass result.fieldsUpdated, unresolvedFields, identityLinked, verifiedProfileUrls, profileSectionsInspected, emailsObserved, experiencesUpserted, visitedUrls, blockedUrls, serpCandidates, ambiguous, partial, and message. Do not manually release the normal lease; completion owns teardown and release.`,
     config: buildContactWebResearchTemplateConfig(),
   },
   {

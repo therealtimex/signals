@@ -9,7 +9,7 @@ import { contacts } from "@/lib/db/schema";
 import { createIdentity } from "@/lib/db/queries/identities";
 import { createOrg } from "@/lib/db/queries/orgs";
 import { createOrgIdentity } from "@/lib/db/queries/org-identities";
-import { createContactChannel } from "@/lib/db/queries/contact-channels";
+import { createContactChannel, listContactChannels } from "@/lib/db/queries/contact-channels";
 import { listContactEmployments } from "@/lib/db/queries/contact-employments";
 import { resetCoreTables } from "@/test/db";
 
@@ -130,7 +130,98 @@ describe("invokeAgentTool", () => {
       contactId,
       contactName: "Jane Doe",
       fieldsUpdated: expect.arrayContaining(["title", "email"]),
+      emailsObserved: 0,
+      experiencesUpserted: 0,
     });
+  });
+
+  it("records source-confirmed emails and additive LinkedIn experience without duplicates", async () => {
+    const created = await invokeAgentTool("create_contact", {
+      name: "William",
+      company: "Latitude.so",
+      title: "Developer Relations",
+    });
+    const contactId = (created as { id: string }).id;
+    const evidenceUrl = "https://www.linkedin.com/in/williamisaacbeckes/";
+    const latitudeStart = 1_672_531_200;
+    const priorStart = 1_577_836_800;
+    const priorEnd = 1_640_995_200;
+    const observations = {
+      contactId,
+      observedEmails: [{
+        address: "beckeswi@gmail.com",
+        evidenceUrl,
+        evidenceText: "The best way to contact me is by email: beckeswi@gmail.com",
+        sourcePlatform: "linkedin",
+      }],
+      employmentObservations: [
+        {
+          orgName: "Latitude.so",
+          title: "Developer Relations",
+          startedAt: latitudeStart,
+          isCurrent: true,
+          evidenceUrl,
+          evidenceText: "Developer Relations at Latitude.so",
+          sourcePlatform: "linkedin",
+        },
+        {
+          orgName: "Prior Company",
+          title: "Developer Advocate",
+          startedAt: priorStart,
+          endedAt: priorEnd,
+          isCurrent: false,
+          evidenceUrl,
+          sourcePlatform: "linkedin",
+        },
+      ],
+    };
+
+    const enriched = await invokeAgentTool("enrich_contact", observations);
+    expect(enriched).toMatchObject({
+      emailsObserved: 1,
+      experiencesUpserted: 2,
+      fieldsUpdated: expect.arrayContaining(["emailEvidence", "experience"]),
+    });
+
+    const email = listContactChannels(contactId).find(
+      (channel) => channel.valueNormalized === "beckeswi@gmail.com",
+    );
+    expect(email).toMatchObject({
+      isPrimary: true,
+      isVerified: false,
+      source: "agent:contact_web_research",
+    });
+    expect(JSON.parse(email?.metadata ?? "{}")).toMatchObject({
+      contactWebResearch: {
+        observations: [expect.objectContaining({
+          kind: "profile_email",
+          evidenceUrl,
+          sourcePlatform: "linkedin",
+          sourceConfirmed: true,
+        })],
+      },
+    });
+
+    const employments = listContactEmployments(contactId);
+    expect(employments).toHaveLength(2);
+    expect(employments.find((employment) => employment.isCurrent)).toMatchObject({
+      title: "Developer Relations",
+      startedAt: latitudeStart,
+    });
+    expect(employments.find((employment) => !employment.isCurrent)).toMatchObject({
+      title: "Developer Advocate",
+      startedAt: priorStart,
+      endedAt: priorEnd,
+    });
+
+    const replay = await invokeAgentTool("enrich_contact", observations);
+    expect(replay).toMatchObject({
+      emailsObserved: 1,
+      experiencesUpserted: 2,
+      fieldsUpdated: [],
+    });
+    expect(listContactChannels(contactId)).toHaveLength(1);
+    expect(listContactEmployments(contactId)).toHaveLength(2);
   });
 
   it("rejects unknown tools", async () => {
@@ -424,6 +515,7 @@ describe("invokeAgentTool", () => {
       platform: "linkedin",
       platformUserId: "identity-contact-li",
       handle: "identitycontact",
+      profileUrl: "https://www.linkedin.com/in/identitycontact",
       headline: "Builder",
       avatarUrl: "https://example.com/avatar.jpg",
       message: "Contact identity upserted.",
@@ -436,6 +528,7 @@ describe("invokeAgentTool", () => {
         expect.objectContaining({
           platform: "linkedin",
           platformUserId: "identity-contact-li",
+          profileUrl: "https://www.linkedin.com/in/identitycontact",
           headline: "Builder",
           avatarUrl: "https://example.com/avatar.jpg",
         }),
