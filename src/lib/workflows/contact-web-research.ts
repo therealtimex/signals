@@ -1,4 +1,5 @@
 import type { ArppPersonDocument } from "@/lib/arpp/types";
+import { identityProfileHref } from "@/lib/contact-identity-handle";
 import type { ContactWithIdentities } from "@/lib/db/types";
 import {
   buildContactWebResearchQuery,
@@ -46,6 +47,16 @@ export type ContactWebResearchBriefContext = {
   researchTarget: ContactWebResearchPreparedTarget;
 };
 
+export type ContactWebResearchKnownProfileCandidate = {
+  identityId: string | null;
+  platform: string;
+  platformUserId: string | null;
+  platformHandle: string | null;
+  url: string;
+  isPrimary: boolean;
+  source: "stored" | "derived" | "contact";
+};
+
 function objectValue(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -78,10 +89,90 @@ export function getContactWebResearchArppMissing(profile: ArppPersonDocument): s
 export function resolveContactWebResearchDirectProfileUrl(
   contact: ContactWebResearchBriefContact,
 ): string | null {
-  if (contact.profileUrl?.trim()) return contact.profileUrl.trim();
-  const primary = contact.identities.find((identity) => identity.isPrimary && identity.isActive);
-  const fallback = contact.identities.find((identity) => identity.isActive);
-  return primary?.platformUrl?.trim() || fallback?.platformUrl?.trim() || null;
+  return resolveContactWebResearchKnownProfileCandidates(contact)[0]?.url ?? null;
+}
+
+function isHttpUrl(value: string): boolean {
+  return /^https?:\/\//i.test(value);
+}
+
+function candidateProfileHref(
+  identity: ContactWebResearchBriefContact["identities"][number],
+): string | null {
+  const stored = identity.platformUrl?.trim() ?? "";
+  if (stored) {
+    const href = identityProfileHref({ ...identity, platformHandle: null });
+    return href && isHttpUrl(href) ? href : null;
+  }
+
+  const handle = identity.platformHandle?.trim() ?? "";
+  if (!handle) return null;
+
+  // A platform user ID can be opaque, and some legacy LinkedIn rows put a display name in
+  // platform_handle. Only synthesize URLs from values that have a real handle/vanity shape.
+  if (identity.platform === "x" && !/^@?[A-Za-z0-9_]{1,15}$/.test(handle)) return null;
+  if (
+    identity.platform === "linkedin" &&
+    !/^\/?(?:in\/)?[A-Za-z0-9][A-Za-z0-9_-]*\/?$/.test(handle) &&
+    !/^https?:\/\/(?:[a-z0-9-]+\.)?linkedin\.com\/in\/[A-Za-z0-9_-]+\/?(?:[?#].*)?$/i.test(handle)
+  ) {
+    return null;
+  }
+
+  const href = identityProfileHref(identity);
+  return href && isHttpUrl(href) ? href : null;
+}
+
+export function resolveContactWebResearchKnownProfileCandidates(
+  contact: ContactWebResearchBriefContact,
+): ContactWebResearchKnownProfileCandidate[] {
+  const active: Array<{
+    identity: ContactWebResearchBriefContact["identities"][number];
+    index: number;
+  }> = [];
+  contact.identities.forEach((identity, index) => {
+    if (identity.isActive) active.push({ identity, index });
+  });
+  active.sort(
+    (a, b) =>
+      Number(Boolean(b.identity.isPrimary)) - Number(Boolean(a.identity.isPrimary)) ||
+      a.index - b.index,
+  );
+  const seen = new Set<string>();
+  const candidates: ContactWebResearchKnownProfileCandidate[] = [];
+
+  for (const { identity } of active) {
+    const url = candidateProfileHref(identity);
+    if (!url) continue;
+    const key = url.replace(/\/$/, "").toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    candidates.push({
+      identityId: identity.id,
+      platform: identity.platform,
+      platformUserId: identity.platformUserId,
+      platformHandle: identity.platformHandle,
+      url,
+      isPrimary: Boolean(identity.isPrimary),
+      source: identity.platformUrl?.trim() ? "stored" : "derived",
+    });
+  }
+
+  const contactUrl = contact.profileUrl?.trim() ?? "";
+  const contactUrlKey = contactUrl.replace(/\/$/, "").toLowerCase();
+  if (isHttpUrl(contactUrl) && !seen.has(contactUrlKey)) {
+    candidates.push({
+      identityId: null,
+      platform: "unknown",
+      platformUserId: null,
+      platformHandle: null,
+      url: contactUrl,
+      isPrimary: true,
+      source: "contact",
+    });
+  }
+
+  return candidates;
 }
 
 export function buildContactWebResearchBriefSection(input: {
@@ -93,10 +184,14 @@ export function buildContactWebResearchBriefSection(input: {
   const { contact } = input.context;
   const { researchTarget } = input.context;
   const query = buildContactWebResearchQuery(contact);
-  const refinedQuery = buildContactWebResearchRefinedQuery(contact.name, contact.company);
+  const refinedQuery = buildContactWebResearchRefinedQuery(contact);
   const googleUrl = buildGoogleSearchUrl(query);
   const refinedGoogleUrl = buildGoogleSearchUrl(refinedQuery);
-  const directProfileUrl = resolveContactWebResearchDirectProfileUrl(contact);
+  const knownProfileCandidates = resolveContactWebResearchKnownProfileCandidates(contact);
+  const knownProfileCandidateLines = knownProfileCandidates.map(
+    (candidate, index) =>
+      `${index + 1}. Existing identity ID: ${candidate.identityId ?? "not recorded"}; platform: ${candidate.platform}; platform user ID: ${candidate.platformUserId ?? "not recorded"}; handle: ${candidate.platformHandle ?? "not recorded"}; URL (${candidate.source}): ${candidate.url}`,
+  );
 
   return [
     "## Contact web research execution contract",
@@ -124,11 +219,17 @@ export function buildContactWebResearchBriefSection(input: {
     `- On ${researchTarget.platform} itself an auth wall means the verified session was lost: call complete_workflow_run with status "failed" and errors ["auth_state_lost: <url>"].`,
     "- On any other platform record the block, continue with remaining candidates, and set partial=true.",
     "",
-    "### Identity-first shortcut",
-    directProfileUrl
-      ? `Open this existing verified profile in the attached ${researchTarget.sessionName} session via agent-browser before Google: ${directProfileUrl}`
-      : "No direct profile URL is linked; begin with hop 0a.",
-    "If a direct fetch fails or identity remains unlinked, continue to hop 0a.",
+    "### Known identities first (required before generic search)",
+    knownProfileCandidateLines.length > 0
+      ? `Open and verify every candidate below, in order, in the attached ${researchTarget.sessionName} session before Google. A stored or derived URL is a high-confidence seed, not proof that its visible person matches the contact.`
+      : "No safe direct profile URL can be derived from the active identities; begin with hop 0a.",
+    ...knownProfileCandidateLines,
+    "For an existing identity, write verified fields back with upsert_contact_identity using its exact identity ID and contactId. Do not create a second row for the same platform account.",
+    "From every matching profile, collect the visible full display name, company, role, website, known handles, and exact outbound social-profile links. Open an exact outbound LinkedIn /in/ link before searching; verify it against the accumulated evidence before upserting it.",
+    "For a newly discovered LinkedIn profile, use its exact verified /in/<slug> value as platformUserId and platformHandle and preserve the visited profile URL as platformUrl. Never synthesize a LinkedIn slug from a person's name.",
+    "Do not stop merely because an X identity was already stored. When X is known but no active LinkedIn identity is listed, inspect the X profile's outbound links and run the one identity-aware LinkedIn search below before completing.",
+    "The authenticated browser owner is transport context only. Never treat the signed-in account, navigation avatar, sidebar identity, or session expected/verified handle as evidence about this contact.",
+    "If a known profile cannot be fetched, does not match, or leaves cross-platform identity gaps, continue to hop 0a.",
     "",
     "### Hop 0a — search",
     `Query: \`${query}\``,
@@ -144,16 +245,17 @@ export function buildContactWebResearchBriefSection(input: {
     "- An LLM may rerank title and snippet only when the top two deterministic scores are within 15 points. Do not load pages for reranking.",
     "",
     "### Ambiguity and refined search",
-    `Refined query: \`${refinedQuery}\``,
-    `Refined URL: ${refinedGoogleUrl}`,
-    "If no candidate clears 60, or close profile candidates still look like different people, run this one refined search and re-triage.",
+    `Baseline refined query: \`${refinedQuery}\``,
+    `Baseline refined URL: ${refinedGoogleUrl}`,
+    "If no candidate clears 60, close profile candidates still look like different people, or a verified known profile reveals a likely missing LinkedIn identity, run one refined search and re-triage.",
+    "Before opening the refined search, replace the baseline's weak/original name with the strongest full display name verified on a known profile and retain its known handle and company. Prefer `\"<verified full name>\" \"<company>\" linkedin`; if the company is absent, use `\"<verified handle>\" linkedin`. The baseline URL is only a fallback when direct-profile evidence adds nothing.",
     "If ambiguity remains, do not call upsert_contact_identity. Complete with ambiguous=true, partial=true, and unresolvedFields including sameAs.",
     "",
     "### Hop policy and evidence",
     "- Max 2 Google searches, 3 page visits after SERP, 2 registrable domains, and about 90 seconds wall clock.",
-    "- Prefer one LinkedIn or X profile visit. Use a company /about or /team page only when employment remains empty.",
+    "- Visit all listed known identity candidates first. After SERP triage, prefer one additional LinkedIn or X profile visit. Use a company /about or /team page only when employment remains empty.",
     "- Write only facts visible on pages you visited. Never overwrite existing non-empty contact fields.",
-    "- Stop when a LinkedIn/X identity is linked, bio plus headline/title is filled, ambiguity is declared, or the hop budget is exhausted.",
+    "- Stop after known-identity and missing-LinkedIn discovery are attempted, when a new LinkedIn/X identity is linked, bio plus headline/title is filled, ambiguity is declared, or the hop budget is exhausted.",
     "",
     "### Tool sequence",
     "1. get_contact → 2. get_contact_arpp (visibility: internal) → 3. RTX Browser triage → 4. upsert_contact_identity → 5. enrich_contact → 6. link_contact_to_org/get_org_aroo if needed → 7. log_interaction with visited URLs → 8. complete_workflow_run.",

@@ -1,4 +1,11 @@
 import { isRedundantHeadline } from "@/lib/contact-detail-format";
+import { formatPlatformHandle } from "@/lib/contact-identity-handle";
+
+export type ContactWebResearchQueryIdentityInput = {
+  platform: string;
+  platformHandle?: string | null;
+  isActive?: number | boolean;
+};
 
 export type ContactWebResearchQueryInput = {
   name: string;
@@ -6,10 +13,31 @@ export type ContactWebResearchQueryInput = {
   title?: string | null;
   headline?: string | null;
   location?: string | null;
+  identities?: readonly ContactWebResearchQueryIdentityInput[];
 };
 
 function clean(value: string | null | undefined): string {
   return value?.trim().replace(/\s+/g, " ") ?? "";
+}
+
+function activeIdentityTerms(input: ContactWebResearchQueryInput): string[] {
+  const seen = new Set<string>();
+  const terms: string[] = [];
+
+  for (const identity of input.identities ?? []) {
+    if (identity.isActive === false || identity.isActive === 0) continue;
+    const handle = clean(identity.platformHandle);
+    if (!handle) continue;
+    const formatted = formatPlatformHandle(identity.platform, handle);
+    const searchTerm =
+      identity.platform === "linkedin" ? formatted.replace(/^\/?in\//i, "") : formatted;
+    const key = searchTerm.toLowerCase();
+    if (!searchTerm || seen.has(key)) continue;
+    seen.add(key);
+    terms.push(searchTerm);
+  }
+
+  return terms;
 }
 
 export function buildContactWebResearchQuery(input: ContactWebResearchQueryInput): string {
@@ -32,6 +60,9 @@ export function buildContactWebResearchQuery(input: ContactWebResearchQueryInput
     parts.push(headline);
   }
 
+  const identityTerms = activeIdentityTerms(input);
+  if (identityTerms.length > 0) parts.push(identityTerms.join(" "));
+
   const location = clean(input.location);
   if (location && parts.length < 4) parts.push(location);
 
@@ -39,10 +70,9 @@ export function buildContactWebResearchQuery(input: ContactWebResearchQueryInput
 }
 
 export function buildContactWebResearchRefinedQuery(
-  name: string,
-  company?: string | null,
+  input: ContactWebResearchQueryInput,
 ): string {
-  return [clean(name), clean(company)]
+  return [clean(input.name), clean(input.company), ...activeIdentityTerms(input)]
     .filter(Boolean)
     .map((part) => `"${part.replaceAll('"', "").trim()}"`)
     .concat("linkedin")
