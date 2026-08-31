@@ -38,6 +38,14 @@ Invoke body: `{ "tool": "<name>", "input": { ... } }`
 | `list_voice_profiles` / `get_voice_profile` | Read immutable voice-profile versions and authoritative lifecycle state |
 | `upsert_voice_profile` | Register new immutable voice content as a draft version |
 | `approve_voice_profile` | Approve the latest admissible draft with durable user evidence |
+| `upsert_personality_statements` | Store verbatim values and boundaries used by Personality projection |
+| `get_personality_binding` | Read binding, drift, source freshness, proposal history, and host capability |
+| `propose_personality_projection` | Create an immutable review proposal; optional same-owner `voiceProfileId`; never writes |
+| `approve_personality_projection` | Apply only with `thread_message` evidence for the configured workspace |
+| `reject_personality_projection` | Reject a reviewable proposal with thread-message evidence and optional note |
+| `retry_personality_projection` | Resume/inspect/recover an existing approved attempt; never invent approval |
+| `rollback_personality_projection` | Propose a retained historical binding by `bindingId`; does not approve |
+| `unbind_personality_projection` | Propose managed-block removal while preserving workspace prose; does not approve |
 | `materialize_variant` | Create or refresh one approved content artifact from a current audited writing variant |
 | `revoke_variant_approval` | Revoke approval and return an unqueued writing artifact to draft |
 | `query_goals` | List goals |
@@ -102,6 +110,18 @@ Scores and metrics are validated at the query layer. Grounding uses shared-scope
    require real user evidence. The tool never queues publishing.
 5. Use `revoke_variant_approval` when the user withdraws approval. Publish only through the
    separate `send-to-agent` route after materialization.
+
+## Personality projection flow
+
+1. Call `get_personality_binding` and inspect local drift plus the host capability.
+2. Call `propose_personality_projection` to freeze exact diffs and CAS tokens. A proposal does not
+   mutate the workspace and may be reviewed even when writer permission is unavailable.
+3. Show the complete proposal to the user. Call `approve_personality_projection` only with the
+   current RealTimeX `thread_message` evidence (`workspaceSlug` and `threadSlug`).
+4. If an attempt is interrupted or restored, call `retry_personality_projection`; it resumes the
+   durable transaction ID and handles recovery rules. Do not create a fresh proposal unless the
+   prior one is stale or the host reports `resolved_discarded`.
+5. Rollback and unbind are proposals too. They require a separate approval before any host write.
 
 ## Common input shapes
 

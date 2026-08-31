@@ -59,7 +59,7 @@ export async function POST(request: NextRequest) {
                 error.code === "APPROVAL_REQUIRED" ||
                 error.code === "STORE_CONFLICT"
               ? 409
-              : error.code === "STORE_BUSY"
+              : error.code === "STORE_BUSY" || error.code === "WORKSPACE_UNAVAILABLE"
                 ? 503
                 : 500;
 

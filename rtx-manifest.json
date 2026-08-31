@@ -12,6 +12,7 @@
     "llm.embed",
     "llm.chat",
     "desktop.browser",
-    "desktop.runtime-sessions"
+    "desktop.runtime-sessions",
+    "workspace.personality.write"
   ]
 }

@@ -66,6 +66,13 @@ Then pass `Authorization: Bearer your-secret-token` on each request.
 | `upsert_voice_profile` | content | Register immutable voice content as a draft version |
 | `approve_voice_profile` | content | Approve the latest admissible draft and atomically supersede the prior active version |
 | `upsert_personality_statements` | content | Store verbatim user-authored values and boundaries for Personality projection |
+| `get_personality_binding` | content | Read the configured workspace binding, drift, source freshness, history, proposals, and host capability |
+| `propose_personality_projection` | content | Create an immutable all-file projection proposal; never approves or writes the workspace |
+| `approve_personality_projection` | content | Record explicit thread-message approval and apply through the RealTimeX transaction writer |
+| `reject_personality_projection` | content | Reject a proposal with durable user evidence; never writes the workspace |
+| `retry_personality_projection` | content | Inspect, recover, resume, or explicitly retry a durable host attempt |
+| `rollback_personality_projection` | content | Propose retained historical managed blocks over current unmanaged prose |
+| `unbind_personality_projection` | content | Propose removal of Signals-managed blocks while preserving unmanaged prose |
 | `query_goals` | goals | List goals |
 | `create_task` | tasks | Create a follow-up task |
 | `get_persona` | contacts | Get active AI persona for a contact |
@@ -209,13 +216,26 @@ Voice profiles are an approved voice-evidence source stored as immutable version
 admissible, approved, self-authored samples and durable user evidence. Store contention and
 optimistic conflicts are reported as `STORE_BUSY` and `STORE_CONFLICT`.
 
-Personality source preview is read-only in this release. `GET /api/personality/sources` projects
-only the self contact's public ARPP fields, one explicitly selected self-owned organization, an
-approved voice profile owned by that self contact, and statements stored by
-`upsert_personality_statements` or `PUT /api/personality/statements`. The response includes the
-strict source snapshot, content-based source hash, revisions, and deterministic block bodies; it
-does not read or write a RealTimeX workspace. Select the represented organization through
-`GET/PUT /api/personality/represented-org`; agent tools cannot change that selection.
+Personality sources come only from the self contact's public ARPP fields, one explicitly selected
+self-owned organization, an approved same-owner voice profile, and statements stored by
+`upsert_personality_statements` or `PUT /api/personality/statements`. Select the represented
+organization through `GET/PUT /api/personality/represented-org`; agent tools cannot change it.
+
+Projection is proposal-first. `propose_personality_projection` records immutable exact UTF-8 files,
+whole-file hashes, managed-block hashes, diffs, and current CAS tokens without requiring the writer
+permission. It always covers `IDENTITY.md`, `SOUL.md`, `VOICE.md`, and `BRAND.md`; `AGENTS.md` is
+included only when a dynamic Personality pointer is needed or already managed. No tool accepts an
+arbitrary workspace slug. `approve_personality_projection` accepts only durable
+`thread_message` evidence for the configured workspace and is the first operation allowed to call
+the authenticated RealTimeX transaction writer. There is no direct filesystem-write fallback.
+
+Interrupted and failed host transactions remain visible by stable attempt ID.
+`retry_personality_projection` inspects before resubmitting, requests restore for
+`recovery_required`, and allocates a new attempt only after a separate retry has proven the prior
+attempt restored. `rollback_personality_projection` and `unbind_personality_projection` also
+create review-only proposals. REST equivalents live under `/api/personality/binding`,
+`/api/personality/host`, `/api/personality/proposals`, proposal `approve|reject|retry` actions,
+`/api/personality/rollback`, and `/api/personality/unbind`.
 
 Voice resolution no longer falls back to a profile owned by another contact or to an unclaimed
 profile. When approved profiles with `ownerContactId: null` are the only candidates,

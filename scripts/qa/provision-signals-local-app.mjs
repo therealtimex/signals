@@ -44,6 +44,7 @@ const SIGNALS_PERMISSIONS = [
   "llm.chat",
   "desktop.browser",
   "desktop.runtime-sessions",
+  "workspace.personality.write",
 ];
 const SCRIPT_REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const REPO_ROOT = canonicalSignalsRepoRoot(SCRIPT_REPO_ROOT);

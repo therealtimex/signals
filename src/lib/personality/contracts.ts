@@ -212,23 +212,32 @@ export const sourceRevisionsSchema = z.object({
 
 export type PersonalitySourceRevisions = z.infer<typeof sourceRevisionsSchema>;
 
-const workspaceSchema = z.object({
+export const workspaceSchema = z.object({
   slug: z.string().min(1),
   id: z.string().min(1).nullable(),
   dir: z.string().min(1),
   key: z.string().min(1),
 }).strict();
 
-const bindingIdentitySchema = z.object({
+export const bindingIdentitySchema = z.object({
   selfContactId: z.string().min(1),
   representedOrgId: z.string().min(1).nullable(),
 }).strict();
 
-const approvalSchema = z.object({
+export const approvalSchema = z.object({
   by: z.literal("user"),
   at: unixSecondsSchema,
   evidence: approvalEvidenceSchema,
 }).strict();
+
+export const hostCapabilityRefSchema = z.object({
+  key: z.literal("workspace.personality.transactions"),
+  version: z.number().int().positive(),
+  schemaVersion: z.literal(1),
+  fileHash: z.literal("sha256-hex"),
+}).strict();
+
+export type HostCapabilityRef = z.infer<typeof hostCapabilityRefSchema>;
 
 const bindingFileSchema = z.object({
   path: z.enum([...SOCIAL_PERSONALITY_FILES, "AGENTS.md"]),
@@ -252,6 +261,8 @@ export const personalityBindingSchema = z.object({
   appliedAt: unixSecondsSchema,
   previousBindingId: idSchema("pb").nullable(),
   hostTransactionId: z.string().min(8).max(200),
+  attemptNo: z.number().int().positive(),
+  hostCapability: hostCapabilityRefSchema,
 }).strict();
 
 export type PersonalityBinding = z.infer<typeof personalityBindingSchema>;
@@ -310,43 +321,74 @@ export const proposalStateSchema = z.enum([
   "stale",
 ]);
 
-const hostTransactionStatusSchema = z.enum([
+export const hostTransactionStatusSchema = z.enum([
   "committed",
   "restored_failure",
   "recovery_required",
+  "resolved_discarded",
   "not_started",
 ]);
+
+export const personalityFailureSchema = z.object({
+  step: z.string().min(1),
+  reason: z.string().min(1),
+  hostRecovery: z.object({
+    transactionId: z.string().min(8).max(200),
+    status: hostTransactionStatusSchema,
+  }).strict().optional(),
+}).strict();
+
+export const personalityHostResultSchema = z.object({
+  status: hostTransactionStatusSchema,
+  shim: z.object({
+    requested: z.boolean(),
+    created: z.boolean(),
+    state: z.enum(["symlink", "regular_file", "missing", "copy"]),
+    error: z.string().optional(),
+  }).strict(),
+  replayed: z.boolean(),
+}).strict();
+
+const personalityAttemptSchema = z.object({
+  bindingId: idSchema("pb"),
+  attemptNo: z.number().int().positive(),
+  hostTransactionId: z.string().min(8).max(200),
+  hostCapability: hostCapabilityRefSchema,
+  phase: z.enum(["prepared", "submitted", "committing", "terminal"]),
+  startedAt: unixSecondsSchema,
+}).strict();
+
+const personalityAttemptHistoryEntrySchema = z.object({
+  bindingId: idSchema("pb"),
+  attemptNo: z.number().int().positive(),
+  hostTransactionId: z.string().min(8).max(200),
+  startedAt: unixSecondsSchema,
+  finishedAt: unixSecondsSchema,
+  terminalStatus: z.enum([
+    "restored_failure",
+    "recovery_required",
+    "resolved_discarded",
+  ]),
+  hostCapability: hostCapabilityRefSchema,
+  failure: personalityFailureSchema.nullable(),
+  hostResult: personalityHostResultSchema.nullable(),
+}).strict();
 
 export const personalityProposalRecordSchema = z.object({
   state: proposalStateSchema,
   workspaceKey: z.string().min(1),
   updatedAt: unixSecondsSchema,
   approval: approvalSchema.nullable(),
-  attempt: z.object({
-    bindingId: idSchema("pb"),
-    attemptNo: z.number().int().positive(),
-    hostTransactionId: z.string().min(8).max(200),
-    phase: z.enum(["prepared", "submitted", "committing", "terminal"]),
-    startedAt: unixSecondsSchema,
+  rejection: z.object({
+    by: z.literal("user"),
+    at: unixSecondsSchema,
+    evidence: approvalEvidenceSchema,
+    note: z.string().max(4_096).optional(),
   }).strict().nullable(),
-  failure: z.object({
-    step: z.string().min(1),
-    reason: z.string().min(1),
-    hostRecovery: z.object({
-      transactionId: z.string().min(8).max(200),
-      status: hostTransactionStatusSchema,
-    }).strict().optional(),
-  }).strict().nullable(),
-  hostResult: z.object({
-    status: hostTransactionStatusSchema,
-    shim: z.object({
-      requested: z.boolean(),
-      created: z.boolean(),
-      state: z.enum(["symlink", "regular_file", "missing", "copy"]),
-      error: z.string().optional(),
-    }).strict(),
-    replayed: z.boolean(),
-  }).strict().nullable(),
+  attempt: personalityAttemptSchema.nullable(),
+  attemptHistory: z.array(personalityAttemptHistoryEntrySchema).max(50),
+  failure: personalityFailureSchema.nullable(),
+  hostResult: personalityHostResultSchema.nullable(),
 }).strict();
 
 export type PersonalityProposalRecord = z.infer<typeof personalityProposalRecordSchema>;
@@ -376,6 +418,8 @@ export const personalityDriftReasonSchema = z.enum([
   "marker_binding_mismatch",
   "index_pointer_missing",
 ]);
+
+export type PersonalityDriftReason = z.infer<typeof personalityDriftReasonSchema>;
 
 export const personalityStatusSchema = z.object({
   workspace: z.object({
