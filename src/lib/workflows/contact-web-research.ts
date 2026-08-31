@@ -99,26 +99,8 @@ function isHttpUrl(value: string): boolean {
 function candidateProfileHref(
   identity: ContactWebResearchBriefContact["identities"][number],
 ): string | null {
-  const stored = identity.platformUrl?.trim() ?? "";
-  if (stored) {
-    const href = identityProfileHref({ ...identity, platformHandle: null });
-    return href && isHttpUrl(href) ? href : null;
-  }
-
-  const handle = identity.platformHandle?.trim() ?? "";
-  if (!handle) return null;
-
-  // A platform user ID can be opaque, and some legacy LinkedIn rows put a display name in
-  // platform_handle. Only synthesize URLs from values that have a real handle/vanity shape.
-  if (identity.platform === "x" && !/^@?[A-Za-z0-9_]{1,15}$/.test(handle)) return null;
-  if (
-    identity.platform === "linkedin" &&
-    !/^\/?(?:in\/)?[A-Za-z0-9][A-Za-z0-9_-]*\/?$/.test(handle) &&
-    !/^https?:\/\/(?:[a-z0-9-]+\.)?linkedin\.com\/in\/[A-Za-z0-9_-]+\/?(?:[?#].*)?$/i.test(handle)
-  ) {
-    return null;
-  }
-
+  // identityProfileHref never uses platformUserId, which may be opaque, and rejects values
+  // that do not have a valid platform handle/vanity shape.
   const href = identityProfileHref(identity);
   return href && isHttpUrl(href) ? href : null;
 }
@@ -154,7 +136,7 @@ export function resolveContactWebResearchKnownProfileCandidates(
       platformHandle: identity.platformHandle,
       url,
       isPrimary: Boolean(identity.isPrimary),
-      source: identity.platformUrl?.trim() ? "stored" : "derived",
+      source: identity.platformUrl?.trim() === url ? "stored" : "derived",
     });
   }
 

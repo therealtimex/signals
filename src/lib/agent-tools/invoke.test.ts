@@ -424,6 +424,7 @@ describe("invokeAgentTool", () => {
       platform: "linkedin",
       platformUserId: "identity-contact-li",
       handle: "identitycontact",
+      profileUrl: "https://www.linkedin.com/in/identitycontact",
       headline: "Builder",
       avatarUrl: "https://example.com/avatar.jpg",
       message: "Contact identity upserted.",
@@ -436,6 +437,7 @@ describe("invokeAgentTool", () => {
         expect.objectContaining({
           platform: "linkedin",
           platformUserId: "identity-contact-li",
+          profileUrl: "https://www.linkedin.com/in/identitycontact",
           headline: "Builder",
           avatarUrl: "https://example.com/avatar.jpg",
         }),
