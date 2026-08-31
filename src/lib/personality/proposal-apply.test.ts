@@ -19,6 +19,7 @@ import {
 import {
   brandRenderedBrandInput,
   brandRenderedIdentityInput,
+  brandRenderedVoiceInput,
   type PersonalityProposal,
 } from "@/lib/personality/contracts";
 import {
@@ -96,13 +97,48 @@ function sources(name = "Ada", contactId = "contact-self", orgId: string | null 
   };
 }
 
+function voiceSources(
+  profileId: `vp_${string}`,
+  label: string,
+  hashCharacter: string,
+) {
+  const bundle = sources();
+  return {
+    ...bundle,
+    sources: {
+      ...bundle.sources,
+      voice: brandRenderedVoiceInput({
+        profile: {
+          id: profileId,
+          label,
+          version: 1,
+          hash: hashCharacter.repeat(64),
+        },
+        platforms: ["x"],
+        sentenceLength: null,
+        openers: [],
+        closers: [],
+        punctuation: [],
+        formats: [],
+        emoji: [],
+        hashtags: [],
+        vocabulary: { keep: [], avoid: [] },
+        protectedQuirks: [],
+        taboo: [],
+        signatureLines: [],
+        exemplars: [],
+      }),
+    },
+  };
+}
+
 function idFactory() {
   let value = 0;
   return (prefix: "prp" | "pb") => `${prefix}_fixture${++value}`;
 }
 
 function proposalDependencies(
-  load = () => sources(),
+  load: NonNullable<PersonalityProposalDependencies["loadSources"]> = () => sources(),
   newId = idFactory(),
 ): PersonalityProposalDependencies {
   return {
@@ -327,10 +363,44 @@ describe.sequential("Personality proposal and apply lifecycle", () => {
       join(workspace.dir, "AGENTS.md"),
       "Read IDENTITY.md and SOUL.md for this workspace.\n",
     );
-    symlinkSync("AGENTS.md", join(workspace.dir, "CLAUDE.md"));
     const staticPointer = await proposePersonalityProjection({}, proposalDependencies(loadAda, ids));
     expect(staticPointer.files).toHaveLength(4);
-    expect(staticPointer.shim.createClaudeSymlink).toBe(false);
+    expect(staticPointer.shim.createClaudeSymlink).toBe(true);
+  });
+
+  it("revalidates and reports a pinned non-default voice profile by immutable ID", async () => {
+    const defaultVoiceId = "vp_default01" as const;
+    const pinnedVoiceId = "vp_pinned001" as const;
+    const loadSources = (options: { voiceProfileId?: string } = {}) =>
+      options.voiceProfileId === pinnedVoiceId
+        ? voiceSources(pinnedVoiceId, "Pinned", "b")
+        : voiceSources(defaultVoiceId, "Default", "a");
+    const proposal = await proposePersonalityProjection(
+      { voiceProfileId: pinnedVoiceId },
+      proposalDependencies(loadSources),
+    );
+    expect(proposal.sourceSnapshot?.voice?.id).toBe(pinnedVoiceId);
+
+    const applied = await approvePersonalityProposal({
+      proposalId: proposal.id,
+      evidence: { kind: "ui", route: "/settings/personality" },
+    }, {
+      ...applyDependencies(proposal),
+      loadSources,
+    });
+    expect(applied.binding?.sourceHash).toBe(proposal.sourceHash);
+    materialize(proposal);
+
+    const view = await getPersonalityBindingView({
+      resolveWorkspace: async () => workspace,
+      readWorkspaceFiles: readPersonalityWorkspaceFiles,
+      loadSources,
+      probeCapability: async () => available,
+    });
+    expect(view.status).toMatchObject({
+      status: "bound",
+      currentSourceHash: proposal.sourceHash,
+    });
   });
 
   it("warns without replacing a regular CLAUDE.md", async () => {
@@ -381,6 +451,49 @@ describe.sequential("Personality proposal and apply lifecycle", () => {
       evidence: { kind: "ui", route: "/settings/personality" },
     }, applyDependencies(rollback));
     expect(restored.binding).toMatchObject({ kind: "rollback", previousBindingId: null });
+  });
+
+  it("replays the binding produced by an applied proposal after newer lifecycle changes", async () => {
+    const ids = idFactory();
+    const first = await proposePersonalityProjection({}, proposalDependencies(() => sources(), ids));
+    await approvePersonalityProposal({
+      proposalId: first.id,
+      evidence: { kind: "ui", route: "/settings/personality" },
+    }, applyDependencies(first));
+    materialize(first);
+
+    const changedSources = () => sources("Ada Changed");
+    const second = await proposePersonalityProjection({}, proposalDependencies(changedSources, ids));
+    await approvePersonalityProposal({
+      proposalId: second.id,
+      evidence: { kind: "ui", route: "/settings/personality" },
+    }, { ...applyDependencies(second), loadSources: changedSources });
+    materialize(second);
+
+    await expect(approvePersonalityProposal({
+      proposalId: first.id,
+      evidence: { kind: "ui", route: "/settings/personality" },
+    })).resolves.toMatchObject({ binding: { id: first.proposedBindingId } });
+    await expect(retryPersonalityProposal(first.id)).resolves.toMatchObject({
+      binding: { id: first.proposedBindingId },
+    });
+
+    const unbind = await proposePersonalityUnbind(
+      { kind: "ui" },
+      proposalDependencies(changedSources, ids),
+    );
+    await approvePersonalityProposal({
+      proposalId: unbind.id,
+      evidence: { kind: "ui", route: "/settings/personality" },
+    }, applyDependencies(unbind));
+    materialize(unbind);
+    const rebound = await proposePersonalityProjection({}, proposalDependencies(changedSources, ids));
+    await approvePersonalityProposal({
+      proposalId: rebound.id,
+      evidence: { kind: "ui", route: "/settings/personality" },
+    }, { ...applyDependencies(rebound), loadSources: changedSources });
+
+    await expect(retryPersonalityProposal(unbind.id)).resolves.toMatchObject({ binding: null });
   });
 
   it("archives a restored failure before allocating a fresh explicit retry attempt", async () => {
@@ -802,6 +915,27 @@ describe.sequential("Personality proposal and apply lifecycle", () => {
         drifted: [expect.objectContaining({ path: "VOICE.md", reason: "unmanaged_edited" })],
       },
       host: { capability: "available", version: 1 },
+    });
+  });
+
+  it("reports unavailable when the resolved workspace ID replaces a stored binding identity", async () => {
+    const proposal = await proposePersonalityProjection({}, proposalDependencies());
+    await approvePersonalityProposal({
+      proposalId: proposal.id,
+      evidence: { kind: "ui", route: "/settings/personality" },
+    }, applyDependencies(proposal));
+    materialize(proposal);
+
+    const view = await getPersonalityBindingView({
+      resolveWorkspace: async () => ({ ...workspace, id: "99" }),
+      readWorkspaceFiles: readPersonalityWorkspaceFiles,
+      loadSources: () => sources(),
+      probeCapability: async () => available,
+    });
+    expect(view.status).toMatchObject({
+      status: "unavailable",
+      binding: null,
+      detail: { unavailable: "workspace_mismatch" },
     });
   });
 

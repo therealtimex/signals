@@ -21,11 +21,13 @@ function wrapper(body = BODY, binding: `pb_${string}` = BINDING, eol = "\n") {
 }
 
 function applySimpleUnifiedDiff(before: string, diff: string): string {
-  const source = before === "" ? [] : before.split("\n");
+  const source = before === "" ? [] : before.split("\n").map((text) => ({ text, newline: true }));
   if (before.endsWith("\n")) source.pop();
-  const result: string[] = [];
+  else if (source.length > 0) source[source.length - 1].newline = false;
+  const result: Array<{ text: string; newline: boolean }> = [];
   let cursor = 0;
-  const lines = diff.trimEnd().split("\n").slice(2);
+  let previousOperation: " " | "+" | "-" | null = null;
+  const lines = (diff.endsWith("\n") ? diff.slice(0, -1) : diff).split("\n").slice(2);
   for (let index = 0; index < lines.length;) {
     const header = /^@@ -(\d+),(\d+) \+(\d+),(\d+) @@$/.exec(lines[index]);
     if (!header) throw new Error(`Invalid test diff hunk: ${lines[index]}`);
@@ -36,22 +38,29 @@ function applySimpleUnifiedDiff(before: string, diff: string): string {
     while (index < lines.length && !lines[index].startsWith("@@ ")) {
       const line = lines[index];
       if (line === "\\ No newline at end of file") {
+        if (previousOperation === " " || previousOperation === "+") {
+          const previous = result.at(-1);
+          if (previous) previous.newline = false;
+        }
         index += 1;
         continue;
       }
       if (line.startsWith(" ")) {
-        result.push(line.slice(1));
+        result.push({ ...source[cursor], text: line.slice(1) });
         cursor += 1;
+        previousOperation = " ";
       } else if (line.startsWith("-")) {
         cursor += 1;
+        previousOperation = "-";
       } else if (line.startsWith("+")) {
-        result.push(line.slice(1));
+        result.push({ text: line.slice(1), newline: true });
+        previousOperation = "+";
       }
       index += 1;
     }
   }
   result.push(...source.slice(cursor));
-  return result.join("\n");
+  return result.map((line) => `${line.text}${line.newline ? "\n" : ""}`).join("");
 }
 
 describe("managed Personality files", () => {
@@ -129,11 +138,21 @@ describe("managed Personality files", () => {
       ["deleted", ""],
       ["a\nb\nc\nd\ne\nf\ng\nh\ni", "a\nB\nc\nd\ne\nf\ng\nH\ni"],
       ["same\nend", "same\ninserted\nend"],
+      ["same", "same\n"],
+      ["same\n", "same"],
     ]) {
       expect(applySimpleUnifiedDiff(
         oldText,
         unifiedDiff("IDENTITY.md", oldText, newText),
       )).toBe(newText);
     }
+    expect(unifiedDiff("VOICE.md", "same", "same\n")).toBe(
+      "--- a/VOICE.md\n+++ b/VOICE.md\n@@ -1,1 +1,1 @@\n-same\n"
+      + "\\ No newline at end of file\n+same\n",
+    );
+    expect(unifiedDiff("VOICE.md", "same\n", "same")).toBe(
+      "--- a/VOICE.md\n+++ b/VOICE.md\n@@ -1,1 +1,1 @@\n-same\n+same\n"
+      + "\\ No newline at end of file\n",
+    );
   });
 });

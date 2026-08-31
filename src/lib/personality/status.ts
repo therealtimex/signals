@@ -158,7 +158,8 @@ function sourceStaleDetail(
   loadSources: typeof loadPersonalitySourceBundle,
 ): { currentSourceHash: string | null; detail: NonNullable<PersonalityStatus["detail"]>["sourceStale"] } {
   try {
-    const bundle = loadSources();
+    const voiceProfileId = bindingProposal.sourceSnapshot?.voice?.id;
+    const bundle = loadSources(voiceProfileId ? { voiceProfileId } : {});
     const current = buildSourceSnapshot(bundle.sources, bundle.revisions);
     const expected = bindingProposal.sourceSnapshot;
     if (!expected) return { currentSourceHash: computeSourceHash(current), detail: {} };
@@ -253,6 +254,26 @@ export async function getPersonalityBindingView(
       }),
       history: [],
       proposals,
+      diagnostics: { orphanProposalIds: store.orphanProposalIds },
+    };
+  }
+  if (
+    bindingSet.workspaceSlug !== workspace.slug
+    || bindingSet.workspaceId !== workspace.id
+    || bindingSet.workspaceDir !== workspace.dir
+  ) {
+    return {
+      status: personalityStatusSchema.parse({
+        workspace: { slug: workspace.slug, dir: workspace.dir },
+        binding: null,
+        currentSourceHash: null,
+        status: "unavailable",
+        detail: { unavailable: "workspace_mismatch" },
+        compatibleTargets: [],
+        host,
+      }),
+      history: [],
+      proposals: [],
       diagnostics: { orphanProposalIds: store.orphanProposalIds },
     };
   }

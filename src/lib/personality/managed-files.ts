@@ -297,6 +297,34 @@ function hunkRanges(operations: PositionedOperation[]): Array<[number, number]> 
   return ranges;
 }
 
+function representLineTerminationChanges(
+  operations: DiffOperation[],
+  before: ReturnType<typeof displayLines>,
+  after: ReturnType<typeof displayLines>,
+): DiffOperation[] {
+  const represented: DiffOperation[] = [];
+  let oldLine = 1;
+  let newLine = 1;
+  for (const operation of operations) {
+    const oldTerminated = oldLine < before.lines.length || before.finalNewline;
+    const newTerminated = newLine < after.lines.length || after.finalNewline;
+    if (
+      operation.kind === "equal"
+      && oldTerminated !== newTerminated
+    ) {
+      represented.push(
+        { kind: "delete", line: operation.line },
+        { kind: "insert", line: operation.line },
+      );
+    } else {
+      represented.push(operation);
+    }
+    if (operation.kind !== "insert") oldLine += 1;
+    if (operation.kind !== "delete") newLine += 1;
+  }
+  return represented;
+}
+
 export function unifiedDiff(
   path: string,
   beforeValue: string | null,
@@ -305,7 +333,11 @@ export function unifiedDiff(
   if (beforeValue === afterValue) return "";
   const before = displayLines(beforeValue);
   const after = displayLines(afterValue);
-  const operations = positionOperations(myersOperations(before.lines, after.lines));
+  const operations = positionOperations(representLineTerminationChanges(
+    myersOperations(before.lines, after.lines),
+    before,
+    after,
+  ));
   const output = [`--- a/${path}`, `+++ b/${path}`];
   for (const [start, end] of hunkRanges(operations)) {
     const hunk = operations.slice(start, end);

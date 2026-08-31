@@ -1,9 +1,9 @@
 # Signals #378 — Personality projection lifecycle design
 
-**Status:** Accepted for implementation  
-**Loop:** `loop-issue-378-bc79c912` · **Role:** System Design → Dev  
-**Date:** 2026-08-30  
-**Signals base:** `main@baae875` (includes #376 at `41a457c`)  
+**Status:** Accepted for implementation\
+**Loop:** `loop-issue-378-bc79c912` · **Role:** System Design → Dev\
+**Date:** 2026-08-30\
+**Signals base:** `main@baae875` (includes #376 at `41a457c`)\
 **Host prerequisite:** RealTimeX #1729 / MR !1782, merged as `6dbf8b5a23e790fc2d272fd49f229989a29de996`
 
 Authority remains #373 / PR #374, `specs/personality-projection.md`,
@@ -732,47 +732,47 @@ must remain capability-disabled for dogfood until H6 is recorded.
 
 ### ADR-378-1: Local read-only proposal, host-locked mutation
 
-**Status:** Accepted.  
+**Status:** Accepted.\
 **Context:** Proposals must remain available without the writer permission, but mutations require a
-consistent host snapshot.  
+consistent host snapshot.\
 **Decision:** Build proposals from byte-stable local reads; revalidate workspace identity and every
-CAS token using the host listing and transaction immediately before mutation.  
+CAS token using the host listing and transaction immediately before mutation.\
 **Consequences:** A proposal can capture a cross-file set that later proves stale, but cannot mutate
 that set. Apply has two defenses: explicit listing guard and host in-lock CAS.
 
 ### ADR-378-2: All social files participate in every transaction
 
-**Status:** Accepted.  
+**Status:** Accepted.\
 **Context:** `personalityHash` covers managed and unmanaged bytes across four files. Sending only
-changed files leaves a race on the omitted files.  
+changed files leaves a race on the omitted files.\
 **Decision:** Include all four social files as exact no-op/create/update/delete operations; include
-`AGENTS.md` only when dynamically managed.  
+`AGENTS.md` only when dynamically managed.\
 **Consequences:** Larger payload (bounded below host limits), but a committed binding names an exact
 whole Personality revision that the host verified together.
 
 ### ADR-378-3: Ambiguous markers fail closed
 
-**Status:** Accepted.  
-**Context:** An unmatched/nested marker has no provable managed/unmanaged boundary.  
-**Decision:** Repair only complete duplicates; reject every ambiguous shape before proposal.  
+**Status:** Accepted.\
+**Context:** An unmatched/nested marker has no provable managed/unmanaged boundary.\
+**Decision:** Repair only complete duplicates; reject every ambiguous shape before proposal.\
 **Consequences:** Some manual corruption needs user repair, but Signals never deletes guessed prose.
 
 ### ADR-378-4: One local lock spans each host attempt transition
 
-**Status:** Accepted.  
-**Context:** Releasing the lock needs a lease/ownership protocol to prevent competing attempts.  
+**Status:** Accepted.\
+**Context:** Releasing the lock needs a lease/ownership protocol to prevent competing attempts.\
 **Decision:** Hold the existing cross-process store lock through preflight, inspect/submit, and
-result commit.  
+result commit.\
 **Consequences:** Concurrent status/store mutations may receive `STORE_BUSY`; apply remains a simple,
 auditable single-owner state machine.
 
 ### ADR-378-5: Host terminal outcomes are facts, not inferred retries
 
-**Status:** Accepted.  
+**Status:** Accepted.\
 **Context:** The host owns before-images and may return committed, restored, recovery-required, or
-operator-discarded outcomes.  
+operator-discarded outcomes.\
 **Decision:** Persist each outcome and its stable transaction ID; resume nonterminal attempts;
-allocate N+1 only after a distinct explicit retry following proven restoration.  
+allocate N+1 only after a distinct explicit retry following proven restoration.\
 **Consequences:** Recovery can require two user actions, but a retry can never repeat or relabel a
 completed mutation.
 

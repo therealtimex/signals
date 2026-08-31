@@ -483,7 +483,7 @@ async function constructProposal(input: {
     });
     const claude = inspectClaudeShim(workspace);
     const shim = {
-      createClaudeSymlink: indexed.includeIndex && claude.state === "missing",
+      createClaudeSymlink: claude.state === "missing",
     };
     const candidateNoop = files.every((file) => file.diff === "")
       && SOCIAL_PERSONALITY_FILES.every((path) =>

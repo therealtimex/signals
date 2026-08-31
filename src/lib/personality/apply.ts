@@ -113,6 +113,25 @@ function bindingSetFor(session: PersonalityStoreSession, proposal: PersonalityPr
   return bindingSet;
 }
 
+function appliedBindingFor(
+  session: PersonalityStoreSession,
+  proposal: PersonalityProposal,
+): PersonalityBinding | null {
+  const bindingSet = bindingSetFor(session, proposal);
+  const binding = [bindingSet?.active, ...(bindingSet?.history ?? [])].find(
+    (candidate): candidate is PersonalityBinding =>
+      candidate?.proposalId === proposal.id
+      && candidate.id === proposal.proposedBindingId,
+  );
+  if (!binding) {
+    throw new AgentToolError("STORE_CONFLICT", "Applied Personality binding is missing", {
+      reason: "store_corrupt",
+      proposalId: proposal.id,
+    });
+  }
+  return proposal.kind === "unbind" ? null : binding;
+}
+
 function assertBaseBinding(
   session: PersonalityStoreSession,
   proposal: PersonalityProposal,
@@ -227,7 +246,10 @@ function assertSourceGuard(
     }
     return;
   }
-  const current = currentSourceIdentity((loadSources ?? loadPersonalitySourceBundle)({}));
+  const voiceProfileId = proposal.sourceSnapshot?.voice?.id;
+  const current = currentSourceIdentity((loadSources ?? loadPersonalitySourceBundle)(
+    voiceProfileId ? { voiceProfileId } : {},
+  ));
   if (!sameIdentity(current.identity, proposal.identity)) {
     throw new AgentToolError("CONFLICT", "Personality represented identity changed", {
       reason: "identity_mismatch",
@@ -949,7 +971,7 @@ export async function approvePersonalityProposal(input: {
       return {
         proposal,
         record,
-        binding: bindingSetFor(session, proposal)?.active ?? null,
+        binding: appliedBindingFor(session, proposal),
       };
     }
     if (record.state === "proposed") {
@@ -1075,7 +1097,7 @@ export async function retryPersonalityProposal(
     if (!record) throw new AgentToolError("NOT_FOUND", `Personality proposal not found: ${proposalId}`);
     const proposal = session.getProposal(proposalId);
     if (record.state === "applied") {
-      return { proposal, record, binding: bindingSetFor(session, proposal)?.active ?? null };
+      return { proposal, record, binding: appliedBindingFor(session, proposal) };
     }
     return retryWithinLock(session, proposal, record, dependencies);
   });
