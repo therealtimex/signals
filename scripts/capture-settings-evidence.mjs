@@ -1,3 +1,13 @@
+/**
+ * Superseded by `scripts/app-automation/flows/capture-guide-assets.mjs`
+ * (`npm run automation:capture-guide-assets`), which covers these two views plus
+ * the other thirteen the guide references, resolves the origin instead of
+ * assuming :3010, and refuses to publish a screenshot it could not confirm.
+ *
+ * Kept only because `specs/company-intelligence.md` still points at this file as
+ * the template for its own evidence capture. Prefer extending the flow's
+ * `GUIDE_VIEWS` manifest over copying this script again.
+ */
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { chromium } from "playwright";

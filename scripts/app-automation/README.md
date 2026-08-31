@@ -32,9 +32,67 @@ scenario.
 ## Running
 
 ```bash
-npm run automation:check-target   # is Signals reachable in the Dev app right now?
-npm run automation:test           # unit-test the flows (no Dev app required)
+npm run automation:check-target          # is Signals reachable in the Dev app right now?
+npm run automation:capture-guide-assets  # regenerate every screenshot guide/ references
+npm run automation:test                  # unit-test the flows (no Dev app required)
 ```
+
+`automation:test` runs in the `check` gate. It needs no browser, no Dev app, and no second
+checkout, so it is the one part of this directory that CI can hold.
+
+## Guide assets
+
+`guide/` ships 15 referenced screenshots. Until `capture-guide-assets` they were effectively
+unmaintainable: `scripts/capture-settings-evidence.mjs` (written for #320) regenerated two of them,
+and the other thirteen were captured by hand in `f033f96`. Hand-captured assets drift silently —
+the UI moves, the guide keeps showing the old screenshot, and nothing fails.
+
+```bash
+npm run automation:capture-guide-assets -- --json
+npm run automation:capture-guide-assets -- --only settings-platforms,settings-agents
+npm run automation:capture-guide-assets -- --base-url http://127.0.0.1:3000 --no-evidence
+```
+
+The two outputs are different products, captured in separate passes:
+
+| | viewport | themes | `fullPage` | naming |
+|---|---|---|---|---|
+| `.evidence/` | 1280x900, 390x844 | light + dark | yes | `after_<view>_<form>_<theme>.png` (#320's convention) |
+| `guide/assets/` | 1440x900 | light | **no** | `<view>.png` |
+
+The guide is not "the desktop+light evidence cell". The fifteen committed assets are 1440x900
+viewport shots; publishing full-page captures instead produced a 1280x3442 compose-dialog image
+with the dialog as a small box at the top. The Next.js dev issue badge (`nextjs-portal`) is hidden
+before every capture, because the guide is routinely shot against a dev server — that is where the
+seed data lives.
+
+Two rules the flow exists to enforce, both versions of "a valid PNG of the wrong thing is worse
+than a failure":
+
+- **The origin is resolved, never assumed.** `capture-settings-evidence.mjs` defaulted to
+  `http://127.0.0.1:3010`. Local App ports get reassigned, so a 200 there only proves *something*
+  is listening — the `not_signals` case below. Capture goes through `resolve-signals-target` (or
+  health-checks an explicit `--base-url` through the same classifier).
+- **A page must be confirmed before it is published.** A 404 detail route and a
+  `chrome-error://` document both settle into `networkidle` and screenshot beautifully. The flow
+  checks the HTTP status, waits on a per-view ready selector, and compares the heading where the
+  heading is static.
+
+Detail views (`contact-detail`, `content-detail`, `goal-detail`, `workflow-detail`) need a real
+record. The flow resolves one id per kind from the list APIs first and fails with
+`missing_seed_data` naming the empty kind, rather than capturing a 404.
+
+Adding a screenshot to `guide/` without adding it to `GUIDE_VIEWS` fails `automation:test`. That
+guard is the point: it is what stops the set drifting back to hand-captured one asset at a time.
+
+How far the committed set had already drifted, as of this flow landing: `dashboard-overview.png`
+still shows the product branded **OpenVolo**, with a left nav missing Explore, Companies and
+Launches. Six months of UI change (the set was captured in `f033f96`, 2026-02-11), invisible
+because nothing could re-render it.
+
+`guide/assets/ai-assist-panel.png` and `chat-panel.png` are referenced by no guide page and match
+no component in `src/`; they are stale output from an earlier draft, listed in
+`KNOWN_ORPHAN_ASSETS` so the next reader does not re-derive that.
 
 ## The failure this is built around
 
@@ -63,3 +121,7 @@ cost more than it saves.
 Gallery deploy lifecycle and the deploy-refusal journey — both specified by QA's #300 report. They
 build on `resolve-signals-target`. #301's non-goal stands: no broad harness before one journey runs
 green.
+
+`specs/company-intelligence.md` still plans its evidence capture as "a copy of
+`scripts/capture-settings-evidence.mjs`". Copying the script is the rebuild-it-ad-hoc pattern #301
+is about; that capture wants a second manifest in this directory instead.
