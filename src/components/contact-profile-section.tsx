@@ -49,7 +49,7 @@ export function ContactProfileSection({
   );
 
   return (
-    <Card>
+    <Card data-contact-detail-section="profile">
       <CardHeader>
         <CardTitle>Profile</CardTitle>
       </CardHeader>

@@ -32,6 +32,7 @@ export function ContactRelationshipSection({
   const [stage, setStage] = useState("");
   const [warmth, setWarmth] = useState(50);
   const [notes, setNotes] = useState("");
+  const [editingNotes, setEditingNotes] = useState(false);
   const [loading, setLoading] = useState(!isSelf);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -91,7 +92,7 @@ export function ContactRelationshipSection({
 
   if (isSelf) {
     return (
-      <Card className="gap-4 py-4">
+      <Card data-contact-detail-section="relationship" className="gap-3 py-4">
         <CardContent>
           <p className="text-sm text-muted-foreground">
             This contact is you. Audience and enrichment are drawn around this profile.
@@ -103,7 +104,7 @@ export function ContactRelationshipSection({
 
   if (loading) {
     return (
-      <Card className="gap-4 py-4">
+      <Card data-contact-detail-section="relationship" className="gap-3 py-4">
         <CardContent>
           <p className="text-sm text-muted-foreground">Loading relationship…</p>
         </CardContent>
@@ -121,95 +122,123 @@ export function ContactRelationshipSection({
       : "No recent interaction";
 
   return (
-    <Card className="gap-4 py-4">
-      <CardContent className="space-y-4">
-        <div className="grid gap-x-6 gap-y-1 md:grid-cols-[max-content_minmax(0,1fr)]">
-          <div className="flex h-5 items-center gap-2">
+    <Card data-contact-detail-section="relationship" className="gap-3 py-4">
+      <CardContent className="grid gap-4 md:grid-cols-[minmax(0,1.25fr)_minmax(16rem,1fr)]">
+        <div className="space-y-2.5">
+          <div className="flex min-h-6 items-center gap-2">
             <h2 className="text-sm font-semibold">Relationship</h2>
             {saving || saved ? (
               <p className="text-xs text-muted-foreground">{saving ? "Saving…" : "Saved"}</p>
             ) : null}
           </div>
-          <Label htmlFor="relationship-notes" className="flex h-5 items-center text-sm font-semibold">
-            Notes
-          </Label>
-
-          <div className="space-y-3">
-            <p className="text-xs text-muted-foreground" title="Private to this workspace">
-              {nextAction}
-            </p>
-            <div className="flex flex-wrap gap-1.5 md:flex-nowrap">
-              {RELATIONSHIP_STAGES.map((value) => {
-                const selected = stage === value;
-                return (
-                  <button
-                    key={value}
-                    type="button"
-                    aria-pressed={selected}
-                    disabled={saving}
-                    onClick={() => {
-                      setStage(value);
-                      void persist({ stage: value, warmth, notes });
-                    }}
-                    className={cn(
-                      "rounded-full border px-3 py-1.5 text-sm font-medium whitespace-nowrap transition-colors",
-                      selected
-                        ? "border-primary bg-primary text-primary-foreground"
-                        : "border-border bg-background text-muted-foreground hover:border-foreground/30 hover:text-foreground",
-                    )}
-                  >
-                    {formatRelationshipStage(value)}
-                  </button>
-                );
-              })}
-            </div>
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between gap-2">
-                <Label htmlFor="relationship-warmth" className="text-xs">
-                  Warmth
-                </Label>
-                <span className="text-xs font-medium tabular-nums">{warmth}</span>
-              </div>
-              <input
-                id="relationship-warmth"
-                type="range"
-                min={0}
-                max={100}
-                step={1}
-                value={warmth}
-                disabled={saving}
-                onChange={(event) => setWarmth(Number(event.target.value))}
-                onPointerUp={() => void persist({ stage, warmth, notes })}
-                onKeyUp={() => void persist({ stage, warmth, notes })}
-                className="h-2 w-full cursor-pointer accent-primary"
-              />
-            </div>
+          <p className="text-xs text-muted-foreground" title="Private to this workspace">
+            {nextAction}
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {RELATIONSHIP_STAGES.map((value) => {
+              const selected = stage === value;
+              return (
+                <button
+                  key={value}
+                  type="button"
+                  aria-pressed={selected}
+                  disabled={saving}
+                  onClick={() => {
+                    setStage(value);
+                    void persist({ stage: value, warmth, notes });
+                  }}
+                  className={cn(
+                    "rounded-full border px-2.5 py-1 text-xs font-medium whitespace-nowrap transition-colors",
+                    selected
+                      ? "border-primary bg-primary text-primary-foreground"
+                      : "border-border bg-background text-muted-foreground hover:border-foreground/30 hover:text-foreground",
+                  )}
+                >
+                  {formatRelationshipStage(value)}
+                </button>
+              );
+            })}
           </div>
+          <div className="grid grid-cols-[auto_minmax(0,1fr)_2rem] items-center gap-3">
+            <Label htmlFor="relationship-warmth" className="text-xs">
+              Warmth
+            </Label>
+            <input
+              id="relationship-warmth"
+              type="range"
+              min={0}
+              max={100}
+              step={1}
+              value={warmth}
+              disabled={saving}
+              onChange={(event) => setWarmth(Number(event.target.value))}
+              onPointerUp={() => void persist({ stage, warmth, notes })}
+              onKeyUp={() => void persist({ stage, warmth, notes })}
+              className="h-2 w-full cursor-pointer accent-primary"
+            />
+            <span className="text-right text-xs font-medium tabular-nums">{warmth}</span>
+          </div>
+          {openTaskCount > 0 && onOpenTasks ? (
+            <Button type="button" variant="ghost" size="xs" className="px-0" onClick={onOpenTasks}>
+              {openTaskCount} open {openTaskCount === 1 ? "task" : "tasks"}
+            </Button>
+          ) : null}
+        </div>
 
-          <div className="min-h-[7rem]">
+        <div className="space-y-2">
+          <div className="flex min-h-6 items-center justify-between gap-2">
+            <Label
+              htmlFor={editingNotes ? "relationship-notes" : undefined}
+              className="text-sm font-semibold"
+            >
+              Notes
+            </Label>
+            {!editingNotes ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="xs"
+                aria-label="Edit relationship notes"
+                onClick={() => setEditingNotes(true)}
+              >
+                {notes ? "Edit" : "Add note"}
+              </Button>
+            ) : null}
+          </div>
+          {editingNotes ? (
             <Textarea
               id="relationship-notes"
+              autoFocus
               value={notes}
-              rows={4}
+              rows={3}
               onChange={(event) => setNotes(event.target.value)}
               onBlur={() => {
                 if (notes !== notesBaseline.current) {
                   void persist({ stage, warmth, notes });
                 }
+                setEditingNotes(false);
               }}
               placeholder="Private context for the next conversation"
-              className="h-full min-h-[7rem] resize-none"
+              className="min-h-20 resize-none"
             />
-          </div>
+          ) : (
+            <button
+              type="button"
+              aria-label={notes ? "Open relationship notes" : "Add relationship notes"}
+              onClick={() => setEditingNotes(true)}
+              className={cn(
+                "flex min-h-16 w-full items-start rounded-md border bg-muted/20 px-3 py-2 text-left text-sm transition-colors hover:bg-muted/40",
+                !notes && "text-muted-foreground",
+              )}
+            >
+              <span className="line-clamp-2">
+                {notes || "Add private context for the next conversation"}
+              </span>
+            </button>
+          )}
         </div>
 
-        {openTaskCount > 0 && onOpenTasks ? (
-          <Button type="button" variant="ghost" size="sm" className="px-0" onClick={onOpenTasks}>
-            {openTaskCount} open {openTaskCount === 1 ? "task" : "tasks"}
-          </Button>
-        ) : null}
-
-        {error ? <p className="text-sm text-destructive">{error}</p> : null}
+        {error ? <p className="text-sm text-destructive md:col-span-2">{error}</p> : null}
       </CardContent>
     </Card>
   );
