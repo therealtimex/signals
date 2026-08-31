@@ -42,6 +42,7 @@ export function computeAuditInputHash(
     "spine",
     "units",
     "claimMap",
+    "personality",
   ];
   return sha256Canonical({
     body: body ?? null,

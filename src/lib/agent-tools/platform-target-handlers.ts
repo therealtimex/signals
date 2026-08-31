@@ -12,6 +12,8 @@ import {
   requirePlatformTarget,
 } from "@/lib/platforms/platform-target-service";
 import { platformTargetErrorResult } from "@/lib/platforms/target-errors";
+import { setTargetRepresentation } from "@/lib/personality/use-cases";
+import { targetRepresentationSchema } from "@/lib/writing/personality-lineage";
 
 const platformSchema = z.enum(["x", "linkedin", "facebook"]);
 const kindSchema = z.enum(["account", "profile", "page", "organization"]);
@@ -38,6 +40,18 @@ export const preparePlatformTargetSchema = z.object({
 export const releasePlatformTargetSchema = z.object({
   leaseId: z.string().min(1),
 });
+
+export const setTargetRepresentationSchema = z.object({
+  targetId: z.string().min(1),
+  bindingId: z.string().regex(/^pb_[A-Za-z0-9_-]{6,}$/),
+  represents: targetRepresentationSchema,
+  evidence: z.object({
+    kind: z.literal("thread_message"),
+    workspaceSlug: z.string().min(1),
+    threadSlug: z.string().min(1),
+    note: z.string().optional(),
+  }).strict(),
+}).strict();
 
 export async function handleListPlatformTargets(
   input: z.infer<typeof listPlatformTargetsSchema>
@@ -92,4 +106,10 @@ export async function handleReleasePlatformTarget(
   } catch (error) {
     return platformTargetErrorResult(error) ?? { error: "Failed to release platform target" };
   }
+}
+
+export async function handleSetTargetRepresentation(
+  input: z.infer<typeof setTargetRepresentationSchema>,
+) {
+  return setTargetRepresentation(input);
 }

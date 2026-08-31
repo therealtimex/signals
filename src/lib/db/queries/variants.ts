@@ -1,6 +1,6 @@
 import { desc, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import { db } from "@/lib/db/client";
+import { db, type DbRunner } from "@/lib/db/client";
 import { launches, variants } from "@/lib/db/schema";
 import { assertPlatform } from "@/lib/db/platforms";
 import { assertVariantType } from "@/lib/db/variant-types";
@@ -8,7 +8,11 @@ import { createContentItem } from "@/lib/db/queries/content";
 import { getLaunchById } from "@/lib/db/queries/launches";
 import { upsertGraphEdge } from "@/lib/db/queries/graph";
 import type { Variant } from "@/lib/db/types";
-import { isWritingVariant, persistWritingVariant } from "@/lib/writing/variant-writing";
+import {
+  isWritingVariant,
+  persistWritingVariant,
+  type PersistPersonalityContext,
+} from "@/lib/writing/variant-writing";
 import type { LineageEdgeSummary } from "@/lib/writing/lineage";
 
 export { isWritingVariant } from "@/lib/writing/variant-writing";
@@ -107,10 +111,19 @@ export type UpsertVariantResult = Variant & {
   lineageEdges?: LineageEdgeSummary[];
 };
 
-export function upsertVariant(input: UpsertVariantInput): UpsertVariantResult {
-  const existingForKind = input.id ? getVariantById(input.id) : undefined;
+export function upsertVariant(
+  input: UpsertVariantInput,
+  writingRunner?: DbRunner,
+): UpsertVariantResult {
+  const existingForKind = input.id
+    ? writingRunner
+      ? writingRunner.select().from(variants).where(eq(variants.id, input.id)).get()
+      : getVariantById(input.id)
+    : undefined;
   if (input.generationMetadata?.kind === "signals-writing" || isWritingVariant(existingForKind)) {
-    const result = persistWritingVariant(input);
+    const result = writingRunner
+      ? persistWritingVariant(input, undefined, writingRunner)
+      : db.transaction((tx) => persistWritingVariant(input, undefined, tx));
     return {
       ...result.variant,
       writing: true,
@@ -185,6 +198,20 @@ export function upsertVariant(input: UpsertVariantInput): UpsertVariantResult {
   }
 
   return getVariantById(id)!;
+}
+
+export function upsertPersonalityBoundWritingVariant(
+  input: UpsertVariantInput,
+  personality: PersistPersonalityContext,
+  runner: DbRunner,
+): UpsertVariantResult {
+  const result = persistWritingVariant(input, personality, runner);
+  return {
+    ...result.variant,
+    writing: true,
+    created: result.created,
+    lineageEdges: result.lineageEdges,
+  };
 }
 
 /** Sole writer of `published_as` edges and `variants.status = 'published'`. */

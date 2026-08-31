@@ -4,8 +4,8 @@ import { getOwnerContactId } from "@/lib/db/queries/contacts";
 import { getOrgById, listOrgs } from "@/lib/db/queries/orgs";
 import {
   getRepresentedOrgId,
-  setRepresentedOrgId,
 } from "@/lib/settings/signals-config";
+import { setRepresentedOrganization } from "@/lib/personality/use-cases";
 
 const putSchema = z.object({
   orgId: z.string().min(1).nullable(),
@@ -60,6 +60,6 @@ export async function PUT(request: Request) {
       );
     }
   }
-  setRepresentedOrgId(parsed.data.orgId);
+  await setRepresentedOrganization(parsed.data.orgId);
   return GET();
 }

@@ -4704,6 +4704,62 @@
                       "tool"
                     ],
                     "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "set_target_representation"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "targetId": {
+                            "type": "string"
+                          },
+                          "bindingId": {
+                            "type": "string"
+                          },
+                          "represents": {
+                            "type": "object"
+                          },
+                          "evidence": {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "const": "thread_message"
+                              },
+                              "workspaceSlug": {
+                                "type": "string"
+                              },
+                              "threadSlug": {
+                                "type": "string"
+                              },
+                              "note": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "workspaceSlug",
+                              "threadSlug"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "targetId",
+                          "bindingId",
+                          "represents",
+                          "evidence"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
                   }
                 ],
                 "properties": {
@@ -4797,7 +4853,8 @@
                       "list_platform_targets",
                       "get_platform_target",
                       "prepare_platform_target",
-                      "release_platform_target"
+                      "release_platform_target",
+                      "set_target_representation"
                     ],
                     "description": "Agent tool name from the manifest"
                   },
@@ -4944,6 +5001,6 @@
   ],
   "x-signals-agent-tools": {
     "manifestVersion": "1",
-    "toolCount": 88
+    "toolCount": 89
   }
 }

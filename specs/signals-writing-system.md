@@ -419,8 +419,8 @@ type VariantGeneration = {
 are untouched. Validation failures return `VALIDATION_ERROR` with the Zod path.
 Under ADR-373-7, an agent supplies only `personality.bindingId`; the server requires the active
 binding, stamps its whole-file `personalityHash` and workspace slug, and rejects a stale id. Skill
-versions before `0.3.0` may omit the field and remain legacy-unbound; canonicalization preserves
-their old audit hashes as specified in §5.5. Skill `>= 0.3.0` requires a binding whenever the
+versions before `1.1.0` may omit the field and remain legacy-unbound; canonicalization preserves
+their old audit hashes as specified in §5.5. Skill `>= 1.1.0` requires a binding whenever the
 workspace has one. The full drift/revocation/migration contract is normative in
 `specs/personality-projection.md` §6.
 

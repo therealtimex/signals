@@ -1082,6 +1082,37 @@ describe.sequential("Personality proposal and apply lifecycle", () => {
     });
   });
 
+  it("reports committed cleanup failure and repairs it on applied-proposal replay", async () => {
+    const proposal = await proposePersonalityProjection({}, proposalDependencies());
+    let failCleanup = true;
+    let cleanupCalls = 0;
+    const dependencies = {
+      ...applyDependencies(proposal),
+      onBindingCommitted: () => {
+        cleanupCalls += 1;
+        if (failCleanup) throw new Error("injected cleanup failure");
+      },
+    };
+    await expect(approvePersonalityProposal({
+      proposalId: proposal.id,
+      evidence: { kind: "ui", route: "/settings/personality" },
+    }, dependencies)).rejects.toMatchObject({
+      code: "EXECUTION_ERROR",
+      details: {
+        bindingCommitted: true,
+        cleanupRequired: true,
+        bindingId: proposal.proposedBindingId,
+      },
+    });
+    expect(readPersonalityStore().index.proposals[proposal.id].state).toBe("applied");
+
+    failCleanup = false;
+    await expect(retryPersonalityProposal(proposal.id, dependencies)).resolves.toMatchObject({
+      binding: { id: proposal.proposedBindingId },
+    });
+    expect(cleanupCalls).toBe(2);
+  });
+
   it("classifies every workspace drift family with its exact public reason", async () => {
     const proposal = await proposePersonalityProjection({}, proposalDependencies());
     await approvePersonalityProposal({

@@ -612,7 +612,7 @@ personality?: { bindingId: `pb_${string}`; personalityHash: string; workspaceSlu
 - `personality` joins the audit `inputHash` field list (§5.5 of the writing spec). Canonicalization
   drops `undefined`, so legacy variants without the field keep their existing hashes.
 - Enforcement: when the workspace has an active projection binding and
-  `generationMetadata.skill.version >= 0.3.0`, a `signals-writing` variant without `personality` is
+  `generationMetadata.skill.version >= 1.1.0`, a `signals-writing` variant without `personality` is
   `VALIDATION_ERROR` / `personality_binding_required`. Older skill versions are accepted with
   `personality: null` (migration window, §9).
 - Eager revocation (apply step 8): for every unqueued variant in this workspace whose
@@ -811,7 +811,7 @@ provisioned slug as `SIGNALS_RTX_WORKSPACE_SLUG` automatically.
 
 ### 9.4 Skill, Creative Studio, calibration, platform adapters
 
-- `signals-writing` 0.3.0 (child D): reads the four files before drafting, echoes
+- `signals-writing` 1.1.0 (child D): reads the four files before drafting, echoes
   `personality.status` and the binding on the approval card, passes `bindingId` to
   `upsert_variant`, renders the proposal card, and never edits Personality files itself.
 - Creative Studio (#351): brief panel shows `PersonalityStatus`; variant board shows the binding
@@ -866,7 +866,7 @@ guarantee and surface as host `recovery_required` if they produce an unexpected 
 | C6 | Two legacy `account`/`profile` targets default to `unbound`. Assigning one to the exact self and one to another contact/org requires distinct user evidence; only the exact bound identity is compatible, and unbind/rebind to a different self never reinterprets the old decision. | tool + unit | C |
 | C7 | After a bound variant is audited and approved, changing any allowlisted Personality source changes `currentSourceHash`, makes the old audit/effective approval stale, returns an unqueued approved item to `draft`, and blocks materialization/G5. A new audit against the unchanged `source_stale` binding records the new source hash + warning and may materialize only after fresh explicit approval; a second source change stales it again. | tool + route | C |
 | G1 | UI reads return an etag/hash and UI saves require it. With UI and SDK paths on the same host coordinator, the exact `read expected hashes → external UI save → SDK commit` fault interleaving lets exactly one stale-revision writer commit; the second revalidates to pre-mutation `file_changed`. Neither writer's bytes are silently lost. | RealTimeX integration | G |
-| D1 | The skill's proposal and approval cards contain only persisted fields; the packaged plugin zip contains the template `AGENTS.md` Personality section; `signals-writing` 0.3.0 passes `bindingId` and never writes `*.md` in the workspace root. | package + fixture | D |
+| D1 | The skill's proposal and approval cards contain only persisted fields; the packaged plugin zip contains the template `AGENTS.md` Personality section; `signals-writing` 1.1.0 passes `bindingId` and never writes `*.md` in the workspace root. | package + fixture | D |
 | E1 | Settings diff view renders managed vs unmanaged regions from the proposal's `files[]` only; Approve is disabled for `noop`/`superseded`/`stale`. | component | E |
 | S1 | Nothing in this epic creates a publish job, reply, comment, or reaction without the existing `send-to-agent` user path (static grep test over the new modules for `createPublishJob`/`send-to-agent` callers). | static | C |
 
@@ -911,7 +911,7 @@ guarantee and surface as host `recovery_required` if they produce an unexpected 
 ```
 #373 (this spec + writing-spec amendment; Dev lands as spec-only PR)
   ├─► A sources+render ───────────────────────────────┐
-  └─► G RTX shared-writer SDK + UI coordination ─────┴─► B projection store/apply/rollback/tools/REST ─► C writing binding + gates ─► D skill 0.3 + plugin template
+  └─► G RTX shared-writer SDK + UI coordination ─────┴─► B projection store/apply/rollback/tools/REST ─► C writing binding + gates ─► D skill 1.1 + plugin template
                                                                                                                    └─► F mandate contract (dormant)      └─► E Settings → Personality UI
 #351 Creative Studio rebases on C · #352 reads the optional attribution field · #353 unaffected
 Later (own ADRs): H target-bound Personality · I any non-assist mandate mode
@@ -926,7 +926,7 @@ Child issues (file from these bodies; each gets its own loop; none expands the #
 | 2 | **B** | Personality projection store: propose, approve/apply, rollback, drift | `src/lib/personality/{store,workspace,diff,apply}.ts`, exact immutable `proposedFile` + proposal-time binding ids, RealTimeX G client (no direct writes), `AGENTS.md` pointer + `CLAUDE.md` shim request, tools `get_personality_binding`, `propose_personality_projection`, `approve_personality_projection`, `retry_personality_projection`, `rollback_personality_projection`, `unbind_personality_projection`, REST `/api/personality/{binding,proposals,proposals/:id/approve|reject,rollback,unbind}`, `WORKSPACE_UNAVAILABLE`, docs/OpenAPI/backup note | W1–W10 |
 | 3 | **C** | Bind writing artifacts to Personality; stale re-audit; target representation | `metadata.writing.personality` (contracts + canonical `inputHash` field list), `WritingAudit.personality` current-source snapshot, whole-file/source drift gates at audit/materialize/G5, eager revoke on rebinding, lazy source-stale revocation, `get_writing_context.personality` + `voice.status` values + concrete `targets[].represents`, explicitly user-evidenced `set_target_representation` + REST, `AttributionKey.personalityBindingId`, `revokedReason: personality_stale|personality_source_stale` | C1–C7, S1 |
 | 3′ | **F** | Presence mandate contract (dormant) | `mandates.json` store, `PRESENCE_MANDATE_MODES`, `get_presence_mandate`/`upsert_presence_mandate` (assist_only only), `get_writing_context.mandate`, ledger read-model type only | C5 |
-| 4 | **D** | `signals-writing` 0.3.0: Personality-first drafting, proposal/approval cards; plugin template | `SKILL.md`/`core/voice.md`/`core/approval.md` updates, `personality` in `reference.md`, cards, `templates/signals/AGENTS.md` Personality section, package test, version `0.2.4` | D1, R7/R8 still green |
+| 4 | **D** | `signals-writing` 1.1.0: Personality-first drafting, proposal/approval cards; plugin template | `SKILL.md`/`core/voice.md`/`core/approval.md` updates, `personality` in `reference.md`, cards, `templates/signals/AGENTS.md` Personality section, package test, version `0.2.4` | D1, R7/R8 still green |
 | 5 | **E** | Settings → Personality: workspace status, diff review, approve/rollback, statements, org picker, target table | routes/components over B/C REST; no new writing state | E1 |
 
 Acceptance for #373's own PR: this file, the writing-spec amendment, and no product code.
@@ -942,7 +942,7 @@ posting path exists (S1 + C5).
    transaction, UI migration, and G1 interleaving test are released in the minimum compatible
    RealTimeX version.
 3. **Removed voice fallback** (§9.2). Default: ship with `unclaimed_only` messaging and the claim flow in A/E; announce in release notes.
-4. **Skill version gate** for `personality_binding_required` (0.3.0). Default: warn-only before D lands; enforce with D.
+4. **Skill version gate** for `personality_binding_required` (1.1.0). Default: 1.0.x remains legacy-unbound before D lands; enforce with D.
 5. **Standalone dev without the desktop layout** → `WORKSPACE_UNAVAILABLE`. Default: Settings shows the same message as brief-file failures; no fallback write path.
 6. **Exemplar samples in `VOICE.md`** put self-authored text into the workspace directory. Default: acceptable (the user approved the samples and the proposal shows them); cap 5 × 600 chars.
 7. **Proposal baseline growth**: immutable proposals retain exact whole Personality files for every

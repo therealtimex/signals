@@ -36,7 +36,8 @@ import { listOrgIdentities, upsertOrgIdentity } from "@/lib/db/queries/org-ident
 import { listLaunches, toLaunchVariantSummary, upsertLaunch } from "@/lib/db/queries/launches";
 import { listNiches, upsertNiche } from "@/lib/db/queries/niches";
 import { semanticSearch } from "@/lib/db/queries/embeddings";
-import { getVariantById, upsertVariant } from "@/lib/db/queries/variants";
+import { getVariantById } from "@/lib/db/queries/variants";
+import { upsertVariantUseCase } from "@/lib/writing/variant-use-cases";
 import {
   createAndStartSimulationRun,
   completeSimulationRun,
@@ -607,7 +608,7 @@ export async function handleUpsertLaunch(input: z.infer<typeof upsertLaunchSchem
 }
 
 export async function handleUpsertVariant(input: z.infer<typeof upsertVariantSchema>) {
-  const variant = upsertVariant({
+  const variant = await upsertVariantUseCase({
     id: input.id,
     launchId: input.launchId,
     label: input.label,

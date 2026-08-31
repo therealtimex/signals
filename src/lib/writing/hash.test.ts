@@ -14,4 +14,15 @@ describe("writing canonical hashes", () => {
     expect(computeAuditInputHash("A", writing)).toBe(computeAuditInputHash("A", { ...writing, approval: { state: "revoked" }, materializedContentItemId: "two" }));
     expect(computeVoiceProfileHash({ id: "vp_profile1", label: "Me", version: 1, status: "draft", hash: "old" })).toBe(computeVoiceProfileHash({ id: "vp_profile1", label: "Me", version: 9, status: "approved", hash: "new" }));
   });
+
+  it("preserves the legacy hash when Personality is absent and changes it when bound", () => {
+    const writing = { platform: "x", surface: "x/post", goal: "likes", formulaId: "x/post/test@1", overlay: { id: "overlay:x", version: 1 }, core: { version: 1 }, voiceProfile: null, voicePrecedence: "voice_first", spine: { id: "spn_spine01", hash: "h" }, units: { texts: ["A"], count: 1, chars: [1] }, claimMap: [] };
+    const legacy = computeAuditInputHash("A", writing);
+    expect(legacy).toBe(computeAuditInputHash("A", { ...writing, personality: undefined }));
+    expect(computeAuditInputHash("A", { ...writing, personality: null })).not.toBe(legacy);
+    expect(computeAuditInputHash("A", {
+      ...writing,
+      personality: { schemaVersion: 1, bindingId: "pb_binding1" },
+    })).not.toBe(legacy);
+  });
 });

@@ -40,6 +40,11 @@ import { readVariantWritingProjection } from "@/lib/writing/variant-writing-proj
 import { computeAuditInputHash } from "@/lib/writing/hash";
 import { getVoiceProfile, resolveActiveVoiceProfileContext } from "@/lib/writing/voice-profile-store";
 import { getNeighbors } from "@/lib/db/queries/graph";
+import { getPersonalityBindingView } from "@/lib/personality/status";
+import {
+  auditPersonalityMatchesSnapshot,
+  hasExactPersonalitySourceStaleFinding,
+} from "@/lib/writing/personality-lineage";
 
 const MAX_BODY_LENGTH = 65_536;
 const MAX_THREAD_TEXTS = 24;
@@ -705,6 +710,8 @@ export async function handleGetWritingContext(
       : [];
   });
   const platforms = new Set(surfaces.map((surface) => surface.split("/")[0]));
+  const personality = await getPersonalityBindingView();
+  const compatibleTargetIds = new Set(personality.status.compatibleTargets);
   const targets = listPlatformTargets().flatMap((target) => {
     if (!platforms.has(target.platform)) return [];
     const view = toPlatformTargetView(target);
@@ -718,6 +725,11 @@ export async function handleGetWritingContext(
         isDefault: view.isDefault,
         status: view.status,
         capabilities: view.capabilities,
+        represents: view.represents,
+        compatible: compatibleTargetIds.has(view.id),
+        ...(view.personalityDecision
+          ? { bindingIdAtDecision: view.personalityDecision.bindingIdAtDecision }
+          : {}),
       },
     ];
   });
@@ -726,6 +738,34 @@ export async function handleGetWritingContext(
   );
   const variants = listVariantsByLaunchId(launch.id).map((variant) => {
     const projection = readVariantWritingProjection(variant);
+    const variantPersonality = projection?.personality;
+    const currentPersonality = Boolean(
+      variantPersonality
+      && personality.status.binding?.id === variantPersonality.bindingId
+      && personality.status.workspace.slug === variantPersonality.workspaceSlug
+      && personality.status.binding.sourceHash === variantPersonality.bindingSourceHash
+      && personality.status.binding.personalityHash === variantPersonality.personalityHash
+      && personality.status.binding.identity.selfContactId === variantPersonality.identity.selfContactId
+      && personality.status.binding.identity.representedOrgId
+        === variantPersonality.identity.representedOrgId
+      && personality.status.status !== "drifted"
+      && personality.status.status !== "unavailable"
+      && (!variantPersonality.target || targets.some((target) =>
+        target.id === variantPersonality.target?.targetId
+        && compatibleTargetIds.has(target.id)
+        && JSON.stringify(target.represents) === JSON.stringify(variantPersonality.target.represents)))
+      && auditPersonalityMatchesSnapshot(variantPersonality, projection?.audit?.personality)
+      && projection?.audit?.personality?.currentSourceHash === personality.status.currentSourceHash
+      && projection?.audit?.personality?.statusAtAudit === personality.status.status
+      && (personality.status.status !== "source_stale" || (
+        projection.approval?.by === "user"
+        && Boolean(projection.approval.evidence)
+        && hasExactPersonalitySourceStaleFinding(projection.audit?.findings ?? [], {
+          bindingSourceHash: variantPersonality.bindingSourceHash,
+          currentSourceHash: personality.status.currentSourceHash!,
+        })
+      ))
+    );
     return {
       id: variant.id,
       label: variant.label,
@@ -742,6 +782,12 @@ export async function handleGetWritingContext(
       materializedContentItemId: projection?.materializedContentItemId ?? variant.contentItemId,
       contentItemStatus: variant.contentItemId ? getContentItem(variant.contentItemId)?.status ?? null : null,
       lineage: projection?.lineage ?? null,
+      personality: variantPersonality ?? null,
+      personalityState: !variantPersonality
+        ? "legacy_unbound"
+        : currentPersonality
+          ? personality.status.status
+          : "stale",
       updatedAt: variant.updatedAt,
     };
   });
@@ -787,6 +833,7 @@ export async function handleGetWritingContext(
         ? { activeVersion: voice.activeVersion }
         : {}),
     },
+    personality: personality.status,
     approvalPolicy: typeof writing?.approvalPolicy === "string" ? writing.approvalPolicy : getWritingApprovalPolicy(),
   };
 }

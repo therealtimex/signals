@@ -1,6 +1,10 @@
 import { z } from "zod";
 import type { Variant } from "@/lib/db/types";
 import { writingUnitsSchema } from "@/lib/writing/content-writing";
+import {
+  variantPersonalitySnapshotSchema,
+  writingAuditPersonalitySchema,
+} from "@/lib/writing/personality-lineage";
 
 const variantWritingProjectionSchema = z
   .object({
@@ -9,6 +13,7 @@ const variantWritingProjectionSchema = z
         id: z.string().min(1),
         inputHash: z.string().min(1),
         verdict: z.string().min(1),
+        personality: writingAuditPersonalitySchema.nullable().optional(),
       })
       .passthrough()
       .nullable(),
@@ -29,6 +34,7 @@ const variantWritingProjectionSchema = z
     schemaVersion: z.literal(1).optional(),
     spine: z.object({ id: z.string().min(1), hash: z.string().min(1) }).passthrough().optional(),
     materializedContentItemId: z.string().min(1).optional(),
+    personality: variantPersonalitySnapshotSchema.nullable().optional(),
     lineage: z.object({
       derivedFromVariantId: z.string().optional(),
       adaptedFromContentItemId: z.string().optional(),

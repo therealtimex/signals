@@ -17,6 +17,7 @@ export type AttributionKey = {
   contentItemId: string;
   contentPostId: string;
   targetId?: string;
+  personalityBindingId: string | null;
 };
 
 export function deriveAttributionKey(input: {
@@ -41,8 +42,25 @@ export function deriveAttributionKey(input: {
     variantId: input.variantId,
     contentItemId: input.contentItemId,
     contentPostId: input.contentPostId,
+    personalityBindingId: input.writing.personality?.bindingId ?? null,
     ...(input.writing.targetId ? { targetId: input.writing.targetId } : {}),
   };
+}
+
+export function attributionGroupKey(key: AttributionKey): string {
+  return JSON.stringify({
+    platform: key.platform,
+    surface: key.surface,
+    goal: key.goal,
+    formulaId: key.formulaId,
+    overlayVersion: key.overlayVersion,
+    coreVersion: key.coreVersion,
+    voiceProfileId: key.voiceProfileId,
+    voiceProfileVersion: key.voiceProfileVersion,
+    audienceCohort: key.audienceCohort,
+    targetId: key.targetId ?? null,
+    personalityBindingId: key.personalityBindingId ?? null,
+  });
 }
 
 function object(value: unknown): Record<string, unknown> {

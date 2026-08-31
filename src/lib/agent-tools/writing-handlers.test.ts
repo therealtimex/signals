@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { browserConnections, contentItems, contentPosts, graphEdges, launches, platformTargets, variants } from "@/lib/db/schema";
 import { getLaunchById } from "@/lib/db/queries/launches";
+import { upsertPersonalityBoundWritingVariant } from "@/lib/db/queries/variants";
 import { createContentItem, deleteContentItem } from "@/lib/db/queries/content";
 import { createPublishJob } from "@/lib/db/queries/publish-jobs";
 import { createContact } from "@/lib/db/queries/contacts";
@@ -11,6 +12,9 @@ import { handleCompletePublish } from "@/lib/agent-tools/publish-handlers";
 import { resetCoreTables } from "@/test/db";
 import { buildWritingUnits } from "@/lib/writing/content-writing";
 import { resolveWritingLineage } from "@/lib/writing/lineage";
+import { reconcilePersonalityBinding } from "@/lib/writing/personality-revocation";
+import { materializeVariantWithRunner } from "@/lib/writing/materialize";
+import type { PersonalityWritingGuard } from "@/lib/writing/personality-guard";
 
 function target() {
   db.insert(browserConnections).values({ id: "connection-1", sessionName: "writing-test", kind: "dedicated", status: "active" }).run();
@@ -623,5 +627,164 @@ describe("writing lifecycle agent tools", () => {
     const second = await invokeAgentTool("materialize_variant", { variantId: secondVariant.id }) as { contentItemId: string };
     db.update(contentItems).set({ status: "queued" }).where(eq(contentItems.id, second.contentItemId)).run();
     expect(() => deleteContentItem(second.contentItemId)).toThrow(/publish lane/i);
+  });
+
+  it("reconciles old bound artifacts while preserving legacy and queued snapshots", async () => {
+    const launchRow = await launch();
+    const legacy = await variant(launchRow.id, "Legacy bytes stay unchanged.");
+    const legacyRow = db.select().from(variants).where(eq(variants.id, legacy.id)).get()!;
+    const legacyMetadata = legacyRow.metadata;
+
+    const personality = {
+      schemaVersion: 1,
+      bindingId: "pb_binding1",
+      personalityHash: "a".repeat(64),
+      bindingSourceHash: "b".repeat(64),
+      workspaceSlug: "signals",
+      workspaceId: null,
+      workspaceKey: "workspace-key",
+      identity: { selfContactId: "self-1", representedOrgId: null },
+      target: null,
+    } as const;
+    const bindVariant = async (body: string, itemStatus: "approved" | "queued") => {
+      const saved = await variant(launchRow.id, body);
+      const row = db.select().from(variants).where(eq(variants.id, saved.id)).get()!;
+      const metadata = JSON.parse(row.metadata ?? "{}");
+      metadata.writing.personality = personality;
+      metadata.writing.audit.personality = {
+        ...personality,
+        currentSourceHash: personality.bindingSourceHash,
+        statusAtAudit: "bound",
+      };
+      metadata.writing.approval = {
+        ...metadata.writing.approval,
+        state: "approved",
+        by: "user",
+        at: 100,
+        auditId: metadata.writing.audit.id,
+      };
+      const item = createContentItem({
+        body,
+        contentType: "post",
+        platformTarget: "x",
+        status: itemStatus,
+        aiGenerated: true,
+        origin: "authored",
+        direction: "outbound",
+      });
+      db.update(variants).set({
+        contentItemId: item.id,
+        status: "selected",
+        metadata: JSON.stringify(metadata),
+      }).where(eq(variants.id, saved.id)).run();
+      return { saved, item, metadata: JSON.stringify(metadata) };
+    };
+
+    const unqueued = await bindVariant("Old binding becomes stale.", "approved");
+    const queued = await bindVariant("Queued snapshot is immutable.", "queued");
+    expect(reconcilePersonalityBinding("pb_binding2")).toEqual([unqueued.saved.id]);
+
+    const revoked = db.select().from(variants).where(eq(variants.id, unqueued.saved.id)).get()!;
+    expect(JSON.parse(revoked.metadata ?? "{}").writing.approval).toMatchObject({
+      state: "revoked",
+      revokedReason: "personality_stale",
+    });
+    expect(revoked.status).toBe("draft");
+    expect(db.select().from(contentItems).where(eq(contentItems.id, unqueued.item.id)).get()?.status).toBe("draft");
+
+    expect(db.select().from(variants).where(eq(variants.id, queued.saved.id)).get()?.metadata).toBe(queued.metadata);
+    expect(db.select().from(contentItems).where(eq(contentItems.id, queued.item.id)).get()?.status).toBe("queued");
+    expect(db.select().from(variants).where(eq(variants.id, legacy.id)).get()?.metadata).toBe(legacyMetadata);
+
+    const reconciledMetadata = revoked.metadata;
+    const reconciledUpdatedAt = revoked.updatedAt;
+    expect(reconcilePersonalityBinding("pb_binding2")).toEqual([]);
+    expect(db.select().from(variants).where(eq(variants.id, unqueued.saved.id)).get()).toMatchObject({
+      metadata: reconciledMetadata,
+      updatedAt: reconciledUpdatedAt,
+    });
+  });
+
+  it("persists and materializes a bound variant in one caller-owned transaction", async () => {
+    const launchRow = await launch();
+    const payload = variantPayload(launchRow.id, "Bound writing stays transactional.");
+    payload.generationMetadata.skill.version = "1.1.0";
+    Object.assign(payload.metadata.writing, { personality: { bindingId: "pb_binding1" } });
+    const personality = {
+      schemaVersion: 1 as const,
+      bindingId: "pb_binding1",
+      personalityHash: "a".repeat(64),
+      bindingSourceHash: "b".repeat(64),
+      workspaceSlug: "signals",
+      workspaceId: null,
+      workspaceKey: "workspace-key",
+      identity: { selfContactId: "self-1", representedOrgId: null },
+      target: {
+        targetId: "target-1",
+        represents: { kind: "self" as const, contactId: "self-1" },
+      },
+    };
+    const decision = {
+      schemaVersion: 1 as const,
+      represents: personality.target.represents,
+      setAt: 100,
+      by: "user" as const,
+      evidence: { kind: "ui" as const, route: "/settings/personality" },
+      bindingIdAtDecision: personality.bindingId,
+    };
+    db.update(platformTargets)
+      .set({ metadata: JSON.stringify({ personality: decision }) })
+      .where(eq(platformTargets.id, "target-1"))
+      .run();
+    const targetRow = db.select().from(platformTargets).where(eq(platformTargets.id, "target-1")).get()!;
+    const guard = {
+      workspace: {
+        slug: personality.workspaceSlug,
+        id: personality.workspaceId,
+        key: personality.workspaceKey,
+        dir: "/workspace",
+      },
+      binding: {
+        id: personality.bindingId,
+        sourceHash: personality.bindingSourceHash,
+        personalityHash: personality.personalityHash,
+        workspace: {
+          slug: personality.workspaceSlug,
+          id: personality.workspaceId,
+          key: personality.workspaceKey,
+          dir: "/workspace",
+        },
+        identity: personality.identity,
+      },
+      status: "bound",
+      currentPersonalityHash: personality.personalityHash,
+      currentSourceHash: personality.bindingSourceHash,
+      currentIdentity: personality.identity,
+      compatibleTargets: new Set([targetRow.id]),
+      targetDecisions: new Map([[targetRow.id, decision]]),
+      targets: new Map([[targetRow.id, targetRow]]),
+      detail: undefined,
+    } as PersonalityWritingGuard;
+
+    const result = db.transaction((tx) => {
+      const saved = upsertPersonalityBoundWritingVariant(payload, {
+        snapshot: personality,
+        auditPersonality: {
+          ...personality,
+          currentSourceHash: personality.bindingSourceHash,
+          statusAtAudit: "bound",
+        },
+      }, tx);
+      return {
+        saved,
+        materialized: materializeVariantWithRunner({ variantId: saved.id }, guard, tx),
+      };
+    }, { behavior: "immediate" });
+
+    expect(result.materialized).toMatchObject({ created: true, nextAction: "publish" });
+    expect(db.select().from(variants).where(eq(variants.id, result.saved.id)).get()).toMatchObject({
+      status: "selected",
+      contentItemId: result.materialized.contentItemId,
+    });
   });
 });

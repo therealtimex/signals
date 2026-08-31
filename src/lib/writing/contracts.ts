@@ -3,6 +3,11 @@ import { PLATFORMS } from "@/lib/db/platforms";
 import { SURFACE_IDS } from "@/lib/writing/surfaces";
 import { parseFormulaId, parseOverlayId, parseRuleId } from "@/lib/writing/ids";
 import { writingUnitsSchema } from "@/lib/writing/content-writing";
+import {
+  variantPersonalityInputSchema,
+  variantPersonalitySnapshotSchema,
+  writingAuditPersonalitySchema,
+} from "@/lib/writing/personality-lineage";
 
 const unixSeconds = z.number().int().nonnegative();
 const id = (prefix: string) => z.string().regex(new RegExp(`^${prefix}_[A-Za-z0-9_-]{6,}$`));
@@ -102,26 +107,36 @@ export const writingAuditSchema = z.object({
   claims: z.object({ total: z.number().int().nonnegative(), preserved: z.number().int().nonnegative(), altered: z.array(id("clm")), missing: z.array(id("clm")), invented: z.array(z.object({ text: z.string(), location: z.object({ unit: z.number().int().nonnegative(), start: z.number().int().nonnegative().optional(), end: z.number().int().nonnegative().optional(), excerpt: z.string().optional() }).passthrough().optional() }).passthrough()), privateIncluded: z.array(id("clm")) }).passthrough(),
   hard: z.object({ units: z.number().int().positive(), chars: z.array(z.number().int().nonnegative()), limit: z.number().int().nonnegative(), hashtags: z.number().int().nonnegative(), links: z.number().int().nonnegative(), mediaCount: z.number().int().nonnegative() }).passthrough(),
   voice: z.object({ status: z.enum(["applied", "none", "rules_first"]), profileId: z.string().optional(), version: z.number().int().positive().optional(), driftScore: z.number().min(0).optional(), protectedQuirksKept: z.boolean().optional(), skipped: z.array(z.string()) }).passthrough(), heuristics: z.object({ applied: z.array(z.string()), conflicts: z.array(z.string()), skippedForVoice: z.array(z.string()) }).passthrough(),
+  personality: writingAuditPersonalitySchema.nullable().optional(),
 }).passthrough();
 
-export const approvalStateSchema = z.object({ schemaVersion: z.literal(1), state: z.enum(["pending", "approved", "rejected", "revoked"]), riskTier: z.enum(["low", "medium", "high"]), policy: approvalPolicySchema, auditId: id("aud").optional(), by: z.enum(["user", "policy"]).optional(), at: unixSeconds.optional(), evidence: approvalEvidenceSchema.optional(), note: z.string().optional(), revokedReason: z.enum(["spine_changed", "audit_stale", "user", "voice_superseded"]).optional() }).passthrough();
+export const approvalStateSchema = z.object({ schemaVersion: z.literal(1), state: z.enum(["pending", "approved", "rejected", "revoked"]), riskTier: z.enum(["low", "medium", "high"]), policy: approvalPolicySchema, auditId: id("aud").optional(), by: z.enum(["user", "policy"]).optional(), at: unixSeconds.optional(), evidence: approvalEvidenceSchema.optional(), note: z.string().optional(), revokedReason: z.enum(["spine_changed", "audit_stale", "user", "voice_superseded", "personality_stale", "personality_source_stale"]).optional() }).passthrough();
 export const voiceProfileRefSchema = z.object({ id: id("vp"), version: z.number().int().positive(), hash: z.string().min(1) }).passthrough();
 export const variantWritingSchema = z.object({
   schemaVersion: z.literal(1), platform: platformSchema, surface: z.enum(SURFACE_IDS), targetId: z.string().min(1).optional(), goal: writingGoalSchema,
   formulaId: z.string().refine((value) => parseFormulaId(value) !== null, "invalid formula id"), overlay: z.object({ id: z.string().min(1), version: z.number().int().positive() }).passthrough(), core: z.object({ version: z.number().int().positive() }).passthrough(), voiceProfile: voiceProfileRefSchema.nullable(), voicePrecedence: voicePrecedenceSchema, spine: z.object({ id: id("spn"), hash: z.string().min(1) }).passthrough(), units: writingUnitsSchema,
   claimMap: z.array(z.object({ claimId: id("clm"), present: z.boolean(), unit: z.number().int().nonnegative().optional(), verbatim: z.boolean().optional() }).passthrough()), audit: writingAuditSchema.nullable(), auditHistory: z.array(z.object({ id: id("aud"), auditedAt: unixSeconds, verdict: z.enum(["pass", "warn", "block"]) }).passthrough()).max(5).optional(), approval: approvalStateSchema,
-  lineage: z.object({ derivedFromVariantId: z.string().optional(), adaptedFromContentItemId: z.string().optional(), adaptedFromVariantId: z.string().optional(), sourceIds: z.array(id("src")) }).passthrough(), capability: z.object({ publish: z.enum(["direct", "beta", "draft_only", "export_only", "unsupported"]) }).passthrough(), materializedContentItemId: z.string().optional(), media: z.object({ assetIds: z.array(z.string()).max(10) }).passthrough().optional(),
+  lineage: z.object({ derivedFromVariantId: z.string().optional(), adaptedFromContentItemId: z.string().optional(), adaptedFromVariantId: z.string().optional(), sourceIds: z.array(id("src")) }).passthrough(), capability: z.object({ publish: z.enum(["direct", "beta", "draft_only", "export_only", "unsupported"]) }).passthrough(), materializedContentItemId: z.string().optional(), media: z.object({ assetIds: z.array(z.string()).max(10) }).passthrough().optional(), personality: variantPersonalitySnapshotSchema.nullable().optional(),
 }).passthrough();
 
 export const writingAuditInputSchema = writingAuditSchema.omit({
   id: true,
   variantId: true,
   inputHash: true,
-});
+  personality: true,
+}).extend({ personality: z.never().optional() });
 
 export const variantWritingInputSchema = variantWritingSchema
-  .omit({ audit: true, auditHistory: true, approval: true, capability: true, materializedContentItemId: true })
-  .extend({ audit: writingAuditInputSchema.nullable() })
+  .omit({ audit: true, auditHistory: true, approval: true, capability: true, materializedContentItemId: true, personality: true })
+  .extend({
+    audit: writingAuditInputSchema.nullable(),
+    personality: variantPersonalityInputSchema.nullable().optional(),
+  })
+  .passthrough();
+
+export const authoritativeVariantWritingInputSchema = variantWritingInputSchema
+  .omit({ personality: true })
+  .extend({ personality: variantPersonalitySnapshotSchema.nullable().optional() })
   .passthrough();
 
 export const variantGenerationSchema = z.object({ schemaVersion: z.literal(1), kind: z.literal("signals-writing"), mode: generationModeSchema, model: z.string().nullable(), skill: z.object({ name: z.literal("signals-writing"), version: z.string().min(1) }).passthrough(), agent: z.object({ workflowRunId: z.string().min(1), rtxThreadSlug: z.string().optional(), rtxRuntimeSessionId: z.string().optional(), briefPath: z.string().optional() }).passthrough(), requestHash: z.string().min(1).max(200), generatedAt: unixSeconds }).passthrough();
@@ -139,6 +154,7 @@ export type LaunchWritingDocument = z.infer<typeof launchWritingSchema>;
 export type LaunchWriting = z.infer<typeof completeLaunchWritingSchema>;
 export type VariantWriting = z.infer<typeof variantWritingSchema>;
 export type VariantWritingInput = z.infer<typeof variantWritingInputSchema>;
+export type AuthoritativeVariantWritingInput = z.infer<typeof authoritativeVariantWritingInputSchema>;
 export type VariantGeneration = z.infer<typeof variantGenerationSchema>;
 export type WritingAudit = z.infer<typeof writingAuditSchema>;
 export type ApprovalState = z.infer<typeof approvalStateSchema>;

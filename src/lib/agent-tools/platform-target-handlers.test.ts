@@ -53,7 +53,11 @@ describe("platform target agent-tool handlers", () => {
   it("lists, gets, prepares, and releases a target with structured context", async () => {
     const { target } = seedTarget();
     const listed = await handleListPlatformTargets({});
-    expect(listed.targets).toContainEqual(expect.objectContaining({ id: target.id }));
+    expect(listed.targets).toContainEqual(expect.objectContaining({
+      id: target.id,
+      represents: { kind: "unbound" },
+      personalityDecision: null,
+    }));
 
     expect(await handleGetPlatformTarget({ targetId: target.id })).toMatchObject({
       id: target.id,

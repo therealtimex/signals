@@ -46,8 +46,10 @@ Invoke body: `{ "tool": "<name>", "input": { ... } }`
 | `retry_personality_projection` | Resume/inspect/recover an existing approved attempt; never invent approval |
 | `rollback_personality_projection` | Propose a retained historical binding by `bindingId`; does not approve |
 | `unbind_personality_projection` | Propose managed-block removal while preserving workspace prose; does not approve |
+| `upsert_variant` | Persist a writing variant; Personality-aware clients submit only the active `{ bindingId }` selector |
 | `materialize_variant` | Create or refresh one approved content artifact from a current audited writing variant |
 | `revoke_variant_approval` | Revoke approval and return an unqueued writing artifact to draft |
+| `set_target_representation` | Bind/unbind one acting target to the exact active self/org identity with thread-message evidence |
 | `query_goals` | List goals |
 | `create_task` | Follow-up task |
 | `create_simulation_run` | Wind Tunnel: create + start a simulation run for a variant |
@@ -99,13 +101,15 @@ Scores and metrics are validated at the query layer. Grounding uses shared-scope
 
 ## Signals Writing flow
 
-1. Read the privacy-filtered spine, voice, target, capability, and variant state with
-   `get_writing_context`.
+1. Read the privacy-filtered spine, voice, Personality status, target representation/capability,
+   and variant state with `get_writing_context`.
 2. Persist a complete hash-stamped spine with `upsert_launch`; partial updates deep-merge and
    preserve durable approvals.
 3. Persist each native draft and structured audit with `upsert_variant` and
-   `generationMetadata.kind: "signals-writing"`. Signals derives audit hashes, verdict, risk,
-   approval, capability, and owned lineage.
+   `generationMetadata.kind: "signals-writing"`. For skill 1.1.0+, pass only
+   `metadata.writing.personality: { "bindingId": "pb_..." }`; never copy hashes, workspace,
+   identity, target, or audit Personality data from context. Signals resolves and stamps all of
+   that lineage and derives audit hashes, verdict, risk, approval, and capability.
 4. Call `materialize_variant` only for a current non-blocked audit. Explicit/high-risk approvals
    require real user evidence. The tool never queues publishing.
 5. Use `revoke_variant_approval` when the user withdraws approval. Publish only through the
@@ -122,6 +126,27 @@ Scores and metrics are validated at the query layer. Grounding uses shared-scope
    durable transaction ID and handles recovery rules. Do not create a fresh proposal unless the
    prior one is stale or the host reports `resolved_discarded`.
 5. Rollback and unbind are proposals too. They require a separate approval before any host write.
+6. Targets start unbound. When the user explicitly chooses an acting identity, call
+   `set_target_representation` with the active `bindingId`, the exact self contact/org ID, and
+   current `thread_message` evidence. Do not infer representation from the account or handle.
+
+A `source_stale` Personality may produce a new audit only with the server's deterministic warning
+and then fresh explicit user approval. File, binding, represented-identity, or target drift fails
+closed. Never reuse a stale materialization or bypass `materialize_variant`/send-to-agent gates.
+
+**set_target_representation**
+```json
+{
+  "targetId": "target_x",
+  "bindingId": "pb_current",
+  "represents": { "kind": "self", "contactId": "contact_self" },
+  "evidence": {
+    "kind": "thread_message",
+    "workspaceSlug": "signals",
+    "threadSlug": "current-thread"
+  }
+}
+```
 
 ## Common input shapes
 

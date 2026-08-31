@@ -3,6 +3,7 @@ import {
   SOCIAL_PERSONALITY_FILES,
   type PersonalityBinding,
   type PersonalityDriftReason,
+  type PersonalityIndex,
   type PersonalityProposal,
   type PersonalityStatus,
   personalityStatusSchema,
@@ -22,6 +23,9 @@ import { probeHostCapabilities } from "@/lib/rtx/capabilities";
 import type { PersonalityCapabilityState } from "@/lib/rtx/capabilities";
 import type { EnvLike } from "@/lib/rtx/env";
 import { sha256Canonical } from "@/lib/writing/hash";
+import { listPlatformTargets } from "@/lib/db/queries/platform-targets";
+import { compatibleTargetIds } from "@/lib/personality/target-representation";
+import type { PlatformTarget } from "@/lib/db/types";
 
 export type PersonalityBindingView = {
   status: PersonalityStatus;
@@ -40,6 +44,7 @@ export type PersonalityStatusDependencies = {
   readWorkspaceFiles?: typeof readPersonalityWorkspaceFiles;
   loadSources?: typeof loadPersonalitySourceBundle;
   probeCapability?: () => Promise<PersonalityCapabilityState>;
+  listTargets?: () => PlatformTarget[];
 };
 
 const SECTION_BY_PATH = {
@@ -204,6 +209,97 @@ async function hostView(
   return { capability: capability.state, version: capability.version };
 }
 
+export type PersonalityStatusCoreInput = {
+  workspace: PersonalityWorkspace;
+  index: PersonalityIndex;
+  getProposal: (proposalId: string) => PersonalityProposal | undefined;
+  readFiles: typeof readPersonalityWorkspaceFiles;
+  loadSources: typeof loadPersonalitySourceBundle;
+  targets: PlatformTarget[];
+  host: PersonalityStatus["host"];
+};
+
+export function computePersonalityStatus(input: PersonalityStatusCoreInput): PersonalityStatus {
+  const bindingSet = input.index.bindings[input.workspace.key];
+  if (!bindingSet) {
+    const mismatch = Object.values(input.index.bindings).some(
+      (candidate) => candidate.workspaceSlug === input.workspace.slug,
+    );
+    return personalityStatusSchema.parse({
+      workspace: { slug: input.workspace.slug, dir: input.workspace.dir },
+      binding: null,
+      currentSourceHash: null,
+      status: mismatch ? "unavailable" : "unbound",
+      ...(mismatch ? { detail: { unavailable: "workspace_mismatch" } } : {}),
+      compatibleTargets: [],
+      host: input.host,
+    });
+  }
+  if (
+    bindingSet.workspaceSlug !== input.workspace.slug
+    || bindingSet.workspaceId !== input.workspace.id
+    || bindingSet.workspaceDir !== input.workspace.dir
+  ) {
+    return personalityStatusSchema.parse({
+      workspace: { slug: input.workspace.slug, dir: input.workspace.dir },
+      binding: null,
+      currentSourceHash: null,
+      status: "unavailable",
+      detail: { unavailable: "workspace_mismatch" },
+      compatibleTargets: [],
+      host: input.host,
+    });
+  }
+  const active = bindingSet.active;
+  if (!active) {
+    return personalityStatusSchema.parse({
+      workspace: { slug: input.workspace.slug, dir: input.workspace.dir },
+      binding: null,
+      currentSourceHash: null,
+      status: "unbound",
+      compatibleTargets: [],
+      host: input.host,
+    });
+  }
+  const bindingProposal = input.getProposal(active.proposalId);
+  if (!bindingProposal) {
+    throw new AgentToolError("STORE_CONFLICT", "Active Personality proposal is missing", {
+      reason: "store_corrupt",
+    });
+  }
+  const workspaceFiles = new Map(input.readFiles(input.workspace).map((file) => [file.path, file]));
+  const drift = [
+    ...socialDrift(active, workspaceFiles),
+    ...indexDrift(active, bindingProposal, workspaceFiles),
+  ];
+  const source = sourceStaleDetail(bindingProposal, input.loadSources);
+  const isSourceStale = source.currentSourceHash !== active.sourceHash
+    || Object.keys(source.detail ?? {}).length > 0;
+  return personalityStatusSchema.parse({
+    workspace: { slug: input.workspace.slug, dir: input.workspace.dir },
+    binding: {
+      id: active.id,
+      sourceHash: active.sourceHash,
+      personalityHash: active.personalityHash,
+      appliedAt: active.appliedAt,
+      identity: active.identity,
+      files: active.files,
+    },
+    currentSourceHash: source.currentSourceHash,
+    status: drift.length > 0 ? "drifted" : isSourceStale ? "source_stale" : "bound",
+    ...(
+      drift.length > 0 || isSourceStale
+        ? { detail: {
+            ...(isSourceStale ? { sourceStale: source.detail } : {}),
+            ...(drift.length > 0 ? { drifted: drift } : {}),
+          } }
+        : {}
+    ),
+    compatibleTargets: compatibleTargetIds(input.targets, active.identity),
+    host: input.host,
+  });
+}
+
 export async function getPersonalityBindingView(
   dependencies: PersonalityStatusDependencies = {},
 ): Promise<PersonalityBindingView> {
@@ -213,6 +309,7 @@ export async function getPersonalityBindingView(
     ?? (() => resolvePersonalityWorkspace(env, fetchImpl));
   const readFiles = dependencies.readWorkspaceFiles ?? readPersonalityWorkspaceFiles;
   const loadSources = dependencies.loadSources ?? loadPersonalitySourceBundle;
+  const listTargets = dependencies.listTargets ?? (() => listPlatformTargets());
   const host = await hostView(env, fetchImpl, dependencies.probeCapability);
   let workspace: PersonalityWorkspace;
   try {
@@ -234,112 +331,27 @@ export async function getPersonalityBindingView(
     };
   }
   const store = readPersonalityStore();
-  const bindingSet = store.index.bindings[workspace.key];
-  if (!bindingSet) {
-    const mismatch = Object.values(store.index.bindings).some(
-      (candidate) => candidate.workspaceSlug === workspace.slug,
-    );
-    const proposals = Object.entries(store.index.proposals)
-      .flatMap(([id, record]) => record.workspaceKey === workspace.key
-        ? [{ proposal: store.proposals.get(id)!, record }]
-        : [])
-      .sort((left, right) => right.record.updatedAt - left.record.updatedAt);
-    return {
-      status: personalityStatusSchema.parse({
-        workspace: { slug: workspace.slug, dir: workspace.dir },
-        binding: null,
-        currentSourceHash: null,
-        status: mismatch ? "unavailable" : "unbound",
-        ...(mismatch ? { detail: { unavailable: "workspace_mismatch" } } : {}),
-        compatibleTargets: [],
-        host,
-      }),
-      history: [],
-      proposals,
-      diagnostics: { orphanProposalIds: store.orphanProposalIds },
-    };
-  }
-  if (
-    bindingSet.workspaceSlug !== workspace.slug
-    || bindingSet.workspaceId !== workspace.id
-    || bindingSet.workspaceDir !== workspace.dir
-  ) {
-    return {
-      status: personalityStatusSchema.parse({
-        workspace: { slug: workspace.slug, dir: workspace.dir },
-        binding: null,
-        currentSourceHash: null,
-        status: "unavailable",
-        detail: { unavailable: "workspace_mismatch" },
-        compatibleTargets: [],
-        host,
-      }),
-      history: [],
-      proposals: [],
-      diagnostics: { orphanProposalIds: store.orphanProposalIds },
-    };
-  }
-  const active = bindingSet.active;
   const proposals = Object.entries(store.index.proposals)
     .flatMap(([id, record]) => record.workspaceKey === workspace.key
       ? [{ proposal: store.proposals.get(id)!, record }]
       : [])
     .sort((left, right) => right.record.updatedAt - left.record.updatedAt);
-  if (!active) {
-    return {
-      status: personalityStatusSchema.parse({
-        workspace: { slug: workspace.slug, dir: workspace.dir },
-        binding: null,
-        currentSourceHash: null,
-        status: "unbound",
-        compatibleTargets: [],
-        host,
-      }),
-      history: bindingSet.history,
-      proposals,
-      diagnostics: { orphanProposalIds: store.orphanProposalIds },
-    };
-  }
-  const bindingProposal = store.proposals.get(active.proposalId);
-  if (!bindingProposal) {
-    throw new AgentToolError("STORE_CONFLICT", "Active Personality proposal is missing", {
-      reason: "store_corrupt",
-    });
-  }
-  const workspaceFiles = new Map(readFiles(workspace).map((file) => [file.path, file]));
-  const drift = [
-    ...socialDrift(active, workspaceFiles),
-    ...indexDrift(active, bindingProposal, workspaceFiles),
-  ];
-  const source = sourceStaleDetail(bindingProposal, loadSources);
-  const isSourceStale = source.currentSourceHash !== active.sourceHash
-    || Object.keys(source.detail ?? {}).length > 0;
+  const status = computePersonalityStatus({
+    workspace,
+    index: store.index,
+    getProposal: (proposalId) => store.proposals.get(proposalId),
+    readFiles,
+    loadSources,
+    targets: listTargets(),
+    host,
+  });
+  const bindingSet = store.index.bindings[workspace.key];
+  const workspaceMismatch = status.status === "unavailable"
+    && status.detail?.unavailable === "workspace_mismatch";
   return {
-    status: personalityStatusSchema.parse({
-      workspace: { slug: workspace.slug, dir: workspace.dir },
-      binding: {
-        id: active.id,
-        sourceHash: active.sourceHash,
-        personalityHash: active.personalityHash,
-        appliedAt: active.appliedAt,
-        identity: active.identity,
-        files: active.files,
-      },
-      currentSourceHash: source.currentSourceHash,
-      status: drift.length > 0 ? "drifted" : isSourceStale ? "source_stale" : "bound",
-      ...(
-        drift.length > 0 || isSourceStale
-          ? { detail: {
-              ...(isSourceStale ? { sourceStale: source.detail } : {}),
-              ...(drift.length > 0 ? { drifted: drift } : {}),
-            } }
-          : {}
-      ),
-      compatibleTargets: [],
-      host,
-    }),
-    history: bindingSet.history,
-    proposals,
+    status,
+    history: workspaceMismatch ? [] : bindingSet?.history ?? [],
+    proposals: workspaceMismatch ? [] : proposals,
     diagnostics: { orphanProposalIds: store.orphanProposalIds },
   };
 }
