@@ -78,7 +78,10 @@ import {
   classifyResearchPageUrl,
   isBlockedResearchUrl,
 } from "@/lib/contacts/web-research-page-state";
-import { isContactWebResearchTemplateConfig } from "@/lib/workflows/contact-web-research";
+import {
+  auditContactWebResearchCompletion,
+  isContactWebResearchTemplateConfig,
+} from "@/lib/workflows/contact-web-research";
 import {
   getContactWebResearchTargetFromRunConfig,
   releaseContactWebResearchTargetFromRunConfig,
@@ -1156,6 +1159,15 @@ export async function handleCompleteWorkflowRun(input: z.infer<typeof completeWo
       }
     } else {
       callbackResult.blockedUrls = [];
+    }
+
+    if (effectiveStatus === "completed") {
+      const audit = auditContactWebResearchCompletion(runConfig, callbackResult);
+      if (audit.errors.length > 0) {
+        callbackResult.unresolvedFields = audit.unresolvedFields;
+        callbackResult.partial = audit.partial;
+        normalizedErrors = uniqueStrings([...normalizedErrors, ...audit.errors]);
+      }
     }
   }
 

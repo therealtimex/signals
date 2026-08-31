@@ -717,6 +717,98 @@
                             "additionalProperties": {
                               "type": "object"
                             }
+                          },
+                          "observedEmails": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "address": {
+                                  "type": "string"
+                                },
+                                "evidenceUrl": {
+                                  "type": "string"
+                                },
+                                "evidenceText": {
+                                  "type": "string"
+                                },
+                                "sourcePlatform": {
+                                  "type": "string",
+                                  "enum": [
+                                    "x",
+                                    "linkedin",
+                                    "gmail",
+                                    "substack",
+                                    "instagram",
+                                    "facebook",
+                                    "threads",
+                                    "tiktok",
+                                    "youtube",
+                                    "bluesky",
+                                    "telegram",
+                                    "whatsapp"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "address",
+                                "evidenceUrl",
+                                "evidenceText"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "employmentObservations": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "orgName": {
+                                  "type": "string"
+                                },
+                                "title": {
+                                  "type": "string"
+                                },
+                                "startedAt": {
+                                  "type": "number"
+                                },
+                                "endedAt": {
+                                  "type": "number"
+                                },
+                                "isCurrent": {
+                                  "type": "boolean"
+                                },
+                                "evidenceUrl": {
+                                  "type": "string"
+                                },
+                                "evidenceText": {
+                                  "type": "string"
+                                },
+                                "sourcePlatform": {
+                                  "type": "string",
+                                  "enum": [
+                                    "x",
+                                    "linkedin",
+                                    "gmail",
+                                    "substack",
+                                    "instagram",
+                                    "facebook",
+                                    "threads",
+                                    "tiktok",
+                                    "youtube",
+                                    "bluesky",
+                                    "telegram",
+                                    "whatsapp"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "orgName",
+                                "isCurrent",
+                                "evidenceUrl"
+                              ],
+                              "additionalProperties": false
+                            }
                           }
                         },
                         "required": [
@@ -1194,6 +1286,29 @@
                               },
                               "identityLinked": {
                                 "type": "boolean"
+                              },
+                              "verifiedProfileUrls": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "profileSectionsInspected": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "enum": [
+                                    "linkedin_about",
+                                    "linkedin_contact_info",
+                                    "linkedin_experience"
+                                  ]
+                                }
+                              },
+                              "emailsObserved": {
+                                "type": "number"
+                              },
+                              "experiencesUpserted": {
+                                "type": "number"
                               },
                               "visitedUrls": {
                                 "type": "array",

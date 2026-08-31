@@ -48,7 +48,7 @@ displayed as **Contact Enrich Profile** and is converged in place on every run; 
 |-------|--------|
 | `templateType` | `enrichment` |
 | `estimatedCost` | `0.2` |
-| `config` | `{ contactWebResearch: { version: 1 }, acceptsContactId: true }` |
+| `config` | `{ contactWebResearch: { version: 2 }, acceptsContactId: true }` |
 | `systemPrompt` | See §6 (full agent contract) |
 
 Seed via `seed-templates.ts` with `SEED_VERSION` bump. Do **not** remove Contact Profile Pipeline.
@@ -205,24 +205,35 @@ Then:
 | Max Google searches | 2 (primary + one refined) |
 | Max page visits after SERP | 3 |
 | Max distinct registrable domains | 2 |
-| Wall clock | 90s recommended |
+| Wall clock | 120s recommended |
 | Same domain | One profile page; optional one `/about` or `/team` |
 
 ### 5.7 Stop conditions
 
-Stop early when **any** of:
+Identity linking and scalar enrichment are not stop conditions while a matching LinkedIn profile
+still has required sections left to inspect. Before completion, inspect visible About, Contact info,
+and the complete visible Experience section (including the same-profile Show all control and its
+resulting details view). Stop when:
 
-- `upsert_contact_identity` succeeded for LinkedIn or X
-- `enrich_contact` filled bio + (headline or title)
-- Ambiguity declared after second search
-- Hop budget exhausted
+- Known-identity and missing-LinkedIn discovery have been attempted and all accessible required
+  sections on every matching LinkedIn profile have been inspected
+- An inaccessible section is named in `unresolvedFields` and the result is marked partial
+- Ambiguity is declared after the second search
+- Hop budget is exhausted and the result is marked partial
 
-Do **not** pursue ARPP L2/L3 (ORCID, VC, signed proof) in v1.
+Do **not** pursue ARPP L2/L3 (ORCID, VC, signed proof) in v2.
 
 ### 5.8 Evidence rules
 
 - Write only fields visible on the visited page (no AI Overview copy without opening a cited source).
 - Company template parity: every `update_org` / employment write cites `evidenceUrl` in provenance where the tool supports it; use `log_interaction` summary with URLs.
+- Mine every visible LinkedIn Experience entry through `enrich_contact.employmentObservations`.
+  Upserts are additive and deduplicate incomplete existing roles by organization plus title.
+- Mine only explicitly self-published email addresses through `enrich_contact.observedEmails`,
+  including the evidence URL and exact visible sentence. Store these as unverified contact channels:
+  source confirmation is not mailbox or deliverability verification.
+- Report `verifiedProfileUrls`, `profileSectionsInspected`, `emailsObserved`, and
+  `experiencesUpserted` so skipped sections and no-op runs are observable.
 
 ---
 
@@ -233,19 +244,22 @@ You are a contact web research agent operating Signals through agent tools and R
 
 ## Contract
 1. Read `config.contactId` and call `get_contact` then `get_contact_arpp` (visibility: internal) before browsing.
-2. Note `signals.conformance` and missing ARPP gaps (sameAs, experience, biography). Your v1 goal is L0 discoverability: at least one linked public profile (`sameAs`) plus biography or headline.
+2. Note `signals.conformance` and missing ARPP gaps (sameAs, experience, biography). A non-empty experience list is only a gap signal; it does not mean the verified LinkedIn career history has been mined.
 3. Identity-first: if the contact already has profileUrl or a primary identity URL, open that page before Google.
 4. Hop 0a: open the pre-filled Google search URL from the brief (RealTimeX Browser + agent-browser skill).
 5. Hop 0b (required): snapshot the SERP, extract title/snippet/url for each visible result plus AI Overview cited URLs. Write `workflow-runs/{runId}/serp-candidates.json`. Score each candidate using the brief rules (or `scoreSerpCandidates` helper). Do not navigate to profile pages until triage completes.
 6. Hop 1: visit only candidates with totalScore >= 60 — not SERP position 1–2. Prefer LinkedIn `/in/` or X profile. Call `upsert_contact_identity` only when the page confirms the same human (name + company/role alignment).
 7. If triage is ambiguous or no candidate clears threshold, run one refined search (`buildContactWebResearchRefinedQuery`) and re-triage. If still ambiguous, stop without linking — set `ambiguous: true`.
-8. Hop 2 (optional): company homepage or team/about when employment still empty. Use `link_contact_to_org` or `enrich_contact`; `get_org_aroo` when orgId exists.
-9. Fill scalar gaps with `enrich_contact` (never overwrite existing non-empty fields).
-10. Log provenance: `log_interaction` with cited URLs.
-11. Do not use Signals in-process Serper/Tavily.
-12. Report `fieldsUpdated`, `unresolvedFields`, `identityLinked`, `visitedUrls`, `serpCandidates` (top 5 scored), `ambiguous`, then `complete_workflow_run`.
-13. Set `result.partial=true` when any source failed, hop budget exhausted without identity, or ambiguity unresolved.
-14. Always call `complete_workflow_run` before ending the turn so Signals can release runtime resources and chain follow-on workflows.
+8. Before leaving every matching LinkedIn profile, inspect visible About, Contact info when available, and complete visible Experience, including the same-profile Show all control and its resulting details view.
+9. Mine all visible roles with `enrich_contact.employmentObservations`. Include organization, title, current/former state, evidence URL, and dates as UTC Unix seconds only when explicitly shown precisely enough. Never delete history absent from the page.
+10. Mine exact self-published emails with `enrich_contact.observedEmails`, including the evidence URL and exact visible sentence. Never infer email or mark source confirmation as mailbox verification.
+11. Hop 2 (optional): company homepage or team/about when employment still empty after profile mining. Use `link_contact_to_org` or `enrich_contact`; `get_org_aroo` when orgId exists.
+12. Fill scalar gaps with `enrich_contact` (never overwrite existing non-empty scalar fields).
+13. Log provenance: `log_interaction` with cited URLs.
+14. Do not use Signals in-process Serper/Tavily.
+15. Report `fieldsUpdated`, `unresolvedFields`, `identityLinked`, `verifiedProfileUrls`, `profileSectionsInspected`, `emailsObserved`, `experiencesUpserted`, `visitedUrls`, `serpCandidates` (top 5 scored), `ambiguous`, then `complete_workflow_run`.
+16. Set `result.partial=true` when any source or required profile section failed, the hop budget was exhausted, or ambiguity remains unresolved.
+17. Always call `complete_workflow_run` before ending the turn so Signals can release runtime resources and chain follow-on workflows.
 ```
 
 ---

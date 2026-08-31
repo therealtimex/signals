@@ -9,7 +9,7 @@ import {
 import type { ContactWebResearchPreparedTarget } from "@/lib/workflows/contact-web-research-target";
 
 export const CONTACT_WEB_RESEARCH_CONFIG_KEY = "contactWebResearch";
-export const CONTACT_WEB_RESEARCH_CONFIG_VERSION = 1;
+export const CONTACT_WEB_RESEARCH_CONFIG_VERSION = 2;
 export const CONTACT_WEB_RESEARCH_VISIT_THRESHOLD = 60;
 export const CONTACT_WEB_RESEARCH_THREAD_NAME = "Contact Enrich Profile";
 
@@ -74,6 +74,91 @@ export function isContactWebResearchTemplateConfig(
   config: Record<string, unknown>,
 ): boolean {
   return objectValue(config[CONTACT_WEB_RESEARCH_CONFIG_KEY]) !== null;
+}
+
+export type ContactWebResearchCompletionAudit = {
+  errors: string[];
+  unresolvedFields: string[];
+  partial: boolean;
+};
+
+export function auditContactWebResearchCompletion(
+  config: Record<string, unknown>,
+  result: Record<string, unknown>,
+): ContactWebResearchCompletionAudit {
+  const researchConfig = objectValue(config[CONTACT_WEB_RESEARCH_CONFIG_KEY]);
+  const version = typeof researchConfig?.version === "number" ? researchConfig.version : 1;
+  if (version < 2) return { errors: [], unresolvedFields: [], partial: false };
+
+  const requiredResultFields = [
+    "verifiedProfileUrls",
+    "profileSectionsInspected",
+    "emailsObserved",
+    "experiencesUpserted",
+  ];
+  const missingResultFields = requiredResultFields.filter(
+    (field) => !Object.prototype.hasOwnProperty.call(result, field),
+  );
+  const errors = missingResultFields.length > 0
+    ? [`contract_result_missing:${missingResultFields.join(",")}`]
+    : [];
+  const unresolvedFields = Array.isArray(result.unresolvedFields)
+    ? result.unresolvedFields.filter((value): value is string => typeof value === "string")
+    : [];
+  const verifiedProfileUrls = Array.isArray(result.verifiedProfileUrls)
+    ? result.verifiedProfileUrls.filter((value): value is string => typeof value === "string")
+    : [];
+  const hasVerifiedLinkedIn = verifiedProfileUrls.some((value) => {
+    try {
+      const url = new URL(value);
+      return /(^|\.)linkedin\.com$/i.test(url.hostname) && /^\/in\//i.test(url.pathname);
+    } catch {
+      return false;
+    }
+  });
+  if (!hasVerifiedLinkedIn) {
+    return {
+      errors,
+      unresolvedFields,
+      partial: errors.length > 0 || result.partial === true,
+    };
+  }
+
+  const inspected = new Set(
+    Array.isArray(result.profileSectionsInspected)
+      ? result.profileSectionsInspected.filter(
+          (value): value is string => typeof value === "string",
+        )
+      : [],
+  );
+  const normalizedUnresolved = unresolvedFields.map((value) => value.toLowerCase());
+  const requiredSections = [
+    { key: "linkedin_about", label: "LinkedIn About", unresolvedTerm: "about" },
+    {
+      key: "linkedin_experience",
+      label: "LinkedIn Experience",
+      unresolvedTerm: "experience",
+    },
+  ];
+  for (const section of requiredSections) {
+    if (inspected.has(section.key)) continue;
+    const alreadyUnresolved = normalizedUnresolved.some((value) =>
+      value.includes(section.unresolvedTerm),
+    );
+    if (alreadyUnresolved) {
+      errors.push(`profile_section_unresolved:${section.key}`);
+      continue;
+    }
+    unresolvedFields.push(section.label);
+    normalizedUnresolved.push(section.label.toLowerCase());
+    errors.push(`profile_section_uninspected:${section.key}`);
+  }
+
+  return {
+    errors,
+    unresolvedFields,
+    partial: errors.length > 0 || result.partial === true,
+  };
 }
 
 export function getContactWebResearchArppMissing(profile: ArppPersonDocument): string[] {
@@ -213,6 +298,15 @@ export function buildContactWebResearchBriefSection(input: {
     "The authenticated browser owner is transport context only. Never treat the signed-in account, navigation avatar, sidebar identity, or session expected/verified handle as evidence about this contact.",
     "If a known profile cannot be fetched, does not match, or leaves cross-platform identity gaps, continue to hop 0a.",
     "",
+    "### Verified LinkedIn profile mining gate (required before completion)",
+    "- On every matching LinkedIn /in/ profile, inspect the visible About text, Contact info when available, and the complete visible Experience section (including the same-profile Show all experiences control and its resulting details view). Existing identity or employment rows do not satisfy this gate.",
+    "- Mine every visible Experience entry, not only the current role. Call enrich_contact with employmentObservations containing orgName, title, isCurrent, evidenceUrl, and dates as UTC Unix seconds only when the page shows them precisely enough; omit uncertain dates rather than infer them.",
+    "- Deduplicate an existing incomplete role by organization plus title; enrich its missing dates/evidence instead of creating a duplicate. Do not delete employment rows that are absent from the visible page.",
+    "- Mine only email addresses explicitly self-published by this person in About or Contact info. Call enrich_contact with observedEmails containing the exact address, the LinkedIn profile evidenceUrl, the visible sentence as evidenceText, and sourcePlatform=linkedin. Never guess or derive an address.",
+    "- A self-published email is source-confirmed evidence, not mailbox/deliverability verification. Do not mark it verified and do not call predicted-email verification tools for it.",
+    "- If About, Contact info, or Experience is unavailable or collapsed behind an inaccessible control, name that section in unresolvedFields and set partial=true; do not silently treat identityLinked as completion.",
+    "- Report the matching LinkedIn URL in verifiedProfileUrls, attempted sections in profileSectionsInspected, and the persisted enrich_contact counts in emailsObserved and experiencesUpserted.",
+    "",
     "### Hop 0a — search",
     `Query: \`${query}\``,
     `URL: ${googleUrl}`,
@@ -234,14 +328,14 @@ export function buildContactWebResearchBriefSection(input: {
     "If ambiguity remains, do not call upsert_contact_identity. Complete with ambiguous=true, partial=true, and unresolvedFields including sameAs.",
     "",
     "### Hop policy and evidence",
-    "- Max 2 Google searches, 3 page visits after SERP, 2 registrable domains, and about 90 seconds wall clock.",
+    "- Max 2 Google searches, 3 page visits after SERP, 2 registrable domains, and about 120 seconds wall clock. Expanding About, Contact info, or Experience on the same verified profile does not consume another page visit.",
     "- Visit all listed known identity candidates first. After SERP triage, prefer one additional LinkedIn or X profile visit. Use a company /about or /team page only when employment remains empty.",
     "- Write only facts visible on pages you visited. Never overwrite existing non-empty contact fields.",
-    "- Stop after known-identity and missing-LinkedIn discovery are attempted, when a new LinkedIn/X identity is linked, bio plus headline/title is filled, ambiguity is declared, or the hop budget is exhausted.",
+    "- Linking an identity or filling bio/headline is not a stop condition while a verified LinkedIn profile still has uninspected required sections. Stop after known-identity and missing-LinkedIn discovery plus the verified-profile mining gate are attempted, ambiguity is declared, or the hop budget is exhausted.",
     "",
     "### Tool sequence",
-    "1. get_contact → 2. get_contact_arpp (visibility: internal) → 3. RTX Browser triage → 4. upsert_contact_identity → 5. enrich_contact → 6. link_contact_to_org/get_org_aroo if needed → 7. log_interaction with visited URLs → 8. complete_workflow_run.",
-    "Pass complete_workflow_run.result with fieldsUpdated, unresolvedFields, identityLinked, visitedUrls, blockedUrls, serpCandidates (top 5), ambiguous, partial, and message.",
+    "1. get_contact → 2. get_contact_arpp (visibility: internal) → 3. RTX Browser triage → 4. upsert_contact_identity → 5. enrich_contact with scalar gaps plus observedEmails/employmentObservations → 6. link_contact_to_org/get_org_aroo only if still needed → 7. log_interaction with visited URLs → 8. complete_workflow_run.",
+    "Pass complete_workflow_run.result with fieldsUpdated, unresolvedFields, identityLinked, verifiedProfileUrls, profileSectionsInspected, emailsObserved, experiencesUpserted, visitedUrls, blockedUrls, serpCandidates (top 5), ambiguous, partial, and message.",
   ].join("\n");
 }
 

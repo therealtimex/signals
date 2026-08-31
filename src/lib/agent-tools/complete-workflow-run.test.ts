@@ -295,6 +295,10 @@ describe("complete_workflow_run terminal teardown", () => {
         fieldsUpdated: ["bio"],
         unresolvedFields: ["experience"],
         identityLinked: true,
+        verifiedProfileUrls: ["https://www.linkedin.com/in/example"],
+        profileSectionsInspected: ["linkedin_about", "linkedin_experience"],
+        emailsObserved: 1,
+        experiencesUpserted: 2,
         visitedUrls: ["https://www.linkedin.com/in/example"],
         ambiguous: false,
         partial: true,
@@ -305,6 +309,10 @@ describe("complete_workflow_run terminal teardown", () => {
       fieldsUpdated: ["bio"],
       unresolvedFields: ["experience"],
       identityLinked: true,
+      verifiedProfileUrls: ["https://www.linkedin.com/in/example"],
+      profileSectionsInspected: ["linkedin_about", "linkedin_experience"],
+      emailsObserved: 1,
+      experiencesUpserted: 2,
       partial: true,
     });
   });

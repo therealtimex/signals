@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  auditContactWebResearchCompletion,
   buildContactWebResearchBriefSection,
   buildContactWebResearchTemplateConfig,
   getContactWebResearchArppMissing,
@@ -41,6 +42,7 @@ const researchTarget: ContactWebResearchPreparedTarget = {
 describe("Contact Web Research workflow contract", () => {
   it("recognizes the seeded config and conditionally resolves a cascade target", () => {
     const config = { ...buildContactWebResearchTemplateConfig(), contactId: "contact-1" };
+    expect(config).toMatchObject({ contactWebResearch: { version: 2 } });
     expect(isContactWebResearchTemplateConfig(config)).toBe(true);
     expect(resolveContactWebResearchCascadeTarget(config, { identityLinked: false })).toBeNull();
     expect(resolveContactWebResearchCascadeTarget(config, { identityLinked: true })).toBe(
@@ -76,6 +78,17 @@ describe("Contact Web Research workflow contract", () => {
     expect(brief).toContain("Ignore devtools://");
     expect(brief).toContain("Never run create-browser-session");
     expect(brief).toContain("result.blockedUrls");
+    expect(brief).toContain("Verified LinkedIn profile mining gate");
+    expect(brief).toContain("complete visible Experience section");
+    expect(brief).toContain("observedEmails");
+    expect(brief).toContain("employmentObservations");
+    expect(brief).toContain("source-confirmed evidence, not mailbox/deliverability verification");
+    expect(brief).toContain("verifiedProfileUrls");
+    expect(brief).toContain("profileSectionsInspected");
+    expect(brief).toContain("emailsObserved");
+    expect(brief).toContain("experiencesUpserted");
+    expect(brief).toContain("identity or employment rows do not satisfy this gate");
+    expect(brief).toContain("is not a stop condition");
     expect(brief).not.toContain("Open this in RealTimeX Browser");
   });
 
@@ -233,7 +246,7 @@ describe("Contact Web Research workflow contract", () => {
     );
   });
 
-  it("limits the ARPP checklist to v1 research gaps", () => {
+  it("keeps the v2 ARPP checklist focused on gap signals", () => {
     const profile = {
       sameAs: [],
       experience: [],
@@ -244,5 +257,40 @@ describe("Contact Web Research workflow contract", () => {
       "biography or headline",
       "experience",
     ]);
+  });
+
+  it("marks verified LinkedIn research partial when required sections are unreported", () => {
+    const config = buildContactWebResearchTemplateConfig();
+    expect(
+      auditContactWebResearchCompletion(config, {
+        identityLinked: true,
+        verifiedProfileUrls: ["https://www.linkedin.com/in/williamisaacbeckes/"],
+        profileSectionsInspected: ["linkedin_about"],
+        emailsObserved: 1,
+        experiencesUpserted: 0,
+        unresolvedFields: [],
+      }),
+    ).toMatchObject({
+      partial: true,
+      unresolvedFields: ["LinkedIn Experience"],
+      errors: ["profile_section_uninspected:linkedin_experience"],
+    });
+
+    expect(
+      auditContactWebResearchCompletion(config, {
+        verifiedProfileUrls: ["https://www.linkedin.com/in/williamisaacbeckes/"],
+        profileSectionsInspected: ["linkedin_about", "linkedin_experience"],
+        emailsObserved: 1,
+        experiencesUpserted: 3,
+        unresolvedFields: [],
+      }),
+    ).toEqual({ errors: [], unresolvedFields: [], partial: false });
+
+    expect(
+      auditContactWebResearchCompletion(
+        { contactWebResearch: { version: 1 } },
+        { verifiedProfileUrls: ["https://www.linkedin.com/in/example"] },
+      ),
+    ).toEqual({ errors: [], unresolvedFields: [], partial: false });
   });
 });
