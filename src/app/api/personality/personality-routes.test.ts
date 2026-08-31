@@ -3,6 +3,14 @@ import { eq } from "drizzle-orm";
 import { GET as getRepresentedOrg, PUT as putRepresentedOrg } from "@/app/api/personality/represented-org/route";
 import { GET as getSources } from "@/app/api/personality/sources/route";
 import { GET as getStatements, PUT as putStatements } from "@/app/api/personality/statements/route";
+import { GET as getBinding } from "@/app/api/personality/binding/route";
+import { GET as getHost } from "@/app/api/personality/host/route";
+import { POST as postProposal } from "@/app/api/personality/proposals/route";
+import { GET as getProposal } from "@/app/api/personality/proposals/[id]/route";
+import { POST as approveProposal } from "@/app/api/personality/proposals/[id]/approve/route";
+import { POST as retryProposal } from "@/app/api/personality/proposals/[id]/retry/route";
+import { POST as rejectProposal } from "@/app/api/personality/proposals/[id]/reject/route";
+import { POST as rollbackProposal } from "@/app/api/personality/rollback/route";
 import { invokeAgentTool } from "@/lib/agent-tools/invoke";
 import { listAgentToolsManifest } from "@/lib/agent-tools/registry";
 import { db } from "@/lib/db/client";
@@ -15,6 +23,14 @@ import { resetCoreTables } from "@/test/db";
 function jsonRequest(url: string, value: unknown): Request {
   return new Request(url, {
     method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(value),
+  });
+}
+
+function jsonPost(url: string, value: unknown): Request {
+  return new Request(url, {
+    method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(value),
   });
@@ -112,5 +128,71 @@ describe("Personality M1 routes and tool", () => {
       },
     });
     expect(JSON.stringify(preview)).not.toMatch(/bindingId|workspaceDir|workspaceSlug/);
+  });
+
+  it("publishes the bounded Personality proposal and recovery tool contracts", () => {
+    const tools = new Map(listAgentToolsManifest().tools.map((tool) => [tool.name, tool]));
+    expect([
+      "get_personality_binding",
+      "propose_personality_projection",
+      "approve_personality_projection",
+      "reject_personality_projection",
+      "retry_personality_projection",
+      "rollback_personality_projection",
+      "unbind_personality_projection",
+    ].every((name) => tools.get(name)?.category === "content")).toBe(true);
+    expect(tools.get("propose_personality_projection")?.parameters).toMatchObject({
+      type: "object",
+      additionalProperties: false,
+      properties: { voiceProfileId: expect.any(Object) },
+    });
+    expect(tools.get("approve_personality_projection")?.parameters).toMatchObject({
+      required: ["proposalId", "evidence"],
+      properties: {
+        evidence: {
+          required: ["kind", "workspaceSlug", "threadSlug"],
+          properties: { kind: { const: "thread_message" } },
+        },
+      },
+    });
+    expect(tools.get("unbind_personality_projection")?.parameters).toMatchObject({
+      additionalProperties: false,
+      properties: {},
+    });
+  });
+
+  it("keeps the REST proposal surface in parity with validation and error mappings", async () => {
+    const missingParams = { params: Promise.resolve({ id: "prp_missing01" }) };
+    const binding = await getBinding();
+    expect(binding.status).toBe(200);
+    await expect(binding.json()).resolves.toMatchObject({
+      status: { status: "unavailable", host: { capability: "unreachable" } },
+    });
+    await expect(getHost().then((response) => response.json())).resolves.toMatchObject({
+      state: "unreachable",
+    });
+    expect((await postProposal(jsonPost(
+      "http://localhost/api/personality/proposals",
+      { arbitraryWorkspaceSlug: "other" },
+    ))).status).toBe(400);
+    expect((await getProposal(new Request(
+      "http://localhost/api/personality/proposals/prp_missing01",
+    ), missingParams)).status).toBe(404);
+    expect((await approveProposal(new Request(
+      "http://localhost/api/personality/proposals/prp_missing01/approve",
+      { method: "POST" },
+    ), missingParams)).status).toBe(404);
+    expect((await retryProposal(new Request(
+      "http://localhost/api/personality/proposals/prp_missing01/retry",
+      { method: "POST" },
+    ), missingParams)).status).toBe(404);
+    expect((await rejectProposal(jsonPost(
+      "http://localhost/api/personality/proposals/prp_missing01/reject",
+      { note: 42 },
+    ), missingParams)).status).toBe(400);
+    expect((await rollbackProposal(jsonPost(
+      "http://localhost/api/personality/rollback",
+      { bindingId: "not-a-binding" },
+    ))).status).toBe(400);
   });
 });

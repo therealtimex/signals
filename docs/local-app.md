@@ -20,8 +20,10 @@ contract. For source-checkout QA, create a dedicated issue app with
 
 Back up the entire data directory, not only `data.db`: approved voice-evidence profiles are
 immutable files under `writing/voice-profiles/`, with lifecycle state in that directory's
-`index.json`; user-authored Personality statements and later projection state live under
-`personality/`. If a `.store.lock` names another host, never delete it automatically; confirm that
+`index.json`; Personality statements, exact proposals (including unmanaged workspace prose),
+bindings, and transaction journals live under `personality/`. Restore that directory as one unit;
+never reconstruct immutable proposals from current workspace files. If a `.store.lock` names
+another host, never delete it automatically; confirm that
 the other host is no longer using the shared data directory before removing the lock manually.
 
 Voice selection is owner-isolated. Signals no longer falls back to another contact's approved
@@ -72,6 +74,18 @@ Terminal agents own open-ended intelligence: they read evidence (`get_persona_ev
 | `webhook.trigger` | Allow RTX flows to trigger agent tasks against Signals |
 | `llm.embed` | On-demand embedding for semantic search (vectors stay local in Signals) |
 | `llm.chat` | Structured persona synthesis workflow (`generate_persona`) |
+| `workspace.personality.write` | Commit approved Personality proposals through the host's locked, recoverable transaction writer |
+
+### Personality writer recovery
+
+Signals never applies or recovers a Personality proposal during startup. Inspect local binding,
+drift, proposal, and attempt state through `GET /api/personality/binding`; inspect capability and
+permission separately through `GET /api/personality/host`. A user-triggered proposal retry first
+inspects the same durable host transaction ID. If the host reports `recovery_required`, that retry
+requests restore and stops; a later explicit retry may allocate a new attempt only after the host
+proves `restored_failure`. If a desktop operator keeps newer workspace bytes, Signals records
+`resolved_discarded`, marks the old proposal stale, and requires a new review proposal. Never edit
+the Signals index or copy host before-images into `SIGNALS_DATA_DIR/personality/` by hand.
 
 ### RealTimeX host dependency (`llm.chat`)
 

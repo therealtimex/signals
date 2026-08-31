@@ -53,16 +53,26 @@ describe("personality contracts", () => {
     expect(renderIdentityBlock(brandRenderedIdentityInput(rawIdentity)).body).toContain("Ada");
   });
 
-  it("keeps Personality modules free of write and host-runtime imports", () => {
+  it("keeps Personality modules free of direct workspace writes and publish runtime imports", () => {
     const root = resolve(process.cwd(), "src/lib/personality");
     const modules = readdirSync(root)
-      .filter((name) => name.endsWith(".ts") && !name.endsWith(".test.ts"));
+      .filter((name) =>
+        name.endsWith(".ts")
+        && !name.endsWith(".test.ts")
+        && name !== "store.ts");
     for (const name of modules) {
       const source = readFileSync(join(root, name), "utf8");
+      if (/from ["']node:fs["']/.test(source)) {
+        expect(source, name).not.toMatch(
+          /\b(?:writeFile|rename|link|unlink|rm|mkdir)Sync?\b/,
+        );
+      }
       expect(source, name).not.toMatch(
-        /import[\s\S]*?from ["']node:fs["'][\s\S]*?\b(?:writeFile|rename|link|unlink|rm|mkdir)Sync?\b/,
+        /from ["']@\/lib\/(?:publish|browser|scheduler)\/|from ["']@\/lib\/rtx\/runtime-sessions/,
       );
-      expect(source, name).not.toMatch(/from ["']@\/lib\/(?:rtx|publish)\//);
+      expect(source, name).not.toMatch(
+        /\b(?:createPublishJob|sendToAgent|replyTo|createComment|createReaction|followAccount)\b/,
+      );
     }
   });
 

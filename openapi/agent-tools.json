@@ -1828,6 +1828,208 @@
                     "type": "object",
                     "properties": {
                       "tool": {
+                        "const": "get_personality_binding"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {},
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "propose_personality_projection"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "voiceProfileId": {
+                            "type": "string"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "approve_personality_projection"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "proposalId": {
+                            "type": "string"
+                          },
+                          "evidence": {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "const": "thread_message"
+                              },
+                              "workspaceSlug": {
+                                "type": "string"
+                              },
+                              "threadSlug": {
+                                "type": "string"
+                              },
+                              "note": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "workspaceSlug",
+                              "threadSlug"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "proposalId",
+                          "evidence"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "reject_personality_projection"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "proposalId": {
+                            "type": "string"
+                          },
+                          "evidence": {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "const": "thread_message"
+                              },
+                              "workspaceSlug": {
+                                "type": "string"
+                              },
+                              "threadSlug": {
+                                "type": "string"
+                              },
+                              "note": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "workspaceSlug",
+                              "threadSlug"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "note": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "proposalId",
+                          "evidence"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "retry_personality_projection"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "proposalId": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "proposalId"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "rollback_personality_projection"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "bindingId": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "bindingId"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "unbind_personality_projection"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {},
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
                         "const": "query_goals"
                       },
                       "input": {
@@ -4536,6 +4738,13 @@
                       "upsert_voice_profile",
                       "approve_voice_profile",
                       "upsert_personality_statements",
+                      "get_personality_binding",
+                      "propose_personality_projection",
+                      "approve_personality_projection",
+                      "reject_personality_projection",
+                      "retry_personality_projection",
+                      "rollback_personality_projection",
+                      "unbind_personality_projection",
                       "query_goals",
                       "create_task",
                       "get_persona",
@@ -4735,6 +4944,6 @@
   ],
   "x-signals-agent-tools": {
     "manifestVersion": "1",
-    "toolCount": 81
+    "toolCount": 88
   }
 }
