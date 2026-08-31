@@ -217,6 +217,24 @@ describe("ContactDetailClient details layout", () => {
     expect(html).toContain('href="/dashboard/organizations/org1"');
   });
 
+  it("puts relationship context before the profile", () => {
+    const html = renderToStaticMarkup(
+      createElement(ContactDetailClient, {
+        contact: contactFixture,
+        tasks: [],
+        explore: exploreFixture,
+        profilePipelineTemplateId: "tmpl-1",
+      }),
+    );
+    const wrapper = document.createElement("div");
+    wrapper.innerHTML = html;
+    const sectionOrder = Array.from(
+      wrapper.querySelectorAll<HTMLElement>("[data-contact-detail-section]"),
+    ).map((section) => section.dataset.contactDetailSection);
+
+    expect(sectionOrder.slice(0, 2)).toEqual(["relationship", "profile"]);
+  });
+
   it("keeps contact actions within the mobile content width", () => {
     const html = renderToStaticMarkup(
       createElement(ContactDetailClient, {
@@ -386,6 +404,16 @@ describe("ContactRelationshipSection", () => {
     expect(slider.value).toBe("72");
     const selected = document.body.querySelector('[aria-pressed="true"]');
     expect(selected?.textContent).toBe("Warm");
+    expect(document.body.textContent).toContain("Met at a dinner");
+    expect(document.querySelector("#relationship-notes")).toBeNull();
+
+    const editNotes = document.querySelector(
+      '[aria-label="Edit relationship notes"]',
+    ) as HTMLButtonElement;
+    await act(async () => {
+      editNotes.click();
+    });
+    expect(document.querySelector("#relationship-notes")).toBeTruthy();
   });
 
   it("does not fetch a self-relationship editor", async () => {

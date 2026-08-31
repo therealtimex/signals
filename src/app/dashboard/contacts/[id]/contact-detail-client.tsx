@@ -462,15 +462,15 @@ export function ContactDetailClient({
         </TabsList>
 
         <TabsContent value="details" className="space-y-4">
-          <ContactProfileSection
-            contact={contact}
-            onEdit={() => setEditOpen(true)}
-          />
           <ContactRelationshipSection
             contactId={contact.id}
             isSelf={contact.isSelf}
             openTaskCount={openTaskCount}
             onOpenTasks={() => setTab("tasks")}
+          />
+          <ContactProfileSection
+            contact={contact}
+            onEdit={() => setEditOpen(true)}
           />
           {agentProfile ? <AgentProfileView profile={agentProfile} /> : null}
         </TabsContent>
