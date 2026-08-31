@@ -53,6 +53,15 @@ npm run automation:capture-guide-assets -- --only settings-platforms,settings-ag
 npm run automation:capture-guide-assets -- --base-url http://127.0.0.1:3000 --no-evidence
 ```
 
+Capture against demo data, not a real CRM — this repo is public, and the guide is a published
+artefact:
+
+```bash
+SIGNALS_DATA_DIR=/tmp/signals-demo npm run seed:demo
+SIGNALS_DATA_DIR=/tmp/signals-demo PORT=3111 npm run dev
+npm run automation:capture-guide-assets -- --base-url http://127.0.0.1:3111
+```
+
 The two outputs are different products, captured in separate passes:
 
 | | viewport | themes | `fullPage` | naming |
@@ -77,6 +86,13 @@ than a failure":
   `chrome-error://` document both settle into `networkidle` and screenshot beautifully. The flow
   checks the HTTP status, waits on a per-view ready selector, and compares the heading where the
   heading is static.
+- **The page must have stopped moving.** `networkidle` and the ready selector both pass while the
+  UI is still animating. The dashboard's stat cards count up over 800ms via `requestAnimationFrame`
+  (`src/components/animated-stat.tsx`), and the first run of this flow against a 12-contact
+  database produced a hero screenshot reading **11** — beside a funnel that correctly summed to 12.
+  `waitForVisualSettle` polls the rendered text until two consecutive reads match. It gives up
+  after 5s rather than blocking: a page with a live clock never settles, and refusing to capture it
+  would be worse.
 
 Detail views (`contact-detail`, `content-detail`, `goal-detail`, `workflow-detail`) need a real
 record. The flow resolves one id per kind from the list APIs first and fails with

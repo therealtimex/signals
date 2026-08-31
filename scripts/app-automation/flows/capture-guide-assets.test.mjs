@@ -18,6 +18,7 @@ import {
   selectViews,
   verifyGuideAssetCoverage,
   viewPath,
+  waitForVisualSettle,
 } from "./capture-guide-assets.mjs";
 
 const ORIGIN = "http://127.0.0.1:3010";
@@ -279,6 +280,10 @@ function stubPage({ status = 200, heading = "Contacts" } = {}) {
       return { status: () => status };
     },
     async waitForSelector() {},
+    // Constant text, so waitForVisualSettle settles on its second read.
+    async evaluate() {
+      return "settled";
+    },
     locator: () => ({ first: () => ({ innerText: async () => heading }) }),
     getByRole: () => ({ first: () => ({ click: async () => {} }) }),
     async addStyleTag() {},
@@ -521,4 +526,51 @@ test("guide/assets holds nothing unaccounted for", async () => {
     "guide/assets has PNGs that are neither in GUIDE_VIEWS nor listed in KNOWN_ORPHAN_ASSETS",
   );
   assert.deepEqual(coverage.stale, [], "GUIDE_VIEWS names an asset that is not on disk");
+});
+
+
+test("waitForVisualSettle waits for two identical reads", async () => {
+  // The dashboard counts 0 -> 12 over 800ms. Stopping at the first repeat would
+  // still catch a frame mid-count, so identical consecutive reads are required.
+  const frames = ["7 contacts", "11 contacts", "12 contacts", "12 contacts"];
+  let index = 0;
+  const page = { evaluate: async () => frames[Math.min(index++, frames.length - 1)] };
+  const slept = [];
+  const result = await waitForVisualSettle(page, {
+    pollMs: 10,
+    sleep: async (ms) => slept.push(ms),
+  });
+  assert.deepEqual(result, { settled: true });
+  assert.equal(index, 4, "should read until two reads match");
+  assert.deepEqual(slept, [10, 10, 10]);
+});
+
+test("waitForVisualSettle gives up rather than blocking a live-clock page", async () => {
+  // A page that never settles must still be captured; refusing would be worse.
+  let now = 0;
+  const page = { evaluate: async () => `tick ${(now += 1)}` };
+  const result = await waitForVisualSettle(page, {
+    pollMs: 1,
+    timeoutMs: 5,
+    sleep: async () => {},
+  });
+  assert.deepEqual(result, { settled: false });
+});
+
+test("captureView settles before it screenshots", async () => {
+  const order = [];
+  const page = stubPage({ heading: "Help & Documentation" });
+  const original = page.screenshot.bind(page);
+  page.screenshot = async (options) => {
+    order.push("screenshot");
+    return original(options);
+  };
+  await captureView({
+    page,
+    view: GUIDE_VIEWS.find((v) => v.id === "help-page"),
+    origin: ORIGIN,
+    screenshotPaths: ["guide/assets/help-page.png"],
+    settle: async () => order.push("settle"),
+  });
+  assert.deepEqual(order, ["settle", "screenshot"]);
 });

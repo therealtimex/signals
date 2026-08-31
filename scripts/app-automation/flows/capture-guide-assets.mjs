@@ -411,6 +411,46 @@ export async function hideDevOverlay(page) {
   await page.addStyleTag({ content: "nextjs-portal{display:none!important}" });
 }
 
+export const DEFAULT_SETTLE_POLL_MS = 150;
+export const DEFAULT_SETTLE_TIMEOUT_MS = 5_000;
+
+/**
+ * Wait until the rendered text stops changing.
+ *
+ * `networkidle` and the ready selector both pass while the UI is still moving.
+ * The dashboard's stat cards animate their values with `requestAnimationFrame`
+ * over 800ms (`src/components/animated-stat.tsx`), and a capture taken during
+ * that ease-out publishes a number that was never real: the first run of this
+ * flow against a 12-contact database produced a hero screenshot reading 11,
+ * beside a funnel that correctly summed to 12.
+ *
+ * Comparing whole-document text rather than watching a specific element keeps
+ * this honest about what it covers — any count-up, skeleton swap or late
+ * hydration settles it, not just the component that exposed the problem.
+ */
+export async function waitForVisualSettle(
+  page,
+  { pollMs = DEFAULT_SETTLE_POLL_MS, timeoutMs = DEFAULT_SETTLE_TIMEOUT_MS, sleep = defaultSleep } = {},
+) {
+  const deadline = Date.now() + timeoutMs;
+  let previous = null;
+  while (Date.now() < deadline) {
+    const current = await page.evaluate(() => document.body.innerText);
+    // Two identical reads a poll apart. One is not enough: an animation frame
+    // can land between the read and the screenshot.
+    if (previous !== null && current === previous) return { settled: true };
+    previous = current;
+    await sleep(pollMs);
+  }
+  // Not fatal. A page with a live clock never settles, and refusing to capture
+  // it would be worse than capturing it.
+  return { settled: false };
+}
+
+function defaultSleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export async function captureView({
   page,
   view,
@@ -419,6 +459,7 @@ export async function captureView({
   screenshotPaths,
   fullPage = true,
   hideDevOverlay: hide = null,
+  settle = null,
 }) {
   const path = viewPath(view, id);
   const response = await page.goto(`${origin}${path}`, { waitUntil: "networkidle" });
@@ -435,6 +476,8 @@ export async function captureView({
   // After the wait, so the style survives the navigation it would otherwise
   // have been attached before.
   if (hide) await hide(page);
+
+  if (settle) await settle(page);
 
   if (view.heading) {
     const heading = (await page.locator(readySelector(view)).first().innerText()).trim();
@@ -525,6 +568,7 @@ export async function runCaptureGuideAssetsFlow(args, dependencies = {}) {
                 screenshotPaths: [screenshotPath],
                 fullPage: pass.fullPage,
                 hideDevOverlay,
+                settle: waitForVisualSettle,
               }),
             );
           } catch (error) {
