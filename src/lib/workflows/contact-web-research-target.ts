@@ -1,11 +1,11 @@
 import {
   getBrowserConnectionById,
   getPlatformTargetById,
-  resolveDefaultTarget,
   resolveTargetById,
   toPlatformTargetView,
 } from "@/lib/db/queries/platform-targets";
 import {
+  prepareCurrentPlatformTarget,
   preparePlatformTarget,
   releasePreparedPlatformTarget,
 } from "@/lib/platforms/platform-target-service";
@@ -26,7 +26,7 @@ export const CONTACT_WEB_RESEARCH_SETTINGS_PATH = "/dashboard/settings?tab=platf
 export type ContactWebResearchTargetSelection = {
   targetId: string;
   platform: ContactWebResearchTargetPlatform;
-  source: "config" | "default";
+  source: "config" | "default" | "session";
 };
 
 export type ContactWebResearchTargetError = {
@@ -38,7 +38,7 @@ export type ContactWebResearchTargetError = {
 export type ContactWebResearchPreparedTarget = {
   targetId: string;
   platform: ContactWebResearchTargetPlatform;
-  source: "config" | "default";
+  source: "config" | "default" | "session";
   sessionName: string;
   startUrl: string;
   expectedHandle: string | null;
@@ -103,7 +103,7 @@ export function describeResearchTargetError(
 
   switch (error.code) {
     case "NO_RESEARCH_TARGET":
-      return "No authenticated LinkedIn or X browser target is connected for contact research. Open Settings → Platform connections, connect LinkedIn in the RealTimeX Browser session, then retry.";
+      return "No authenticated LinkedIn or X identity is available in the signals-publish browser session. Open Settings → Platform connections, sign in to LinkedIn or X in that session, then retry.";
     case "LOGIN_REQUIRED":
     case "TARGET_NOT_ACTIVE": {
       const detected =
@@ -172,15 +172,6 @@ export function selectContactWebResearchTarget(
     };
   }
 
-  for (const platform of CONTACT_WEB_RESEARCH_TARGET_PLATFORM_ORDER) {
-    const target = resolveDefaultTarget(platform);
-    if (!target || !toPlatformTargetView(target).capabilities.includes("browse")) continue;
-    return {
-      ok: true,
-      selection: { targetId: target.id, platform, source: "default" },
-    };
-  }
-
   return { ok: false, error: researchTargetError("NO_RESEARCH_TARGET") };
 }
 
@@ -192,6 +183,61 @@ export async function prepareContactWebResearchTarget(
   | { ok: true; target: ContactWebResearchPreparedTarget }
   | { ok: false; error: ContactWebResearchTargetError }
 > {
+  const configuredTargetId = explicitTargetId(input.config);
+  if (!configuredTargetId) {
+    const unavailablePlatforms: ContactWebResearchTargetPlatform[] = [];
+    for (const platform of CONTACT_WEB_RESEARCH_TARGET_PLATFORM_ORDER) {
+      try {
+        const prepared = await prepareCurrentPlatformTarget(
+          {
+            platform,
+            intent: "browse",
+            holder: `${CONTACT_WEB_RESEARCH_LEASE_HOLDER_PREFIX}${input.workflowRunId}`,
+            leaseTtlSeconds: CONTACT_WEB_RESEARCH_LEASE_TTL_SECONDS,
+          },
+          env,
+          fetchImpl,
+        );
+        return {
+          ok: true,
+          target: {
+            targetId: prepared.targetId,
+            platform,
+            source: "session",
+            sessionName: prepared.sessionName,
+            startUrl: prepared.startUrl,
+            expectedHandle: prepared.expectedHandle,
+            verifiedHandle: prepared.verifiedHandle,
+            leaseId: prepared.lease.leaseId,
+            leaseExpiresAt: prepared.lease.expiresAt,
+            preparedAt: Math.floor(Date.now() / 1000),
+          },
+        };
+      } catch (error) {
+        if (!(error instanceof PlatformTargetError)) throw error;
+        if (error.code === "LOGIN_REQUIRED") {
+          unavailablePlatforms.push(platform);
+          continue;
+        }
+        return {
+          ok: false,
+          error: researchTargetError(error.code, {
+            platform,
+            sessionName: "signals-publish",
+            ...(error.details ?? {}),
+          }),
+        };
+      }
+    }
+    return {
+      ok: false,
+      error: researchTargetError("NO_RESEARCH_TARGET", {
+        sessionName: "signals-publish",
+        unavailablePlatforms,
+      }),
+    };
+  }
+
   const selected = selectContactWebResearchTarget(input.config);
   if (!selected.ok) return selected;
 
@@ -259,7 +305,9 @@ export function getContactWebResearchTargetFromRunConfig(
   if (
     typeof target.targetId !== "string" ||
     !isResearchPlatform(String(target.platform)) ||
-    (target.source !== "config" && target.source !== "default") ||
+    (target.source !== "config" &&
+      target.source !== "default" &&
+      target.source !== "session") ||
     typeof target.sessionName !== "string" ||
     typeof target.startUrl !== "string" ||
     typeof target.leaseId !== "string" ||

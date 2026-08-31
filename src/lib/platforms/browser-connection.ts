@@ -139,6 +139,18 @@ const LOGGED_OUT_SELECTORS: Record<SocialPlatform, string[]> = {
   ],
 };
 
+const LINKEDIN_AUTHENTICATED_NAV_SELECTORS = [
+  ".global-nav__me",
+  '[data-test-icon="nav-home-icon"]',
+  'nav[aria-label="Primary"]',
+] as const;
+
+const LINKEDIN_SELF_PROFILE_LINK_SELECTORS = [
+  '.global-nav__me a[href*="/in/"]',
+  'button.global-nav__me a[href*="/in/"]',
+  'a.global-nav__primary-link[href*="/in/"]',
+] as const;
+
 function asBrowserPlatform(platform: SocialPlatform): BrowserPlatform {
   return platform;
 }
@@ -192,7 +204,6 @@ export function isLinkedInLoggedInUrl(rawUrl: string): boolean {
     const path = new URL(rawUrl).pathname.toLowerCase();
     return (
       path.startsWith("/feed") ||
-      path.startsWith("/in/") ||
       path.startsWith("/mynetwork") ||
       path.startsWith("/notifications") ||
       path.startsWith("/messaging") ||
@@ -359,6 +370,29 @@ function platformUrlChecks(
         loggedOut: isFacebookLoggedOutUrl(pageUrl),
         loggedIn: isFacebookLoggedInUrl(pageUrl),
       };
+  }
+}
+
+/** Auth challenges are terminal evidence, unlike a login URL that may still redirect. */
+function isPlatformAuthChallengeUrl(
+  platform: SocialPlatform,
+  rawUrl: string,
+): boolean {
+  try {
+    const path = new URL(rawUrl).pathname.toLowerCase();
+    if (platform === "linkedin") {
+      return path.includes("/checkpoint") || path.includes("/authwall");
+    }
+    if (platform === "facebook") {
+      return (
+        path.includes("/checkpoint") ||
+        path.includes("/recover") ||
+        path.includes("/authwall")
+      );
+    }
+    return false;
+  } catch {
+    return false;
   }
 }
 
@@ -534,6 +568,53 @@ export async function probePlatformLogin(
   }
 }
 
+export type AuthenticatedPlatformIdentity = {
+  loggedIn: boolean;
+  detectedHandle: string | null;
+};
+
+/**
+ * Poll for the account-owned identity required to bind work to the live session.
+ * A platform URL can become visible before client-rendered account navigation,
+ * so URL-positive login evidence alone is not a complete identity verdict.
+ */
+export async function probeAuthenticatedPlatformIdentity(
+  platform: SocialPlatform,
+  page: Page,
+  timeoutMs: number,
+): Promise<AuthenticatedPlatformIdentity> {
+  const start = Date.now();
+  const deadline = start + timeoutMs;
+
+  for (;;) {
+    if (await isAnySelectorVisible(page, LOGGED_OUT_SELECTORS[platform])) {
+      return { loggedIn: false, detectedHandle: null };
+    }
+
+    const pageUrl = page.url();
+    const { loggedIn, loggedOut } = platformUrlChecks(platform, pageUrl);
+    if (loggedOut && isPlatformAuthChallengeUrl(platform, pageUrl)) {
+      return { loggedIn: false, detectedHandle: null };
+    }
+
+    const loginSurfaceDetected =
+      loggedIn || (await isAnySelectorVisible(page, LOGGED_IN_SELECTORS[platform]));
+    if (loginSurfaceDetected) {
+      const detectedHandle = await detectPlatformHandle(platform, page, pageUrl);
+      if (detectedHandle) return { loggedIn: true, detectedHandle };
+    }
+
+    if (loggedOut && Date.now() - start >= PROBE_REDIRECT_GRACE_MS) {
+      return { loggedIn: false, detectedHandle: null };
+    }
+    if (Date.now() >= deadline) {
+      return { loggedIn: false, detectedHandle: null };
+    }
+
+    await sleep(PROBE_POLL_MS);
+  }
+}
+
 async function detectLoggedInViaCdp(
   platform: SocialPlatform,
   debugPort: number,
@@ -623,14 +704,13 @@ export async function detectPlatformHandle(
     return pageSlug ? formatFacebookHandle(pageSlug) : null;
   }
 
-  const navSelectors = [
-    'a.global-nav__primary-link[href*="/in/"]',
-    '.global-nav__me a[href*="/in/"]',
-    'button.global-nav__me a[href*="/in/"]',
-    'nav a[href*="/in/"]',
-  ];
+  const authenticatedNavigationVisible = await isAnySelectorVisible(
+    page,
+    [...LINKEDIN_AUTHENTICATED_NAV_SELECTORS],
+  );
+  if (!authenticatedNavigationVisible) return null;
 
-  for (const selector of navSelectors) {
+  for (const selector of LINKEDIN_SELF_PROFILE_LINK_SELECTORS) {
     const href = await page
       .locator(selector)
       .first()
@@ -639,9 +719,7 @@ export async function detectPlatformHandle(
     const vanity = extractLinkedInVanityFromUrl(href ?? "");
     if (vanity) return formatLinkedInHandle(vanity);
   }
-
-  const pageVanity = extractLinkedInVanityFromUrl(pageUrl);
-  return pageVanity ? formatLinkedInHandle(pageVanity) : null;
+  return null;
 }
 
 /**

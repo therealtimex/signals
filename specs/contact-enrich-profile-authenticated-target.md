@@ -6,6 +6,27 @@
 [`platform-targets.md`](./platform-targets.md), [`docs/rtx-browser-publish.md`](../docs/rtx-browser-publish.md)
 **Out of scope:** verified email discovery (#385).
 
+## Manual-validation correction (2026-08-30)
+
+The ordinary one-click **Contact Enrich Profile** path inherits the live authenticated identity in
+the shared `signals-publish` browser session. Stored platform defaults are not an authorization
+boundary for research and must not block a run merely because they name an older account.
+
+- Without an explicit `config.targetId` / `config.contactWebResearch.targetId`, preflight probes
+  LinkedIn and then X inside `signals-publish`, registers or refreshes the detected live identity,
+  and binds the browse lease to that target before dispatch.
+- A stale default target is ignored. The live session identity is recorded as `source: "session"`.
+- LinkedIn identity requires positive authenticated navigation plus its self-profile link. A public
+  `/in/*` page is never authentication evidence and its vanity must not be registered as the
+  session owner.
+- An explicit target override remains exact and fail-closed for callers that intentionally pin an
+  identity.
+- Preflight still never creates a substitute browser profile. If neither LinkedIn nor X is signed
+  in within `signals-publish`, dispatch fails with an actionable 409.
+
+This correction supersedes ADR-384-2's default-target selection for the unconfigured path while
+preserving the pre-dispatch lease, exact-session attachment, and no-anonymous-fallback guarantees.
+
 ## 1. Problem
 
 Manual validation of merged #383 showed two defects in the contact-detail **Enrich profile** lane:

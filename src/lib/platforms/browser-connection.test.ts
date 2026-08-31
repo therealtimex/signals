@@ -9,6 +9,7 @@ import {
   buildPublishSessionAllowedOrigins,
   buildPublishSessionGuardrails,
   buildSocialPlatformConnectionPayload,
+  detectPlatformHandle,
   extractFacebookProfileSlugFromUrl,
   extractLinkedInVanityFromUrl,
   extractXHandleFromProfileHref,
@@ -23,6 +24,8 @@ import {
   isXLoggedInUrl,
   isXLoggedOutUrl,
   openPlatformBrowserSession,
+  probeAuthenticatedPlatformIdentity,
+  probePlatformLogin,
   urlMatchesPlatformHost,
   validatePlatformBrowserSession,
 } from "@/lib/platforms/browser-connection";
@@ -46,9 +49,9 @@ describe("rtx browser session helpers", () => {
     );
   });
 
-  it("detects authenticated LinkedIn URLs including profile pages", () => {
+  it("does not treat public LinkedIn profile URLs as authentication evidence", () => {
     expect(isLinkedInLoggedInUrl("https://www.linkedin.com/feed/")).toBe(true);
-    expect(isLinkedInLoggedInUrl("https://www.linkedin.com/in/jane-doe")).toBe(true);
+    expect(isLinkedInLoggedInUrl("https://www.linkedin.com/in/jane-doe")).toBe(false);
     expect(isLinkedInLoggedInUrl("https://www.linkedin.com/login")).toBe(false);
     expect(isLinkedInLoggedInUrl("https://www.linkedin.com/checkpoint/challenge")).toBe(
       false
@@ -351,14 +354,24 @@ describe("publish session guardrails", () => {
   /** Minimal stand-in for a CDP page: URL, selector visibility, and hrefs. */
   function fakePage(
     url: string,
-    { visible = [] as string[], hrefs = {} as Record<string, string> } = {}
+    {
+      visible = [] as string[],
+      hrefs = {} as Record<string, string>,
+      isVisible,
+      getHref,
+    }: {
+      visible?: string[];
+      hrefs?: Record<string, string>;
+      isVisible?: (selector: string) => boolean;
+      getHref?: (selector: string) => string | null;
+    } = {},
   ) {
     return {
       url: () => url,
       locator: (selector: string) => ({
         first: () => ({
-          isVisible: async () => visible.includes(selector),
-          getAttribute: async () => hrefs[selector] ?? null,
+          isVisible: async () => isVisible?.(selector) ?? visible.includes(selector),
+          getAttribute: async () => getHref?.(selector) ?? hrefs[selector] ?? null,
         }),
       }),
     };
@@ -494,6 +507,73 @@ describe("publish session guardrails", () => {
     expect(result.isValid).toBe(true);
   });
 
+  it("rejects a public LinkedIn profile URL as the authenticated session identity", async () => {
+    const page = fakePage("https://www.linkedin.com/in/alice");
+
+    await expect(probePlatformLogin("linkedin", page as never, 0)).resolves.toBe(false);
+    await expect(
+      detectPlatformHandle("linkedin", page as never, page.url()),
+    ).resolves.toBe(null);
+  });
+
+  it("reads LinkedIn identity only from authenticated navigation, not the viewed profile", async () => {
+    const page = fakePage("https://www.linkedin.com/in/alice", {
+      visible: [".global-nav__me"],
+      hrefs: { '.global-nav__me a[href*="/in/"]': "/in/session-owner" },
+    });
+
+    await expect(probePlatformLogin("linkedin", page as never, 0)).resolves.toBe(true);
+    await expect(
+      detectPlatformHandle("linkedin", page as never, page.url()),
+    ).resolves.toBe("/in/session-owner");
+  });
+
+  it("waits for LinkedIn self navigation after the authenticated feed URL appears", async () => {
+    vi.useFakeTimers();
+    try {
+      let navChecks = 0;
+      const page = fakePage("https://www.linkedin.com/feed/", {
+        isVisible: (selector) => {
+          if (selector !== ".global-nav__me") return false;
+          navChecks += 1;
+          return navChecks >= 2;
+        },
+        getHref: (selector) =>
+          navChecks >= 2 && selector === '.global-nav__me a[href*="/in/"]'
+            ? "/in/session-owner"
+            : null,
+      });
+
+      const identity = probeAuthenticatedPlatformIdentity(
+        "linkedin",
+        page as never,
+        1_000,
+      );
+      await vi.advanceTimersByTimeAsync(250);
+
+      await expect(identity).resolves.toEqual({
+        loggedIn: true,
+        detectedHandle: "/in/session-owner",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("rejects a LinkedIn authwall without waiting for the identity timeout", async () => {
+    vi.useFakeTimers();
+    try {
+      const page = fakePage("https://www.linkedin.com/authwall?trk=guest_homepage-basic_nav-header-signin");
+
+      await expect(
+        probeAuthenticatedPlatformIdentity("linkedin", page as never, 8_000),
+      ).resolves.toEqual({ loggedIn: false, detectedHandle: null });
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("requests a platform tab when the session has none, then validates", async () => {
     const { fetchImpl, calls, find } = mockRtxCli([
       { sessionName: "signals-publish", running: true, remoteDebugPort: 9223 },
@@ -518,6 +598,7 @@ describe("publish session guardrails", () => {
       if (url.includes("/cli/start-browser-session/") && body?.url) {
         open.push(
           fakePage("https://www.linkedin.com/feed/", {
+            visible: [".global-nav__me"],
             hrefs: { 'a.global-nav__primary-link[href*="/in/"]': "/in/jane-doe" },
           })
         );
