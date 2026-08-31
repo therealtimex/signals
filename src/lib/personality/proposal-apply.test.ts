@@ -444,6 +444,44 @@ describe.sequential("Personality proposal and apply lifecycle", () => {
     expect(readPersonalityStore().index.proposals[proposal.id].state).toBe("stale");
   });
 
+  it("preserves identity mismatch precedence when a pinned voice belongs to the prior self", async () => {
+    const pinnedVoiceId = "vp_pinned001" as const;
+    let selfChanged = false;
+    const loadSources = (options: { voiceProfileId?: string } = {}) => {
+      if (!selfChanged) return voiceSources(pinnedVoiceId, "Pinned", "b");
+      if (options.voiceProfileId === pinnedVoiceId) {
+        throw new AgentToolError("VALIDATION_ERROR", "Voice profile is not self-owned and approved", {
+          reason: "voice_not_self_owned",
+        });
+      }
+      return sources("Grace", "contact-other");
+    };
+    const proposal = await proposePersonalityProjection(
+      { voiceProfileId: pinnedVoiceId },
+      proposalDependencies(loadSources),
+    );
+    let puts = 0;
+    selfChanged = true;
+
+    await expect(approvePersonalityProposal({
+      proposalId: proposal.id,
+      evidence: { kind: "ui", route: "/settings/personality" },
+    }, {
+      ...applyDependencies(proposal, fakeHost(proposal, {
+        put: async (id) => {
+          puts += 1;
+          return transaction(proposal, id);
+        },
+      })),
+      loadSources,
+    })).rejects.toMatchObject({
+      code: "CONFLICT",
+      details: { reason: "identity_mismatch" },
+    });
+    expect(puts).toBe(0);
+    expect(readPersonalityStore().index.proposals[proposal.id].state).toBe("stale");
+  });
+
   it("warns without replacing a regular CLAUDE.md", async () => {
     writeFileSync(join(workspace.dir, "CLAUDE.md"), "User-owned Claude instructions");
     const proposal = await proposePersonalityProjection({}, proposalDependencies());

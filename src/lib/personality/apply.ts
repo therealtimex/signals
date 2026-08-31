@@ -247,6 +247,12 @@ function loadSourcesForGuard(
       ? (error.details as { reason?: string } | undefined)?.reason
       : null;
     if (proposal.kind === "projection" && reason === "voice_not_self_owned") {
+      const current = currentSourceIdentity(loadSources({}));
+      if (!sameIdentity(current.identity, proposal.identity)) {
+        throw new AgentToolError("CONFLICT", "Personality represented identity changed", {
+          reason: "identity_mismatch",
+        });
+      }
       throw new AgentToolError("CONFLICT", "Personality sources changed after proposal", {
         reason: "source_changed",
       });
