@@ -158,7 +158,9 @@ function sourceStaleDetail(
   loadSources: typeof loadPersonalitySourceBundle,
 ): { currentSourceHash: string | null; detail: NonNullable<PersonalityStatus["detail"]>["sourceStale"] } {
   try {
-    const voiceProfileId = bindingProposal.sourceSnapshot?.voice?.id;
+    const voiceProfileId = bindingProposal.kind === "projection"
+      ? bindingProposal.sourceSnapshot?.voice?.id
+      : undefined;
     const bundle = loadSources(voiceProfileId ? { voiceProfileId } : {});
     const current = buildSourceSnapshot(bundle.sources, bundle.revisions);
     const expected = bindingProposal.sourceSnapshot;

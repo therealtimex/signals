@@ -403,6 +403,47 @@ describe.sequential("Personality proposal and apply lifecycle", () => {
     });
   });
 
+  it("stales a pinned projection when its voice is superseded before approval", async () => {
+    const defaultVoiceId = "vp_default01" as const;
+    const pinnedVoiceId = "vp_pinned001" as const;
+    let pinnedApproved = true;
+    const loadSources = (options: { voiceProfileId?: string } = {}) => {
+      if (options.voiceProfileId !== pinnedVoiceId) {
+        return voiceSources(defaultVoiceId, "Default", "a");
+      }
+      if (!pinnedApproved) {
+        throw new AgentToolError("VALIDATION_ERROR", "Voice profile is not self-owned and approved", {
+          reason: "voice_not_self_owned",
+        });
+      }
+      return voiceSources(pinnedVoiceId, "Pinned", "b");
+    };
+    const proposal = await proposePersonalityProjection(
+      { voiceProfileId: pinnedVoiceId },
+      proposalDependencies(loadSources),
+    );
+    let puts = 0;
+    pinnedApproved = false;
+
+    await expect(approvePersonalityProposal({
+      proposalId: proposal.id,
+      evidence: { kind: "ui", route: "/settings/personality" },
+    }, {
+      ...applyDependencies(proposal, fakeHost(proposal, {
+        put: async (id) => {
+          puts += 1;
+          return transaction(proposal, id);
+        },
+      })),
+      loadSources,
+    })).rejects.toMatchObject({
+      code: "CONFLICT",
+      details: { reason: "source_changed" },
+    });
+    expect(puts).toBe(0);
+    expect(readPersonalityStore().index.proposals[proposal.id].state).toBe("stale");
+  });
+
   it("warns without replacing a regular CLAUDE.md", async () => {
     writeFileSync(join(workspace.dir, "CLAUDE.md"), "User-owned Claude instructions");
     const proposal = await proposePersonalityProjection({}, proposalDependencies());
@@ -451,6 +492,70 @@ describe.sequential("Personality proposal and apply lifecycle", () => {
       evidence: { kind: "ui", route: "/settings/personality" },
     }, applyDependencies(rollback));
     expect(restored.binding).toMatchObject({ kind: "rollback", previousBindingId: null });
+  });
+
+  it("restores historical voice bytes after supersession and immediately reports source stale", async () => {
+    const ids = idFactory();
+    const voiceAId = "vp_voice_a01" as const;
+    const voiceBId = "vp_voice_b01" as const;
+    let voiceAApproved = true;
+    const loadSources = (options: { voiceProfileId?: string } = {}) => {
+      if (options.voiceProfileId === voiceAId) {
+        if (!voiceAApproved) {
+          throw new AgentToolError("VALIDATION_ERROR", "Voice profile is not self-owned and approved", {
+            reason: "voice_not_self_owned",
+          });
+        }
+        return voiceSources(voiceAId, "Voice A", "a");
+      }
+      return voiceSources(voiceBId, "Voice B", "b");
+    };
+    const projection = await proposePersonalityProjection(
+      { voiceProfileId: voiceAId },
+      proposalDependencies(loadSources, ids),
+    );
+    await approvePersonalityProposal({
+      proposalId: projection.id,
+      evidence: { kind: "ui", route: "/settings/personality" },
+    }, { ...applyDependencies(projection), loadSources });
+    materialize(projection);
+
+    const unbind = await proposePersonalityUnbind(
+      { kind: "ui" },
+      proposalDependencies(loadSources, ids),
+    );
+    await approvePersonalityProposal({
+      proposalId: unbind.id,
+      evidence: { kind: "ui", route: "/settings/personality" },
+    }, applyDependencies(unbind));
+    materialize(unbind);
+    voiceAApproved = false;
+
+    const rollback = await proposePersonalityRollback(
+      projection.proposedBindingId,
+      { kind: "ui" },
+      proposalDependencies(loadSources, ids),
+    );
+    const restored = await approvePersonalityProposal({
+      proposalId: rollback.id,
+      evidence: { kind: "ui", route: "/settings/personality" },
+    }, { ...applyDependencies(rollback), loadSources });
+    expect(restored.binding).toMatchObject({
+      kind: "rollback",
+      sourceHash: projection.sourceHash,
+    });
+    materialize(rollback);
+
+    const view = await getPersonalityBindingView({
+      resolveWorkspace: async () => workspace,
+      readWorkspaceFiles: readPersonalityWorkspaceFiles,
+      loadSources,
+      probeCapability: async () => available,
+    });
+    expect(view.status).toMatchObject({
+      status: "source_stale",
+      detail: { sourceStale: { voice: true } },
+    });
   });
 
   it("replays the binding produced by an applied proposal after newer lifecycle changes", async () => {

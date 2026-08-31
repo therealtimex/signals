@@ -233,6 +233,28 @@ function currentSourceIdentity(bundle: LoadedPersonalitySourceBundle) {
   };
 }
 
+function loadSourcesForGuard(
+  proposal: PersonalityProposal,
+  loadSources: NonNullable<PersonalityApplyDependencies["loadSources"]>,
+): LoadedPersonalitySourceBundle {
+  const voiceProfileId = proposal.kind === "projection"
+    ? proposal.sourceSnapshot?.voice?.id
+    : undefined;
+  try {
+    return loadSources(voiceProfileId ? { voiceProfileId } : {});
+  } catch (error) {
+    const reason = error instanceof AgentToolError
+      ? (error.details as { reason?: string } | undefined)?.reason
+      : null;
+    if (proposal.kind === "projection" && reason === "voice_not_self_owned") {
+      throw new AgentToolError("CONFLICT", "Personality sources changed after proposal", {
+        reason: "source_changed",
+      });
+    }
+    throw error;
+  }
+}
+
 function assertSourceGuard(
   proposal: PersonalityProposal,
   active: PersonalityBinding | null,
@@ -246,9 +268,9 @@ function assertSourceGuard(
     }
     return;
   }
-  const voiceProfileId = proposal.sourceSnapshot?.voice?.id;
-  const current = currentSourceIdentity((loadSources ?? loadPersonalitySourceBundle)(
-    voiceProfileId ? { voiceProfileId } : {},
+  const current = currentSourceIdentity(loadSourcesForGuard(
+    proposal,
+    loadSources ?? loadPersonalitySourceBundle,
   ));
   if (!sameIdentity(current.identity, proposal.identity)) {
     throw new AgentToolError("CONFLICT", "Personality represented identity changed", {
