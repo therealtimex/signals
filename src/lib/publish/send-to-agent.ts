@@ -121,24 +121,35 @@ async function restoreWritingAfterDispatchFailure(input: {
       }
     }, { env: input.env, fetchImpl: input.fetchImpl });
   } catch {
-    db.transaction((tx) => {
-      const now = Math.floor(Date.now() / 1_000);
-      tx.update(contentItems)
-        .set({ status: "draft", updatedAt: now })
-        .where(eq(contentItems.id, input.contentItemId))
-        .run();
-      const variant = contentWriting.variantId
-        ? tx.select().from(variants).where(eq(variants.id, contentWriting.variantId)).get()
-        : undefined;
-      if (variant) {
-        revokeWritingVariantWithRunner(tx, {
-          variant,
-          reason: "personality_stale",
-          allowQueuedNoop: true,
-          now,
-        });
+    try {
+      db.transaction((tx) => {
+        const now = Math.floor(Date.now() / 1_000);
+        tx.update(contentItems)
+          .set({ status: "draft", updatedAt: now })
+          .where(eq(contentItems.id, input.contentItemId))
+          .run();
+        const variant = contentWriting.variantId
+          ? tx.select().from(variants).where(eq(variants.id, contentWriting.variantId)).get()
+          : undefined;
+        if (variant) {
+          revokeWritingVariantWithRunner(tx, {
+            variant,
+            reason: "personality_stale",
+            allowQueuedNoop: true,
+            now,
+          });
+        }
+      });
+    } catch {
+      // The publish job is already failed. Preserve that API outcome and make a
+      // best-effort direct status write so restoration failure never reports the
+      // content item as approved.
+      try {
+        updateContentItem(input.contentItemId, { status: "failed" });
+      } catch {
+        // A fully unavailable database cannot be repaired in this request.
       }
-    });
+    }
   }
 }
 

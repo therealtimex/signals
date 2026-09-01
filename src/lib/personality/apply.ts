@@ -65,7 +65,10 @@ export type PersonalityApplyDependencies = {
   loadSources?: (options?: { voiceProfileId?: string }) => LoadedPersonalitySourceBundle;
   probeCapability?: (uncached: boolean) => Promise<PersonalityCapabilityState>;
   hostClient?: PersonalityHostClient;
-  onBindingCommitted?: (result: PersonalityApplyResult) => Promise<void> | void;
+  onBindingCommitted?: (
+    result: PersonalityApplyResult,
+    context: { activeBindingId: string | null },
+  ) => Promise<void> | void;
 };
 
 type Attempt = NonNullable<PersonalityProposalRecord["attempt"]>;
@@ -766,17 +769,22 @@ async function committedOrMismatch(input: {
   };
   updateRecord(input.session, input.proposal.id, committing);
   const result = successfulBinding(input.session, input.proposal, committing, input.transaction, input.at);
-  await notifyBindingCommitted(result, input.onBindingCommitted);
+  await notifyBindingCommitted(
+    result,
+    bindingSetFor(input.session, input.proposal)?.active?.id ?? null,
+    input.onBindingCommitted,
+  );
   return result;
 }
 
 async function notifyBindingCommitted(
   result: PersonalityApplyResult,
+  activeBindingId: string | null,
   callback: PersonalityApplyDependencies["onBindingCommitted"],
 ): Promise<void> {
   if (!callback) return;
   try {
-    await callback(result);
+    await callback(result, { activeBindingId });
   } catch (error) {
     throw new AgentToolError(
       "EXECUTION_ERROR",
@@ -785,7 +793,7 @@ async function notifyBindingCommitted(
         reason: "personality_cleanup_failed",
         bindingCommitted: true,
         cleanupRequired: true,
-        bindingId: result.binding?.id ?? null,
+        bindingId: activeBindingId,
         error: error instanceof Error ? error.message : String(error),
       },
     );
@@ -1029,7 +1037,11 @@ export async function approvePersonalityProposal(input: {
         record,
         binding: appliedBindingFor(session, proposal),
       };
-      await notifyBindingCommitted(result, dependencies.onBindingCommitted);
+      await notifyBindingCommitted(
+        result,
+        bindingSetFor(session, proposal)?.active?.id ?? null,
+        dependencies.onBindingCommitted,
+      );
       return result;
     }
     if (record.state === "proposed") {
@@ -1157,7 +1169,11 @@ export async function retryPersonalityProposal(
     const proposal = session.getProposal(proposalId);
     if (record.state === "applied") {
       const result = { proposal, record, binding: appliedBindingFor(session, proposal) };
-      await notifyBindingCommitted(result, dependencies.onBindingCommitted);
+      await notifyBindingCommitted(
+        result,
+        bindingSetFor(session, proposal)?.active?.id ?? null,
+        dependencies.onBindingCommitted,
+      );
       return result;
     }
     return retryWithinLock(session, proposal, record, dependencies);

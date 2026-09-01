@@ -3,6 +3,7 @@ import { AgentToolError } from "@/lib/agent-tools/types";
 import {
   approvePersonalityProposal,
   retryPersonalityProposal,
+  type PersonalityApplyDependencies,
 } from "@/lib/personality/apply";
 import { platformTargets } from "@/lib/db/schema";
 import { toPlatformTargetView } from "@/lib/db/queries/platform-targets";
@@ -28,18 +29,38 @@ import {
   revokeVariantsForTargetRepresentationWithRunner,
 } from "@/lib/writing/personality-revocation";
 
-const reconcileCommittedBinding = (result: {
-  binding: { id: string } | null;
-}) => {
-  reconcilePersonalityBinding(result.binding?.id ?? null);
+export const __personalityUseCaseTestHooks: {
+  beforeBindingReconcile?: (activeBindingId: string | null) => Promise<void> | void;
+  beforeTargetMutation?: (targetId: string) => void;
+} = {};
+
+const reconcileCommittedBinding: NonNullable<
+  PersonalityApplyDependencies["onBindingCommitted"]
+> = async (_result, context) => {
+  await __personalityUseCaseTestHooks.beforeBindingReconcile?.(context.activeBindingId);
+  reconcilePersonalityBinding(context.activeBindingId);
 };
 
-export function approvePersonalityProjection(input: Parameters<typeof approvePersonalityProposal>[0]) {
-  return approvePersonalityProposal(input, { onBindingCommitted: reconcileCommittedBinding });
+type ProjectionApplyDependencies = Omit<PersonalityApplyDependencies, "onBindingCommitted">;
+
+export function approvePersonalityProjection(
+  input: Parameters<typeof approvePersonalityProposal>[0],
+  dependencies: ProjectionApplyDependencies = {},
+) {
+  return approvePersonalityProposal(input, {
+    ...dependencies,
+    onBindingCommitted: reconcileCommittedBinding,
+  });
 }
 
-export function retryPersonalityProjection(proposalId: string) {
-  return retryPersonalityProposal(proposalId, { onBindingCommitted: reconcileCommittedBinding });
+export function retryPersonalityProjection(
+  proposalId: string,
+  dependencies: ProjectionApplyDependencies = {},
+) {
+  return retryPersonalityProposal(proposalId, {
+    ...dependencies,
+    onBindingCommitted: reconcileCommittedBinding,
+  });
 }
 
 export function setRepresentedOrganization(orgId: string | null) {
@@ -94,6 +115,7 @@ export async function setTargetRepresentation(input: {
       evidence: input.evidence,
       bindingIdAtDecision: binding.bindingId,
     });
+    __personalityUseCaseTestHooks.beforeTargetMutation?.(target.id);
     const metadata = { ...parseMetadataObject(target.metadata), personality };
     tx.update(platformTargets)
       .set({

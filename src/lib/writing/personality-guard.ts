@@ -192,6 +192,13 @@ export function stampVariantPersonality(input: {
 }): VariantPersonalitySnapshot {
   const binding = assertUsableBinding(input.guard, input.bindingId);
   let target: VariantPersonalitySnapshot["target"] = null;
+  if (input.requireCompatibleTarget && !input.targetId) {
+    return guardError(
+      "CONFLICT",
+      "A compatible Personality target is required",
+      "target_identity_mismatch",
+    );
+  }
   if (input.targetId) {
     const targetRow = input.guard.targets.get(input.targetId);
     if (!targetRow || targetRow.status !== "active") {

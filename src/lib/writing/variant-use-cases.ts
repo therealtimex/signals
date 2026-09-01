@@ -14,6 +14,7 @@ import {
 import {
   isPersonalityAwareWritingSkillVersion,
 } from "@/lib/writing/personality-lineage";
+import { getSurfaceCapabilities } from "@/lib/writing/capabilities";
 import {
   stampAuditPersonality,
   stampVariantPersonality,
@@ -77,7 +78,9 @@ export async function upsertVariantUseCase(
       guard,
       bindingId: selector.bindingId,
       targetId: writingInput.data.targetId,
-      requireCompatibleTarget: Boolean(writingInput.data.audit),
+      requireCompatibleTarget: Boolean(writingInput.data.audit) && ["direct", "beta"].includes(
+        getSurfaceCapabilities(writingInput.data.surface).publish,
+      ),
     });
     return upsertPersonalityBoundWritingVariant(input, {
       snapshot,

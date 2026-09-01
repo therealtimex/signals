@@ -76,6 +76,22 @@ describe("Personality writing guard", () => {
     });
   });
 
+  it("requires a compatible target for audited publish-capable surfaces", () => {
+    expect(() => stampVariantPersonality({
+      guard: guard(),
+      bindingId: binding.id,
+      requireCompatibleTarget: true,
+    })).toThrow(expect.objectContaining({
+      details: { reason: "target_identity_mismatch" },
+    }));
+
+    expect(stampVariantPersonality({
+      guard: guard(),
+      bindingId: binding.id,
+      requireCompatibleTarget: false,
+    }).target).toBeNull();
+  });
+
   it("distinguishes the narrow source-stale audit from hard identity drift", () => {
     const sourceStaleGuard = guard({ status: "source_stale", currentSourceHash: hash("c") });
     const snapshot = stampVariantPersonality({
