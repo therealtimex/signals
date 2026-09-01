@@ -16,6 +16,7 @@
  * `company` field the dashboard reads off `currentEmployment`, and the
  * engagement→interaction projection the analytics UNION depends on.
  */
+import { recalcContactEnrichment } from "@/lib/db/contact-enrichment-recalc";
 import { createContact } from "@/lib/db/queries/contacts";
 import { createContentItem } from "@/lib/db/queries/content";
 import { logInteraction } from "@/lib/db/queries/interactions";
@@ -56,20 +57,31 @@ export const DEMO_ORGS = [
  * Twelve contacts spread across all six funnel stages, so the dashboard's
  * funnel bar is a distribution rather than one block. `orgIndex` drives the
  * employment row that the "Recent Contacts" company line reads from.
+ *
+ * `daysAgo` is clustered rather than evenly spaced. One contact every two days
+ * makes every bar in the analytics Contact Growth chart exactly 1, so the
+ * y-axis maxes at 1 and the area fills flat — a chart that illustrates nothing.
+ * Repeats here give it peaks.
+ *
+ * `richness` drives how complete each profile is, which is what the Enrichment
+ * Score Distribution histogram buckets on. Uniformly thin profiles put all
+ * twelve contacts in one bar. See `src/lib/db/enrichment.ts` for the weights;
+ * these tiers land near 95 / 52 / 26. No avatars at any tier — initials keep
+ * the guide free of photographs.
  */
 export const DEMO_CONTACTS = [
-  { name: "Aria Park", title: "Founder", orgIndex: 0, funnelStage: "customer" as const, handle: "ariapark", headline: "Building data pipelines that explain themselves.", followers: 18_400, score: 88 },
-  { name: "Devan Osei", title: "Head of Engineering", orgIndex: 0, funnelStage: "advocate" as const, handle: "devanosei", headline: "Distributed systems, mostly on purpose.", followers: 9_120, score: 81 },
-  { name: "Mira Lindqvist", title: "Co-Founder", orgIndex: 1, funnelStage: "opportunity" as const, handle: "miralind", headline: "Developer tools for very small teams.", followers: 24_700, score: 76 },
-  { name: "Tomas Reyes", title: "Principal Engineer", orgIndex: 1, funnelStage: "qualified" as const, handle: "tomasreyes", headline: "Local-first software, offline by default.", followers: 5_380, score: 64 },
-  { name: "Noor Haddad", title: "VP Product", orgIndex: 2, funnelStage: "qualified" as const, handle: "noorhaddad", headline: "Payments infrastructure and the humans who use it.", followers: 12_900, score: 69 },
-  { name: "Iwan Sobczak", title: "Staff Designer", orgIndex: 2, funnelStage: "engaged" as const, handle: "iwansob", headline: "Interface design for dense, boring, important screens.", followers: 3_150, score: 52 },
-  { name: "Petra Halvorsen", title: "Research Lead", orgIndex: 3, funnelStage: "engaged" as const, handle: "petrahalv", headline: "Open weights, open evals, open notebooks.", followers: 31_200, score: 71 },
-  { name: "Leo Amankwah", title: "ML Engineer", orgIndex: 3, funnelStage: "prospect" as const, handle: "leoamank", headline: "Small models, careful benchmarks.", followers: 7_640, score: 44 },
-  { name: "Saoirse Byrne", title: "Chief of Staff", orgIndex: 4, funnelStage: "prospect" as const, handle: "saoirseb", headline: "Operations for teams that ship weekly.", followers: 2_080, score: 38 },
-  { name: "Kenji Watanabe", title: "Founder", orgIndex: 4, funnelStage: "prospect" as const, handle: "kenjiwat", headline: "Clinical workflows, minus the fax machine.", followers: 14_300, score: 41 },
-  { name: "Rosa Delacroix", title: "Angel Investor", orgIndex: null, funnelStage: "engaged" as const, handle: "rosadela", headline: "Pre-seed cheques for infrastructure founders.", followers: 41_800, score: 58 },
-  { name: "Ben Ostrowski", title: "Technical Writer", orgIndex: null, funnelStage: "prospect" as const, handle: "benostr", headline: "Docs are a feature.", followers: 1_460, score: 29 },
+  { name: "Aria Park", daysAgo: 28, richness: "rich" as const, title: "Founder", orgIndex: 0, funnelStage: "customer" as const, handle: "ariapark", headline: "Building data pipelines that explain themselves.", followers: 18_400, score: 88 },
+  { name: "Devan Osei", daysAgo: 28, richness: "rich" as const, title: "Head of Engineering", orgIndex: 0, funnelStage: "advocate" as const, handle: "devanosei", headline: "Distributed systems, mostly on purpose.", followers: 9_120, score: 81 },
+  { name: "Mira Lindqvist", daysAgo: 26, richness: "rich" as const, title: "Co-Founder", orgIndex: 1, funnelStage: "opportunity" as const, handle: "miralind", headline: "Developer tools for very small teams.", followers: 24_700, score: 76 },
+  { name: "Tomas Reyes", daysAgo: 21, richness: "medium" as const, title: "Principal Engineer", orgIndex: 1, funnelStage: "qualified" as const, handle: "tomasreyes", headline: "Local-first software, offline by default.", followers: 5_380, score: 64 },
+  { name: "Noor Haddad", daysAgo: 21, richness: "medium" as const, title: "VP Product", orgIndex: 2, funnelStage: "qualified" as const, handle: "noorhaddad", headline: "Payments infrastructure and the humans who use it.", followers: 12_900, score: 69 },
+  { name: "Iwan Sobczak", daysAgo: 21, richness: "medium" as const, title: "Staff Designer", orgIndex: 2, funnelStage: "engaged" as const, handle: "iwansob", headline: "Interface design for dense, boring, important screens.", followers: 3_150, score: 52 },
+  { name: "Petra Halvorsen", daysAgo: 17, richness: "rich" as const, title: "Research Lead", orgIndex: 3, funnelStage: "engaged" as const, handle: "petrahalv", headline: "Open weights, open evals, open notebooks.", followers: 31_200, score: 71 },
+  { name: "Leo Amankwah", daysAgo: 14, richness: "medium" as const, title: "ML Engineer", orgIndex: 3, funnelStage: "prospect" as const, handle: "leoamank", headline: "Small models, careful benchmarks.", followers: 7_640, score: 44 },
+  { name: "Saoirse Byrne", daysAgo: 14, richness: "sparse" as const, title: "Chief of Staff", orgIndex: 4, funnelStage: "prospect" as const, handle: "saoirseb", headline: "Operations for teams that ship weekly.", followers: 2_080, score: 38 },
+  { name: "Kenji Watanabe", daysAgo: 9, richness: "medium" as const, title: "Founder", orgIndex: 4, funnelStage: "prospect" as const, handle: "kenjiwat", headline: "Clinical workflows, minus the fax machine.", followers: 14_300, score: 41 },
+  { name: "Rosa Delacroix", daysAgo: 5, richness: "sparse" as const, title: "Angel Investor", orgIndex: null, funnelStage: "engaged" as const, handle: "rosadela", headline: "Pre-seed cheques for infrastructure founders.", followers: 41_800, score: 58 },
+  { name: "Ben Ostrowski", daysAgo: 5, richness: "sparse" as const, title: "Technical Writer", orgIndex: null, funnelStage: "prospect" as const, handle: "benostr", headline: "Docs are a feature.", followers: 1_460, score: 29 },
 ];
 
 /**
@@ -77,6 +89,17 @@ export const DEMO_CONTACTS = [
  * days before the run, kept inside the analytics 30-day window so the charts
  * are populated rather than empty.
  */
+/**
+ * What each tier supplies, in the terms `calculateEnrichmentScore` actually
+ * weighs. Kept as data so the spread is legible without reading the seeding
+ * loop.
+ */
+export const RICHNESS_TIERS = {
+  rich: { verifiedEmail: true, phone: true, location: true, bio: true, website: true, identities: 3, richPlatformData: true },
+  medium: { verifiedEmail: false, phone: false, location: true, bio: false, website: false, identities: 2, richPlatformData: false },
+  sparse: { verifiedEmail: false, phone: false, location: false, bio: false, website: false, identities: 1, richPlatformData: false },
+} as const;
+
 export const DEMO_CONTENT = [
   { title: "Why local-first CRMs win on trust", contentType: "article" as const, body: "Your relationship graph is the most sensitive thing you own. Shipping it to someone else's cloud is a choice, not a requirement.", status: "published" as const, origin: "authored" as const, direction: "outbound" as const, platform: "linkedin" as const, age: 2, likes: 214, comments: 31, shares: 18, impressions: 9_400 },
   { title: "Thread: what a one-person GTM stack looks like", contentType: "thread" as const, body: "Six tools, one afternoon of setup, no seat licences. Here is the whole thing.", status: "published" as const, origin: "authored" as const, direction: "outbound" as const, platform: "x" as const, age: 4, likes: 488, comments: 64, shares: 122, impressions: 27_300 },
@@ -153,6 +176,7 @@ export function seedDemoData(now = Math.floor(Date.now() / 1000)): DemoSeedSumma
 
   const contacts = DEMO_CONTACTS.map((person, index) => {
     const org = person.orgIndex === null ? null : orgs[person.orgIndex];
+    const tier = RICHNESS_TIERS[person.richness];
     summary.contacts += 1;
     const contact = createContact({
       name: person.name,
@@ -160,36 +184,56 @@ export function seedDemoData(now = Math.floor(Date.now() / 1000)): DemoSeedSumma
       score: person.score,
       // Reserved by RFC 2606, so no real mailbox can appear in a screenshot.
       email: `${person.handle}@example.com`,
+      verifiedEmail: tier.verifiedEmail,
+      // A documentation range (RFC 3849 style is IPv6; for phones E.164 has no
+      // reserved block, so this uses the 555 fictional prefix).
+      ...(tier.phone ? { phone: "+1-555-0100" } : {}),
       title: person.title,
       ...(org ? { orgId: org.id } : {}),
       headline: person.headline,
       relationshipGoal: index % 3 === 0 ? "mutual_engagement" : "follow_back",
       relationshipGoalStatus: index % 3 === 0 ? "in_progress" : "not_started",
-      createdAt: ago(30 - index * 2),
+      createdAt: ago(person.daysAgo),
     });
 
-    summary.identities += 1;
-    createIdentity({
-      contactId: contact.id,
-      platform: "x",
-      platformUserId: `demo-x-${person.handle}`,
-      platformHandle: person.handle,
-      displayName: person.name,
-      headline: person.headline,
-      followersCount: person.followers,
-      isPrimary: 1,
-    });
-    if (org) {
+    // >3 keys is what `calculateEnrichmentScore` counts as rich platform data.
+    const platformData = tier.richPlatformData
+      ? JSON.stringify({
+          verified: true,
+          accountAge: "4y",
+          tweetCount: 3_100,
+          mediaCount: 210,
+          pinnedPost: `demo-post-${index}`,
+        })
+      : null;
+
+    const platforms = ["x", "linkedin", "substack"] as const;
+    for (let n = 0; n < tier.identities; n += 1) {
       summary.identities += 1;
       createIdentity({
         contactId: contact.id,
-        platform: "linkedin",
-        platformUserId: `demo-li-${person.handle}`,
+        platform: platforms[n],
+        platformUserId: `demo-${platforms[n]}-${person.handle}`,
         platformHandle: person.handle,
         displayName: person.name,
-        followersCount: Math.round(person.followers * 0.4),
+        headline: person.headline,
+        followersCount: Math.round(person.followers * (n === 0 ? 1 : 0.4)),
+        isPrimary: n === 0 ? 1 : 0,
+        // `resolveContactProfile` reads headline/bio/location/website off the
+        // identities, never off the contact, so these have to live here to
+        // count toward the enrichment score.
+        ...(tier.bio ? { bio: person.headline } : {}),
+        ...(tier.location ? { location: "Remote" } : {}),
+        ...(tier.website ? { websiteUrl: `https://${person.handle}.example.com` } : {}),
+        ...(n === 0 && platformData ? { platformData } : {}),
       });
     }
+
+    // `createContact` scores the contact before any identity exists, and
+    // `createIdentity` does not re-score. Without this every contact keeps the
+    // score it had when it had no platform profile at all — which is why the
+    // first seeded set landed in a single histogram bucket.
+    recalcContactEnrichment(contact.id);
     return contact;
   });
 
