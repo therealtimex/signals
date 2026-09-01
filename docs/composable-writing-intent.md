@@ -26,6 +26,22 @@ authority, and it never enters `IDENTITY.md`, `SOUL.md`, `VOICE.md`, or `BRAND.m
 - **`WritingIntent`** — the runtime request: the draft plus the active `bindingId` the agent read
   from `get_writing_context`.
 
+## The server decides, not the payload
+
+`metadata.writing.intent` is the agent's claim. Whether a variant *is* an assist-only proposal is
+resolved by `writing-intent-authority.ts` from the workflow-run row Signals wrote at dispatch time
+(`buildStoredRunConfig`), falling back to the template config. Both directions fail closed:
+
+- a run whose stored config carries the opt-in **must** produce a valid, matching intent
+  (`writing_intent_required`), and
+- a run that does not **must not** carry one (`writing_intent_not_permitted`), so assist-only
+  provenance cannot be forged onto an unrelated artifact.
+
+The submitted record must also agree with the dispatch on consumer, surface, enabled surfaces, and
+lineage (`workflowRunId` / `templateId`); a mismatch is rejected rather than downgraded. A composed
+run additionally requires the active Personality binding and a **compatible represented target** —
+`draft_only` does not relax the target gate.
+
 `resolveWritingRequest(intent, context)` turns an intent plus observed Personality/target state
 into a `WritingRequest`. It fails closed:
 
@@ -49,6 +65,9 @@ into a `WritingRequest`. It fails closed:
   `materializeVariantWithRunner` rejects a `by: "policy"` approval outright.
 - `sendContentToAgent` refuses any content item whose writing metadata carries an assist-only
   intent, even on a publish-capable surface. Composition provenance outranks surface capability.
+- The intent is part of `computeAuditInputHash`, so rebinding an approved proposal to a different
+  recipient, relationship goal, or evidence set stales the audit and revokes the approval. Same
+  body, different artifact.
 
 Widening the mandate needs a new ADR, not an enum edit.
 
@@ -65,7 +84,8 @@ Six send-less surfaces carry draft/audit contracts and no publish adapter:
 | `facebook/comment` | `draft_only` | 8 000 |
 | `facebook/direct_message` | `draft_only` | 20 000 |
 
-Each has rules, formulas, and heuristics in `.claude/skills/signals-writing/overlays/`, mirrored
+Each is listed in the `signals-writing` capability table and its platform overlay's operating
+prose, with rules, formulas, and heuristics in `.claude/skills/signals-writing/overlays/`, mirrored
 hard limits in `src/lib/writing/variant-writing.ts` and the skill's `writing-cli.cjs`, and
 `contentTypeForSurface` materializes them as `reply` or `dm` — never `post`, which is what
 `send-to-agent.ts` re-derives to prove an artifact is a publishable original.
@@ -75,7 +95,7 @@ publish-capable spotlight-post surface for an assist-only consumer.
 
 ## Opting a workflow in
 
-Three edits, no new engine:
+Four edits, no new engine:
 
 1. **Register the consumer** in `WRITING_INTENT_CONSUMERS` and give it allowed surfaces in
    `WRITING_INTENT_CONSUMER_SURFACES` (`src/lib/writing/writing-intent.ts`). The registry is
@@ -89,12 +109,17 @@ Three edits, no new engine:
    `buildAgentWorkflowBrief` detects the `writingIntent` key and appends the shared contract. It
    does **not** make the workflow the Platform-native writing template — that lane still keys off
    `signalsWriting` and its brief is unchanged.
-3. **Emit intents from the workflow's own brief section**, as
+3. **Resolve the acting target before building the brief.** `buildAgentWorkflowBrief` takes the
+   resolved `platformTarget` row; it never queries the database and never guesses a platform. A
+   composed contract offers only the acting platform's surfaces, and its intent sample is always
+   internally valid — an X sample handed to a LinkedIn run is both wrong advice and an intent the
+   schema rejects. With no target resolved, the brief says so and defers surface choice per contact.
+4. **Emit intents from the workflow's own brief section**, as
    `buildContactNurtureBriefSection` does: map the workflow's goal to a surface, name the
    recipient reference and evidence, and tell the agent to attach the intent as
    `metadata.writing.intent` on `upsert_variant`.
 
-Existing installs need a fourth step: seed migration. Template config is preserved across seed
+Existing installs need one more step: seed migration. Template config is preserved across seed
 versions except where a branch merges structural keys, so `seedTemplates` merges the opt-in
 explicitly (see the `CONTACT_RELATIONSHIP_NURTURE_TEMPLATE_NAME` branch). Without it the prompt
 would reference a contract the brief never renders.
@@ -116,7 +141,8 @@ own goals map onto it.
 
 | Concern | File |
 |---|---|
-| Intent contract, lanes, refusals | `src/lib/writing/writing-intent.ts` |
+| Intent contract, composition config, lanes, refusals | `src/lib/writing/writing-intent.ts` |
+| Server-side composition authority | `src/lib/writing/writing-intent-authority.ts` |
 | Shared brief text (both lanes) | `src/lib/workflows/writing-contract.ts` |
 | Reusable opt-in + composed brief | `src/lib/workflows/writing-composition.ts` |
 | Platform-native lane | `src/lib/workflows/signals-writing.ts` |

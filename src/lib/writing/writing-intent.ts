@@ -22,7 +22,7 @@ import { z } from "zod";
 import { PLATFORMS, type Platform } from "@/lib/db/platforms";
 import { RELATIONSHIP_GOAL_ENUM, type RelationshipGoal } from "@/lib/relationship-goals";
 import { getSurfaceCapabilities, type PublishCapability } from "@/lib/writing/capabilities";
-import { SURFACE_IDS, type SurfaceId } from "@/lib/writing/surfaces";
+import { SURFACE_IDS, parseSurfaceId, type SurfaceId } from "@/lib/writing/surfaces";
 
 export const WRITING_INTENT_SCHEMA_VERSION = 1;
 
@@ -316,6 +316,79 @@ export function readWritingIntentRecord(value: unknown): WritingIntentRecord | n
 export function isAssistOnlyIntent(value: unknown): boolean {
   const record = readWritingIntentRecord(value);
   return record?.mandate === "assist_only";
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Composition config
+ *
+ * The opt-in a workflow template carries. It lives with the contract rather than with the brief
+ * builder because the *server* reads it to decide whether a run is composed — see
+ * `writing-intent-authority.ts`. Brief rendering re-exports these from
+ * `@/lib/workflows/writing-composition`.
+ * ---------------------------------------------------------------------------------------------- */
+
+export const WRITING_INTENT_CONFIG_KEY = "writingIntent";
+export const WRITING_INTENT_CONFIG_VERSION = 1;
+
+export interface WritingIntentComposition {
+  version: typeof WRITING_INTENT_CONFIG_VERSION;
+  consumer: WritingIntentConsumer;
+  /** Surfaces this workflow may propose on; always a subset of the consumer's allowed surfaces. */
+  surfaces: SurfaceId[];
+  mandate: WritingIntentMandate;
+  approvalPolicy: typeof WRITING_INTENT_APPROVAL_POLICY;
+}
+
+export function readWritingIntentComposition(
+  config: Record<string, unknown>,
+): WritingIntentComposition | null {
+  const raw = config[WRITING_INTENT_CONFIG_KEY];
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const candidate = raw as Record<string, unknown>;
+  if (candidate.version !== WRITING_INTENT_CONFIG_VERSION) return null;
+  if (
+    typeof candidate.consumer !== "string" ||
+    !(WRITING_INTENT_CONSUMERS as readonly string[]).includes(candidate.consumer)
+  ) {
+    return null;
+  }
+  const consumer = candidate.consumer as WritingIntentConsumer;
+  const allowed = new Set<SurfaceId>(WRITING_INTENT_CONSUMER_SURFACES[consumer]);
+  if (!Array.isArray(candidate.surfaces) || candidate.surfaces.length === 0) return null;
+  const surfaces: SurfaceId[] = [];
+  for (const entry of candidate.surfaces) {
+    const surface = parseSurfaceId(entry);
+    if (!surface || !allowed.has(surface)) return null;
+    surfaces.push(surface);
+  }
+  if (candidate.mandate !== "assist_only") return null;
+  if (candidate.approvalPolicy !== WRITING_INTENT_APPROVAL_POLICY) return null;
+  return {
+    version: WRITING_INTENT_CONFIG_VERSION,
+    consumer,
+    surfaces,
+    mandate: "assist_only",
+    approvalPolicy: WRITING_INTENT_APPROVAL_POLICY,
+  };
+}
+
+export function isWritingComposedConfig(config: Record<string, unknown>): boolean {
+  return readWritingIntentComposition(config) !== null;
+}
+
+export function buildWritingIntentCompositionConfig(input: {
+  consumer: WritingIntentConsumer;
+  surfaces?: readonly SurfaceId[];
+}): Record<string, unknown> {
+  return {
+    [WRITING_INTENT_CONFIG_KEY]: {
+      version: WRITING_INTENT_CONFIG_VERSION,
+      consumer: input.consumer,
+      surfaces: [...(input.surfaces ?? WRITING_INTENT_CONSUMER_SURFACES[input.consumer])],
+      mandate: "assist_only",
+      approvalPolicy: WRITING_INTENT_APPROVAL_POLICY,
+    },
+  };
 }
 
 export function buildWritingIntentDraft(input: {

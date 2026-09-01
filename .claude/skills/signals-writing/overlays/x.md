@@ -9,9 +9,13 @@ sources: [docs-dev/refs/manifest.json, src/lib/writing/variant-writing.ts, src/l
 
 # X overlay
 
-Use this overlay only for `x/post` and `x/thread`. Both surfaces are measured per ordered unit.
-The server is authoritative for limits and audit parity; the publish adapter preserves thread
-order after the first unit.
+Use this overlay for `x/post`, `x/thread`, `x/reply`, and `x/direct_message`. Every surface is
+measured per ordered unit. The server is authoritative for limits and audit parity; the publish
+adapter preserves thread order after the first unit.
+
+`x/reply` and `x/direct_message` are assist-only: draft, audit, and propose them exactly like a
+post, but they have no publish or send adapter. A direct message is not a reply — its limit is
+10 000 code units, not 280.
 
 ## Hard constraints
 

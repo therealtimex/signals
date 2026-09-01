@@ -364,16 +364,18 @@ export async function runTemplateViaRtx(
     const { threadSlug, resolution: threadResolution } = thread;
 
     let runtimeConfig = { ...mergedConfig };
-    if (typeof mergedConfig.targetId === "string" && !mergedConfig.targetPlatform) {
-      const target = getPlatformTargetById(mergedConfig.targetId);
-      if (target) {
-        runtimeConfig = {
-          ...runtimeConfig,
-          targetPlatform: target.platform,
-          targetName: target.name || target.handle,
-          targetHandle: target.handle,
-        };
-      }
+    // Resolve the acting profile once, and hand the row to the brief rather than letting the brief
+    // re-derive a platform from loose config keys.
+    const actingTarget = typeof mergedConfig.targetId === "string" && mergedConfig.targetId.trim()
+      ? getPlatformTargetById(mergedConfig.targetId.trim())
+      : undefined;
+    if (actingTarget && !mergedConfig.targetPlatform) {
+      runtimeConfig = {
+        ...runtimeConfig,
+        targetPlatform: actingTarget.platform,
+        targetName: actingTarget.name || actingTarget.handle,
+        targetHandle: actingTarget.handle,
+      };
     }
 
     let researchTarget: ContactWebResearchPreparedTarget | undefined;
@@ -459,6 +461,14 @@ export async function runTemplateViaRtx(
       signalsBaseUrl,
       systemPromptOverride: input.systemPrompt,
       contactWebResearchContext,
+      platformTarget: actingTarget
+        ? {
+            id: actingTarget.id,
+            platform: actingTarget.platform,
+            name: actingTarget.name ?? "",
+            handle: actingTarget.handle,
+          }
+        : null,
     });
 
     const briefPath = workflowRunBriefRelativePath(run.id);

@@ -9,6 +9,10 @@ import { deriveAuditVerdict, deriveRiskTier, validateAuditFindingSemantics } fro
 import { getSurfaceCapabilities } from "@/lib/writing/capabilities";
 import { isAssistOnlyIntent } from "@/lib/writing/writing-intent";
 import {
+  assertWritingIntentAuthority,
+  resolveComposedRunAuthority,
+} from "@/lib/writing/writing-intent-authority";
+import {
   type ApprovalState,
   type LaunchWriting,
   type VariantGeneration,
@@ -279,6 +283,18 @@ export function persistWritingVariant(
     }
   }
   const variantId = existing?.id ?? nanoid();
+  // Composition is the run's property, not the payload's: a composed run must produce a matching
+  // intent, and an uncomposed one must not carry assist-only provenance at all.
+  const composedAuthority = resolveComposedRunAuthority(
+    runner,
+    generationResult.data.agent.workflowRunId,
+  );
+  assertWritingIntentAuthority({
+    authority: composedAuthority,
+    intent: authoritativeWriting.intent,
+    surface: authoritativeWriting.surface,
+    workflowRunId: generationResult.data.agent.workflowRunId,
+  });
   const { spine, targetKind } = validateCrossDocuments({ variantId, body: input.body, writing: authoritativeWriting, generation: generationResult.data, launch: launchResult.data }, runner);
   const now = Math.floor(Date.now() / 1000);
   const inputHash = computeAuditInputHash(authoritativeWriting.units.texts[0], authoritativeWriting);
@@ -321,7 +337,7 @@ export function persistWritingVariant(
     audit = { ...candidate, verdict };
   }
   const unchanged = Boolean(previous?.audit && audit && previous.audit.inputHash === inputHash && previous.audit.id === audit.id);
-  const assistOnly = isAssistOnlyIntent(authoritativeWriting.intent);
+  const assistOnly = Boolean(composedAuthority) || isAssistOnlyIntent(authoritativeWriting.intent);
   const approval = input.status === "rejected"
     ? {
         schemaVersion: 1 as const,

@@ -284,7 +284,7 @@ describe("signals-writing skill package", () => {
       "overlays/README.md", "overlays/x.md", "overlays/linkedin.md", "overlays/facebook.md",
     ];
     const nonToolTokens = new Set([
-      "adapted_from", "auto_low_risk", "content_item", "derived_from", "materialized_as", "pinned_superseded",
+      "adapted_from", "auto_low_risk", "content_item", "derived_from", "draft_only", "materialized_as", "pinned_superseded",
       "published_as", "rules_first", "sourced_from", "variant_locked", "voice_first",
       "legacy_unbound", "source_stale", "thread_message", "personality_binding_required",
       "personality_binding_stale", "personality_drifted", "personality_identity_mismatch",

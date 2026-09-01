@@ -110,6 +110,7 @@ describe("buildContactNurtureBriefSection", () => {
         maxActionsPerRun: 8,
       }),
       signalsBaseUrl: "http://127.0.0.1:3000",
+      platformTarget: { id: "tgt_x_1", platform: "x", name: "Acting", handle: "acting" },
     });
 
     expect(brief).toContain("Contact Relationship Nurture execution contract");
@@ -159,6 +160,36 @@ describe("buildContactNurtureBriefSection", () => {
       expect(brief).not.toMatch(/before publishing|then follow\b|send connection request/);
       expect(brief).toContain("It never publishes, comments, replies, sends a message");
     }
+  });
+
+  it("does not claim X when no acting target is configured", () => {
+    const brief = buildContactNurtureBriefSection({
+      workflowRunId: "run-nurture-123",
+      config: buildContactNurtureTemplateConfig(),
+      signalsBaseUrl: "http://127.0.0.1:3000",
+    });
+
+    expect(brief).toContain("Active Platform: unresolved — detect per contact");
+    expect(brief).toContain("resolve the acting profile for this contact's platform");
+    expect(brief).not.toContain("surface=x/reply");
+  });
+
+  it("uses the resolved target row over a stale config platform", () => {
+    const brief = buildContactNurtureBriefSection({
+      workflowRunId: "run-nurture-123",
+      config: { ...buildContactNurtureTemplateConfig(), targetPlatform: "x" },
+      signalsBaseUrl: "http://127.0.0.1:3000",
+      platformTarget: {
+        id: "tgt_fb_1",
+        platform: "facebook",
+        name: "Page",
+        handle: "page",
+      },
+    });
+
+    expect(brief).toContain("Active Platform: facebook");
+    expect(brief).toContain("surface=facebook/comment");
+    expect(brief).not.toContain("surface=x/reply");
   });
 
   it("customizes surfaces and interaction type for a LinkedIn acting target", () => {

@@ -9,8 +9,12 @@ sources: [docs-dev/refs/manifest.json, src/lib/writing/variant-writing.ts]
 
 # Facebook overlay
 
-Use this overlay only for `facebook/post`. The target may be a profile or page; keep target-kind
-differences visible in the CTA and approval risk.
+Use this overlay for `facebook/post`, `facebook/comment`, and `facebook/direct_message`. The target
+may be a profile or page; keep target-kind differences visible in the CTA and approval risk.
+
+`facebook/comment` and `facebook/direct_message` are assist-only: draft, audit, and propose them
+like a post, but neither has a submit or send adapter. Their limits are 8 000 and 20 000 code
+units.
 
 ## Hard constraints
 

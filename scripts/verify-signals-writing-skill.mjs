@@ -85,6 +85,11 @@ const overlayRuleCatalog = {
   "linkedin.md": ["linkedin/post/hard/char-limit", "linkedin/post/hard/single-unit", "linkedin/post/heuristic/hook-before-fold", "linkedin/post/heuristic/no-external-link-in-body", "linkedin/post/heuristic/hashtags-0-2", "linkedin/post/heuristic/line-breaks-for-scan", "linkedin/post/heuristic/no-comment-gate", "linkedin/post/heuristic/passive-voice-ceiling", "linkedin/comment/hard/char-limit", "linkedin/comment/hard/single-unit", "linkedin/direct_message/hard/char-limit", "linkedin/direct_message/hard/single-unit", "linkedin/comment/heuristic/no-generic-praise", "linkedin/comment/heuristic/no-link-drop", "linkedin/direct_message/heuristic/one-ask", "linkedin/direct_message/heuristic/no-template-open"],
   "facebook.md": ["facebook/post/hard/char-limit", "facebook/post/hard/single-unit", "facebook/post/heuristic/short-post-sweet-spot", "facebook/post/heuristic/link-in-first-comment", "facebook/post/heuristic/hashtags-0-2", "facebook/post/heuristic/emoji-0-2", "facebook/post/heuristic/page-vs-profile-cta", "facebook/post/heuristic/genuine-question-only", "facebook/comment/hard/char-limit", "facebook/comment/hard/single-unit", "facebook/direct_message/hard/char-limit", "facebook/direct_message/hard/single-unit", "facebook/comment/heuristic/no-generic-praise", "facebook/comment/heuristic/no-link-drop", "facebook/direct_message/heuristic/one-ask", "facebook/direct_message/heuristic/no-cold-pitch"],
 };
+function sectionIndexOrEnd(text, heading) {
+  const index = text.indexOf(heading);
+  return index < 0 ? text.length : index;
+}
+
 const seenRules = new Set();
 const ruleById = new Map();
 for (const rel of ["core/claims.md", "core/voice.md", "core/audit.md", "overlays/x.md", "overlays/linkedin.md", "overlays/facebook.md"]) {
@@ -133,6 +138,20 @@ for (const [file, ids] of Object.entries(catalog)) {
     const allowedSurfaces = { x: ["x/post", "x/thread", "x/reply", "x/direct_message"], linkedin: ["linkedin/post", "linkedin/comment", "linkedin/direct_message"], facebook: ["facebook/post", "facebook/comment", "facebook/direct_message"] }[platform];
     if (data.overlayId !== `overlay:${platform}` || data.version !== 1 || data.platform !== platform || !Array.isArray(data.surfaces) || !data.surfaces.every((surface) => allowedSurfaces.includes(surface)) || !/^\d{4}-\d{2}-\d{2}$/.test(data.reviewedAt ?? "") || !Array.isArray(data.sources) || !data.sources.length) fail(`${rel}: invalid overlay frontmatter`);
   } catch (error) { fail(error.message); }
+  // Prose and catalog must agree. The overlays once said "use this overlay only for <post>" while
+  // their frontmatter listed reply/comment/DM surfaces, so an agent following the executable
+  // instructions would refuse exactly the artifacts the catalog enables (#410).
+  {
+    const { data } = parseFrontmatter(text, rel);
+    const intro = text.slice(text.indexOf("# "), sectionIndexOrEnd(text, "## Hard constraints"));
+    for (const surface of data.surfaces ?? []) {
+      if (!intro.includes(`\`${surface}\``)) fail(`${rel}: operating prose does not name ${surface}`);
+    }
+    if (/only for/.test(intro) && (data.surfaces ?? []).length > 1) {
+      const named = (data.surfaces ?? []).filter((surface) => intro.includes(`\`${surface}\``));
+      if (named.length !== (data.surfaces ?? []).length) fail(`${rel}: prose restricts a multi-surface overlay`);
+    }
+  }
   const sectionOrder = ["## Hard constraints", "## Formulas", "## Heuristics & aesthetics"].map((heading) => text.indexOf(heading));
   if (sectionOrder.some((index) => index < 0) || sectionOrder.some((index, position) => position > 0 && index <= sectionOrder[position - 1])) fail(`${rel}: required sections are missing or out of order`);
   const formulas = extractTaggedBlocks(text, "signals-writing:formulas", rel).flat();
@@ -158,6 +177,22 @@ for (const [id, value] of Object.entries({ "x/post/hard/char-limit": 280, "x/thr
   if (rule?.value !== value || rule?.enforcedBy !== "server:hardLimit") fail(`${id}: hard-limit value/enforcement mismatch`);
 }
 if (ruleById.get("x/thread/hard/min-units")?.value !== 2) fail("x/thread/hard/min-units: value must be 2");
+
+// Every surface an overlay can draft must appear in SKILL.md's capability table; otherwise the
+// required instructions tell the agent a drawable surface "gets no writing variant".
+if (actual.includes("SKILL.md")) {
+  const capabilityTable = read("SKILL.md").split("## Capability honesty")[1] ?? "";
+  const overlaySurfaces = new Set(
+    Object.keys(catalog)
+      .filter((file) => actual.includes(`overlays/${file}`))
+      .flatMap((file) => parseFrontmatter(read(`overlays/${file}`), `overlays/${file}`).data.surfaces ?? []),
+  );
+  for (const surface of overlaySurfaces) {
+    if (!capabilityTable.includes(`\`${surface}\``)) {
+      fail(`SKILL.md: capability table omits drawable surface ${surface}`);
+    }
+  }
+}
 
 if (actual.includes("reference.md")) {
   const tags = [...read("reference.md").matchAll(/```json (signals-writing:example:[^\s]+)/g)].map((match) => match[1]);

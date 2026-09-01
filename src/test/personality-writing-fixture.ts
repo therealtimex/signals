@@ -277,6 +277,8 @@ export function personalityVariantPayload(input: {
   voiceProfile?: { id: string; version: number; hash: string } | null;
   /** Composed writing-intent record (#410); omitted for Platform-native fixtures. */
   intent?: Record<string, unknown>;
+  /** Run the artifact is attributed to; the server resolves composition from this row. */
+  workflowRunId?: string;
 }) {
   const body = input.body ?? "Personality-bound publish proof.";
   const launch = getLaunchById(input.launchId)!;
@@ -291,7 +293,7 @@ export function personalityVariantPayload(input: {
       mode: "draft",
       model: "test-model",
       skill: { name: "signals-writing", version: "1.1.0" },
-      agent: { workflowRunId: "run-personality-proof" },
+      agent: { workflowRunId: input.workflowRunId ?? "run-personality-proof" },
       requestHash: `request-${surface}-${body}`,
       generatedAt: 20,
     },

@@ -12,6 +12,7 @@ import {
 import {
   buildContactNurtureBriefSection,
   isContactNurtureTemplateConfig,
+  type ContactNurtureTargetInfo,
 } from "@/lib/workflows/contact-relationship-nurture";
 import {
   buildNetworkSnowballBriefSection,
@@ -126,6 +127,25 @@ function stripInternalConfigKeys(config: Record<string, unknown>): Record<string
     : visible;
 }
 
+/**
+ * The acting profile a composed contract is written for, or `null` when none is configured.
+ *
+ * Prefers the resolved row; falls back to the platform the dispatcher wrote onto the run config.
+ * Never guesses `x` — an unresolved target means "resolve it per contact", not "assume X".
+ */
+function resolveActingTarget(
+  config: Record<string, unknown>,
+  platformTarget?: ContactNurtureTargetInfo | null,
+): { platform: string; targetId: string | null } | null {
+  if (platformTarget) {
+    return { platform: platformTarget.platform.toLowerCase(), targetId: platformTarget.id };
+  }
+  const platform = typeof config.targetPlatform === "string" ? config.targetPlatform.trim() : "";
+  if (!platform) return null;
+  const targetId = typeof config.targetId === "string" ? config.targetId.trim() : "";
+  return { platform: platform.toLowerCase(), targetId: targetId || null };
+}
+
 export function buildAgentWorkflowBrief(input: {
   template: Pick<
     WorkflowTemplate,
@@ -136,6 +156,14 @@ export function buildAgentWorkflowBrief(input: {
   signalsBaseUrl: string;
   systemPromptOverride?: string;
   contactWebResearchContext?: ContactWebResearchBriefContext;
+  /**
+   * The acting profile row, already resolved from `config.targetId` by the caller.
+   *
+   * A brief builder must not query the database, but it must not guess a platform either: a
+   * LinkedIn target described as X produces the wrong touchpoint surfaces and an invalid writing
+   * intent. `run-template-via-rtx.ts` resolves it once and passes it here.
+   */
+  platformTarget?: ContactNurtureTargetInfo | null;
 }): string {
   const category = CATEGORY_LABELS[input.template.templateType] ?? input.template.templateType;
   const instructions = input.systemPromptOverride?.trim() || input.template.systemPrompt?.trim();
@@ -160,6 +188,7 @@ export function buildAgentWorkflowBrief(input: {
         workflowRunId: input.workflowRunId,
         config: input.config,
         signalsBaseUrl: input.signalsBaseUrl,
+        platformTarget: input.platformTarget,
       })}\n`
     : null;
   const snowballContract = isNetworkSnowballTemplateConfig(input.config)
@@ -188,16 +217,7 @@ export function buildAgentWorkflowBrief(input: {
         templateName: input.template.name,
         workflowRunId: input.workflowRunId,
         signalsBaseUrl: input.signalsBaseUrl,
-        target: {
-          platform:
-            typeof input.config.targetPlatform === "string" && input.config.targetPlatform.trim()
-              ? input.config.targetPlatform.trim().toLowerCase()
-              : (input.template.platform ?? "x"),
-          targetId:
-            typeof input.config.targetId === "string" && input.config.targetId.trim()
-              ? input.config.targetId.trim()
-              : null,
-        },
+        target: resolveActingTarget(input.config, input.platformTarget),
       })}\n`
     : null;
   const contactWebResearchContract =

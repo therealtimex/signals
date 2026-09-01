@@ -12,13 +12,22 @@
  * config. See `docs/composable-writing-intent.md`.
  */
 
-import { parseSurfaceId, type SurfaceId } from "@/lib/writing/surfaces";
+import type { SurfaceId } from "@/lib/writing/surfaces";
 import {
   WRITING_INTENT_APPROVAL_POLICY,
-  WRITING_INTENT_CONSUMERS,
-  WRITING_INTENT_CONSUMER_SURFACES,
   WRITING_INTENT_SCHEMA_VERSION,
-  type WritingIntentConsumer,
+  type WritingIntentComposition,
+} from "@/lib/writing/writing-intent";
+
+// The composition config lives with the contract (`writing-intent.ts`) because the server reads it
+// to decide whether a run is composed. Re-exported here so brief-layer callers keep one import.
+export {
+  WRITING_INTENT_CONFIG_KEY,
+  WRITING_INTENT_CONFIG_VERSION,
+  buildWritingIntentCompositionConfig,
+  isWritingComposedConfig,
+  readWritingIntentComposition,
+  type WritingIntentComposition,
 } from "@/lib/writing/writing-intent";
 import {
   WRITING_HARD_RULES,
@@ -33,70 +42,16 @@ import {
   buildWritingLaneBoundStep,
 } from "@/lib/workflows/writing-contract";
 
-export const WRITING_INTENT_CONFIG_KEY = "writingIntent";
-export const WRITING_INTENT_CONFIG_VERSION = 1;
-
-export interface WritingIntentComposition {
-  version: typeof WRITING_INTENT_CONFIG_VERSION;
-  consumer: WritingIntentConsumer;
-  /** Surfaces this workflow may propose on; always a subset of the consumer's allowed surfaces. */
-  surfaces: SurfaceId[];
-  mandate: "assist_only";
-  approvalPolicy: typeof WRITING_INTENT_APPROVAL_POLICY;
-}
-
-export function readWritingIntentComposition(
-  config: Record<string, unknown>,
-): WritingIntentComposition | null {
-  const raw = config[WRITING_INTENT_CONFIG_KEY];
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
-  const candidate = raw as Record<string, unknown>;
-  if (candidate.version !== WRITING_INTENT_CONFIG_VERSION) return null;
-  if (
-    typeof candidate.consumer !== "string" ||
-    !(WRITING_INTENT_CONSUMERS as readonly string[]).includes(candidate.consumer)
-  ) {
-    return null;
-  }
-  const consumer = candidate.consumer as WritingIntentConsumer;
-  const allowed = new Set<SurfaceId>(WRITING_INTENT_CONSUMER_SURFACES[consumer]);
-  if (!Array.isArray(candidate.surfaces) || candidate.surfaces.length === 0) return null;
-  const surfaces: SurfaceId[] = [];
-  for (const entry of candidate.surfaces) {
-    const surface = parseSurfaceId(entry);
-    if (!surface || !allowed.has(surface)) return null;
-    surfaces.push(surface);
-  }
-  if (candidate.mandate !== "assist_only") return null;
-  if (candidate.approvalPolicy !== WRITING_INTENT_APPROVAL_POLICY) return null;
-  return { version: WRITING_INTENT_CONFIG_VERSION, consumer, surfaces, mandate: "assist_only", approvalPolicy: WRITING_INTENT_APPROVAL_POLICY };
-}
-
-export function isWritingComposedConfig(config: Record<string, unknown>): boolean {
-  return readWritingIntentComposition(config) !== null;
-}
-
-export function buildWritingIntentCompositionConfig(input: {
-  consumer: WritingIntentConsumer;
-  surfaces?: readonly SurfaceId[];
-}): Record<string, unknown> {
-  return {
-    [WRITING_INTENT_CONFIG_KEY]: {
-      version: WRITING_INTENT_CONFIG_VERSION,
-      consumer: input.consumer,
-      surfaces: [...(input.surfaces ?? WRITING_INTENT_CONSUMER_SURFACES[input.consumer])],
-      mandate: "assist_only",
-      approvalPolicy: WRITING_INTENT_APPROVAL_POLICY,
-    },
-  };
-}
-
 /**
  * The composed writing execution contract.
  *
  * Identical Personality gate, source rules, lane gate, lineage step, and hard rules as the
  * Platform-native lane; what differs is the deliverable (a writing intent per touchpoint), the
  * absence of an unbound sketch lane, and an approval step that never mentions `auto_low_risk`.
+ *
+ * `target` is the *resolved* acting profile, not a config guess. When one is resolved, only its
+ * platform's surfaces are offered — an X sample handed to a LinkedIn run is both wrong advice and
+ * an intent `writingIntentDraftSchema` rejects.
  */
 export function buildComposedWritingBriefSection(input: {
   composition: WritingIntentComposition;
@@ -104,18 +59,37 @@ export function buildComposedWritingBriefSection(input: {
   templateName: string;
   workflowRunId: string;
   signalsBaseUrl: string;
-  target: { platform: string; targetId: string | null };
+  target: { platform: string; targetId: string | null } | null;
 }): string {
+  const platform = input.target?.platform.toLowerCase() ?? null;
+  const scoped = platform
+    ? input.composition.surfaces.filter((surface) => surface.startsWith(`${platform}/`))
+    : input.composition.surfaces;
+
+  if (platform && scoped.length === 0) {
+    return [
+      "Shared writing-intent contract:",
+      `Consumer: ${input.composition.consumer} (mandate=${input.composition.mandate})`,
+      `Workflow run: ${input.workflowRunId}`,
+      `No enabled writing surface exists for the acting platform ${platform}. Report every touchpoint as unsupported, propose nothing, and call complete_workflow_run with that blocker.`,
+    ].join("\n");
+  }
+
   const capabilityRows = buildWritingCapabilityRows(
-    input.composition.surfaces.map((surface) => ({
+    scoped.map((surface) => ({
       platform: surface.split("/")[0],
       surface,
-      ...(input.target.targetId && surface.startsWith(`${input.target.platform}/`)
+      ...(input.target?.targetId && surface.startsWith(`${platform}/`)
         ? { targetId: input.target.targetId }
         : {}),
     })),
     "No surfaces configured — stop and ask the operator which surfaces this workflow may propose on.",
   );
+
+  // Keep the sample internally valid: its surface and target platform always agree, because the
+  // contract rejects a mismatch and an invalid sample teaches the agent the wrong shape.
+  const sampleSurface = scoped[0];
+  const samplePlatform = sampleSurface.split("/")[0];
 
   const intentTemplate = {
     schemaVersion: WRITING_INTENT_SCHEMA_VERSION,
@@ -128,10 +102,10 @@ export function buildComposedWritingBriefSection(input: {
       templateId: input.templateId,
       templateName: input.templateName,
     },
-    recipient: { kind: "contact", contactId: "<contactId>", platform: "<platform>", handle: "<handle>" },
+    recipient: { kind: "contact", contactId: "<contactId>", platform: "<recipient platform>", handle: "<handle>" },
     goal: { kind: "relationship_goal", id: "<relationshipGoal>", writingGoal: "<writingGoal>" },
-    target: { platform: input.target.platform, targetId: input.target.targetId },
-    surface: input.composition.surfaces[0],
+    target: { platform: samplePlatform, targetId: input.target?.targetId ?? "<acting platform_targets.id>" },
+    surface: sampleSurface,
     replyContext: { kind: "post", url: "<url of the post being answered>" },
     sourceRefs: [{ kind: "contact_record", contactId: "<contactId>" }],
     approvalPolicy: WRITING_INTENT_APPROVAL_POLICY,
@@ -144,11 +118,15 @@ export function buildComposedWritingBriefSection(input: {
     `Template: ${input.templateName} (${input.templateId})`,
     `Workflow run: ${input.workflowRunId}`,
     `Signals base URL: ${input.signalsBaseUrl}`,
+    platform
+      ? `Acting platform: ${platform}. Only the surfaces listed below are enabled for this run.`
+      : "No acting target is configured. Resolve the acting profile per contact platform, then use only the surfaces below that match it.",
     "This workflow does not write its own voice, audit, approval, or lineage rules. It supplies intent; Signals owns the rest.",
     "Writing intent template — build one per touchpoint and attach it as `metadata.writing.intent` on upsert_variant:",
     "```json",
     JSON.stringify(intentTemplate, null, 2),
     "```",
+    "`surface` must belong to `target.platform`, and `lineage` must name this workflow run and template — Signals resolves the composition from the run record and rejects a mismatch.",
     "Capability truth:",
     ...capabilityRows,
     "Tool sequence:",
@@ -163,6 +141,7 @@ export function buildComposedWritingBriefSection(input: {
     "   - For `unbound`, refuse: a workflow proposal speaks as the workspace Personality, so there is no legacy-unbound sketch lane here. Report the persisted status and stop.",
     WRITING_LANE_DRIFTED_STEP,
     WRITING_LANE_REVISION_STEP,
+    "   A proposal is bound to one recipient and goal. Rebinding an approved proposal to a different contact, relationship goal, or source set stales its audit and revokes approval — build a new intent instead.",
     WRITING_LINEAGE_STEP,
     "8. Render the persisted approval card after audit and precheck, then wait for fresh explicit user approval and call `materialize_variant` with the real user evidence. `auto_low_risk` does not apply to composed proposals — the mandate pins `explicit`, and Signals rejects a policy approval on these artifacts.",
     "   Never manufacture approval evidence. Use `revoke_variant_approval` when the user withdraws approval.",

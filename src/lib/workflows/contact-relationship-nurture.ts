@@ -203,14 +203,14 @@ export function buildContactNurtureBriefSection(input: {
     ? "All assigned relationship goals (follow_back, repost_amplification, mutual_engagement, warm_conversation, partnership)"
     : `Only "${nurture.relationshipGoalFilter}" goals`;
 
-  const targetPlatform = (
+  // Null when no acting profile is configured. Do not fall back to "x": claiming a platform the
+  // operator never selected produces the wrong touchpoint surfaces and an invalid writing intent.
+  const resolvedPlatform = (
     input.platformTarget?.platform ||
-    (typeof input.config.targetPlatform === "string" ? input.config.targetPlatform : "") ||
-    "x"
-  ).toLowerCase();
-
-  const isLinkedIn = targetPlatform === "linkedin";
-  const isFacebook = targetPlatform === "facebook";
+    (typeof input.config.targetPlatform === "string" ? input.config.targetPlatform : "")
+  ).toLowerCase() || null;
+  const isLinkedIn = resolvedPlatform === "linkedin";
+  const isFacebook = resolvedPlatform === "facebook";
   const platformLabel = isLinkedIn ? "LinkedIn" : isFacebook ? "Facebook" : "X";
 
   const targetName = input.platformTarget
@@ -225,16 +225,20 @@ export function buildContactNurtureBriefSection(input: {
 
   const touchpointRows = goalsInScope.map((goal) => {
     const plan = NURTURE_TOUCHPOINT_PLAN[goal];
-    const surface = resolveNurtureSurface(targetPlatform, plan.surfaceKind);
+    const label = `    - ${goal} (${RELATIONSHIP_GOAL_LABELS[goal]})`;
+    if (!resolvedPlatform) {
+      return `${label}: surfaceKind=${plan.surfaceKind}, writingGoal=${plan.writingGoal} — resolve the acting profile for this contact's platform, pick the matching ${plan.surfaceKind} surface from the capability rows, and propose ${plan.deliverable}.`;
+    }
+    const surface = resolveNurtureSurface(resolvedPlatform, plan.surfaceKind);
     return surface
-      ? `    - ${goal} (${RELATIONSHIP_GOAL_LABELS[goal]}): surface=${surface}, writingGoal=${plan.writingGoal} — propose ${plan.deliverable}.`
-      : `    - ${goal} (${RELATIONSHIP_GOAL_LABELS[goal]}): no ${plan.surfaceKind} surface on ${targetPlatform} — report it as unsupported and skip.`;
+      ? `${label}: surface=${surface}, writingGoal=${plan.writingGoal} — propose ${plan.deliverable}.`
+      : `${label}: no ${plan.surfaceKind} surface on ${resolvedPlatform} — report it as unsupported and skip.`;
   });
 
   const lines = [
     "Contact Relationship Nurture execution contract:",
     `N0. Goal filter: ${goalText}. Max targets to inspect: ${nurture.maxTargets}. Max touchpoint proposals: ${nurture.maxActionsPerRun}.`,
-    `    Acting Profile: ${targetName}. Active Platform: ${targetPlatform}.`,
+    `    Acting Profile: ${targetName}. Active Platform: ${resolvedPlatform ?? "unresolved — detect per contact"}.`,
     "    Mandate: assist_only. This workflow drafts, audits, and proposes. It never publishes, comments, replies, sends a message, opens a publish job, or schedules one.",
     `N1. Query unachieved contacts via query_contacts({ relationshipGoalStatus: "not_started" }) and query_contacts({ relationshipGoalStatus: "in_progress" }).`,
     "N2. For each contact, call get_contact({ contactId }) for recipient context — persona, conversion triggers, tone, platform. This answers \"who is receiving and what is relevant\"; it never answers \"who is speaking\" and never becomes a fact in the artifact.",

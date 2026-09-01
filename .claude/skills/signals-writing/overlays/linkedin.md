@@ -9,8 +9,12 @@ sources: [docs-dev/refs/manifest.json, src/lib/writing/variant-writing.ts]
 
 # LinkedIn overlay
 
-Use this overlay only for `linkedin/post`. Drafts are one ordered unit and publishing is beta, so
-the approval card must preserve that capability label.
+Use this overlay for `linkedin/post`, `linkedin/comment`, and `linkedin/direct_message`. Drafts are
+one ordered unit. Publishing is beta for `linkedin/post`, so the approval card must preserve that
+capability label.
+
+`linkedin/comment` and `linkedin/direct_message` are assist-only: draft, audit, and propose them
+like a post, but neither has a submit or send adapter. Their limits are 1 250 and 8 000 code units.
 
 ## Hard constraints
 

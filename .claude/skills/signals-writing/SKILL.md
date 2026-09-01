@@ -143,10 +143,20 @@ evidence. Copy the user's approval message verbatim into the evidence note.
 | `x/post`, `x/thread` | supported | direct |
 | `linkedin/post` | supported | beta |
 | `facebook/post` | supported | direct |
+| `x/reply`, `x/direct_message` | supported | draft_only |
+| `linkedin/comment`, `linkedin/direct_message` | supported | draft_only |
+| `facebook/comment`, `facebook/direct_message` | supported | draft_only |
 | all other surfaces | no writing overlay | draft/export boundary from context |
 
-Unsupported surfaces get no writing variant. On an explicit export-only request, use a standalone
-content draft with the same claim rules, no writing audit, no approval card, and no publish.
+The `draft_only` rows are assist-only surfaces: full spine, voice, audit, approval card, and
+materialization, but no publish adapter and no send. Never submit one to a publish job, and never
+describe it as publishable. A composed workflow reaches them through the writing-intent contract
+(`docs/composable-writing-intent.md`), which pins explicit approval — `auto_low_risk` does not
+apply to a proposal.
+
+Surfaces outside the table get no writing variant. On an explicit export-only request, use a
+standalone content draft with the same claim rules, no writing audit, no approval card, and no
+publish.
 
 ## Never do
 

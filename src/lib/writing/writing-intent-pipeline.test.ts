@@ -1,9 +1,10 @@
 /**
- * End-to-end proof that a composed `assist_only` proposal cannot approve itself or reach a send
- * adapter, run against the real launch/variant/content tables rather than a mock.
+ * End-to-end proof that the assist-only mandate is the *server's* decision, run against the real
+ * workflow-run, launch, variant, and content tables rather than a mock.
  *
- * The fixture launch records `approvalPolicy: "auto_low_risk"` on purpose: without the mandate,
- * a low-risk passing audit auto-approves. Every assertion here is the difference the intent makes.
+ * The fixture launch records `approvalPolicy: "auto_low_risk"` on purpose: without the mandate, a
+ * low-risk passing audit auto-approves. Every assertion here is the difference the run's recorded
+ * composition makes — not the difference an optional payload field makes.
  */
 
 import { mkdtempSync, rmSync } from "node:fs";
@@ -13,9 +14,16 @@ import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { db } from "@/lib/db/client";
 import { getContentItem } from "@/lib/db/queries/content";
+import {
+  ensureBrowserConnection,
+  registerPlatformTarget,
+} from "@/lib/db/queries/platform-targets";
+import { createTemplate } from "@/lib/db/queries/workflow-templates";
+import { createWorkflowRun } from "@/lib/db/queries/workflows";
 import { contentItems, variants } from "@/lib/db/schema";
 import { resetPersonalityStore } from "@/lib/personality/store-paths";
 import { sendContentToAgent } from "@/lib/publish/send-to-agent";
+import { buildContactNurtureTemplateConfig } from "@/lib/workflows/contact-relationship-nurture";
 import { materializeVariantWithRunner } from "@/lib/writing/materialize";
 import { withPersonalityWritingGuard } from "@/lib/writing/personality-guard";
 import { upsertVariantUseCase } from "@/lib/writing/variant-use-cases";
@@ -36,45 +44,144 @@ const env: NodeJS.ProcessEnv = {
   SIGNALS_RTX_WORKSPACE_SLUG: "signals",
 };
 
-const intentRecord = toWritingIntentRecord({
-  ...buildWritingIntentDraft({
-    intentId: "wint_nurture1",
-    consumer: "contact_relationship_nurture",
-    lineage: {
-      workflowRunId: "run-personality-proof",
-      templateId: "tpl_nurture",
-      templateName: "Contact Relationship Nurture",
-    },
-    recipient: { kind: "contact", contactId: "contact_recipient", platform: "x" },
-    goal: { relationshipGoal: "follow_back", writingGoal: "follows" },
-    target: { platform: "x", targetId: null },
-    surface: "x/reply",
-    sourceRefs: [{ kind: "contact_record", contactId: "contact_recipient" }],
-  }),
-  bindingId: "unused",
-}) as unknown as Record<string, unknown>;
+type ComposedDispatch = ReturnType<typeof composedRun>;
+type Fixture = Awaited<ReturnType<typeof createPersonalityWritingFixture>>;
 
-async function proposeNurtureVariant(fixture: Awaited<ReturnType<typeof createPersonalityWritingFixture>>, options: { intent: boolean }) {
-  return upsertVariantUseCase(
-    personalityVariantPayload({
-      launchId: fixture.launchId,
-      bindingId: fixture.binding.id,
-      targetId: fixture.target.id,
-      surface: "x/reply",
-      body: "Answering the actual question with the evidence we already have.",
-      voiceProfile: fixture.voiceProfile,
-      ...(options.intent ? { intent: intentRecord } : {}),
+/**
+ * A real composed dispatch: a nurture template carrying the opt-in, and a run row whose stored
+ * config carries it too. This is the state the server derives the mandate from — an agent cannot
+ * conjure it by adding a field to its payload.
+ */
+function composedRun() {
+  const template = createTemplate({
+    name: "Contact Relationship Nurture",
+    templateType: "nurture",
+    status: "active",
+    config: JSON.stringify(buildContactNurtureTemplateConfig()),
+    isSystem: 1,
+  });
+  const run = createWorkflowRun({
+    templateId: template.id,
+    workflowType: "agent",
+    config: JSON.stringify(buildContactNurtureTemplateConfig()),
+  });
+  return { template, run };
+}
+
+/** A dispatch with no composition: the same payload has no authority behind it. */
+function plainRun() {
+  const template = createTemplate({
+    name: "Ad-hoc writing",
+    templateType: "content",
+    status: "active",
+    config: JSON.stringify({}),
+  });
+  return createWorkflowRun({
+    templateId: template.id,
+    workflowType: "agent",
+    config: JSON.stringify({}),
+  });
+}
+
+/** An active X target that was never bound to the Personality. */
+function unrepresentedTarget() {
+  return registerPlatformTarget({
+    connectionId: ensureBrowserConnection({ sessionName: "writing-intent-foreign" }).id,
+    platform: "x",
+    kind: "account",
+    name: "Someone else",
+    handle: "@someone-else",
+    capabilities: ["publish"],
+    source: "test",
+  });
+}
+
+function intentFor(
+  dispatch: ComposedDispatch,
+  overrides: {
+    contactId?: string;
+    relationshipGoal?: "follow_back" | "partnership";
+    workflowRunId?: string;
+    templateId?: string;
+    surface?: "x/reply" | "x/direct_message";
+  } = {},
+): Record<string, unknown> {
+  const contactId = overrides.contactId ?? "contact_recipient";
+  return toWritingIntentRecord({
+    ...buildWritingIntentDraft({
+      intentId: "wint_nurture1",
+      consumer: "contact_relationship_nurture",
+      lineage: {
+        workflowRunId: overrides.workflowRunId ?? dispatch.run.id,
+        templateId: overrides.templateId ?? dispatch.template.id,
+        templateName: "Contact Relationship Nurture",
+      },
+      recipient: { kind: "contact", contactId, platform: "x" },
+      goal: {
+        relationshipGoal: overrides.relationshipGoal ?? "follow_back",
+        writingGoal: "follows",
+      },
+      target: { platform: "x", targetId: null },
+      surface: overrides.surface ?? "x/reply",
+      sourceRefs: [{ kind: "contact_record", contactId }],
     }),
+    bindingId: "unused",
+  }) as unknown as Record<string, unknown>;
+}
+
+function propose(
+  fixture: Fixture,
+  options: {
+    workflowRunId: string;
+    intent?: Record<string, unknown>;
+    id?: string;
+    targetId?: string | null;
+    body?: string;
+  },
+) {
+  const targetId = options.targetId === undefined ? fixture.target.id : options.targetId;
+  return upsertVariantUseCase(
+    {
+      ...personalityVariantPayload({
+        launchId: fixture.launchId,
+        bindingId: fixture.binding.id,
+        ...(targetId === null ? {} : { targetId }),
+        surface: "x/reply",
+        body: options.body ?? "Answering the actual question with the evidence we already have.",
+        voiceProfile: fixture.voiceProfile,
+        workflowRunId: options.workflowRunId,
+        ...(options.intent ? { intent: options.intent } : {}),
+      }),
+      ...(options.id ? { id: options.id } : {}),
+    },
     fixture.dependencies,
   );
 }
 
-function writingOf(variantId: string): Record<string, never> & { approval: Record<string, string>; intent?: unknown } {
+async function approve(fixture: Fixture, variantId: string) {
+  const materialized = await withPersonalityWritingGuard(
+    (guard, tx) => materializeVariantWithRunner({
+      variantId,
+      approval: { by: "user", evidence: { kind: "ui", route: "/dashboard/contacts" } },
+    }, guard, tx),
+    fixture.dependencies,
+  );
+  if ("gateError" in materialized && materialized.gateError) {
+    throw new Error(materialized.gateError.reason);
+  }
+  return materialized;
+}
+
+function writingOf(variantId: string): {
+  approval: Record<string, string | undefined>;
+  audit: { id: string; inputHash: string };
+  intent?: Record<string, unknown>;
+} {
   const row = db.select().from(variants).where(eq(variants.id, variantId)).get()!;
   return JSON.parse(row.metadata ?? "{}").writing;
 }
 
-describe("assist-only writing intent pipeline", () => {
+describe("assist-only writing intent authority", () => {
   beforeEach(() => {
     resetCoreTables();
     resetPersonalityStore();
@@ -86,19 +193,80 @@ describe("assist-only writing intent pipeline", () => {
     rmSync(storageDir, { recursive: true, force: true });
   });
 
-  it("auto-approves the same proposal only when no assist-only intent is attached", async () => {
+  it("auto-approves the identical proposal when the run is not composed", async () => {
     const fixture = await createPersonalityWritingFixture(storageDir, { voice: true });
-    const unbounded = await proposeNurtureVariant(fixture, { intent: false });
-    expect(writingOf(unbounded.id).approval).toMatchObject({
+    const variant = await propose(fixture, { workflowRunId: plainRun().id });
+    expect(writingOf(variant.id).approval).toMatchObject({
       state: "approved",
       by: "policy",
       policy: "auto_low_risk",
     });
   });
 
+  it("refuses a composed run that omits the intent instead of falling back to policy approval", async () => {
+    const fixture = await createPersonalityWritingFixture(storageDir, { voice: true });
+    const before = db.select().from(variants).all().length;
+
+    await expect(propose(fixture, { workflowRunId: composedRun().run.id })).rejects.toMatchObject({
+      details: { reason: "writing_intent_required" },
+    });
+    expect(db.select().from(variants).all()).toHaveLength(before);
+  });
+
+  it("refuses assist-only provenance forged onto an uncomposed run", async () => {
+    const fixture = await createPersonalityWritingFixture(storageDir, { voice: true });
+    const dispatch = composedRun();
+
+    await expect(propose(fixture, {
+      workflowRunId: plainRun().id,
+      intent: intentFor(dispatch),
+    })).rejects.toMatchObject({ details: { reason: "writing_intent_not_permitted" } });
+  });
+
+  it("refuses an intent whose lineage or surface disagrees with the dispatch", async () => {
+    const fixture = await createPersonalityWritingFixture(storageDir, { voice: true });
+    const dispatch = composedRun();
+
+    await expect(propose(fixture, {
+      workflowRunId: dispatch.run.id,
+      intent: intentFor(dispatch, { workflowRunId: plainRun().id }),
+    })).rejects.toMatchObject({ details: { reason: "writing_intent_lineage_mismatch" } });
+
+    await expect(propose(fixture, {
+      workflowRunId: dispatch.run.id,
+      intent: intentFor(dispatch, { templateId: "tpl_other" }),
+    })).rejects.toMatchObject({ details: { reason: "writing_intent_lineage_mismatch" } });
+
+    await expect(propose(fixture, {
+      workflowRunId: dispatch.run.id,
+      intent: intentFor(dispatch, { surface: "x/direct_message" }),
+    })).rejects.toMatchObject({ details: { reason: "writing_intent_surface_mismatch" } });
+  });
+
+  it("requires a compatible represented target even on a draft-only surface", async () => {
+    const fixture = await createPersonalityWritingFixture(storageDir, { voice: true });
+    const dispatch = composedRun();
+
+    await expect(propose(fixture, {
+      workflowRunId: dispatch.run.id,
+      intent: intentFor(dispatch),
+      targetId: unrepresentedTarget().id,
+    })).rejects.toMatchObject({ details: { reason: "target_identity_mismatch" } });
+
+    await expect(propose(fixture, {
+      workflowRunId: dispatch.run.id,
+      intent: intentFor(dispatch),
+      targetId: null,
+    })).rejects.toMatchObject({ details: { reason: "target_identity_mismatch" } });
+  });
+
   it("pins explicit approval on a composed proposal under an auto_low_risk launch", async () => {
     const fixture = await createPersonalityWritingFixture(storageDir, { voice: true });
-    const proposal = await proposeNurtureVariant(fixture, { intent: true });
+    const dispatch = composedRun();
+    const proposal = await propose(fixture, {
+      workflowRunId: dispatch.run.id,
+      intent: intentFor(dispatch),
+    });
     const writing = writingOf(proposal.id);
 
     expect(writing.approval).toMatchObject({ state: "pending", policy: "explicit" });
@@ -108,7 +276,11 @@ describe("assist-only writing intent pipeline", () => {
 
   it("refuses materialization without real user approval evidence", async () => {
     const fixture = await createPersonalityWritingFixture(storageDir, { voice: true });
-    const proposal = await proposeNurtureVariant(fixture, { intent: true });
+    const dispatch = composedRun();
+    const proposal = await propose(fixture, {
+      workflowRunId: dispatch.run.id,
+      intent: intentFor(dispatch),
+    });
 
     await expect(withPersonalityWritingGuard(
       (guard, tx) => materializeVariantWithRunner({ variantId: proposal.id }, guard, tx),
@@ -120,21 +292,12 @@ describe("assist-only writing intent pipeline", () => {
 
   it("materializes an explicitly approved proposal as a reply that carries its intent", async () => {
     const fixture = await createPersonalityWritingFixture(storageDir, { voice: true });
-    const proposal = await proposeNurtureVariant(fixture, { intent: true });
-
-    const materialized = await withPersonalityWritingGuard(
-      (guard, tx) => materializeVariantWithRunner({
-        variantId: proposal.id,
-        approval: {
-          by: "user",
-          evidence: { kind: "ui", route: "/dashboard/contacts" },
-        },
-      }, guard, tx),
-      fixture.dependencies,
-    );
-    if ("gateError" in materialized && materialized.gateError) {
-      throw new Error(materialized.gateError.reason);
-    }
+    const dispatch = composedRun();
+    const proposal = await propose(fixture, {
+      workflowRunId: dispatch.run.id,
+      intent: intentFor(dispatch),
+    });
+    const materialized = await approve(fixture, proposal.id);
 
     const item = getContentItem(materialized.contentItemId)!;
     expect(item.contentType).toBe("reply");
@@ -144,7 +307,7 @@ describe("assist-only writing intent pipeline", () => {
     expect(stored.intent).toMatchObject({
       mandate: "assist_only",
       consumer: "contact_relationship_nurture",
-      lineage: { workflowRunId: "run-personality-proof", templateId: "tpl_nurture" },
+      lineage: { workflowRunId: dispatch.run.id, templateId: dispatch.template.id },
       recipient: { contactId: "contact_recipient" },
       goal: { id: "follow_back" },
     });
@@ -152,19 +315,44 @@ describe("assist-only writing intent pipeline", () => {
     expect(stored.personality.bindingId).toBe(fixture.binding.id);
   });
 
+  it("revokes approval when an approved proposal is rebound to another recipient or goal", async () => {
+    const fixture = await createPersonalityWritingFixture(storageDir, { voice: true });
+    const dispatch = composedRun();
+    const proposal = await propose(fixture, {
+      workflowRunId: dispatch.run.id,
+      intent: intentFor(dispatch),
+    });
+    await approve(fixture, proposal.id);
+    const approved = writingOf(proposal.id);
+    expect(approved.approval).toMatchObject({ state: "approved", by: "user" });
+
+    // Same body, same target, same audit text — only the recipient and goal move.
+    const rebound = await propose(fixture, {
+      workflowRunId: dispatch.run.id,
+      intent: intentFor(dispatch, {
+        contactId: "contact_someone_else",
+        relationshipGoal: "partnership",
+      }),
+      id: proposal.id,
+    });
+    const after = writingOf(rebound.id);
+
+    expect(after.audit.inputHash).not.toBe(approved.audit.inputHash);
+    expect(after.approval).toMatchObject({ state: "revoked", revokedReason: "audit_stale" });
+    await expect(withPersonalityWritingGuard(
+      (guard, tx) => materializeVariantWithRunner({ variantId: rebound.id }, guard, tx),
+      fixture.dependencies,
+    )).rejects.toMatchObject({ code: "APPROVAL_REQUIRED" });
+  });
+
   it("never lets an approved proposal reach the publish lane", async () => {
     const fixture = await createPersonalityWritingFixture(storageDir, { voice: true });
-    const proposal = await proposeNurtureVariant(fixture, { intent: true });
-    const materialized = await withPersonalityWritingGuard(
-      (guard, tx) => materializeVariantWithRunner({
-        variantId: proposal.id,
-        approval: { by: "user", evidence: { kind: "ui", route: "/dashboard/contacts" } },
-      }, guard, tx),
-      fixture.dependencies,
-    );
-    if ("gateError" in materialized && materialized.gateError) {
-      throw new Error(materialized.gateError.reason);
-    }
+    const dispatch = composedRun();
+    const proposal = await propose(fixture, {
+      workflowRunId: dispatch.run.id,
+      intent: intentFor(dispatch),
+    });
+    const materialized = await approve(fixture, proposal.id);
 
     await expect(sendContentToAgent({
       contentItemId: materialized.contentItemId,
