@@ -468,7 +468,7 @@ test("the default move is a bare rename, with no unlink to fall between", async 
 
 test("the bed is trimmed to the take and faded at the end", () => {
   const filter = musicFilter({ durationSec: 40.64 });
-  assert.match(filter, /^\[1:a\]volume=0\.12/);
+  assert.match(filter, /^\[1:a\]volume=0\.22/);
   assert.match(filter, /atrim=0:40\.640/);
   // Restamped after the trim, so the fade is measured from the clip start
   // rather than from wherever the loop happened to be.

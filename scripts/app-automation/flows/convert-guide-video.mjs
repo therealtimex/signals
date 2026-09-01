@@ -30,10 +30,14 @@ export const CONVERT_GUIDE_VIDEO_FLOW_NAME = "convert-guide-video";
  * budget to spend, so a lower CRF buys nothing but megabytes.
  */
 /**
- * Quiet. A screencast bed sits under the content; at conversational level it
- * competes with the captions it is supposed to support.
+ * Quiet, but audible.
+ *
+ * The first pass used 0.12, reasoning that the bed should sit under the
+ * captions — but captions are visual, and these tours have no narration, so
+ * nothing competes with the music acoustically. 0.12 measured -32 dB in the
+ * mix, close to inaudible on laptop speakers. This lands around -26 dB.
  */
-export const DEFAULT_MUSIC_GAIN = 0.12;
+export const DEFAULT_MUSIC_GAIN = 0.22;
 export const DEFAULT_FADE_SEC = 1.5;
 export const DEFAULT_MUSIC_PATH = join("guide", "video", "audio", "tour-bed.mp3");
 
