@@ -1,7 +1,9 @@
 # Voice profiles
 
 Voice evidence is learned from the user's real writing, not imposed as a generic style preset.
-Only an approved immutable version may shape a variant.
+When a Personality binding is active, the whole workspace `VOICE.md` is the live voice. An approved
+immutable voice profile remains evidence and attribution for observed habits; it does not override
+the Personality files.
 
 ## Resolve voice from context
 
@@ -11,6 +13,8 @@ Only an approved immutable version may shape a variant.
 - `ambiguous`: show candidate labels and versions, then ask the user to choose.
 - `missing`: stop because the requested pin cannot be resolved.
 - `none`: build a profile unless the brief explicitly selected a voice-less run.
+- `unclaimed_only`: ask the user to claim or build their own profile. Never use another owner's
+  writing as the active voice.
 
 ## Build or revise a profile
 
@@ -74,9 +78,19 @@ profile dimensions the draft misses; record `core/voice/drift` as a warning at 0
     "class":"voice", "statement":"A signature line is used only as the exact approved sample substring.",
     "applies":["core"], "severity":"warning",
     "source":[{"kind":"spec","path":"specs/signals-writing-system.md"}], "status":"active"
+  },
+  {
+    "id":"core/voice/personality-source-stale",
+    "class":"voice", "severity":"warning",
+    "statement":"Server-inserted when an audit knowingly retains unchanged Personality bytes after sources changed; requires fresh explicit approval.",
+    "applies":["core"],
+    "source":[{"kind":"spec","path":"specs/personality-projection.md"}], "status":"active"
   }
 ]
 ```
+
+`core/voice/personality-source-stale` is server-owned. Never author, copy, or repair it in agent
+input; Signals removes client copies and inserts the deterministic warning when applicable.
 
 ## Approval evidence
 

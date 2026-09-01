@@ -43,6 +43,10 @@ describe("Signals Writing workflow contract", () => {
     expect(section).toContain("youtube/thumbnail_brief");
     expect(section).toContain("publish=export_only");
     expect(section).toContain("get_writing_context");
+    expect(section).toContain("IDENTITY.md, SOUL.md, VOICE.md, BRAND.md");
+    expect(section).toContain("get_writing_context.personality as the binding gate");
+    expect(section).toContain("submits only its active bindingId");
+    expect(section).toContain("Do not edit workspace Personality files");
     expect(section).toContain("query_graph");
     expect(section).toContain("new derived alternatives omit id");
     expect(section).toContain(".claude/skills/signals-writing/SKILL.md");

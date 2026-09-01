@@ -23,22 +23,26 @@ the inner spine/audit/units object. The helper reads only files named on its com
 
 ## Exact persistence order
 
-1. Resolve/create the launch and call `get_writing_context`.
-2. Resolve or build/approve the voice profile. Keep the returned `{id, version, hash}`.
-3. Generate source/claim/spine IDs with `writing-cli.cjs id`.
-4. Write `spine.json`, then send one complete `upsert_launch` writing document containing the full
+1. Read `IDENTITY.md`, `SOUL.md`, `VOICE.md`, and `BRAND.md` whole, then resolve/create the launch
+   and call `get_writing_context`; record its current `personality` status.
+2. Apply the Personality gate. A bound-lane variant includes only
+   `personality: { bindingId }` copied from the current context.
+3. Resolve or build/approve the voice profile. Keep the returned `{id, version, hash}`.
+4. Generate source/claim/spine IDs with `writing-cli.cjs id`.
+5. Write `spine.json`, then send one complete `upsert_launch` writing document containing the full
    existing+new `surfaces`, `sources`, and `runs` arrays. Arrays replace during deep merge.
-5. Read the server-derived source hashes and spine hash from the response/context; update working
+6. Read the server-derived source hashes and spine hash from the response/context; update working
    files without inventing hashes.
-6. For each supported surface, produce distinct units from the spine, measure, audit, precheck, and
+7. For each supported surface, produce distinct units from the spine, measure, audit, precheck, and
    call `upsert_variant` with the same launch/spine pin.
-7. Read the persisted variant, audit, approval, capability, and returned `lineageEdges`; render its
-   card.
-8. Materialize only the selected approved variant. Verify the returned content item through
+8. Read the server-stamped Personality snapshot and `personalityState` with the persisted variant,
+   audit, approval, capability, and returned `lineageEdges`; render its card. Never copy Personality
+   hashes into a working file or later input.
+9. Materialize only the selected approved variant. Verify the returned content item through
    `get_content`; use `query_graph` from the variant ID when a graph-edge check is needed.
-9. On explicit publish instruction, hand the content item to the REST route; completion is owned by
+10. On explicit publish instruction, hand the content item to the REST route; completion is owned by
    the publish job and `signals-publish` callback.
-10. Complete the workflow run with every created ID and any blocker/missing surface.
+11. Complete the workflow run with every created ID and any blocker/missing surface.
 
 ## Idempotency
 
