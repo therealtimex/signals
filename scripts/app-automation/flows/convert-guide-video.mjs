@@ -14,7 +14,7 @@
  * Side-effect free on import (see README): the CLI is guarded on argv[1].
  */
 import { execFile } from "node:child_process";
-import { mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
 import { promisify } from "node:util";
 import { pathToFileURL } from "node:url";
@@ -29,6 +29,14 @@ export const CONVERT_GUIDE_VIDEO_FLOW_NAME = "convert-guide-video";
  * flat UI with hard text edges, which x264 encodes cheaply; there is no grain
  * budget to spend, so a lower CRF buys nothing but megabytes.
  */
+/**
+ * Quiet. A screencast bed sits under the content; at conversational level it
+ * competes with the captions it is supposed to support.
+ */
+export const DEFAULT_MUSIC_GAIN = 0.12;
+export const DEFAULT_FADE_SEC = 1.5;
+export const DEFAULT_MUSIC_PATH = join("guide", "video", "audio", "tour-bed.mp3");
+
 export const DEFAULT_CRF = 20;
 export const DEFAULT_PRESET = "slow";
 
@@ -118,14 +126,55 @@ export function selectSources(only, sources) {
  * it is a no-op — but an odd viewport would otherwise fail the encode outright
  * with "width not divisible by 2", far from the line that changed it.
  */
-export function ffmpegArgs({ input, output, crf = DEFAULT_CRF, preset = DEFAULT_PRESET, silentAudio = true }) {
+/**
+ * The music bed, trimmed to the take.
+ *
+ * Tours are 40.6s and 15.9s and both shift by a few tenths on every re-record,
+ * so the bed cannot be a fixed-length file dropped in — a hard cut lands
+ * mid-phrase. It is looped to cover any length, trimmed to this video exactly,
+ * and faded out, all from the probed duration. `asetpts` restamps after the
+ * trim so the fade is measured from the start of the clip rather than from
+ * wherever the loop happened to be.
+ */
+export function musicFilter({ durationSec, gain = DEFAULT_MUSIC_GAIN, fadeSec = DEFAULT_FADE_SEC }) {
+  const fade = Math.min(fadeSec, durationSec / 2);
+  const start = Math.max(0, durationSec - fade);
+  return [
+    `[1:a]volume=${gain}`,
+    `atrim=0:${durationSec.toFixed(3)}`,
+    "asetpts=N/SR/TB",
+    `afade=t=out:st=${start.toFixed(3)}:d=${fade.toFixed(3)}[a]`,
+  ].join(",");
+}
+
+export function ffmpegArgs({
+  input,
+  output,
+  crf = DEFAULT_CRF,
+  preset = DEFAULT_PRESET,
+  silentAudio = true,
+  music = null,
+  musicGain = DEFAULT_MUSIC_GAIN,
+  fadeSec = DEFAULT_FADE_SEC,
+  durationSec = null,
+}) {
+  // Music needs the video's own duration to know where to fade, so a caller
+  // that has not probed yet gets the silent track rather than a wrong fade.
+  const withMusic = Boolean(music) && durationSec > 0;
   return [
     "-y",
     "-i", input,
-    // A silent AAC track. Tours have no audio, and some upload pipelines reject
-    // or mis-transcode a video with no audio stream at all; an empty track is
-    // a few KB and removes the failure mode.
-    ...(silentAudio ? ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100", "-shortest"] : []),
+    // -stream_loop covers a bed shorter than the tour; the filter trims it back.
+    ...(withMusic ? ["-stream_loop", "-1", "-i", music] : []),
+    // A silent AAC track when there is no bed. Tours have no audio, and some
+    // upload pipelines reject or mis-transcode a video with no audio stream at
+    // all; an empty track is a few KB and removes the failure mode.
+    ...(!withMusic && silentAudio
+      ? ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100", "-shortest"]
+      : []),
+    ...(withMusic
+      ? ["-filter_complex", musicFilter({ durationSec, gain: musicGain, fadeSec }), "-map", "0:v", "-map", "[a]"]
+      : []),
     "-c:v", "libx264",
     "-preset", preset,
     "-crf", String(crf),
@@ -133,7 +182,7 @@ export function ffmpegArgs({ input, output, crf = DEFAULT_CRF, preset = DEFAULT_
     "-profile:v", "high",
     "-level", "4.0",
     "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
-    ...(silentAudio ? ["-c:a", "aac", "-b:a", "128k"] : ["-an"]),
+    ...(withMusic || silentAudio ? ["-c:a", "aac", "-b:a", "128k"] : ["-an"]),
     "-movflags", "+faststart",
     output,
   ];
@@ -142,8 +191,9 @@ export function ffmpegArgs({ input, output, crf = DEFAULT_CRF, preset = DEFAULT_
 export function ffprobeArgs(file) {
   return [
     "-v", "error",
-    "-select_streams", "v:0",
-    "-show_entries", "stream=codec_name,width,height,pix_fmt",
+    // Every stream, not just v:0 — the audio is the half that can silently
+    // vanish when a filter graph is wrong, and the video would still look fine.
+    "-show_entries", "stream=codec_type,codec_name,width,height,pix_fmt",
     "-show_entries", "format=duration",
     "-of", "json",
     file,
@@ -152,12 +202,17 @@ export function ffprobeArgs(file) {
 
 export function probeSummary(raw) {
   const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
-  const stream = parsed.streams?.[0] ?? {};
+  const streams = parsed.streams ?? [];
+  // Located by codec_type rather than by index: stream order is not guaranteed,
+  // and picking [0] read an audio stream as the video one.
+  const video = streams.find((s) => s.codec_type === "video") ?? {};
+  const audio = streams.find((s) => s.codec_type === "audio") ?? null;
   return {
-    codec: stream.codec_name ?? null,
-    width: stream.width ?? null,
-    height: stream.height ?? null,
-    pixelFormat: stream.pix_fmt ?? null,
+    codec: video.codec_name ?? null,
+    width: video.width ?? null,
+    height: video.height ?? null,
+    pixelFormat: video.pix_fmt ?? null,
+    audioCodec: audio?.codec_name ?? null,
     durationSec: Number(parsed.format?.duration ?? 0),
   };
 }
@@ -169,7 +224,7 @@ export function probeSummary(raw) {
  * so the conversion is only done once the output has been probed — the same
  * reason the capture flow settles before it believes a screenshot.
  */
-export function assertUsableOutput(summary, { source } = {}) {
+export function assertUsableOutput(summary, { source, expectAudio = false } = {}) {
   const label = source ? `${source}: ` : "";
   if (summary.codec !== "h264") {
     throw new Error(`${label}expected an h264 stream, got ${summary.codec ?? "none"}`);
@@ -180,6 +235,13 @@ export function assertUsableOutput(summary, { source } = {}) {
   if (!(summary.durationSec > 0)) {
     throw new Error(`${label}converted file has no duration`);
   }
+  // A filter graph that drops the music still produces a valid, watchable mp4 —
+  // the failure that looks like success, so it is checked rather than trusted.
+  if (expectAudio && summary.audioCodec !== "aac") {
+    throw new Error(
+      `${label}expected an aac track, got ${summary.audioCodec ?? "none"} — the music was dropped`,
+    );
+  }
 }
 
 export function parseArgs(argv = [], env = process.env) {
@@ -189,6 +251,8 @@ export function parseArgs(argv = [], env = process.env) {
     crf: DEFAULT_CRF,
     preset: DEFAULT_PRESET,
     silentAudio: true,
+    music: env.SIGNALS_TOUR_MUSIC || DEFAULT_MUSIC_PATH,
+    musicGain: DEFAULT_MUSIC_GAIN,
     ffmpeg: env.SIGNALS_FFMPEG || "ffmpeg",
     ffprobe: resolveFfprobe(env.SIGNALS_FFMPEG || "ffmpeg", env),
     json: false,
@@ -219,6 +283,22 @@ export function parseArgs(argv = [], env = process.env) {
       case "--no-silent-audio":
         args.silentAudio = false;
         break;
+      case "--no-music":
+        args.music = null;
+        break;
+      case "--music":
+        args.music = readValue(index, rawArg);
+        if (!rawArg.includes("=")) index += 1;
+        break;
+      case "--music-gain": {
+        const value = Number(readValue(index, rawArg));
+        if (!Number.isFinite(value) || value < 0 || value > 2) {
+          throw new Error(`--music-gain must be between 0 and 2: ${rawArg}`);
+        }
+        args.musicGain = value;
+        if (!rawArg.includes("=")) index += 1;
+        break;
+      }
       case "--only":
         args.only.push(
           ...readValue(index, rawArg).split(",").map((v) => v.trim()).filter(Boolean),
@@ -261,6 +341,10 @@ export function createHelpText() {
     `  --video-dir <dir>   Default: ${DEFAULT_VIDEO_DIR}`,
     `  --crf <0-51>        Quality; lower is bigger. Default: ${DEFAULT_CRF}`,
     `  --preset <name>     x264 speed/size tradeoff. Default: ${DEFAULT_PRESET}`,
+    "  --music <path>      Music bed to mix under the tour.",
+    `                      Default: ${DEFAULT_MUSIC_PATH} (silent if absent)`,
+    `  --music-gain <n>    Bed volume, 0-2. Default: ${DEFAULT_MUSIC_GAIN}`,
+    "  --no-music          Silent track instead of a bed.",
     "  --no-silent-audio   Emit no audio track at all.",
     "  --json              Emit the result as JSON on stdout.",
     "  --quiet             Suppress progress on stderr.",
@@ -269,6 +353,7 @@ export function createHelpText() {
     "Environment:",
     "  SIGNALS_FFMPEG      ffmpeg binary to use. ffprobe is taken from beside it.",
     "  SIGNALS_FFPROBE     Override that, if ffprobe lives elsewhere.",
+    "  SIGNALS_TOUR_MUSIC  Default music bed path.",
   ].join("\n");
 }
 
@@ -287,6 +372,7 @@ export async function runConvertGuideVideoFlow(args, dependencies = {}) {
     listSources = discoverSources,
     ensureDir = (dir) => mkdirSync(dir, { recursive: true }),
     sizeOf = (file) => statSync(file).size,
+    fileExists = (file) => existsSync(file),
     // Seams, so a test can assert on the default policy rather than on a stub
     // that replaces it — the bug here was in the default, not at the call site.
     renameImpl = renameSync,
@@ -337,6 +423,11 @@ export async function runConvertGuideVideoFlow(args, dependencies = {}) {
   }
 
   ensureDir(args.videoDir);
+  // Resolved once, not per file: an absent bed is the silent track, not an
+  // error. Music is an optional committed asset, so a fresh clone that has not
+  // fetched it still converts.
+  const music = args.music && fileExists(args.music) ? args.music : null;
+  if (args.music && !music) log(`no music bed at ${args.music}; using a silent track`);
   const converted = [];
   const failures = [];
 
@@ -349,21 +440,30 @@ export async function runConvertGuideVideoFlow(args, dependencies = {}) {
     const partial = partialPath(output);
     log(`${source} -> ${basename(output)}`);
     try {
+      // The bed is trimmed and faded to this take, so the source has to be
+      // measured before it can be encoded.
+      const durationSec = music
+        ? probeSummary((await run(args.ffprobe, ffprobeArgs(input))).stdout).durationSec
+        : 0;
       await run(args.ffmpeg, ffmpegArgs({
         input,
         output: partial,
         crf: args.crf,
         preset: args.preset,
         silentAudio: args.silentAudio,
+        music,
+        musicGain: args.musicGain,
+        durationSec,
       }));
       const { stdout } = await run(args.ffprobe, ffprobeArgs(partial));
       const summary = probeSummary(stdout);
-      assertUsableOutput(summary, { source });
+      assertUsableOutput(summary, { source, expectAudio: Boolean(music) });
       move(partial, output);
       converted.push({
         source,
         path: output,
         bytes: sizeOf(output),
+        music: music ?? null,
         ...summary,
       });
     } catch (error) {
