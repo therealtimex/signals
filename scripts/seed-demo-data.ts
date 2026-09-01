@@ -11,6 +11,8 @@
  * Run through vite-node so `@/` resolves, matching
  * `scripts/qa/run-persona-agent-job-smoke.sh`.
  */
+import { execFileSync } from "node:child_process";
+import { mkdirSync } from "node:fs";
 import { checkDemoSeedTarget } from "@/lib/db/demo-seed-guard";
 
 async function main(): Promise<void> {
@@ -27,6 +29,18 @@ async function main(): Promise<void> {
   }
 
   process.stderr.write(`${verdict.message}\n`);
+
+  // Migrate from *inside* the guard, never before it. Chaining `npm run
+  // db:migrate` ahead of this script in the package script meant drizzle-kit ran
+  // against whatever SIGNALS_DATA_DIR pointed at — including the default — and
+  // applied pending migrations to a real CRM before the refusal was ever
+  // printed. The guard is worth nothing if something mutates the database ahead
+  // of it.
+  mkdirSync(verdict.dataDir!, { recursive: true });
+  execFileSync("npx", ["drizzle-kit", "migrate"], {
+    stdio: "inherit",
+    env: { ...process.env, SIGNALS_DATA_DIR: verdict.dataDir! },
+  });
 
   // `client.ts` applies migrations on import via `require("./migrate")`, a CJS
   // require of a TypeScript module that vite-node cannot resolve. The only flag
