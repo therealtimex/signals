@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Camera, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -36,6 +36,18 @@ export function ContactAvatarUpload({
   // avatar retries instead of staying stuck on initials.
   const [failedAvatarUrl, setFailedAvatarUrl] = useState<string | null>(null);
   const showImage = Boolean(currentAvatarUrl) && currentAvatarUrl !== failedAvatarUrl;
+  const imageRef = useRef<HTMLImageElement>(null);
+
+  // `onError` alone misses the common case. The `<img>` is server-rendered, so
+  // the browser usually finishes failing the request *before* React hydrates,
+  // and an error event fired before the handler is attached is never delivered.
+  // A finished image with no intrinsic width is one that failed.
+  useEffect(() => {
+    const image = imageRef.current;
+    if (image?.complete && image.naturalWidth === 0) {
+      setFailedAvatarUrl(currentAvatarUrl);
+    }
+  }, [currentAvatarUrl]);
   const initials = contactDisplayInitials({
     name: name ?? undefined,
     firstName: firstName ?? undefined,
@@ -86,6 +98,7 @@ export function ContactAvatarUpload({
         {showImage ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
+            ref={imageRef}
             src={currentAvatarUrl!}
             alt=""
             className="h-full w-full object-cover"
