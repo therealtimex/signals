@@ -59,12 +59,12 @@ export function readWritingIntentComposition(
     return null;
   }
   const consumer = candidate.consumer as WritingIntentConsumer;
-  const allowed = WRITING_INTENT_CONSUMER_SURFACES[consumer];
+  const allowed = new Set<SurfaceId>(WRITING_INTENT_CONSUMER_SURFACES[consumer]);
   if (!Array.isArray(candidate.surfaces) || candidate.surfaces.length === 0) return null;
   const surfaces: SurfaceId[] = [];
   for (const entry of candidate.surfaces) {
     const surface = parseSurfaceId(entry);
-    if (!surface || !allowed.includes(surface)) return null;
+    if (!surface || !allowed.has(surface)) return null;
     surfaces.push(surface);
   }
   if (candidate.mandate !== "assist_only") return null;
