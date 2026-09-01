@@ -28,19 +28,39 @@ authority, and it never enters `IDENTITY.md`, `SOUL.md`, `VOICE.md`, or `BRAND.m
 
 ## The server decides, not the payload
 
-`metadata.writing.intent` is the agent's claim. Whether a variant *is* an assist-only proposal is
-resolved by `writing-intent-authority.ts` from the workflow-run row Signals wrote at dispatch time
-(`buildStoredRunConfig`), falling back to the template config. Both directions fail closed:
+`metadata.writing.intent` is the agent's claim, and so is
+`generationMetadata.agent.workflowRunId`. The agent-tools route has no ambient run context (auth is
+localhost-or-shared-token), so **a run pointer can never be the anchor on its own** — a caller could
+name an ordinary run, omit the intent, and slide a proposal into the platform-native lane.
 
-- a run whose stored config carries the opt-in **must** produce a valid, matching intent
-  (`writing_intent_required`), and
-- a run that does not **must not** carry one (`writing_intent_not_permitted`), so assist-only
-  provenance cannot be forged onto an unrelated artifact.
+Two independent anchors carry the mandate instead:
 
-The submitted record must also agree with the dispatch on consumer, surface, enabled surfaces, and
-lineage (`workflowRunId` / `templateId`); a mismatch is rejected rather than downgraded. A composed
-run additionally requires the active Personality binding and a **compatible represented target** —
-`draft_only` does not relax the target gate.
+1. **The surface.** `WRITING_SURFACE_CAPABILITIES[...].mandate` marks the six proposal surfaces
+   `assist_only`. A reply, comment, or direct message *is* a proposal, so the mandate holds even
+   when every pointer in the payload is wrong. `persistWritingVariant` requires an intent on such a
+   surface, `approvalFor` pins `explicit`, and `materializeVariantWithRunner` refuses a
+   `by: "policy"` approval — all keyed on `writing.surface`.
+2. **The workflow-run row** Signals wrote at dispatch (`buildStoredRunConfig`), falling back to the
+   template config. It supplies the composition, consumer, and enabled surfaces.
+
+The composition is resolved against the run the **intent** names, and the generation pointer must
+equal it, so the two cannot be played against each other. Every direction fails closed:
+
+| Situation | Result |
+|---|---|
+| assist-only surface, no intent | `writing_intent_required` — regardless of which run is named |
+| intent naming an uncomposed run | `writing_intent_not_permitted` |
+| composed run, no intent | `writing_intent_required` |
+| consumer / surface / enabled-surface / lineage disagreement | rejected, not downgraded |
+| `intent.target` ≠ the variant's acting target | `writing_intent_target_mismatch` |
+
+A dishonest run pointer therefore cannot reach the platform-native lane. The most it buys is
+attributing work to a *different composed run* — all of which pin explicit approval.
+
+A composed run additionally requires the active Personality binding and a **compatible represented
+target**; `draft_only` does not relax the target gate. One artifact carries one acting identity: the
+Personality guard validates `writing.targetId` and the intent must name the same target, so a
+materialized proposal cannot end up with contradictory lineage.
 
 `resolveWritingRequest(intent, context)` turns an intent plus observed Personality/target state
 into a `WritingRequest`. It fails closed:
@@ -65,6 +85,9 @@ into a `WritingRequest`. It fails closed:
   `materializeVariantWithRunner` rejects a `by: "policy"` approval outright.
 - `sendContentToAgent` refuses any content item whose writing metadata carries an assist-only
   intent, even on a publish-capable surface. Composition provenance outranks surface capability.
+- An opted-in workflow's brief advertises the writing tool set (`get_writing_context`,
+  `upsert_launch`, `upsert_variant`, `materialize_variant`, …) alongside its own category tools, so
+  requirement 8 and the contract below it agree.
 - The intent is part of `computeAuditInputHash`, so rebinding an approved proposal to a different
   recipient, relationship goal, or evidence set stales the audit and revokes the approval. Same
   body, different artifact.
@@ -142,6 +165,7 @@ own goals map onto it.
 | Concern | File |
 |---|---|
 | Intent contract, composition config, lanes, refusals | `src/lib/writing/writing-intent.ts` |
+| Surface mandate (`isAssistOnlySurface`) | `src/lib/writing/capabilities.ts` |
 | Server-side composition authority | `src/lib/writing/writing-intent-authority.ts` |
 | Shared brief text (both lanes) | `src/lib/workflows/writing-contract.ts` |
 | Reusable opt-in + composed brief | `src/lib/workflows/writing-composition.ts` |

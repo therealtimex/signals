@@ -6,10 +6,11 @@ import type { Variant } from "@/lib/db/types";
 import { resolveTargetById } from "@/lib/db/queries/platform-targets";
 import { AgentToolError } from "@/lib/agent-tools/types";
 import { deriveAuditVerdict, deriveRiskTier, validateAuditFindingSemantics } from "@/lib/writing/audit";
-import { getSurfaceCapabilities } from "@/lib/writing/capabilities";
+import { getSurfaceCapabilities, isAssistOnlySurface } from "@/lib/writing/capabilities";
 import { isAssistOnlyIntent } from "@/lib/writing/writing-intent";
 import {
   assertWritingIntentAuthority,
+  composedRunIdForVariant,
   resolveComposedRunAuthority,
 } from "@/lib/writing/writing-intent-authority";
 import {
@@ -283,16 +284,21 @@ export function persistWritingVariant(
     }
   }
   const variantId = existing?.id ?? nanoid();
-  // Composition is the run's property, not the payload's: a composed run must produce a matching
-  // intent, and an uncomposed one must not carry assist-only provenance at all.
+  // Resolve the composition against the run the *intent* names, then require the generation pointer
+  // to agree with it — so the two cannot be played against each other.
   const composedAuthority = resolveComposedRunAuthority(
     runner,
-    generationResult.data.agent.workflowRunId,
+    composedRunIdForVariant({
+      intent: authoritativeWriting.intent,
+      generationWorkflowRunId: generationResult.data.agent.workflowRunId,
+    }),
   );
   assertWritingIntentAuthority({
     authority: composedAuthority,
     intent: authoritativeWriting.intent,
     surface: authoritativeWriting.surface,
+    platform: authoritativeWriting.platform,
+    targetId: authoritativeWriting.targetId ?? null,
     workflowRunId: generationResult.data.agent.workflowRunId,
   });
   const { spine, targetKind } = validateCrossDocuments({ variantId, body: input.body, writing: authoritativeWriting, generation: generationResult.data, launch: launchResult.data }, runner);
@@ -337,7 +343,11 @@ export function persistWritingVariant(
     audit = { ...candidate, verdict };
   }
   const unchanged = Boolean(previous?.audit && audit && previous.audit.inputHash === inputHash && previous.audit.id === audit.id);
-  const assistOnly = Boolean(composedAuthority) || isAssistOnlyIntent(authoritativeWriting.intent);
+  // Surface first: the mandate survives a wrong or forged run pointer because it is a property of
+  // the artifact, not of the request that created it.
+  const assistOnly = isAssistOnlySurface(authoritativeWriting.surface)
+    || Boolean(composedAuthority)
+    || isAssistOnlyIntent(authoritativeWriting.intent);
   const approval = input.status === "rejected"
     ? {
         schemaVersion: 1 as const,

@@ -72,6 +72,27 @@ const TOOLS_BY_TYPE: Record<string, string[]> = {
   nurture: ["query_contacts", "get_contact", "update_contact", "query_goals", "create_task"],
 };
 
+/**
+ * Tools the shared writing contract requires, whatever the workflow's own category is.
+ *
+ * A composed workflow prints its category tools *and* these; otherwise requirement 8 would list a
+ * CRM-only tool set while the contract below it calls for the whole writing pipeline.
+ */
+const WRITING_COMPOSITION_TOOLS = [
+  "get_writing_context",
+  "get_content",
+  "list_voice_profiles",
+  "get_voice_profile",
+  "upsert_voice_profile",
+  "approve_voice_profile",
+  "upsert_launch",
+  "upsert_variant",
+  "materialize_variant",
+  "revoke_variant_approval",
+  "query_graph",
+  "complete_workflow_run",
+] as const;
+
 export function getTemplateToolsHint(
   templateType: string,
   config?: Record<string, unknown>,
@@ -79,7 +100,9 @@ export function getTemplateToolsHint(
   if (config && isContactWebResearchTemplateConfig(config)) {
     return [...CONTACT_WEB_RESEARCH_TOOLS];
   }
-  return TOOLS_BY_TYPE[templateType] ?? ["query_contacts", "create_task"];
+  const base = TOOLS_BY_TYPE[templateType] ?? ["query_contacts", "create_task"];
+  if (!config || !readWritingIntentComposition(config)) return base;
+  return [...new Set([...base, ...WRITING_COMPOSITION_TOOLS])];
 }
 
 /**

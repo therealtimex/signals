@@ -19,6 +19,15 @@ export type SurfaceCapabilities = {
   publish: PublishCapability;
   metrics: CapabilityState;
   engage: CapabilityState;
+  /**
+   * Mandate the surface itself carries.
+   *
+   * `assist_only` is a property of the artifact, not of the request that created it: a reply, a
+   * comment, and a direct message exist only as proposals. Anchoring the mandate here means a
+   * caller cannot recover policy approval by pointing `generationMetadata.agent.workflowRunId` at
+   * some other run — changing the mandate would mean changing what the artifact *is*.
+   */
+  mandate: "assist_only" | null;
   notes?: string;
 };
 
@@ -35,6 +44,7 @@ const supportedPublish = (
   publish,
   metrics,
   engage: "unsupported",
+  mandate: null,
   notes,
 });
 
@@ -55,6 +65,7 @@ const assistOnlySurface = (notes: string): SurfaceCapabilities => ({
   publish: "draft_only",
   metrics: "unsupported",
   engage: "unsupported",
+  mandate: "assist_only",
   notes,
 });
 
@@ -71,6 +82,7 @@ const futureSurface = (
   publish,
   metrics: "unsupported",
   engage: "unsupported",
+  mandate: null,
   notes,
 });
 
@@ -132,6 +144,17 @@ export function getSurfaceCapabilities(surface: SurfaceId): SurfaceCapabilities 
 export function canReachPublishAdapter(capability: PublishCapability): boolean {
   return capability === "direct" || capability === "beta";
 }
+
+/**
+ * Whether the surface is an assist-only proposal surface.
+ *
+ * Intrinsic to the artifact, so it holds even when the caller's run pointer is wrong or forged.
+ */
+export function isAssistOnlySurface(surface: SurfaceId): boolean {
+  return WRITING_SURFACE_CAPABILITIES[surface].mandate === "assist_only";
+}
+
+export const ASSIST_ONLY_SURFACES: readonly SurfaceId[] = SURFACE_IDS.filter(isAssistOnlySurface);
 
 const PUBLISH_RANK: Record<PublishCapability, number> = {
   unsupported: 0,

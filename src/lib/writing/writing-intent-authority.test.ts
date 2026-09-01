@@ -20,7 +20,12 @@ function nurtureTemplate() {
   });
 }
 
-function intent(overrides: { workflowRunId: string; templateId: string; surface?: "x/reply" | "x/direct_message" }) {
+function intent(overrides: {
+  workflowRunId: string;
+  templateId: string;
+  surface?: "x/reply" | "x/direct_message";
+  targetId?: string | null;
+}) {
   return toWritingIntentRecord({
     ...buildWritingIntentDraft({
       intentId: "wint_authority1",
@@ -28,7 +33,11 @@ function intent(overrides: { workflowRunId: string; templateId: string; surface?
       lineage: { workflowRunId: overrides.workflowRunId, templateId: overrides.templateId },
       recipient: { kind: "contact", contactId: "contact_1", platform: "x" },
       goal: { relationshipGoal: "follow_back", writingGoal: "follows" },
-      target: { platform: "x", targetId: null },
+      target: {
+        platform: "x",
+        // `??` would swallow an explicit null, which is one of the cases under test.
+        targetId: "targetId" in overrides ? overrides.targetId! : "tgt_acting",
+      },
       surface: overrides.surface ?? "x/reply",
       sourceRefs: [],
     }),
@@ -97,7 +106,12 @@ describe("assertWritingIntentAuthority", () => {
       approvalPolicy: "explicit" as const,
     },
   };
-  const base = { workflowRunId: "run_1", surface: "x/reply" as const };
+  const base = {
+    workflowRunId: "run_1",
+    surface: "x/reply" as const,
+    platform: "x",
+    targetId: "tgt_acting" as string | null,
+  };
   const valid = intent({ workflowRunId: "run_1", templateId: "tpl_1" });
 
   it("passes an intent that matches the dispatch", () => {
@@ -106,9 +120,23 @@ describe("assertWritingIntentAuthority", () => {
     ).toMatchObject({ consumer: "contact_relationship_nurture", surface: "x/reply" });
   });
 
-  it("returns null for an ordinary run with no intent", () => {
-    expect(assertWritingIntentAuthority({ ...base, authority: null, intent: undefined })).toBeNull();
-    expect(assertWritingIntentAuthority({ ...base, authority: null, intent: null })).toBeNull();
+  it("returns null for an ordinary surface and run with no intent", () => {
+    const ordinary = { ...base, surface: "x/post" as const };
+    expect(assertWritingIntentAuthority({ ...ordinary, authority: null, intent: undefined })).toBeNull();
+    expect(assertWritingIntentAuthority({ ...ordinary, authority: null, intent: null })).toBeNull();
+  });
+
+  it("requires an intent on an assist-only surface even when the named run is ordinary", () => {
+    // The bypass Review found: name any uncomposed run and omit the intent. The surface refuses.
+    for (const surface of ["x/reply", "x/direct_message"] as const) {
+      expect(() =>
+        assertWritingIntentAuthority({ ...base, surface, authority: null, intent: undefined }),
+      ).toThrowError(
+        expect.objectContaining({
+          details: expect.objectContaining({ reason: "writing_intent_required" }),
+        }),
+      );
+    }
   });
 
   const composed = {
@@ -133,6 +161,14 @@ describe("assertWritingIntentAuthority", () => {
     [
       "writing_intent_lineage_mismatch",
       { authority: composed, intent: intent({ workflowRunId: "run_1", templateId: "tpl_other" }) },
+    ],
+    [
+      "writing_intent_target_mismatch",
+      { authority: composed, intent: intent({ workflowRunId: "run_1", templateId: "tpl_1", targetId: null }) },
+    ],
+    [
+      "writing_intent_target_mismatch",
+      { authority: composed, intent: intent({ workflowRunId: "run_1", templateId: "tpl_1", targetId: "tgt_other" }) },
     ],
   ];
 
@@ -165,7 +201,7 @@ describe("assertWritingIntentAuthority", () => {
     };
     expect(() =>
       assertWritingIntentAuthority({
-        workflowRunId: "run_1",
+        ...base,
         surface: "x/direct_message",
         authority: narrowed,
         intent: intent({ workflowRunId: "run_1", templateId: "tpl_1", surface: "x/reply" }),

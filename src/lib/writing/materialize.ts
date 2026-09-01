@@ -25,6 +25,7 @@ import {
   withPersonalityWritingGuard,
 } from "@/lib/writing/personality-guard";
 import { revokeWritingVariantWithRunner } from "@/lib/writing/personality-revocation";
+import { isAssistOnlySurface } from "@/lib/writing/capabilities";
 import { contentTypeForSurface } from "@/lib/writing/surfaces";
 import { isAssistOnlyIntent } from "@/lib/writing/writing-intent";
 
@@ -155,7 +156,9 @@ export function materializeVariantWithRunner(
   const approval = effectiveApproval({ stored: writing.approval, auditId: writing.audit.id, call: input.approval, now });
   if ((writing.approval.riskTier === "high" || writing.approval.policy === "explicit") && approval.by !== "user") throw new AgentToolError("APPROVAL_REQUIRED", "This variant requires explicit user approval");
   // A composed `assist_only` proposal always needs a human, whatever policy the launch recorded.
-  if (isAssistOnlyIntent(writing.intent) && approval.by !== "user") {
+  // Keyed on the surface as well as the intent so a variant persisted before this rule, or one
+  // whose provenance was stripped, still cannot be policy-approved into a content item.
+  if ((isAssistOnlySurface(writing.surface) || isAssistOnlyIntent(writing.intent)) && approval.by !== "user") {
     throw new AgentToolError("APPROVAL_REQUIRED", "Assist-only writing proposals require explicit user approval");
   }
   if (writing.audit.personality?.statusAtAudit === "source_stale" && (approval.by !== "user" || !approval.evidence)) {

@@ -47,6 +47,9 @@ const env: NodeJS.ProcessEnv = {
 type ComposedDispatch = ReturnType<typeof composedRun>;
 type Fixture = Awaited<ReturnType<typeof createPersonalityWritingFixture>>;
 
+/** Set per test from the fixture, so intents and variants name the same acting target. */
+let actingTargetId = "";
+
 /**
  * A real composed dispatch: a nurture template carrying the opt-in, and a run row whose stored
  * config carries it too. This is the state the server derives the mandate from — an agent cannot
@@ -104,6 +107,7 @@ function intentFor(
     workflowRunId?: string;
     templateId?: string;
     surface?: "x/reply" | "x/direct_message";
+    targetId?: string | null;
   } = {},
 ): Record<string, unknown> {
   const contactId = overrides.contactId ?? "contact_recipient";
@@ -121,7 +125,11 @@ function intentFor(
         relationshipGoal: overrides.relationshipGoal ?? "follow_back",
         writingGoal: "follows",
       },
-      target: { platform: "x", targetId: null },
+      // The intent's acting target must equal the variant's; a mismatch is rejected.
+      target: {
+        platform: "x",
+        targetId: "targetId" in overrides ? overrides.targetId! : actingTargetId,
+      },
       surface: overrides.surface ?? "x/reply",
       sourceRefs: [{ kind: "contact_record", contactId }],
     }),
@@ -136,6 +144,7 @@ function propose(
     intent?: Record<string, unknown>;
     id?: string;
     targetId?: string | null;
+    surface?: "x/reply" | "x/post";
     body?: string;
   },
 ) {
@@ -146,7 +155,7 @@ function propose(
         launchId: fixture.launchId,
         bindingId: fixture.binding.id,
         ...(targetId === null ? {} : { targetId }),
-        surface: "x/reply",
+        surface: options.surface ?? "x/reply",
         body: options.body ?? "Answering the actual question with the evidence we already have.",
         voiceProfile: fixture.voiceProfile,
         workflowRunId: options.workflowRunId,
@@ -172,6 +181,13 @@ async function approve(fixture: Fixture, variantId: string) {
   return materialized;
 }
 
+/** Build the fixture and record its represented target so intents can name the same one. */
+async function newFixture(): Promise<Fixture> {
+  const fixture = await createPersonalityWritingFixture(storageDir, { voice: true });
+  actingTargetId = fixture.target.id;
+  return fixture;
+}
+
 function writingOf(variantId: string): {
   approval: Record<string, string | undefined>;
   audit: { id: string; inputHash: string };
@@ -187,15 +203,21 @@ describe("assist-only writing intent authority", () => {
     resetPersonalityStore();
     storageDir = mkdtempSync(join(tmpdir(), "signals-writing-intent-"));
     env.STORAGE_DIR = storageDir;
+    actingTargetId = "";
   });
 
   afterEach(() => {
     rmSync(storageDir, { recursive: true, force: true });
   });
 
-  it("auto-approves the identical proposal when the run is not composed", async () => {
-    const fixture = await createPersonalityWritingFixture(storageDir, { voice: true });
-    const variant = await propose(fixture, { workflowRunId: plainRun().id });
+  it("still auto-approves an ordinary platform-native artifact", async () => {
+    // The policy lane must keep working; only assist-only artifacts are pinned to explicit.
+    const fixture = await newFixture();
+    const variant = await propose(fixture, {
+      workflowRunId: plainRun().id,
+      surface: "x/post",
+      body: "An ordinary platform-native post that the policy may approve.",
+    });
     expect(writingOf(variant.id).approval).toMatchObject({
       state: "approved",
       by: "policy",
@@ -204,7 +226,7 @@ describe("assist-only writing intent authority", () => {
   });
 
   it("refuses a composed run that omits the intent instead of falling back to policy approval", async () => {
-    const fixture = await createPersonalityWritingFixture(storageDir, { voice: true });
+    const fixture = await newFixture();
     const before = db.select().from(variants).all().length;
 
     await expect(propose(fixture, { workflowRunId: composedRun().run.id })).rejects.toMatchObject({
@@ -213,24 +235,61 @@ describe("assist-only writing intent authority", () => {
     expect(db.select().from(variants).all()).toHaveLength(before);
   });
 
-  it("refuses assist-only provenance forged onto an uncomposed run", async () => {
-    const fixture = await createPersonalityWritingFixture(storageDir, { voice: true });
+  it("refuses a tampered run pointer that omits the intent, instead of policy-approving it", async () => {
+    // Review's bypass: start from a composed dispatch, then submit an *ordinary* run id in
+    // generationMetadata and drop the intent. The surface refuses regardless of the pointer.
+    const fixture = await newFixture();
+    composedRun();
+    const before = db.select().from(variants).all().length;
+
+    await expect(propose(fixture, { workflowRunId: plainRun().id })).rejects.toMatchObject({
+      details: { reason: "writing_intent_required" },
+    });
+    expect(db.select().from(variants).all()).toHaveLength(before);
+    expect(
+      db.select().from(variants).all().some((row) => row.label?.startsWith("x/reply")),
+    ).toBe(false);
+  });
+
+  it("refuses a tampered generation pointer that disagrees with the intent it carries", async () => {
+    const fixture = await newFixture();
     const dispatch = composedRun();
 
     await expect(propose(fixture, {
       workflowRunId: plainRun().id,
       intent: intentFor(dispatch),
-    })).rejects.toMatchObject({ details: { reason: "writing_intent_not_permitted" } });
+    })).rejects.toMatchObject({ details: { reason: "writing_intent_lineage_mismatch" } });
   });
 
-  it("refuses an intent whose lineage or surface disagrees with the dispatch", async () => {
-    const fixture = await createPersonalityWritingFixture(storageDir, { voice: true });
+  it("refuses an intent whose acting target differs from the variant's", async () => {
+    const fixture = await newFixture();
     const dispatch = composedRun();
 
     await expect(propose(fixture, {
       workflowRunId: dispatch.run.id,
-      intent: intentFor(dispatch, { workflowRunId: plainRun().id }),
-    })).rejects.toMatchObject({ details: { reason: "writing_intent_lineage_mismatch" } });
+      intent: intentFor(dispatch, { targetId: null }),
+    })).rejects.toMatchObject({ details: { reason: "writing_intent_target_mismatch" } });
+
+    await expect(propose(fixture, {
+      workflowRunId: dispatch.run.id,
+      intent: intentFor(dispatch, { targetId: unrepresentedTarget().id }),
+    })).rejects.toMatchObject({ details: { reason: "writing_intent_target_mismatch" } });
+  });
+
+  it("refuses assist-only provenance whose named run is not composed", async () => {
+    const fixture = await newFixture();
+    const dispatch = composedRun();
+    const ordinary = plainRun().id;
+
+    await expect(propose(fixture, {
+      workflowRunId: ordinary,
+      intent: intentFor(dispatch, { workflowRunId: ordinary }),
+    })).rejects.toMatchObject({ details: { reason: "writing_intent_not_permitted" } });
+  });
+
+  it("refuses an intent whose lineage or surface disagrees with the dispatch", async () => {
+    const fixture = await newFixture();
+    const dispatch = composedRun();
 
     await expect(propose(fixture, {
       workflowRunId: dispatch.run.id,
@@ -244,7 +303,7 @@ describe("assist-only writing intent authority", () => {
   });
 
   it("requires a compatible represented target even on a draft-only surface", async () => {
-    const fixture = await createPersonalityWritingFixture(storageDir, { voice: true });
+    const fixture = await newFixture();
     const dispatch = composedRun();
 
     await expect(propose(fixture, {
@@ -261,7 +320,7 @@ describe("assist-only writing intent authority", () => {
   });
 
   it("pins explicit approval on a composed proposal under an auto_low_risk launch", async () => {
-    const fixture = await createPersonalityWritingFixture(storageDir, { voice: true });
+    const fixture = await newFixture();
     const dispatch = composedRun();
     const proposal = await propose(fixture, {
       workflowRunId: dispatch.run.id,
@@ -275,7 +334,7 @@ describe("assist-only writing intent authority", () => {
   });
 
   it("refuses materialization without real user approval evidence", async () => {
-    const fixture = await createPersonalityWritingFixture(storageDir, { voice: true });
+    const fixture = await newFixture();
     const dispatch = composedRun();
     const proposal = await propose(fixture, {
       workflowRunId: dispatch.run.id,
@@ -291,7 +350,7 @@ describe("assist-only writing intent authority", () => {
   });
 
   it("materializes an explicitly approved proposal as a reply that carries its intent", async () => {
-    const fixture = await createPersonalityWritingFixture(storageDir, { voice: true });
+    const fixture = await newFixture();
     const dispatch = composedRun();
     const proposal = await propose(fixture, {
       workflowRunId: dispatch.run.id,
@@ -316,7 +375,7 @@ describe("assist-only writing intent authority", () => {
   });
 
   it("revokes approval when an approved proposal is rebound to another recipient or goal", async () => {
-    const fixture = await createPersonalityWritingFixture(storageDir, { voice: true });
+    const fixture = await newFixture();
     const dispatch = composedRun();
     const proposal = await propose(fixture, {
       workflowRunId: dispatch.run.id,
@@ -346,7 +405,7 @@ describe("assist-only writing intent authority", () => {
   });
 
   it("never lets an approved proposal reach the publish lane", async () => {
-    const fixture = await createPersonalityWritingFixture(storageDir, { voice: true });
+    const fixture = await newFixture();
     const dispatch = composedRun();
     const proposal = await propose(fixture, {
       workflowRunId: dispatch.run.id,

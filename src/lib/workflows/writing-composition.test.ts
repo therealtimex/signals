@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildAgentWorkflowBrief } from "@/lib/workflows/template-brief";
+import { buildAgentWorkflowBrief, getTemplateToolsHint } from "@/lib/workflows/template-brief";
 import { buildContactNurtureTemplateConfig } from "@/lib/workflows/contact-relationship-nurture";
 import {
   buildWritingBriefSection,
@@ -205,6 +205,41 @@ describe("brief composition boundary", () => {
     expect(brief).toContain("Contact Relationship Nurture execution contract");
     expect(brief).not.toContain("Signals Writing execution contract");
     expect(brief).toContain("linkedin/comment");
+  });
+
+  it("advertises the writing tools the composed contract actually requires", () => {
+    const config = buildContactNurtureTemplateConfig();
+    const tools = getTemplateToolsHint("nurture", config);
+
+    for (const tool of [
+      "get_writing_context",
+      "upsert_launch",
+      "upsert_variant",
+      "materialize_variant",
+      "revoke_variant_approval",
+      "complete_workflow_run",
+    ]) {
+      expect(tools).toContain(tool);
+    }
+    // The workflow's own category tools survive alongside them.
+    expect(tools).toContain("query_contacts");
+    expect(tools).toContain("get_contact");
+    expect(new Set(tools).size).toBe(tools.length);
+    expect(getTemplateToolsHint("nurture", {})).not.toContain("upsert_variant");
+  });
+
+  it("prints those tools in the brief's invoke requirement", () => {
+    const brief = buildAgentWorkflowBrief({
+      template,
+      workflowRunId: "run_1",
+      config: buildContactNurtureTemplateConfig(),
+      signalsBaseUrl: "http://127.0.0.1:3000",
+    });
+    const requirement = brief.split("8. For single-record edits, invoke tools (")[1]?.split(")")[0];
+
+    expect(requirement).toContain("upsert_variant");
+    expect(requirement).toContain("materialize_variant");
+    expect(requirement).toContain("query_contacts");
   });
 
   it("leaves a workflow without the opt-in untouched", () => {
