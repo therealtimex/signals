@@ -28,6 +28,14 @@ export function ContactAvatarUpload({
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  // `resolveContactAvatar` falls back to `gravatar.com/avatar/<md5>?d=404`,
+  // which 404s for anyone without a Gravatar — most people. Without this the
+  // detail page renders a broken-image glyph where the contacts list, which
+  // uses Radix AvatarFallback, correctly shows initials.
+  // Remember *which* URL failed rather than a boolean, so uploading a new
+  // avatar retries instead of staying stuck on initials.
+  const [failedAvatarUrl, setFailedAvatarUrl] = useState<string | null>(null);
+  const showImage = Boolean(currentAvatarUrl) && currentAvatarUrl !== failedAvatarUrl;
   const initials = contactDisplayInitials({
     name: name ?? undefined,
     firstName: firstName ?? undefined,
@@ -75,9 +83,14 @@ export function ContactAvatarUpload({
         )}
         aria-label="Change photo"
       >
-        {currentAvatarUrl ? (
+        {showImage ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={currentAvatarUrl} alt="" className="h-full w-full object-cover" />
+          <img
+            src={currentAvatarUrl!}
+            alt=""
+            className="h-full w-full object-cover"
+            onError={() => setFailedAvatarUrl(currentAvatarUrl)}
+          />
         ) : (
           <span className="text-muted-foreground">{initials}</span>
         )}
