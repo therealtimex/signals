@@ -49,5 +49,7 @@ marketplace/release-manifest.sig.json
 __pycache__/
 *.pyc
 
-# generated tour video (regenerate with `npm run automation:record-guide-tour`)
-guide/video/
+# Tour video: the mp4 ships (guide/ is a published artifact and the mp4 is what
+# uploads), the webm does not — it is the recorder's intermediate, regenerated
+# wholesale by `npm run automation:record-guide-tour`.
+guide/video/*.webm

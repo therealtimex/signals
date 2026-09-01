@@ -58,9 +58,10 @@ Routes are warmed in a throwaway context first. A dev server compiles on demand,
 the first visit to each page spends seconds on a skeleton: the first take ran 50s to show ~25s of
 content, and 41s after warming.
 
-Output is `.webm` at 1440x900, matching the guide screenshots. It is **not committed** — see
-`.gitignore`. Video regenerates on every run, and binaries that change wholesale each time belong in
-a CDN or release, not in git history.
+Output is `.webm` at 1440x900, matching the guide screenshots. The webm is **not committed** — it is
+an intermediate, regenerated wholesale on every run. The converted `.mp4` **is** committed, because
+`guide/` is a published artifact and the mp4 is the form that actually uploads; a reader of the
+guide should not have to run a dev server and a browser to see the product move.
 
 ### Converting for upload
 

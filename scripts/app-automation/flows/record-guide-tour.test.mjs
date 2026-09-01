@@ -471,3 +471,24 @@ test("a context that fails to open does not abort the remaining tours", async ()
   assert.equal(result.failures.length, 1);
   assert.equal(result.recorded.length, GUIDE_JOURNEYS.length - 1);
 });
+
+test("every journey has a committed mp4, and guide/video holds nothing else", async () => {
+  // The mp4 ships now, so it can drift exactly the way the hand-captured
+  // screenshots did: add a journey and forget to record it, or rename one and
+  // leave the old file behind, and nothing fails.
+  const { readdir } = await import("node:fs/promises");
+  const videoDir = new URL("../../../guide/video/", import.meta.url).pathname;
+  const onDisk = (await readdir(videoDir)).filter((name) => name.endsWith(".mp4")).sort();
+  const expected = GUIDE_JOURNEYS.map((journey) => `${journey.id}.mp4`).sort();
+
+  assert.deepEqual(
+    onDisk.filter((name) => !expected.includes(name)),
+    [],
+    "guide/video has an mp4 that no journey produces — a renamed or removed journey",
+  );
+  assert.deepEqual(
+    expected.filter((name) => !onDisk.includes(name)),
+    [],
+    "a journey has no committed mp4 — run automation:record-guide-tour then automation:convert-guide-video",
+  );
+});
