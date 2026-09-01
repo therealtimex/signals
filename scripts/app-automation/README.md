@@ -37,6 +37,31 @@ npm run automation:capture-guide-assets  # regenerate every screenshot guide/ re
 npm run automation:test                  # unit-test the flows (no Dev app required)
 ```
 
+`automation:record-guide-tour` records the same demo data being *used*, as video. Stills show what
+a screen looks like; they cannot show a flow.
+
+```bash
+npm run automation:record-guide-tour -- --base-url http://127.0.0.1:3111 --json
+npm run automation:record-guide-tour -- --only product-tour
+```
+
+Playwright records the page natively, so this needs no ffmpeg — which matters, because
+`realtimex-ai-app`'s `recorder.mjs` shells out to ffmpeg with an avfoundation screen capture and is
+macOS-only. Recording the page rather than the screen also means no desktop, no window chrome, no
+other window wandering into frame, and it runs headless.
+
+Captions are burned in as DOM rather than added in post, so a tour is reproducible from `main` by
+anyone with the demo seed — the same property that made the screenshots worth automating. There is
+no audio and no edit step.
+
+Routes are warmed in a throwaway context first. A dev server compiles on demand, so without warming
+the first visit to each page spends seconds on a skeleton: the first take ran 50s to show ~25s of
+content, and 41s after warming.
+
+Output is `.webm` at 1440x900, matching the guide screenshots. It is **not committed** — see
+`.gitignore`. Video regenerates on every run, and binaries that change wholesale each time belong in
+a CDN or release, not in git history.
+
 `automation:test` runs in the `check` gate. It needs no browser, no Dev app, and no second
 checkout, so it is the one part of this directory that CI can hold.
 

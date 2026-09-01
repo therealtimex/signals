@@ -48,3 +48,6 @@ marketplace/release-manifest.sig.json
 # Python bytecode from bundled workspace scripts (scripts/snowball-seed-scout)
 __pycache__/
 *.pyc
+
+# generated tour video (regenerate with `npm run automation:record-guide-tour`)
+guide/video/
