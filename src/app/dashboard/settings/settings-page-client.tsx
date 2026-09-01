@@ -6,6 +6,7 @@ import { CheckCircle } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { ConnectionStatus } from "@/components/platform-connection-card";
 import { AiAgentsTab } from "@/app/dashboard/settings/ai-agents-tab";
+import { PersonalityTab } from "@/app/dashboard/settings/personality-tab";
 import {
   PlatformsTab,
   type PlatformKey,
@@ -309,7 +310,7 @@ export function SettingsPageClient() {
       <div>
         <h1 className="text-heading-1">Settings</h1>
         <p className="text-muted-foreground mt-1">
-          Connect platforms via RealTimeX Browser. OAuth API sync is optional.
+          Manage platform connections, agent runtime, and the identity your agents represent.
         </p>
       </div>
 
@@ -329,9 +330,10 @@ export function SettingsPageClient() {
       )}
 
       <Tabs value={activeTab} onValueChange={handleTabChange}>
-        <TabsList variant="line" className="grid w-full grid-cols-2 sm:w-full">
+        <TabsList variant="line" className="grid w-full grid-cols-3 sm:w-full">
           <TabsTrigger value="platforms">Platform connections</TabsTrigger>
           <TabsTrigger value="agents">AI &amp; agents</TabsTrigger>
+          <TabsTrigger value="personality">Personality</TabsTrigger>
         </TabsList>
 
         <TabsContent value="platforms" className="mt-6">
@@ -365,6 +367,10 @@ export function SettingsPageClient() {
 
         <TabsContent value="agents" className="mt-6">
           <AiAgentsTab />
+        </TabsContent>
+
+        <TabsContent value="personality" className="mt-6">
+          <PersonalityTab />
         </TabsContent>
       </Tabs>
     </div>

@@ -33,8 +33,16 @@ export type PersonalityBindingView = {
   proposals: Array<{
     proposal: PersonalityProposal;
     record: ReturnType<typeof readPersonalityStore>["index"]["proposals"][string];
+    actions: PersonalityProposalActions;
   }>;
   diagnostics: { orphanProposalIds: string[] };
+};
+
+export type PersonalityProposalActions = {
+  canApprove: boolean;
+  canReject: boolean;
+  canRetry: boolean;
+  approvalBlockers: string[];
 };
 
 export type PersonalityStatusDependencies = {
@@ -156,6 +164,91 @@ function indexDrift(
 
 function sourcePart(value: unknown): string {
   return sha256Canonical(value);
+}
+
+function sameIdentity(
+  left: PersonalityProposal["identity"],
+  right: PersonalityProposal["identity"],
+): boolean {
+  return left.selfContactId === right.selfContactId
+    && left.representedOrgId === right.representedOrgId;
+}
+
+function proposalActions(input: {
+  proposal: PersonalityProposal;
+  record: PersonalityBindingView["proposals"][number]["record"];
+  workspace: PersonalityWorkspace;
+  workspaceFiles: PersonalityWorkspaceFile[];
+  activeBinding: PersonalityBinding | null;
+  host: PersonalityStatus["host"];
+  loadSources: typeof loadPersonalitySourceBundle;
+}): PersonalityProposalActions {
+  const blockers: string[] = [];
+  const { proposal, record, workspace, activeBinding } = input;
+
+  if (record.state !== "proposed") blockers.push(`state_${record.state}`);
+  if (proposal.noop) blockers.push("proposal_noop");
+  if (input.host.capability !== "available") blockers.push("host_capability_unavailable");
+  if (
+    proposal.workspace.slug !== workspace.slug
+    || proposal.workspace.id !== workspace.id
+    || proposal.workspace.dir !== workspace.dir
+    || proposal.workspace.key !== workspace.key
+  ) {
+    blockers.push("workspace_mismatch");
+  }
+  if (proposal.basedOnBindingId !== (activeBinding?.id ?? null)) {
+    blockers.push("binding_changed");
+  }
+
+  const fileHashes = new Map(
+    input.workspaceFiles.map((file) => [file.path, file.fileHash]),
+  );
+  if (proposal.files.some((file) => (fileHashes.get(file.path) ?? null) !== file.currentFileHash)) {
+    blockers.push("file_changed");
+  }
+
+  try {
+    if (proposal.kind === "unbind") {
+      if (!activeBinding || !sameIdentity(activeBinding.identity, proposal.identity)) {
+        blockers.push("identity_changed");
+      }
+    } else {
+      const voiceProfileId = proposal.kind === "projection"
+        ? proposal.sourceSnapshot?.voice?.id
+        : undefined;
+      const sources = input.loadSources(voiceProfileId ? { voiceProfileId } : {});
+      const snapshot = buildSourceSnapshot(sources.sources, sources.revisions);
+      const identity = {
+        selfContactId: snapshot.self.contactId,
+        representedOrgId: snapshot.org?.orgId ?? null,
+      };
+      if (!sameIdentity(identity, proposal.identity)) blockers.push("identity_changed");
+      if (proposal.kind === "projection" && computeSourceHash(snapshot) !== proposal.sourceHash) {
+        blockers.push("source_changed");
+      }
+    }
+  } catch {
+    blockers.push("source_unavailable");
+  }
+
+  const approvalBlockers = [...new Set(blockers)];
+  const canReject = record.state === "proposed"
+    || (record.state === "approved" && record.attempt === null)
+    || (record.state === "apply_failed" && record.attempt?.phase === "terminal");
+  const canRetry = record.state === "apply_failed"
+    && record.attempt !== null
+    && (
+      record.hostResult?.status === "restored_failure"
+      || record.hostResult?.status === "recovery_required"
+      || record.failure?.hostRecovery?.status === "recovery_required"
+    );
+  return {
+    canApprove: approvalBlockers.length === 0,
+    canReject,
+    canRetry,
+    approvalBlockers,
+  };
 }
 
 function sourceStaleDetail(
@@ -331,16 +424,17 @@ export async function getPersonalityBindingView(
     };
   }
   const store = readPersonalityStore();
-  const proposals = Object.entries(store.index.proposals)
+  const proposalRecords = Object.entries(store.index.proposals)
     .flatMap(([id, record]) => record.workspaceKey === workspace.key
       ? [{ proposal: store.proposals.get(id)!, record }]
       : [])
     .sort((left, right) => right.record.updatedAt - left.record.updatedAt);
+  const workspaceFiles = readFiles(workspace);
   const status = computePersonalityStatus({
     workspace,
     index: store.index,
     getProposal: (proposalId) => store.proposals.get(proposalId),
-    readFiles,
+    readFiles: () => workspaceFiles,
     loadSources,
     targets: listTargets(),
     host,
@@ -348,6 +442,17 @@ export async function getPersonalityBindingView(
   const bindingSet = store.index.bindings[workspace.key];
   const workspaceMismatch = status.status === "unavailable"
     && status.detail?.unavailable === "workspace_mismatch";
+  const proposals = proposalRecords.map((view) => ({
+    ...view,
+    actions: proposalActions({
+      ...view,
+      workspace,
+      workspaceFiles,
+      activeBinding: bindingSet?.active ?? null,
+      host: status.host,
+      loadSources,
+    }),
+  }));
   return {
     status,
     history: workspaceMismatch ? [] : bindingSet?.history ?? [],

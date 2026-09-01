@@ -8,11 +8,12 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentToolError } from "@/lib/agent-tools/types";
 import {
   readPersonalityWorkspaceFiles,
   resolvePersonalityWorkspace,
+  resolvePersonalityWorkspaceContext,
 } from "@/lib/personality/workspace";
 import {
   clearHostCapabilityCache,
@@ -32,7 +33,7 @@ function fixture() {
     SIGNALS_RTX_WORKSPACE_SLUG: "signals",
   };
   const fetchImpl = async () => new Response(JSON.stringify({
-    workspace: { id: 42, slug: "signals" },
+    workspace: { id: 42, slug: "signals", name: "Signals GTM" },
   }), { status: 200, headers: { "content-type": "application/json" } });
   return { storage, env, fetchImpl: fetchImpl as typeof fetch };
 }
@@ -50,6 +51,50 @@ describe("Personality workspace resolution", () => {
     expect(workspace.dir).toBe(realpathSync(join(storage, "working-data", "signals")));
     expect(workspace.key).toMatch(/^[a-f0-9]{32}$/);
     expect(readPersonalityWorkspaceFiles(workspace)).toHaveLength(5);
+    await expect(resolvePersonalityWorkspaceContext(env, fetchImpl)).resolves.toMatchObject({
+      displayName: "Signals GTM",
+      workspace: { slug: "signals", id: "42" },
+    });
+  });
+
+  it("resolves the existing Signals workspace by name when its slug is host-generated", async () => {
+    const storage = mkdtempSync(join(tmpdir(), "signals-381-workspace-"));
+    roots.push(storage);
+    const resolvedSlug = "f3a8c2e1-4d5b-4a7c-8e9f-0a1b2c3d4e5f";
+    mkdirSync(join(storage, "working-data", resolvedSlug), { recursive: true });
+    const env = {
+      RTX_APP_ID: "signals-app",
+      RTX_API_BASE_URL: "http://rtx.test",
+      STORAGE_DIR: storage,
+      SIGNALS_RTX_WORKSPACE_SLUG: "signals",
+    };
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : input.url;
+      if (url.endsWith("/cli/get-workspace/signals") && init?.method === "GET") {
+        return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
+      }
+      if (url.endsWith("/cli/list-workspaces") && init?.method === "GET") {
+        return new Response(JSON.stringify({
+          workspaces: [{ slug: resolvedSlug, name: "Signals" }],
+        }), { status: 200 });
+      }
+      if (url.endsWith(`/cli/get-workspace/${resolvedSlug}`) && init?.method === "GET") {
+        return new Response(JSON.stringify({
+          workspace: { id: 46, slug: resolvedSlug, name: "Signals" },
+        }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ error: "unexpected" }), { status: 500 });
+    });
+
+    await expect(resolvePersonalityWorkspaceContext(env, fetchImpl)).resolves.toMatchObject({
+      displayName: "Signals",
+      workspace: { slug: resolvedSlug, id: "46" },
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
   });
 
   it("rejects target aliases, symlinks, invalid UTF-8, and workspace symlinks", async () => {

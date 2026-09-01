@@ -5,6 +5,7 @@ describe("settings-tabs", () => {
   it("parses valid tabs and falls back to platforms", () => {
     expect(parseSettingsTab("platforms")).toBe("platforms");
     expect(parseSettingsTab("agents")).toBe("agents");
+    expect(parseSettingsTab("personality")).toBe("personality");
     expect(parseSettingsTab("invalid")).toBe("platforms");
     expect(parseSettingsTab(null)).toBe("platforms");
   });
@@ -12,6 +13,7 @@ describe("settings-tabs", () => {
   it("builds tab hrefs", () => {
     expect(settingsTabHref("platforms")).toBe("/dashboard/settings?tab=platforms");
     expect(settingsTabHref("agents")).toBe("/dashboard/settings?tab=agents");
+    expect(settingsTabHref("personality")).toBe("/dashboard/settings?tab=personality");
   });
 
   it("navigates with router.replace and scroll disabled", () => {

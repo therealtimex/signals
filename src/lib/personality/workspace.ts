@@ -13,7 +13,7 @@ import {
   type PersonalityFile,
   type PersonalityIndex,
 } from "@/lib/personality/contracts";
-import { getSignalsRtxWorkspaceSlug } from "@/lib/rtx/cli-provisioning";
+import { resolveSignalsRtxWorkspaceSlug } from "@/lib/rtx/cli-provisioning";
 import { getRtxAppId, resolveRtxApiBase, type EnvLike } from "@/lib/rtx/env";
 import { resolveRtxStorageDir } from "@/lib/rtx/storage-path";
 import { sha256, sha256Canonical } from "@/lib/writing/hash";
@@ -28,6 +28,11 @@ export type PersonalityWorkspace = {
   id: string | null;
   dir: string;
   key: string;
+};
+
+export type PersonalityWorkspaceContext = {
+  workspace: PersonalityWorkspace;
+  displayName: string;
 };
 
 export type PersonalityWorkspaceFile = {
@@ -108,6 +113,7 @@ function assertDirectoryChain(root: string, target: string): void {
 function parseWorkspaceIdentity(body: unknown, requestedSlug: string): {
   id: string | null;
   slug: string;
+  displayName: string;
 } {
   if (!body || typeof body !== "object") {
     workspaceUnavailable("RealTimeX returned an invalid workspace identity");
@@ -118,6 +124,7 @@ function parseWorkspaceIdentity(body: unknown, requestedSlug: string): {
   }
   const rawSlug = (workspace as { slug?: unknown }).slug;
   const rawId = (workspace as { id?: unknown }).id;
+  const rawName = (workspace as { name?: unknown }).name;
   const slug = typeof rawSlug === "string" ? rawSlug.trim() : "";
   if (!slug || slug !== requestedSlug || basename(slug) !== slug) {
     workspaceUnavailable("RealTimeX workspace identity does not match Signals configuration", {
@@ -128,22 +135,36 @@ function parseWorkspaceIdentity(body: unknown, requestedSlug: string): {
   if (rawId === undefined || rawId === null || String(rawId).trim() === "") {
     workspaceUnavailable("RealTimeX workspace identity is missing its id", { slug });
   }
-  return { id: String(rawId), slug };
+  return {
+    id: String(rawId),
+    slug,
+    displayName:
+      typeof rawName === "string" && rawName.trim() ? rawName.trim() : slug,
+  };
 }
 
-export async function resolvePersonalityWorkspace(
+export async function resolvePersonalityWorkspaceContext(
   env: EnvLike = process.env,
   fetchImpl: typeof fetch = fetch,
-): Promise<PersonalityWorkspace> {
+): Promise<PersonalityWorkspaceContext> {
   const appId = getRtxAppId(env);
   const apiBase = resolveRtxApiBase(env);
   const storageDir = resolveRtxStorageDir(env);
-  const requestedSlug = getSignalsRtxWorkspaceSlug(env);
   if (!appId || !apiBase || !storageDir) {
     workspaceUnavailable("RealTimeX workspace identity is not configured", {
       appId: Boolean(appId),
       apiBase: Boolean(apiBase),
       storageDir: Boolean(storageDir),
+    });
+  }
+
+  let requestedSlug: string;
+  try {
+    requestedSlug = await resolveSignalsRtxWorkspaceSlug(env, fetchImpl);
+  } catch (error) {
+    workspaceUnavailable("Could not resolve the RealTimeX workspace identity", {
+      slug: env.SIGNALS_RTX_WORKSPACE_SLUG?.trim() || "signals",
+      error: error instanceof Error ? error.message : String(error),
     });
   }
 
@@ -183,11 +204,21 @@ export async function resolvePersonalityWorkspace(
     });
   }
   return {
-    slug: identity.slug,
-    id: identity.id,
-    dir: workspaceReal,
-    key: sha256Canonical([identity.slug, workspaceReal]).slice(0, 32),
+    displayName: identity.displayName,
+    workspace: {
+      slug: identity.slug,
+      id: identity.id,
+      dir: workspaceReal,
+      key: sha256Canonical([identity.slug, workspaceReal]).slice(0, 32),
+    },
   };
+}
+
+export async function resolvePersonalityWorkspace(
+  env: EnvLike = process.env,
+  fetchImpl: typeof fetch = fetch,
+): Promise<PersonalityWorkspace> {
+  return (await resolvePersonalityWorkspaceContext(env, fetchImpl)).workspace;
 }
 
 export function assertWorkspaceBindingIdentity(
