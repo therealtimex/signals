@@ -403,3 +403,71 @@ test("a journey that fails still closes its context and discards the take", asyn
   // The surviving journey still produced its video.
   assert.equal(moved.length, 1);
 });
+
+test("a failed promotion is a partial result, not an aborted run", async () => {
+  // move() sat outside the per-journey catch, so a rename failure escaped the
+  // loop and skipped every remaining tour instead of failing just this one.
+  const { chromium } = stubChromium();
+  const discarded = [];
+  let attempts = 0;
+  const result = await runRecordGuideTourFlow(
+    parseArgs(["--base-url", ORIGIN, "--dwell-ms", "0"], {}),
+    {
+      chromium,
+      fetchImpl: stubFetch({
+        "/api/health": { app: "signals", status: "ok" },
+        "/api/contacts?pageSize=25": { data: [{ id: "c1", enrichmentScore: 98 }], total: 1 },
+      }),
+      ensureDir: () => {},
+      move: () => {
+        if (++attempts === 1) throw new Error("EXDEV: cross-device link not permitted");
+      },
+      discardRaw: (file) => discarded.push(file),
+      sleep: async () => {},
+    },
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, "partial");
+  assert.match(result.failures[0].error, /EXDEV/);
+  // The second journey still ran and still succeeded.
+  assert.equal(result.recorded.length, GUIDE_JOURNEYS.length - 1);
+  assert.equal(attempts, GUIDE_JOURNEYS.length, "every journey attempted promotion");
+  // The take that could not be promoted was cleaned up.
+  assert.deepEqual(discarded, ["/tmp/raw-video.webm"]);
+});
+
+test("a context that fails to open does not abort the remaining tours", async () => {
+  const { chromium } = stubChromium();
+  const launch = chromium.launch;
+  let opened = 0;
+  chromium.launch = async () => {
+    const browser = await launch();
+    const newContext = browser.newContext;
+    browser.newContext = async (options) => {
+      // Index 0 is the warmup; fail the first journey's recording context.
+      if (++opened === 2) throw new Error("Target page, context or browser has been closed");
+      return newContext.call(browser, options);
+    };
+    return browser;
+  };
+
+  const result = await runRecordGuideTourFlow(
+    parseArgs(["--base-url", ORIGIN, "--dwell-ms", "0"], {}),
+    {
+      chromium,
+      fetchImpl: stubFetch({
+        "/api/health": { app: "signals", status: "ok" },
+        "/api/contacts?pageSize=25": { data: [{ id: "c1", enrichmentScore: 98 }], total: 1 },
+      }),
+      ensureDir: () => {},
+      move: () => {},
+      discardRaw: () => {},
+      sleep: async () => {},
+    },
+  );
+
+  assert.equal(result.code, "partial");
+  assert.equal(result.failures.length, 1);
+  assert.equal(result.recorded.length, GUIDE_JOURNEYS.length - 1);
+});

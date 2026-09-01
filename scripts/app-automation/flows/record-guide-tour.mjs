@@ -401,50 +401,68 @@ export async function runRecordGuideTourFlow(args, dependencies = {}) {
   try {
     for (const journey of journeys) {
       log(`${journey.id}: ${journey.title}`);
-      const context = await browser.newContext({
-        viewport: { ...GUIDE_VIEWPORT },
-        colorScheme: "light",
-        recordVideo: { dir: args.videoDir, size: { ...GUIDE_VIEWPORT } },
-      });
-      const page = await context.newPage();
-      // Grabbed before the run: the handle exists immediately, but Playwright
-      // only finalises the file on close, so path() must wait until after.
-      const video = page.video();
+      // One catch around the whole journey, so no step of it — opening the
+      // context, recording, or promoting the file — can abort the tours that
+      // come after. A journey failing is a `partial` result, not the end.
+      let context = null;
+      let video = null;
+      let promoted = false;
       let failure = null;
       try {
-        await recordJourney({
-          page,
-          journey,
-          origin: target.origin,
-          ids,
-          dwellMs: args.dwellMs,
-          sleep,
-          log,
+        context = await browser.newContext({
+          viewport: { ...GUIDE_VIEWPORT },
+          colorScheme: "light",
+          recordVideo: { dir: args.videoDir, size: { ...GUIDE_VIEWPORT } },
         });
+        const page = await context.newPage();
+        // Grabbed before the run: the handle exists immediately, but Playwright
+        // only finalises the file on close, so path() must wait until after.
+        video = page.video();
+        try {
+          await recordJourney({
+            page,
+            journey,
+            origin: target.origin,
+            ids,
+            dwellMs: args.dwellMs,
+            sleep,
+            log,
+          });
+        } finally {
+          // As soon as recording ends, however it ended: a step guard throwing
+          // used to skip the close entirely, leaving a recorder running into
+          // the next journey. Closing here is also what resolves path().
+          await context.close().catch(() => {});
+          context = null;
+        }
+
+        const raw = video ? await video.path().catch(() => null) : null;
+        if (!raw) throw new Error("Playwright produced no video file");
+        // Playwright names videos by an internal id; give them the journey name.
+        const named = join(args.videoDir, videoFileName(journey.id));
+        move(raw, named);
+        promoted = true;
+        recorded.push({ journey: journey.id, path: named, steps: journey.steps.length });
       } catch (error) {
         failure = error;
       } finally {
-        // Unconditionally, and per journey. A step guard throwing used to skip
-        // the close entirely, leaving a recorder running into the next journey.
-        await context.close().catch(() => {});
+        if (context) await context.close().catch(() => {});
+        // Resolved here rather than in the body: a step guard throwing skips
+        // the body entirely, and the take still needs discarding. An unpromoted
+        // one must not survive — convert-guide-video converts every .webm in
+        // this directory, so it would be published under a Playwright id.
+        if (!promoted && video) {
+          const stray = await video.path().catch(() => null);
+          if (stray) {
+            try {
+              discardRaw(stray);
+            } catch {
+              // Already failing; a leftover file is the lesser problem.
+            }
+          }
+        }
       }
-
-      const raw = video ? await video.path().catch(() => null) : null;
-      if (failure || !raw) {
-        // The partial take must not survive: convert-guide-video converts every
-        // .webm in this directory, so an abandoned one would be published under
-        // a Playwright id.
-        if (raw) discardRaw(raw);
-        failures.push({
-          journey: journey.id,
-          error: failure ? failure.message : "Playwright produced no video file",
-        });
-        continue;
-      }
-      // Playwright names videos by an internal id; give them the journey name.
-      const named = join(args.videoDir, videoFileName(journey.id));
-      move(raw, named);
-      recorded.push({ journey: journey.id, path: named, steps: journey.steps.length });
+      if (failure) failures.push({ journey: journey.id, error: failure.message });
     }
   } finally {
     await browser.close();
