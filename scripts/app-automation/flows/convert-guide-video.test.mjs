@@ -18,6 +18,7 @@ import {
   runConvertGuideVideoFlow,
   selectSources,
 } from "./convert-guide-video.mjs";
+import { join } from "node:path";
 import { DEFAULT_VIDEO_DIR, GUIDE_JOURNEYS, videoFileName } from "./record-guide-tour.mjs";
 
 const OK_PROBE = JSON.stringify({
@@ -416,19 +417,37 @@ test("an explicit relative ffmpeg keeps an explicit relative ffprobe", () => {
   assert.equal(resolveFfprobe("ffmpeg", {}), "ffprobe");
 });
 
-test("promotion is a single rename, leaving no window with neither file", async () => {
+test("the validated partial is promoted, and nothing else is touched", async () => {
   const { run } = fakeRun();
   const fsCalls = [];
   await runConvertGuideVideoFlow(parseArgs([]), {
     ...flowDeps({
       run,
-      move: undefined,
+      move: (from, to) => fsCalls.push(["move", from, to]),
       discard: (file) => fsCalls.push(["discard", file]),
     }),
-    // Exercise the real default move by stubbing only what it calls.
-    move: (from, to) => fsCalls.push(["rename", from, to]),
   });
-  // One rename, no unlink of the destination beforehand: rename() already
-  // overwrites atomically, and unlinking first can destroy the good artifact.
-  assert.deepEqual(fsCalls, [["rename", "guide/video/.product-tour.part.mp4", "guide/video/product-tour.mp4"]]);
+  assert.deepEqual(fsCalls, [
+    ["move", partialPath(join(DEFAULT_VIDEO_DIR, "product-tour.mp4")), join(DEFAULT_VIDEO_DIR, "product-tour.mp4")],
+  ]);
+});
+
+test("the default move is a bare rename, with no unlink to fall between", async () => {
+  // Asserted on the default itself rather than through a stub that replaces it:
+  // rename() overwrites atomically, so unlinking the destination first would
+  // reopen the window where a crash leaves neither file in place.
+  const calls = [];
+  const { run } = fakeRun();
+  await runConvertGuideVideoFlow(parseArgs([]), {
+    ...flowDeps({
+      run,
+      move: undefined,
+      discard: () => {},
+    }),
+    renameImpl: (from, to) => calls.push(["rename", from, to]),
+    unlinkImpl: (file) => calls.push(["unlink", file]),
+  });
+  assert.deepEqual(calls, [
+    ["rename", partialPath(join(DEFAULT_VIDEO_DIR, "product-tour.mp4")), join(DEFAULT_VIDEO_DIR, "product-tour.mp4")],
+  ]);
 });

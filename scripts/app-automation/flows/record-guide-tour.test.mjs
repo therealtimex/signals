@@ -1,15 +1,19 @@
 import assert from "node:assert/strict";
+import { join } from "node:path";
 import test from "node:test";
 import {
   CAPTION_ELEMENT_ID,
   DEFAULT_DWELL_MS,
   GUIDE_JOURNEYS,
+  DEFAULT_VIDEO_DIR,
   RECORD_GUIDE_TOUR_FLOW_NAME,
   STEP_ACTIONS,
   captionStyles,
   createHelpText,
   journeyById,
   parseArgs,
+  smoothScrollToBottom,
+  recordJourney,
   requiredIdKindsForJourneys,
   runRecordGuideTourFlow,
   selectJourneys,
@@ -207,7 +211,11 @@ test("routes are warmed in a throwaway context before the take", async () => {
   assert.equal(contexts[0].options.recordVideo, undefined, "warmup must not record");
   assert.ok(contexts[1].options.recordVideo, "the take must record");
   assert.deepEqual(contexts[1].options.recordVideo.size, { width: 1440, height: 900 });
-  assert.deepEqual(moved, [["/tmp/raw-video.webm", "guide/video/product-tour.webm"]]);
+  // Built the way the flow builds it: a literal would fail on Windows, where
+  // join() yields a backslash, even though the flow is correct.
+  assert.deepEqual(moved, [
+    ["/tmp/raw-video.webm", join(DEFAULT_VIDEO_DIR, videoFileName("product-tour"))],
+  ]);
 });
 
 test("warmRoutes visits each path once and survives a route that fails", async () => {
@@ -227,4 +235,117 @@ test("warmRoutes visits each path once and survives a route that fails", async (
 
 test("the flow reports its own name", () => {
   assert.equal(RECORD_GUIDE_TOUR_FLOW_NAME, "record-guide-tour");
+});
+
+/** Runs the function smoothScrollToBottom hands to page.evaluate, against a fake DOM. */
+async function runScrollIn(dom) {
+  let captured;
+  const page = { evaluate: async (fn, arg) => { captured = [fn, arg]; return undefined; } };
+  await smoothScrollToBottom(page, { steps: 4, pauseMs: 0 });
+  const previous = globalThis.document;
+  globalThis.document = dom;
+  try {
+    return await captured[0](captured[1]);
+  } finally {
+    globalThis.document = previous;
+  }
+}
+
+function scrollNode(scrollHeight, clientHeight) {
+  return { scrollHeight, clientHeight, scrollTop: 0 };
+}
+
+test("scrolling drives the overflow-auto main, not the unmoving document", async () => {
+  // src/app/dashboard/layout.tsx renders <main class="flex-1 overflow-auto">, so
+  // the document itself never scrolls on any dashboard route.
+  const main = scrollNode(3000, 900);
+  const root = scrollNode(900, 900);
+  const moved = await runScrollIn({
+    querySelectorAll: () => [main],
+    scrollingElement: root,
+    documentElement: root,
+  });
+  assert.equal(moved, true);
+  assert.equal(main.scrollTop, 2100, "main should have been scrolled to its bottom");
+  assert.equal(root.scrollTop, 0, "the document should not have been touched");
+});
+
+test("scrolling still falls back to the document when that is what scrolls", async () => {
+  const root = scrollNode(2000, 900);
+  const moved = await runScrollIn({
+    querySelectorAll: () => [],
+    scrollingElement: root,
+    documentElement: root,
+  });
+  assert.equal(moved, true);
+  assert.equal(root.scrollTop, 1100);
+});
+
+test("scrolling reports false when nothing can move", async () => {
+  const root = scrollNode(900, 900);
+  const moved = await runScrollIn({
+    querySelectorAll: () => [scrollNode(900, 900)],
+    scrollingElement: root,
+    documentElement: root,
+  });
+  assert.equal(moved, false);
+});
+
+test("a scroll step that cannot scroll fails rather than filming a still frame", async () => {
+  const page = stubPage();
+  // The settle check returns a fingerprint; only the scroll call returns false.
+  page.evaluate = async (fn) => (String(fn).includes("scrollTop") ? false : "settled");
+  const journey = {
+    id: "j",
+    title: "t",
+    steps: [{ path: "/dashboard/analytics", caption: "c", scroll: true }],
+  };
+  await assert.rejects(
+    () => recordJourney({
+      context: { close: async () => {} },
+      page,
+      journey,
+      origin: ORIGIN,
+      ids: {},
+      dwellMs: 0,
+      sleep: async () => {},
+    }),
+    /nothing to scroll/,
+  );
+});
+
+test("a route that 404s fails the journey instead of recording the error page", async () => {
+  const page = stubPage();
+  page.goto = async () => ({ status: () => 404 });
+  const journey = { id: "j", title: "t", steps: [{ path: "/dashboard/gone", caption: "c" }] };
+  await assert.rejects(
+    () => recordJourney({
+      context: { close: async () => {} },
+      page,
+      journey,
+      origin: ORIGIN,
+      ids: {},
+      dwellMs: 0,
+      sleep: async () => {},
+    }),
+    /returned HTTP 404/,
+  );
+});
+
+test("a 500 fails too, since the generic h1 check passes on an error page", async () => {
+  const page = stubPage();
+  page.goto = async () => ({ status: () => 500 });
+  const journey = { id: "j", title: "t", steps: [{ path: "/dashboard", caption: "c" }] };
+  await assert.rejects(
+    () => recordJourney({
+      context: { close: async () => {} },
+      page,
+      journey,
+      origin: ORIGIN,
+      ids: {},
+      dwellMs: 0,
+      sleep: async () => {},
+    }),
+    /returned HTTP 500/,
+  );
 });

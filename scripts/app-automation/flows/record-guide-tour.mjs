@@ -164,17 +164,30 @@ export async function hideCaption(page) {
   }, CAPTION_ELEMENT_ID);
 }
 
-/** A slow scroll reads as deliberate; jumping to the bottom reads as a glitch. */
+/**
+ * A slow scroll reads as deliberate; jumping to the bottom reads as a glitch.
+ *
+ * The dashboard scrolls an `overflow-auto` <main>, not the document, so driving
+ * `document.scrollingElement` moves nothing — and moves it silently, burning the
+ * dwell time while the frame never changes. So pick whichever candidate actually
+ * has somewhere to go, and report back whether anything moved.
+ */
 export async function smoothScrollToBottom(page, { steps = 24, pauseMs = 28 } = {}) {
-  await page.evaluate(
+  return await page.evaluate(
     async ({ steps: count, pauseMs: pause }) => {
-      const target = document.scrollingElement ?? document.documentElement;
-      const distance = target.scrollHeight - target.clientHeight;
-      if (distance <= 0) return;
+      const candidates = [
+        ...document.querySelectorAll("main, [data-scroll-container]"),
+        document.scrollingElement ?? document.documentElement,
+      ];
+      const [best] = candidates
+        .map((node) => ({ node, distance: node.scrollHeight - node.clientHeight }))
+        .sort((a, b) => b.distance - a.distance);
+      if (!best || best.distance <= 0) return false;
       for (let i = 1; i <= count; i += 1) {
-        target.scrollTop = (distance * i) / count;
+        best.node.scrollTop = (best.distance * i) / count;
         await new Promise((resolve) => setTimeout(resolve, pause));
       }
+      return true;
     },
     { steps, pauseMs },
   );
@@ -293,7 +306,14 @@ export async function recordJourney({
   for (const [index, step] of journey.steps.entries()) {
     const path = stepPath(step, ids);
     log(`  ${index + 1}/${journey.steps.length} ${path}`);
-    await page.goto(`${origin}${path}`, { waitUntil: "networkidle" });
+    const response = await page.goto(`${origin}${path}`, { waitUntil: "networkidle" });
+    // goto() resolves happily on a 404 or 500, and the generic h1 readiness check
+    // passes on an error page — so without this a confident caption gets recorded
+    // over Next's error screen. captureView already guards this way.
+    const status = response?.status?.() ?? null;
+    if (status != null && status >= 400) {
+      throw new Error(`${journey.id} step ${index + 1}: ${path} returned HTTP ${status}`);
+    }
 
     if (step.act) {
       const action = STEP_ACTIONS[step.act];
@@ -313,7 +333,16 @@ export async function recordJourney({
     await showCaption(page, step.caption);
     await sleep(dwellMs);
     if (step.scroll) {
-      await smoothScrollToBottom(page);
+      const scrolled = await smoothScrollToBottom(page);
+      // The step asked for scroll because the point of it is below the fold. If
+      // nothing moved, the take holds a still frame under a caption promising
+      // more — worse than failing, because it looks fine.
+      if (!scrolled) {
+        throw new Error(
+          `${journey.id} step ${index + 1}: ${path} has nothing to scroll, ` +
+            "so the step would record a still frame. Drop `scroll` or seed more data.",
+        );
+      }
       await sleep(DEFAULT_SCROLL_DWELL_MS);
     }
     await hideCaption(page);

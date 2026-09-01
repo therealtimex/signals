@@ -287,12 +287,16 @@ export async function runConvertGuideVideoFlow(args, dependencies = {}) {
     listSources = discoverSources,
     ensureDir = (dir) => mkdirSync(dir, { recursive: true }),
     sizeOf = (file) => statSync(file).size,
+    // Seams, so a test can assert on the default policy rather than on a stub
+    // that replaces it — the bug here was in the default, not at the call site.
+    renameImpl = renameSync,
+    unlinkImpl = (file) => rmSync(file, { force: true }),
     // rename() overwrites the destination atomically on the same filesystem.
     // Unlinking first would reopen the very window the partial file closes: die
     // between the two calls and the good artifact is gone while the validated
     // replacement is still under a name nothing looks for.
-    move = (from, to) => renameSync(from, to),
-    discard = (file) => rmSync(file, { force: true }),
+    move = (from, to) => renameImpl(from, to),
+    discard = (file) => unlinkImpl(file),
     log = () => {},
   } = dependencies;
 
