@@ -28,39 +28,48 @@ authority, and it never enters `IDENTITY.md`, `SOUL.md`, `VOICE.md`, or `BRAND.m
 
 ## The server decides, not the payload
 
-`metadata.writing.intent` is the agent's claim, and so is
-`generationMetadata.agent.workflowRunId`. The agent-tools route has no ambient run context (auth is
-localhost-or-shared-token), so **a run pointer can never be the anchor on its own** — a caller could
-name an ordinary run, omit the intent, and slide a proposal into the platform-native lane.
+Every field an agent sends is caller-owned — the run pointer *and* the surface — so neither can be
+the authority. The agent-tools route has no ambient run context (auth is localhost-or-shared-token),
+so there is nothing in the request itself to trust.
 
-Two independent anchors carry the mandate instead:
+The anchor is the **launch**. A writing variant structurally requires a `launchId` that resolves to
+a launch with a spine, and `mergeLaunchMetadata` stamps a server-derived
+`writing.composition` scope onto that launch from the workflow-run row Signals wrote at dispatch:
 
-1. **The surface.** `WRITING_SURFACE_CAPABILITIES[...].mandate` marks the six proposal surfaces
-   `assist_only`. A reply, comment, or direct message *is* a proposal, so the mandate holds even
-   when every pointer in the payload is wrong. `persistWritingVariant` requires an intent on such a
-   surface, `approvalFor` pins `explicit`, and `materializeVariantWithRunner` refuses a
-   `by: "policy"` approval — all keyed on `writing.surface`.
-2. **The workflow-run row** Signals wrote at dispatch (`buildStoredRunConfig`), falling back to the
-   template config. It supplies the composition, consumer, and enabled surfaces.
+```
+{ schemaVersion, workflowRunId, templateId, consumer, mandate, surfaces, stampedAt }
+```
 
-The composition is resolved against the run the **intent** names, and the generation pointer must
-equal it, so the two cannot be played against each other. Every direction fails closed:
+A caller cannot set it — an incoming `composition` is stripped — and cannot remove or widen it: it
+is immutable once stamped. A launch becomes a composed scope by naming a composed run in
+`writing.runs`, which is what the brief instructs.
+
+`assertWritingIntentAuthority` then validates the submission against that scope, so mandate,
+consumer, allowed surfaces, and run/template lineage all come from server state:
 
 | Situation | Result |
 |---|---|
-| assist-only surface, no intent | `writing_intent_required` — regardless of which run is named |
-| intent naming an uncomposed run | `writing_intent_not_permitted` |
-| composed run, no intent | `writing_intent_required` |
-| consumer / surface / enabled-surface / lineage disagreement | rejected, not downgraded |
-| `intent.target` ≠ the variant's acting target | `writing_intent_target_mismatch` |
+| scoped launch, no intent | `writing_intent_required` |
+| scoped launch, surface outside the consumer's enabled set (e.g. `x/post`) | `writing_intent_surface_mismatch` |
+| scoped launch, `generationMetadata.agent.workflowRunId` ≠ the scope's run | `writing_intent_lineage_mismatch` |
+| scoped launch, intent lineage ≠ the scope's run/template | `writing_intent_lineage_mismatch` |
+| scoped launch, `intent.target` ≠ the variant's acting target | `writing_intent_target_mismatch` |
+| unscoped launch, intent present | `writing_intent_not_permitted` |
+| unscoped launch, assist-only surface | `composed_scope_required` |
 
-A dishonest run pointer therefore cannot reach the platform-native lane. The most it buys is
-attributing work to a *different composed run* — all of which pin explicit approval.
+Moving both caller-owned fields at once — an ordinary run id *and* `x/post` — no longer helps: on a
+scoped launch the surface is rejected and the pointer is checked against the scope; on an unscoped
+launch a proposal surface is rejected outright.
 
-A composed run additionally requires the active Personality binding and a **compatible represented
-target**; `draft_only` does not relax the target gate. One artifact carries one acting identity: the
-Personality guard validates `writing.targetId` and the intent must name the same target, so a
-materialized proposal cannot end up with contradictory lineage.
+`isAssistOnlySurface` remains as defence in depth, and a composed run still requires the active
+Personality binding and a **compatible represented target**; `draft_only` does not relax the target
+gate. One artifact carries one acting identity.
+
+**What this does not claim.** An authorized caller can always create an *unrelated* ordinary launch
+and do ordinary platform-native writing — no server-side check can distinguish that from any other
+writing workflow without per-invocation identity, which this route does not have. The guarantee is
+about artifacts bound to a composed dispatch: those cannot shed the mandate, and the binding cannot
+be forged, widened, or dropped.
 
 `resolveWritingRequest(intent, context)` turns an intent plus observed Personality/target state
 into a `WritingRequest`. It fails closed:
@@ -166,7 +175,8 @@ own goals map onto it.
 |---|---|
 | Intent contract, composition config, lanes, refusals | `src/lib/writing/writing-intent.ts` |
 | Surface mandate (`isAssistOnlySurface`) | `src/lib/writing/capabilities.ts` |
-| Server-side composition authority | `src/lib/writing/writing-intent-authority.ts` |
+| Launch scope stamping (server-owned, immutable) | `src/lib/writing/launch-writing.ts` |
+| Scope validation | `src/lib/writing/writing-intent-authority.ts` |
 | Shared brief text (both lanes) | `src/lib/workflows/writing-contract.ts` |
 | Reusable opt-in + composed brief | `src/lib/workflows/writing-composition.ts` |
 | Platform-native lane | `src/lib/workflows/signals-writing.ts` |

@@ -1,25 +1,23 @@
 /**
  * Server-side authority for composed writing.
  *
- * Whether a variant is an `assist_only` proposal is **not** the caller's claim to make, and it is
- * not decided by a caller-supplied run pointer either. Two independent anchors carry it:
+ * Every payload field an agent sends is caller-owned — the run pointer and the surface alike — so
+ * neither can be the authority. The anchor is the **launch**: a writing variant structurally
+ * requires a `launchId` that resolves to a launch with a spine, and `mergeLaunchMetadata` stamps a
+ * server-derived `writing.composition` onto that launch from the workflow-run row Signals wrote at
+ * dispatch. Callers cannot set it (it is stripped) and cannot remove it (it is immutable).
  *
- * 1. **The surface.** `isAssistOnlySurface` is a property of the artifact
- *    (`WRITING_SURFACE_CAPABILITIES[...].mandate`). A reply, comment, or direct message is a
- *    proposal by construction, so the mandate holds even if every pointer in the payload is wrong.
- * 2. **The workflow run row** Signals wrote at dispatch (`buildStoredRunConfig`), falling back to
- *    the template config — the composition, consumer, and enabled surfaces come from there.
- *
- * Both directions fail closed: an assist-only surface *must* carry an intent naming a genuinely
- * composed run, a composed run *must* produce a matching intent, and an uncomposed run *must not*
- * carry one. A dishonest run pointer therefore cannot reach the platform-native lane; at most it
- * misattributes work between composed runs, all of which pin explicit approval.
+ * `assertWritingIntentAuthority` validates the submission against that stamped scope, so the
+ * mandate, consumer, allowed surfaces, and run/template lineage all come from server state. The
+ * surface mandate (`isAssistOnlySurface`) stays as defence in depth: a proposal surface outside any
+ * composed scope is refused rather than quietly treated as ordinary writing.
  */
 
 import { eq } from "drizzle-orm";
 import { AgentToolError } from "@/lib/agent-tools/types";
 import type { DbRunner } from "@/lib/db/client";
-import { workflowRuns, workflowTemplates } from "@/lib/db/schema";
+import { launches, workflowRuns, workflowTemplates } from "@/lib/db/schema";
+import { launchCompositionSchema, type LaunchComposition } from "@/lib/writing/contracts";
 import { isAssistOnlySurface } from "@/lib/writing/capabilities";
 import type { SurfaceId } from "@/lib/writing/surfaces";
 import {
@@ -43,7 +41,8 @@ export type WritingIntentAuthorityReason =
   | "writing_intent_surface_mismatch"
   | "writing_intent_surface_not_allowed"
   | "writing_intent_target_mismatch"
-  | "writing_intent_lineage_mismatch";
+  | "writing_intent_lineage_mismatch"
+  | "composed_scope_required";
 
 function object(value: unknown): Record<string, unknown> {
   if (typeof value === "string") {
@@ -106,7 +105,8 @@ export function resolveComposedRunAuthority(
  * Returns the validated record for a composed artifact and `null` for ordinary writing.
  */
 export function assertWritingIntentAuthority(input: {
-  authority: ComposedRunAuthority | null;
+  /** Server-stamped scope on the variant's launch; `null` for an ordinary writing launch. */
+  composition: LaunchComposition | null;
   intent: unknown;
   surface: SurfaceId;
   platform: string;
@@ -114,31 +114,31 @@ export function assertWritingIntentAuthority(input: {
   workflowRunId: string;
 }): WritingIntentRecord | null {
   const submitted = input.intent;
-  const assistOnlySurface = isAssistOnlySurface(input.surface);
+  const composition = input.composition;
 
-  if (submitted === undefined || submitted === null) {
-    if (assistOnlySurface) {
+  if (!composition) {
+    if (submitted !== undefined && submitted !== null) {
       return fail(
-        "writing_intent_required",
-        `Surface ${input.surface} is assist-only and exists only for composed proposals; metadata.writing.intent is required`,
+        "writing_intent_not_permitted",
+        "This launch was not created under a composed dispatch, so it cannot carry a writing intent",
       );
     }
-    if (input.authority) {
+    if (isAssistOnlySurface(input.surface)) {
       return fail(
-        "writing_intent_required",
-        `Workflow run ${input.workflowRunId} is composed as ${input.authority.composition.consumer} and requires metadata.writing.intent`,
+        "composed_scope_required",
+        `Surface ${input.surface} is assist-only and exists only inside a composed dispatch; this launch has no composition scope`,
       );
     }
     return null;
   }
 
-  if (!input.authority) {
+  if (submitted === undefined || submitted === null) {
     return fail(
-      "writing_intent_not_permitted",
-      "The workflow run named by this intent is not composed for writing intents",
+      "writing_intent_required",
+      `This launch is scoped to ${composition.consumer} and requires metadata.writing.intent`,
     );
   }
-  const { composition, templateId } = input.authority;
+  const templateId = composition.templateId;
   const record = readWritingIntentRecord(submitted);
   if (!record) return fail("writing_intent_invalid", "Invalid writing intent record");
   if (record.consumer !== composition.consumer) {
@@ -167,10 +167,18 @@ export function assertWritingIntentAuthority(input: {
       "Writing intent target does not match the variant's acting target",
     );
   }
-  if (record.lineage.workflowRunId !== input.workflowRunId) {
+  // Both the intent's lineage and the caller's generation pointer are checked against the *server*
+  // value, so neither can be moved to escape the scope.
+  if (record.lineage.workflowRunId !== composition.workflowRunId) {
     return fail(
       "writing_intent_lineage_mismatch",
-      "Writing intent lineage names a different workflow run",
+      "Writing intent lineage names a different workflow run than the launch scope",
+    );
+  }
+  if (input.workflowRunId !== composition.workflowRunId) {
+    return fail(
+      "writing_intent_lineage_mismatch",
+      "generationMetadata.agent.workflowRunId does not match the launch scope",
     );
   }
   if (templateId && record.lineage.templateId !== templateId) {
@@ -182,16 +190,15 @@ export function assertWritingIntentAuthority(input: {
   return record;
 }
 
-/**
- * The run an artifact's composition must be resolved against.
- *
- * A submitted intent names its own run; that is the one whose composition has to hold. Falling back
- * to the generation pointer only matters for ordinary writing, where no composition applies.
- */
-export function composedRunIdForVariant(input: {
-  intent: unknown;
-  generationWorkflowRunId: string;
-}): string {
-  const record = readWritingIntentRecord(input.intent);
-  return record?.lineage.workflowRunId ?? input.generationWorkflowRunId;
+/** Read the server-stamped composition scope off a launch. */
+export function readLaunchComposition(
+  runner: DbRunner,
+  launchId: string,
+): LaunchComposition | null {
+  const launch = runner.select().from(launches).where(eq(launches.id, launchId)).get();
+  if (!launch) return null;
+  const parsed = launchCompositionSchema.safeParse(
+    object(object(launch.metadata).writing).composition,
+  );
+  return parsed.success ? parsed.data : null;
 }

@@ -184,6 +184,12 @@ describe("composed writing brief", () => {
     expect(unsupported).not.toContain("x/reply");
   });
 
+  it("tells the agent to bind the launch to this dispatch", () => {
+    expect(composed).toContain("put this workflow run in its `writing.runs`");
+    expect(composed).toContain('workflowRunId: "run_1"');
+    expect(composed).toContain("server-owned composition scope");
+  });
+
   it("names the recipient boundary explicitly", () => {
     expect(composed).toContain("Workspace Personality answers \"who is speaking\"");
     expect(composed).toContain(

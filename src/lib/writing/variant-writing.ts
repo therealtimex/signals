@@ -8,11 +8,7 @@ import { AgentToolError } from "@/lib/agent-tools/types";
 import { deriveAuditVerdict, deriveRiskTier, validateAuditFindingSemantics } from "@/lib/writing/audit";
 import { getSurfaceCapabilities, isAssistOnlySurface } from "@/lib/writing/capabilities";
 import { isAssistOnlyIntent } from "@/lib/writing/writing-intent";
-import {
-  assertWritingIntentAuthority,
-  composedRunIdForVariant,
-  resolveComposedRunAuthority,
-} from "@/lib/writing/writing-intent-authority";
+import { assertWritingIntentAuthority } from "@/lib/writing/writing-intent-authority";
 import {
   type ApprovalState,
   type LaunchWriting,
@@ -284,17 +280,11 @@ export function persistWritingVariant(
     }
   }
   const variantId = existing?.id ?? nanoid();
-  // Resolve the composition against the run the *intent* names, then require the generation pointer
-  // to agree with it — so the two cannot be played against each other.
-  const composedAuthority = resolveComposedRunAuthority(
-    runner,
-    composedRunIdForVariant({
-      intent: authoritativeWriting.intent,
-      generationWorkflowRunId: generationResult.data.agent.workflowRunId,
-    }),
-  );
+  // The launch carries the server-stamped scope; every caller-supplied pointer is validated against
+  // it rather than trusted to select it.
+  const launchComposition = launchResult.data.composition ?? null;
   assertWritingIntentAuthority({
-    authority: composedAuthority,
+    composition: launchComposition,
     intent: authoritativeWriting.intent,
     surface: authoritativeWriting.surface,
     platform: authoritativeWriting.platform,
@@ -345,8 +335,8 @@ export function persistWritingVariant(
   const unchanged = Boolean(previous?.audit && audit && previous.audit.inputHash === inputHash && previous.audit.id === audit.id);
   // Surface first: the mandate survives a wrong or forged run pointer because it is a property of
   // the artifact, not of the request that created it.
-  const assistOnly = isAssistOnlySurface(authoritativeWriting.surface)
-    || Boolean(composedAuthority)
+  const assistOnly = Boolean(launchComposition)
+    || isAssistOnlySurface(authoritativeWriting.surface)
     || isAssistOnlyIntent(authoritativeWriting.intent);
   const approval = input.status === "rejected"
     ? {

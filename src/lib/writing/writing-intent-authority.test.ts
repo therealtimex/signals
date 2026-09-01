@@ -95,16 +95,15 @@ describe("composed run authority", () => {
 });
 
 describe("assertWritingIntentAuthority", () => {
-  const authority = {
+  /** The shape `mergeLaunchMetadata` stamps onto a launch. */
+  const composed = {
+    schemaVersion: 1 as const,
     workflowRunId: "run_1",
-    templateId: "tpl_1",
-    composition: {
-      version: 1 as const,
-      consumer: "contact_relationship_nurture" as const,
-      surfaces: ["x/reply"] as const,
-      mandate: "assist_only" as const,
-      approvalPolicy: "explicit" as const,
-    },
+    templateId: "tpl_1" as string | null,
+    consumer: "contact_relationship_nurture",
+    mandate: "assist_only" as const,
+    surfaces: ["x/reply" as const],
+    stampedAt: 1_700_000_000,
   };
   const base = {
     workflowRunId: "run_1",
@@ -114,61 +113,55 @@ describe("assertWritingIntentAuthority", () => {
   };
   const valid = intent({ workflowRunId: "run_1", templateId: "tpl_1" });
 
-  it("passes an intent that matches the dispatch", () => {
+  it("passes an intent that matches the launch scope", () => {
     expect(
-      assertWritingIntentAuthority({ ...base, authority: { ...authority, composition: { ...authority.composition, surfaces: [...authority.composition.surfaces] } }, intent: valid }),
+      assertWritingIntentAuthority({ ...base, composition: composed, intent: valid }),
     ).toMatchObject({ consumer: "contact_relationship_nurture", surface: "x/reply" });
   });
 
-  it("returns null for an ordinary surface and run with no intent", () => {
-    const ordinary = { ...base, surface: "x/post" as const };
-    expect(assertWritingIntentAuthority({ ...ordinary, authority: null, intent: undefined })).toBeNull();
-    expect(assertWritingIntentAuthority({ ...ordinary, authority: null, intent: null })).toBeNull();
+  it("returns null for an ordinary surface on an unscoped launch", () => {
+    const ordinary = { ...base, surface: "x/post" as const, composition: null };
+    expect(assertWritingIntentAuthority({ ...ordinary, intent: undefined })).toBeNull();
+    expect(assertWritingIntentAuthority({ ...ordinary, intent: null })).toBeNull();
   });
 
-  it("requires an intent on an assist-only surface even when the named run is ordinary", () => {
-    // The bypass Review found: name any uncomposed run and omit the intent. The surface refuses.
+  it("refuses an assist-only surface outside any composed scope", () => {
     for (const surface of ["x/reply", "x/direct_message"] as const) {
       expect(() =>
-        assertWritingIntentAuthority({ ...base, surface, authority: null, intent: undefined }),
+        assertWritingIntentAuthority({ ...base, surface, composition: null, intent: undefined }),
       ).toThrowError(
         expect.objectContaining({
-          details: expect.objectContaining({ reason: "writing_intent_required" }),
+          details: expect.objectContaining({ reason: "composed_scope_required" }),
         }),
       );
     }
   });
 
-  const composed = {
-    ...authority,
-    composition: { ...authority.composition, surfaces: [...authority.composition.surfaces] },
-  };
-
-  const cases: [string, { authority: typeof composed | null; intent: unknown }][] = [
-    ["writing_intent_not_permitted", { authority: null, intent: valid }],
-    ["writing_intent_required", { authority: composed, intent: undefined }],
-    ["writing_intent_invalid", { authority: composed, intent: { mandate: "assist_only" } }],
+  const cases: [string, { composition: typeof composed | null; intent: unknown }][] = [
+    ["writing_intent_not_permitted", { composition: null, intent: valid }],
+    ["writing_intent_required", { composition: composed, intent: undefined }],
+    ["writing_intent_invalid", { composition: composed, intent: { mandate: "assist_only" } }],
     // An unregistered consumer never becomes a valid record in the first place.
-    ["writing_intent_invalid", { authority: composed, intent: { ...valid, consumer: "other" } }],
+    ["writing_intent_invalid", { composition: composed, intent: { ...valid, consumer: "other" } }],
     [
       "writing_intent_surface_mismatch",
-      { authority: composed, intent: intent({ workflowRunId: "run_1", templateId: "tpl_1", surface: "x/direct_message" }) },
+      { composition: composed, intent: intent({ workflowRunId: "run_1", templateId: "tpl_1", surface: "x/direct_message" }) },
     ],
     [
       "writing_intent_lineage_mismatch",
-      { authority: composed, intent: intent({ workflowRunId: "run_other", templateId: "tpl_1" }) },
+      { composition: composed, intent: intent({ workflowRunId: "run_other", templateId: "tpl_1" }) },
     ],
     [
       "writing_intent_lineage_mismatch",
-      { authority: composed, intent: intent({ workflowRunId: "run_1", templateId: "tpl_other" }) },
+      { composition: composed, intent: intent({ workflowRunId: "run_1", templateId: "tpl_other" }) },
     ],
     [
       "writing_intent_target_mismatch",
-      { authority: composed, intent: intent({ workflowRunId: "run_1", templateId: "tpl_1", targetId: null }) },
+      { composition: composed, intent: intent({ workflowRunId: "run_1", templateId: "tpl_1", targetId: null }) },
     ],
     [
       "writing_intent_target_mismatch",
-      { authority: composed, intent: intent({ workflowRunId: "run_1", templateId: "tpl_1", targetId: "tgt_other" }) },
+      { composition: composed, intent: intent({ workflowRunId: "run_1", templateId: "tpl_1", targetId: "tgt_other" }) },
     ],
   ];
 
@@ -178,15 +171,30 @@ describe("assertWritingIntentAuthority", () => {
     );
   });
 
+  it("rejects a generation pointer that disagrees with the launch scope", () => {
+    expect(() =>
+      assertWritingIntentAuthority({
+        ...base,
+        workflowRunId: "run_tampered",
+        composition: composed,
+        intent: valid,
+      }),
+    ).toThrowError(
+      expect.objectContaining({
+        details: expect.objectContaining({ reason: "writing_intent_lineage_mismatch" }),
+      }),
+    );
+  });
+
   it("rejects a valid intent belonging to a different registered consumer", () => {
     // Unreachable while `WRITING_INTENT_CONSUMERS` has one entry; the cast keeps the guard live so
-    // adding a second consumer cannot silently let its proposals ride another workflow's run.
-    const otherConsumer = {
-      ...composed,
-      composition: { ...composed.composition, consumer: "social_intent_patrol" as never },
-    };
+    // adding a second consumer cannot silently let its proposals ride another scope.
     expect(() =>
-      assertWritingIntentAuthority({ ...base, authority: otherConsumer, intent: valid }),
+      assertWritingIntentAuthority({
+        ...base,
+        composition: { ...composed, consumer: "social_intent_patrol" },
+        intent: valid,
+      }),
     ).toThrowError(
       expect.objectContaining({
         details: expect.objectContaining({ reason: "writing_intent_consumer_mismatch" }),
@@ -194,17 +202,13 @@ describe("assertWritingIntentAuthority", () => {
     );
   });
 
-  it("rejects a surface the composition does not enable", () => {
-    const narrowed = {
-      ...composed,
-      composition: { ...composed.composition, surfaces: ["x/direct_message" as const] },
-    };
+  it("rejects a surface the scope does not enable", () => {
     expect(() =>
       assertWritingIntentAuthority({
         ...base,
-        surface: "x/direct_message",
-        authority: narrowed,
-        intent: intent({ workflowRunId: "run_1", templateId: "tpl_1", surface: "x/reply" }),
+        surface: "x/post",
+        composition: composed,
+        intent: intent({ workflowRunId: "run_1", templateId: "tpl_1" }),
       }),
     ).toThrowError(
       expect.objectContaining({

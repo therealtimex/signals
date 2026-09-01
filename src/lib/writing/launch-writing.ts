@@ -9,6 +9,41 @@ import {
   userApprovalSchema,
 } from "@/lib/writing/contracts";
 import { computeSpineHash, sha256 } from "@/lib/writing/hash";
+import { db } from "@/lib/db/client";
+import { launchCompositionSchema, type LaunchComposition } from "@/lib/writing/contracts";
+import { resolveComposedRunAuthority } from "@/lib/writing/writing-intent-authority";
+
+/**
+ * Stamp the server-owned composition scope onto a launch.
+ *
+ * Derived from the workflow run the launch names — a row Signals wrote at dispatch — and never from
+ * caller input, which is stripped. Immutable once stamped: a launch that was created under a
+ * composed dispatch stays composed, so the mandate cannot be shed by a later `upsert_launch`.
+ */
+function stampLaunchComposition(input: {
+  merged: Record<string, unknown>;
+  stored: Record<string, unknown>;
+}): LaunchComposition | null {
+  const existing = launchCompositionSchema.safeParse(parseObject(input.stored).composition);
+  if (existing.success) return existing.data;
+  const runs = Array.isArray(input.merged.runs) ? input.merged.runs : [];
+  for (const entry of runs) {
+    const workflowRunId = parseObject(entry).workflowRunId;
+    if (typeof workflowRunId !== "string" || !workflowRunId) continue;
+    const authority = resolveComposedRunAuthority(db, workflowRunId);
+    if (!authority) continue;
+    return launchCompositionSchema.parse({
+      schemaVersion: 1,
+      workflowRunId: authority.workflowRunId,
+      templateId: authority.templateId,
+      consumer: authority.composition.consumer,
+      mandate: authority.composition.mandate,
+      surfaces: authority.composition.surfaces,
+      stampedAt: Math.floor(Date.now() / 1000),
+    });
+  }
+  return null;
+}
 
 function parseObject(value: unknown): Record<string, unknown> {
   if (typeof value === "string") {
@@ -224,6 +259,10 @@ export function mergeLaunchMetadata(input: {
     const sources = (Array.isArray(spine.sources) ? spine.sources : []).map((value) => normalizeSource(value, value, input.scope));
     merged.spine = { ...spine, sources, hash: computeSpineHash({ ...spine, sources }) };
   }
+  // Composition is server-owned: drop whatever the caller sent and re-derive it.
+  delete merged.composition;
+  const composition = stampLaunchComposition({ merged, stored });
+  if (composition) merged.composition = composition;
   const parsed = launchWritingSchema.safeParse(merged);
   if (!parsed.success) throw new AgentToolError("VALIDATION_ERROR", "Incomplete launch writing metadata", parsed.error.flatten());
   if (parsed.data.spine && parsed.data.spine.launchId !== input.launchId) validation("Spine launch does not match launch", "spine_launch_mismatch");

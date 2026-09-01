@@ -131,7 +131,7 @@ export function buildComposedWritingBriefSection(input: {
     ...capabilityRows,
     "Tool sequence:",
     WRITING_PERSONALITY_FILES_STEP,
-    "2. Call get_writing_context with the launch you create for this run and the intent surfaces. Treat its redactions and capability rows as authoritative.",
+    `2. Create this run's launch with upsert_launch, and put this workflow run in its \`writing.runs\` — \`runs: [{ workflowRunId: "${input.workflowRunId}", mode: "draft", startedAt: <unix> }]\`. That is what binds the launch to this dispatch: Signals stamps a server-owned composition scope from it, and every proposal on that launch is validated against the scope. A launch without it cannot carry a proposal. Then call get_writing_context with that launch and the intent surfaces, and treat its redactions and capability rows as authoritative.`,
     ...WRITING_SOURCE_STEPS,
     WRITING_LANE_GATE_STEP,
     buildWritingLaneBoundStep({

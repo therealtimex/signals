@@ -146,8 +146,28 @@ export const variantGenerationSchema = z.object({ schemaVersion: z.literal(1), k
 
 const launchSurfaceSchema = z.object({ platform: platformSchema, surface: z.enum(SURFACE_IDS), targetId: z.string().optional() }).passthrough();
 const launchRunSchema = z.object({ workflowRunId: z.string().min(1), mode: generationModeSchema, startedAt: unixSeconds, rtxThreadSlug: z.string().optional() }).passthrough();
-export const launchWritingSchema = z.object({ schemaVersion: z.literal(1).optional(), goal: writingGoalSchema.optional(), surfaces: z.array(launchSurfaceSchema).optional(), sources: z.array(sourceRefSchema).optional(), spine: evidenceSpineSchema.optional(), voiceProfile: voiceProfileRefSchema.nullable().optional(), voicePrecedence: voicePrecedenceSchema.optional(), approvalPolicy: approvalPolicySchema.optional(), runs: z.array(launchRunSchema).optional() }).passthrough();
-export const completeLaunchWritingSchema = z.object({ schemaVersion: z.literal(1), goal: writingGoalSchema, surfaces: z.array(launchSurfaceSchema), sources: z.array(sourceRefSchema), spine: evidenceSpineSchema.optional(), voiceProfile: voiceProfileRefSchema.nullable(), voicePrecedence: voicePrecedenceSchema, approvalPolicy: approvalPolicySchema, runs: z.array(launchRunSchema) }).passthrough();
+/**
+ * Server-stamped composition scope (#410).
+ *
+ * Written by `mergeLaunchMetadata` from the workflow run the launch names, never by the caller, and
+ * immutable once present. This is the server-owned association an artifact is bound to: a variant's
+ * `launchId` is structurally required and validated, so the mandate cannot be dropped by editing a
+ * payload field.
+ */
+export const launchCompositionSchema = z.object({
+  schemaVersion: z.literal(1),
+  workflowRunId: z.string().min(1),
+  templateId: z.string().min(1).nullable(),
+  consumer: z.string().min(1),
+  mandate: z.literal("assist_only"),
+  surfaces: z.array(z.enum(SURFACE_IDS)).min(1),
+  stampedAt: unixSeconds,
+}).strict();
+
+export type LaunchComposition = z.infer<typeof launchCompositionSchema>;
+
+export const launchWritingSchema = z.object({ schemaVersion: z.literal(1).optional(), composition: launchCompositionSchema.optional(), goal: writingGoalSchema.optional(), surfaces: z.array(launchSurfaceSchema).optional(), sources: z.array(sourceRefSchema).optional(), spine: evidenceSpineSchema.optional(), voiceProfile: voiceProfileRefSchema.nullable().optional(), voicePrecedence: voicePrecedenceSchema.optional(), approvalPolicy: approvalPolicySchema.optional(), runs: z.array(launchRunSchema).optional() }).passthrough();
+export const completeLaunchWritingSchema = z.object({ schemaVersion: z.literal(1), composition: launchCompositionSchema.optional(), goal: writingGoalSchema, surfaces: z.array(launchSurfaceSchema), sources: z.array(sourceRefSchema), spine: evidenceSpineSchema.optional(), voiceProfile: voiceProfileRefSchema.nullable(), voicePrecedence: voicePrecedenceSchema, approvalPolicy: approvalPolicySchema, runs: z.array(launchRunSchema) }).passthrough();
 
 export const launchWritingPatchSchema = z.object({ schemaVersion: z.literal(1).optional(), goal: writingGoalSchema.optional(), surfaces: z.array(z.object({ platform: platformSchema, surface: z.enum(SURFACE_IDS), targetId: z.string().optional() }).passthrough()).optional(), sources: z.array(sourceRefInputSchema).optional(), spine: z.record(z.unknown()).optional(), voiceProfile: voiceProfileRefSchema.nullable().optional(), voicePrecedence: voicePrecedenceSchema.optional(), approvalPolicy: approvalPolicySchema.optional(), runs: z.array(z.object({ workflowRunId: z.string().min(1), mode: generationModeSchema, startedAt: unixSeconds, rtxThreadSlug: z.string().optional() }).passthrough()).optional() }).passthrough();
 

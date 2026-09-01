@@ -21,7 +21,7 @@ import {
   withPersonalityWritingGuard,
   type PersonalityGuardDependencies,
 } from "@/lib/writing/personality-guard";
-import { resolveComposedRunAuthority } from "@/lib/writing/writing-intent-authority";
+import { readLaunchComposition } from "@/lib/writing/writing-intent-authority";
 
 function object(value: unknown): Record<string, unknown> {
   if (typeof value === "string") {
@@ -60,7 +60,7 @@ export async function upsertVariantUseCase(
   return withPersonalityWritingGuard((guard, tx) => {
     // A composed run speaks as the workspace Personality, so it has neither a legacy-unbound sketch
     // lane nor a relaxed target check — `draft_only` does not mean "any target will do".
-    const composed = resolveComposedRunAuthority(tx, generation.data.agent.workflowRunId) !== null;
+    const composed = readLaunchComposition(tx, input.launchId) !== null;
     if (!selector) {
       if (composed) {
         throw new AgentToolError(
