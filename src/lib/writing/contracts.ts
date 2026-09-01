@@ -8,6 +8,7 @@ import {
   variantPersonalitySnapshotSchema,
   writingAuditPersonalitySchema,
 } from "@/lib/writing/personality-lineage";
+import { writingIntentRecordSchema } from "@/lib/writing/writing-intent";
 
 const unixSeconds = z.number().int().nonnegative();
 const id = (prefix: string) => z.string().regex(new RegExp(`^${prefix}_[A-Za-z0-9_-]{6,}$`));
@@ -117,6 +118,8 @@ export const variantWritingSchema = z.object({
   formulaId: z.string().refine((value) => parseFormulaId(value) !== null, "invalid formula id"), overlay: z.object({ id: z.string().min(1), version: z.number().int().positive() }).passthrough(), core: z.object({ version: z.number().int().positive() }).passthrough(), voiceProfile: voiceProfileRefSchema.nullable(), voicePrecedence: voicePrecedenceSchema, spine: z.object({ id: id("spn"), hash: z.string().min(1) }).passthrough(), units: writingUnitsSchema,
   claimMap: z.array(z.object({ claimId: id("clm"), present: z.boolean(), unit: z.number().int().nonnegative().optional(), verbatim: z.boolean().optional() }).passthrough()), audit: writingAuditSchema.nullable(), auditHistory: z.array(z.object({ id: id("aud"), auditedAt: unixSeconds, verdict: z.enum(["pass", "warn", "block"]) }).passthrough()).max(5).optional(), approval: approvalStateSchema,
   lineage: z.object({ derivedFromVariantId: z.string().optional(), adaptedFromContentItemId: z.string().optional(), adaptedFromVariantId: z.string().optional(), sourceIds: z.array(id("src")) }).passthrough(), capability: z.object({ publish: z.enum(["direct", "beta", "draft_only", "export_only", "unsupported"]) }).passthrough(), materializedContentItemId: z.string().optional(), media: z.object({ assetIds: z.array(z.string()).max(10) }).passthrough().optional(), personality: variantPersonalitySnapshotSchema.nullable().optional(),
+  /** Set when a workflow composed this artifact through the shared writing-intent contract (#410). */
+  intent: writingIntentRecordSchema.nullable().optional(),
 }).passthrough();
 
 export const writingAuditInputSchema = writingAuditSchema.omit({
@@ -153,6 +156,7 @@ export type EvidenceSpine = z.infer<typeof evidenceSpineSchema>;
 export type LaunchWritingDocument = z.infer<typeof launchWritingSchema>;
 export type LaunchWriting = z.infer<typeof completeLaunchWritingSchema>;
 export type VariantWriting = z.infer<typeof variantWritingSchema>;
+export type VariantWritingIntent = NonNullable<VariantWriting["intent"]>;
 export type VariantWritingInput = z.infer<typeof variantWritingInputSchema>;
 export type AuthoritativeVariantWritingInput = z.infer<typeof authoritativeVariantWritingInputSchema>;
 export type VariantGeneration = z.infer<typeof variantGenerationSchema>;

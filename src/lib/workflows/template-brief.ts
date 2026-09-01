@@ -23,6 +23,10 @@ import {
   isSignalsWritingTemplateConfig,
 } from "@/lib/workflows/signals-writing";
 import {
+  buildComposedWritingBriefSection,
+  readWritingIntentComposition,
+} from "@/lib/workflows/writing-composition";
+import {
   CONTACT_WEB_RESEARCH_THREAD_NAME,
   CONTACT_WEB_RESEARCH_TOOLS,
   buildContactWebResearchBriefSection,
@@ -174,6 +178,28 @@ export function buildAgentWorkflowBrief(input: {
         signalsBaseUrl: input.signalsBaseUrl,
       })}\n`
     : null;
+  // The reusable opt-in: any workflow carrying a writing-intent composition gets the same shared
+  // contract without becoming the Platform-native writing template.
+  const composition = readWritingIntentComposition(input.config);
+  const composedWritingContract = composition
+    ? `${buildComposedWritingBriefSection({
+        composition,
+        templateId: input.template.id,
+        templateName: input.template.name,
+        workflowRunId: input.workflowRunId,
+        signalsBaseUrl: input.signalsBaseUrl,
+        target: {
+          platform:
+            typeof input.config.targetPlatform === "string" && input.config.targetPlatform.trim()
+              ? input.config.targetPlatform.trim().toLowerCase()
+              : (input.template.platform ?? "x"),
+          targetId:
+            typeof input.config.targetId === "string" && input.config.targetId.trim()
+              ? input.config.targetId.trim()
+              : null,
+        },
+      })}\n`
+    : null;
   const contactWebResearchContract =
     isContactWebResearchTemplateConfig(input.config) && input.contactWebResearchContext
       ? `${buildContactWebResearchBriefSection({
@@ -235,6 +261,7 @@ export function buildAgentWorkflowBrief(input: {
     nurtureContract,
     snowballContract,
     writingContract,
+    composedWritingContract,
     contactWebResearchContract,
     "Do not call legacy in-process workflow runners. This thread is the execution lane.",
   ];

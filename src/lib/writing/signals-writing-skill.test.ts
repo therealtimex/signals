@@ -162,7 +162,7 @@ describe("signals-writing skill package", () => {
   });
 
   it("parses namespaced overlay records and the complete formula catalog", () => {
-    const expected = { x: 10, linkedin: 19, facebook: 9 };
+    const expected = { x: 14, linkedin: 23, facebook: 13 };
     const overlaySurfaces = new Set<string>();
     for (const [platform, formulaCount] of Object.entries(expected)) {
       const text = fs.readFileSync(path.join(skillDir, `overlays/${platform}.md`), "utf8");
@@ -310,7 +310,21 @@ describe("signals-writing skill package", () => {
   });
 
   it("matches server hard limits, measurements, and audit verdicts", () => {
-    for (const surface of ["x/post", "x/thread", "linkedin/post", "facebook/post"]) expect(helper.hardLimit(surface)).toBe(hardLimit(surface));
+    for (const surface of [
+      "x/post",
+      "x/thread",
+      "x/reply",
+      "x/direct_message",
+      "linkedin/post",
+      "linkedin/comment",
+      "linkedin/direct_message",
+      "facebook/post",
+      "facebook/comment",
+      "facebook/direct_message",
+    ]) expect(helper.hardLimit(surface)).toBe(hardLimit(surface));
+    // A DM must not inherit the reply ceiling, or every nurture message audits against 280.
+    expect(hardLimit("x/direct_message")).toBe(10_000);
+    expect(hardLimit("x/reply")).toBe(280);
     const measurement = json<{ surface: string; texts: string[]; media: { assetIds: string[] }; expected: Record<string, unknown> }>("units-measure.json");
     const measured = helper.measure(measurement.surface, measurement);
     expect(measured.hard).toMatchObject(measurement.expected);

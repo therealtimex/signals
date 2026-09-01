@@ -29,6 +29,7 @@ import {
 import type { PersonalityCapabilityState } from "@/lib/rtx/capabilities";
 import { setRepresentedOrgId } from "@/lib/settings/signals-config";
 import { buildWritingUnits } from "@/lib/writing/content-writing";
+import { hardLimit } from "@/lib/writing/variant-writing";
 import { sha256Canonical } from "@/lib/writing/hash";
 import { materializeVariantWithRunner } from "@/lib/writing/materialize";
 import {
@@ -272,8 +273,10 @@ export function personalityVariantPayload(input: {
   bindingId: string;
   targetId?: string;
   body?: string;
-  surface?: "x/post" | "threads/post";
+  surface?: "x/post" | "threads/post" | "x/reply";
   voiceProfile?: { id: string; version: number; hash: string } | null;
+  /** Composed writing-intent record (#410); omitted for Platform-native fixtures. */
+  intent?: Record<string, unknown>;
 }) {
   const body = input.body ?? "Personality-bound publish proof.";
   const launch = getLaunchById(input.launchId)!;
@@ -326,7 +329,7 @@ export function personalityVariantPayload(input: {
           hard: {
             units: 1,
             chars: [body.length],
-            limit: surface.startsWith("x/") ? 280 : 500,
+            limit: hardLimit(surface),
             hashtags: 0,
             links: 0,
             mediaCount: 0,
@@ -343,6 +346,7 @@ export function personalityVariantPayload(input: {
         },
         lineage: { sourceIds: ["src_personality1"] },
         personality: { bindingId: input.bindingId },
+        ...(input.intent ? { intent: input.intent } : {}),
       },
     },
   };

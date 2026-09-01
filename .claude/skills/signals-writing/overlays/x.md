@@ -2,7 +2,7 @@
 overlayId: overlay:x
 version: 1
 platform: x
-surfaces: [x/post, x/thread]
+surfaces: [x/post, x/thread, x/reply, x/direct_message]
 reviewedAt: 2026-08-29
 sources: [docs-dev/refs/manifest.json, src/lib/writing/variant-writing.ts, src/lib/publish/x-publish.cjs]
 ---
@@ -51,6 +51,34 @@ order after the first unit.
     "applies":["x/post"], "severity":"blocker",
     "source":[{"kind":"adapter","path":".claude/skills/signals-publish/scripts/x-publish.cjs"}], "value":4,
     "enforcedBy":"adapter:x-publish.cjs", "status":"active"
+  },
+  {
+    "id":"x/reply/hard/char-limit",
+    "class":"hard", "statement":"A reply is at most 280 UTF-16 code units.",
+    "applies":["x/reply"], "severity":"blocker",
+    "source":[{"kind":"server","path":"src/lib/writing/variant-writing.ts#hardLimit"}], "value":280,
+    "enforcedBy":"server:hardLimit", "status":"active"
+  },
+  {
+    "id":"x/reply/hard/single-unit",
+    "class":"hard", "statement":"A reply contains exactly one ordered unit.",
+    "applies":["x/reply"], "severity":"blocker",
+    "source":[{"kind":"server","path":"src/lib/writing/variant-writing.ts#hardLimit"}], "value":1,
+    "enforcedBy":"server:exactSurfaceUnits", "status":"active"
+  },
+  {
+    "id":"x/direct_message/hard/char-limit",
+    "class":"hard", "statement":"A direct message is at most 10000 UTF-16 code units.",
+    "applies":["x/direct_message"], "severity":"blocker",
+    "source":[{"kind":"server","path":"src/lib/writing/variant-writing.ts#hardLimit"}], "value":10000,
+    "enforcedBy":"server:hardLimit", "status":"active"
+  },
+  {
+    "id":"x/direct_message/hard/single-unit",
+    "class":"hard", "statement":"A direct message contains exactly one ordered unit.",
+    "applies":["x/direct_message"], "severity":"blocker",
+    "source":[{"kind":"server","path":"src/lib/writing/variant-writing.ts#hardLimit"}], "value":1,
+    "enforcedBy":"server:exactSurfaceUnits", "status":"active"
   }
 ]
 ```
@@ -140,6 +168,38 @@ Treat a helper/server mismatch as a stop condition. Do not repair measurements b
     "claimRules":["core/claim/no-invented-fact","core/claim/no-unverifiable-promise"], "consent":false,
     "source":[{"kind":"corpus","path":"docs-dev/refs/manifest.json","observedAt":"2026-07"}], "confidence":"low",
     "reviewBy":"2027-02-28", "status":"active"
+  },
+  {
+    "id":"x/reply/direct-answer@1",
+    "surfaces":["x/reply"], "goals":["replies","follows"],
+    "shape":"Answer the question actually asked in one supported move, then stop.", "slots":[{"name":"question being answered","from":"message.core","required":true},{"name":"supported answer","from":"spine.claim","required":true}],
+    "claimRules":["core/claim/no-invented-fact"], "consent":false,
+    "source":[{"kind":"server","path":"src/lib/writing/writing-intent.ts","observedAt":"2026-09"}], "confidence":"low",
+    "reviewBy":"2027-02-28", "status":"active"
+  },
+  {
+    "id":"x/reply/evidence-addition@1",
+    "surfaces":["x/reply"], "goals":["replies","reposts","follows"],
+    "shape":"Add one preserved detail the thread is missing and say why it changes the read.", "slots":[{"name":"missing detail","from":"spine.claim","required":true},{"name":"why it matters","from":"message.core","required":true}],
+    "claimRules":["core/claim/no-invented-fact","core/claim/verbatim-claim-kept"], "consent":false,
+    "source":[{"kind":"server","path":"src/lib/writing/writing-intent.ts","observedAt":"2026-09"}], "confidence":"low",
+    "reviewBy":"2027-02-28", "status":"active"
+  },
+  {
+    "id":"x/direct_message/referenced-opener@1",
+    "surfaces":["x/direct_message"], "goals":["replies","leads"],
+    "shape":"Open with the real public interaction, state why you are writing, and close with one bounded ask.", "slots":[{"name":"public interaction","from":"spine.claim","required":true},{"name":"reason for writing","from":"message.core","required":true},{"name":"bounded ask","from":"message.core","required":true}],
+    "claimRules":["core/claim/no-invented-fact","core/claim/no-unverifiable-promise"], "consent":false,
+    "source":[{"kind":"server","path":"src/lib/writing/writing-intent.ts","observedAt":"2026-09"}], "confidence":"low",
+    "reviewBy":"2027-02-28", "status":"active"
+  },
+  {
+    "id":"x/direct_message/bounded-ask@1",
+    "surfaces":["x/direct_message"], "goals":["leads","clicks"],
+    "shape":"State the supported context, make one specific request, and name what happens if the answer is no.", "slots":[{"name":"supported context","from":"spine.claim","required":true},{"name":"specific request","from":"message.core","required":true},{"name":"graceful exit","from":"message.core","required":true}],
+    "claimRules":["core/claim/no-unverifiable-promise","core/claim/no-manipulation"], "consent":false,
+    "source":[{"kind":"server","path":"src/lib/writing/writing-intent.ts","observedAt":"2026-09"}], "confidence":"low",
+    "reviewBy":"2027-02-28", "status":"active"
   }
 ]
 ```
@@ -209,6 +269,34 @@ how-to shapes for saves, and data/story shapes for awareness. Evidence fit overr
     "class":"heuristic", "statement":"Do not add mechanical numbering when sequence is already clear.",
     "applies":["x/thread"], "severity":"warning",
     "source":[{"kind":"corpus","path":"docs-dev/refs/manifest.json","observedAt":"2026-07"}], "confidence":"low",
+    "reviewBy":"2027-02-28", "status":"active"
+  },
+  {
+    "id":"x/reply/heuristic/answer-before-pitch",
+    "class":"heuristic", "statement":"Answer the thread before mentioning anything of your own.",
+    "applies":["x/reply"], "severity":"warning",
+    "source":[{"kind":"server","path":"src/lib/writing/writing-intent.ts","observedAt":"2026-09"}], "confidence":"low",
+    "reviewBy":"2027-02-28", "status":"active"
+  },
+  {
+    "id":"x/reply/heuristic/no-generic-agreement",
+    "class":"heuristic", "statement":"Do not open with bare agreement or praise that carries no information.",
+    "applies":["x/reply"], "severity":"warning",
+    "source":[{"kind":"server","path":"src/lib/writing/writing-intent.ts","observedAt":"2026-09"}], "confidence":"low",
+    "reviewBy":"2027-02-28", "status":"active"
+  },
+  {
+    "id":"x/direct_message/heuristic/one-ask",
+    "class":"heuristic", "statement":"Make at most one ask per message.",
+    "applies":["x/direct_message"], "severity":"warning",
+    "source":[{"kind":"server","path":"src/lib/writing/writing-intent.ts","observedAt":"2026-09"}], "confidence":"low",
+    "reviewBy":"2027-02-28", "status":"active"
+  },
+  {
+    "id":"x/direct_message/heuristic/no-cold-pitch",
+    "class":"heuristic", "statement":"Do not pitch without a real prior interaction to reference.",
+    "applies":["x/direct_message"], "severity":"warning",
+    "source":[{"kind":"server","path":"src/lib/writing/writing-intent.ts","observedAt":"2026-09"}], "confidence":"low",
     "reviewBy":"2027-02-28", "status":"active"
   }
 ]

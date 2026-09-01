@@ -38,6 +38,26 @@ const supportedPublish = (
   notes,
 });
 
+/**
+ * A surface Signals can research, draft, audit, and export, but never send.
+ *
+ * Replies, comments, and direct messages have no publish adapter and are not getting one here
+ * (#377 keeps nurture `assist_only`), so `publish` stays `draft_only` and `engage` stays
+ * `unsupported`. Draft and audit are supported because the shared writing-intent lane needs a real
+ * audited artifact before approval.
+ */
+const assistOnlySurface = (notes: string): SurfaceCapabilities => ({
+  research: "supported",
+  draft: "supported",
+  audit: "supported",
+  export: "supported",
+  target: "supported",
+  publish: "draft_only",
+  metrics: "unsupported",
+  engage: "unsupported",
+  notes,
+});
+
 const futureSurface = (
   publish: "draft_only" | "export_only",
   target: CapabilityState,
@@ -57,26 +77,30 @@ const futureSurface = (
 export const WRITING_SURFACE_CAPABILITIES: Record<SurfaceId, SurfaceCapabilities> = {
   "x/post": supportedPublish("direct", "supported", "x-publish.cjs"),
   "x/thread": supportedPublish("direct", "supported", "x-publish.cjs"),
-  "x/reply": futureSurface("draft_only", "supported", "Writing overlay lands in #353."),
+  "x/reply": assistOnlySurface("Draft/audit only; reply submission has no adapter."),
   "x/quote": futureSurface(
     "draft_only",
     "supported",
     "Quote publish exists; its writing overlay lands in #353.",
   ),
+  "x/direct_message": assistOnlySurface("Draft/audit only; DM sending has no adapter."),
   "linkedin/post": supportedPublish(
     "beta",
     "supported",
     "Shared connections are verify-only; use a dedicated connection for multiple members.",
   ),
-  "linkedin/comment": futureSurface(
-    "draft_only",
-    "supported",
-    "Writing overlay lands in #353.",
+  "linkedin/comment": assistOnlySurface("Draft/audit only; comment submission has no adapter."),
+  "linkedin/direct_message": assistOnlySurface(
+    "Draft/audit only; message and InMail sending have no adapter.",
   ),
   "facebook/post": supportedPublish(
     "direct",
     "beta",
     "Target kind may be profile or page; publisher is facebook-publish.cjs.",
+  ),
+  "facebook/comment": assistOnlySurface("Draft/audit only; comment submission has no adapter."),
+  "facebook/direct_message": assistOnlySurface(
+    "Draft/audit only; message sending has no adapter.",
   ),
   "threads/post": futureSurface("draft_only", "unsupported", "No target adapter or publisher."),
   "threads/thread": futureSurface("draft_only", "unsupported", "No target adapter or publisher."),
@@ -97,6 +121,16 @@ export const WRITING_SURFACE_CAPABILITIES: Record<SurfaceId, SurfaceCapabilities
 
 export function getSurfaceCapabilities(surface: SurfaceId): SurfaceCapabilities {
   return WRITING_SURFACE_CAPABILITIES[surface];
+}
+
+/**
+ * Whether a surface may reach a publish/send adapter at all.
+ *
+ * The publish lane asks this instead of re-deriving the `direct | beta` pair, so a surface added
+ * with `draft_only`/`export_only`/`unsupported` is unreachable by construction.
+ */
+export function canReachPublishAdapter(capability: PublishCapability): boolean {
+  return capability === "direct" || capability === "beta";
 }
 
 const PUBLISH_RANK: Record<PublishCapability, number> = {

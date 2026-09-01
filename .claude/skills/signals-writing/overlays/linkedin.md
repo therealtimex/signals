@@ -2,7 +2,7 @@
 overlayId: overlay:linkedin
 version: 1
 platform: linkedin
-surfaces: [linkedin/post]
+surfaces: [linkedin/post, linkedin/comment, linkedin/direct_message]
 reviewedAt: 2026-08-29
 sources: [docs-dev/refs/manifest.json, src/lib/writing/variant-writing.ts]
 ---
@@ -28,6 +28,34 @@ the approval card must preserve that capability label.
     "class":"hard", "statement":"A post contains exactly one ordered unit.",
     "applies":["linkedin/post"], "severity":"blocker",
     "source":[{"kind":"server","path":"src/lib/writing/variant-writing.ts#exactSurfaceUnits"}], "value":1,
+    "enforcedBy":"server:exactSurfaceUnits", "status":"active"
+  },
+  {
+    "id":"linkedin/comment/hard/char-limit",
+    "class":"hard", "statement":"A comment is at most 1250 UTF-16 code units.",
+    "applies":["linkedin/comment"], "severity":"blocker",
+    "source":[{"kind":"server","path":"src/lib/writing/variant-writing.ts#hardLimit"}], "value":1250,
+    "enforcedBy":"server:hardLimit", "status":"active"
+  },
+  {
+    "id":"linkedin/comment/hard/single-unit",
+    "class":"hard", "statement":"A comment contains exactly one ordered unit.",
+    "applies":["linkedin/comment"], "severity":"blocker",
+    "source":[{"kind":"server","path":"src/lib/writing/variant-writing.ts#hardLimit"}], "value":1,
+    "enforcedBy":"server:exactSurfaceUnits", "status":"active"
+  },
+  {
+    "id":"linkedin/direct_message/hard/char-limit",
+    "class":"hard", "statement":"A message is at most 8000 UTF-16 code units.",
+    "applies":["linkedin/direct_message"], "severity":"blocker",
+    "source":[{"kind":"server","path":"src/lib/writing/variant-writing.ts#hardLimit"}], "value":8000,
+    "enforcedBy":"server:hardLimit", "status":"active"
+  },
+  {
+    "id":"linkedin/direct_message/hard/single-unit",
+    "class":"hard", "statement":"A message contains exactly one ordered unit.",
+    "applies":["linkedin/direct_message"], "severity":"blocker",
+    "source":[{"kind":"server","path":"src/lib/writing/variant-writing.ts#hardLimit"}], "value":1,
     "enforcedBy":"server:exactSurfaceUnits", "status":"active"
   }
 ]
@@ -188,6 +216,38 @@ the approval card must preserve that capability label.
     "claimRules":["core/claim/no-invented-number"], "consent":false,
     "source":[{"kind":"corpus","path":"docs-dev/refs/manifest.json","observedAt":"2026-07"}], "confidence":"low",
     "reviewBy":"2027-02-28", "status":"active"
+  },
+  {
+    "id":"linkedin/comment/specific-addition@1",
+    "surfaces":["linkedin/comment"], "goals":["replies","follows"],
+    "shape":"Extend the post with one preserved specific the author did not cover.", "slots":[{"name":"author point","from":"message.core","required":true},{"name":"preserved specific","from":"spine.claim","required":true}],
+    "claimRules":["core/claim/no-invented-fact"], "consent":false,
+    "source":[{"kind":"server","path":"src/lib/writing/writing-intent.ts","observedAt":"2026-09"}], "confidence":"low",
+    "reviewBy":"2027-02-28", "status":"active"
+  },
+  {
+    "id":"linkedin/comment/practitioner-note@1",
+    "surfaces":["linkedin/comment"], "goals":["replies","reposts","leads"],
+    "shape":"Give the operator-level detail behind the claim, in plain language, with the evidence attached.", "slots":[{"name":"claim under discussion","from":"message.core","required":true},{"name":"operator detail","from":"spine.claim","required":true}],
+    "claimRules":["core/claim/no-invented-fact","core/claim/no-third-party-dunk"], "consent":false,
+    "source":[{"kind":"server","path":"src/lib/writing/writing-intent.ts","observedAt":"2026-09"}], "confidence":"low",
+    "reviewBy":"2027-02-28", "status":"active"
+  },
+  {
+    "id":"linkedin/direct_message/shared-context-opener@1",
+    "surfaces":["linkedin/direct_message"], "goals":["replies","leads"],
+    "shape":"Name the shared context truthfully, state the reason for the message, and close with one bounded ask.", "slots":[{"name":"shared context","from":"spine.claim","required":true},{"name":"reason","from":"message.core","required":true},{"name":"bounded ask","from":"message.core","required":true}],
+    "claimRules":["core/claim/no-invented-fact","core/claim/no-unverifiable-promise"], "consent":false,
+    "source":[{"kind":"server","path":"src/lib/writing/writing-intent.ts","observedAt":"2026-09"}], "confidence":"low",
+    "reviewBy":"2027-02-28", "status":"active"
+  },
+  {
+    "id":"linkedin/direct_message/bounded-proposal@1",
+    "surfaces":["linkedin/direct_message"], "goals":["leads","clicks"],
+    "shape":"Propose one concrete collaboration, state what each side brings from the evidence, and bound the commitment.", "slots":[{"name":"concrete proposal","from":"message.core","required":true},{"name":"supported contribution","from":"spine.claim","required":true},{"name":"bounded commitment","from":"message.core","required":true}],
+    "claimRules":["core/claim/no-unverifiable-promise","core/claim/named-party-consent"], "consent":true,
+    "source":[{"kind":"server","path":"src/lib/writing/writing-intent.ts","observedAt":"2026-09"}], "confidence":"low",
+    "reviewBy":"2027-02-28", "status":"active"
   }
 ]
 ```
@@ -245,6 +305,34 @@ or ledger shapes for saves, and story/data shapes for awareness. Evidence fit ov
     "source":[{"kind":"corpus","path":"docs-dev/refs/manifest.json","observedAt":"2026-07"}], "confidence":"low",
     "reviewBy":"2027-02-28", "status":"active",
     "notes":"Corpus sources disagree between 8 and 10 percent; this overlay chooses 8."
+  },
+  {
+    "id":"linkedin/comment/heuristic/no-generic-praise",
+    "class":"heuristic", "statement":"Do not open with generic praise; lead with the specific.",
+    "applies":["linkedin/comment"], "severity":"warning",
+    "source":[{"kind":"server","path":"src/lib/writing/writing-intent.ts","observedAt":"2026-09"}], "confidence":"low",
+    "reviewBy":"2027-02-28", "status":"active"
+  },
+  {
+    "id":"linkedin/comment/heuristic/no-link-drop",
+    "class":"heuristic", "statement":"Do not drop an external link into a comment without being asked.",
+    "applies":["linkedin/comment"], "severity":"warning",
+    "source":[{"kind":"server","path":"src/lib/writing/writing-intent.ts","observedAt":"2026-09"}], "confidence":"low",
+    "reviewBy":"2027-02-28", "status":"active"
+  },
+  {
+    "id":"linkedin/direct_message/heuristic/one-ask",
+    "class":"heuristic", "statement":"Make at most one ask per message.",
+    "applies":["linkedin/direct_message"], "severity":"warning",
+    "source":[{"kind":"server","path":"src/lib/writing/writing-intent.ts","observedAt":"2026-09"}], "confidence":"low",
+    "reviewBy":"2027-02-28", "status":"active"
+  },
+  {
+    "id":"linkedin/direct_message/heuristic/no-template-open",
+    "class":"heuristic", "statement":"Do not open with a recognisable outreach template line.",
+    "applies":["linkedin/direct_message"], "severity":"warning",
+    "source":[{"kind":"server","path":"src/lib/writing/writing-intent.ts","observedAt":"2026-09"}], "confidence":"low",
+    "reviewBy":"2027-02-28", "status":"active"
   }
 ]
 ```

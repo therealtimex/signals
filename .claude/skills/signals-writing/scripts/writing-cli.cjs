@@ -14,7 +14,17 @@ function newId(prefix) {
   return `${prefix}_${crypto.randomBytes(12).toString("base64url")}`;
 }
 
+// Mirrors SURFACE_HARD_LIMITS in src/lib/writing/variant-writing.ts. A DM is not a post.
+const SURFACE_HARD_LIMITS = {
+  "x/direct_message": 10_000,
+  "linkedin/comment": 1_250,
+  "linkedin/direct_message": 8_000,
+  "facebook/comment": 8_000,
+  "facebook/direct_message": 20_000,
+};
+
 function hardLimit(surface) {
+  if (SURFACE_HARD_LIMITS[surface] !== undefined) return SURFACE_HARD_LIMITS[surface];
   if (surface.startsWith("x/")) return 280;
   if (surface.startsWith("linkedin/")) return 3_000;
   if (surface.startsWith("facebook/")) return 63_206;

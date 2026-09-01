@@ -7,6 +7,7 @@ import { resolveTargetById } from "@/lib/db/queries/platform-targets";
 import { AgentToolError } from "@/lib/agent-tools/types";
 import { deriveAuditVerdict, deriveRiskTier, validateAuditFindingSemantics } from "@/lib/writing/audit";
 import { getSurfaceCapabilities } from "@/lib/writing/capabilities";
+import { isAssistOnlyIntent } from "@/lib/writing/writing-intent";
 import {
   type ApprovalState,
   type LaunchWriting,
@@ -91,7 +92,24 @@ export function deriveHard(input: { units: VariantWriting["units"]; media?: { as
   };
 }
 
+/**
+ * Surfaces whose limit is not the platform default.
+ *
+ * A DM is not a post: X allows 10k characters in a direct message and 280 in a reply, so a single
+ * per-platform default would audit every nurture message against the wrong ceiling. Mirrored in
+ * `.claude/skills/signals-writing/scripts/writing-cli.cjs`; the skill parity test pins the pair.
+ */
+const SURFACE_HARD_LIMITS: Record<string, number> = {
+  "x/direct_message": 10_000,
+  "linkedin/comment": 1_250,
+  "linkedin/direct_message": 8_000,
+  "facebook/comment": 8_000,
+  "facebook/direct_message": 20_000,
+};
+
 export function hardLimit(surface: string): number {
+  const explicit = SURFACE_HARD_LIMITS[surface];
+  if (explicit !== undefined) return explicit;
   if (surface.startsWith("x/")) return 280;
   if (surface.startsWith("linkedin/")) return 3_000;
   if (surface.startsWith("facebook/")) return 63_206;
@@ -121,26 +139,31 @@ function approvalFor(input: {
   unchanged: boolean;
   now: number;
   staleReason?: ApprovalState["revokedReason"];
+  /** True when the artifact was composed under an `assist_only` writing intent (#410). */
+  assistOnly: boolean;
 }): ApprovalState {
   const riskTier = input.audit ? deriveRiskTier(input.audit, input.spine, input.targetKind) : "low";
+  // An assist-only proposal pins `explicit`: a workspace-wide `auto_low_risk` policy must not
+  // approve a touchpoint on the operator's behalf (#377).
+  const policy: ApprovalState["policy"] = input.assistOnly ? "explicit" : input.launch.approvalPolicy;
   if (input.unchanged && input.existing?.approval && input.existing.audit?.id === input.audit?.id) {
-    return { ...input.existing.approval, riskTier, policy: input.launch.approvalPolicy };
+    return { ...input.existing.approval, riskTier, policy };
   }
   if (input.existing?.approval.state === "approved") {
     return {
       ...input.existing.approval,
       state: "revoked",
       riskTier,
-      policy: input.launch.approvalPolicy,
+      policy,
       auditId: input.audit?.id,
       at: input.now,
       revokedReason: input.staleReason ?? "audit_stale",
     };
   }
-  if (input.audit && input.launch.approvalPolicy === "auto_low_risk" && riskTier === "low" && input.audit.verdict !== "block") {
-    return { schemaVersion: 1, state: "approved", riskTier, policy: input.launch.approvalPolicy, auditId: input.audit.id, by: "policy", at: input.now };
+  if (input.audit && policy === "auto_low_risk" && riskTier === "low" && input.audit.verdict !== "block") {
+    return { schemaVersion: 1, state: "approved", riskTier, policy, auditId: input.audit.id, by: "policy", at: input.now };
   }
-  return { schemaVersion: 1, state: "pending", riskTier, policy: input.launch.approvalPolicy, ...(input.audit ? { auditId: input.audit.id } : {}) };
+  return { schemaVersion: 1, state: "pending", riskTier, policy, ...(input.audit ? { auditId: input.audit.id } : {}) };
 }
 
 function exactSurfaceUnits(surface: string, count: number): boolean {
@@ -298,12 +321,13 @@ export function persistWritingVariant(
     audit = { ...candidate, verdict };
   }
   const unchanged = Boolean(previous?.audit && audit && previous.audit.inputHash === inputHash && previous.audit.id === audit.id);
+  const assistOnly = isAssistOnlyIntent(authoritativeWriting.intent);
   const approval = input.status === "rejected"
     ? {
         schemaVersion: 1 as const,
         state: "rejected" as const,
         riskTier: audit ? deriveRiskTier(audit, spine, targetKind) : "low" as const,
-        policy: launchResult.data.approvalPolicy,
+        policy: assistOnly ? ("explicit" as const) : launchResult.data.approvalPolicy,
         ...(audit ? { auditId: audit.id } : {}),
       }
     : approvalFor({
@@ -314,6 +338,7 @@ export function persistWritingVariant(
         existing: previous,
         unchanged,
         now,
+        assistOnly,
         ...(previous?.audit?.personality
           && audit?.personality
           && previous.audit.personality.currentSourceHash !== audit.personality.currentSourceHash

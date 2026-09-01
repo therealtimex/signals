@@ -8,6 +8,7 @@ export const WRITING_ID_PREFIXES = [
   "vp",
   "vs",
   "prp",
+  "wint",
   "pb",
   "pm",
 ] as const;

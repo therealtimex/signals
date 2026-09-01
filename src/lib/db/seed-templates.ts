@@ -14,6 +14,7 @@ import {
 import {
   CONTACT_RELATIONSHIP_NURTURE_TEMPLATE_NAME,
   buildContactNurtureTemplateConfig,
+  buildContactNurtureWritingComposition,
 } from "@/lib/workflows/contact-relationship-nurture";
 import {
   NETWORK_SNOWBALL_TEMPLATE_NAME,
@@ -27,7 +28,7 @@ import { buildWritingTemplateConfig } from "@/lib/workflows/signals-writing";
 import { buildContactWebResearchTemplateConfig } from "@/lib/workflows/contact-web-research";
 
 /** Bump this when seed template prompts change to trigger updates on existing installs. */
-const SEED_VERSION = 28;
+const SEED_VERSION = 29;
 
 export const CONTACT_PROFILE_PIPELINE_TEMPLATE_NAME = "Contact profile pipeline";
 export const CONTACT_WEB_RESEARCH_TEMPLATE_NAME = "Contact Web Research";
@@ -559,14 +560,17 @@ gate when it is enabled.
   },
   {
     name: CONTACT_RELATIONSHIP_NURTURE_TEMPLATE_NAME,
-    description: "Autonomous persona-grounded relationship progression. Nurtures CRM contacts toward goals (follow back, repost, mutual engagement, conversation, partnership) with salted pacing delays and milestone tracking.",
+    description: "Assist-only persona-grounded relationship progression. Observes milestones and proposes Personality-bound touchpoints for CRM contacts (follow back, repost, mutual engagement, conversation, partnership) through the shared writing pipeline. Proposes; never publishes.",
     templateType: "nurture",
     targetPersona: "High-value CRM contacts with assigned relationship goals",
     estimatedCost: 0.45,
-    systemPrompt: `You are an autonomous relationship nurture agent for Signals CRM.
+    systemPrompt: `You are an assist-only relationship nurture agent for Signals CRM.
 
 ## Objective
-Progress relationships with high-value CRM contacts by executing personalized, persona-grounded touchpoints aligned with each contact's assigned relationship goal (follow_back, repost_amplification, mutual_engagement, warm_conversation, partnership).
+Progress relationships with high-value CRM contacts by proposing personalized, Personality-bound touchpoints aligned with each contact's assigned relationship goal (follow_back, repost_amplification, mutual_engagement, warm_conversation, partnership).
+
+## Mandate
+assist_only. You draft, audit, and propose. You never publish, comment, reply, send a message, open a publish job, or schedule one. Every touchpoint stops at an explicitly approved, materialized proposal.
 
 ## Scope & Target Resolution
 1. Query unachieved relationship contacts:
@@ -575,33 +579,26 @@ Progress relationships with high-value CRM contacts by executing personalized, p
    - Respect maxTargets and maxActionsPerRun limits.
 
 2. For each target contact:
-   - Inspect their persona (interests, conversion triggers, tone, archetype) using get_contact({ contactId }).
-   - Connect to the acting profile via RealTimeX Browser / CDP.
-   - Check if milestone has been achieved (e.g. contact followed back or reposted). If achieved, call update_contact({ contactId, relationshipGoalStatus: "achieved" }).
-   - If unachieved:
-     * follow_back: Leave a high-value comment on their recent post matching their persona interests, wait 20s–40s salted delay, then follow. Update status to "in_progress".
-     * repost_amplification: Publish an organic spotlight post highlighting their project and tag them.
-     * mutual_engagement: Post an authoritative answer on their active discussions.
-     * warm_conversation: Send a tailored direct message or stage draft task.
-     * partnership: Stage co-marketing proposal draft in CRM.
+   - Read recipient context with get_contact({ contactId }) — interests, conversion triggers, tone, archetype. Recipient context selects relevance; it never becomes the speaker and never becomes a fact.
+   - Observe their live stream read-only to check whether the milestone is already achieved (followed back, reposted). If achieved, call update_contact({ contactId, relationshipGoalStatus: "achieved" }).
+   - If unachieved, emit one writing intent and hand it to the shared writing-intent contract in the brief. Do not author prose from these instructions.
 
-## Safety & Account Health
-- Apply a salted sleep delay (20s–45s) between consecutive interactions to protect account health.
-- Never exceed maxActionsPerRun.
-- If requireApproval is true, present batches of 3–5 drafts for operator approval before publishing.
+## Voice and privacy boundary
+- The workspace Personality answers "who is speaking". The contact answers "who is receiving".
+- Never write contact facts, persona attributes, relationship notes, or private CRM fields into IDENTITY.md, SOUL.md, VOICE.md, or BRAND.md.
+- Submit only the active bindingId. Signals derives Personality, workspace, identity, source hashes, target representation, and audit snapshots.
 
-## Execution & Post-Submission Verification
-- Native Submit: On web editors (Facebook, LinkedIn, X), locate and click the native submit button element (e.g. "Post comment", "Comment", "Reply", "Send") rather than relying on synthetic Enter keys.
-- Verification Gate: Always verify submission success by taking a DOM snapshot to confirm the input box is cleared and the comment appears in the live comment stream BEFORE writing back to Signals CRM.
+## Approval
+- Explicit user approval is required for every proposal. auto_low_risk does not apply here.
+- If requireApproval is true, present batches of 3–5 proposals for operator review.
+- Never manufacture approval evidence.
 
 ## Mandatory Write-Back to Signals CRM
-After executing any action:
-1. Save published content/replies:
-   POST $SIGNALS_BASE_URL/api/content with JSON:
-   { "body": "<published text>", "contentType": "reply", "status": "published", "origin": "authored", "direction": "outbound", "platformTarget": "<platformTarget: x|linkedin|facebook>", "platformUrl": "<url of published post/reply>", "contactId": "<contactId>" }
-2. Log the touchpoint interaction:
+After each proposal:
+1. materialize_variant owns the content record. Do not POST /api/content for a proposal and never mark one published.
+2. Log the proposed touchpoint:
    POST $SIGNALS_BASE_URL/api/agent-tools/invoke with JSON:
-   { "tool": "log_interaction", "input": { "contactId": "<contactId>", "interactionType": "reply", "summary": "<summary>" } }
+   { "tool": "log_interaction", "input": { "contactId": "<contactId>", "interactionType": "reply", "summary": "<proposed touchpoint, variant id, approval state>" } }
 3. Update contact milestone status:
    POST $SIGNALS_BASE_URL/api/agent-tools/invoke with JSON:
    { "tool": "update_contact", "input": { "contactId": "<contactId>", "relationshipGoalStatus": "in_progress" (or "achieved") } }`,
@@ -705,6 +702,15 @@ export function seedTemplates(): { seeded: number; updated: number; skipped: boo
           // read as a live budget.
           updatedConfig = stripRetiredSocialPatrolConfigKeys(updatedConfig) ?? updatedConfig;
         }
+        if (seed.name === CONTACT_RELATIONSHIP_NURTURE_TEMPLATE_NAME) {
+          // #410 moved nurture onto the shared writing pipeline. The opt-in is structural, so an
+          // existing install must gain it — without it the brief keeps the legacy prose lane while
+          // the prompt above tells the agent to use a contract that is not there.
+          updatedConfig = {
+            ...updatedConfig,
+            ...buildContactNurtureWritingComposition(),
+          };
+        }
         if (seed.name === CONTACT_PROFILE_PIPELINE_TEMPLATE_NAME) {
           const existingPipeline = readObject(existingConfig.pipeline);
           const seededPipeline = readObject(seed.config.pipeline);
@@ -728,6 +734,7 @@ export function seedTemplates(): { seeded: number; updated: number; skipped: boo
             // also feeds the brief's `Goal:` line).
             ...(seed.name === CONTACT_PROFILE_PIPELINE_TEMPLATE_NAME ||
             seed.name === SOCIAL_INTENT_PATROL_TEMPLATE_NAME ||
+            seed.name === CONTACT_RELATIONSHIP_NURTURE_TEMPLATE_NAME ||
             seed.name === PLATFORM_NATIVE_WRITING_TEMPLATE_NAME
               ? { description: seed.description }
               : {}),
