@@ -14,8 +14,8 @@
  * Side-effect free on import (see README): the CLI is guarded on argv[1].
  */
 import { execFile } from "node:child_process";
-import { mkdirSync, readdirSync, statSync } from "node:fs";
-import { basename, extname, join } from "node:path";
+import { mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
+import { basename, dirname, extname, join } from "node:path";
 import { promisify } from "node:util";
 import { pathToFileURL } from "node:url";
 import { DEFAULT_VIDEO_DIR } from "./record-guide-tour.mjs";
@@ -32,20 +32,52 @@ export const CONVERT_GUIDE_VIDEO_FLOW_NAME = "convert-guide-video";
 export const DEFAULT_CRF = 20;
 export const DEFAULT_PRESET = "slow";
 
+/** Composed after the name of whichever binary was missing, so it must not name one itself. */
 export const INSTALL_HINT =
-  "ffmpeg is not on PATH. Install it with `brew install ffmpeg` (macOS) or " +
-  "`apt-get install ffmpeg` (Linux), or point SIGNALS_FFMPEG at a binary. " +
+  "Install ffmpeg with `brew install ffmpeg` (macOS) or `apt-get install ffmpeg` (Linux), " +
+  "or point SIGNALS_FFMPEG / SIGNALS_FFPROBE at binaries. " +
   "Recording tours does not need ffmpeg — only converting them for upload does.";
+
+/**
+ * The ffprobe that belongs to this ffmpeg.
+ *
+ * SIGNALS_FFMPEG exists so a binary off PATH can be used, so hardcoding the
+ * literal `ffprobe` would break exactly the setup that flag is for — and break
+ * it at validation, after every expensive encode had already run. ffmpeg ships
+ * ffprobe beside itself, so a path implies its sibling.
+ */
+export function resolveFfprobe(ffmpeg, env = process.env) {
+  if (env.SIGNALS_FFPROBE) return env.SIGNALS_FFPROBE;
+  const dir = dirname(ffmpeg);
+  return dir === "." ? "ffprobe" : join(dir, "ffprobe");
+}
+
+/** Where the encode lands before it has earned the real name. */
+export function partialPath(output) {
+  return join(dirname(output), `.${basename(output, ".mp4")}.part.mp4`);
+}
 
 export function outputFileName(source) {
   return `${basename(source, extname(source))}.mp4`;
 }
 
-/** Every recorded take in the directory, in stable order. */
+/**
+ * Every recorded take in the directory, in stable order.
+ *
+ * A missing directory is an empty set rather than an error: `guide/video` is
+ * gitignored, so on a fresh checkout it does not exist at all, and a raw
+ * `ENOENT: scandir` there would bury the one thing the caller needs to be told
+ * — that they should record something first.
+ */
 export function discoverSources(videoDir, { readdir = readdirSync } = {}) {
-  return readdir(videoDir)
-    .filter((name) => name.toLowerCase().endsWith(".webm"))
-    .sort();
+  let entries;
+  try {
+    entries = readdir(videoDir);
+  } catch (error) {
+    if (error?.code === "ENOENT") return [];
+    throw error;
+  }
+  return entries.filter((name) => name.toLowerCase().endsWith(".webm")).sort();
 }
 
 export function selectSources(only, sources) {
@@ -152,6 +184,7 @@ export function parseArgs(argv = [], env = process.env) {
     preset: DEFAULT_PRESET,
     silentAudio: true,
     ffmpeg: env.SIGNALS_FFMPEG || "ffmpeg",
+    ffprobe: resolveFfprobe(env.SIGNALS_FFMPEG || "ffmpeg", env),
     json: false,
     quiet: false,
     help: false,
@@ -226,6 +259,10 @@ export function createHelpText() {
     "  --json              Emit the result as JSON on stdout.",
     "  --quiet             Suppress progress on stderr.",
     "  -h, --help          Show this help.",
+    "",
+    "Environment:",
+    "  SIGNALS_FFMPEG      ffmpeg binary to use. ffprobe is taken from beside it.",
+    "  SIGNALS_FFPROBE     Override that, if ffprobe lives elsewhere.",
   ].join("\n");
 }
 
@@ -244,16 +281,25 @@ export async function runConvertGuideVideoFlow(args, dependencies = {}) {
     listSources = discoverSources,
     ensureDir = (dir) => mkdirSync(dir, { recursive: true }),
     sizeOf = (file) => statSync(file).size,
+    move = (from, to) => {
+      rmSync(to, { force: true });
+      renameSync(from, to);
+    },
+    discard = (file) => rmSync(file, { force: true }),
     log = () => {},
   } = dependencies;
 
-  if (!(await ffmpegAvailable(args.ffmpeg, { run }))) {
-    return {
-      ok: false,
-      flow: CONVERT_GUIDE_VIDEO_FLOW_NAME,
-      code: "ffmpeg_missing",
-      message: INSTALL_HINT,
-    };
+  // Both, up front. ffprobe missing only at validation time would mean every
+  // encode runs and then every file is rejected.
+  for (const binary of [args.ffmpeg, args.ffprobe]) {
+    if (!(await ffmpegAvailable(binary, { run }))) {
+      return {
+        ok: false,
+        flow: CONVERT_GUIDE_VIDEO_FLOW_NAME,
+        code: "ffmpeg_missing",
+        message: `${binary} is not runnable. ${INSTALL_HINT}`,
+      };
+    }
   }
 
   let sources;
@@ -286,18 +332,23 @@ export async function runConvertGuideVideoFlow(args, dependencies = {}) {
   for (const source of sources) {
     const input = join(args.videoDir, source);
     const output = join(args.videoDir, outputFileName(source));
+    // Encode beside the real file, not onto it. Re-converting otherwise
+    // destroys the last good upload artifact the moment ffmpeg starts writing,
+    // so a truncated input would leave a partial file where a working one was.
+    const partial = partialPath(output);
     log(`${source} -> ${basename(output)}`);
     try {
       await run(args.ffmpeg, ffmpegArgs({
         input,
-        output,
+        output: partial,
         crf: args.crf,
         preset: args.preset,
         silentAudio: args.silentAudio,
       }));
-      const { stdout } = await run("ffprobe", ffprobeArgs(output));
+      const { stdout } = await run(args.ffprobe, ffprobeArgs(partial));
       const summary = probeSummary(stdout);
       assertUsableOutput(summary, { source });
+      move(partial, output);
       converted.push({
         source,
         path: output,
@@ -305,6 +356,7 @@ export async function runConvertGuideVideoFlow(args, dependencies = {}) {
         ...summary,
       });
     } catch (error) {
+      discard(partial);
       failures.push({ source, error: error.message });
     }
   }

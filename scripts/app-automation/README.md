@@ -74,8 +74,9 @@ npm run automation:convert-guide-video -- --only product-tour --crf 18
 **This is the only part of app-automation that needs ffmpeg**, and it is deliberately the only part.
 Recording stays dependency-free so it runs headless anywhere; ffmpeg lives at the publish boundary,
 where the alternative is not publishing at all. Anyone can record — only whoever uploads needs
-`brew install ffmpeg` (or `apt-get install ffmpeg`, or `SIGNALS_FFMPEG` pointing at a binary). A
-missing ffmpeg is reported by name with the install command, not as a spawn `ENOENT`.
+`brew install ffmpeg` (or `apt-get install ffmpeg`, or `SIGNALS_FFMPEG` pointing at a binary —
+`ffprobe` is taken from beside it, overridable with `SIGNALS_FFPROBE`). Both binaries are checked
+up front and reported by name with the install command, not as a spawn `ENOENT` partway through.
 
 Two encode settings decide whether an upload is *accepted* rather than merely produced, and both are
 pinned by a test: `yuv420p`, because x264 can otherwise emit 4:4:4 from VP8 that Safari and
@@ -84,9 +85,10 @@ player shows a frame before fetching the whole file. A silent AAC track is added
 (`--no-silent-audio` to skip) — tours have no audio, and some upload pipelines mishandle a video
 with no audio stream at all.
 
-The output is probed with `ffprobe` and rejected unless it is h264/yuv420p with a non-zero duration.
-ffmpeg exits 0 having written a zero-frame file if its input was truncated, so an mp4 that exists is
-not an mp4 that plays — the same reason the capture flow settles before it believes a screenshot.
+Each encode lands on a hidden partial file and is promoted to its real name only after `ffprobe`
+confirms h264/yuv420p with a non-zero duration. ffmpeg exits 0 having written a zero-frame file if
+its input was truncated, so an mp4 that exists is not an mp4 that plays — and re-converting in place
+would destroy the last good upload artifact the moment ffmpeg started writing.
 
 `automation:test` runs in the `check` gate. It needs no browser, no Dev app, and no second
 checkout, so it is the one part of this directory that CI can hold.

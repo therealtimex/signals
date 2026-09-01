@@ -12,6 +12,8 @@ import {
   ffprobeArgs,
   outputFileName,
   parseArgs,
+  partialPath,
+  resolveFfprobe,
   probeSummary,
   runConvertGuideVideoFlow,
   selectSources,
@@ -44,6 +46,8 @@ function flowDeps(overrides = {}) {
     listSources: () => ["product-tour.webm"],
     ensureDir: () => {},
     sizeOf: () => 2_000_000,
+    move: () => {},
+    discard: () => {},
     ...overrides,
   };
 }
@@ -212,7 +216,8 @@ test("missing ffmpeg is a named failure that says how to install it", async () =
   });
   assert.equal(result.ok, false);
   assert.equal(result.code, "ffmpeg_missing");
-  assert.equal(result.message, INSTALL_HINT);
+  assert.ok(result.message.endsWith(INSTALL_HINT), result.message);
+  assert.match(result.message, /^ffmpeg is not runnable/);
   assert.match(result.message, /brew install ffmpeg/);
   // The point of keeping ffmpeg optional: this must not read as "recording broke".
   assert.match(result.message, /Recording tours does not need ffmpeg/);
@@ -283,4 +288,120 @@ test("--only for an unrecorded journey fails before ffmpeg is invoked", async ()
   assert.equal(result.ok, false);
   assert.equal(result.code, "no_such_recording");
   assert.equal(calls.filter((call) => call.args.includes("-c:v")).length, 0);
+});
+
+test("a missing video directory is an empty set, not an ENOENT", () => {
+  // guide/video is gitignored, so on a fresh checkout it does not exist at all.
+  const readdir = () => {
+    throw Object.assign(new Error("ENOENT: no such file or directory, scandir"), { code: "ENOENT" });
+  };
+  assert.deepEqual(discoverSources("guide/video", { readdir }), []);
+});
+
+test("a directory that fails for any other reason still throws", () => {
+  const readdir = () => {
+    throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
+  };
+  assert.throws(() => discoverSources("guide/video", { readdir }), /EACCES/);
+});
+
+test("a fresh checkout is told to record, not shown a scandir error", async () => {
+  const result = await runConvertGuideVideoFlow(parseArgs([]), {
+    ...flowDeps({
+      listSources: (dir) => discoverSources(dir, {
+        readdir: () => {
+          throw Object.assign(new Error("ENOENT: scandir"), { code: "ENOENT" });
+        },
+      }),
+    }),
+  });
+  assert.equal(result.code, "no_recordings");
+  assert.match(result.message, /automation:record-guide-tour/);
+  assert.doesNotMatch(result.message, /ENOENT|scandir/);
+});
+
+test("ffprobe is resolved beside ffmpeg, so SIGNALS_FFMPEG off PATH works", () => {
+  assert.equal(resolveFfprobe("ffmpeg", {}), "ffprobe");
+  assert.equal(resolveFfprobe("/opt/x/bin/ffmpeg", {}), "/opt/x/bin/ffprobe");
+  assert.equal(resolveFfprobe("/opt/x/bin/ffmpeg", { SIGNALS_FFPROBE: "/usr/bin/ffprobe" }), "/usr/bin/ffprobe");
+});
+
+test("parseArgs carries the resolved ffprobe alongside ffmpeg", () => {
+  const args = parseArgs([], { SIGNALS_FFMPEG: "/opt/x/bin/ffmpeg" });
+  assert.equal(args.ffmpeg, "/opt/x/bin/ffmpeg");
+  assert.equal(args.ffprobe, "/opt/x/bin/ffprobe");
+});
+
+test("the flow probes with the resolved ffprobe, not the literal name", async () => {
+  const { run, calls } = fakeRun();
+  const args = parseArgs([], { SIGNALS_FFMPEG: "/opt/x/bin/ffmpeg" });
+  // fakeRun answers -version for anything, and the probe branch keys on binary.
+  const probing = async (binary, argv) => {
+    calls.push({ binary, args: argv });
+    if (argv.includes("-show_entries")) return { stdout: OK_PROBE, stderr: "" };
+    return { stdout: "", stderr: "" };
+  };
+  const result = await runConvertGuideVideoFlow(args, { ...flowDeps({ run: probing }) });
+  assert.equal(result.ok, true);
+  assert.ok(calls.some((call) => call.binary === "/opt/x/bin/ffprobe"));
+  assert.ok(!calls.some((call) => call.binary === "ffprobe"));
+  void run;
+});
+
+test("a missing ffprobe fails up front, before any encode runs", async () => {
+  const calls = [];
+  const run = async (binary, argv) => {
+    calls.push({ binary, args: argv });
+    if (binary.endsWith("ffprobe")) throw new Error("spawn ffprobe ENOENT");
+    return { stdout: "", stderr: "" };
+  };
+  const result = await runConvertGuideVideoFlow(parseArgs([]), { ...flowDeps({ run }) });
+  assert.equal(result.code, "ffmpeg_missing");
+  assert.match(result.message, /ffprobe is not runnable/);
+  // The expensive part must not have run only to be rejected afterwards.
+  assert.equal(calls.filter((call) => call.args.includes("-c:v")).length, 0);
+});
+
+test("the partial file is a hidden sibling that discovery ignores", () => {
+  assert.equal(partialPath("guide/video/product-tour.mp4"), "guide/video/.product-tour.part.mp4");
+  // Still .mp4, because ffmpeg picks the container from the extension.
+  assert.ok(partialPath("a/b.mp4").endsWith(".mp4"));
+  assert.deepEqual(discoverSources("d", { readdir: () => [".product-tour.part.mp4", "x.webm"] }), ["x.webm"]);
+});
+
+test("the encode lands on a partial path and is promoted only after it validates", async () => {
+  const { run, calls } = fakeRun();
+  const moves = [];
+  const result = await runConvertGuideVideoFlow(parseArgs([]), {
+    ...flowDeps({ run, move: (from, to) => moves.push([from, to]) }),
+  });
+  assert.equal(result.ok, true);
+  const encode = calls.find((call) => call.args.includes("-c:v"));
+  assert.equal(encode.args.at(-1), "guide/video/.product-tour.part.mp4");
+  assert.deepEqual(moves, [["guide/video/.product-tour.part.mp4", "guide/video/product-tour.mp4"]]);
+});
+
+test("a failed encode discards the partial and leaves the previous mp4 intact", async () => {
+  const { run } = fakeRun({ failOn: "product-tour" });
+  const moves = [];
+  const discarded = [];
+  const result = await runConvertGuideVideoFlow(parseArgs([]), {
+    ...flowDeps({ run, move: (from, to) => moves.push([from, to]), discard: (f) => discarded.push(f) }),
+  });
+  assert.equal(result.ok, false);
+  // Nothing was promoted, so a previously good upload artifact survives.
+  assert.deepEqual(moves, []);
+  assert.deepEqual(discarded, ["guide/video/.product-tour.part.mp4"]);
+});
+
+test("a zero-duration encode is never promoted over the real file", async () => {
+  const { run } = fakeRun({
+    probe: JSON.stringify({ streams: [{ codec_name: "h264", pix_fmt: "yuv420p" }], format: { duration: "0" } }),
+  });
+  const moves = [];
+  const result = await runConvertGuideVideoFlow(parseArgs([]), {
+    ...flowDeps({ run, move: (from, to) => moves.push([from, to]) }),
+  });
+  assert.equal(result.ok, false);
+  assert.deepEqual(moves, []);
 });
