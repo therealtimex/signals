@@ -4,10 +4,13 @@ import {
   dispatchTerminalAgentViaSendMessage,
   isTerminalRuntimeSessionBusy,
   launchTerminalCliAgent,
+  listTerminalRuntimeSessions,
   readRtxJsonBody,
+  resolveActiveTerminalSessionIdForThread,
   terminateTerminalRuntimeSession,
   waitForTerminalSessionIdle,
 } from "@/lib/rtx/runtime-sessions";
+import liveTerminalSessionsPayload from "./host-fixtures/list-terminal-sessions.live.json";
 
 describe("readRtxJsonBody", () => {
   it("parses JSON responses", async () => {
@@ -487,23 +490,21 @@ describe("terminal session idle helpers", () => {
         new Response(
           JSON.stringify({
             success: true,
-            results: {
-              workspaces: [
-                {
-                  threads: [
-                    {
-                      sessions: [
-                        {
-                          id: "cli-agent:session-1",
-                          chatLinkedTurnStateKnown: true,
-                          chatLinkedPendingTurn: { id: "turn-1", state: "capturing" },
-                        },
-                      ],
-                    },
-                  ],
-                },
-              ],
-            },
+            workspaces: [
+              {
+                threads: [
+                  {
+                    sessions: [
+                      {
+                        id: "cli-agent:session-1",
+                        chatLinkedTurnStateKnown: true,
+                        chatLinkedPendingTurn: { id: "turn-1", state: "capturing" },
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
           }),
           { status: 200 }
         )
@@ -512,23 +513,21 @@ describe("terminal session idle helpers", () => {
         new Response(
           JSON.stringify({
             success: true,
-            results: {
-              workspaces: [
-                {
-                  threads: [
-                    {
-                      sessions: [
-                        {
-                          id: "cli-agent:session-1",
-                          chatLinkedTurnStateKnown: true,
-                          chatLinkedPendingTurn: null,
-                        },
-                      ],
-                    },
-                  ],
-                },
-              ],
-            },
+            workspaces: [
+              {
+                threads: [
+                  {
+                    sessions: [
+                      {
+                        id: "cli-agent:session-1",
+                        chatLinkedTurnStateKnown: true,
+                        chatLinkedPendingTurn: null,
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
           }),
           { status: 200 }
         )
@@ -543,5 +542,99 @@ describe("terminal session idle helpers", () => {
     await vi.advanceTimersByTimeAsync(10);
     await expect(idlePromise).resolves.toEqual({ idle: true });
     vi.useRealTimers();
+  });
+});
+
+/**
+ * These run against `list-terminal-sessions.live.json` — a verbatim capture of
+ * `GET /cli/list-terminal-sessions?includeClosed=false` from a running
+ * RealTimeX host (paths scrubbed, nothing else edited).
+ *
+ * The bug this guards against was invisible to hand-written mocks: every mock
+ * in this file described the payload as `{ results: { workspaces } }`, the
+ * parser read the same invented shape, and both agreed with each other while
+ * disagreeing with the host, which returns `workspaces` at the top level. The
+ * parser therefore saw zero sessions in production for every response, so
+ * `resolveActiveTerminalSessionIdForThread` returned null and the orchestrator
+ * terminal was never torn down. Assert against captured bytes, not a mock.
+ */
+describe("list-terminal-sessions parsing (captured host payload)", () => {
+  const env = { RTX_APP_ID: "app-1", RTX_API_BASE_URL: "http://127.0.0.1:3001" };
+  const liveBody = () =>
+    new Response(JSON.stringify(liveTerminalSessionsPayload), { status: 200 });
+
+  /**
+   * The host — not the caller — applies `workspaceSlug`/`threadSlug`, so a mock
+   * that ignores the query would let a caller that never sends them still pass.
+   */
+  const liveHost = () =>
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      const workspaceSlug = url.searchParams.get("workspaceSlug");
+      const threadSlug = url.searchParams.get("threadSlug");
+      const workspaces = liveTerminalSessionsPayload.workspaces
+        .filter((workspace) => !workspaceSlug || workspace.workspaceSlug === workspaceSlug)
+        .map((workspace) => ({
+          ...workspace,
+          threads: workspace.threads.filter(
+            (thread) => !threadSlug || thread.threadSlug === threadSlug
+          ),
+        }));
+      return new Response(
+        JSON.stringify({ ...liveTerminalSessionsPayload, workspaces }),
+        { status: 200 }
+      );
+    }) as unknown as typeof fetch;
+
+  it("sees every session the host reported", async () => {
+    const expectedIds = liveTerminalSessionsPayload.workspaces.flatMap((workspace) =>
+      workspace.threads.flatMap((thread) => thread.sessions.map((session) => session.id))
+    );
+    expect(expectedIds.length).toBeGreaterThan(0);
+
+    const sessions = await listTerminalRuntimeSessions(
+      { includeClosed: false },
+      env,
+      vi.fn().mockResolvedValue(liveBody()) as unknown as typeof fetch
+    );
+
+    expect(sessions.map((session) => session.id)).toEqual(expectedIds);
+  });
+
+  it("resolves the orchestrator thread's live session id", async () => {
+    const sessionId = await resolveActiveTerminalSessionIdForThread(
+      "f3a8c2e1-4d5b-4a7c-8e9f-0a1b2c3d4e5f",
+      "signals-orchestrator",
+      env,
+      liveHost()
+    );
+
+    expect(sessionId).toBe("cli-agent:8369c139-e79f-4776-84d6-4077a7a5673c");
+  });
+
+  it("still reads a busy chat-linked turn out of the captured shape", async () => {
+    const sessions = await listTerminalRuntimeSessions(
+      { includeClosed: false },
+      env,
+      vi.fn().mockResolvedValue(liveBody()) as unknown as typeof fetch
+    );
+
+    const busy = sessions.find(
+      (session) => session.id === "cli-agent:2e68d09f-9487-49de-bfbd-92dc671fbd83"
+    );
+    expect(isTerminalRuntimeSessionBusy(busy)).toBe(true);
+  });
+
+  it("still reads the legacy results-wrapped shape", async () => {
+    const wrapped = { success: true, results: { workspaces: liveTerminalSessionsPayload.workspaces } };
+    const sessions = await listTerminalRuntimeSessions(
+      { includeClosed: false },
+      env,
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify(wrapped), { status: 200 })
+      ) as unknown as typeof fetch
+    );
+
+    expect(sessions).toHaveLength(3);
   });
 });

@@ -1,0 +1,108 @@
+{
+  "success": true,
+  "totalCount": 3,
+  "workspaces": [
+    {
+      "workspaceSlug": "f3a8c2e1-4d5b-4a7c-8e9f-0a1b2c3d4e5f",
+      "totalCount": 3,
+      "threads": [
+        {
+          "threadSlug": "f0238db7-6620-4452-9a91-bcdb9dd23fdd",
+          "totalCount": 1,
+          "sessions": [
+            {
+              "id": "cli-agent:9f8af01f-0332-4bb7-845c-8e81a8049101",
+              "sessionId": "cli-agent:9f8af01f-0332-4bb7-845c-8e81a8049101",
+              "latestSessionId": "cli-agent:9f8af01f-0332-4bb7-845c-8e81a8049101",
+              "activityCardId": "terminal-card:cli-agent:9f8af01f-0332-4bb7-845c-8e81a8049101",
+              "controlSessionId": "9f8af01f-0332-4bb7-845c-8e81a8049101",
+              "ptySessionId": "9f8af01f-0332-4bb7-845c-8e81a8049101",
+              "status": "running",
+              "attached": true,
+              "source": "live",
+              "workspaceSlug": "f3a8c2e1-4d5b-4a7c-8e9f-0a1b2c3d4e5f",
+              "threadSlug": "f0238db7-6620-4452-9a91-bcdb9dd23fdd",
+              "agentLabel": "antigravity",
+              "assistantAgent": {
+                "name": "antigravity"
+              },
+              "latestOccurredAt": "2026-09-01T03:51:01.482Z",
+              "chatLinkedTurnStateKnown": true,
+              "sessionMeta": {
+                "cwd": "/Users/example/.realtimex.ai/desktop-user-data/dev/users/example_user/storage/working-data/f3a8c2e1-4d5b-4a7c-8e9f-0a1b2c3d4e5f",
+                "logPath": "/var/folders/40/52g9p4w13h5cx666bfj6k74h0000gn/T/realtimex-terminal-activity-XXXXXX/antigravity.log"
+              }
+            }
+          ]
+        },
+        {
+          "threadSlug": "9b62b964-5014-494d-94c9-0724bb1936aa",
+          "totalCount": 1,
+          "sessions": [
+            {
+              "id": "cli-agent:2e68d09f-9487-49de-bfbd-92dc671fbd83",
+              "sessionId": "cli-agent:2e68d09f-9487-49de-bfbd-92dc671fbd83",
+              "latestSessionId": "cli-agent:2e68d09f-9487-49de-bfbd-92dc671fbd83",
+              "activityCardId": "terminal-card:cli-agent:2e68d09f-9487-49de-bfbd-92dc671fbd83",
+              "controlSessionId": "2e68d09f-9487-49de-bfbd-92dc671fbd83",
+              "ptySessionId": "2e68d09f-9487-49de-bfbd-92dc671fbd83",
+              "status": "running",
+              "attached": true,
+              "source": "live",
+              "workspaceSlug": "f3a8c2e1-4d5b-4a7c-8e9f-0a1b2c3d4e5f",
+              "threadSlug": "9b62b964-5014-494d-94c9-0724bb1936aa",
+              "agentLabel": "cursor",
+              "assistantAgent": {
+                "name": "cursor",
+                "modelId": "composer-2.5"
+              },
+              "latestOccurredAt": "2026-09-01T03:41:35.365Z",
+              "chatLinkedTurnStateKnown": true,
+              "sessionMeta": {
+                "cwd": "/Users/example/.realtimex.ai/desktop-user-data/dev/users/example_user/storage/working-data/f3a8c2e1-4d5b-4a7c-8e9f-0a1b2c3d4e5f",
+                "logPath": "/Users/example/.cursor/projects/Users-realtimex-realtimex-ai-desktop-user-data-dev-users-trungle-rta-vn-storage-working-data-f3a8c2e1-4d5b-4a7c-8e9f-0a1b2c3d4e5f/agent-transcripts/5adbd421-e03b-4722-8dd4-88f53ab81b9f/5adbd421-e03b-4722-8dd4-88f53ab81b9f.jsonl"
+              },
+              "chatLinkedPendingTurn": {
+                "id": "3c112cf7-9206-44ea-a8bb-a6afe18dd5fe",
+                "state": "capturing"
+              }
+            }
+          ]
+        },
+        {
+          "threadSlug": "signals-orchestrator",
+          "totalCount": 1,
+          "sessions": [
+            {
+              "id": "cli-agent:8369c139-e79f-4776-84d6-4077a7a5673c",
+              "sessionId": "cli-agent:8369c139-e79f-4776-84d6-4077a7a5673c",
+              "latestSessionId": "cli-agent:8369c139-e79f-4776-84d6-4077a7a5673c",
+              "activityCardId": "terminal-card:cli-agent:8369c139-e79f-4776-84d6-4077a7a5673c",
+              "controlSessionId": "8369c139-e79f-4776-84d6-4077a7a5673c",
+              "ptySessionId": "8369c139-e79f-4776-84d6-4077a7a5673c",
+              "status": "running",
+              "attached": true,
+              "source": "live",
+              "workspaceSlug": "f3a8c2e1-4d5b-4a7c-8e9f-0a1b2c3d4e5f",
+              "threadSlug": "signals-orchestrator",
+              "agentLabel": "cursor",
+              "assistantAgent": {
+                "name": "cursor",
+                "modelId": "composer-2.5"
+              },
+              "latestOccurredAt": "2026-09-01T03:41:13.605Z",
+              "chatLinkedTurnStateKnown": true,
+              "sessionMeta": {
+                "cwd": "/Users/example/.realtimex.ai/desktop-user-data/dev/users/example_user/storage/working-data/f3a8c2e1-4d5b-4a7c-8e9f-0a1b2c3d4e5f",
+                "logPath": "/Users/example/.cursor/projects/Users-realtimex-realtimex-ai-desktop-user-data-dev-users-trungle-rta-vn-storage-working-data-f3a8c2e1-4d5b-4a7c-8e9f-0a1b2c3d4e5f/agent-transcripts/fd7ac5ce-6c2e-4e88-8320-b3368f237052/fd7ac5ce-6c2e-4e88-8320-b3368f237052.jsonl"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "liveCount": 3,
+  "historicalCount": 0,
+  "limit": 3
+}

@@ -80,6 +80,16 @@ provision-verifier → `db:migrate` → build. It is the same gate CI runs.
   lives in its own `contract` vitest project whose include is gated on
   `SIGNALS_CONTRACT_PROBES=1`, so no default invocation — including a bare `vitest run`, which
   executes every project — depends on a sibling repo's state. Nothing runs it for you.
+- **Touching `runtime-sessions.ts` parsing? Run `npm run contract:terminal-sessions`.** Same class
+  of bug, same reason: we read `GET /cli/list-terminal-sessions` as `results.workspaces`, an
+  envelope the host has never sent, and every mock in the unit test described that same invented
+  shape — so our output agreed with our input while both disagreed with the runtime. The parser
+  returned zero sessions for every real response, which silently disabled the whole deferred
+  teardown path for 100+ commits (#295, shipped dead in #297). The probe asserts our parser
+  against a *live* RealTimeX; it skips when none is reachable and fails when `RTX_API_BASE_URL` is
+  set but unusable. Run every contract project with `npm run contract`.
+- A mock you wrote cannot falsify an assumption you made. When the shape comes from outside this
+  repo, pin it with captured bytes (see `src/lib/rtx/host-fixtures/`) or a contract probe.
 - Decide what proves the change *before* patching: name the observable that moves if the fix
   works — an API response, a DB row, a test assertion, a screenshot.
 - When sources disagree, trust the most authoritative one. The SQLite row and the API payload
