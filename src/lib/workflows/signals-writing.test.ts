@@ -44,7 +44,9 @@ describe("Signals Writing workflow contract", () => {
     expect(section).toContain("publish=export_only");
     expect(section).toContain("get_writing_context");
     expect(section).toContain("IDENTITY.md, SOUL.md, VOICE.md, BRAND.md");
-    expect(section).toContain("get_writing_context.personality as the binding gate");
+    expect(section).toContain(
+      "get_writing_context.personality.status and get_writing_context.personality.host.capability as the binding gate",
+    );
     expect(section).toContain("submits only its active bindingId");
     expect(section).toContain("Do not edit workspace Personality files");
     expect(section).toContain("query_graph");
@@ -70,7 +72,13 @@ describe("Signals Writing workflow contract", () => {
       signalsBaseUrl: "http://127.0.0.1:3000",
     });
 
-    expect(section).toContain("Persist by the lane returned in `get_writing_context.personality.status`");
+    expect(section).toContain(
+      "both get_writing_context.personality.status and get_writing_context.personality.host.capability",
+    );
+    expect(section).toContain("Gate on both persisted Personality fields before selecting a lane");
+    expect(section).toContain(
+      "If `get_writing_context.personality.host.capability` is not `available`, refuse Personality-required writing",
+    );
     expect(section).toContain("For `bound`/`source_stale`");
     expect(section).toContain("run `measure`, create the structured audit");
     expect(section).toContain("run `verdict` then `precheck`");
@@ -87,11 +95,30 @@ describe("Signals Writing workflow contract", () => {
     expect(section).toContain(
       "Stop before audit, verdict, precheck, approval, materialization, export, or publish",
     );
-    expect(section).toContain("In the `bound`/`source_stale` full lane only");
-    expect(section).toContain("render the persisted approval card after audit and precheck");
-    expect(section).toContain("wait for explicit user approval, then call `materialize_variant`");
     expect(section).not.toContain("Draft and audit one platform-native artifact per surface");
     expect(section).not.toContain("Call materialize_variant only after");
+  });
+
+  it("branches materialization on persisted explicit and auto-low-risk approval state", () => {
+    const section = buildWritingBriefSection({
+      template: { id: "template_1", name: "Platform-native writing" },
+      config,
+      workflowRunId: "run_1",
+      signalsBaseUrl: "http://127.0.0.1:3000",
+    });
+
+    expect(section).toContain("In the `bound`/`source_stale` full lane only");
+    expect(section).toContain("render the persisted approval card after audit and precheck");
+    expect(section).toContain("follow `get_writing_context.approvalPolicy`");
+    expect(section).toContain("`approvalState`, `riskTier`, and `auditStale`");
+    expect(section).toContain("For `explicit`, `source_stale`, medium/high risk");
+    expect(section).toContain("wait for fresh explicit user approval");
+    expect(section).toContain("For `auto_low_risk`");
+    expect(section).toContain("without a user approval payload");
+    expect(section).toContain(
+      "`approvalState: approved`, `riskTier: low`, and `auditStale: false`",
+    );
+    expect(section).not.toContain("wait for explicit user approval, then call");
   });
 
   it("appears only in briefs carrying the signalsWriting config", () => {
