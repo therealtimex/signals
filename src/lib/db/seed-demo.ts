@@ -70,18 +70,18 @@ export const DEMO_ORGS = [
  * the guide free of photographs.
  */
 export const DEMO_CONTACTS = [
-  { name: "Aria Park", daysAgo: 28, richness: "rich" as const, title: "Founder", orgIndex: 0, funnelStage: "customer" as const, handle: "ariapark", headline: "Building data pipelines that explain themselves.", followers: 18_400, score: 88 },
-  { name: "Devan Osei", daysAgo: 28, richness: "rich" as const, title: "Head of Engineering", orgIndex: 0, funnelStage: "advocate" as const, handle: "devanosei", headline: "Distributed systems, mostly on purpose.", followers: 9_120, score: 81 },
-  { name: "Mira Lindqvist", daysAgo: 26, richness: "rich" as const, title: "Co-Founder", orgIndex: 1, funnelStage: "opportunity" as const, handle: "miralind", headline: "Developer tools for very small teams.", followers: 24_700, score: 76 },
-  { name: "Tomas Reyes", daysAgo: 21, richness: "medium" as const, title: "Principal Engineer", orgIndex: 1, funnelStage: "qualified" as const, handle: "tomasreyes", headline: "Local-first software, offline by default.", followers: 5_380, score: 64 },
-  { name: "Noor Haddad", daysAgo: 21, richness: "medium" as const, title: "VP Product", orgIndex: 2, funnelStage: "qualified" as const, handle: "noorhaddad", headline: "Payments infrastructure and the humans who use it.", followers: 12_900, score: 69 },
-  { name: "Iwan Sobczak", daysAgo: 21, richness: "medium" as const, title: "Staff Designer", orgIndex: 2, funnelStage: "engaged" as const, handle: "iwansob", headline: "Interface design for dense, boring, important screens.", followers: 3_150, score: 52 },
-  { name: "Petra Halvorsen", daysAgo: 17, richness: "rich" as const, title: "Research Lead", orgIndex: 3, funnelStage: "engaged" as const, handle: "petrahalv", headline: "Open weights, open evals, open notebooks.", followers: 31_200, score: 71 },
-  { name: "Leo Amankwah", daysAgo: 14, richness: "medium" as const, title: "ML Engineer", orgIndex: 3, funnelStage: "prospect" as const, handle: "leoamank", headline: "Small models, careful benchmarks.", followers: 7_640, score: 44 },
-  { name: "Saoirse Byrne", daysAgo: 14, richness: "sparse" as const, title: "Chief of Staff", orgIndex: 4, funnelStage: "prospect" as const, handle: "saoirseb", headline: "Operations for teams that ship weekly.", followers: 2_080, score: 38 },
-  { name: "Kenji Watanabe", daysAgo: 9, richness: "medium" as const, title: "Founder", orgIndex: 4, funnelStage: "prospect" as const, handle: "kenjiwat", headline: "Clinical workflows, minus the fax machine.", followers: 14_300, score: 41 },
-  { name: "Rosa Delacroix", daysAgo: 5, richness: "sparse" as const, title: "Angel Investor", orgIndex: null, funnelStage: "engaged" as const, handle: "rosadela", headline: "Pre-seed cheques for infrastructure founders.", followers: 41_800, score: 58 },
-  { name: "Ben Ostrowski", daysAgo: 5, richness: "sparse" as const, title: "Technical Writer", orgIndex: null, funnelStage: "prospect" as const, handle: "benostr", headline: "Docs are a feature.", followers: 1_460, score: 29 },
+  { name: "Aria Park", bio: "Fifteen years in data infrastructure, most of it spent explaining why the numbers moved.", daysAgo: 28, richness: "rich" as const, title: "Founder", orgIndex: 0, funnelStage: "customer" as const, handle: "ariapark", headline: "Building data pipelines that explain themselves.", followers: 18_400, score: 88 },
+  { name: "Devan Osei", bio: "Runs the platform team. Believes most outages are org charts in disguise.", daysAgo: 28, richness: "rich" as const, title: "Head of Engineering", orgIndex: 0, funnelStage: "advocate" as const, handle: "devanosei", headline: "Distributed systems, mostly on purpose.", followers: 9_120, score: 81 },
+  { name: "Mira Lindqvist", bio: "Second-time founder. Building the tooling she wanted at the last company.", daysAgo: 26, richness: "rich" as const, title: "Co-Founder", orgIndex: 1, funnelStage: "opportunity" as const, handle: "miralind", headline: "Developer tools for very small teams.", followers: 24_700, score: 76 },
+  { name: "Tomas Reyes", bio: "Works on sync engines and conflict resolution. Offline is a first-class state.", daysAgo: 21, richness: "medium" as const, title: "Principal Engineer", orgIndex: 1, funnelStage: "qualified" as const, handle: "tomasreyes", headline: "Local-first software, offline by default.", followers: 5_380, score: 64 },
+  { name: "Noor Haddad", bio: "Came up through support, then product. Still reads every ticket on Fridays.", daysAgo: 21, richness: "medium" as const, title: "VP Product", orgIndex: 2, funnelStage: "qualified" as const, handle: "noorhaddad", headline: "Payments infrastructure and the humans who use it.", followers: 12_900, score: 69 },
+  { name: "Iwan Sobczak", bio: "Designs for operators, not demos. Density is a feature when the job is real.", daysAgo: 21, richness: "medium" as const, title: "Staff Designer", orgIndex: 2, funnelStage: "engaged" as const, handle: "iwansob", headline: "Interface design for dense, boring, important screens.", followers: 3_150, score: 52 },
+  { name: "Petra Halvorsen", bio: "Publishes reproducible evals and the notebooks behind them.", daysAgo: 17, richness: "rich" as const, title: "Research Lead", orgIndex: 3, funnelStage: "engaged" as const, handle: "petrahalv", headline: "Open weights, open evals, open notebooks.", followers: 31_200, score: 71 },
+  { name: "Leo Amankwah", bio: "Trains small models on a single box and writes up what actually moved the metric.", daysAgo: 14, richness: "medium" as const, title: "ML Engineer", orgIndex: 3, funnelStage: "prospect" as const, handle: "leoamank", headline: "Small models, careful benchmarks.", followers: 7_640, score: 44 },
+  { name: "Saoirse Byrne", bio: "Keeps a twelve-person company shipping weekly without a project manager.", daysAgo: 14, richness: "sparse" as const, title: "Chief of Staff", orgIndex: 4, funnelStage: "prospect" as const, handle: "saoirseb", headline: "Operations for teams that ship weekly.", followers: 2_080, score: 38 },
+  { name: "Kenji Watanabe", bio: "Building clinical workflow tools after a decade inside hospital IT.", daysAgo: 9, richness: "medium" as const, title: "Founder", orgIndex: 4, funnelStage: "prospect" as const, handle: "kenjiwat", headline: "Clinical workflows, minus the fax machine.", followers: 14_300, score: 41 },
+  { name: "Rosa Delacroix", bio: "Writes first cheques for infrastructure founders, usually pre-product.", daysAgo: 5, richness: "sparse" as const, title: "Angel Investor", orgIndex: null, funnelStage: "engaged" as const, handle: "rosadela", headline: "Pre-seed cheques for infrastructure founders.", followers: 41_800, score: 58 },
+  { name: "Ben Ostrowski", bio: "Technical writer. Thinks the docs are where most products are actually lost.", daysAgo: 5, richness: "sparse" as const, title: "Technical Writer", orgIndex: null, funnelStage: "prospect" as const, handle: "benostr", headline: "Docs are a feature.", followers: 1_460, score: 29 },
 ];
 
 /**
@@ -222,7 +222,7 @@ export function seedDemoData(now = Math.floor(Date.now() / 1000)): DemoSeedSumma
         // `resolveContactProfile` reads headline/bio/location/website off the
         // identities, never off the contact, so these have to live here to
         // count toward the enrichment score.
-        ...(tier.bio ? { bio: person.headline } : {}),
+        ...(tier.bio ? { bio: person.bio } : {}),
         ...(tier.location ? { location: "Remote" } : {}),
         ...(tier.website ? { websiteUrl: `https://${person.handle}.example.com` } : {}),
         ...(n === 0 && platformData ? { platformData } : {}),
