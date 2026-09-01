@@ -33,11 +33,13 @@ the inner spine/audit/units object. The helper reads only files named on its com
    existing+new `surfaces`, `sources`, and `runs` arrays. Arrays replace during deep merge.
 6. Read the server-derived source hashes and spine hash from the response/context; update working
    files without inventing hashes.
-7. For each supported surface, produce distinct units from the spine, measure, audit, precheck, and
-   call `upsert_variant` with the same launch/spine pin.
-8. Read the server-stamped Personality snapshot and `personalityState` with the persisted variant,
-   audit, approval, capability, and returned `lineageEdges`; render its card. Never copy Personality
-   hashes into a working file or later input.
+7. For each supported surface, produce distinct units from the spine. In a `bound`/`source_stale`
+   lane, measure, audit, precheck, and upsert with only the active `personality: { bindingId }`
+   selector. In an `unbound` lane, follow `core/personality.md`: measure, omit target and selector,
+   send `audit: null`, persist the `legacy_unbound` label, and stop before approval/materialization.
+8. For full-lane work, read the server-stamped Personality snapshot and `personalityState` with the
+   persisted variant, audit, approval, capability, and returned `lineageEdges`; render its card.
+   Never copy Personality hashes into a working file or later input.
 9. Materialize only the selected approved variant. Verify the returned content item through
    `get_content`; use `query_graph` from the variant ID when a graph-edge check is needed.
 10. On explicit publish instruction, hand the content item to the REST route; completion is owned by

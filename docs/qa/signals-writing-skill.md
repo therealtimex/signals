@@ -46,8 +46,10 @@ touching production data.
    report `drifted` / `index_pointer_missing` because its older dynamic index span disappeared.
    Approve one new projection; the static pointer then prevents the dynamic block from returning.
 3. In a separate unbound scratch workspace on plugin 0.2.4, request a writing run. The agent may
-   offer only visibly labelled, targetless, unaudited **legacy-unbound sketches**. Binding
-   Personality must unlock the normal draft → audit → approve → materialize lane.
+   offer only visibly labelled, targetless, unaudited **legacy-unbound sketches**: persisted input
+   omits `targetId` and `personality`, carries `audit: null`, and never proceeds to an approval card,
+   materialization, export, or publish. Binding Personality must unlock the normal
+   draft → audit → approve → materialize lane.
 
 ## Evidence
 

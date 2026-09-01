@@ -69,21 +69,33 @@ from the persisted variant and current binding state.
 A legacy-unbound sketch is not a publishable fallback. Never downgrade the declared skill version
 or omit a target/audit to make full-lane work appear successful.
 
+Its exact persistence sequence is: draft from the spine under the requested supported overlay; run
+`writing-cli.cjs measure`; omit `metadata.writing.targetId` and `metadata.writing.personality`; set
+`metadata.writing.audit` to `null`; set the top-level variant `label` suffix to
+`legacy_unbound sketch`; call `upsert_variant`; re-read `get_writing_context` and verify
+the selected `variants[].personalityState` is `legacy_unbound`. Stop there. Do not run audit
+`verdict` or `precheck`, render an approval card, materialize, export, or publish the sketch.
+
 ## Binding and stale-state cards
 
 Render from the latest persisted read:
 
 ```text
-Personality  <binding id|unbound>  ·  <status>  ·  host <capability>
-Identity     self <contact/name>  ·  org <org/name|none>
-Sources      binding <source hash|none>  ·  current <source hash|none>
-Target       <target id|none>  ·  represents <self|org|unbound>  ·  compatible <yes|no>
-Detail       <persisted status detail or none>
-Next         <persisted recovery action>
+Personality  <status.binding.id|unbound>  ·  <status.status>  ·  host <status.host.capability>
+Workspace    <status.workspace.slug>  ·  directory <status.workspace.dir|unavailable>
+Identity     self <status.binding.identity.selfContactId|unbound>  ·  org <status.binding.identity.representedOrgId|none>
+Sources      binding <status.binding.sourceHash|none>  ·  current <status.currentSourceHash|none>
+Target       <targets[].id>  ·  represents <targets[].represents.kind>  ·  compatible <targets[].compatible>
+Detail       <status.detail|none>
+Doctrine     <required action from Lane selection or Error recovery below>
 ```
 
-Do not invent a friendly status or suppress a persisted warning. For legacy records, say
-`legacy_unbound` rather than `bound`.
+Here `status.*` is from `get_personality_binding.status` (or the identical
+`get_writing_context.personality` fields). Render one Target row per relevant persisted
+`get_writing_context.targets[]` entry, or omit that row when no target is relevant. `Doctrine` is
+prescribed by this skill, not a persisted field. Do not invent a friendly status or suppress a
+persisted warning. For legacy variants, report their persisted context state `legacy_unbound`
+rather than `bound`.
 
 ## Projection lifecycle
 
@@ -99,14 +111,24 @@ Do not invent a friendly status or suppress a persisted warning. For legacy reco
 Projection proposal card:
 
 ```text
-Personality proposal  <proposal id>  ·  <kind>  ·  <state>
-Binding               current <binding id|none>  →  proposed <binding id|none>
-Identity              self <contact/name>  ·  org <org/name|none>
-Files                 <persisted file paths and diff summaries>
-Warnings              <persisted preflight warnings or none>
-Approval blockers     <record.actions.approvalBlockers or none>
-Next                  approve <proposal id> | reject <proposal id>
+Personality proposal  <proposals[].proposal.id>  ·  <proposals[].proposal.kind>  ·  <proposals[].record.state>
+Workspace             <proposals[].proposal.workspace.slug>  ·  id <proposals[].proposal.workspace.id|none>  ·  directory <proposals[].proposal.workspace.dir>  ·  key <proposals[].proposal.workspace.key>
+Binding               current <proposals[].proposal.basedOnBindingId|none>  →  proposed <proposals[].proposal.proposedBindingId>
+Identity              self <proposals[].proposal.identity.selfContactId> (<proposals[].proposal.sourceSnapshot.self.input.name|snapshot absent>)  ·  org <proposals[].proposal.identity.representedOrgId|none> (<proposals[].proposal.sourceSnapshot.org.input.name|none>)
+Sources               self rev <proposals[].proposal.sourceSnapshot.self.revision|none>  ·  org rev <proposals[].proposal.sourceSnapshot.org.revision|none>  ·  voice <proposals[].proposal.sourceSnapshot.voice.input.profile.label|none> (<proposals[].proposal.sourceSnapshot.voice.id|none>) v<proposals[].proposal.sourceSnapshot.voice.version|none> hash <proposals[].proposal.sourceSnapshot.voice.hash|none>  ·  statements <proposals[].proposal.sourceSnapshot.statements.hash|none>
+Files                 repeat <proposals[].proposal.files[].path>: <proposals[].proposal.files[].diff>
+Drift                 repeat non-null <proposals[].proposal.files[].path>: <proposals[].proposal.files[].driftDiff>; otherwise none
+Preserves             repeat <proposals[].proposal.files[].path>: <proposals[].proposal.files[].unmanagedBytes> unmanaged bytes
+Warnings              <proposals[].proposal.preflight.warnings|none>
+Approval blockers     <proposals[].actions.approvalBlockers|none>
+Actions               approve <proposals[].actions.canApprove>  ·  reject <proposals[].actions.canReject>  ·  retry <proposals[].actions.canRetry>
+Doctrine next         expose only commands whose corresponding persisted action is true; otherwise stop
 ```
+
+Render the full persisted `files[].diff` for each file; it is the per-file change summary the user
+approves. Render every non-null `files[].driftDiff` separately and every file's `unmanagedBytes`,
+without replacing them with a model-authored summary. The path prefix `proposals[]` always means the
+single proposal entry selected by its persisted `proposal.id`.
 
 Copy the approving message verbatim into evidence. Never infer approval from a request to inspect,
 draft, preview, retry, roll back, or unbind.

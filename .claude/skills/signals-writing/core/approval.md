@@ -2,6 +2,8 @@
 
 Approval is a durable user decision tied to the current audit. Materialization copies exactly one
 approved platform variant into one content item; publishing is a later explicit instruction.
+This module applies only to the `bound` and `source_stale` full lanes. A `legacy_unbound` sketch
+has no approval card, materialization, export, or publish path.
 
 ## Render the persisted card
 
@@ -13,16 +15,20 @@ Body     <full text, unit-numbered for threads>
 Limits   <chars per unit> / <limit>  ·  hashtags n  ·  links n  ·  media n
 Claims   <preserved>/<total> preserved  ·  altered: <ids or none>  ·  missing: <ids or none>  ·  invented: none
 Voice    <profile label v<version>>  ·  precedence <voice_first|rules_first>  ·  drift <score>  ·  protected quirks kept: yes
-Personality  <pb_id>  ·  <bound|source_stale|legacy-unbound>  ·  self <name> (org <name|none>)  ·  target represents <self|org|unbound>
+Personality  <variants[].personality.bindingId>  ·  <variants[].personalityState>  ·  self <variants[].personality.identity.selfContactId> (org <variants[].personality.identity.representedOrgId|none>)  ·  target represents <variants[].personality.target.represents.kind|none>
 Audit    <verdict>  ·  blockers <n>  ·  warnings <n>  (list each finding code + one line)
 Risk     <tier>  ·  policy <explicit|auto_low_risk>
 Publish  <direct|beta|draft_only|export_only>  — draft_only: this platform has no publish adapter; export only
 Next     approve <variantId> | revise <instruction> | reject
 ```
 
-Map target handle/kind and Personality from context and persisted snapshots, hard and claims from
-audit, voice label/version from the resolved profile, risk/policy from `approval`, and publish text
-from `capability.publish`.
+After `upsert_variant`, re-read `get_writing_context` and select `variants[]` by the returned ID.
+Map the Personality line exactly from that entry's `personality.bindingId`, `personalityState`,
+`personality.identity.selfContactId`, `personality.identity.representedOrgId`, and nullable
+`personality.target.represents.kind`; do not substitute names inferred from workspace files. Map
+target handle/kind from the context `targets[]` entry, hard and claims from persisted `audit`, voice
+label/version from the resolved profile, risk/policy from `approval`, and publish text from
+`capability.publish`.
 
 ## Approval policy
 

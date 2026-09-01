@@ -7,23 +7,29 @@ current run's server/context values.
 ## Call sequence by mode
 
 Every mode reads `IDENTITY.md`, `SOUL.md`, `VOICE.md`, and `BRAND.md` first, then reads
-`get_writing_context.personality`. Bound work copies only the current `bindingId`; audit input
-never includes Personality.
+`get_writing_context.personality`. `bound`/`source_stale` work copies only the current `bindingId`;
+audit input never includes Personality. `unbound` uses the separate terminal sketch sequence below.
 
 - **voice build:** `get_writing_context` → `query_content`/`get_content` only for admissible
   self-authored samples → `upsert_voice_profile` → present profile → wait →
   `approve_voice_profile` with the user's thread evidence.
 - **spine:** `get_writing_context` → `get_content` only for explicit unredacted sources → write a
   complete launch-writing file → `upsert_launch` → read the server-derived spine hash.
-- **draft:** run `writing-cli.cjs id` as needed → draft from the spine under one overlay →
-  `measure` → create audit → `verdict` → `precheck` → `upsert_variant`.
-- **adapt/revise/humanize:** read the current variant plus spine → preserve or add lineage as
-  required → repeat measure/audit/precheck → update the same variant unless a derived alternative
-  is explicitly required.
-- **audit:** read current units, spine, voice, and pinned rule versions → recompute the complete
-  audit → `verdict` → `precheck` → `upsert_variant` with unchanged units.
-- **approve/export:** render the persisted approval card → wait → `materialize_variant`; use
-  `revoke_variant_approval` when approval is withdrawn. Export only from the returned content item.
+- **full-lane draft (`bound`/`source_stale`):** run `writing-cli.cjs id` as needed → draft from the
+  spine under one overlay → `measure` → create audit → `verdict` → `precheck` → `upsert_variant`.
+- **legacy-unbound draft:** draft from the spine under one overlay → `measure` → omit `targetId` and
+  `personality` → send `audit: null` → set top-level `label` suffix to
+  `legacy_unbound sketch` → `upsert_variant` → re-read context and confirm
+  `variants[].personalityState` is `legacy_unbound` → stop. Do not run verdict/precheck, approval,
+  materialization, export, or publish.
+- **adapt/revise/humanize:** read the current variant plus spine → preserve or add lineage. In a
+  full lane, repeat measure/audit/precheck; for a legacy-unbound sketch, preserve the exact
+  targetless/unaudited shape above. Update the same variant unless a derived alternative is explicit.
+- **audit (full lane only):** read current units, spine, voice, and pinned rule versions → recompute
+  the complete audit → `verdict` → `precheck` → `upsert_variant` with unchanged units.
+- **approve/export (full lane only):** render the persisted approval card → wait →
+  `materialize_variant`; use `revoke_variant_approval` when approval is withdrawn. Export only from
+  the returned content item.
 - **personality:** `get_personality_binding` → `propose_personality_projection` → render the
   persisted proposal and wait → `approve_personality_projection` or
   `reject_personality_projection` with the user's thread evidence. Retry, rollback, and unbind use

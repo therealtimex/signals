@@ -10,6 +10,7 @@ import { browserConnections, contentItems, platformTargets, variants } from "@/l
 import { createContact } from "@/lib/db/queries/contacts";
 import { getLaunchById } from "@/lib/db/queries/launches";
 import { invokeAgentTool } from "@/lib/agent-tools/invoke";
+import { handleGetWritingContext } from "@/lib/agent-tools/content-item-handlers";
 import { AGENT_TOOLS } from "@/lib/agent-tools/registry";
 import { approvePersonalityProjectionSchema } from "@/lib/agent-tools/personality-handlers";
 import { approveVoiceProfileSchema, materializeVariantSchema } from "@/lib/agent-tools/writing-handlers";
@@ -36,6 +37,7 @@ import { WRITING_SURFACE_CAPABILITIES } from "@/lib/writing/capabilities";
 import { parseFormulaId, parseRuleId } from "@/lib/writing/ids";
 import { SURFACE_IDS } from "@/lib/writing/surfaces";
 import { resetPersonalityStore } from "@/lib/personality/store-paths";
+import type { PersonalityBindingView } from "@/lib/personality/status";
 import { setTargetRepresentation } from "@/lib/personality/use-cases";
 import { resetCoreTables } from "@/test/db";
 import {
@@ -62,6 +64,55 @@ const example = (name: string) => extractTaggedBlocks(fs.readFileSync(path.join(
 type VariantFixture = { platform: "x" | "linkedin" | "facebook"; surface: "x/post" | "x/thread" | "linkedin/post" | "facebook/post"; targetId: string; formulaId: string; texts: string[] };
 type VariantDerivation = { mode: "revise" | "humanize" | "adapt"; requestHash: string; derivedFromVariantId: string };
 type PersonalityOverride = { bindingId?: string; skillVersion: string };
+type WritingContextView = Awaited<ReturnType<typeof handleGetWritingContext>>;
+type WritingContextVariant = WritingContextView["variants"][number];
+type VariantPersonality = NonNullable<WritingContextVariant["personality"]>;
+type VariantCardReadModelFields = {
+  "variants[].personality.bindingId": VariantPersonality["bindingId"];
+  "variants[].personalityState": WritingContextVariant["personalityState"];
+  "variants[].personality.identity.selfContactId": VariantPersonality["identity"]["selfContactId"];
+  "variants[].personality.identity.representedOrgId": VariantPersonality["identity"]["representedOrgId"];
+  "variants[].personality.target.represents.kind": NonNullable<VariantPersonality["target"]>["represents"]["kind"];
+};
+type BindingStatus = PersonalityBindingView["status"];
+type Binding = NonNullable<BindingStatus["binding"]>;
+type ContextTarget = WritingContextView["targets"][number];
+type BindingCardReadModelFields = {
+  "status.binding.id": Binding["id"];
+  "status.status": BindingStatus["status"];
+  "status.host.capability": BindingStatus["host"]["capability"];
+  "status.workspace.slug": BindingStatus["workspace"]["slug"];
+  "status.workspace.dir": BindingStatus["workspace"]["dir"];
+  "status.binding.identity.selfContactId": Binding["identity"]["selfContactId"];
+  "status.binding.identity.representedOrgId": Binding["identity"]["representedOrgId"];
+  "status.binding.sourceHash": Binding["sourceHash"];
+  "status.currentSourceHash": BindingStatus["currentSourceHash"];
+  "targets[].represents.kind": NonNullable<ContextTarget["represents"]>["kind"];
+  "targets[].compatible": ContextTarget["compatible"];
+  "status.detail": BindingStatus["detail"];
+};
+type ProposalEntry = PersonalityBindingView["proposals"][number];
+type ProposalCardReadModelFields = {
+  "proposals[].proposal.workspace.slug": ProposalEntry["proposal"]["workspace"]["slug"];
+  "proposals[].proposal.workspace.id": ProposalEntry["proposal"]["workspace"]["id"];
+  "proposals[].proposal.workspace.dir": ProposalEntry["proposal"]["workspace"]["dir"];
+  "proposals[].proposal.workspace.key": ProposalEntry["proposal"]["workspace"]["key"];
+  "proposals[].proposal.sourceSnapshot.self.revision": NonNullable<ProposalEntry["proposal"]["sourceSnapshot"]>["self"]["revision"];
+  "proposals[].proposal.sourceSnapshot.org.revision": NonNullable<NonNullable<ProposalEntry["proposal"]["sourceSnapshot"]>["org"]>["revision"];
+  "proposals[].proposal.sourceSnapshot.voice.id": NonNullable<NonNullable<ProposalEntry["proposal"]["sourceSnapshot"]>["voice"]>["id"];
+  "proposals[].proposal.sourceSnapshot.voice.version": NonNullable<NonNullable<ProposalEntry["proposal"]["sourceSnapshot"]>["voice"]>["version"];
+  "proposals[].proposal.sourceSnapshot.voice.hash": NonNullable<NonNullable<ProposalEntry["proposal"]["sourceSnapshot"]>["voice"]>["hash"];
+  "proposals[].proposal.sourceSnapshot.voice.input.profile.label": NonNullable<NonNullable<ProposalEntry["proposal"]["sourceSnapshot"]>["voice"]>["input"]["profile"]["label"];
+  "proposals[].proposal.sourceSnapshot.statements.hash": NonNullable<NonNullable<ProposalEntry["proposal"]["sourceSnapshot"]>["statements"]>["hash"];
+  "proposals[].proposal.files[].diff": ProposalEntry["proposal"]["files"][number]["diff"];
+  "proposals[].proposal.files[].driftDiff": ProposalEntry["proposal"]["files"][number]["driftDiff"];
+  "proposals[].proposal.files[].unmanagedBytes": ProposalEntry["proposal"]["files"][number]["unmanagedBytes"];
+  "proposals[].proposal.preflight.warnings": ProposalEntry["proposal"]["preflight"]["warnings"];
+  "proposals[].actions.approvalBlockers": ProposalEntry["actions"]["approvalBlockers"];
+  "proposals[].actions.canApprove": ProposalEntry["actions"]["canApprove"];
+  "proposals[].actions.canReject": ProposalEntry["actions"]["canReject"];
+  "proposals[].actions.canRetry": ProposalEntry["actions"]["canRetry"];
+};
 
 function variantInput(
   fixture: VariantFixture,
@@ -155,6 +206,75 @@ describe("signals-writing skill package", () => {
     expect(approvePersonalityProjectionSchema.safeParse(example("approve-personality-input")).success).toBe(true);
     expect(sendToAgentSchema.safeParse(example("send-to-agent-body")).success).toBe(true);
     expect(example("audit-input")).not.toHaveProperty("personality");
+  });
+
+  it("pins Personality cards to fields exposed by the persisted read models", () => {
+    const skill = fs.readFileSync(path.join(skillDir, "SKILL.md"), "utf8");
+    const approval = fs.readFileSync(path.join(skillDir, "core/approval.md"), "utf8");
+    const personality = fs.readFileSync(path.join(skillDir, "core/personality.md"), "utf8");
+    const approvalCard = (text: string) => text.match(/```text\nVariant[\s\S]*?```/)?.[0];
+
+    expect(approvalCard(skill)).toBe(approvalCard(approval));
+    const variantPaths = [
+      "variants[].personality.bindingId",
+      "variants[].personalityState",
+      "variants[].personality.identity.selfContactId",
+      "variants[].personality.identity.representedOrgId",
+      "variants[].personality.target.represents.kind",
+    ] as const satisfies readonly (keyof VariantCardReadModelFields)[];
+    for (const persistedPath of variantPaths) {
+      expect(approvalCard(skill)).toContain(persistedPath);
+    }
+    expect(approvalCard(skill)).not.toContain("self <name>");
+    expect(approvalCard(skill)).not.toContain("org <name");
+
+    const bindingPaths = [
+      "status.binding.id",
+      "status.status",
+      "status.host.capability",
+      "status.workspace.slug",
+      "status.workspace.dir",
+      "status.binding.identity.selfContactId",
+      "status.binding.identity.representedOrgId",
+      "status.binding.sourceHash",
+      "status.currentSourceHash",
+      "targets[].represents.kind",
+      "targets[].compatible",
+      "status.detail",
+    ] as const satisfies readonly (keyof BindingCardReadModelFields)[];
+    for (const persistedPath of bindingPaths) {
+      expect(personality).toContain(persistedPath);
+    }
+    expect(personality.replace(/\s+/g, " ")).toContain(
+      "`Doctrine` is prescribed by this skill, not a persisted field",
+    );
+    expect(personality).not.toContain("<persisted recovery action>");
+
+    const proposalPaths = [
+      "proposals[].proposal.workspace.slug",
+      "proposals[].proposal.workspace.id",
+      "proposals[].proposal.workspace.dir",
+      "proposals[].proposal.workspace.key",
+      "proposals[].proposal.sourceSnapshot.self.revision",
+      "proposals[].proposal.sourceSnapshot.org.revision",
+      "proposals[].proposal.sourceSnapshot.voice.id",
+      "proposals[].proposal.sourceSnapshot.voice.version",
+      "proposals[].proposal.sourceSnapshot.voice.hash",
+      "proposals[].proposal.sourceSnapshot.voice.input.profile.label",
+      "proposals[].proposal.sourceSnapshot.statements.hash",
+      "proposals[].proposal.files[].diff",
+      "proposals[].proposal.files[].driftDiff",
+      "proposals[].proposal.files[].unmanagedBytes",
+      "proposals[].proposal.preflight.warnings",
+      "proposals[].actions.approvalBlockers",
+      "proposals[].actions.canApprove",
+      "proposals[].actions.canReject",
+      "proposals[].actions.canRetry",
+    ] as const satisfies readonly (keyof ProposalCardReadModelFields)[];
+    for (const persistedPath of proposalPaths) {
+      expect(personality).toContain(persistedPath);
+    }
+    expect(personality).not.toContain("record.actions.approvalBlockers");
   });
 
   it("names only registered agent tools in operational prose", () => {
@@ -411,5 +531,42 @@ describe.sequential("signals-writing fixture integration", () => {
     await expect(upsertVariantUseCase(input, dependencies)).rejects.toMatchObject({
       details: { reason: "personality_binding_required" },
     });
+  });
+
+  it("persists a labelled targetless unaudited 1.1.0 sketch while unbound", async () => {
+    const workspace = personalityWorkspace(personalityStorageDir);
+    createContact({ name: "Unbound sketch writer", isSelf: true });
+    const dependencies = personalityGuardDependencies(workspace);
+    const launchWriting = json<Record<string, unknown>>("launch-writing.json");
+    const launch = await invokeAgentTool("upsert_launch", {
+      name: "Legacy-unbound sketch fixture",
+      metadata: { writing: launchWriting },
+    }) as { id: string };
+    const storedLaunch = getLaunchById(launch.id)!;
+    const spine = JSON.parse(storedLaunch.metadata ?? "{}").writing.spine as Record<string, unknown>;
+    const input = variantInput(json<VariantFixture>("x-post.variant.json"), spine, undefined, {
+      skillVersion: "1.1.0",
+    });
+    input.launchId = launch.id;
+    const mutable = input as unknown as {
+      label?: string;
+      metadata: { writing: Record<string, unknown> };
+    };
+    mutable.label = "legacy_unbound sketch";
+    delete mutable.metadata.writing.targetId;
+    delete mutable.metadata.writing.personality;
+    mutable.metadata.writing.audit = null;
+
+    const persisted = await upsertVariantUseCase(input, dependencies);
+    expect(persisted).toMatchObject({
+      label: "x/post · legacy_unbound sketch",
+      writing: true,
+      created: true,
+    });
+    const row = db.select().from(variants).all().find((candidate) => candidate.id === persisted.id)!;
+    const writing = JSON.parse(row.metadata ?? "{}").writing;
+    expect(writing).not.toHaveProperty("targetId");
+    expect(writing).not.toHaveProperty("personality");
+    expect(writing.audit).toBeNull();
   });
 });

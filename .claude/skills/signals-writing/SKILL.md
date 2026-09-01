@@ -58,10 +58,10 @@ come only from persisted server records. Load `core/personality.md` for the card
 |---|---|---|
 | `voice build` / `voice approve` | `core/voice.md` | `get_writing_context`, `query_content`, `get_content`, `list_voice_profiles`, `get_voice_profile`, `upsert_voice_profile`, `approve_voice_profile` |
 | `spine` | `core/claims.md`, `core/lineage.md` | `get_writing_context`, `get_content`, `upsert_launch` |
-| `draft` | `core/personality.md`, `core/claims.md`, `core/voice.md`, `core/audit.md`, one platform overlay | `upsert_variant` |
-| `adapt` / `revise` / `humanize` | draft loads plus `core/adapt.md` | `get_content`, `query_graph`, `upsert_variant` |
-| `audit` | `core/personality.md`, `core/audit.md`, one platform overlay | `upsert_variant` |
-| `approve` / `export` / `publish` | `core/personality.md`, `core/approval.md`, `core/lineage.md` | `get_content`, `query_graph`, `materialize_variant`, `revoke_variant_approval`, REST `send-to-agent` |
+| `draft` | `core/personality.md`, `core/claims.md`, `core/voice.md`, one platform overlay; `core/audit.md` only in a full lane | `upsert_variant` |
+| `adapt` / `revise` / `humanize` | draft loads plus `core/adapt.md`; audit only in a full lane | `get_content`, `query_graph`, `upsert_variant` |
+| `audit` | `core/personality.md`, `core/audit.md`, one platform overlay; `bound`/`source_stale` only | `upsert_variant` |
+| `approve` / `export` / `publish` | `core/personality.md`, `core/approval.md`, `core/lineage.md`; full lane only | `get_content`, `query_graph`, `materialize_variant`, `revoke_variant_approval`, REST `send-to-agent` |
 | `personality` | `core/personality.md` | `get_personality_binding`, `propose_personality_projection`, `approve_personality_projection`, `reject_personality_projection`, `retry_personality_projection`, `rollback_personality_projection`, `unbind_personality_projection`, `set_target_representation` |
 
 Load only `.claude/skills/signals-writing/overlays/x.md`, `linkedin.md`, or `facebook.md` for the
@@ -82,13 +82,17 @@ requested supported surface. Use `.claude/skills/signals-writing/reference.md` f
    complete launch-writing document and read the server-derived spine hash back.
 6. **Draft per surface** — start each surface from the same spine, not another surface's body.
    Select a versioned formula and preserve approved voice evidence under the chosen precedence.
-7. **Measure and audit** — run `writing-cli.cjs measure`, create the structured audit, run
-   `verdict`, then `precheck`. Fix every problem before `upsert_variant`; retry validation errors
-   with the same request hash.
+7. **Persist by lane** — for `bound`/`source_stale`, run `measure`, create the structured audit,
+   run `verdict` then `precheck`, fix every problem, and call `upsert_variant` with the current
+   `bindingId`. For `unbound`, run `measure`, omit `targetId` and `personality`, send `audit: null`,
+   set the persisted variant `label` suffix to `legacy_unbound sketch`, call `upsert_variant`,
+   then confirm its context `personalityState` is `legacy_unbound`. Do not audit or precheck that
+   sketch, and do not continue it to approval, materialization, export, or publish.
 8. **Optional Wind Tunnel** — use the `realtimex-signals` simulation playbook. Simulation never
    changes the approval gate.
-9. **Approval cards** — render from the persisted `upsert_variant` response, then wait for an
-   explicit `approve <variantId>`, `revise <instruction>`, or `reject`.
+9. **Approval cards (full lane only)** — after persistence, re-read `get_writing_context`, select
+   the returned variant by ID, render the persisted card, then wait for an explicit
+   `approve <variantId>`, `revise <instruction>`, or `reject`.
 10. **Close** — call `complete_workflow_run` with variant IDs, content item IDs, blockers, and
    missing surfaces. Publishing remains a separate explicit instruction.
 
@@ -119,12 +123,15 @@ Body     <full text, unit-numbered for threads>
 Limits   <chars per unit> / <limit>  ·  hashtags n  ·  links n  ·  media n
 Claims   <preserved>/<total> preserved  ·  altered: <ids or none>  ·  missing: <ids or none>  ·  invented: none
 Voice    <profile label v<version>>  ·  precedence <voice_first|rules_first>  ·  drift <score>  ·  protected quirks kept: yes
-Personality  <pb_id>  ·  <bound|source_stale|legacy-unbound>  ·  self <name> (org <name|none>)  ·  target represents <self|org|unbound>
+Personality  <variants[].personality.bindingId>  ·  <variants[].personalityState>  ·  self <variants[].personality.identity.selfContactId> (org <variants[].personality.identity.representedOrgId|none>)  ·  target represents <variants[].personality.target.represents.kind|none>
 Audit    <verdict>  ·  blockers <n>  ·  warnings <n>  (list each finding code + one line)
 Risk     <tier>  ·  policy <explicit|auto_low_risk>
 Publish  <direct|beta|draft_only|export_only>  — draft_only: this platform has no publish adapter; export only
 Next     approve <variantId> | revise <instruction> | reject
 ```
+
+The Personality placeholders above are exact paths on the selected persisted
+`get_writing_context.variants[]` entry; do not substitute names inferred from workspace files.
 
 Only approval messages that name the profile/variant and say approve become thread-message
 evidence. Copy the user's approval message verbatim into the evidence note.

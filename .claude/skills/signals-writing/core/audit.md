@@ -1,5 +1,8 @@
 # Structured audit
 
+This module applies only to `bound` and `source_stale` full-lane variants. Do not create an audit
+for an `unbound` workspace; follow `core/personality.md` and persist `audit: null` instead.
+
 Audit the exact ordered units that will be persisted. The model supplies observations; the helper
 supplies hard measurements and the deterministic verdict; Signals revalidates both.
 
