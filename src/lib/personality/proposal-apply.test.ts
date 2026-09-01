@@ -456,6 +456,55 @@ describe.sequential("Personality proposal and apply lifecycle", () => {
     expect(staticPointer.shim.createClaudeSymlink).toBe(true);
   });
 
+  it("issues proposal actions from current server state", async () => {
+    const proposal = await proposePersonalityProjection({}, proposalDependencies());
+    const view = (options: {
+      loadSources?: () => ReturnType<typeof sources>;
+      capability?: PersonalityCapabilityState;
+    } = {}) => getPersonalityBindingView({
+      resolveWorkspace: async () => workspace,
+      readWorkspaceFiles: readPersonalityWorkspaceFiles,
+      loadSources: options.loadSources ?? (() => sources()),
+      probeCapability: async () => options.capability ?? available,
+    });
+
+    await expect(view()).resolves.toMatchObject({
+      proposals: [
+        {
+          proposal: { id: proposal.id },
+          actions: {
+            canApprove: true,
+            canReject: true,
+            canRetry: false,
+            approvalBlockers: [],
+          },
+        },
+      ],
+    });
+
+    writeFileSync(join(workspace.dir, "IDENTITY.md"), "Changed after proposal");
+    const changedFile = await view();
+    expect(changedFile.proposals[0].actions).toMatchObject({
+      canApprove: false,
+      approvalBlockers: ["file_changed"],
+    });
+    unlinkSync(join(workspace.dir, "IDENTITY.md"));
+
+    const changedSource = await view({ loadSources: () => sources("Changed Ada") });
+    expect(changedSource.proposals[0].actions).toMatchObject({
+      canApprove: false,
+      approvalBlockers: ["source_changed"],
+    });
+
+    const unavailableHost = await view({
+      capability: { ...available, state: "not_granted" },
+    });
+    expect(unavailableHost.proposals[0].actions).toMatchObject({
+      canApprove: false,
+      approvalBlockers: ["host_capability_unavailable"],
+    });
+  });
+
   it("revalidates and reports a pinned non-default voice profile by immutable ID", async () => {
     const defaultVoiceId = "vp_default01" as const;
     const pinnedVoiceId = "vp_pinned001" as const;

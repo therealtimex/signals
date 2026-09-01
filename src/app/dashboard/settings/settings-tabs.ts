@@ -1,4 +1,4 @@
-export const VALID_SETTINGS_TABS = ["platforms", "agents"] as const;
+export const VALID_SETTINGS_TABS = ["platforms", "agents", "personality"] as const;
 export type SettingsTab = (typeof VALID_SETTINGS_TABS)[number];
 
 export function parseSettingsTab(value: string | null | undefined): SettingsTab {
