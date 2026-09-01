@@ -62,6 +62,32 @@ Output is `.webm` at 1440x900, matching the guide screenshots. It is **not commi
 `.gitignore`. Video regenerates on every run, and binaries that change wholesale each time belong in
 a CDN or release, not in git history.
 
+### Converting for upload
+
+X and LinkedIn do not accept webm, so `automation:convert-guide-video` re-encodes to H.264 mp4.
+
+```bash
+npm run automation:convert-guide-video                    # every recording in guide/video
+npm run automation:convert-guide-video -- --only product-tour --crf 18
+```
+
+**This is the only part of app-automation that needs ffmpeg**, and it is deliberately the only part.
+Recording stays dependency-free so it runs headless anywhere; ffmpeg lives at the publish boundary,
+where the alternative is not publishing at all. Anyone can record — only whoever uploads needs
+`brew install ffmpeg` (or `apt-get install ffmpeg`, or `SIGNALS_FFMPEG` pointing at a binary). A
+missing ffmpeg is reported by name with the install command, not as a spawn `ENOENT`.
+
+Two encode settings decide whether an upload is *accepted* rather than merely produced, and both are
+pinned by a test: `yuv420p`, because x264 can otherwise emit 4:4:4 from VP8 that Safari and
+QuickTime refuse to decode; and `+faststart`, which moves the moov atom ahead of the media so a
+player shows a frame before fetching the whole file. A silent AAC track is added by default
+(`--no-silent-audio` to skip) — tours have no audio, and some upload pipelines mishandle a video
+with no audio stream at all.
+
+The output is probed with `ffprobe` and rejected unless it is h264/yuv420p with a non-zero duration.
+ffmpeg exits 0 having written a zero-frame file if its input was truncated, so an mp4 that exists is
+not an mp4 that plays — the same reason the capture flow settles before it believes a screenshot.
+
 `automation:test` runs in the `check` gate. It needs no browser, no Dev app, and no second
 checkout, so it is the one part of this directory that CI can hold.
 
