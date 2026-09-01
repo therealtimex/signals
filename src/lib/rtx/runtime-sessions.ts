@@ -496,6 +496,7 @@ export type TerminalRuntimeSessionSnapshot = {
 
 function flattenTerminalRuntimeSessions(body: Record<string, unknown>): TerminalRuntimeSessionSnapshot[] {
   const sessions: TerminalRuntimeSessionSnapshot[] = [];
+  const seen = new Set<string>();
 
   const pushSession = (raw: unknown) => {
     if (!raw || typeof raw !== "object") return;
@@ -504,7 +505,8 @@ function flattenTerminalRuntimeSessions(body: Record<string, unknown>): Terminal
       (typeof session.id === "string" && session.id.trim()) ||
       (typeof session.sessionId === "string" && session.sessionId.trim()) ||
       "";
-    if (!id) return;
+    if (!id || seen.has(id)) return;
+    seen.add(id);
 
     const pendingTurn =
       session.chatLinkedPendingTurn && typeof session.chatLinkedPendingTurn === "object"
@@ -528,22 +530,32 @@ function flattenTerminalRuntimeSessions(body: Record<string, unknown>): Terminal
     });
   };
 
-  const results = body.results;
-  if (results && typeof results === "object") {
-    const workspaces = (results as Record<string, unknown>).workspaces;
-    if (Array.isArray(workspaces)) {
-      for (const workspace of workspaces) {
-        if (!workspace || typeof workspace !== "object") continue;
-        const threads = (workspace as Record<string, unknown>).threads;
-        if (!Array.isArray(threads)) continue;
-        for (const thread of threads) {
-          if (!thread || typeof thread !== "object") continue;
-          const threadSessions = (thread as Record<string, unknown>).sessions;
-          if (!Array.isArray(threadSessions)) continue;
-          for (const session of threadSessions) pushSession(session);
-        }
+  const pushWorkspaceGroups = (workspaces: unknown) => {
+    if (!Array.isArray(workspaces)) return;
+    for (const workspace of workspaces) {
+      if (!workspace || typeof workspace !== "object") continue;
+      const threads = (workspace as Record<string, unknown>).threads;
+      if (!Array.isArray(threads)) continue;
+      for (const thread of threads) {
+        if (!thread || typeof thread !== "object") continue;
+        const threadSessions = (thread as Record<string, unknown>).sessions;
+        if (!Array.isArray(threadSessions)) continue;
+        for (const session of threadSessions) pushSession(session);
       }
     }
+  };
+
+  // `GET /cli/list-terminal-sessions` groups sessions under a *top-level*
+  // `workspaces` key. Reading only `results.workspaces` made every response
+  // parse as zero sessions, which silently disabled terminal teardown — the
+  // orchestrator session id never resolved, so no terminate was ever sent, and
+  // waitForTerminalSessionIdle reported "idle" for sessions it could not see.
+  // #295 reported this; #297 shipped the fix against this shape and it has
+  // never run. `results.workspaces` stays tolerated for older hosts.
+  pushWorkspaceGroups(body.workspaces);
+  const results = body.results;
+  if (results && typeof results === "object") {
+    pushWorkspaceGroups((results as Record<string, unknown>).workspaces);
   }
 
   const topLevelSessions = body.sessions;
