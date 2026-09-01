@@ -48,8 +48,14 @@ export const INSTALL_HINT =
  */
 export function resolveFfprobe(ffmpeg, env = process.env) {
   if (env.SIGNALS_FFPROBE) return env.SIGNALS_FFPROBE;
-  const dir = dirname(ffmpeg);
-  return dir === "." ? "ffprobe" : join(dir, "ffprobe");
+  // A bare name means "search PATH", so the sibling is a bare name too. Anything
+  // with a separator is an explicit location and must stay one: `./ffmpeg` has a
+  // dirname of ".", which join() would normalise away into a PATH lookup.
+  //
+  // Sliced rather than dirname()'d because dirname() is POSIX-only in this
+  // process and reads a Windows path as one long filename.
+  const cut = Math.max(ffmpeg.lastIndexOf("/"), ffmpeg.lastIndexOf("\\"));
+  return cut === -1 ? "ffprobe" : `${ffmpeg.slice(0, cut + 1)}ffprobe`;
 }
 
 /** Where the encode lands before it has earned the real name. */
@@ -281,10 +287,11 @@ export async function runConvertGuideVideoFlow(args, dependencies = {}) {
     listSources = discoverSources,
     ensureDir = (dir) => mkdirSync(dir, { recursive: true }),
     sizeOf = (file) => statSync(file).size,
-    move = (from, to) => {
-      rmSync(to, { force: true });
-      renameSync(from, to);
-    },
+    // rename() overwrites the destination atomically on the same filesystem.
+    // Unlinking first would reopen the very window the partial file closes: die
+    // between the two calls and the good artifact is gone while the validated
+    // replacement is still under a name nothing looks for.
+    move = (from, to) => renameSync(from, to),
     discard = (file) => rmSync(file, { force: true }),
     log = () => {},
   } = dependencies;

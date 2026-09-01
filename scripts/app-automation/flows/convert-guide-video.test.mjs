@@ -405,3 +405,30 @@ test("a zero-duration encode is never promoted over the real file", async () => 
   assert.equal(result.ok, false);
   assert.deepEqual(moves, []);
 });
+
+test("an explicit relative ffmpeg keeps an explicit relative ffprobe", () => {
+  // dirname("./ffmpeg") is ".", which join() would normalise away into a bare
+  // name — silently turning a configured binary into a PATH lookup.
+  assert.equal(resolveFfprobe("./ffmpeg", {}), "./ffprobe");
+  assert.equal(resolveFfprobe("../bin/ffmpeg", {}), "../bin/ffprobe");
+  assert.equal(resolveFfprobe("C:\\tools\\ffmpeg", {}), "C:\\tools\\ffprobe");
+  // Still a bare name when it was one, so PATH lookup keeps working.
+  assert.equal(resolveFfprobe("ffmpeg", {}), "ffprobe");
+});
+
+test("promotion is a single rename, leaving no window with neither file", async () => {
+  const { run } = fakeRun();
+  const fsCalls = [];
+  await runConvertGuideVideoFlow(parseArgs([]), {
+    ...flowDeps({
+      run,
+      move: undefined,
+      discard: (file) => fsCalls.push(["discard", file]),
+    }),
+    // Exercise the real default move by stubbing only what it calls.
+    move: (from, to) => fsCalls.push(["rename", from, to]),
+  });
+  // One rename, no unlink of the destination beforehand: rename() already
+  // overwrites atomically, and unlinking first can destroy the good artifact.
+  assert.deepEqual(fsCalls, [["rename", "guide/video/.product-tour.part.mp4", "guide/video/product-tour.mp4"]]);
+});
