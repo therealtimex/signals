@@ -22,6 +22,11 @@ import { getWorkflowRun, listWorkflowSteps } from "@/lib/db/queries/workflows";
 import { createContact } from "@/lib/db/queries/contacts";
 import { getLaunchById, upsertLaunch } from "@/lib/db/queries/launches";
 import { buildWritingTemplateConfig } from "@/lib/workflows/signals-writing";
+import { buildContactNurtureTemplateConfig } from "@/lib/workflows/contact-relationship-nurture";
+import { db } from "@/lib/db/client";
+import { workflowRuns } from "@/lib/db/schema";
+import { sha256 } from "@/lib/writing/hash";
+import { WRITING_SCOPE_TOKEN_CONFIG_KEY } from "@/lib/writing/writing-scope-token";
 import { buildContactWebResearchTemplateConfig } from "@/lib/workflows/contact-web-research";
 import { resetCoreTables } from "@/test/db";
 
@@ -171,6 +176,84 @@ describe("runTemplateViaRtx health preflight", () => {
         ],
       },
     });
+  });
+
+  it("persists the writing scope hash before the brief or dispatch leaves the server", async () => {
+    // Ordering matters: an accepted dispatch holding a capability whose hash is not yet stored
+    // would verify against nothing, permanently if the process died before the post-dispatch write.
+    const template = createTemplate({
+      name: "Contact Relationship Nurture",
+      templateType: "nurture",
+      status: "active",
+      config: JSON.stringify(buildContactNurtureTemplateConfig()),
+      isSystem: 1,
+    });
+
+    let hashAtDispatch: unknown;
+    let runIdAtDispatch: string | undefined;
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url =
+        typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.endsWith("/api/health")) {
+        return new Response(JSON.stringify({ app: "signals", status: "ok" }), { status: 200 });
+      }
+      if (url.endsWith("/cli/get-workspace/signals")) {
+        return new Response(JSON.stringify({ workspace: { slug: "signals" } }), { status: 200 });
+      }
+      if (url.endsWith("/cli/create-thread/signals")) {
+        return new Response(JSON.stringify({ thread: { slug: "nurture-thread" } }), { status: 200 });
+      }
+      if (url.endsWith("/cli/send-message/signals/nurture-thread")) {
+        // Read the run row at the moment dispatch is being accepted.
+        const run = db.select().from(workflowRuns).all().at(-1);
+        runIdAtDispatch = run?.id;
+        hashAtDispatch = JSON.parse(run?.config ?? "{}")[WRITING_SCOPE_TOKEN_CONFIG_KEY];
+        return new Response(
+          JSON.stringify({
+            success: true,
+            terminalDispatchAccepted: true,
+            descriptor: { id: "runtime-nurture" },
+          }),
+          { status: 200 },
+        );
+      }
+      if (url.endsWith("/sdk/desktop/runtime-sessions/open-launcher")) {
+        return new Response(JSON.stringify({ success: true }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ error: `Unexpected request: ${url}` }), { status: 500 });
+    }) as unknown as typeof fetch;
+
+    const result = await runTemplateViaRtx(
+      { templateId: template.id, signalsBaseUrl: "http://127.0.0.1:3099" },
+      {
+        ...process.env,
+        RTX_APP_ID: "test-app-id",
+        RTX_API_BASE_URL: "http://127.0.0.1:3001",
+        STORAGE_DIR: storageDir,
+      },
+      fetchImpl,
+    );
+    expect(result.success).toBe(true);
+    if (!result.success) throw new Error(result.error);
+
+    expect(runIdAtDispatch).toBe(result.workflowRunId);
+    expect(hashAtDispatch).toMatch(/^[a-f0-9]{64}$/);
+
+    const brief = readFileSync(
+      join(storageDir, "working-data/signals/workflow-runs", result.workflowRunId, "brief.md"),
+      "utf8",
+    );
+    const token = /writingScopeToken: "([^"]+)"/.exec(brief)?.[1];
+    expect(token).toBeDefined();
+    // The brief carries the plaintext capability and never the stored hash.
+    expect(brief).not.toContain(String(hashAtDispatch));
+    expect(brief).not.toContain(WRITING_SCOPE_TOKEN_CONFIG_KEY);
+    // The token the agent was handed verifies against what was already persisted.
+    expect(sha256(token!)).toBe(hashAtDispatch);
+    expect(token!.startsWith(`${result.workflowRunId}.`)).toBe(true);
+    // The hash survives the post-dispatch config write.
+    expect(JSON.parse(getWorkflowRun(result.workflowRunId)?.config ?? "{}"))
+      .toMatchObject({ [WRITING_SCOPE_TOKEN_CONFIG_KEY]: hashAtDispatch });
   });
 
   function createResearchTemplateAndContact() {

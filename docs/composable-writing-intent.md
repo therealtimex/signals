@@ -51,8 +51,18 @@ Naming a composed run in caller-owned `writing.runs` therefore mints nothing. Th
 of having been handed *this* dispatch.
 
 The scope cannot be forged, widened, or dropped: a caller-supplied `composition` is stripped, a
-wrong or another dispatch's token does not verify (constant-time), and a stamped scope is immutable
-across later `upsert_launch` calls.
+malformed or non-verifying token is a hard `writing_scope_token_invalid` error that writes no launch
+(presenting a capability is an explicit composed-lane attempt, so failing it must not silently
+downgrade to ordinary writing), and a stamped scope is immutable across later `upsert_launch` calls.
+
+The hash is persisted on the run row **before** the plaintext is written into the brief or terminal
+dispatch is accepted, so an accepted dispatch never holds a capability that verifies against
+nothing. `run-template-via-rtx.test.ts` pins that ordering by reading the run row from inside the
+mocked `/cli/send-message` handler.
+
+Possessing another dispatch's token authorises *that* dispatch, not this one: the scope it mints
+names the other run, so a proposal claiming this run is rejected on lineage. An agent able to read
+another run's brief file is the documented capability bound below, not a gap in the binding.
 
 `assertWritingIntentAuthority` then validates the submission against that scope, so mandate,
 consumer, allowed surfaces, and run/template lineage all come from server state:

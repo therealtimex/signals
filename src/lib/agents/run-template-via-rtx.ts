@@ -380,6 +380,15 @@ export async function runTemplateViaRtx(
         ...runtimeConfig,
         [WRITING_SCOPE_TOKEN_CONFIG_KEY]: writingScope.tokenHash,
       };
+      // Persist before the plaintext leaves the server. Handing an agent a capability whose hash is
+      // not yet stored would leave an accepted dispatch holding a token that verifies against
+      // nothing — permanently, if the process dies before the post-dispatch config write below.
+      updateWorkflowRun(run.id, {
+        config: JSON.stringify({
+          ...parseObject(getWorkflowRun(run.id)?.config),
+          [WRITING_SCOPE_TOKEN_CONFIG_KEY]: writingScope.tokenHash,
+        }),
+      });
     }
     // Resolve the acting profile once, and hand the row to the brief rather than letting the brief
     // re-derive a platform from loose config keys.

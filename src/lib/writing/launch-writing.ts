@@ -14,6 +14,26 @@ import { launchCompositionSchema, type LaunchComposition } from "@/lib/writing/c
 import { resolveComposedRunAuthorityByToken } from "@/lib/writing/writing-intent-authority";
 
 /**
+ * Resolve a presented capability, or refuse the whole call.
+ *
+ * Presenting a token is an explicit composed-lane attempt, so a malformed, unknown, or mismatched
+ * one is an error rather than a silent downgrade to ordinary writing — otherwise a real dispatch
+ * whose capability failed to verify would quietly get an unscoped launch and only discover the
+ * problem when its first proposal is rejected. Omitting the token remains ordinary writing.
+ */
+function resolvePresentedWritingScope(token: string | undefined) {
+  if (token === undefined) return null;
+  const authority = resolveComposedRunAuthorityByToken(db, token);
+  if (!authority) {
+    throw new AgentToolError("VALIDATION_ERROR", "Writing scope token is invalid or unknown", {
+      reason: "writing_scope_token_invalid",
+      path: ["writingScopeToken"],
+    });
+  }
+  return authority;
+}
+
+/**
  * Stamp the server-owned composition scope onto a launch.
  *
  * Minted only from a dispatch-issued capability token. Naming a composed run in caller-owned
@@ -23,19 +43,19 @@ import { resolveComposedRunAuthorityByToken } from "@/lib/writing/writing-intent
  */
 function stampLaunchComposition(input: {
   stored: Record<string, unknown>;
-  writingScopeToken: string | undefined;
+  authority: ReturnType<typeof resolvePresentedWritingScope>;
 }): LaunchComposition | null {
   const existing = launchCompositionSchema.safeParse(parseObject(input.stored).composition);
   if (existing.success) return existing.data;
-  const authority = resolveComposedRunAuthorityByToken(db, input.writingScopeToken);
-  if (!authority) return null;
+  if (!input.authority) return null;
+  const { workflowRunId, templateId, composition } = input.authority;
   return launchCompositionSchema.parse({
     schemaVersion: 1,
-    workflowRunId: authority.workflowRunId,
-    templateId: authority.templateId,
-    consumer: authority.composition.consumer,
-    mandate: authority.composition.mandate,
-    surfaces: authority.composition.surfaces,
+    workflowRunId,
+    templateId,
+    consumer: composition.consumer,
+    mandate: composition.mandate,
+    surfaces: composition.surfaces,
     stampedAt: Math.floor(Date.now() / 1000),
   });
 }
@@ -176,6 +196,8 @@ export function mergeLaunchMetadata(input: {
   /** Dispatch-issued capability; the only way a launch becomes a composed scope. */
   writingScopeToken?: string;
 }): { metadata: Record<string, unknown>; writing: LaunchWritingDocument | null; spineChanged: boolean } {
+  // Before any early return: a presented capability is validated whatever the metadata shape is.
+  const presentedScope = resolvePresentedWritingScope(input.writingScopeToken);
   const existingRoot = parseObject(input.existingMetadata);
   if (!input.incomingMetadata) {
     return { metadata: existingRoot, writing: readLaunchWriting(existingRoot), spineChanged: false };
@@ -258,7 +280,7 @@ export function mergeLaunchMetadata(input: {
   }
   // Composition is server-owned: drop whatever the caller sent and re-derive it.
   delete merged.composition;
-  const composition = stampLaunchComposition({ stored, writingScopeToken: input.writingScopeToken });
+  const composition = stampLaunchComposition({ stored, authority: presentedScope });
   if (composition) merged.composition = composition;
   const parsed = launchWritingSchema.safeParse(merged);
   if (!parsed.success) throw new AgentToolError("VALIDATION_ERROR", "Incomplete launch writing metadata", parsed.error.flatten());

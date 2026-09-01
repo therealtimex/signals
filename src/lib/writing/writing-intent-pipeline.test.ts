@@ -285,18 +285,47 @@ describe("assist-only writing intent authority", () => {
     })) as { id: string };
     expect(launchCompositionOf(named.id)).toBeNull();
 
-    // Neither does another dispatch's token, or a forged one.
+    // A token that does not verify fails the call outright — presenting one is an explicit
+    // composed-lane attempt, so silently downgrading it to an unscoped launch would hide a real
+    // dispatch's broken capability until its first proposal was rejected.
     const other = composedRun();
-    const wrongToken = await invokeAgentTool("upsert_launch", {
+    const before = db.select().from(launches).all().length;
+    for (const badToken of [
+      `${dispatch.run.id}.${other.token.split(".")[1]}`, // this run's id, another dispatch's secret
+      `${dispatch.run.id}.not-the-secret`,
+      "malformed-token",
+      `run_does_not_exist.${dispatch.token.split(".")[1]}`,
+    ]) {
+      await expect(invokeAgentTool("upsert_launch", {
+        ...personalityLaunchPayload({
+          name: "Launch with a tampered token",
+          targetId: actingTargetId,
+          workflowRunId: dispatch.run.id,
+          surfaces: [{ platform: "x", surface: "x/reply", targetId: actingTargetId }],
+        }),
+        writingScopeToken: badToken,
+      })).rejects.toMatchObject({ details: { reason: "writing_scope_token_invalid" } });
+    }
+    expect(db.select().from(launches).all()).toHaveLength(before);
+
+    // Another dispatch's *valid* token is a valid capability — for that dispatch. It mints a scope
+    // bound to that run, so it cannot be used to attribute work to this one; the lineage check
+    // downstream rejects that. (An agent able to read another run's brief is the documented
+    // capability bound, not a hole in the binding itself.)
+    const borrowed = await invokeAgentTool("upsert_launch", {
       ...personalityLaunchPayload({
-        name: "Launch with a tampered token",
+        name: "Launch built with another dispatch's token",
         targetId: actingTargetId,
-        workflowRunId: dispatch.run.id,
         surfaces: [{ platform: "x", surface: "x/reply", targetId: actingTargetId }],
       }),
-      writingScopeToken: `${dispatch.run.id}.${other.token.split(".")[1]}`,
+      writingScopeToken: other.token,
     }) as { id: string };
-    expect(launchCompositionOf(wrongToken.id)).toBeNull();
+    expect(launchCompositionOf(borrowed.id)).toMatchObject({ workflowRunId: other.run.id });
+    await expect(propose(fixture, {
+      launchId: borrowed.id,
+      workflowRunId: dispatch.run.id,
+      intent: intentFor(dispatch),
+    })).rejects.toMatchObject({ details: { reason: "writing_intent_lineage_mismatch" } });
 
     const launchId = await composedLaunch(dispatch);
 
@@ -312,7 +341,7 @@ describe("assist-only writing intent authority", () => {
     expect(scope.surfaces).not.toContain("x/post");
     expect(launchCompositionOf(fixture.launchId)).toBeNull();
 
-    // A caller cannot mint a scope on an ordinary launch...
+    // A caller cannot mint a scope on an ordinary launch by supplying `composition` directly...
     await invokeAgentTool("upsert_launch", {
       id: fixture.launchId,
       name: "Personality publish proof",

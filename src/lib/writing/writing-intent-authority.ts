@@ -2,15 +2,28 @@
  * Server-side authority for composed writing.
  *
  * Every payload field an agent sends is caller-owned — the run pointer and the surface alike — so
- * neither can be the authority. The anchor is the **launch**: a writing variant structurally
- * requires a `launchId` that resolves to a launch with a spine, and `mergeLaunchMetadata` stamps a
- * server-derived `writing.composition` onto that launch from the workflow-run row Signals wrote at
- * dispatch. Callers cannot set it (it is stripped) and cannot remove it (it is immutable).
+ * neither can be the authority, and neither is. The anchor is the **launch**, bound to its dispatch
+ * by a capability rather than by a selector:
  *
- * `assertWritingIntentAuthority` validates the submission against that stamped scope, so the
- * mandate, consumer, allowed surfaces, and run/template lineage all come from server state. The
- * surface mandate (`isAssistOnlySurface`) stays as defence in depth: a proposal surface outside any
- * composed scope is refused rather than quietly treated as ordinary writing.
+ * - `run-template-via-rtx.ts` mints a writing scope token while dispatching a composed run, stores
+ *   only its hash on the server-owned run row, and writes the plaintext into that dispatch's brief.
+ * - `mergeLaunchMetadata` stamps `writing.composition` onto a launch only when that token verifies.
+ *   A caller-supplied composition is stripped; a stamped one is immutable; naming a composed run in
+ *   `writing.runs` mints nothing; a presented token that does not verify fails the call outright.
+ * - A writing variant structurally requires a `launchId`, so every artifact reaches this scope.
+ *
+ * `assertWritingIntentAuthority` validates the submission against that stamped scope, so mandate,
+ * consumer, allowed surfaces, and run/template lineage all come from server state — including
+ * `generationMetadata.agent.workflowRunId`, which is compared to the scope's run rather than to
+ * itself, so cross-run attribution is rejected rather than merely detected.
+ *
+ * `isAssistOnlySurface` stays as defence in depth: a proposal surface outside any composed scope is
+ * refused rather than quietly treated as ordinary writing.
+ *
+ * Boundary, stated so future changes are reviewed against the real model: the agent-tools route has
+ * no per-invocation identity, so ordinary platform-native writing by the same credential cannot be
+ * attributed to a dispatch at all. See "What this does not claim" in
+ * `docs/composable-writing-intent.md`.
  */
 
 import { eq } from "drizzle-orm";
