@@ -59,7 +59,21 @@ export const GUIDE_THEME = "light";
  * how to read itself rather than the caller guessing.
  */
 export const ID_SOURCES = {
-  contact: { path: "/api/contacts?pageSize=1", pick: (body) => body?.data?.[0]?.id ?? null },
+  // Contacts are fetched a page at a time so the *best-enriched* one can be
+  // preferred. The list is recency-ordered, and taking the first row captured a
+  // contact scoring 31/100 whose detail page reads "This profile is still thin"
+  // — the worst possible illustration of the view. Falls back to the first row.
+  contact: {
+    path: "/api/contacts?pageSize=25",
+    pick: (body) => {
+      const rows = body?.data ?? [];
+      const best = rows.reduce(
+        (a, b) => ((b?.enrichmentScore ?? 0) > (a?.enrichmentScore ?? 0) ? b : a),
+        rows[0],
+      );
+      return best?.id ?? null;
+    },
+  },
   // Content is fetched a page at a time so a *titled* item can be preferred:
   // `title` is optional on content (only 6 of the first 25 rows have one), and a
   // detail screenshot of an untitled row is a markedly worse guide illustration.
