@@ -88,6 +88,19 @@ test("content-detail waits on its back link, not a conditional heading", () => {
   assert.equal(readySelector(GUIDE_VIEWS.find((v) => v.id === "contacts-list")), "h1");
 });
 
+test("the contact id source prefers the best-enriched row", () => {
+  // The list is recency-ordered, so the first row captured a contact scoring
+  // 31/100 whose detail page reads "This profile is still thin".
+  const { pick } = ID_SOURCES.contact;
+  assert.equal(
+    pick({ data: [{ id: "thin", enrichmentScore: 31 }, { id: "rich", enrichmentScore: 98 }] }),
+    "rich",
+  );
+  assert.equal(pick({ data: [{ id: "a" }, { id: "b" }] }), "a", "falls back to the first row");
+  assert.equal(pick({ data: [] }), null);
+  assert.equal(pick(null), null);
+});
+
 test("the content id source prefers a titled item but tolerates none", () => {
   const { pick } = ID_SOURCES.content;
   assert.equal(pick({ items: [{ id: "a" }, { id: "b", title: "Reply" }] }), "b");
@@ -227,7 +240,7 @@ test("resolveDetailIds reads each endpoint's own envelope", async () => {
   // /api/content answers `items`; the others answer `data`. Getting this wrong
   // would look exactly like empty seed data.
   const { fetchImpl } = stubFetch({
-    "/api/contacts?pageSize=1": { body: { data: [{ id: "c1" }], total: 1 } },
+    "/api/contacts?pageSize=25": { body: { data: [{ id: "c1", enrichmentScore: 90 }], total: 1 } },
     "/api/content?pageSize=25": { body: { items: [{ id: "n1" }], total: 1 } },
     "/api/goals?pageSize=1": { body: { data: [{ id: "g1" }], total: 1 } },
     "/api/workflows?pageSize=1": { body: { data: [{ id: "w1" }], total: 1 } },
@@ -243,7 +256,7 @@ test("resolveDetailIds reads each endpoint's own envelope", async () => {
 
 test("resolveDetailIds names the empty kind rather than returning nothing", async () => {
   const { fetchImpl } = stubFetch({
-    "/api/contacts?pageSize=1": { body: { data: [], total: 0 } },
+    "/api/contacts?pageSize=25": { body: { data: [], total: 0 } },
     "/api/goals?pageSize=1": { body: { data: [{ id: "g1" }], total: 1 } },
   });
   const { ids, missing } = await resolveDetailIds({
