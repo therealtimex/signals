@@ -48,3 +48,8 @@ marketplace/release-manifest.sig.json
 # Python bytecode from bundled workspace scripts (scripts/snowball-seed-scout)
 __pycache__/
 *.pyc
+
+# Tour video: the mp4 ships (guide/ is a published artifact and the mp4 is what
+# uploads), the webm does not — it is the recorder's intermediate, regenerated
+# wholesale by `npm run automation:record-guide-tour`.
+guide/video/*.webm

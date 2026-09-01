@@ -37,6 +37,60 @@ npm run automation:capture-guide-assets  # regenerate every screenshot guide/ re
 npm run automation:test                  # unit-test the flows (no Dev app required)
 ```
 
+`automation:record-guide-tour` records the same demo data being *used*, as video. Stills show what
+a screen looks like; they cannot show a flow.
+
+```bash
+npm run automation:record-guide-tour -- --base-url http://127.0.0.1:3111 --json
+npm run automation:record-guide-tour -- --only product-tour
+```
+
+Playwright records the page natively, so this needs no ffmpeg — which matters, because
+`realtimex-ai-app`'s `recorder.mjs` shells out to ffmpeg with an avfoundation screen capture and is
+macOS-only. Recording the page rather than the screen also means no desktop, no window chrome, no
+other window wandering into frame, and it runs headless.
+
+Captions are burned in as DOM rather than added in post, so a tour is reproducible from `main` by
+anyone with the demo seed — the same property that made the screenshots worth automating. There is
+no audio and no edit step.
+
+Routes are warmed in a throwaway context first. A dev server compiles on demand, so without warming
+the first visit to each page spends seconds on a skeleton: the first take ran 50s to show ~25s of
+content, and 41s after warming.
+
+Output is `.webm` at 1440x900, matching the guide screenshots. The webm is **not committed** — it is
+an intermediate, regenerated wholesale on every run. The converted `.mp4` **is** committed, because
+`guide/` is a published artifact and the mp4 is the form that actually uploads; a reader of the
+guide should not have to run a dev server and a browser to see the product move.
+
+### Converting for upload
+
+X and LinkedIn do not accept webm, so `automation:convert-guide-video` re-encodes to H.264 mp4.
+
+```bash
+npm run automation:convert-guide-video                    # every recording in guide/video
+npm run automation:convert-guide-video -- --only product-tour --crf 18
+```
+
+**This is the only part of app-automation that needs ffmpeg**, and it is deliberately the only part.
+Recording stays dependency-free so it runs headless anywhere; ffmpeg lives at the publish boundary,
+where the alternative is not publishing at all. Anyone can record — only whoever uploads needs
+`brew install ffmpeg` (or `apt-get install ffmpeg`, or `SIGNALS_FFMPEG` pointing at a binary —
+`ffprobe` is taken from beside it, overridable with `SIGNALS_FFPROBE`). Both binaries are checked
+up front and reported by name with the install command, not as a spawn `ENOENT` partway through.
+
+Two encode settings decide whether an upload is *accepted* rather than merely produced, and both are
+pinned by a test: `yuv420p`, because x264 can otherwise emit 4:4:4 from VP8 that Safari and
+QuickTime refuse to decode; and `+faststart`, which moves the moov atom ahead of the media so a
+player shows a frame before fetching the whole file. A silent AAC track is added by default
+(`--no-silent-audio` to skip) — tours have no audio, and some upload pipelines mishandle a video
+with no audio stream at all.
+
+Each encode lands on a hidden partial file and is promoted to its real name only after `ffprobe`
+confirms h264/yuv420p with a non-zero duration. ffmpeg exits 0 having written a zero-frame file if
+its input was truncated, so an mp4 that exists is not an mp4 that plays — and re-converting in place
+would destroy the last good upload artifact the moment ffmpeg started writing.
+
 `automation:test` runs in the `check` gate. It needs no browser, no Dev app, and no second
 checkout, so it is the one part of this directory that CI can hold.
 
