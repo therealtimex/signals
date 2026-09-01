@@ -86,6 +86,43 @@ player shows a frame before fetching the whole file. A silent AAC track is added
 (`--no-silent-audio` to skip) — tours have no audio, and some upload pipelines mishandle a video
 with no audio stream at all.
 
+### Music
+
+The mp4s carry a silent AAC track by default. Point `--music` at an audio file and it becomes a bed
+instead:
+
+```bash
+npm run automation:convert-guide-video -- --music guide/video/audio/tour-bed.mp3
+npm run automation:convert-guide-video -- --no-music          # back to silence
+```
+
+The bed is **looped, trimmed to the take, and faded out**, all from the source's probed duration.
+That is not incidental: tours are 40.6s and 15.9s and both shift by a few tenths on every re-record,
+so a fixed-length file dropped in would hard-cut mid-phrase. `asetpts` restamps after the trim so the
+fade is measured from the start of the clip rather than from wherever the loop happened to be.
+
+`guide/video/audio/tour-bed.mp3` ships with the repo and is picked up automatically, so
+`automation:convert-guide-video` with no arguments produces the published videos.
+
+Gain defaults to `0.22`, which measures about -26 dB in the mix. The first pass used `0.12` on the
+reasoning that the bed should sit under the captions — but captions are *visual*, and these tours
+have no narration, so nothing competes with the music acoustically. `0.12` landed at -32 dB, close
+to inaudible on laptop speakers.
+
+**Trim a new bed past its intro.** Suno wrote a ~20s ramp into every candidate despite being asked
+for steady dynamics, and an untrimmed bed makes the opening steps near-silent and the closing ones
+loud. Measured over the first 40s the candidates spread 4.7-9.8 dB; measured past the intro, 0.6-1.9
+dB. The committed bed is a 50s slice of that plateau — longer than either tour, so it does not even
+loop.
+
+An absent bed is a silent track, not an error, so a fresh clone converts without fetching the asset.
+The output is probed for an `aac` stream whenever a bed was requested: a filter graph that drops the
+music still produces a valid, watchable mp4, which is the failure that looks like success.
+
+Worth knowing before investing in this: **X and LinkedIn autoplay muted**, so most feed viewers never
+hear it. Music earns its keep in the guide embed, a demo, or a deck — not in a feed scroll. The
+captions carry the message on their own, by design.
+
 Each encode lands on a hidden partial file and is promoted to its real name only after `ffprobe`
 confirms h264/yuv420p with a non-zero duration. ffmpeg exits 0 having written a zero-frame file if
 its input was truncated, so an mp4 that exists is not an mp4 that plays — and re-converting in place

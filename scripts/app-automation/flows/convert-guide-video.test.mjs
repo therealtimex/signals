@@ -10,6 +10,9 @@ import {
   ffmpegArgs,
   ffmpegAvailable,
   ffprobeArgs,
+  DEFAULT_MUSIC_GAIN,
+  DEFAULT_MUSIC_PATH,
+  musicFilter,
   outputFileName,
   parseArgs,
   partialPath,
@@ -22,7 +25,10 @@ import { join } from "node:path";
 import { DEFAULT_VIDEO_DIR, GUIDE_JOURNEYS, videoFileName } from "./record-guide-tour.mjs";
 
 const OK_PROBE = JSON.stringify({
-  streams: [{ codec_name: "h264", width: 1440, height: 900, pix_fmt: "yuv420p" }],
+  streams: [
+    { codec_type: "video", codec_name: "h264", width: 1440, height: 900, pix_fmt: "yuv420p" },
+    { codec_type: "audio", codec_name: "aac" },
+  ],
   format: { duration: "41.06" },
 });
 
@@ -49,6 +55,7 @@ function flowDeps(overrides = {}) {
     sizeOf: () => 2_000_000,
     move: () => {},
     discard: () => {},
+    fileExists: () => false,
     ...overrides,
   };
 }
@@ -131,6 +138,7 @@ test("probe reads codec, geometry and duration out of ffprobe json", () => {
     width: 1440,
     height: 900,
     pixelFormat: "yuv420p",
+    audioCodec: "aac",
     durationSec: 41.06,
   });
 });
@@ -141,13 +149,17 @@ test("probe survives a file ffprobe could not read", () => {
     width: null,
     height: null,
     pixelFormat: null,
+    audioCodec: null,
     durationSec: 0,
   });
 });
 
-test("ffprobe is asked for the video stream, not whichever stream is first", () => {
+test("ffprobe is asked for every stream, so the audio can be checked too", () => {
+  // It used to select v:0 only; the audio is the half that can silently vanish
+  // when a filter graph is wrong.
   const args = ffprobeArgs("out.mp4");
-  assert.equal(args[args.indexOf("-select_streams") + 1], "v:0");
+  assert.ok(!args.includes("-select_streams"));
+  assert.match(args[args.indexOf("-show_entries") + 1], /codec_type/);
   assert.equal(args.at(-1), "out.mp4");
 });
 
@@ -249,10 +261,12 @@ test("a successful run converts, probes, and reports geometry", async () => {
     source: "product-tour.webm",
     path: `${DEFAULT_VIDEO_DIR}/product-tour.mp4`,
     bytes: 2_000_000,
+    music: null,
     codec: "h264",
     width: 1440,
     height: 900,
     pixelFormat: "yuv420p",
+    audioCodec: "aac",
     durationSec: 41.06,
   });
   // Probed, not assumed: exit 0 alone is not evidence the file plays.
@@ -261,7 +275,7 @@ test("a successful run converts, probes, and reports geometry", async () => {
 
 test("a file that encodes to nothing is reported as a failure", async () => {
   const { run } = fakeRun({
-    probe: JSON.stringify({ streams: [{ codec_name: "h264", pix_fmt: "yuv420p" }], format: { duration: "0" } }),
+    probe: JSON.stringify({ streams: [{ codec_type: "video", codec_name: "h264", pix_fmt: "yuv420p" }], format: { duration: "0" } }),
   });
   const result = await runConvertGuideVideoFlow(parseArgs([]), { ...flowDeps({ run }) });
   assert.equal(result.ok, false);
@@ -397,7 +411,7 @@ test("a failed encode discards the partial and leaves the previous mp4 intact", 
 
 test("a zero-duration encode is never promoted over the real file", async () => {
   const { run } = fakeRun({
-    probe: JSON.stringify({ streams: [{ codec_name: "h264", pix_fmt: "yuv420p" }], format: { duration: "0" } }),
+    probe: JSON.stringify({ streams: [{ codec_type: "video", codec_name: "h264", pix_fmt: "yuv420p" }], format: { duration: "0" } }),
   });
   const moves = [];
   const result = await runConvertGuideVideoFlow(parseArgs([]), {
@@ -450,4 +464,122 @@ test("the default move is a bare rename, with no unlink to fall between", async 
   assert.deepEqual(calls, [
     ["rename", partialPath(join(DEFAULT_VIDEO_DIR, "product-tour.mp4")), join(DEFAULT_VIDEO_DIR, "product-tour.mp4")],
   ]);
+});
+
+test("the bed is trimmed to the take and faded at the end", () => {
+  const filter = musicFilter({ durationSec: 40.64 });
+  assert.match(filter, /^\[1:a\]volume=0\.22/);
+  assert.match(filter, /atrim=0:40\.640/);
+  // Restamped after the trim, so the fade is measured from the clip start
+  // rather than from wherever the loop happened to be.
+  assert.match(filter, /asetpts=N\/SR\/TB/);
+  assert.match(filter, /afade=t=out:st=39\.140:d=1\.500\[a\]$/);
+});
+
+test("the fade cannot exceed half a short take", () => {
+  // A 2s clip with a 1.5s fade would be audibly fading almost from the start.
+  const filter = musicFilter({ durationSec: 2 });
+  assert.match(filter, /afade=t=out:st=1\.000:d=1\.000/);
+});
+
+test("music loops, so a bed shorter than the tour still covers it", () => {
+  const args = ffmpegArgs({ input: "in.webm", output: "out.mp4", music: "bed.mp3", durationSec: 40 });
+  assert.equal(args[args.indexOf("-stream_loop") + 1], "-1");
+  assert.equal(args[args.indexOf("-stream_loop") + 3], "bed.mp3");
+  assert.equal(args[args.indexOf("-c:a") + 1], "aac");
+  // The video is taken from the source and the audio from the filter graph.
+  assert.ok(args.includes("-filter_complex"));
+  assert.equal(args[args.indexOf("-map") + 1], "0:v");
+  assert.equal(args.at(args.indexOf("-map", args.indexOf("-map") + 1) + 1), "[a]");
+});
+
+test("music without a known duration falls back to silence, not a wrong fade", () => {
+  // The fade position comes from the probed duration; guessing it would put the
+  // fade in the wrong place, which is worse than no music.
+  const args = ffmpegArgs({ input: "in.webm", output: "out.mp4", music: "bed.mp3", durationSec: 0 });
+  assert.ok(!args.includes("-stream_loop"));
+  assert.ok(args.includes("anullsrc=channel_layout=stereo:sample_rate=44100"));
+});
+
+test("no music keeps exactly the previous silent-track behaviour", () => {
+  const args = ffmpegArgs({ input: "in.webm", output: "out.mp4" });
+  assert.ok(!args.includes("-stream_loop"));
+  assert.ok(!args.includes("-filter_complex"));
+  assert.ok(args.includes("anullsrc=channel_layout=stereo:sample_rate=44100"));
+  assert.equal(args[args.indexOf("-c:a") + 1], "aac");
+});
+
+test("music gain is overridable", () => {
+  assert.match(musicFilter({ durationSec: 10, gain: 0.3 }), /volume=0\.3/);
+  assert.equal(parseArgs(["--music-gain=0.25"]).musicGain, 0.25);
+  assert.throws(() => parseArgs(["--music-gain", "9"]), /--music-gain must be between 0 and 2/);
+});
+
+test("music args default to the committed bed and can be turned off", () => {
+  assert.equal(parseArgs([]).music, DEFAULT_MUSIC_PATH);
+  assert.equal(parseArgs([]).musicGain, DEFAULT_MUSIC_GAIN);
+  assert.equal(parseArgs(["--no-music"]).music, null);
+  assert.equal(parseArgs(["--music", "x.mp3"]).music, "x.mp3");
+  assert.equal(parseArgs([], { SIGNALS_TOUR_MUSIC: "env.mp3" }).music, "env.mp3");
+});
+
+test("an absent bed is a silent track, not a failure", async () => {
+  // guide/video/audio may not be fetched in a fresh clone; converting must
+  // still work rather than dying on a missing optional asset.
+  const { run, calls } = fakeRun();
+  const result = await runConvertGuideVideoFlow(parseArgs([]), {
+    ...flowDeps({ run, fileExists: () => false }),
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.converted[0].music, null);
+  assert.ok(!calls.some((call) => call.args.includes("-stream_loop")));
+});
+
+test("the source is probed for its duration before a bed is mixed", async () => {
+  const calls = [];
+  const run = async (binary, argv) => {
+    calls.push({ binary, args: argv });
+    if (argv.includes("-show_entries")) return { stdout: OK_PROBE, stderr: "" };
+    return { stdout: "", stderr: "" };
+  };
+  const result = await runConvertGuideVideoFlow(parseArgs([]), {
+    ...flowDeps({ run, fileExists: () => true }),
+  });
+  assert.equal(result.ok, true);
+  const probes = calls.filter((call) => call.args.includes("-show_entries"));
+  // One for the source (to place the fade), one for the output (to validate it).
+  assert.equal(probes.length, 2);
+  assert.ok(probes[0].args.includes("guide/video/product-tour.webm"));
+});
+
+test("probe reads the audio stream, and finds video wherever it sits", () => {
+  const summary = probeSummary(OK_PROBE);
+  assert.equal(summary.audioCodec, "aac");
+  assert.equal(summary.codec, "h264");
+  // Audio listed first must not be mistaken for the video stream.
+  const reordered = probeSummary(JSON.stringify({
+    streams: [
+      { codec_type: "audio", codec_name: "aac" },
+      { codec_type: "video", codec_name: "h264", width: 1440, height: 900, pix_fmt: "yuv420p" },
+    ],
+    format: { duration: "10" },
+  }));
+  assert.equal(reordered.codec, "h264");
+  assert.equal(reordered.width, 1440);
+});
+
+test("music silently dropped by a bad filter graph is a failure", () => {
+  // The mp4 is still valid and watchable without it — the failure that looks
+  // like success, so it is checked rather than trusted.
+  assert.throws(
+    () => assertUsableOutput(
+      { codec: "h264", pixelFormat: "yuv420p", durationSec: 40, audioCodec: null },
+      { expectAudio: true },
+    ),
+    /the music was dropped/,
+  );
+  assert.doesNotThrow(() => assertUsableOutput(
+    { codec: "h264", pixelFormat: "yuv420p", durationSec: 40, audioCodec: null },
+    { expectAudio: false },
+  ));
 });
