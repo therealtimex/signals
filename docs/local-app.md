@@ -87,6 +87,15 @@ proves `restored_failure`. If a desktop operator keeps newer workspace bytes, Si
 `resolved_discarded`, marks the old proposal stale, and requires a new review proposal. Never edit
 the Signals index or copy host before-images into `SIGNALS_DATA_DIR/personality/` by hand.
 
+Personality-bound writing is stored only in existing JSON metadata; it adds no SQLite migration.
+Signals-writing 1.0.x artifacts remain legacy-unbound and are never backfilled or revoked merely
+because the first binding is applied. Version 1.1.0 and later must select the active binding and
+the server stamps the complete immutable lineage. Existing and new platform targets also remain
+unbound until a user records an explicit representation decision. Rolling back to a pre-binding
+binary preserves the unknown JSON metadata and legacy artifacts; bound audits may safely fail the
+older hash check. Restore a #379-capable binary to resume them—do not down-convert approvals or
+delete target decisions.
+
 ### RealTimeX host dependency (`llm.chat`)
 
 Persona generation records `${provider}:${model}` provenance on every `workflow_runs` row. Signals **rejects** `POST /sdk/llm/chat` responses that omit `response.provider` or `response.model` (no client-side fabrication).

@@ -65,6 +65,10 @@ export type PersonalityApplyDependencies = {
   loadSources?: (options?: { voiceProfileId?: string }) => LoadedPersonalitySourceBundle;
   probeCapability?: (uncached: boolean) => Promise<PersonalityCapabilityState>;
   hostClient?: PersonalityHostClient;
+  onBindingCommitted?: (
+    result: PersonalityApplyResult,
+    context: { activeBindingId: string | null },
+  ) => Promise<void> | void;
 };
 
 type Attempt = NonNullable<PersonalityProposalRecord["attempt"]>;
@@ -715,6 +719,7 @@ async function committedOrMismatch(input: {
   transaction: HostPersonalityTransaction;
   client: PersonalityHostClient;
   at: number;
+  onBindingCommitted?: PersonalityApplyDependencies["onBindingCommitted"];
 }): Promise<PersonalityApplyResult> {
   const attempt = input.record.attempt;
   if (!attempt) {
@@ -763,7 +768,36 @@ async function committedOrMismatch(input: {
     hostResult: hostResult(input.transaction),
   };
   updateRecord(input.session, input.proposal.id, committing);
-  return successfulBinding(input.session, input.proposal, committing, input.transaction, input.at);
+  const result = successfulBinding(input.session, input.proposal, committing, input.transaction, input.at);
+  await notifyBindingCommitted(
+    result,
+    bindingSetFor(input.session, input.proposal)?.active?.id ?? null,
+    input.onBindingCommitted,
+  );
+  return result;
+}
+
+async function notifyBindingCommitted(
+  result: PersonalityApplyResult,
+  activeBindingId: string | null,
+  callback: PersonalityApplyDependencies["onBindingCommitted"],
+): Promise<void> {
+  if (!callback) return;
+  try {
+    await callback(result, { activeBindingId });
+  } catch (error) {
+    throw new AgentToolError(
+      "EXECUTION_ERROR",
+      "Personality binding committed but writing cleanup must be retried",
+      {
+        reason: "personality_cleanup_failed",
+        bindingCommitted: true,
+        cleanupRequired: true,
+        bindingId: activeBindingId,
+        error: error instanceof Error ? error.message : String(error),
+      },
+    );
+  }
 }
 
 async function preflightAndSubmit(input: {
@@ -902,6 +936,7 @@ async function preflightAndSubmit(input: {
     transaction,
     client: input.dependencies.hostClient,
     at,
+    onBindingCommitted: input.rawDependencies.onBindingCommitted,
   });
 }
 
@@ -943,6 +978,7 @@ async function resumeAttempt(input: {
       transaction,
       client: input.dependencies.hostClient,
       at: atSeconds(input.rawDependencies),
+      onBindingCommitted: input.rawDependencies.onBindingCommitted,
     });
   }
   if (transaction.status === "not_started") {
@@ -996,11 +1032,17 @@ export async function approvePersonalityProposal(input: {
       });
     }
     if (record.state === "applied") {
-      return {
+      const result = {
         proposal,
         record,
         binding: appliedBindingFor(session, proposal),
       };
+      await notifyBindingCommitted(
+        result,
+        bindingSetFor(session, proposal)?.active?.id ?? null,
+        dependencies.onBindingCommitted,
+      );
+      return result;
     }
     if (record.state === "proposed") {
       const at = atSeconds(dependencies);
@@ -1086,6 +1128,7 @@ async function retryWithinLock(
         transaction,
         client: dependencies.hostClient,
         at,
+        onBindingCommitted: rawDependencies.onBindingCommitted,
       });
     }
     if (transaction.status === "resolved_discarded") {
@@ -1125,7 +1168,13 @@ export async function retryPersonalityProposal(
     if (!record) throw new AgentToolError("NOT_FOUND", `Personality proposal not found: ${proposalId}`);
     const proposal = session.getProposal(proposalId);
     if (record.state === "applied") {
-      return { proposal, record, binding: appliedBindingFor(session, proposal) };
+      const result = { proposal, record, binding: appliedBindingFor(session, proposal) };
+      await notifyBindingCommitted(
+        result,
+        bindingSetFor(session, proposal)?.active?.id ?? null,
+        dependencies.onBindingCommitted,
+      );
+      return result;
     }
     return retryWithinLock(session, proposal, record, dependencies);
   });

@@ -122,6 +122,7 @@ Then pass `Authorization: Bearer your-secret-token` on each request.
 | `complete_publish` | content | Record per-platform publish result; creates `content_posts` on success |
 | `list_platform_targets` | platforms | List named acting targets and browser connections |
 | `get_platform_target` | platforms | Get target identity, capabilities, connection, and lease state |
+| `set_target_representation` | platforms | Explicitly bind or unbind one acting target to the active Personality identity with user evidence |
 | `prepare_platform_target` | platforms | Lease the connection, activate the target, and verify the live identity |
 | `release_platform_target` | platforms | Release a target preparation lease |
 
@@ -197,6 +198,21 @@ variants. `materialize_variant` checks the current spine, audit, approval, targe
 units before even an idempotent return. It can report `AUDIT_STALE`, `AUDIT_BLOCKED`,
 `APPROVAL_REQUIRED`, `CAPABILITY_UNSUPPORTED`, or `TARGET_REQUIRED`.
 
+Personality-aware `signals-writing` clients (version 1.1.0 and later) submit only
+`metadata.writing.personality: { "bindingId": "pb_..." }`. The server resolves that selector
+under the Personality and voice locks and replaces it with the complete binding, whole-file,
+source, workspace, represented-identity, and target snapshot. Caller-supplied hashes, workspace
+fields, target snapshots, and audit Personality fields are rejected. Versions 1.0.x may omit the
+field during the explicit legacy-unbound compatibility window; absent lineage is never silently
+backfilled and retains its pre-Personality audit hash.
+
+When allowlisted Personality sources change but the bound files and represented identity remain
+exactly the same, the server records one deterministic `core/voice/personality-source-stale`
+warning. The resulting medium-risk audit requires fresh explicit user approval. Any later source,
+binding, file, identity, or target change revokes the effective unqueued approval, returns an
+approved item to draft, and blocks materialization or queueing. Queued, scheduled, publishing,
+and published snapshots remain immutable after the queue transaction wins.
+
 Agents own the creative inputs (`platform`, `surface`, target, goal, formula/overlay/core refs,
 voice/spine refs, ordered units, claim map, audit observations, lineage refs, and media IDs).
 Signals overwrites all integrity and lifecycle fields: schema version, audit IDs/input hashes and
@@ -220,6 +236,15 @@ Personality sources come only from the self contact's public ARPP fields, one ex
 self-owned organization, an approved same-owner voice profile, and statements stored by
 `upsert_personality_statements` or `PUT /api/personality/statements`. Select the represented
 organization through `GET/PUT /api/personality/represented-org`; agent tools cannot change it.
+
+Platform targets are separate acting-identity decisions and default to `{ "kind": "unbound" }`,
+including legacy account/profile targets. `set_target_representation` accepts `targetId`, the
+active `bindingId`, an exact `self`/`org` representation (or `unbound`), and durable
+`thread_message` evidence. It never infers identity from a handle, login, target kind, or browser
+connection. The UI-equivalent `PUT /api/platform-targets/[id]/representation` accepts
+`{ bindingId, represents }` and stamps UI evidence server-side. Target views expose normalized
+`represents` and `personalityDecision`; writing context also exposes `compatible` and
+`bindingIdAtDecision`.
 
 Projection is proposal-first. `propose_personality_projection` records immutable exact UTF-8 files,
 whole-file hashes, managed-block hashes, diffs, and current CAS tokens without requiring the writer

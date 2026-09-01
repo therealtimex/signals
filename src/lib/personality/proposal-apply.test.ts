@@ -10,7 +10,10 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
 import { AgentToolError } from "@/lib/agent-tools/types";
+import { db } from "@/lib/db/client";
+import { contentItems, launches, variants } from "@/lib/db/schema";
 import {
   approvePersonalityProposal,
   retryPersonalityProposal,
@@ -20,6 +23,7 @@ import {
   brandRenderedBrandInput,
   brandRenderedIdentityInput,
   brandRenderedVoiceInput,
+  type PersonalityBinding,
   type PersonalityProposal,
 } from "@/lib/personality/contracts";
 import {
@@ -38,9 +42,15 @@ import {
 import { resetPersonalityStore } from "@/lib/personality/store-paths";
 import { readPersonalityStore, withPersonalityStore } from "@/lib/personality/store";
 import { getPersonalityBindingView } from "@/lib/personality/status";
+import {
+  approvePersonalityProjection,
+  retryPersonalityProjection,
+} from "@/lib/personality/use-cases";
 import { readPersonalityWorkspaceFiles } from "@/lib/personality/workspace";
 import type { PersonalityWorkspace } from "@/lib/personality/workspace";
 import type { PersonalityCapabilityState } from "@/lib/rtx/capabilities";
+import { resetCoreTables } from "@/test/db";
+import { buildWritingUnits } from "@/lib/writing/content-writing";
 
 const root = mkdtempSync(join(tmpdir(), "signals-378-proposal-"));
 const workspaceDir = join(root, "workspace");
@@ -275,7 +285,85 @@ function materialize(proposal: PersonalityProposal): void {
   }
 }
 
+function createBoundArtifact(binding: PersonalityBinding) {
+  const launchId = "launch-facade-replay";
+  const itemId = "item-facade-replay";
+  const variantId = "variant-facade-replay";
+  const now = 1_700_000_010;
+  const personality = {
+    schemaVersion: 1 as const,
+    bindingId: binding.id,
+    personalityHash: binding.personalityHash,
+    bindingSourceHash: binding.sourceHash,
+    workspaceSlug: binding.workspace.slug,
+    workspaceId: binding.workspace.id,
+    workspaceKey: binding.workspace.key,
+    identity: binding.identity,
+    target: null,
+  };
+  const writing = {
+    schemaVersion: 1,
+    platform: "x",
+    surface: "x/post",
+    goal: "likes",
+    formulaId: "x/post/test@1",
+    overlay: { id: "overlay:x", version: 1 },
+    core: { version: 1 },
+    voiceProfile: null,
+    voicePrecedence: "voice_first",
+    spine: { id: "spn_facade1", hash: "spine-hash" },
+    units: buildWritingUnits(["Current binding stays authoritative."]),
+    claimMap: [],
+    audit: null,
+    approval: {
+      schemaVersion: 1,
+      state: "approved",
+      riskTier: "low",
+      policy: "explicit",
+      by: "user",
+      at: now,
+    },
+    lineage: { sourceIds: [] },
+    capability: { publish: "direct" },
+    personality,
+  };
+  db.insert(launches).values({ id: launchId, name: "Facade replay fixture" }).run();
+  db.insert(contentItems).values({
+    id: itemId,
+    body: writing.units.texts[0],
+    contentType: "post",
+    platformTarget: "x",
+    status: "approved",
+    aiGenerated: true,
+    origin: "authored",
+    direction: "outbound",
+    platformData: JSON.stringify({ writing: { ...writing, variantId } }),
+    createdAt: now,
+    updatedAt: now,
+  }).run();
+  db.insert(variants).values({
+    id: variantId,
+    launchId,
+    body: writing.units.texts[0],
+    contentItemId: itemId,
+    status: "selected",
+    generationMetadata: "{}",
+    metadata: JSON.stringify({ writing }),
+    createdAt: now,
+    updatedAt: now,
+  }).run();
+  return { variantId, itemId };
+}
+
+function artifactRows(ids: ReturnType<typeof createBoundArtifact>) {
+  return {
+    variant: db.select().from(variants).where(eq(variants.id, ids.variantId)).get(),
+    item: db.select().from(contentItems).where(eq(contentItems.id, ids.itemId)).get(),
+  };
+}
+
 beforeEach(() => {
+  resetCoreTables();
   resetPersonalityStore();
   rmSync(workspaceDir, { recursive: true, force: true });
   mkdirSync(workspaceDir, { recursive: true });
@@ -1080,6 +1168,116 @@ describe.sequential("Personality proposal and apply lifecycle", () => {
       binding: null,
       detail: { unavailable: "workspace_mismatch" },
     });
+  });
+
+  it("reports committed cleanup failure and repairs it on applied-proposal replay", async () => {
+    const proposal = await proposePersonalityProjection({}, proposalDependencies());
+    let failCleanup = true;
+    let cleanupCalls = 0;
+    const dependencies = {
+      ...applyDependencies(proposal),
+      onBindingCommitted: () => {
+        cleanupCalls += 1;
+        if (failCleanup) throw new Error("injected cleanup failure");
+      },
+    };
+    await expect(approvePersonalityProposal({
+      proposalId: proposal.id,
+      evidence: { kind: "ui", route: "/settings/personality" },
+    }, dependencies)).rejects.toMatchObject({
+      code: "EXECUTION_ERROR",
+      details: {
+        bindingCommitted: true,
+        cleanupRequired: true,
+        bindingId: proposal.proposedBindingId,
+      },
+    });
+    expect(readPersonalityStore().index.proposals[proposal.id].state).toBe("applied");
+
+    failCleanup = false;
+    await expect(retryPersonalityProposal(proposal.id, dependencies)).resolves.toMatchObject({
+      binding: { id: proposal.proposedBindingId },
+    });
+    expect(cleanupCalls).toBe(2);
+  });
+
+  it("keeps current-binding artifacts byte-identical when the facade replays historical A", async () => {
+    const ids = idFactory();
+    const proposalA = await proposePersonalityProjection(
+      {},
+      proposalDependencies(() => sources("Ada A"), ids),
+    );
+    const appliedA = await approvePersonalityProjection({
+      proposalId: proposalA.id,
+      evidence: { kind: "ui", route: "/settings/personality" },
+    }, {
+      ...applyDependencies(proposalA),
+      loadSources: () => sources("Ada A"),
+    });
+    materialize(proposalA);
+    expect(appliedA.binding?.id).toBe(proposalA.proposedBindingId);
+
+    const proposalB = await proposePersonalityProjection(
+      {},
+      proposalDependencies(() => sources("Ada B"), ids),
+    );
+    const appliedB = await approvePersonalityProjection({
+      proposalId: proposalB.id,
+      evidence: { kind: "ui", route: "/settings/personality" },
+    }, {
+      ...applyDependencies(proposalB),
+      loadSources: () => sources("Ada B"),
+    });
+    materialize(proposalB);
+    const artifact = createBoundArtifact(appliedB.binding!);
+    const before = artifactRows(artifact);
+
+    await expect(retryPersonalityProjection(proposalA.id, {
+      ...applyDependencies(proposalA),
+      loadSources: () => sources("Ada B"),
+    })).resolves.toMatchObject({ binding: { id: proposalA.proposedBindingId } });
+    expect(artifactRows(artifact)).toEqual(before);
+  });
+
+  it("keeps rebound artifacts byte-identical when the facade replays historical unbind", async () => {
+    const ids = idFactory();
+    const proposalA = await proposePersonalityProjection({}, proposalDependencies(() => sources(), ids));
+    await approvePersonalityProjection({
+      proposalId: proposalA.id,
+      evidence: { kind: "ui", route: "/settings/personality" },
+    }, applyDependencies(proposalA));
+    materialize(proposalA);
+
+    const unbind = await proposePersonalityUnbind(
+      { kind: "tool" },
+      proposalDependencies(() => sources(), ids),
+    );
+    await approvePersonalityProjection({
+      proposalId: unbind.id,
+      evidence: { kind: "ui", route: "/settings/personality" },
+    }, applyDependencies(unbind));
+    materialize(unbind);
+
+    const rebound = await proposePersonalityProjection(
+      {},
+      proposalDependencies(() => sources("Ada rebound"), ids),
+    );
+    const applied = await approvePersonalityProjection({
+      proposalId: rebound.id,
+      evidence: { kind: "ui", route: "/settings/personality" },
+    }, {
+      ...applyDependencies(rebound),
+      loadSources: () => sources("Ada rebound"),
+    });
+    materialize(rebound);
+    const artifact = createBoundArtifact(applied.binding!);
+    const before = artifactRows(artifact);
+
+    await expect(retryPersonalityProjection(unbind.id, {
+      ...applyDependencies(unbind),
+      loadSources: () => sources("Ada rebound"),
+    })).resolves.toMatchObject({ binding: null });
+    expect(artifactRows(artifact)).toEqual(before);
   });
 
   it("classifies every workspace drift family with its exact public reason", async () => {

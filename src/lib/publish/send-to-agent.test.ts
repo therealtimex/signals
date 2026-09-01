@@ -2,8 +2,12 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { eq } from "drizzle-orm";
+import { db } from "@/lib/db/client";
+import { contentItems, publishJobs, variants } from "@/lib/db/schema";
 import { createContentItem, getContentItem } from "@/lib/db/queries/content";
 import { getPublishJobById } from "@/lib/db/queries/publish-jobs";
+import { updateContact } from "@/lib/db/queries/contacts";
 import { upsertLaunch } from "@/lib/db/queries/launches";
 import {
   ensureBrowserConnection,
@@ -14,6 +18,11 @@ import { handleGetPublishJob } from "@/lib/agent-tools/publish-handlers";
 import { sendContentToAgent } from "@/lib/publish/send-to-agent";
 import { buildWritingUnits, mergeContentWriting } from "@/lib/writing/content-writing";
 import { resetCoreTables } from "@/test/db";
+import { resetPersonalityStore } from "@/lib/personality/store-paths";
+import {
+  createPersonalityWritingFixture,
+  unbindPersonalityBinding,
+} from "@/test/personality-writing-fixture";
 
 const env: NodeJS.ProcessEnv = {
   ...process.env,
@@ -24,12 +33,17 @@ const env: NodeJS.ProcessEnv = {
 
 let storageDir = "";
 
-function fakeRtxFetch(dispatch = "success") {
+function fakeRtxFetch(
+  dispatch = "success",
+  beforeDispatch?: () => Promise<void> | void,
+) {
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url =
       typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
     if (url.endsWith("/cli/get-workspace/signals") && init?.method === "GET") {
-      return new Response(JSON.stringify({ workspace: { slug: "signals" } }), { status: 200 });
+      return new Response(JSON.stringify({
+        workspace: { slug: "signals", id: "workspace-test-id" },
+      }), { status: 200 });
     }
     if (url.endsWith("/cli/create-thread/signals") && init?.method === "POST") {
       return new Response(JSON.stringify({ thread: { slug: "publish-thread" } }), {
@@ -37,6 +51,7 @@ function fakeRtxFetch(dispatch = "success") {
       });
     }
     if (url.endsWith("/cli/send-message/signals/publish-thread") && init?.method === "POST") {
+      await beforeDispatch?.();
       if (dispatch === "failure") {
         return new Response(
           JSON.stringify({
@@ -128,7 +143,9 @@ function createApprovedWritingItem(input?: {
 
 describe("send-to-agent writing gates", () => {
   beforeEach(() => {
+    vi.restoreAllMocks();
     resetCoreTables();
+    resetPersonalityStore();
     storageDir = mkdtempSync(join(tmpdir(), "signals-writing-send-tests-"));
     env.STORAGE_DIR = storageDir;
   });
@@ -309,6 +326,97 @@ describe("send-to-agent writing gates", () => {
     );
     expect(result).toMatchObject({ success: false, errorCode: "terminal_dispatch_required" });
     expect(getContentItem(item.id)?.status).toBe("approved");
+  });
+
+  it("keeps queued bound rows and job payload byte-identical after Personality unbind", async () => {
+    const fixture = await createPersonalityWritingFixture(storageDir);
+    const result = await sendContentToAgent({
+      contentItemId: fixture.contentItemId,
+      platforms: ["x"],
+      targets: [{ targetId: fixture.target.id }],
+      text: "ignored",
+    }, env, fakeRtxFetch());
+    expect(result.success).toBe(true);
+    if (!result.success) throw new Error(result.error);
+    const before = {
+      variant: db.select().from(variants).where(eq(variants.id, fixture.variantId)).get(),
+      item: db.select().from(contentItems).where(eq(contentItems.id, fixture.contentItemId)).get(),
+      job: getPublishJobById(result.jobId),
+    };
+
+    await unbindPersonalityBinding(fixture.workspace, fixture.dependencies);
+
+    expect({
+      variant: db.select().from(variants).where(eq(variants.id, fixture.variantId)).get(),
+      item: db.select().from(contentItems).where(eq(contentItems.id, fixture.contentItemId)).get(),
+      job: getPublishJobById(result.jobId),
+    }).toEqual(before);
+    expect(before.item?.status).toBe("queued");
+    expect(before.job?.payloadParsed).toMatchObject({
+      text: "Personality-bound publish proof.",
+      platforms: ["x"],
+    });
+  });
+
+  it("drafts and revokes bound rows when source drifts before dispatch failure restore", async () => {
+    const fixture = await createPersonalityWritingFixture(storageDir);
+    const result = await sendContentToAgent({
+      contentItemId: fixture.contentItemId,
+      platforms: ["x"],
+      targets: [{ targetId: fixture.target.id }],
+      text: "ignored",
+    }, env, fakeRtxFetch("failure", () => {
+      updateContact(fixture.self.id, { name: "Changed after queue" });
+    }));
+    expect(result).toMatchObject({
+      success: false,
+      errorCode: "terminal_dispatch_required",
+    });
+    const item = getContentItem(fixture.contentItemId);
+    const variant = db.select().from(variants).where(eq(variants.id, fixture.variantId)).get()!;
+    const writing = JSON.parse(variant.metadata ?? "{}").writing;
+    const job = db.select().from(publishJobs).where(eq(publishJobs.contentItemId, item!.id)).get()!;
+    expect(item?.status).toBe("draft");
+    expect(variant.status).toBe("draft");
+    expect(writing.approval).toMatchObject({
+      state: "revoked",
+      revokedReason: "personality_source_stale",
+    });
+    expect(job).toMatchObject({ status: "failed", errorCode: "terminal_dispatch_required" });
+    expect(JSON.parse(job.payload)).toMatchObject({
+      text: "Personality-bound publish proof.",
+      platforms: ["x"],
+    });
+  });
+
+  it("returns dispatch failure and never reports approved when both restore transactions fail", async () => {
+    const fixture = await createPersonalityWritingFixture(storageDir);
+    const queuedVariant = db.select().from(variants).where(eq(variants.id, fixture.variantId)).get()!;
+    const result = await sendContentToAgent({
+      contentItemId: fixture.contentItemId,
+      platforms: ["x"],
+      targets: [{ targetId: fixture.target.id }],
+      text: "ignored",
+    }, env, fakeRtxFetch("failure", () => {
+      vi.spyOn(db, "transaction").mockImplementation((() => {
+        throw new Error("injected restoration transaction failure");
+      }) as typeof db.transaction);
+    }));
+    expect(result).toMatchObject({
+      success: false,
+      errorCode: "terminal_dispatch_required",
+    });
+    const item = getContentItem(fixture.contentItemId);
+    const variant = db.select().from(variants).where(eq(variants.id, fixture.variantId)).get()!;
+    const job = db.select().from(publishJobs).where(eq(publishJobs.contentItemId, item!.id)).get()!;
+    expect(item?.status).toBe("failed");
+    expect(item?.status).not.toBe("approved");
+    expect(variant.metadata).toBe(queuedVariant.metadata);
+    expect(job).toMatchObject({ status: "failed", errorCode: "terminal_dispatch_required" });
+    expect(JSON.parse(job.payload)).toMatchObject({
+      text: "Personality-bound publish proof.",
+      platforms: ["x"],
+    });
   });
 
   it("preserves legacy caller text and restores legacy failures to draft", async () => {

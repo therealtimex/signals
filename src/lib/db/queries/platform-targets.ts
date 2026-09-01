@@ -1,6 +1,6 @@
 import { and, asc, eq, isNull, ne } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import { db } from "@/lib/db/client";
+import { db, type DbRunner } from "@/lib/db/client";
 import {
   browserConnections,
   browserSessionLeases,
@@ -17,6 +17,12 @@ import {
   type PlatformTargetKind,
   type PlatformTargetPlatform,
 } from "@/lib/platforms/target-identity";
+import {
+  mergeTargetPersonalityMetadata,
+  projectTargetRepresentation,
+  type TargetPersonalityDecision,
+  type TargetRepresentationProjection,
+} from "@/lib/personality/target-representation";
 
 export type BrowserConnectionView = BrowserConnection & {
   lease: {
@@ -30,6 +36,8 @@ export type BrowserConnectionView = BrowserConnection & {
 export type PlatformTargetView = Omit<PlatformTarget, "capabilities" | "metadata"> & {
   capabilities: PlatformTargetCapability[];
   metadata: Record<string, unknown>;
+  represents: TargetRepresentationProjection["represents"];
+  personalityDecision: TargetPersonalityDecision | null;
 };
 
 export type RegisterPlatformTargetInput = {
@@ -76,10 +84,12 @@ function parseCapabilities(value: string): PlatformTargetCapability[] {
 }
 
 export function toPlatformTargetView(target: PlatformTarget): PlatformTargetView {
+  const metadata = parseJsonObject(target.metadata);
   return {
     ...target,
     capabilities: parseCapabilities(target.capabilities),
-    metadata: parseJsonObject(target.metadata),
+    metadata,
+    ...projectTargetRepresentation(metadata),
   };
 }
 
@@ -260,6 +270,14 @@ export function registerPlatformTarget(input: RegisterPlatformTargetInput): Plat
         .run();
 
       if (externalMatch && handleMatch && externalMatch.id !== handleMatch.id) {
+        const mergedMetadata = mergeTargetPersonalityMetadata(
+          externalMatch.metadata,
+          handleMatch.metadata,
+        );
+        tx.update(platformTargets)
+          .set({ metadata: JSON.stringify(mergedMetadata), updatedAt: nowSec() })
+          .where(eq(platformTargets.id, externalMatch.id))
+          .run();
         tx.update(contentPosts)
           .set({ targetId: externalMatch.id })
           .where(eq(contentPosts.targetId, handleMatch.id))
@@ -318,10 +336,13 @@ export function registerPlatformTarget(input: RegisterPlatformTargetInput): Plat
   });
 }
 
-export function resolveTargetById(id: string): PlatformTarget | undefined {
-  const target = db.select().from(platformTargets).where(eq(platformTargets.id, id)).get();
+export function resolveTargetById(
+  id: string,
+  runner: DbRunner = db,
+): PlatformTarget | undefined {
+  const target = runner.select().from(platformTargets).where(eq(platformTargets.id, id)).get();
   if (target?.status === "merged" && target.mergedIntoTargetId) {
-    return db
+    return runner
       .select()
       .from(platformTargets)
       .where(eq(platformTargets.id, target.mergedIntoTargetId))

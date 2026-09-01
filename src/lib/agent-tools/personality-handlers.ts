@@ -1,8 +1,8 @@
 import { z } from "zod";
 import {
-  approvePersonalityProposal,
-  retryPersonalityProposal,
-} from "@/lib/personality/apply";
+  approvePersonalityProjection,
+  retryPersonalityProjection,
+} from "@/lib/personality/use-cases";
 import { personalityStatementsInputSchema } from "@/lib/personality/contracts";
 import {
   proposePersonalityProjection,
@@ -64,7 +64,7 @@ export async function handleProposePersonalityProjection(
 export async function handleApprovePersonalityProjection(
   input: z.infer<typeof approvePersonalityProjectionSchema>,
 ) {
-  return approvePersonalityProposal(input);
+  return approvePersonalityProjection(input);
 }
 
 export async function handleRejectPersonalityProjection(
@@ -76,7 +76,7 @@ export async function handleRejectPersonalityProjection(
 export async function handleRetryPersonalityProjection(
   input: z.infer<typeof retryPersonalityProjectionSchema>,
 ) {
-  return retryPersonalityProposal(input.proposalId);
+  return retryPersonalityProjection(input.proposalId);
 }
 
 export async function handleRollbackPersonalityProjection(

@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { ContentItem } from "@/lib/db/types";
 import { PLATFORMS } from "@/lib/db/platforms";
 import { SURFACE_IDS } from "@/lib/writing/surfaces";
+import { variantPersonalitySnapshotSchema } from "@/lib/writing/personality-lineage";
 
 export const CONTENT_WRITING_KEY = "writing";
 
@@ -57,6 +58,7 @@ export const contentWritingSchema = z
     targetId: z.string().min(1).optional(),
     platform: z.enum(PLATFORMS).optional(),
     materialization: materializationSnapshotSchema.optional(),
+    personality: variantPersonalitySnapshotSchema.nullable().optional(),
   })
   .passthrough();
 

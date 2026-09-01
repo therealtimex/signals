@@ -7,6 +7,7 @@ import { readVariantWritingProjection } from "@/lib/writing/variant-writing-proj
 import { getLaunchById } from "@/lib/db/queries/launches";
 import { readLaunchWriting } from "@/lib/writing/launch-writing";
 import { computeAuditInputHash } from "@/lib/writing/hash";
+import { hasExactPersonalitySourceStaleFinding } from "@/lib/writing/personality-lineage";
 
 export const WRITING_APPROVAL_REQUIRED = "WRITING_APPROVAL_REQUIRED";
 export const WRITING_ARTIFACT_STALE = "WRITING_ARTIFACT_STALE";
@@ -85,6 +86,23 @@ export function evaluateWritingPublishGate(args: {
     writing.targetId !== projection.targetId
   ) {
     return stale("targetId mismatch");
+  }
+  if (JSON.stringify(writing.personality ?? null) !== JSON.stringify(projection.personality ?? null)) {
+    return stale("Personality snapshot mismatch");
+  }
+  if (projection.personality && !projection.audit.personality) {
+    return stale("Personality audit snapshot is missing");
+  }
+  if (projection.audit.personality?.statusAtAudit === "source_stale") {
+    if (approval.by !== "user" || !approval.evidence) {
+      return approvalRequired("Source-stale Personality approval evidence is missing.");
+    }
+    if (!hasExactPersonalitySourceStaleFinding(projection.audit.findings, {
+      bindingSourceHash: projection.audit.personality.bindingSourceHash,
+      currentSourceHash: projection.audit.personality.currentSourceHash,
+    })) {
+      return stale("Personality source-stale warning is missing or invalid");
+    }
   }
 
   return { ok: true, payload: deriveWritingPublishText(writing, item) };

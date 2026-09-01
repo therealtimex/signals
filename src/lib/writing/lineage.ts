@@ -1,6 +1,6 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import { db } from "@/lib/db/client";
+import { db, type DbRunner } from "@/lib/db/client";
 import { contentItems, contentPosts, graphEdges, launches, variants } from "@/lib/db/schema";
 import { queryGraphEdges } from "@/lib/db/queries/graph";
 import type { EvidenceSpine, VariantGeneration, VariantWriting } from "@/lib/writing/contracts";
@@ -17,7 +17,7 @@ export type LineageEdgeSummary = {
   dstId: string;
 };
 
-function insertEdge(input: {
+function insertEdge(runner: DbRunner, input: {
   variantId: string;
   dstType: "variant" | "content";
   dstId: string;
@@ -26,7 +26,7 @@ function insertEdge(input: {
   scope: "shared" | "local_only";
 }): LineageEdgeSummary {
   const now = Math.floor(Date.now() / 1000);
-  db.insert(graphEdges).values({
+  runner.insert(graphEdges).values({
     id: nanoid(), srcType: "variant", srcId: input.variantId, dstType: input.dstType,
     dstId: input.dstId, edgeType: input.edgeType, properties: JSON.stringify(input.properties),
     scope: input.scope, source: "signals-writing", firstSeenAt: now, lastSeenAt: now,
@@ -40,8 +40,10 @@ export function syncVariantLineageEdges(input: {
   generation: VariantGeneration;
   spine: EvidenceSpine;
   scope: "shared" | "local_only";
+  runner?: DbRunner;
 }): LineageEdgeSummary[] {
-  db.delete(graphEdges).where(and(
+  const runner = input.runner ?? db;
+  runner.delete(graphEdges).where(and(
     eq(graphEdges.srcType, "variant"),
     eq(graphEdges.srcId, input.variantId),
     inArray(graphEdges.edgeType, [...VARIANT_LINEAGE_EDGES]),
@@ -50,11 +52,11 @@ export function syncVariantLineageEdges(input: {
   const sources = new Map(input.spine.sources.map((source) => [source.id, source]));
   for (const sourceId of input.writing.lineage.sourceIds) {
     const source = sources.get(sourceId);
-    if (source?.kind === "content_item") result.push(insertEdge({ variantId: input.variantId, dstType: "content", dstId: source.contentItemId, edgeType: "sourced_from", properties: { sourceId, spineId: input.spine.id }, scope: input.scope }));
+    if (source?.kind === "content_item") result.push(insertEdge(runner, { variantId: input.variantId, dstType: "content", dstId: source.contentItemId, edgeType: "sourced_from", properties: { sourceId, spineId: input.spine.id }, scope: input.scope }));
   }
-  if (input.writing.lineage.derivedFromVariantId) result.push(insertEdge({ variantId: input.variantId, dstType: "variant", dstId: input.writing.lineage.derivedFromVariantId, edgeType: "derived_from", properties: { spineId: input.spine.id, mode: input.generation.mode }, scope: input.scope }));
-  if (input.writing.lineage.adaptedFromContentItemId) result.push(insertEdge({ variantId: input.variantId, dstType: "content", dstId: input.writing.lineage.adaptedFromContentItemId, edgeType: "adapted_from", properties: { mode: "adapt" }, scope: input.scope }));
-  if (input.writing.lineage.adaptedFromVariantId) result.push(insertEdge({ variantId: input.variantId, dstType: "variant", dstId: input.writing.lineage.adaptedFromVariantId, edgeType: "adapted_from", properties: { mode: "adapt" }, scope: input.scope }));
+  if (input.writing.lineage.derivedFromVariantId) result.push(insertEdge(runner, { variantId: input.variantId, dstType: "variant", dstId: input.writing.lineage.derivedFromVariantId, edgeType: "derived_from", properties: { spineId: input.spine.id, mode: input.generation.mode }, scope: input.scope }));
+  if (input.writing.lineage.adaptedFromContentItemId) result.push(insertEdge(runner, { variantId: input.variantId, dstType: "content", dstId: input.writing.lineage.adaptedFromContentItemId, edgeType: "adapted_from", properties: { mode: "adapt" }, scope: input.scope }));
+  if (input.writing.lineage.adaptedFromVariantId) result.push(insertEdge(runner, { variantId: input.variantId, dstType: "variant", dstId: input.writing.lineage.adaptedFromVariantId, edgeType: "adapted_from", properties: { mode: "adapt" }, scope: input.scope }));
   return result;
 }
 

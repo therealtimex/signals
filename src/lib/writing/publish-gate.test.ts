@@ -6,6 +6,7 @@ import {
   WRITING_APPROVAL_REQUIRED,
   WRITING_ARTIFACT_STALE,
 } from "@/lib/writing/publish-gate";
+import { personalitySourceStaleFinding } from "@/lib/writing/personality-lineage";
 
 function fixture() {
   const units = buildWritingUnits(["A", "B", "C"]);
@@ -41,6 +42,20 @@ function fixture() {
     }),
   } as Variant;
   return { item, writing, variant };
+}
+
+function personalitySnapshot() {
+  return {
+    schemaVersion: 1 as const,
+    bindingId: "pb_binding1",
+    personalityHash: "a".repeat(64),
+    bindingSourceHash: "b".repeat(64),
+    workspaceSlug: "signals",
+    workspaceId: null,
+    workspaceKey: "workspace-key",
+    identity: { selfContactId: "self-1", representedOrgId: null },
+    target: null,
+  };
 }
 
 describe("writing publish gate", () => {
@@ -93,6 +108,78 @@ describe("writing publish gate", () => {
   ])("rejects a stale %s snapshot", (_name, mutate) => {
     const value = fixture();
     mutate(value);
+    expect(evaluateWritingPublishGate(value)).toMatchObject({
+      ok: false,
+      code: WRITING_ARTIFACT_STALE,
+    });
+  });
+
+  it("requires the exact Personality snapshot and audit lineage for bound content", () => {
+    const value = fixture();
+    const personality = personalitySnapshot();
+    value.writing.personality = personality;
+    const metadata = JSON.parse(value.variant.metadata ?? "{}");
+    metadata.writing.personality = personality;
+    metadata.writing.audit.personality = {
+      ...personality,
+      currentSourceHash: personality.bindingSourceHash,
+      statusAtAudit: "bound",
+    };
+    value.variant.metadata = JSON.stringify(metadata);
+    expect(evaluateWritingPublishGate(value)).toMatchObject({ ok: true });
+
+    delete metadata.writing.audit.personality;
+    value.variant.metadata = JSON.stringify(metadata);
+    expect(evaluateWritingPublishGate(value)).toMatchObject({
+      ok: false,
+      code: WRITING_ARTIFACT_STALE,
+      reason: "Personality audit snapshot is missing",
+    });
+
+    metadata.writing.audit.personality = {
+      ...personality,
+      currentSourceHash: personality.bindingSourceHash,
+      statusAtAudit: "bound",
+    };
+    metadata.writing.personality = { ...personality, bindingId: "pb_binding2" };
+    value.variant.metadata = JSON.stringify(metadata);
+    expect(evaluateWritingPublishGate(value)).toMatchObject({
+      ok: false,
+      code: WRITING_ARTIFACT_STALE,
+      reason: "Personality snapshot mismatch",
+    });
+  });
+
+  it("requires deterministic warning and fresh evidence for source-stale approval", () => {
+    const value = fixture();
+    const personality = personalitySnapshot();
+    value.writing.personality = personality;
+    const metadata = JSON.parse(value.variant.metadata ?? "{}");
+    metadata.writing.personality = personality;
+    metadata.writing.audit.personality = {
+      ...personality,
+      currentSourceHash: "c".repeat(64),
+      statusAtAudit: "source_stale",
+    };
+    metadata.writing.audit.findings = [personalitySourceStaleFinding({
+      bindingSourceHash: personality.bindingSourceHash,
+      currentSourceHash: "c".repeat(64),
+    })];
+    metadata.writing.approval.by = "user";
+    metadata.writing.approval.evidence = { kind: "ui", route: "/dashboard/content" };
+    value.variant.metadata = JSON.stringify(metadata);
+    expect(evaluateWritingPublishGate(value)).toMatchObject({ ok: true });
+
+    delete metadata.writing.approval.evidence;
+    value.variant.metadata = JSON.stringify(metadata);
+    expect(evaluateWritingPublishGate(value)).toMatchObject({
+      ok: false,
+      code: WRITING_APPROVAL_REQUIRED,
+    });
+
+    metadata.writing.approval.evidence = { kind: "ui", route: "/dashboard/content" };
+    metadata.writing.audit.findings[0].evidence = "forged";
+    value.variant.metadata = JSON.stringify(metadata);
     expect(evaluateWritingPublishGate(value)).toMatchObject({
       ok: false,
       code: WRITING_ARTIFACT_STALE,

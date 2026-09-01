@@ -168,9 +168,11 @@ import {
   handleListPlatformTargets,
   handlePreparePlatformTarget,
   handleReleasePlatformTarget,
+  handleSetTargetRepresentation,
   listPlatformTargetsSchema,
   preparePlatformTargetSchema,
   releasePlatformTargetSchema,
+  setTargetRepresentationSchema,
 } from "@/lib/agent-tools/platform-target-handlers";
 import {
   createContentDraftSchema,
@@ -957,6 +959,15 @@ export const AGENT_TOOLS: Record<string, AgentToolDefinition> = {
     schema: releasePlatformTargetSchema,
     parameters: zodToParameters(releasePlatformTargetSchema),
     execute: handleReleasePlatformTarget,
+  },
+  set_target_representation: {
+    name: "set_target_representation",
+    description:
+      "Explicitly bind or unbind one acting target to the active workspace Personality identity using user evidence.",
+    category: "platforms",
+    schema: setTargetRepresentationSchema,
+    parameters: zodToParameters(setTargetRepresentationSchema),
+    execute: handleSetTargetRepresentation,
   },
 };
 

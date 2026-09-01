@@ -1,5 +1,7 @@
 import { getContentItem, updateContentItem } from "@/lib/db/queries/content";
-import { db } from "@/lib/db/client";
+import { eq } from "drizzle-orm";
+import { db, type DbRunner } from "@/lib/db/client";
+import { contentItems, variants } from "@/lib/db/schema";
 import { isPlatform } from "@/lib/db/platforms";
 import { getVariantById } from "@/lib/db/queries/variants";
 import {
@@ -50,8 +52,106 @@ import {
   WRITING_ARTIFACT_STALE,
   type WritingPublishGateResult,
 } from "@/lib/writing/publish-gate";
+import { variantWritingSchema } from "@/lib/writing/contracts";
+import {
+  personalityGateFailure,
+  type PersonalityWritingGuard,
+  withPersonalityWritingGuard,
+} from "@/lib/writing/personality-guard";
+import { revokeWritingVariantWithRunner } from "@/lib/writing/personality-revocation";
 
 const SENDABLE_ITEM_STATUSES = new Set(["draft", "approved", "failed"]);
+
+function object(value: unknown): Record<string, unknown> {
+  if (typeof value === "string") {
+    try { return object(JSON.parse(value)); } catch { return {}; }
+  }
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+async function restoreWritingAfterDispatchFailure(input: {
+  contentItemId: string;
+  env: NodeJS.ProcessEnv;
+  fetchImpl: typeof fetch;
+}): Promise<void> {
+  const item = getContentItem(input.contentItemId);
+  const contentWritingState = item ? readContentWritingState(item) : null;
+  if (!item || !contentWritingState || contentWritingState.kind !== "valid") return;
+  const contentWriting = contentWritingState.writing;
+  if (!contentWriting.personality) {
+    updateContentItem(input.contentItemId, { status: "approved" });
+    return;
+  }
+  try {
+    await withPersonalityWritingGuard((guard, tx) => {
+      const now = Math.floor(Date.now() / 1_000);
+      const variant = contentWriting.variantId
+        ? tx.select().from(variants).where(eq(variants.id, contentWriting.variantId)).get()
+        : undefined;
+      const writing = variantWritingSchema.safeParse(object(variant?.metadata).writing);
+      const failure = variant && writing.success && writing.data.personality
+        ? personalityGateFailure({
+            snapshot: writing.data.personality,
+            audit: writing.data.audit?.personality,
+            auditFindings: writing.data.audit?.findings,
+            guard,
+            requireCompatibleTarget: true,
+          })
+        : { reason: "personality_binding_stale" as const, revokedReason: "personality_stale" as const };
+      if (!failure) {
+        tx.update(contentItems)
+          .set({ status: "approved", updatedAt: now })
+          .where(eq(contentItems.id, input.contentItemId))
+          .run();
+        return;
+      }
+      tx.update(contentItems)
+        .set({ status: "draft", updatedAt: now })
+        .where(eq(contentItems.id, input.contentItemId))
+        .run();
+      if (variant) {
+        revokeWritingVariantWithRunner(tx, {
+          variant,
+          reason: failure.revokedReason,
+          allowQueuedNoop: true,
+          now,
+        });
+      }
+    }, { env: input.env, fetchImpl: input.fetchImpl });
+  } catch {
+    try {
+      db.transaction((tx) => {
+        const now = Math.floor(Date.now() / 1_000);
+        tx.update(contentItems)
+          .set({ status: "draft", updatedAt: now })
+          .where(eq(contentItems.id, input.contentItemId))
+          .run();
+        const variant = contentWriting.variantId
+          ? tx.select().from(variants).where(eq(variants.id, contentWriting.variantId)).get()
+          : undefined;
+        if (variant) {
+          revokeWritingVariantWithRunner(tx, {
+            variant,
+            reason: "personality_stale",
+            allowQueuedNoop: true,
+            now,
+          });
+        }
+      });
+    } catch {
+      // The publish job is already failed. Preserve that API outcome and make a
+      // best-effort direct status write so restoration failure never reports the
+      // content item as approved.
+      try {
+        updateContentItem(input.contentItemId, { status: "failed" });
+      } catch {
+        // A fully unavailable database cannot be repaired in this request.
+      }
+    }
+  }
+}
 
 export type SendToAgentInput = {
   contentItemId: string;
@@ -172,7 +272,7 @@ export async function sendContentToAgent(
         variant: writing.variantId ? (getVariantById(writing.variantId) ?? null) : null,
       })
     : null;
-  if (preGate && !preGate.ok) return gateFailure(preGate);
+  if (preGate && !preGate.ok && !writing?.personality) return gateFailure(preGate);
 
   if (writing) {
     if (!writing.targetId) {
@@ -297,7 +397,10 @@ export async function sendContentToAgent(
   }
   let payload = payloadResult.payload;
 
-  const transactionResult = db.transaction(() => {
+  const queueOperation = (
+    personalityGuard?: PersonalityWritingGuard,
+    tx: DbRunner = db,
+  ) => {
     if (writing) {
       const freshItem = getContentItem(input.contentItemId);
       const freshWritingState = freshItem ? readContentWritingState(freshItem) : null;
@@ -326,7 +429,50 @@ export async function sendContentToAgent(
           ? (getVariantById(freshWriting.variantId) ?? null)
           : null,
       });
-      if (!gate.ok) return { ok: false as const, gate };
+      if (!gate.ok) {
+        if (freshWriting.personality && freshWriting.variantId) {
+          const staleVariant = getVariantById(freshWriting.variantId);
+          if (staleVariant) {
+            revokeWritingVariantWithRunner(tx, {
+              variant: staleVariant,
+              reason: gate.code === WRITING_ARTIFACT_STALE ? "audit_stale" : "personality_stale",
+              allowQueuedNoop: true,
+            });
+          }
+        }
+        return { ok: false as const, gate };
+      }
+      if (freshWriting.personality) {
+        const freshVariant = freshWriting.variantId ? getVariantById(freshWriting.variantId) : undefined;
+        const variantWriting = variantWritingSchema.safeParse(object(freshVariant?.metadata).writing);
+        const failure = personalityGuard && freshVariant && variantWriting.success
+          ? personalityGateFailure({
+              snapshot: freshWriting.personality,
+              audit: variantWriting.data.audit?.personality,
+              auditFindings: variantWriting.data.audit?.findings,
+              guard: personalityGuard,
+              requireCompatibleTarget: true,
+            })
+          : { reason: "personality_binding_stale" as const, revokedReason: "personality_stale" as const };
+        if (failure) {
+          if (freshVariant) {
+            revokeWritingVariantWithRunner(tx, {
+              variant: freshVariant,
+              reason: failure.revokedReason,
+              allowQueuedNoop: true,
+            });
+          }
+          const personalityGate: Exclude<WritingPublishGateResult, { ok: true }> = {
+            ok: false,
+            code: WRITING_ARTIFACT_STALE,
+            reason: failure.reason,
+          };
+          return {
+            ok: false as const,
+            gate: personalityGate,
+          };
+        }
+      }
       if (
         !freshWriting.targetId ||
         targetSnapshots.length !== 1 ||
@@ -367,7 +513,13 @@ export async function sendContentToAgent(
     });
     updateContentItem(input.contentItemId, { status: "queued" });
     return { ok: true as const, job };
-  });
+  };
+  const transactionResult = writing?.personality
+    ? await withPersonalityWritingGuard(
+        (guard, tx) => queueOperation(guard, tx),
+        { env, fetchImpl },
+      )
+    : db.transaction((tx) => queueOperation(undefined, tx));
   if (!transactionResult.ok) return gateFailure(transactionResult.gate);
   const job = transactionResult.job;
 
@@ -424,7 +576,12 @@ export async function sendContentToAgent(
 
     if (!launch.success) {
       markPublishJobLaunchFailed(job.id, launch.error, launch.errorCode);
-      updateContentItem(input.contentItemId, { status: writing ? "approved" : "draft" });
+      if (writing) await restoreWritingAfterDispatchFailure({
+        contentItemId: input.contentItemId,
+        env,
+        fetchImpl,
+      });
+      else updateContentItem(input.contentItemId, { status: "draft" });
       const httpStatus =
         launch.errorCode === "permission_required"
           ? 403
@@ -465,7 +622,12 @@ export async function sendContentToAgent(
   } catch (error) {
     const message = error instanceof Error ? error.message : "Launch failed";
     markPublishJobLaunchFailed(job.id, message, "launch_failed");
-    updateContentItem(input.contentItemId, { status: writing ? "approved" : "draft" });
+    if (writing) await restoreWritingAfterDispatchFailure({
+      contentItemId: input.contentItemId,
+      env,
+      fetchImpl,
+    });
+    else updateContentItem(input.contentItemId, { status: "draft" });
     return {
       success: false,
       error: message,

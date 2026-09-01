@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getVariantById, isWritingVariant, updateWritingVariantLabel, upsertVariant } from "@/lib/db/queries/variants";
+import { getVariantById, isWritingVariant, updateWritingVariantLabel } from "@/lib/db/queries/variants";
+import { upsertVariantUseCase } from "@/lib/writing/variant-use-cases";
 import { updateVariantSchema } from "@/lib/api/gtm-schemas";
 import { badRequestResponse, notFoundResponse, toErrorResponse } from "@/lib/api/errors";
 import { serializeVariant } from "@/lib/serializers/gtm";
@@ -43,7 +44,7 @@ export async function PUT(
       const variant = updateWritingVariantLabel(id, data.label ?? existing.label);
       return NextResponse.json(serializeVariant(variant));
     }
-    const variant = upsertVariant({
+    const variant = await upsertVariantUseCase({
       id,
       launchId: existing.launchId,
       label: data.label,

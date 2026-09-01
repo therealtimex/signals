@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getLaunchById } from "@/lib/db/queries/launches";
-import { upsertVariant } from "@/lib/db/queries/variants";
+import { upsertVariantUseCase } from "@/lib/writing/variant-use-cases";
 import { createVariantSchema } from "@/lib/api/gtm-schemas";
 import { badRequestResponse, notFoundResponse, toErrorResponse } from "@/lib/api/errors";
 import { serializeVariant } from "@/lib/serializers/gtm";
@@ -17,7 +17,7 @@ export async function POST(
 
     const body = await req.json();
     const data = createVariantSchema.parse(body);
-    const variant = upsertVariant({
+    const variant = await upsertVariantUseCase({
       launchId,
       label: data.label,
       variantType: data.variantType,

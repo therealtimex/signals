@@ -76,6 +76,26 @@ describe("personality contracts", () => {
     }
   });
 
+  it("keeps Personality-bound writing services free of autonomous action paths", () => {
+    const modules = [
+      "src/lib/writing/personality-lineage.ts",
+      "src/lib/writing/personality-guard.ts",
+      "src/lib/writing/personality-revocation.ts",
+      "src/lib/writing/variant-use-cases.ts",
+      "src/lib/personality/target-representation.ts",
+      "src/lib/personality/use-cases.ts",
+    ];
+    for (const modulePath of modules) {
+      const source = readFileSync(resolve(process.cwd(), modulePath), "utf8");
+      expect(source, modulePath).not.toMatch(
+        /from ["']@\/lib\/(?:publish|browser|scheduler)\/|from ["']@\/lib\/rtx\/runtime-sessions/,
+      );
+      expect(source, modulePath).not.toMatch(
+        /\b(?:createPublishJob|sendToAgent|replyTo|createComment|createReaction|followAccount)\b/,
+      );
+    }
+  });
+
   it("rejects unknown keys at nested allowlist boundaries", () => {
     expect(renderedIdentityInputSchema.safeParse({
       ...rawIdentity,
