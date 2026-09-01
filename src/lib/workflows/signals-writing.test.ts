@@ -62,6 +62,38 @@ describe("Signals Writing workflow contract", () => {
     expect(section).not.toMatch(/save_draft|report_progress|search_web/);
   });
 
+  it("selects the Personality lane before audit, approval, or materialization", () => {
+    const section = buildWritingBriefSection({
+      template: { id: "template_1", name: "Platform-native writing" },
+      config,
+      workflowRunId: "run_1",
+      signalsBaseUrl: "http://127.0.0.1:3000",
+    });
+
+    expect(section).toContain("Persist by the lane returned in `get_writing_context.personality.status`");
+    expect(section).toContain("For `bound`/`source_stale`");
+    expect(section).toContain("run `measure`, create the structured audit");
+    expect(section).toContain("run `verdict` then `precheck`");
+    expect(section).toContain("only the current `bindingId`");
+    expect(section).toContain("For `unbound`, create only a targetless, unaudited sketch");
+    expect(section).toContain(
+      "omit `metadata.writing.targetId` and `metadata.writing.personality`",
+    );
+    expect(section).toContain("send `metadata.writing.audit: null`");
+    expect(section).toContain("top-level `label` suffix to `legacy_unbound sketch`");
+    expect(section).toContain(
+      "confirm the selected `variants[].personalityState` is `legacy_unbound`",
+    );
+    expect(section).toContain(
+      "Stop before audit, verdict, precheck, approval, materialization, export, or publish",
+    );
+    expect(section).toContain("In the `bound`/`source_stale` full lane only");
+    expect(section).toContain("render the persisted approval card after audit and precheck");
+    expect(section).toContain("wait for explicit user approval, then call `materialize_variant`");
+    expect(section).not.toContain("Draft and audit one platform-native artifact per surface");
+    expect(section).not.toContain("Call materialize_variant only after");
+  });
+
   it("appears only in briefs carrying the signalsWriting config", () => {
     const template = {
       id: "template_1",
