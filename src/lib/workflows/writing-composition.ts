@@ -60,6 +60,8 @@ export function buildComposedWritingBriefSection(input: {
   workflowRunId: string;
   signalsBaseUrl: string;
   target: { platform: string; targetId: string | null } | null;
+  /** Dispatch-issued capability that mints this run's launch scope. */
+  writingScopeToken?: string;
 }): string {
   const platform = input.target?.platform.toLowerCase() ?? null;
   const scoped = platform
@@ -131,7 +133,9 @@ export function buildComposedWritingBriefSection(input: {
     ...capabilityRows,
     "Tool sequence:",
     WRITING_PERSONALITY_FILES_STEP,
-    `2. Create this run's launch with upsert_launch, and put this workflow run in its \`writing.runs\` — \`runs: [{ workflowRunId: "${input.workflowRunId}", mode: "draft", startedAt: <unix> }]\`. That is what binds the launch to this dispatch: Signals stamps a server-owned composition scope from it, and every proposal on that launch is validated against the scope. A launch without it cannot carry a proposal. Then call get_writing_context with that launch and the intent surfaces, and treat its redactions and capability rows as authoritative.`,
+    input.writingScopeToken
+      ? `2. Create this run's launch with upsert_launch, passing \`writingScopeToken: "${input.writingScopeToken}"\`. That token was issued to this dispatch and is what binds the launch to it: Signals stamps a server-owned composition scope from the token, and every proposal on that launch is validated against the scope. Naming the run in \`writing.runs\` does not bind anything. A launch without the token cannot carry a proposal — do not share the token or reuse another run's. Then call get_writing_context with that launch and the intent surfaces, and treat its redactions and capability rows as authoritative.`
+      : "2. No writing scope token was issued for this run, so no launch can be scoped to it and no proposal can be created. Report that and stop.",
     ...WRITING_SOURCE_STEPS,
     WRITING_LANE_GATE_STEP,
     buildWritingLaneBoundStep({

@@ -187,6 +187,8 @@ export function buildAgentWorkflowBrief(input: {
    * intent. `run-template-via-rtx.ts` resolves it once and passes it here.
    */
   platformTarget?: ContactNurtureTargetInfo | null;
+  /** Dispatch-issued capability for a composed run; omitted for every other workflow. */
+  writingScopeToken?: string;
 }): string {
   const category = CATEGORY_LABELS[input.template.templateType] ?? input.template.templateType;
   const instructions = input.systemPromptOverride?.trim() || input.template.systemPrompt?.trim();
@@ -241,6 +243,7 @@ export function buildAgentWorkflowBrief(input: {
         workflowRunId: input.workflowRunId,
         signalsBaseUrl: input.signalsBaseUrl,
         target: resolveActingTarget(input.config, input.platformTarget),
+        writingScopeToken: input.writingScopeToken,
       })}\n`
     : null;
   const contactWebResearchContract =

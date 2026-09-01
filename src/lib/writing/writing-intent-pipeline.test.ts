@@ -20,7 +20,7 @@ import {
 } from "@/lib/db/queries/platform-targets";
 import { createTemplate } from "@/lib/db/queries/workflow-templates";
 import { createWorkflowRun } from "@/lib/db/queries/workflows";
-import { contentItems, launches, variants } from "@/lib/db/schema";
+import { contentItems, launches, variants, workflowRuns } from "@/lib/db/schema";
 import { resetPersonalityStore } from "@/lib/personality/store-paths";
 import { sendContentToAgent } from "@/lib/publish/send-to-agent";
 import { buildContactNurtureTemplateConfig } from "@/lib/workflows/contact-relationship-nurture";
@@ -28,6 +28,10 @@ import { materializeVariantWithRunner } from "@/lib/writing/materialize";
 import { withPersonalityWritingGuard } from "@/lib/writing/personality-guard";
 import { upsertVariantUseCase } from "@/lib/writing/variant-use-cases";
 import { buildWritingIntentDraft, toWritingIntentRecord } from "@/lib/writing/writing-intent";
+import {
+  WRITING_SCOPE_TOKEN_CONFIG_KEY,
+  mintWritingScopeToken,
+} from "@/lib/writing/writing-scope-token";
 import { resetCoreTables } from "@/test/db";
 import { invokeAgentTool } from "@/lib/agent-tools/invoke";
 import {
@@ -62,15 +66,15 @@ async function composedLaunch(
   dispatch: ComposedDispatch,
   surfaces: readonly ("x/reply" | "x/direct_message")[] = ["x/reply"],
 ): Promise<string> {
-  const created = await invokeAgentTool(
-    "upsert_launch",
-    personalityLaunchPayload({
+  const created = await invokeAgentTool("upsert_launch", {
+    ...personalityLaunchPayload({
       name: `Nurture proposals ${dispatch.run.id}`,
       targetId: actingTargetId,
       workflowRunId: dispatch.run.id,
       surfaces: surfaces.map((surface) => ({ platform: "x", surface, targetId: actingTargetId })),
     }),
-  ) as { id: string };
+    writingScopeToken: dispatch.token,
+  }) as { id: string };
   return created.id;
 }
 
@@ -92,7 +96,19 @@ function composedRun() {
     workflowType: "agent",
     config: JSON.stringify(buildContactNurtureTemplateConfig()),
   });
-  return { template, run };
+  // Mirrors what `run-template-via-rtx.ts` does at dispatch: mint, persist the hash, hand the
+  // plaintext to this run's brief only.
+  const scope = mintWritingScopeToken(run.id);
+  db.update(workflowRuns)
+    .set({
+      config: JSON.stringify({
+        ...buildContactNurtureTemplateConfig(),
+        [WRITING_SCOPE_TOKEN_CONFIG_KEY]: scope.tokenHash,
+      }),
+    })
+    .where(eq(workflowRuns.id, run.id))
+    .run();
+  return { template, run, token: scope.token };
 }
 
 /** A dispatch with no composition: the same payload has no authority behind it. */
@@ -256,9 +272,32 @@ describe("assist-only writing intent authority", () => {
     });
   });
 
-  it("stamps the composition scope onto a launch from the run it names, and never from the caller", async () => {
+  it("mints a scope only from the dispatch-issued token, never from a caller-named run", async () => {
     const fixture = await newFixture();
     const dispatch = composedRun();
+
+    // Naming the composed run in caller-owned `writing.runs`, through the public tool, mints nothing.
+    const named = await invokeAgentTool("upsert_launch", personalityLaunchPayload({
+      name: "Launch naming a composed run",
+      targetId: actingTargetId,
+      workflowRunId: dispatch.run.id,
+      surfaces: [{ platform: "x", surface: "x/reply", targetId: actingTargetId }],
+    })) as { id: string };
+    expect(launchCompositionOf(named.id)).toBeNull();
+
+    // Neither does another dispatch's token, or a forged one.
+    const other = composedRun();
+    const wrongToken = await invokeAgentTool("upsert_launch", {
+      ...personalityLaunchPayload({
+        name: "Launch with a tampered token",
+        targetId: actingTargetId,
+        workflowRunId: dispatch.run.id,
+        surfaces: [{ platform: "x", surface: "x/reply", targetId: actingTargetId }],
+      }),
+      writingScopeToken: `${dispatch.run.id}.${other.token.split(".")[1]}`,
+    }) as { id: string };
+    expect(launchCompositionOf(wrongToken.id)).toBeNull();
+
     const launchId = await composedLaunch(dispatch);
 
     const scope = launchCompositionOf(launchId)!;
@@ -339,6 +378,32 @@ describe("assist-only writing intent authority", () => {
       body: "A publishable post smuggled onto a nurture launch.",
       intent: intentFor(dispatch),
     })).rejects.toMatchObject({ details: { reason: "writing_intent_surface_mismatch" } });
+  });
+
+  it("documents the boundary: ordinary writing beside an active dispatch is never a proposal", async () => {
+    // The one case the server cannot prevent — there is no per-invocation identity, so an ordinary
+    // launch + ordinary run + publish-capable surface is indistinguishable from any other writing
+    // workflow. What is asserted here is the guarantee that *does* hold: the artifact carries no
+    // composition scope, no intent, and no nurture lineage, so it can never be counted as a
+    // proposal of the active dispatch. See "What this does not claim" in
+    // docs/composable-writing-intent.md.
+    const fixture = await newFixture();
+    const dispatch = composedRun();
+    await composedLaunch(dispatch);
+
+    const escaped = await propose(fixture, {
+      workflowRunId: plainRun().id,
+      surface: "x/post",
+      body: "Ordinary writing that is not attributed to the nurture dispatch.",
+    });
+    const writing = writingOf(escaped.id);
+
+    expect(writing.approval).toMatchObject({ state: "approved", by: "policy" });
+    expect(writing.intent).toBeUndefined();
+    expect(launchCompositionOf(fixture.launchId)).toBeNull();
+    // Nothing links it to the dispatch: no proposal lineage exists to be forged or miscounted.
+    expect(JSON.stringify(writing)).not.toContain(dispatch.run.id);
+    expect(JSON.stringify(writing)).not.toContain(dispatch.template.id);
   });
 
   it("rejects an assist-only surface on a launch with no composed scope", async () => {

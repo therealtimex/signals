@@ -11,38 +11,33 @@ import {
 import { computeSpineHash, sha256 } from "@/lib/writing/hash";
 import { db } from "@/lib/db/client";
 import { launchCompositionSchema, type LaunchComposition } from "@/lib/writing/contracts";
-import { resolveComposedRunAuthority } from "@/lib/writing/writing-intent-authority";
+import { resolveComposedRunAuthorityByToken } from "@/lib/writing/writing-intent-authority";
 
 /**
  * Stamp the server-owned composition scope onto a launch.
  *
- * Derived from the workflow run the launch names — a row Signals wrote at dispatch — and never from
- * caller input, which is stripped. Immutable once stamped: a launch that was created under a
- * composed dispatch stays composed, so the mandate cannot be shed by a later `upsert_launch`.
+ * Minted only from a dispatch-issued capability token. Naming a composed run in caller-owned
+ * `writing.runs` deliberately does **not** mint a scope: a run id is a selector the caller can
+ * choose, so honouring it would let any launch claim any composed dispatch. Immutable once stamped,
+ * so a later `upsert_launch` can neither shed the mandate nor repoint the association.
  */
 function stampLaunchComposition(input: {
-  merged: Record<string, unknown>;
   stored: Record<string, unknown>;
+  writingScopeToken: string | undefined;
 }): LaunchComposition | null {
   const existing = launchCompositionSchema.safeParse(parseObject(input.stored).composition);
   if (existing.success) return existing.data;
-  const runs = Array.isArray(input.merged.runs) ? input.merged.runs : [];
-  for (const entry of runs) {
-    const workflowRunId = parseObject(entry).workflowRunId;
-    if (typeof workflowRunId !== "string" || !workflowRunId) continue;
-    const authority = resolveComposedRunAuthority(db, workflowRunId);
-    if (!authority) continue;
-    return launchCompositionSchema.parse({
-      schemaVersion: 1,
-      workflowRunId: authority.workflowRunId,
-      templateId: authority.templateId,
-      consumer: authority.composition.consumer,
-      mandate: authority.composition.mandate,
-      surfaces: authority.composition.surfaces,
-      stampedAt: Math.floor(Date.now() / 1000),
-    });
-  }
-  return null;
+  const authority = resolveComposedRunAuthorityByToken(db, input.writingScopeToken);
+  if (!authority) return null;
+  return launchCompositionSchema.parse({
+    schemaVersion: 1,
+    workflowRunId: authority.workflowRunId,
+    templateId: authority.templateId,
+    consumer: authority.composition.consumer,
+    mandate: authority.composition.mandate,
+    surfaces: authority.composition.surfaces,
+    stampedAt: Math.floor(Date.now() / 1000),
+  });
 }
 
 function parseObject(value: unknown): Record<string, unknown> {
@@ -178,6 +173,8 @@ export function mergeLaunchMetadata(input: {
   incomingMetadata: Record<string, unknown> | undefined;
   launchId: string;
   scope: "shared" | "local_only";
+  /** Dispatch-issued capability; the only way a launch becomes a composed scope. */
+  writingScopeToken?: string;
 }): { metadata: Record<string, unknown>; writing: LaunchWritingDocument | null; spineChanged: boolean } {
   const existingRoot = parseObject(input.existingMetadata);
   if (!input.incomingMetadata) {
@@ -261,7 +258,7 @@ export function mergeLaunchMetadata(input: {
   }
   // Composition is server-owned: drop whatever the caller sent and re-derive it.
   delete merged.composition;
-  const composition = stampLaunchComposition({ merged, stored });
+  const composition = stampLaunchComposition({ stored, writingScopeToken: input.writingScopeToken });
   if (composition) merged.composition = composition;
   const parsed = launchWritingSchema.safeParse(merged);
   if (!parsed.success) throw new AgentToolError("VALIDATION_ERROR", "Incomplete launch writing metadata", parsed.error.flatten());

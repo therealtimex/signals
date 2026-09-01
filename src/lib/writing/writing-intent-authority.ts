@@ -26,6 +26,11 @@ import {
   type WritingIntentComposition,
   type WritingIntentRecord,
 } from "@/lib/writing/writing-intent";
+import {
+  WRITING_SCOPE_TOKEN_CONFIG_KEY,
+  parseWritingScopeToken,
+  writingScopeTokenMatches,
+} from "@/lib/writing/writing-scope-token";
 
 export type ComposedRunAuthority = {
   workflowRunId: string;
@@ -188,6 +193,31 @@ export function assertWritingIntentAuthority(input: {
     );
   }
   return record;
+}
+
+/**
+ * Resolve the composition a dispatch-issued capability token authorises.
+ *
+ * The token names its own run, so this is a row lookup plus a constant-time hash check against the
+ * server-stored value. A token for a different dispatch does not verify, and no token at all
+ * resolves to nothing — a caller cannot select a composed run by naming it.
+ */
+export function resolveComposedRunAuthorityByToken(
+  runner: DbRunner,
+  presentedToken: unknown,
+): ComposedRunAuthority | null {
+  const parsed = parseWritingScopeToken(presentedToken);
+  if (!parsed) return null;
+  const run = runner
+    .select()
+    .from(workflowRuns)
+    .where(eq(workflowRuns.id, parsed.workflowRunId))
+    .get();
+  if (!run) return null;
+  if (!writingScopeTokenMatches(parsed.token, object(run.config)[WRITING_SCOPE_TOKEN_CONFIG_KEY])) {
+    return null;
+  }
+  return resolveComposedRunAuthority(runner, run.id);
 }
 
 /** Read the server-stamped composition scope off a launch. */

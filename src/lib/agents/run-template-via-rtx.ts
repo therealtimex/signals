@@ -38,6 +38,11 @@ import {
 import type { TemplateThreadResolution } from "@/lib/rtx/template-thread";
 import type { WorkflowType } from "@/lib/workflows/types";
 import { getWritingApprovalPolicy } from "@/lib/settings/writing-approval-policy";
+import { readWritingIntentComposition } from "@/lib/workflows/writing-composition";
+import {
+  WRITING_SCOPE_TOKEN_CONFIG_KEY,
+  mintWritingScopeToken,
+} from "@/lib/writing/writing-scope-token";
 import { getContactById } from "@/lib/db/queries/contacts";
 import { loadAndProjectContactToArpp } from "@/lib/arpp/load";
 import {
@@ -364,6 +369,18 @@ export async function runTemplateViaRtx(
     const { threadSlug, resolution: threadResolution } = thread;
 
     let runtimeConfig = { ...mergedConfig };
+    // Mint the composed dispatch's capability here, where the server still owns the whole context.
+    // Only the hash is persisted (under a `_` key, so `stripInternalConfigKeys` keeps it out of the
+    // brief's config block); the plaintext goes to this run's brief and nowhere else.
+    const writingScope = readWritingIntentComposition(mergedConfig)
+      ? mintWritingScopeToken(run.id)
+      : null;
+    if (writingScope) {
+      runtimeConfig = {
+        ...runtimeConfig,
+        [WRITING_SCOPE_TOKEN_CONFIG_KEY]: writingScope.tokenHash,
+      };
+    }
     // Resolve the acting profile once, and hand the row to the brief rather than letting the brief
     // re-derive a platform from loose config keys.
     const actingTarget = typeof mergedConfig.targetId === "string" && mergedConfig.targetId.trim()
@@ -461,6 +478,7 @@ export async function runTemplateViaRtx(
       signalsBaseUrl,
       systemPromptOverride: input.systemPrompt,
       contactWebResearchContext,
+      writingScopeToken: writingScope?.token,
       platformTarget: actingTarget
         ? {
             id: actingTarget.id,

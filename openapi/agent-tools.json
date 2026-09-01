@@ -3891,6 +3891,9 @@
                           },
                           "completedAt": {
                             "type": "number"
+                          },
+                          "writingScopeToken": {
+                            "type": "string"
                           }
                         },
                         "required": [

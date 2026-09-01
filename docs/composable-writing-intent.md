@@ -32,17 +32,27 @@ Every field an agent sends is caller-owned — the run pointer *and* the surface
 the authority. The agent-tools route has no ambient run context (auth is localhost-or-shared-token),
 so there is nothing in the request itself to trust.
 
-The anchor is the **launch**. A writing variant structurally requires a `launchId` that resolves to
-a launch with a spine, and `mergeLaunchMetadata` stamps a server-derived
-`writing.composition` scope onto that launch from the workflow-run row Signals wrote at dispatch:
+The anchor is the **launch**, and the launch is bound to its dispatch by a **capability**, not by a
+selector.
+
+At dispatch, `run-template-via-rtx.ts` mints a writing scope token for a composed run
+(`<workflowRunId>.<secret>`), persists only its SHA-256 under `_writingScopeTokenHash` on the
+server-owned run row — a `_`-prefixed key, so `stripInternalConfigKeys` keeps it out of the brief —
+and writes the plaintext into *that dispatch's brief*. `upsert_launch` accepts the token and
+`mergeLaunchMetadata` stamps:
 
 ```
-{ schemaVersion, workflowRunId, templateId, consumer, mandate, surfaces, stampedAt }
+writing.composition = { schemaVersion, workflowRunId, templateId, consumer, mandate, surfaces, stampedAt }
 ```
 
-A caller cannot set it — an incoming `composition` is stripped — and cannot remove or widen it: it
-is immutable once stamped. A launch becomes a composed scope by naming a composed run in
-`writing.runs`, which is what the brief instructs.
+Why a token rather than the run id: a run id is a **selector** the caller can enumerate through
+agent-tools, so naming one proves nothing and would let any launch claim any composed dispatch.
+Naming a composed run in caller-owned `writing.runs` therefore mints nothing. The token is evidence
+of having been handed *this* dispatch.
+
+The scope cannot be forged, widened, or dropped: a caller-supplied `composition` is stripped, a
+wrong or another dispatch's token does not verify (constant-time), and a stamped scope is immutable
+across later `upsert_launch` calls.
 
 `assertWritingIntentAuthority` then validates the submission against that scope, so mandate,
 consumer, allowed surfaces, and run/template lineage all come from server state:
@@ -65,23 +75,23 @@ launch a proposal surface is rejected outright.
 Personality binding and a **compatible represented target**; `draft_only` does not relax the target
 gate. One artifact carries one acting identity.
 
-**What this does not claim.** An authorized caller can always create an *unrelated* ordinary launch
-and do ordinary platform-native writing — no server-side check can distinguish that from any other
-writing workflow without per-invocation identity, which this route does not have. The guarantee is
-about artifacts bound to a composed dispatch: those cannot shed the mandate, and the binding cannot
-be forged, widened, or dropped.
+**What this does not claim — an explicit narrowing of #410's lineage guarantee.**
 
-`resolveWritingRequest(intent, context)` turns an intent plus observed Personality/target state
-into a `WritingRequest`. It fails closed:
+The complete-lineage guarantee applies to *composed proposals*: every artifact created under a
+composed dispatch scope records run, template, consumer, recipient, goal, source, target, variant,
+audit, approval, and materialization lineage, and that binding is unforgeable.
 
-| Observed state | Result |
-|---|---|
-| `personality.host.capability !== "available"` | refused `personality_host_unavailable` |
-| status `unavailable` / `drifted` | refused `personality_workspace_unavailable` / `personality_drifted` |
-| status `unbound` | refused `personality_unbound` — a proposal speaks as the workspace, so there is no legacy-unbound sketch lane |
-| declared `targetId` does not represent the Personality | refused `target_identity_mismatch` |
-| surface is not draft/audit-capable | refused `surface_draft_unsupported` |
-| status `bound` / `source_stale` | `lane: "full"`, `deliverable: "draft_only"`, `approvalPolicy: "explicit"` |
+It does **not** guarantee that an agent holding the workspace's agent-tools credential performs only
+composed work. The route authenticates by localhost or a shared token
+(`authorizeAgentToolRequest`), with no per-invocation identity, so ordinary platform-native writing
+by that credential is indistinguishable from any other writing workflow — the server has nothing to
+attribute it to. Such an artifact carries no composition scope, no intent, and no nurture lineage,
+so it can never be *counted* as a proposal of the active dispatch; but the server cannot stop it
+being created.
+
+Closing that requires scoped request authentication, which is an auth change outside this contract.
+`writing-intent-pipeline.test.ts` pins the boundary in
+`documents the boundary: ordinary writing beside an active dispatch is never a proposal`.
 
 ## The `assist_only` mandate
 

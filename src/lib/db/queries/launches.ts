@@ -130,6 +130,8 @@ export type UpsertLaunchInput = {
   metadata?: Record<string, unknown>;
   launchedAt?: number | null;
   completedAt?: number | null;
+  /** Dispatch-issued capability token; see `writing-scope-token.ts`. */
+  writingScopeToken?: string;
 };
 
 function normalizePrimaryPlatform(value: string | null | undefined): string | null | undefined {
@@ -157,6 +159,7 @@ export function upsertLaunch(input: UpsertLaunchInput): UpsertLaunchResult {
       incomingMetadata: input.metadata,
       launchId: existing.id,
       scope,
+      writingScopeToken: input.writingScopeToken,
     });
     const revokedVariantIds = db.transaction(() => {
       db.update(launches)
@@ -202,6 +205,7 @@ export function upsertLaunch(input: UpsertLaunchInput): UpsertLaunchResult {
     incomingMetadata: input.metadata,
     launchId: id,
     scope,
+    writingScopeToken: input.writingScopeToken,
   });
   db.insert(launches)
     .values({

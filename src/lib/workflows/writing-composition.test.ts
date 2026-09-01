@@ -27,7 +27,11 @@ const composition = readWritingIntentComposition(
   buildWritingIntentCompositionConfig({ consumer: "contact_relationship_nurture" }),
 )!;
 
-function composedFor(target: { platform: string; targetId: string | null } | null): string {
+function composedFor(
+  target: { platform: string; targetId: string | null } | null,
+  // `null` means "this dispatch was issued no token", which is distinct from the default.
+  writingScopeToken: string | null = "run_1.secret-token",
+): string {
   return buildComposedWritingBriefSection({
     composition,
     templateId: "tpl_1",
@@ -35,6 +39,7 @@ function composedFor(target: { platform: string; targetId: string | null } | nul
     workflowRunId: "run_1",
     signalsBaseUrl: "http://127.0.0.1:3000",
     target,
+    writingScopeToken: writingScopeToken ?? undefined,
   });
 }
 
@@ -55,7 +60,7 @@ const template = {
   targetPersona: null,
 };
 
-const composed = composedFor({ platform: "x", targetId: "tgt_x" });
+const composed = composedFor({ platform: "x", targetId: "tgt_x" }, "run_1.secret-token");
 
 const platformNative = buildWritingBriefSection({
   template: { id: "tpl_2", name: "Platform-native writing" },
@@ -184,10 +189,18 @@ describe("composed writing brief", () => {
     expect(unsupported).not.toContain("x/reply");
   });
 
-  it("tells the agent to bind the launch to this dispatch", () => {
-    expect(composed).toContain("put this workflow run in its `writing.runs`");
-    expect(composed).toContain('workflowRunId: "run_1"');
-    expect(composed).toContain("server-owned composition scope");
+  it("hands the agent its dispatch capability and says what it is for", () => {
+    expect(composed).toContain('writingScopeToken: "run_1.secret-token"');
+    expect(composed).toContain("issued to this dispatch");
+    expect(composed).toContain("Naming the run in `writing.runs` does not bind anything");
+    expect(composed).toContain("do not share the token or reuse another run's");
+  });
+
+  it("refuses to describe a proposal lane when no token was issued", () => {
+    const unscoped = composedFor({ platform: "x", targetId: "tgt_x" }, null);
+    expect(unscoped).toContain("No writing scope token was issued for this run");
+    expect(unscoped).toContain("no proposal can be created");
+    expect(unscoped).not.toContain("writingScopeToken:");
   });
 
   it("names the recipient boundary explicitly", () => {
