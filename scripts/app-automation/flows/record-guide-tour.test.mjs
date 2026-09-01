@@ -138,8 +138,14 @@ function stubChromium() {
         return {
           async newContext(options) {
             const page = stubPage();
-            contexts.push({ options, page });
-            return { newPage: async () => page, close: async () => {} };
+            const record = { options, page, closed: 0 };
+            contexts.push(record);
+            return {
+              newPage: async () => page,
+              close: async () => {
+                record.closed += 1;
+              },
+            };
           },
           close: async () => {},
         };
@@ -348,4 +354,52 @@ test("a 500 fails too, since the generic h1 check passes on an error page", asyn
     }),
     /returned HTTP 500/,
   );
+});
+
+test("a journey that fails still closes its context and discards the take", async () => {
+  // A step guard throwing used to skip recordJourney's only close(), so the
+  // next journey ran with a recorder still attached to the dead one.
+  const { chromium, contexts } = stubChromium();
+  const discarded = [];
+  const moved = [];
+  const launch = chromium.launch;
+  chromium.launch = async () => {
+    const browser = await launch();
+    const newContext = browser.newContext;
+    browser.newContext = async (options) => {
+      const context = await newContext.call(browser, options);
+      // contexts[0] is the warmup; contexts[1] is the first journey's take.
+      if (contexts.length === 2) contexts[1].page.goto = async () => ({ status: () => 500 });
+      return context;
+    };
+    return browser;
+  };
+
+  const result = await runRecordGuideTourFlow(
+    parseArgs(["--base-url", ORIGIN, "--dwell-ms", "0"], {}),
+    {
+      chromium,
+      fetchImpl: stubFetch({
+        "/api/health": { app: "signals", status: "ok" },
+        "/api/contacts?pageSize=25": { data: [{ id: "c1", enrichmentScore: 98 }], total: 1 },
+      }),
+      ensureDir: () => {},
+      move: (from, to) => moved.push([from, to]),
+      discardRaw: (file) => discarded.push(file),
+      sleep: async () => {},
+    },
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.failures.length, 1);
+  assert.match(result.failures[0].error, /HTTP 500/);
+  // Every context opened was closed exactly once, including the failed one.
+  for (const [index, context] of contexts.entries()) {
+    assert.equal(context.closed, 1, `context ${index} closed ${context.closed} times`);
+  }
+  // The abandoned take is deleted rather than left for convert-guide-video to
+  // publish under a Playwright id.
+  assert.deepEqual(discarded, ["/tmp/raw-video.webm"]);
+  // The surviving journey still produced its video.
+  assert.equal(moved.length, 1);
 });
