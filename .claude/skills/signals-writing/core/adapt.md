@@ -1,5 +1,9 @@
 # Adapt, revise, and humanize
 
+The complete measure/audit/precheck cycle below applies to `bound` and `source_stale` variants.
+When revising a `legacy_unbound` sketch, keep it targetless and set `audit: null`, persist the
+`legacy_unbound sketch` label suffix, and stop before approval or materialization.
+
 Adaptation changes the delivery container while preserving the evidence boundary. Revision normally
 updates one live variant in place; derived alternatives exist only when the user wants both drafts
 or the original is locked by the publish lane.

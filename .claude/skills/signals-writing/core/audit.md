@@ -1,5 +1,8 @@
 # Structured audit
 
+This module applies only to `bound` and `source_stale` full-lane variants. Do not create an audit
+for an `unbound` workspace; follow `core/personality.md` and persist `audit: null` instead.
+
 Audit the exact ordered units that will be persisted. The model supplies observations; the helper
 supplies hard measurements and the deterministic verdict; Signals revalidates both.
 
@@ -14,6 +17,12 @@ supplies hard measurements and the deterministic verdict; Signals revalidates bo
    be blockers. Only voice/heuristic/aesthetic findings may be skipped for voice.
 5. Set voice status to `rules_first`, `applied`, or `none` from the variant inputs.
 6. Run `writing-cli.cjs verdict --audit ... --spine ...`, copy the verdict, then precheck.
+
+For a bound variant, the audit input must omit `personality`. Signals stamps `audit.personality`
+from the persisted variant and current binding, including `currentSourceHash` and
+`statusAtAudit`. When status is `source_stale`, expect the deterministic
+`core/voice/personality-source-stale` warning and account for it in the predicted `warn` verdict
+and risk. Never author that finding; the server owns its exact bytes.
 
 Verdict is `block` for applied blockers, invented claims, altered verbatim-required claims,
 unapproved private inclusion, or over-limit units. It is `warn` for applicable warnings,
@@ -118,3 +127,6 @@ when it conflicts with an approved protected quirk under voice-first precedence 
 The audit overlay/core versions must match the variant, hard values must match the measured units,
 and the audit input must describe the current body. On revision, rerun the complete audit; never
 reuse a prior audit ID or input hash. The server derives both and keeps bounded history.
+
+Read the server-stamped `audit.personality` back after persistence. It is evidence for the card,
+staleness decision, approval, and materialization; it is never a template for the next audit input.

@@ -198,6 +198,7 @@ variants. `materialize_variant` checks the current spine, audit, approval, targe
 units before even an idempotent return. It can report `AUDIT_STALE`, `AUDIT_BLOCKED`,
 `APPROVAL_REQUIRED`, `CAPABILITY_UNSUPPORTED`, or `TARGET_REQUIRED`.
 
+The packaged `signals-writing` skill declares version 1.1.0 starting with plugin 0.2.4.
 Personality-aware `signals-writing` clients (version 1.1.0 and later) submit only
 `metadata.writing.personality: { "bindingId": "pb_..." }`. The server resolves that selector
 under the Personality and voice locks and replaces it with the complete binding, whole-file,

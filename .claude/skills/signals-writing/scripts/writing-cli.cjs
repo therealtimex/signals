@@ -134,8 +134,23 @@ function precheck(payload, spinePayload, launchPayload) {
     problem("voice_profile_required", ["metadata", "writing", "voiceProfile"]);
   }
 
+  if (Object.hasOwn(writing, "personality")) {
+    const selector = writing.personality;
+    const keys = selector && typeof selector === "object" && !Array.isArray(selector)
+      ? Object.keys(selector)
+      : [];
+    if (keys.length !== 1 || keys[0] !== "bindingId" ||
+        typeof selector?.bindingId !== "string" ||
+        !/^pb_[A-Za-z0-9_-]{6,}$/.test(selector.bindingId)) {
+      problem("personality_selector_invalid", ["metadata", "writing", "personality"]);
+    }
+  }
+
   const audit = writing.audit;
   if (audit) {
+    if (Object.hasOwn(audit, "personality")) {
+      problem("audit_personality_forbidden", ["metadata", "writing", "audit", "personality"]);
+    }
     if (!sameHard(audit.hard, measured.hard)) {
       problem("audit_hard_mismatch", ["metadata", "writing", "audit", "hard"]);
     }

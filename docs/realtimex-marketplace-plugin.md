@@ -16,6 +16,10 @@ Package and distribute Signals through the **RealtimeX marketplace** — not pub
 Plugin id: `com.realtimex.signals`  
 Local app id: `47e45f71-3279-42f5-8e95-731de01b6eae`
 
+Version 0.2.4 packages `signals-writing` 1.1.0. Writing agents read the four workspace Personality
+files first, use only the active binding selector, and refuse the full audited/materialized lane
+until Personality is bound. The provisioned `AGENTS.md` includes the permanent Personality pointer.
+
 ## Build
 
 Dependency installation, release builds, and smoke tests require exact Node `22.16.0` (module ABI `127`), matching the RealtimeX plugin host. The installed runtime hard-fails on ABI mismatch but warns and continues on compatible Node 22 patch drift. This prevents native dependencies such as `better-sqlite3` from being published for the wrong ABI without making an otherwise compatible host patch a startup blocker.
@@ -80,6 +84,18 @@ Gate logic: `scripts/ci/should-publish-marketplace-release.mjs` (`--main` or `--
 Marketplace store upload remains manual until RealtimeX #1614 provides publisher automation.
 
 Source layout: `realtimex-plugin/` (manifest, templates, marketplace specs). Three skills are copied from `.claude/skills/` at package time: `realtimex-signals`, `signals-writing`, and `signals-publish`. Signals Writing ships one zero-dependency CJS helper; its development reference corpus under `docs-dev/refs` is never packaged. The `signals-publish` skill's `x-publish.cjs` delegates to the host **`agent-browser` CLI** (locked external skill); the plugin zip contains **no** `node_modules`. Source `SKILL.md` paths stay under `.claude/skills/`; packaging rewrites them to `skills/` in the zip.
+
+### 0.2.4 Personality migration
+
+- Plugin 0.2.3 keeps `signals-writing` 1.0.0 in the legacy-unbound compatibility lane. Upgrading to
+  0.2.4 activates the Personality-aware 1.1.0 gate; unbound workspaces can create only labelled,
+  targetless, unaudited sketches until a binding is approved.
+- Workspace provisioning manages `AGENTS.md`. Redeploying 0.2.4 can remove an older binding's
+  dynamic Personality index span and temporarily report `drifted` / `index_pointer_missing`.
+  Recover by approving one new Personality projection. The new static pointer is unmanaged and
+  prevents later proposals from adding another dynamic index block.
+- Existing variants without Personality lineage stay `legacy_unbound` and retain their original
+  audit hashes; the upgrade does not backfill or revoke them.
 
 Plugin validation uses `scripts/vendor/validate-plugin.cjs` (override with `REALTIMEX_PLUGIN_VALIDATOR`). Packaging fails if the validator is missing.
 

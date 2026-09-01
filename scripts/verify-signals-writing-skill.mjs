@@ -9,7 +9,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const skill = path.join(root, ".claude/skills/signals-writing");
 const expected = [
   "SKILL.md", "reference.md",
-  "core/claims.md", "core/voice.md", "core/audit.md", "core/adapt.md", "core/approval.md", "core/lineage.md",
+  "core/claims.md", "core/voice.md", "core/audit.md", "core/adapt.md", "core/approval.md", "core/lineage.md", "core/personality.md",
   "overlays/README.md", "overlays/x.md", "overlays/linkedin.md", "overlays/facebook.md",
   "scripts/writing-cli.cjs",
 ];
@@ -48,6 +48,9 @@ if (skillText) {
     if (!never.includes(token)) fail(`SKILL.md must explicitly prohibit ${token}`);
     const outside = skillText.replace(never, "");
     if (outside.includes(token)) fail(`retired token appears outside Never do: ${token}`);
+  }
+  for (const token of ["IDENTITY.md", "SOUL.md", "VOICE.md", "BRAND.md", "propose_personality_projection"]) {
+    if (!never.includes(token)) fail(`SKILL.md Never do must name ${token}`);
   }
 }
 
@@ -117,7 +120,7 @@ for (const rel of ["core/claims.md", "core/voice.md", "core/audit.md", "overlays
     }
   }
 }
-const coreCatalog = ["core/claim/no-invented-fact", "core/claim/no-invented-number", "core/claim/no-invented-date", "core/claim/no-invented-name", "core/claim/no-invented-quote", "core/claim/no-invented-citation", "core/claim/verbatim-claim-kept", "core/claim/claim-source-resolves", "core/claim/private-claim-excluded", "core/claim/no-third-party-dunk", "core/claim/no-unverifiable-promise", "core/claim/named-party-consent", "core/claim/no-manipulation", "core/voice/drift", "core/voice/protected-quirk-kept", "core/voice/avoid-list", "core/voice/taboo", "core/voice/signature-verbatim", "core/heuristic/ai-tell-phrases", "core/heuristic/tricolon-cadence", "core/heuristic/uniform-sentence-length", "core/heuristic/rhetorical-question-open", "core/heuristic/summary-close", "core/heuristic/hedge-stack", "core/heuristic/emoji-bullets", "core/heuristic/title-case-headers", "core/aesthetic/em-dash-sparingly", "core/aesthetic/emoji-count", "core/aesthetic/list-vs-prose", "core/aesthetic/sign-off-style"];
+const coreCatalog = ["core/claim/no-invented-fact", "core/claim/no-invented-number", "core/claim/no-invented-date", "core/claim/no-invented-name", "core/claim/no-invented-quote", "core/claim/no-invented-citation", "core/claim/verbatim-claim-kept", "core/claim/claim-source-resolves", "core/claim/private-claim-excluded", "core/claim/no-third-party-dunk", "core/claim/no-unverifiable-promise", "core/claim/named-party-consent", "core/claim/no-manipulation", "core/voice/drift", "core/voice/protected-quirk-kept", "core/voice/avoid-list", "core/voice/taboo", "core/voice/signature-verbatim", "core/voice/personality-source-stale", "core/heuristic/ai-tell-phrases", "core/heuristic/tricolon-cadence", "core/heuristic/uniform-sentence-length", "core/heuristic/rhetorical-question-open", "core/heuristic/summary-close", "core/heuristic/hedge-stack", "core/heuristic/emoji-bullets", "core/heuristic/title-case-headers", "core/aesthetic/em-dash-sparingly", "core/aesthetic/emoji-count", "core/aesthetic/list-vs-prose", "core/aesthetic/sign-off-style"];
 for (const id of coreCatalog) if (!seenRules.has(id)) fail(`missing required core rule ${id}`);
 
 for (const [file, ids] of Object.entries(catalog)) {
@@ -158,7 +161,7 @@ if (ruleById.get("x/thread/hard/min-units")?.value !== 2) fail("x/thread/hard/mi
 
 if (actual.includes("reference.md")) {
   const tags = [...read("reference.md").matchAll(/```json (signals-writing:example:[^\s]+)/g)].map((match) => match[1]);
-  const requiredTags = ["launch-writing-patch", "spine", "variant-input", "generation", "audit-input", "voice-profile-input", "materialize-input", "approve-voice-input", "send-to-agent-body"].map((name) => `signals-writing:example:${name}`);
+  const requiredTags = ["launch-writing-patch", "spine", "variant-input", "generation", "audit-input", "voice-profile-input", "materialize-input", "approve-voice-input", "approve-personality-input", "send-to-agent-body"].map((name) => `signals-writing:example:${name}`);
   for (const tag of requiredTags) {
     const blocks = extractTaggedBlocks(read("reference.md"), tag, "reference.md");
     if (blocks.length !== 1) fail(`reference.md: expected one ${tag} block`);

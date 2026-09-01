@@ -50,6 +50,7 @@ const required = [
   "skills/signals-writing/core/adapt.md",
   "skills/signals-writing/core/approval.md",
   "skills/signals-writing/core/lineage.md",
+  "skills/signals-writing/core/personality.md",
   "skills/signals-writing/overlays/README.md",
   "skills/signals-writing/overlays/x.md",
   "skills/signals-writing/overlays/linkedin.md",
@@ -271,6 +272,9 @@ if (!workspaceAgentsMd.includes("@realtimex/signals-pp-cli")) {
 if (workspaceAgentsMd.includes("run `scripts/resolve-base-url.sh`")) {
   errors.push("Signals workspace AGENTS.md requires an ambiguous helper path");
 }
+if (!workspaceAgentsMd.includes("Read IDENTITY.md, SOUL.md, VOICE.md, and BRAND.md when present; they are the canonical identity and voice for this workspace. HEARTBEAT.md is scheduling, not personality.")) {
+  errors.push("Signals workspace AGENTS.md missing the static Personality pointer");
+}
 
 const bundledNativeCli = entries.filter(
   (entry) =>
@@ -306,6 +310,10 @@ for (const entry of writingMarkdownEntries) {
   if (markdown.includes(".claude/skills/")) errors.push(`${entry} still references .claude/skills paths`);
 }
 const bundledAdapt = writingMarkdown.get("skills/signals-writing/core/adapt.md") ?? "";
+const bundledWritingSkill = writingMarkdown.get("skills/signals-writing/SKILL.md") ?? "";
+if (!/^version: "1\.1\.0"$/m.test(bundledWritingSkill)) {
+  errors.push("Packaged signals-writing SKILL.md must declare version 1.1.0");
+}
 if (/\b(?:variant|alternative)\b[\s\S]{0,160}`vs_`|`vs_`[\s\S]{0,160}\b(?:variant|alternative)\b/i.test(bundledAdapt)) {
   errors.push("Packaged adaptation guidance assigns voice-sample vs_ IDs to variants");
 }

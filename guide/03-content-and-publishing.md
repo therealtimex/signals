@@ -61,7 +61,8 @@ Drag and drop images (JPEG, PNG, GIF, WebP up to 5 MB) into the upload zone. The
 ## Writing with your terminal agent
 
 Start from a Launch and run the **Platform-native writing** template. The RealTimeX terminal agent
-uses your approved voice profile and a source-backed evidence spine to create independent X,
+reads the workspace Personality files first, then uses the approved binding, voice evidence, and a
+source-backed evidence spine to create independent X,
 LinkedIn, and Facebook variants. Each variant is measured, audited, and shown as an approval card
 with its claims, voice drift, risk, and publishing capability.
 

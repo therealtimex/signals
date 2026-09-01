@@ -6,20 +6,34 @@ current run's server/context values.
 
 ## Call sequence by mode
 
+Every mode reads `IDENTITY.md`, `SOUL.md`, `VOICE.md`, and `BRAND.md` first, then reads
+`get_writing_context.personality`. `bound`/`source_stale` work copies only the current `bindingId`;
+audit input never includes Personality. `unbound` uses the separate terminal sketch sequence below.
+
 - **voice build:** `get_writing_context` → `query_content`/`get_content` only for admissible
   self-authored samples → `upsert_voice_profile` → present profile → wait →
   `approve_voice_profile` with the user's thread evidence.
 - **spine:** `get_writing_context` → `get_content` only for explicit unredacted sources → write a
   complete launch-writing file → `upsert_launch` → read the server-derived spine hash.
-- **draft:** run `writing-cli.cjs id` as needed → draft from the spine under one overlay →
-  `measure` → create audit → `verdict` → `precheck` → `upsert_variant`.
-- **adapt/revise/humanize:** read the current variant plus spine → preserve or add lineage as
-  required → repeat measure/audit/precheck → update the same variant unless a derived alternative
-  is explicitly required.
-- **audit:** read current units, spine, voice, and pinned rule versions → recompute the complete
-  audit → `verdict` → `precheck` → `upsert_variant` with unchanged units.
-- **approve/export:** render the persisted approval card → wait → `materialize_variant`; use
-  `revoke_variant_approval` when approval is withdrawn. Export only from the returned content item.
+- **full-lane draft (`bound`/`source_stale`):** run `writing-cli.cjs id` as needed → draft from the
+  spine under one overlay → `measure` → create audit → `verdict` → `precheck` → `upsert_variant`.
+- **legacy-unbound draft:** draft from the spine under one overlay → `measure` → omit `targetId` and
+  `personality` → send `audit: null` → set top-level `label` suffix to
+  `legacy_unbound sketch` → `upsert_variant` → re-read context and confirm
+  `variants[].personalityState` is `legacy_unbound` → stop. Do not run verdict/precheck, approval,
+  materialization, export, or publish.
+- **adapt/revise/humanize:** read the current variant plus spine → preserve or add lineage. In a
+  full lane, repeat measure/audit/precheck; for a legacy-unbound sketch, preserve the exact
+  targetless/unaudited shape above. Update the same variant unless a derived alternative is explicit.
+- **audit (full lane only):** read current units, spine, voice, and pinned rule versions → recompute
+  the complete audit → `verdict` → `precheck` → `upsert_variant` with unchanged units.
+- **approve/export (full lane only):** render the persisted approval card → wait →
+  `materialize_variant`; use `revoke_variant_approval` when approval is withdrawn. Export only from
+  the returned content item.
+- **personality:** `get_personality_binding` → `propose_personality_projection` → render the
+  persisted proposal and wait → `approve_personality_projection` or
+  `reject_personality_projection` with the user's thread evidence. Retry, rollback, and unbind use
+  their dedicated proposal tools and the same approval boundary.
 - **publish:** only after a separate explicit instruction, POST the materialized item and target to
   `/api/content/send-to-agent`; the publish workspace owns the job and browser lifecycle.
 
@@ -42,19 +56,19 @@ request hash while correcting only the server-reported reason.
 ## Variant writing input
 
 ```json signals-writing:example:variant-input
-{"schemaVersion":1,"platform":"x","surface":"x/post","targetId":"target_x_demo","goal":"awareness","formulaId":"x/post/data-point@1","overlay":{"id":"overlay:x","version":1},"core":{"version":1},"voiceProfile":null,"voicePrecedence":"voice_first","spine":{"id":"spn_demo001","hash":"spine_hash_demo"},"units":{"texts":["Aster reduced review time from 10 minutes to 6 minutes."],"count":1,"chars":[55]},"claimMap":[{"claimId":"clm_demo001","present":true,"unit":0,"verbatim":true}],"lineage":{"sourceIds":["src_demo001"]},"media":{"assetIds":[]},"audit":{"schemaVersion":1,"auditedAt":1750000001,"auditor":{"kind":"agent","skillVersion":"1.0.0","workflowRunId":"run_demo"},"overlay":{"id":"overlay:x","version":1},"core":{"version":1},"verdict":"pass","findings":[],"claims":{"total":1,"preserved":1,"altered":[],"missing":[],"invented":[],"privateIncluded":[]},"hard":{"units":1,"chars":[55],"limit":280,"hashtags":0,"links":0,"mediaCount":0},"voice":{"status":"none","skipped":[]},"heuristics":{"applied":[],"conflicts":[],"skippedForVoice":[]}}}
+{"schemaVersion":1,"platform":"x","surface":"x/post","targetId":"target_x_demo","goal":"awareness","formulaId":"x/post/data-point@1","overlay":{"id":"overlay:x","version":1},"core":{"version":1},"voiceProfile":null,"voicePrecedence":"voice_first","spine":{"id":"spn_demo001","hash":"spine_hash_demo"},"units":{"texts":["Aster reduced review time from 10 minutes to 6 minutes."],"count":1,"chars":[55]},"claimMap":[{"claimId":"clm_demo001","present":true,"unit":0,"verbatim":true}],"lineage":{"sourceIds":["src_demo001"]},"media":{"assetIds":[]},"personality":{"bindingId":"pb_demo001"},"audit":{"schemaVersion":1,"auditedAt":1750000001,"auditor":{"kind":"agent","skillVersion":"1.1.0","workflowRunId":"run_demo"},"overlay":{"id":"overlay:x","version":1},"core":{"version":1},"verdict":"pass","findings":[],"claims":{"total":1,"preserved":1,"altered":[],"missing":[],"invented":[],"privateIncluded":[]},"hard":{"units":1,"chars":[55],"limit":280,"hashtags":0,"links":0,"mediaCount":0},"voice":{"status":"none","skipped":[]},"heuristics":{"applied":[],"conflicts":[],"skippedForVoice":[]}}}
 ```
 
 ## Generation metadata
 
 ```json signals-writing:example:generation
-{"schemaVersion":1,"kind":"signals-writing","mode":"draft","model":null,"skill":{"name":"signals-writing","version":"1.0.0"},"agent":{"workflowRunId":"run_demo","rtxThreadSlug":"thread_demo","briefPath":"workflow-runs/run_demo/brief.md"},"requestHash":"wr1:run_demo:x/post:draft:1","generatedAt":1750000001}
+{"schemaVersion":1,"kind":"signals-writing","mode":"draft","model":null,"skill":{"name":"signals-writing","version":"1.1.0"},"agent":{"workflowRunId":"run_demo","rtxThreadSlug":"thread_demo","briefPath":"workflow-runs/run_demo/brief.md"},"requestHash":"wr1:run_demo:x/post:draft:1","generatedAt":1750000001}
 ```
 
 ## Audit input
 
 ```json signals-writing:example:audit-input
-{"schemaVersion":1,"auditedAt":1750000001,"auditor":{"kind":"agent","skillVersion":"1.0.0","workflowRunId":"run_demo"},"overlay":{"id":"overlay:x","version":1},"core":{"version":1},"verdict":"pass","findings":[],"claims":{"total":1,"preserved":1,"altered":[],"missing":[],"invented":[],"privateIncluded":[]},"hard":{"units":1,"chars":[55],"limit":280,"hashtags":0,"links":0,"mediaCount":0},"voice":{"status":"none","skipped":[]},"heuristics":{"applied":[],"conflicts":[],"skippedForVoice":[]}}
+{"schemaVersion":1,"auditedAt":1750000001,"auditor":{"kind":"agent","skillVersion":"1.1.0","workflowRunId":"run_demo"},"overlay":{"id":"overlay:x","version":1},"core":{"version":1},"verdict":"pass","findings":[],"claims":{"total":1,"preserved":1,"altered":[],"missing":[],"invented":[],"privateIncluded":[]},"hard":{"units":1,"chars":[55],"limit":280,"hashtags":0,"links":0,"mediaCount":0},"voice":{"status":"none","skipped":[]},"heuristics":{"applied":[],"conflicts":[],"skippedForVoice":[]}}
 ```
 
 ## Voice profile input
@@ -73,6 +87,12 @@ request hash while correcting only the server-reported reason.
 
 ```json signals-writing:example:approve-voice-input
 {"id":"vp_demo001","version":1,"evidence":{"kind":"thread_message","workspaceSlug":"signals","threadSlug":"thread_demo","note":"approve vp_demo001 version 1"}}
+```
+
+## Approve Personality projection
+
+```json signals-writing:example:approve-personality-input
+{"proposalId":"prp_demo001","evidence":{"kind":"thread_message","workspaceSlug":"signals","threadSlug":"thread_demo","note":"approve prp_demo001"}}
 ```
 
 ## Send materialized item to publish agent
