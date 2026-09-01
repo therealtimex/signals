@@ -16,6 +16,7 @@ import {
   resolveDetailIds,
   runCaptureGuideAssetsFlow,
   selectViews,
+  fingerprintExpression,
   verifyGuideAssetCoverage,
   viewPath,
   waitForVisualSettle,
@@ -573,4 +574,33 @@ test("captureView settles before it screenshots", async () => {
     settle: async () => order.push("settle"),
   });
   assert.deepEqual(order, ["settle", "screenshot"]);
+});
+
+
+test("the fingerprint notices a chart animating with no text change", () => {
+  // Recharts interpolates path geometry over ~1s while every string on the page
+  // stays identical. Text-only comparison called that settled, and published a
+  // pie chart a quarter drawn.
+  const nodes = [];
+  global.document = {
+    body: { innerText: "Platform Mix" },
+    querySelectorAll: () => nodes,
+  };
+  const node = (attrs) => ({ getAttribute: (name) => attrs[name] ?? null });
+
+  nodes.push(node({ d: "M0,0 L10,0" }));
+  const midAnimation = fingerprintExpression();
+
+  nodes.length = 0;
+  nodes.push(node({ d: "M0,0 L40,0" }));
+  const settled = fingerprintExpression();
+
+  assert.notEqual(midAnimation, settled, "geometry change must move the fingerprint");
+  assert.match(settled, /Platform Mix/, "text is still part of the fingerprint");
+
+  nodes.length = 0;
+  nodes.push(node({ cx: "5", cy: "5", r: "3" }));
+  assert.match(fingerprintExpression(), /5,5,3/, "circle geometry is included");
+
+  delete global.document;
 });

@@ -427,6 +427,12 @@ export const DEFAULT_SETTLE_TIMEOUT_MS = 5_000;
  * Comparing whole-document text rather than watching a specific element keeps
  * this honest about what it covers — any count-up, skeleton swap or late
  * hydration settles it, not just the component that exposed the problem.
+ *
+ * Text alone is not enough, though. Recharts animates its series in over ~1s by
+ * interpolating SVG path geometry, which changes no text at all: the first
+ * analytics capture published a Platform Mix pie frozen as a thin wedge, a
+ * quarter drawn. The fingerprint therefore includes every `path`/`circle`
+ * geometry attribute alongside the text.
  */
 export async function waitForVisualSettle(
   page,
@@ -435,7 +441,7 @@ export async function waitForVisualSettle(
   const deadline = Date.now() + timeoutMs;
   let previous = null;
   while (Date.now() < deadline) {
-    const current = await page.evaluate(() => document.body.innerText);
+    const current = await page.evaluate(fingerprintExpression);
     // Two identical reads a poll apart. One is not enough: an animation frame
     // can land between the read and the screenshot.
     if (previous !== null && current === previous) return { settled: true };
@@ -445,6 +451,24 @@ export async function waitForVisualSettle(
   // Not fatal. A page with a live clock never settles, and refusing to capture
   // it would be worse than capturing it.
   return { settled: false };
+}
+
+/**
+ * Runs in the page. Text catches count-ups and late hydration; the SVG geometry
+ * catches chart entrance animations, which change no text.
+ */
+export function fingerprintExpression() {
+  const shapes = Array.from(document.querySelectorAll("svg path, svg circle"))
+    .map((node) =>
+      [
+        node.getAttribute("d"),
+        node.getAttribute("cx"),
+        node.getAttribute("cy"),
+        node.getAttribute("r"),
+      ].join(","),
+    )
+    .join("|");
+  return `${document.body.innerText}\u0000${shapes}`;
 }
 
 function defaultSleep(ms) {
