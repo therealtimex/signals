@@ -131,6 +131,51 @@ would destroy the last good upload artifact the moment ffmpeg started writing.
 `automation:test` runs in the `check` gate. It needs no browser, no Dev app, and no second
 checkout, so it is the one part of this directory that CI can hold.
 
+## Experience Contracts
+
+An Experience Contract is the executable statement of what a feature promises at the UI and
+persisted-state boundary. Contracts live beside their scenarios as
+`scenarios/<id>.contract.mjs` + `scenarios/<id>.mjs`; a contract without a runnable sibling is a
+test failure. This keeps the #301 bar intact: do not add a general framework or a prose contract
+that is more expensive than rebuilding one journey ad hoc.
+
+Run one contract against a healthy Signals origin:
+
+```bash
+npm run automation:contract -- issue-413-review-path \
+  --base-url http://127.0.0.1:3010 \
+  --data-dir /private/tmp/signals-qa-issue-413 \
+  --json
+```
+
+The contract's checkpoint IDs are the durable UX contract. Every checkpoint has an assertion that
+can compare UI observations with authoritative API/data observations. The ledger fails on an
+undeclared or duplicate record, a declared-but-missing record, an assertion failure, or a missing
+required capture. A deliberately unreachable journey is not skipped: its guard records every
+checkpoint as `blocked`, and the manifest result is `blocked` with exit code 2.
+
+Evidence profiles are intentionally separate:
+
+- `assertions` is the default for behavior with no material visual claim.
+- `visual` is required for approval, autonomy, publish/materialize, hidden-state, and explicit UX
+  claims. It produces clean QA screenshots; `--promote-evidence` derives the committed
+  desktop/mobile × light/dark `before_` or `after_` stills.
+- GTM editing is a downstream, opt-in consumer of clean QA capture. Captions, music, and encoding
+  do not belong in a feature's diagnostic scenario.
+
+Raw output is written to `.evidence/experience/<contractId>/<stamp>/` (or under
+`RTXTEST_ARTIFACTS_DIR` when `rtxtest` supplies one) and is gitignored. Its `manifest.json` pins:
+
+```text
+schemaVersion · contract id/path/hash · issue/kind · commit SHA/dirty flag
+target origin/source/health app · evidence profile · fixture ids
+started/finished timestamps · result · checkpoint assertions/evidence · failures
+```
+
+PRs link the raw manifest path and paste its checkpoint table; they commit only the promoted
+`before_`/`after_` stills required for review. `npm run automation:test` validates every contract,
+requires a sibling scenario, and keeps checkpoint IDs globally unique.
+
 ## Guide assets
 
 `guide/` ships 15 referenced screenshots. Until `capture-guide-assets` they were effectively
