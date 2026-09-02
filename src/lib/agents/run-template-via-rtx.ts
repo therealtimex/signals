@@ -342,6 +342,28 @@ export async function runTemplateViaRtx(
 
   let preparedLeaseId: string | null = null;
   let dispatchAccepted = false;
+  let writingScopeMinted = false;
+
+  /**
+   * Drop the composed dispatch's capability when the dispatch never happened.
+   *
+   * The plaintext token is already sitting in the brief file on disk by the time a send can be
+   * rejected, so leaving the hash on the run row would let anyone who can read that file mint a
+   * scope for a dispatch that does not exist. Only called while `dispatchAccepted` is false: an
+   * agent that *was* accepted keeps its capability even if later bookkeeping fails.
+   */
+  function revokeWritingScopeIfUnaccepted(): string {
+    if (!writingScopeMinted || dispatchAccepted) return "";
+    try {
+      const current = parseObject(getWorkflowRun(run.id)?.config);
+      delete current[WRITING_SCOPE_TOKEN_CONFIG_KEY];
+      updateWorkflowRun(run.id, { config: JSON.stringify(current) });
+      writingScopeMinted = false;
+      return "";
+    } catch (error) {
+      return ` Writing scope revocation failed: ${error instanceof Error ? error.message : "unknown error"}`;
+    }
+  }
   const releaseLauncherOwnedLease = () => {
     if (!preparedLeaseId) return null;
     const leaseId = preparedLeaseId;
@@ -389,6 +411,7 @@ export async function runTemplateViaRtx(
           [WRITING_SCOPE_TOKEN_CONFIG_KEY]: writingScope.tokenHash,
         }),
       });
+      writingScopeMinted = true;
     }
     // Resolve the acting profile once, and hand the row to the brief rather than letting the brief
     // re-derive a platform from loose config keys.
@@ -532,6 +555,7 @@ export async function runTemplateViaRtx(
       } catch (error) {
         errorMessage += ` Lease cleanup failed: ${error instanceof Error ? error.message : "unknown error"}`;
       }
+      errorMessage += revokeWritingScopeIfUnaccepted();
       updateWorkflowRun(run.id, {
         status: "failed",
         completedAt: now,
@@ -637,6 +661,7 @@ export async function runTemplateViaRtx(
       } catch (releaseError) {
         message += ` Lease cleanup failed: ${releaseError instanceof Error ? releaseError.message : "unknown error"}`;
       }
+      message += revokeWritingScopeIfUnaccepted();
     }
     updateWorkflowRun(run.id, {
       status: "failed",

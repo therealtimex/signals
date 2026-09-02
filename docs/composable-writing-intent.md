@@ -55,10 +55,17 @@ malformed or non-verifying token is a hard `writing_scope_token_invalid` error t
 (presenting a capability is an explicit composed-lane attempt, so failing it must not silently
 downgrade to ordinary writing), and a stamped scope is immutable across later `upsert_launch` calls.
 
-The hash is persisted on the run row **before** the plaintext is written into the brief or terminal
-dispatch is accepted, so an accepted dispatch never holds a capability that verifies against
-nothing. `run-template-via-rtx.test.ts` pins that ordering by reading the run row from inside the
-mocked `/cli/send-message` handler.
+The capability's lifecycle is bounded at both ends:
+
+- The hash is persisted on the run row **before** the plaintext is written into the brief or
+  terminal dispatch is accepted, so an accepted dispatch never holds a capability that verifies
+  against nothing. `run-template-via-rtx.test.ts` pins the ordering by reading the run row from
+  inside the mocked `/cli/send-message` handler.
+- If dispatch is **rejected**, or an exception fires before acceptance, the hash is revoked. The
+  brief is already on disk by then, so the plaintext token is recoverable — revocation is what stops
+  it minting a scope for a dispatch that never happened. The guard is `!dispatchAccepted`, so an
+  agent that really was handed the brief keeps its capability even if later bookkeeping throws.
+  Both directions have regressions.
 
 Possessing another dispatch's token authorises *that* dispatch, not this one: the scope it mints
 names the other run, so a proposal claiming this run is rejected on lineage. An agent able to read
