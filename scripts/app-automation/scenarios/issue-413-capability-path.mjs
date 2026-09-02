@@ -15,6 +15,8 @@ function surfaceLabel(surface) {
   const [platform, kind] = surface.split("/");
   const platformLabel = platform === "x"
     ? "X"
+    : platform === "linkedin"
+      ? "LinkedIn"
     : `${platform.slice(0, 1).toUpperCase()}${platform.slice(1)}`;
   return `${platformLabel} ${kind === "direct_message" ? "DM" : kind}`;
 }
@@ -26,6 +28,19 @@ function gateSurfaceRow(surface) {
       ? "approval required"
       : "operator choice";
   return `${surfaceLabel(surface.surface)} Draft only · ${approval}`;
+}
+
+export function templateGateSurfaceRows(config) {
+  const writingIntent = object(config).writingIntent;
+  const surfaces = object(writingIntent).surfaces;
+  if (!Array.isArray(surfaces)) return [];
+  return surfaces.map((surface) => gateSurfaceRow({
+    surface: String(surface),
+    approval: "explicit",
+    reason: String(surface).endsWith("/direct_message")
+      ? "explicit_floor"
+      : "assist_only_mandate",
+  }));
 }
 
 function proposalCard(page, variantId) {
@@ -49,7 +64,6 @@ export default async function run(ctx) {
   ]);
   const runConfig = object(runResponse.body.config);
   const launchMetadata = object(launchResponse.body.metadata);
-  const gateConfig = object(runConfig.approvalGate);
 
   await page.goto(`${ctx.origin}/dashboard/workflows`, { waitUntil: "networkidle" });
   const card = page.locator("[data-testid=workflow-template-card]").filter({ hasText: template.name });
@@ -59,7 +73,10 @@ export default async function run(ctx) {
   const toggle = gate.getByRole("switch");
   const config = object(template.config);
   const surfaceRows = await gate.locator("[data-testid=nurture-approval-surface]")
-    .evaluateAll((nodes) => nodes.map((node) => (node.textContent ?? "").replace(/\s+/g, " ").trim()));
+    .evaluateAll((nodes) => nodes.map((node) => Array.from(node.children)
+      .map((child) => (child.textContent ?? "").replace(/\s+/g, " ").trim())
+      .filter(Boolean)
+      .join(" ")));
   await capture("nurture-approval-gate");
   record("activation-gate-locked", {
     ui: {
@@ -74,9 +91,7 @@ export default async function run(ctx) {
     },
     data: {
       requireApproval: config.requireApproval,
-      surfaceRows: Array.isArray(gateConfig.surfaces)
-        ? gateConfig.surfaces.map(gateSurfaceRow)
-        : [],
+      surfaceRows: templateGateSurfaceRows(config),
     },
   });
 

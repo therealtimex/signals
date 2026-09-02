@@ -41,6 +41,21 @@ export function defaultQaDataDir(issueId) {
   return join(QA_TEMP_ROOT, `signals-qa-issue-${normalizeIssueId(issueId)}-data`);
 }
 
+export function assertIssueScopedQaWorkspaceSlug(workspaceSlug, issueId) {
+  const slug = String(workspaceSlug ?? "").trim();
+  if (!slug) return null;
+  const normalizedIssueId = normalizeIssueId(issueId);
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) {
+    throw new Error(`QA workspace slug must be lowercase kebab-case; received ${slug}.`);
+  }
+  if (!slug.startsWith(`signals-issue-${normalizedIssueId}-`)) {
+    throw new Error(
+      `QA workspace slug must start with signals-issue-${normalizedIssueId}-; received ${slug}.`,
+    );
+  }
+  return slug;
+}
+
 export function qaReceiptPath(issueId) {
   return join(QA_TEMP_ROOT, `signals-qa-local-app-issue-${normalizeIssueId(issueId)}.json`);
 }
@@ -186,9 +201,17 @@ export function assertSafeQaApp(app, issueId) {
   return app;
 }
 
-export function buildQaCreateCliArgs({ issueId, worktree, dataDir, loopId = "", baseUrl }) {
+export function buildQaCreateCliArgs({
+  issueId,
+  worktree,
+  dataDir,
+  loopId = "",
+  baseUrl,
+  workspaceSlug = "",
+}) {
   const normalizedIssueId = normalizeIssueId(issueId);
   const safeDataDir = assertSafeQaDataDir(dataDir);
+  const safeWorkspaceSlug = assertIssueScopedQaWorkspaceSlug(workspaceSlug, normalizedIssueId);
   const nodeBinDir = dirname(process.execPath);
   const env = {
     HOSTNAME: "127.0.0.1",
@@ -196,6 +219,7 @@ export function buildQaCreateCliArgs({ issueId, worktree, dataDir, loopId = "", 
     SIGNALS_QA_WORKTREE: resolve(worktree),
     REALTIMEX_BASE_URL: baseUrl || DEFAULT_DEV_CLI_BASE_URL,
     PATH: `${nodeBinDir}${delimiter}${process.env.PATH || ""}`,
+    ...(safeWorkspaceSlug ? { SIGNALS_RTX_WORKSPACE_SLUG: safeWorkspaceSlug } : {}),
   };
   return [
     "create-local-app",

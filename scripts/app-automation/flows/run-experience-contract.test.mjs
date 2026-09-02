@@ -7,6 +7,7 @@ import test from "node:test";
 import { defineContract } from "./experience-contract.mjs";
 import {
   contractPaths,
+  fixtureProcessEnv,
   fixtureResultFromProcess,
   parseArgs,
   runExperienceContract,
@@ -30,6 +31,14 @@ test("contractPaths keeps contracts beside scenarios", () => {
   const paths = contractPaths("/repo", "example");
   assert.equal(paths.contractPath, "/repo/scripts/app-automation/scenarios/example.contract.mjs");
   assert.equal(paths.scenarioPath, "/repo/scripts/app-automation/scenarios/example.mjs");
+});
+
+test("fixture subprocess reuses the migrations owned by the healthy target app", () => {
+  assert.deepEqual(fixtureProcessEnv("/tmp/disposable", { KEEP: "yes" }), {
+    KEEP: "yes",
+    SIGNALS_DATA_DIR: "/tmp/disposable",
+    SIGNALS_SKIP_CLIENT_MIGRATIONS: "1",
+  });
 });
 
 test("runner writes a passed manifest with a fake scenario", async () => {

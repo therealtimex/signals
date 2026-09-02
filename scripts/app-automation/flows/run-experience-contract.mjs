@@ -155,6 +155,14 @@ function parseFixtureJson(stdout) {
   }
 }
 
+export function fixtureProcessEnv(dataDir, env = process.env) {
+  return {
+    ...env,
+    SIGNALS_DATA_DIR: dataDir,
+    SIGNALS_SKIP_CLIENT_MIGRATIONS: "1",
+  };
+}
+
 export function fixtureResultFromProcess(result) {
   const stdout = typeof result.stdout === "string" ? result.stdout : "";
   const stderr = typeof result.stderr === "string" ? result.stderr : "";
@@ -189,7 +197,7 @@ function defaultRunFixture({ repoDir, name, dataDir }) {
     {
       cwd: repoDir,
       encoding: "utf8",
-      env: { ...process.env, SIGNALS_DATA_DIR: dataDir },
+      env: fixtureProcessEnv(dataDir),
     },
   );
   return fixtureResultFromProcess(result);

@@ -88,6 +88,34 @@ describe("platform target adapters", () => {
     expect(browserConnectionMocks.detectPlatformHandle).not.toHaveBeenCalled();
   });
 
+  it("discovers the current X identity when the account button label omits its handle", async () => {
+    const accountButton = {
+      getAttribute: vi.fn().mockResolvedValue("Account menu"),
+      click: vi.fn().mockResolvedValue(undefined),
+    };
+    const menu = {
+      first: vi.fn().mockReturnThis(),
+      waitFor: vi.fn().mockResolvedValue(undefined),
+      allInnerTexts: vi.fn().mockResolvedValue([]),
+    };
+    const discoveryPage = {
+      url: () => "https://x.com/home",
+      locator: vi.fn((selector: string) =>
+        selector === '[role="menu"]' ? menu : accountButton
+      ),
+      keyboard: { press: vi.fn().mockResolvedValue(undefined) },
+    } as unknown as Page;
+
+    await expect(xTargetAdapter.discover(discoveryPage)).resolves.toEqual([
+      expect.objectContaining({ kind: "account", handle: "@current" }),
+    ]);
+    expect(browserConnectionMocks.detectPlatformHandle).toHaveBeenCalledWith(
+      "x",
+      discoveryPage,
+      "https://x.com/home",
+    );
+  });
+
   it("discovers Facebook identities only from entity links in the account menu", async () => {
     const links = [
       { name: "Managed Page", href: "https://www.facebook.com/managed.page" },

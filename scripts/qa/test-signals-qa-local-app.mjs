@@ -18,6 +18,7 @@ import {
   CANONICAL_SIGNALS_APP_ID,
   appsFromCliPayload,
   assertIssueBoundQaDataDir,
+  assertIssueScopedQaWorkspaceSlug,
   assertSafeQaApp,
   assertSafeQaDataDir,
   buildQaCreateCliArgs,
@@ -47,6 +48,19 @@ assert.throws(
   /must include issue-356/,
 );
 assert.throws(() => assertSafeQaDataDir("~/.signals"), /signals-qa-\*/);
+assert.equal(
+  assertIssueScopedQaWorkspaceSlug("signals-issue-356-experience-qa", "356"),
+  "signals-issue-356-experience-qa",
+);
+assert.equal(assertIssueScopedQaWorkspaceSlug("", "356"), null);
+assert.throws(
+  () => assertIssueScopedQaWorkspaceSlug("signals-issue-357-experience-qa", "356"),
+  /must start with signals-issue-356-/,
+);
+assert.throws(
+  () => assertIssueScopedQaWorkspaceSlug("Signals issue 356", "356"),
+  /lowercase kebab-case/,
+);
 
 const safeApp = {
   id: "qa-app-id",
@@ -75,6 +89,7 @@ const createArgs = buildQaCreateCliArgs({
   dataDir: contractDataDir,
   loopId: "loop-issue-356-example",
   baseUrl: "http://127.0.0.1:3101/cli",
+  workspaceSlug: "signals-issue-356-experience-qa",
 });
 assert.equal(createArgs[0], "create-local-app");
 assert.ok(createArgs.includes("Signals issue-356 QA"));
@@ -83,6 +98,7 @@ const envJson = createArgs[createArgs.indexOf("--env") + 1];
 const env = JSON.parse(envJson);
 assert.equal(env.SIGNALS_QA_WORKTREE, "/tmp/loop-issue-356");
 assert.equal(env.SIGNALS_DATA_DIR, contractDataDir);
+assert.equal(env.SIGNALS_RTX_WORKSPACE_SLUG, "signals-issue-356-experience-qa");
 
 const cleanCanonical = {
   id: CANONICAL_SIGNALS_APP_ID,
@@ -245,6 +261,8 @@ console.log(JSON.stringify({ meta: { source: "mock" }, results }));
       lifecycleData,
       "--cli",
       mockCliPath,
+      "--workspace-slug",
+      `signals-issue-${lifecycleIssue}-experience-qa`,
       "--no-start",
     ],
     { encoding: "utf8", env: childEnv },
@@ -253,6 +271,10 @@ console.log(JSON.stringify({ meta: { source: "mock" }, results }));
   assert.equal(existsSync(lifecycleReceipt), true);
   const lifecycleReceiptData = JSON.parse(readFileSync(lifecycleReceipt, "utf8"));
   assert.equal(lifecycleReceiptData.baseUrl, "http://127.0.0.1:3101/cli");
+  assert.equal(
+    lifecycleReceiptData.workspaceSlug,
+    `signals-issue-${lifecycleIssue}-experience-qa`,
+  );
   let lifecycleState = JSON.parse(readFileSync(mockStatePath, "utf8"));
   assert.equal(lifecycleState.apps.length, 2);
   assert.equal(lifecycleState.apps[0].id, CANONICAL_SIGNALS_APP_ID);
