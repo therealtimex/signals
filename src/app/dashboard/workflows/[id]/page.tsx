@@ -16,6 +16,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { WorkflowRunLive } from "./workflow-run-live";
 import { resolveWorkflowRunSubjectsForDetail } from "@/lib/workflows/workflow-run-subjects";
+import { summarizeWorkflowRunProposals } from "@/lib/writing/workflow-run-proposals";
 
 const TYPE_ICONS: Record<string, typeof RefreshCw> = {
   sync: RefreshCw,
@@ -116,6 +117,7 @@ export default async function WorkflowDetailPage({
         subjects={subjects}
         contactsCreated={countContactsByCreatedWorkflowRun(id)}
         orgsCreated={countOrgsByCreatedWorkflowRun(id)}
+        initialProposalSummary={summarizeWorkflowRunProposals(id)}
       />
     </div>
   );

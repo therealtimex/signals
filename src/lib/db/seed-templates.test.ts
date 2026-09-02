@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { createTemplate, getSystemTemplateByName } from "@/lib/db/queries/workflow-templates";
@@ -57,7 +57,7 @@ describe("Platform-native writing seed", () => {
     expect(migrated.id).toBe(legacy.id);
     expect(getSystemTemplateByName("Thought Leadership Posts")).toBeUndefined();
     const config = JSON.parse(migrated.config ?? "{}") as Record<string, unknown>;
-    expect(config).toMatchObject({ _seedVersion: 29, topics: ["keep"] });
+    expect(config).toMatchObject({ _seedVersion: 30, topics: ["keep"] });
     expect(isSignalsWritingTemplateConfig(config)).toBe(true);
   });
 });
@@ -75,7 +75,7 @@ describe("Contact profile pipeline seed", () => {
       pipeline?: { version?: number; steps?: Array<{ id: string; handler: string }> };
     };
 
-    expect(config._seedVersion).toBe(29);
+    expect(config._seedVersion).toBe(30);
     expect(config.pipeline?.version).toBe(2);
     expect(config.pipeline?.steps).toEqual([
       { id: "hydrate", executor: "code", handler: "hydrate_x_profiles" },
@@ -119,7 +119,7 @@ describe("Contact profile pipeline seed", () => {
       };
     };
     expect(config).toMatchObject({
-      _seedVersion: 29,
+      _seedVersion: 30,
       customTopLevel: true,
       pipeline: {
         version: 2,
@@ -149,7 +149,7 @@ describe("Contact Web Research seed", () => {
     expect(template.templateType).toBe("enrichment");
     expect(template.estimatedCost).toBe(0.2);
     expect(config).toMatchObject({
-      _seedVersion: 29,
+      _seedVersion: 30,
       contactWebResearch: { version: 2 },
       acceptsContactId: true,
     });
@@ -261,7 +261,7 @@ describe("Social Intent Patrol seed", () => {
 
     expect(config).not.toHaveProperty("maxPosts");
     expect(config).not.toHaveProperty("durationMinutes");
-    expect(config._seedVersion).toBe(29);
+    expect(config._seedVersion).toBe(30);
     expect(config.maxComments).toBe(8);
     // The card copy is structural — an existing install must not keep describing a shift that
     // still posts to your own timeline.
@@ -366,6 +366,31 @@ describe("Contact Relationship Nurture seed", () => {
     expect(migrated.maxTargets).toBe(42);
     expect(readWritingIntentComposition(migrated)?.consumer).toBe("contact_relationship_nurture");
   });
+
+  it("normalizes a stale disabled approval gate once while preserving run controls", () => {
+    seedTemplates();
+    const template = getSystemTemplateByName("Contact Relationship Nurture")!;
+    const existingConfig = JSON.parse(template.config ?? "{}") as Record<string, unknown>;
+    db.update(workflowTemplates).set({
+      config: JSON.stringify({
+        ...existingConfig,
+        _seedVersion: 29,
+        requireApproval: false,
+        maxTargets: 42,
+      }),
+    }).where(eq(workflowTemplates.id, template.id)).run();
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+
+    expect(seedTemplates().updated).toBe(1);
+    const migrated = JSON.parse(
+      getSystemTemplateByName("Contact Relationship Nurture")!.config ?? "{}",
+    ) as Record<string, unknown>;
+    expect(migrated).toMatchObject({ _seedVersion: 30, requireApproval: true, maxTargets: 42 });
+    expect(info).toHaveBeenCalledTimes(1);
+
+    seedTemplates();
+    expect(info).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("Snowball Seed Scout seed", () => {
@@ -386,7 +411,7 @@ describe("Snowball Seed Scout seed", () => {
       snowballSeedScout?: { version?: number; executionKind?: string };
       maxLinksPerRun?: number;
     };
-    expect(config._seedVersion).toBe(29);
+    expect(config._seedVersion).toBe(30);
     expect(config.snowballSeedScout?.executionKind).toBe("heartbeat_shell");
     expect(config.maxLinksPerRun).toBe(5);
   });
@@ -415,7 +440,7 @@ describe("Network Snowball seed", () => {
       maxContacts?: number;
       maxHops?: number;
     };
-    expect(config._seedVersion).toBe(29);
+    expect(config._seedVersion).toBe(30);
     expect(config.networkSnowball?.version).toBe(1);
     expect(config.focus).toBe("investors_and_angels");
     expect(config.maxContacts).toBe(10);
@@ -439,6 +464,6 @@ describe("Network Snowball seed", () => {
 
     expect(updated.systemPrompt).toContain("--workflow-run-id <runId>");
     expect(updated.systemPrompt).toContain("--template-id <templateId>");
-    expect(updatedConfig._seedVersion).toBe(29);
+    expect(updatedConfig._seedVersion).toBe(30);
   });
 });

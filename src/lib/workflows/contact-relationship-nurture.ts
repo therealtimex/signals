@@ -25,6 +25,10 @@ import { parseSurfaceId, type SurfaceId } from "@/lib/writing/surfaces";
 import { NURTURE_WRITING_SURFACES } from "@/lib/writing/writing-intent";
 import { buildWritingIntentCompositionConfig } from "@/lib/workflows/writing-composition";
 import type { WritingGoal } from "@/lib/workflows/signals-writing";
+import {
+  readNurtureApprovalGate,
+  resolveNurtureApprovalGate,
+} from "@/lib/workflows/nurture-approval-gate";
 
 export const CONTACT_RELATIONSHIP_NURTURE_TEMPLATE_NAME = "Contact Relationship Nurture";
 
@@ -199,6 +203,7 @@ export function buildContactNurtureBriefSection(input: {
   platformTarget?: ContactNurtureTargetInfo | null;
 }): string {
   const nurture = readContactNurtureConfig(input.config);
+  const gate = readNurtureApprovalGate(input.config) ?? resolveNurtureApprovalGate(null);
   const goalText = nurture.relationshipGoalFilter === "all"
     ? "All assigned relationship goals (follow_back, repost_amplification, mutual_engagement, warm_conversation, partnership)"
     : `Only "${nurture.relationshipGoalFilter}" goals`;
@@ -237,7 +242,7 @@ export function buildContactNurtureBriefSection(input: {
 
   const lines = [
     "Contact Relationship Nurture execution contract:",
-    `N0. Goal filter: ${goalText}. Max targets to inspect: ${nurture.maxTargets}. Max touchpoint proposals: ${nurture.maxActionsPerRun}.`,
+    `N0. Goal filter: ${goalText}. Max targets to inspect: ${nurture.maxTargets}. Max touchpoint proposals: ${nurture.maxActionsPerRun}. Approval gate: ${gate.mode} (${gate.reason}).`,
     `    Acting Profile: ${targetName}. Active Platform: ${resolvedPlatform ?? "unresolved — detect per contact"}.`,
     "    Mandate: assist_only. This workflow drafts, audits, and proposes. It never publishes, comments, replies, sends a message, opens a publish job, or schedules one.",
     `N1. Query unachieved contacts via query_contacts({ relationshipGoalStatus: "not_started" }) and query_contacts({ relationshipGoalStatus: "in_progress" }).`,
@@ -256,9 +261,7 @@ export function buildContactNurtureBriefSection(input: {
     ...touchpointRows,
     "    For each intent set `recipient` to the contact reference, `goal.id` to the relationship goal, `target` to the acting profile above, and `sourceRefs` to the allowlisted evidence you actually read. Attach the intent as `metadata.writing.intent` on upsert_variant.",
     "    Personality is the speaker; the contact is the recipient. Never write contact facts, persona attributes, relationship notes, or private CRM fields into IDENTITY.md, SOUL.md, VOICE.md, or BRAND.md.",
-    nurture.requireApproval
-      ? "N5. Approval gate: present proposals in this thread in batches of 3–5 and wait for explicit operator approval before calling materialize_variant. `auto_low_risk` does not apply to nurture proposals."
-      : "N5. Approval gate: explicit user approval is still required for every nurture proposal — the assist-only mandate outranks this run control, and Signals rejects a policy approval on these artifacts.",
+    `N5. Approval gate: present proposals in this thread in batches of 3–5 and wait for explicit operator approval before calling materialize_variant. Approvals, rejections, and revision requests may also be made on the Signals run page (\`/dashboard/workflows/${input.workflowRunId}\`). Before materialize_variant and before complete_workflow_run, re-read each variant through get_writing_context; variants[] carries approval, materialization, and revisionRequest. Skip materialized proposals, do not re-present rejected proposals, and produce a revision for any revisionRequest before asking again. Never manufacture approval evidence.`,
     "N6. A refused intent is a result, not a failure: report the persisted Personality status, capability, or target reason and move on. Never repair drift by editing Personality files.",
     "N7. WRITE-BACK TO SIGNALS (record every proposal):",
     `    a. The approved, materialized proposal is the content record — materialize_variant owns that boundary. Do not POST ${input.signalsBaseUrl}/api/content for a proposal, and never mark one published.`,

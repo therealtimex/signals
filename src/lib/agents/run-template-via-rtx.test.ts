@@ -104,6 +104,37 @@ describe("runTemplateViaRtx health preflight", () => {
     );
   });
 
+  it("rejects a locked nurture approval gate before creating a run", async () => {
+    const template = createTemplate({
+      name: "Contact Relationship Nurture",
+      templateType: "nurture",
+      status: "active",
+      config: JSON.stringify(buildContactNurtureTemplateConfig()),
+      isSystem: 1,
+    });
+    const runsBefore = db.select().from(workflowRuns).all().length;
+    const fetchImpl = vi.fn() as unknown as typeof fetch;
+
+    const result = await runTemplateViaRtx(
+      {
+        templateId: template.id,
+        config: { requireApproval: false },
+        signalsBaseUrl: "http://127.0.0.1:3099",
+      },
+      { ...process.env, RTX_APP_ID: "test-app-id", STORAGE_DIR: storageDir },
+      fetchImpl,
+    );
+
+    expect(result).toMatchObject({
+      success: false,
+      errorCode: "approval_gate_locked",
+      httpStatus: 422,
+      details: { reason: "assist_only_mandate" },
+    });
+    expect(db.select().from(workflowRuns).all()).toHaveLength(runsBefore);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it("records a successful writing dispatch on its launch", async () => {
     const launch = upsertLaunch({
       name: "Launch",
@@ -226,7 +257,11 @@ describe("runTemplateViaRtx health preflight", () => {
     }) as unknown as typeof fetch;
 
     const result = await runTemplateViaRtx(
-      { templateId: template.id, signalsBaseUrl: "http://127.0.0.1:3099" },
+      {
+        templateId: template.id,
+        config: { approvalGate: { mode: "operator_choice", reason: "caller_owned" } },
+        signalsBaseUrl: "http://127.0.0.1:3099",
+      },
       {
         ...process.env,
         RTX_APP_ID: "test-app-id",
@@ -255,7 +290,14 @@ describe("runTemplateViaRtx health preflight", () => {
     expect(token!.startsWith(`${result.workflowRunId}.`)).toBe(true);
     // The hash survives the post-dispatch config write.
     expect(JSON.parse(getWorkflowRun(result.workflowRunId)?.config ?? "{}"))
-      .toMatchObject({ [WRITING_SCOPE_TOKEN_CONFIG_KEY]: hashAtDispatch });
+      .toMatchObject({
+        [WRITING_SCOPE_TOKEN_CONFIG_KEY]: hashAtDispatch,
+        approvalGate: {
+          schemaVersion: 1,
+          mode: "locked_explicit",
+          reason: "assist_only_mandate",
+        },
+      });
   });
 
   it("revokes the writing scope when terminal dispatch is rejected", async () => {

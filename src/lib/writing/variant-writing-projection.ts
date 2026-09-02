@@ -34,6 +34,10 @@ const variantWritingProjectionSchema = z
     schemaVersion: z.literal(1).optional(),
     spine: z.object({ id: z.string().min(1), hash: z.string().min(1) }).passthrough().optional(),
     materializedContentItemId: z.string().min(1).optional(),
+    revisionRequest: z.object({
+      requestedAt: z.number().int().nonnegative(),
+      note: z.string().min(1),
+    }).passthrough().optional(),
     personality: variantPersonalitySnapshotSchema.nullable().optional(),
     lineage: z.object({
       derivedFromVariantId: z.string().optional(),

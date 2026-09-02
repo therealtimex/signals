@@ -9,6 +9,10 @@ import { getTemplate, updateTemplate } from "@/lib/db/queries/workflow-templates
 import type { WorkflowRun, WorkflowTemplate } from "@/lib/db/types";
 import { getPlatformTargetById } from "@/lib/db/queries/platform-targets";
 import { isContactNurtureTemplateConfig } from "@/lib/workflows/contact-relationship-nurture";
+import {
+  NURTURE_APPROVAL_GATE_CONFIG_KEY,
+  resolveNurtureApprovalGate,
+} from "@/lib/workflows/nurture-approval-gate";
 import { getLaunchById, upsertLaunch } from "@/lib/db/queries/launches";
 import {
   isSignalsWritingTemplateConfig,
@@ -252,20 +256,37 @@ export async function runTemplateViaRtx(
   }
 
   let mergedConfig = mergeRunConfig(template, input.config);
-  if (
-    isContactNurtureTemplateConfig(mergedConfig) &&
-    typeof mergedConfig.targetId === "string" &&
-    mergedConfig.targetId.trim()
-  ) {
-    const target = getPlatformTargetById(mergedConfig.targetId.trim());
-    if (target) {
-      mergedConfig = {
-        ...mergedConfig,
-        targetPlatform: target.platform,
-        targetName: target.name,
-        targetHandle: target.handle,
+  // The approval gate is capability-derived and server-owned. A caller may select a target and
+  // request approval, but it cannot submit a gate that widens the surface policy.
+  delete mergedConfig[NURTURE_APPROVAL_GATE_CONFIG_KEY];
+  const isContactNurture = isContactNurtureTemplateConfig(mergedConfig);
+  const actingTarget = typeof mergedConfig.targetId === "string" && mergedConfig.targetId.trim()
+    ? getPlatformTargetById(mergedConfig.targetId.trim())
+    : undefined;
+  if (isContactNurture) {
+    const approvalGate = resolveNurtureApprovalGate(actingTarget?.platform ?? null);
+    if (approvalGate.mode === "locked_explicit" && mergedConfig.requireApproval === false) {
+      return {
+        success: false,
+        error:
+          "Approval is locked on because every selected nurture surface is assist-only and requires explicit operator review.",
+        errorCode: "approval_gate_locked",
+        httpStatus: 422,
+        details: { reason: approvalGate.reason, approvalGate },
       };
     }
+    mergedConfig = {
+      ...mergedConfig,
+      [NURTURE_APPROVAL_GATE_CONFIG_KEY]: approvalGate,
+    };
+  }
+  if (actingTarget) {
+    mergedConfig = {
+      ...mergedConfig,
+      targetPlatform: actingTarget.platform,
+      targetName: actingTarget.name,
+      targetHandle: actingTarget.handle,
+    };
   }
   const workflowType = TEMPLATE_TO_WORKFLOW_TYPE[template.templateType] ?? "agent";
   const now = Math.floor(Date.now() / 1000);
@@ -415,9 +436,6 @@ export async function runTemplateViaRtx(
     }
     // Resolve the acting profile once, and hand the row to the brief rather than letting the brief
     // re-derive a platform from loose config keys.
-    const actingTarget = typeof mergedConfig.targetId === "string" && mergedConfig.targetId.trim()
-      ? getPlatformTargetById(mergedConfig.targetId.trim())
-      : undefined;
     if (actingTarget && !mergedConfig.targetPlatform) {
       runtimeConfig = {
         ...runtimeConfig,

@@ -278,6 +278,7 @@ export function TemplateGallery() {
             return (
               <Card
                 key={template.id}
+                data-testid="workflow-template-card"
                 className="hover:border-primary/50 transition-colors"
               >
                 <CardHeader className="pb-3">

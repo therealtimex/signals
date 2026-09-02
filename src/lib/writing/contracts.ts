@@ -112,6 +112,15 @@ export const writingAuditSchema = z.object({
 }).passthrough();
 
 export const approvalStateSchema = z.object({ schemaVersion: z.literal(1), state: z.enum(["pending", "approved", "rejected", "revoked"]), riskTier: z.enum(["low", "medium", "high"]), policy: approvalPolicySchema, auditId: id("aud").optional(), by: z.enum(["user", "policy"]).optional(), at: unixSeconds.optional(), evidence: approvalEvidenceSchema.optional(), note: z.string().optional(), revokedReason: z.enum(["spine_changed", "audit_stale", "user", "voice_superseded", "personality_stale", "personality_source_stale"]).optional() }).passthrough();
+export const revisionRequestSchema = z.object({
+  schemaVersion: z.literal(1),
+  requestedAt: unixSeconds,
+  note: z.string().trim().min(1).max(2_000),
+  evidence: z.object({
+    kind: z.literal("ui"),
+    route: z.string().min(1),
+  }).passthrough(),
+}).passthrough();
 export const voiceProfileRefSchema = z.object({ id: id("vp"), version: z.number().int().positive(), hash: z.string().min(1) }).passthrough();
 export const variantWritingSchema = z.object({
   schemaVersion: z.literal(1), platform: platformSchema, surface: z.enum(SURFACE_IDS), targetId: z.string().min(1).optional(), goal: writingGoalSchema,
@@ -120,6 +129,8 @@ export const variantWritingSchema = z.object({
   lineage: z.object({ derivedFromVariantId: z.string().optional(), adaptedFromContentItemId: z.string().optional(), adaptedFromVariantId: z.string().optional(), sourceIds: z.array(id("src")) }).passthrough(), capability: z.object({ publish: z.enum(["direct", "beta", "draft_only", "export_only", "unsupported"]) }).passthrough(), materializedContentItemId: z.string().optional(), media: z.object({ assetIds: z.array(z.string()).max(10) }).passthrough().optional(), personality: variantPersonalitySnapshotSchema.nullable().optional(),
   /** Set when a workflow composed this artifact through the shared writing-intent contract (#410). */
   intent: writingIntentRecordSchema.nullable().optional(),
+  /** Server-owned operator feedback. Agent updates clear it only when a changed draft lands. */
+  revisionRequest: revisionRequestSchema.optional(),
 }).passthrough();
 
 export const writingAuditInputSchema = writingAuditSchema.omit({
@@ -130,10 +141,11 @@ export const writingAuditInputSchema = writingAuditSchema.omit({
 }).extend({ personality: z.never().optional() });
 
 export const variantWritingInputSchema = variantWritingSchema
-  .omit({ audit: true, auditHistory: true, approval: true, capability: true, materializedContentItemId: true, personality: true })
+  .omit({ audit: true, auditHistory: true, approval: true, capability: true, materializedContentItemId: true, personality: true, revisionRequest: true })
   .extend({
     audit: writingAuditInputSchema.nullable(),
     personality: variantPersonalityInputSchema.nullable().optional(),
+    revisionRequest: z.never().optional(),
   })
   .passthrough();
 

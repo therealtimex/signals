@@ -135,16 +135,21 @@ describe("buildContactNurtureBriefSection", () => {
     expect(brief).toContain("IDENTITY.md, SOUL.md, VOICE.md, or BRAND.md");
   });
 
-  it("requires explicit approval even when the run control turns the gate off", () => {
-    const brief = buildContactNurtureBriefSection({
-      workflowRunId: "run-nurture-123",
-      config: buildContactNurtureTemplateConfig({ requireApproval: false }),
-      signalsBaseUrl: "http://127.0.0.1:3000",
-    });
+  it("uses one persisted-state approval instruction for both legacy config values", () => {
+    for (const requireApproval of [true, false]) {
+      const brief = buildContactNurtureBriefSection({
+        workflowRunId: "run-nurture-123",
+        config: buildContactNurtureTemplateConfig({ requireApproval }),
+        signalsBaseUrl: "http://127.0.0.1:3000",
+      });
 
-    expect(brief).toContain("explicit user approval is still required");
-    expect(brief).toContain("assist-only mandate outranks this run control");
-    expect(brief).not.toContain("Execute touchpoints directly");
+      expect(brief).toContain("Approval gate: locked_explicit (assist_only_mandate)");
+      expect(brief).toContain("Approvals, rejections, and revision requests may also be made on the Signals run page");
+      expect(brief).toContain("revisionRequest");
+      expect(brief).toContain("Never manufacture approval evidence");
+      expect(brief).not.toContain("still required");
+      expect(brief).not.toContain("Toggle off");
+    }
   });
 
   it("never instructs publishing, sending, or submission verification", () => {

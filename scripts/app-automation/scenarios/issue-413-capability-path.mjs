@@ -43,14 +43,22 @@ export default async function run(ctx) {
     data: { status: rejected.status, errorCode: rejected.body.errorCode, beforeCount: before.body.total, afterCount: after.body.total },
   });
 
-  const runResponse = await api(`/api/workflows/${fixture.workflowRunId}`);
-  const launchResponse = await api(`/api/launches/${fixture.launchId}`);
+  const [runResponse, launchResponse] = await Promise.all([
+    api(`/api/workflows/${fixture.workflowRunId}`),
+    api(`/api/launches/${fixture.launchId}`),
+  ]);
+  const runConfig = typeof runResponse.body.config === "string"
+    ? JSON.parse(runResponse.body.config)
+    : runResponse.body.config;
+  const launchMetadata = typeof launchResponse.body.metadata === "string"
+    ? JSON.parse(launchResponse.body.metadata)
+    : launchResponse.body.metadata;
   record("composition-pinned", {
     data: {
-      runMandate: runResponse.body.config.writingIntent.mandate,
-      runPolicy: runResponse.body.config.writingIntent.approvalPolicy,
-      gateMode: runResponse.body.config.approvalGate.mode,
-      launchMandate: launchResponse.body.metadata.writing.composition.mandate,
+      runMandate: runConfig.writingIntent.mandate,
+      runPolicy: runConfig.writingIntent.approvalPolicy,
+      gateMode: runConfig.approvalGate.mode,
+      launchMandate: launchMetadata.writing.composition.mandate,
     },
   });
 

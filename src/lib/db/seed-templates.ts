@@ -28,7 +28,7 @@ import { buildWritingTemplateConfig } from "@/lib/workflows/signals-writing";
 import { buildContactWebResearchTemplateConfig } from "@/lib/workflows/contact-web-research";
 
 /** Bump this when seed template prompts change to trigger updates on existing installs. */
-const SEED_VERSION = 29;
+const SEED_VERSION = 30;
 
 export const CONTACT_PROFILE_PIPELINE_TEMPLATE_NAME = "Contact profile pipeline";
 export const CONTACT_WEB_RESEARCH_TEMPLATE_NAME = "Contact Web Research";
@@ -590,7 +590,7 @@ assist_only. You draft, audit, and propose. You never publish, comment, reply, s
 
 ## Approval
 - Explicit user approval is required for every proposal. auto_low_risk does not apply here.
-- If requireApproval is true, present batches of 3–5 proposals for operator review.
+- Present batches of 3–5 proposals for operator review. Approvals may arrive in the thread or on the Signals run page; re-read persisted variant state before materializing or completing the run.
 - Never manufacture approval evidence.
 
 ## Mandatory Write-Back to Signals CRM
@@ -710,6 +710,12 @@ export function seedTemplates(): { seeded: number; updated: number; skipped: boo
             ...updatedConfig,
             ...buildContactNurtureWritingComposition(),
           };
+          if (existingConfig.requireApproval === false) {
+            updatedConfig.requireApproval = true;
+            console.info(
+              `[signals] Normalized stale Contact Relationship Nurture approval gate on template ${existing.id}; assist-only surfaces require explicit approval.`,
+            );
+          }
         }
         if (seed.name === CONTACT_PROFILE_PIPELINE_TEMPLATE_NAME) {
           const existingPipeline = readObject(existingConfig.pipeline);

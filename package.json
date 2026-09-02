@@ -56,6 +56,7 @@
     "automation:capture-guide-assets": "node scripts/app-automation/flows/capture-guide-assets.mjs",
     "automation:convert-guide-video": "node scripts/app-automation/flows/convert-guide-video.mjs",
     "automation:contract": "node scripts/app-automation/flows/run-experience-contract.mjs",
+    "seed:fixture": "vite-node --config vitest.config.ts scripts/seed-experience-fixture.ts",
     "automation:test": "node --test \"scripts/app-automation/**/*.test.mjs\"",
     "build:signals-pp-cli": "node scripts/build-signals-pp-cli.mjs",
     "package:signals-pp-cli-npm": "node scripts/package-signals-pp-cli-npm.mjs",
