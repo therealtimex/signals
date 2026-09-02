@@ -103,6 +103,22 @@ describe("nurture proposal experience fixture", () => {
       && Boolean(proposal.recipient?.name)
     )).toBe(true);
 
+    await expect(seedNurtureProposalFixture({
+      label: "test-issue-413",
+      dependencies: {
+        ...dependencies,
+        listTargets: () => [],
+      },
+    })).rejects.toMatchObject({
+      code: "fixture_precondition_unmet",
+      reasons: ["register an active X acting target represented by that Personality"],
+    });
+    const preserved = listWorkflowRunProposals(fixture.workflowRunId);
+    expect(preserved.proposals.map((proposal) => proposal.variantId).sort()).toEqual(
+      [...fixture.variantIds].sort(),
+    );
+    expect(preserved.summary).toMatchObject({ total: 3, pendingReview: 3 });
+
     const materialized = await withPersonalityWritingGuard(
       (guard, tx) => materializeVariantWithRunner({
         variantId: fixture.variantIds[0],

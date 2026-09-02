@@ -288,7 +288,6 @@ export async function seedNurtureProposalFixture(
   options: FixtureOptions = {},
 ): Promise<NurtureProposalFixtureResult> {
   const label = options.label?.trim() || "issue-413";
-  cleanupPriorFixture(label);
   const template = getSystemTemplateByName(CONTACT_RELATIONSHIP_NURTURE_TEMPLATE_NAME);
   const personality = await getPersonalityBindingView(options.dependencies);
   const binding = personality.status.binding;
@@ -303,6 +302,7 @@ export async function seedNurtureProposalFixture(
     ...(!target ? ["register an active X acting target represented by that Personality"] : []),
   ];
   if (reasons.length || !template || !binding || !target) fixtureError(reasons);
+  cleanupPriorFixture(label);
 
   const goals = ["follow_back", "mutual_engagement", "warm_conversation"] as const;
   const contacts = goals.map((relationshipGoal, index) => createContact({

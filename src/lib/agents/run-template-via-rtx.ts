@@ -8,7 +8,10 @@ import {
 import { getTemplate, updateTemplate } from "@/lib/db/queries/workflow-templates";
 import type { WorkflowRun, WorkflowTemplate } from "@/lib/db/types";
 import { getPlatformTargetById } from "@/lib/db/queries/platform-targets";
-import { isContactNurtureTemplateConfig } from "@/lib/workflows/contact-relationship-nurture";
+import {
+  CONTACT_NURTURE_CONFIG_KEY,
+  isContactNurtureTemplateConfig,
+} from "@/lib/workflows/contact-relationship-nurture";
 import {
   NURTURE_APPROVAL_GATE_CONFIG_KEY,
   resolveNurtureApprovalGate,
@@ -43,6 +46,7 @@ import type { TemplateThreadResolution } from "@/lib/rtx/template-thread";
 import type { WorkflowType } from "@/lib/workflows/types";
 import { getWritingApprovalPolicy } from "@/lib/settings/writing-approval-policy";
 import { readWritingIntentComposition } from "@/lib/workflows/writing-composition";
+import { WRITING_INTENT_CONFIG_KEY } from "@/lib/writing/writing-intent";
 import {
   WRITING_SCOPE_TOKEN_CONFIG_KEY,
   mintWritingScopeToken,
@@ -255,11 +259,21 @@ export async function runTemplateViaRtx(
     };
   }
 
+  const storedTemplateConfig = mergeRunConfig(template);
+  const isContactNurture = isContactNurtureTemplateConfig(storedTemplateConfig);
   let mergedConfig = mergeRunConfig(template, input.config);
   // The approval gate is capability-derived and server-owned. A caller may select a target and
-  // request approval, but it cannot submit a gate that widens the surface policy.
+  // request approval, but it cannot submit a gate that widens the surface policy. Workflow kind
+  // and writing composition are structural template declarations too: determine them from the
+  // stored template and restore them after merging untrusted run overrides.
   delete mergedConfig[NURTURE_APPROVAL_GATE_CONFIG_KEY];
-  const isContactNurture = isContactNurtureTemplateConfig(mergedConfig);
+  if (isContactNurture) {
+    mergedConfig = {
+      ...mergedConfig,
+      [CONTACT_NURTURE_CONFIG_KEY]: storedTemplateConfig[CONTACT_NURTURE_CONFIG_KEY],
+      [WRITING_INTENT_CONFIG_KEY]: storedTemplateConfig[WRITING_INTENT_CONFIG_KEY],
+    };
+  }
   const actingTarget = typeof mergedConfig.targetId === "string" && mergedConfig.targetId.trim()
     ? getPlatformTargetById(mergedConfig.targetId.trim())
     : undefined;

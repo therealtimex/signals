@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -155,23 +155,44 @@ function parseFixtureJson(stdout) {
   }
 }
 
+export function fixtureResultFromProcess(result) {
+  const stdout = typeof result.stdout === "string" ? result.stdout : "";
+  const stderr = typeof result.stderr === "string" ? result.stderr : "";
+  let payload = null;
+  try {
+    payload = parseFixtureJson(stdout);
+  } catch (error) {
+    if (result.status === 0) throw error;
+  }
+  if (result.status === 0 && payload) return payload;
+
+  const detail = payload?.error
+    ?? stderr.trim()
+    ?? result.error?.message
+    ?? `fixture process exited ${result.status ?? "without a status"}`;
+  const error = new Error(detail);
+  error.code = typeof payload?.code === "string" ? payload.code : "fixture_failed";
+  if (Array.isArray(payload?.reasons)) error.reasons = payload.reasons.map(String);
+  error.exitCode = result.status;
+  throw error;
+}
+
 function defaultRunFixture({ repoDir, name, dataDir }) {
   if (!dataDir) {
     const error = new Error("fixture_precondition_unmet: pass --data-dir or provision the issue QA Local App");
     error.code = "fixture_precondition_unmet";
     throw error;
   }
-  const stdout = execFileSync(
+  const result = spawnSync(
     "npm",
     ["run", "seed:fixture", "--", "--fixture", name, "--json"],
     {
       cwd: repoDir,
       encoding: "utf8",
       env: { ...process.env, SIGNALS_DATA_DIR: dataDir },
-      stdio: ["ignore", "pipe", "pipe"],
     },
   );
-  return parseFixtureJson(stdout);
+  return fixtureResultFromProcess(result);
 }
 
 async function defaultCreateSession({ chromium, origin, cdp, cdpUrl }) {
@@ -274,6 +295,7 @@ export async function runExperienceContract(args, dependencies = {}) {
     runnerFailures.push({
       code: error?.code ?? "scenario_failed",
       detail: error instanceof Error ? error.message : String(error),
+      ...(Array.isArray(error?.reasons) ? { reasons: error.reasons.map(String) } : {}),
     });
   } finally {
     await session?.close?.();

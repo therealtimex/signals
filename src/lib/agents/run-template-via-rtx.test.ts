@@ -135,6 +135,41 @@ describe("runTemplateViaRtx health preflight", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
+  it("derives nurture identity from the stored template before caller overrides", async () => {
+    const template = createTemplate({
+      name: "Contact Relationship Nurture",
+      templateType: "nurture",
+      status: "active",
+      config: JSON.stringify(buildContactNurtureTemplateConfig()),
+      isSystem: 1,
+    });
+    const runsBefore = db.select().from(workflowRuns).all().length;
+    const fetchImpl = vi.fn() as unknown as typeof fetch;
+
+    const result = await runTemplateViaRtx(
+      {
+        templateId: template.id,
+        config: {
+          contactNurture: false,
+          writingIntent: null,
+          requireApproval: false,
+        },
+        signalsBaseUrl: "http://127.0.0.1:3099",
+      },
+      { ...process.env, RTX_APP_ID: "test-app-id", STORAGE_DIR: storageDir },
+      fetchImpl,
+    );
+
+    expect(result).toMatchObject({
+      success: false,
+      errorCode: "approval_gate_locked",
+      httpStatus: 422,
+      details: { reason: "assist_only_mandate" },
+    });
+    expect(db.select().from(workflowRuns).all()).toHaveLength(runsBefore);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it("records a successful writing dispatch on its launch", async () => {
     const launch = upsertLaunch({
       name: "Launch",

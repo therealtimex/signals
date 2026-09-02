@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,6 +7,7 @@ import test from "node:test";
 import { defineContract } from "./experience-contract.mjs";
 import {
   contractPaths,
+  fixtureResultFromProcess,
   parseArgs,
   runExperienceContract,
 } from "./run-experience-contract.mjs";
@@ -76,4 +78,65 @@ test("target failures use the not-ready exit code and write no manifest", async 
   });
   assert.equal(result.exitCode, 3);
   assert.equal(result.manifest, null);
+});
+
+test("an actual nonzero fixture child preserves its precondition code and reasons", () => {
+  const payload = {
+    ok: false,
+    code: "fixture_precondition_unmet",
+    error: "fixture_precondition_unmet: bind Personality",
+    reasons: ["bind Personality"],
+  };
+  const child = spawnSync(process.execPath, [
+    "-e",
+    `process.stdout.write(${JSON.stringify(JSON.stringify(payload))}); process.exit(1)`,
+  ], { encoding: "utf8" });
+
+  assert.throws(
+    () => fixtureResultFromProcess(child),
+    (error) => {
+      assert.equal(error.code, "fixture_precondition_unmet");
+      assert.deepEqual(error.reasons, ["bind Personality"]);
+      assert.equal(error.exitCode, 1);
+      return true;
+    },
+  );
+});
+
+test("runner returns not-ready and writes fixture reasons into the manifest", async () => {
+  const outputDir = mkdtempSync(join(tmpdir(), "signals-contract-precondition-"));
+  const value = defineContract({
+    id: "fake-contract",
+    issue: 413,
+    kind: "review",
+    reachability: { status: "reachable" },
+    fixture: "nurture-proposals",
+    evidence: { profile: "assertions", gtm: false },
+    promise: "Fixture is ready.",
+    checkpoints: [{ id: "fixture-ready", data: "ready", assert: () => true }],
+  });
+  const result = await runExperienceContract(
+    { ...parseArgs(["fake-contract"]), dataDir: "/tmp/disposable", outputDir },
+    {
+      repoDir: "/repo",
+      importModule: async (path) => path.endsWith(".contract.mjs")
+        ? { default: value }
+        : { default: async () => {} },
+      resolveOrigin: async () => ({ ok: true, origin: "http://127.0.0.1:3010", source: "base-url", healthApp: "signals" }),
+      getGitState: () => ({ sha: "abc", dirty: false }),
+      runFixture: async () => {
+        throw Object.assign(new Error("fixture_precondition_unmet: bind Personality"), {
+          code: "fixture_precondition_unmet",
+          reasons: ["bind Personality"],
+        });
+      },
+    },
+  );
+
+  assert.equal(result.exitCode, 3);
+  assert.deepEqual(result.manifest.failures.at(-1), {
+    code: "fixture_precondition_unmet",
+    detail: "fixture_precondition_unmet: bind Personality",
+    reasons: ["bind Personality"],
+  });
 });
