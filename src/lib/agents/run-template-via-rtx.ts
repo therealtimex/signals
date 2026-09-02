@@ -8,7 +8,14 @@ import {
 import { getTemplate, updateTemplate } from "@/lib/db/queries/workflow-templates";
 import type { WorkflowRun, WorkflowTemplate } from "@/lib/db/types";
 import { getPlatformTargetById } from "@/lib/db/queries/platform-targets";
-import { isContactNurtureTemplateConfig } from "@/lib/workflows/contact-relationship-nurture";
+import {
+  CONTACT_NURTURE_CONFIG_KEY,
+  isContactNurtureTemplateConfig,
+} from "@/lib/workflows/contact-relationship-nurture";
+import {
+  NURTURE_APPROVAL_GATE_CONFIG_KEY,
+  resolveNurtureApprovalGate,
+} from "@/lib/workflows/nurture-approval-gate";
 import { getLaunchById, upsertLaunch } from "@/lib/db/queries/launches";
 import {
   isSignalsWritingTemplateConfig,
@@ -39,6 +46,7 @@ import type { TemplateThreadResolution } from "@/lib/rtx/template-thread";
 import type { WorkflowType } from "@/lib/workflows/types";
 import { getWritingApprovalPolicy } from "@/lib/settings/writing-approval-policy";
 import { readWritingIntentComposition } from "@/lib/workflows/writing-composition";
+import { WRITING_INTENT_CONFIG_KEY } from "@/lib/writing/writing-intent";
 import {
   WRITING_SCOPE_TOKEN_CONFIG_KEY,
   mintWritingScopeToken,
@@ -251,21 +259,48 @@ export async function runTemplateViaRtx(
     };
   }
 
+  const storedTemplateConfig = mergeRunConfig(template);
+  const isContactNurture = isContactNurtureTemplateConfig(storedTemplateConfig);
   let mergedConfig = mergeRunConfig(template, input.config);
-  if (
-    isContactNurtureTemplateConfig(mergedConfig) &&
-    typeof mergedConfig.targetId === "string" &&
-    mergedConfig.targetId.trim()
-  ) {
-    const target = getPlatformTargetById(mergedConfig.targetId.trim());
-    if (target) {
-      mergedConfig = {
-        ...mergedConfig,
-        targetPlatform: target.platform,
-        targetName: target.name,
-        targetHandle: target.handle,
+  // The approval gate is capability-derived and server-owned. A caller may select a target and
+  // request approval, but it cannot submit a gate that widens the surface policy. Workflow kind
+  // and writing composition are structural template declarations too: determine them from the
+  // stored template and restore them after merging untrusted run overrides.
+  delete mergedConfig[NURTURE_APPROVAL_GATE_CONFIG_KEY];
+  if (isContactNurture) {
+    mergedConfig = {
+      ...mergedConfig,
+      [CONTACT_NURTURE_CONFIG_KEY]: storedTemplateConfig[CONTACT_NURTURE_CONFIG_KEY],
+      [WRITING_INTENT_CONFIG_KEY]: storedTemplateConfig[WRITING_INTENT_CONFIG_KEY],
+    };
+  }
+  const actingTarget = typeof mergedConfig.targetId === "string" && mergedConfig.targetId.trim()
+    ? getPlatformTargetById(mergedConfig.targetId.trim())
+    : undefined;
+  if (isContactNurture) {
+    const approvalGate = resolveNurtureApprovalGate(actingTarget?.platform ?? null);
+    if (approvalGate.mode === "locked_explicit" && mergedConfig.requireApproval === false) {
+      return {
+        success: false,
+        error:
+          "Approval is locked on because every selected nurture surface is assist-only and requires explicit operator review.",
+        errorCode: "approval_gate_locked",
+        httpStatus: 422,
+        details: { reason: approvalGate.reason, approvalGate },
       };
     }
+    mergedConfig = {
+      ...mergedConfig,
+      [NURTURE_APPROVAL_GATE_CONFIG_KEY]: approvalGate,
+    };
+  }
+  if (actingTarget) {
+    mergedConfig = {
+      ...mergedConfig,
+      targetPlatform: actingTarget.platform,
+      targetName: actingTarget.name,
+      targetHandle: actingTarget.handle,
+    };
   }
   const workflowType = TEMPLATE_TO_WORKFLOW_TYPE[template.templateType] ?? "agent";
   const now = Math.floor(Date.now() / 1000);
@@ -415,9 +450,6 @@ export async function runTemplateViaRtx(
     }
     // Resolve the acting profile once, and hand the row to the brief rather than letting the brief
     // re-derive a platform from loose config keys.
-    const actingTarget = typeof mergedConfig.targetId === "string" && mergedConfig.targetId.trim()
-      ? getPlatformTargetById(mergedConfig.targetId.trim())
-      : undefined;
     if (actingTarget && !mergedConfig.targetPlatform) {
       runtimeConfig = {
         ...runtimeConfig,

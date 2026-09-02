@@ -43,6 +43,10 @@ import {
   readContactNurtureConfig,
 } from "@/lib/workflows/contact-relationship-nurture";
 import {
+  applyNurtureApprovalGate,
+  resolveNurtureApprovalGate,
+} from "@/lib/workflows/nurture-approval-gate";
+import {
   buildNetworkSnowballRunConfig,
   isNetworkSnowballTemplateConfig,
   readNetworkSnowballConfig,
@@ -119,6 +123,10 @@ type DialogAction =
 
 function initDialogState(template: Template): DialogState {
   const config = parseTemplateConfig(template.config);
+  const contactNurture = applyNurtureApprovalGate(
+    readContactNurtureConfig(config),
+    resolveNurtureApprovalGate(null),
+  );
   return {
     running: false,
     error: null,
@@ -131,7 +139,7 @@ function initDialogState(template: Template): DialogState {
     systemPrompt: template.systemPrompt ?? "",
     patrol: readSocialPatrolConfig(config),
     profilePublish: readProfilePublishConfig(config),
-    contactNurture: readContactNurtureConfig(config),
+    contactNurture,
     snowball: readNetworkSnowballConfig(config),
     limits: readRunLimitFromTemplateConfig(config),
   };

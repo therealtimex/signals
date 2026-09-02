@@ -25,6 +25,7 @@ function usage() {
   node scripts/qa/provision-signals-qa-local-app.mjs \\
     --issue <number> --worktree <absolute-path> [--loop-id <id>] \\
     [--data-dir <platform-temp>/signals-qa-...] [--base-url http://127.0.0.1:3101/cli] \\
+    [--workspace-slug signals-issue-<number>-<suffix>] \\
     [--no-start]
 
 Creates a new issue-scoped QA Local App. It never updates the canonical Signals app.
@@ -43,6 +44,7 @@ try {
   const dataDir = defaultQaDataDir(issueId);
   const requestedDataDir = assertSafeQaDataDir(flags.get("data-dir", dataDir));
   const loopId = flags.get("loop-id");
+  const workspaceSlug = flags.get("workspace-slug");
   const baseUrl = flags.get("base-url") || DEFAULT_DEV_CLI_BASE_URL;
   const cliOptions = { baseUrl, cli: flags.get("cli") };
   const receiptPath = qaReceiptPath(issueId);
@@ -75,6 +77,7 @@ try {
     dataDir: requestedDataDir,
     loopId,
     baseUrl,
+    workspaceSlug,
   });
   const createdPayload = runRealtimeXCli(createArgs, cliOptions);
   const created = appFromCliPayload(createdPayload);
@@ -94,6 +97,7 @@ try {
     branch: worktree.branch,
     worktree: worktree.path,
     dataDir: requestedDataDir,
+    workspaceSlug: workspaceSlug || null,
     baseUrl,
     createdAt: new Date().toISOString(),
   };
@@ -123,6 +127,7 @@ try {
         issueId,
         worktree: receipt.worktree,
         dataDir: receipt.dataDir,
+        workspaceSlug: receipt.workspaceSlug,
         receiptPath,
         started: !flags.has("no-start"),
         cleanupCommand: `node scripts/qa/cleanup-signals-qa-local-app.mjs --issue ${issueId}`,

@@ -1,4 +1,5 @@
 import { X_SELECTORS } from "@/lib/publish/x-browser/x-publish-selectors";
+import { detectPlatformHandle } from "@/lib/platforms/browser-connection";
 import { defaultTargetCapabilities } from "@/lib/platforms/target-identity";
 import { targetLabel, verifyDetectedTarget } from "@/lib/platforms/target-adapters/shared";
 import type { PlatformTargetAdapter } from "@/lib/platforms/target-adapters/types";
@@ -6,6 +7,8 @@ import type { PlatformTargetAdapter } from "@/lib/platforms/target-adapters/type
 export const xTargetAdapter: PlatformTargetAdapter = {
   async discover(page) {
     const handles = new Set<string>();
+    const detected = await detectPlatformHandle("x", page, page.url()).catch(() => null);
+    if (detected) handles.add(detected);
     const current = await page
       .locator(X_SELECTORS.accountSwitcher)
       .getAttribute("aria-label")
@@ -14,8 +17,9 @@ export const xTargetAdapter: PlatformTargetAdapter = {
     current.forEach((handle) => handles.add(handle));
 
     await page.locator(X_SELECTORS.accountSwitcher).click().catch(() => undefined);
-    const switcherText = await page
-      .locator('[role="menu"]')
+    const menu = page.locator('[role="menu"]');
+    await menu.first().waitFor({ state: "visible", timeout: 2_000 }).catch(() => undefined);
+    const switcherText = await menu
       .allInnerTexts()
       .then((values) => values.join("\n"))
       .catch(() => "");

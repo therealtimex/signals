@@ -371,6 +371,7 @@ export function persistWritingVariant(
     approval,
     capability: { publish: getSurfaceCapabilities(authoritativeWriting.surface).publish },
     ...(previous?.materializedContentItemId ? { materializedContentItemId: previous.materializedContentItemId } : {}),
+    ...(unchanged && previous?.revisionRequest ? { revisionRequest: previous.revisionRequest } : {}),
   });
   const rootMetadata = { ...object(existing?.metadata), ...input.metadata, writing };
   const created = !existing;
@@ -416,5 +417,102 @@ export function revokeVariantsForSpineChange(launchId: string): string[] {
       if (result.mutated) revoked.push(variant.id);
     }
     return revoked;
+  });
+}
+
+function writingProposalForDecision(variantId: string, runner: DbRunner = db) {
+  const variant = runner.select().from(variants).where(eq(variants.id, variantId)).get();
+  if (!variant) throw new AgentToolError("NOT_FOUND", `Variant not found: ${variantId}`);
+  const parsed = variantWritingSchema.safeParse(object(variant.metadata).writing);
+  if (!parsed.success) {
+    throw new AgentToolError("VALIDATION_ERROR", "Variant is not a valid Signals writing proposal", {
+      reason: "writing_metadata_invalid",
+      issues: parsed.error.issues,
+    });
+  }
+  return { variant, writing: parsed.data };
+}
+
+function assertProposalIsMutable(variant: Variant, writing: VariantWriting, runner: DbRunner): void {
+  if (writing.materializedContentItemId || variant.contentItemId) {
+    throw new AgentToolError("CONFLICT", "A materialized proposal cannot be changed", {
+      reason: "proposal_materialized",
+    });
+  }
+  const linked = runner.select().from(graphEdges).where(and(
+    eq(graphEdges.srcType, "variant"),
+    eq(graphEdges.srcId, variant.id),
+    eq(graphEdges.dstType, "content"),
+  )).get();
+  const contentItemId = variant.contentItemId ?? linked?.dstId;
+  const item = contentItemId
+    ? runner.select().from(contentItems).where(eq(contentItems.id, contentItemId)).get()
+    : undefined;
+  if (item && PUBLISH_LANE_STATUSES.has(item.status)) {
+    throw new AgentToolError("CONFLICT", `Cannot change a proposal linked to a ${item.status} content item`, {
+      reason: "variant_locked",
+      contentItemId: item.id,
+      status: item.status,
+    });
+  }
+}
+
+export function rejectWritingProposal(
+  variantId: string,
+  input: { evidence: { kind: "ui"; route: string }; note?: string },
+): Variant {
+  return db.transaction((tx) => {
+    const { variant, writing } = writingProposalForDecision(variantId, tx);
+    assertProposalIsMutable(variant, writing, tx);
+    if (writing.approval.state === "rejected" || variant.status === "rejected") return variant;
+    const now = Math.floor(Date.now() / 1_000);
+    const approval: ApprovalState = {
+      schemaVersion: 1,
+      state: "rejected",
+      riskTier: writing.approval.riskTier,
+      policy: writing.approval.policy,
+      ...(writing.audit ? { auditId: writing.audit.id } : {}),
+      by: "user",
+      at: now,
+      evidence: input.evidence,
+      ...(input.note?.trim() ? { note: input.note.trim() } : {}),
+    };
+    tx.update(variants).set({
+      status: "rejected",
+      metadata: JSON.stringify({
+        ...object(variant.metadata),
+        writing: { ...writing, approval },
+      }),
+      updatedAt: now,
+    }).where(eq(variants.id, variant.id)).run();
+    return tx.select().from(variants).where(eq(variants.id, variant.id)).get()!;
+  });
+}
+
+export function requestWritingProposalRevision(
+  variantId: string,
+  input: { evidence: { kind: "ui"; route: string }; note: string },
+): Variant {
+  return db.transaction((tx) => {
+    const { variant, writing } = writingProposalForDecision(variantId, tx);
+    assertProposalIsMutable(variant, writing, tx);
+    if (writing.approval.state === "rejected" || variant.status === "rejected") {
+      throw new AgentToolError("CONFLICT", "A rejected proposal cannot be revised", {
+        reason: "proposal_rejected",
+      });
+    }
+    const now = Math.floor(Date.now() / 1_000);
+    const revisionRequest = {
+      schemaVersion: 1 as const,
+      requestedAt: now,
+      note: input.note.trim(),
+      evidence: input.evidence,
+    };
+    const updatedWriting = variantWritingSchema.parse({ ...writing, revisionRequest });
+    tx.update(variants).set({
+      metadata: JSON.stringify({ ...object(variant.metadata), writing: updatedWriting }),
+      updatedAt: now,
+    }).where(eq(variants.id, variant.id)).run();
+    return tx.select().from(variants).where(eq(variants.id, variant.id)).get()!;
   });
 }

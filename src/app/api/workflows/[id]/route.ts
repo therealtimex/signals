@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getWorkflowRun } from "@/lib/db/queries/workflows";
 import { countContactsByCreatedWorkflowRun } from "@/lib/db/queries/contacts";
 import { countOrgsByCreatedWorkflowRun } from "@/lib/db/queries/orgs";
+import { summarizeWorkflowRunProposals } from "@/lib/writing/workflow-run-proposals";
 
 /**
  * GET /api/workflows/[id]
@@ -22,5 +23,6 @@ export async function GET(
     ...run,
     contactsCreated: countContactsByCreatedWorkflowRun(id),
     orgsCreated: countOrgsByCreatedWorkflowRun(id),
+    proposalSummary: summarizeWorkflowRunProposals(id),
   });
 }

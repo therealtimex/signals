@@ -11,6 +11,7 @@ import * as schema from "./schema";
 const require = createRequire(import.meta.url);
 
 const isStandaloneBuild = process.env.SIGNALS_BOOT_MIGRATIONS_DONE === "1";
+const migrationsManagedByRunningApp = process.env.SIGNALS_SKIP_CLIENT_MIGRATIONS === "1";
 const dataDir = resolveSignalsDataDir();
 
 if (!isStandaloneBuild && !existsSync(dataDir)) {
@@ -29,6 +30,11 @@ function applyMigrationsOnce(): void {
   if (migrationsApplied) return;
   migrationsApplied = true;
   if (process.env.VITEST === "true") return;
+  // Experience fixtures run only after the target app's health check succeeds,
+  // so that app already owns migration of its disposable data directory. The
+  // fixture subprocess must not try to load the deferred CommonJS migration
+  // bridge through vite-node (or race the running app's database connection).
+  if (migrationsManagedByRunningApp) return;
 
   if (isStandaloneBuild) {
     const migrationsDir =

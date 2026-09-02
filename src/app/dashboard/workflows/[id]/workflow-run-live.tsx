@@ -1,5 +1,6 @@
 "use client";
 
+import { useCallback, useEffect, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -23,6 +24,8 @@ import type { WorkflowRunWithSteps } from "@/lib/db/types";
 import type { PipelineRunResult } from "@/lib/workflows/pipeline/types";
 import type { WorkflowRunSubject } from "@/lib/workflows/workflow-run-subjects-shared";
 import { workflowSubjectLookup } from "@/lib/workflows/workflow-run-subjects-shared";
+import type { WorkflowRunProposalSummary } from "@/lib/writing/workflow-run-proposals";
+import { WorkflowRunProposalsPanel } from "./workflow-run-proposals";
 
 type PipelineRunContext = {
   backlogTotal: number;
@@ -112,13 +115,16 @@ export function WorkflowRunLive({
   subjects = [],
   contactsCreated = 0,
   orgsCreated = 0,
+  initialProposalSummary = null,
 }: {
   initialRun: WorkflowRunWithSteps;
   subjects?: WorkflowRunSubject[];
   contactsCreated?: number;
   orgsCreated?: number;
+  initialProposalSummary?: WorkflowRunProposalSummary | null;
 }) {
   const { data, isPolling } = useWorkflowPolling(initialRun.id, initialRun.status);
+  const [proposalSummary, setProposalSummary] = useState(initialProposalSummary);
 
   // Use polled data when available, fall back to server-rendered initial data
   const run = data?.run ?? initialRun;
@@ -130,6 +136,13 @@ export function WorkflowRunLive({
   const isAgent = run.workflowType === "agent";
   const totalTokens = run.inputTokens + run.outputTokens;
   const pipelineCtx = parsePipelineRunContext(run);
+  const polledProposalSummary = data?.proposalSummary;
+  useEffect(() => {
+    if (polledProposalSummary !== undefined) setProposalSummary(polledProposalSummary);
+  }, [polledProposalSummary]);
+  const updateProposalSummary = useCallback((summary: WorkflowRunProposalSummary) => {
+    setProposalSummary(summary);
+  }, []);
 
   return (
     <>
@@ -144,13 +157,21 @@ export function WorkflowRunLive({
             Live
           </span>
         )}
-        <Badge variant={statusConfig.variant} className="text-xs px-2 py-0.5">
+        <Badge
+          variant={statusConfig.variant}
+          className="text-xs px-2 py-0.5"
+          data-testid="workflow-run-status"
+          data-pending-review={proposalSummary?.pendingReview ?? 0}
+        >
           {run.status === "running" ? (
             <Loader2 className="mr-1 h-3 w-3 animate-spin" />
           ) : (
             <StatusIcon className="mr-1 h-3 w-3" />
           )}
           {statusConfig.label}
+          {proposalSummary && proposalSummary.pendingReview > 0
+            ? ` · ${proposalSummary.pendingReview} awaiting review`
+            : ""}
         </Badge>
       </div>
 
@@ -263,6 +284,14 @@ export function WorkflowRunLive({
       )}
 
       <WorkflowRunSubjectsPanel subjects={subjects} />
+
+      {proposalSummary !== null ? (
+        <WorkflowRunProposalsPanel
+          runId={run.id}
+          refreshKey={`${run.status}:${run.processedItems}:${proposalSummary.pendingReview}:${proposalSummary.materialized}:${proposalSummary.rejected}`}
+          onSummaryChange={updateProposalSummary}
+        />
+      ) : null}
 
       {/* Step section with Timeline/Graph toggle */}
       <WorkflowDetailSteps

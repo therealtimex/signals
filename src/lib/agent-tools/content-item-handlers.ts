@@ -780,6 +780,7 @@ export async function handleGetWritingContext(
           projection.audit.inputHash !== computeAuditInputHash(variant.body, projection),
       ),
       materializedContentItemId: projection?.materializedContentItemId ?? variant.contentItemId,
+      revisionRequest: projection?.revisionRequest ?? null,
       contentItemStatus: variant.contentItemId ? getContentItem(variant.contentItemId)?.status ?? null : null,
       lineage: projection?.lineage ?? null,
       personality: variantPersonality ?? null,

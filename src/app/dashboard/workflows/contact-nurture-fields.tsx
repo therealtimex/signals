@@ -20,6 +20,12 @@ import {
   type ContactNurtureConfig,
   type ContactNurtureSliderKey,
 } from "@/lib/workflows/contact-relationship-nurture";
+import { isPlatform } from "@/lib/db/platforms";
+import {
+  applyNurtureApprovalGate,
+  resolveNurtureApprovalGate,
+  type NurtureApprovalGate,
+} from "@/lib/workflows/nurture-approval-gate";
 import {
   RELATIONSHIP_GOAL_ENUM,
   RELATIONSHIP_GOAL_ICONS,
@@ -31,20 +37,51 @@ interface ContactNurtureFieldsProps {
   value: ContactNurtureConfig;
   onChange: (next: ContactNurtureConfig) => void;
   disabled?: boolean;
+  /** Test seam for the future publish-capable operator-choice state. */
+  approvalGateOverride?: NurtureApprovalGate;
+}
+
+function platformLabel(platform: string | null): string {
+  if (platform === "linkedin") return "LinkedIn";
+  if (platform === "facebook") return "Facebook";
+  if (platform === "x") return "X";
+  return "the selected platforms";
+}
+
+function surfaceLabel(surface: string): string {
+  const [platform, kind] = surface.split("/");
+  const platformName = platformLabel(platform);
+  const kindName = kind === "direct_message" ? "DM" : kind === "reply" ? "reply" : "comment";
+  return `${platformName} ${kindName}`;
 }
 
 export function ContactNurtureFields({
   value,
   onChange,
   disabled,
+  approvalGateOverride,
 }: ContactNurtureFieldsProps) {
   const targets = useActingTargets();
+  const selectedTarget = targets?.find((target) => target.id === value.targetId) ?? null;
+  const selectedPlatform = selectedTarget && isPlatform(selectedTarget.platform)
+    ? selectedTarget.platform
+    : null;
+  const gate = approvalGateOverride ?? resolveNurtureApprovalGate(selectedPlatform);
+
+  const emit = useCallback(
+    (next: ContactNurtureConfig) => {
+      const nextTarget = targets?.find((target) => target.id === next.targetId) ?? null;
+      const nextPlatform = nextTarget && isPlatform(nextTarget.platform) ? nextTarget.platform : null;
+      onChange(applyNurtureApprovalGate(next, resolveNurtureApprovalGate(nextPlatform)));
+    },
+    [onChange, targets],
+  );
 
   const setSlider = useCallback(
     (key: ContactNurtureSliderKey, next: number) => {
-      onChange({ ...value, [key]: clampContactNurtureSlider(key, next) });
+      emit({ ...value, [key]: clampContactNurtureSlider(key, next) });
     },
-    [onChange, value],
+    [emit, value],
   );
 
   return (
@@ -54,7 +91,7 @@ export function ContactNurtureFields({
         <Label htmlFor="nurture-target">Acting profile</Label>
         <Select
           value={value.targetId ?? ""}
-          onValueChange={(next) => onChange({ ...value, targetId: next })}
+          onValueChange={(next) => emit({ ...value, targetId: next })}
           disabled={disabled || !targets?.length}
         >
           <SelectTrigger id="nurture-target">
@@ -91,7 +128,7 @@ export function ContactNurtureFields({
         <Select
           value={value.relationshipGoalFilter}
           onValueChange={(next) =>
-            onChange({
+            emit({
               ...value,
               relationshipGoalFilter: next as "all" | RelationshipGoal,
             })
@@ -142,7 +179,7 @@ export function ContactNurtureFields({
           onChange={(next) => setSlider("maxActionsPerRun", next)}
           disabled={disabled}
           format={(v) => (v === 1 ? "1 action" : `${v} actions`)}
-          hint="Maximum comments, spotlights, or DMs to execute in this run."
+          hint="Maximum comments, spotlights, or DMs to propose in this run."
         />
 
         <BoundedSlider
@@ -159,23 +196,47 @@ export function ContactNurtureFields({
 
       {/* Safety & Automation Toggles */}
       <div className="space-y-3 pt-1">
-        <div className="flex items-start justify-between gap-3">
-          <div className="space-y-0.5">
-            <Label htmlFor="nurture-approval" className="text-sm">
-              Require confirmation before publishing
-            </Label>
-            <p className="text-xs text-muted-foreground">
-              The agent presents drafted touchpoints in the thread for review before publishing. Toggle off for full autonomous execution.
-            </p>
+        <div
+          className="space-y-2 rounded-lg border bg-muted/20 p-3"
+          data-testid="nurture-approval-gate"
+          data-mode={gate.mode}
+          data-reason={gate.reason}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="space-y-0.5 pr-3">
+              <Label htmlFor="nurture-approval" className="text-sm">
+                Require approval before anything is sent
+              </Label>
+              <p id="nurture-approval-reason" className="text-xs text-muted-foreground">
+                {gate.mode === "locked_explicit"
+                  ? `Locked: every nurture surface on ${platformLabel(gate.platform)} is draft-only. The agent drafts and audits; you approve each proposal in the thread or on the run page.`
+                  : "Public surfaces with a publish adapter may run without a second prompt. Direct messages always require explicit approval."}
+              </p>
+            </div>
+            <Switch
+              id="nurture-approval"
+              aria-describedby="nurture-approval-reason"
+              checked={gate.mode === "locked_explicit" ? true : value.requireApproval}
+              onCheckedChange={(requireApproval) =>
+                emit({ ...value, requireApproval })
+              }
+              disabled={disabled || gate.mode === "locked_explicit"}
+            />
           </div>
-          <Switch
-            id="nurture-approval"
-            checked={value.requireApproval}
-            onCheckedChange={(requireApproval) =>
-              onChange({ ...value, requireApproval })
-            }
-            disabled={disabled}
-          />
+          <div className="grid gap-1 text-xs text-muted-foreground sm:grid-cols-2">
+            {gate.surfaces.map((surface) => (
+              <div
+                key={surface.surface}
+                data-testid="nurture-approval-surface"
+                className="flex items-center justify-between gap-2 rounded border bg-background px-2 py-1.5"
+              >
+                <span>{surfaceLabel(surface.surface)}</span>
+                <span className="text-right">
+                  Draft only · {surface.reason === "explicit_floor" ? "always explicit" : surface.approval === "explicit" ? "approval required" : "operator choice"}
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
 
         <div className="flex items-start justify-between gap-3">
@@ -191,7 +252,7 @@ export function ContactNurtureFields({
             id="nurture-auto-achieve"
             checked={value.autoAchieveOnMilestone}
             onCheckedChange={(autoAchieveOnMilestone) =>
-              onChange({ ...value, autoAchieveOnMilestone })
+              emit({ ...value, autoAchieveOnMilestone })
             }
             disabled={disabled}
           />

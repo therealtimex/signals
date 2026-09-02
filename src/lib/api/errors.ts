@@ -13,6 +13,8 @@ import {
   PersonaSynthesisError,
 } from "@/lib/db/queries/persona-errors";
 import { OrgDomainConflictError, OrgValidationError } from "@/lib/orgs/errors";
+import { AgentToolError } from "@/lib/agent-tools/types";
+import { agentToolErrorStatus } from "@/lib/agent-tools/http-status";
 
 export type ApiErrorBody = {
   error: string;
@@ -21,6 +23,12 @@ export type ApiErrorBody = {
 };
 
 export function toErrorResponse(error: unknown): NextResponse<ApiErrorBody> {
+  if (error instanceof AgentToolError) {
+    return NextResponse.json(
+      { error: error.message, code: error.code, details: error.details },
+      { status: agentToolErrorStatus(error.code) },
+    );
+  }
   if (error instanceof ZodError) {
     return NextResponse.json(
       {

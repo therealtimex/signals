@@ -215,7 +215,7 @@ export function LaunchDetailView({
                 {sortedVariants.map((variant) => {
                   const isPublished = variant.status === "published";
                   return (
-                    <TableRow key={variant.id}>
+                    <TableRow key={variant.id} data-variant-id={variant.id}>
                       <TableCell>
                         <div className="flex items-center gap-2">
                           <Link

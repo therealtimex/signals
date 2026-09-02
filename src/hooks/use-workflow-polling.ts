@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import type { WorkflowStep } from "@/lib/db/types";
+import type { WorkflowRunProposalSummary } from "@/lib/writing/workflow-run-proposals";
 
 const POLL_INTERVAL_MS = 2000;
 const TERMINAL_STATUSES = ["completed", "failed", "cancelled"];
@@ -29,6 +30,7 @@ export interface ProgressData {
   steps: WorkflowStep[];
   isComplete: boolean;
   totalSteps: number;
+  proposalSummary: WorkflowRunProposalSummary | null;
 }
 
 export function useWorkflowPolling(runId: string, initialStatus: string) {

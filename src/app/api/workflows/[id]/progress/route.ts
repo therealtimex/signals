@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getWorkflowRun } from "@/lib/db/queries/workflows";
+import { summarizeWorkflowRunProposals } from "@/lib/writing/workflow-run-proposals";
 
 /**
  * GET /api/workflows/[id]/progress
@@ -42,5 +43,6 @@ export async function GET(
     steps: run.steps,
     isComplete,
     totalSteps: run.steps.length,
+    proposalSummary: summarizeWorkflowRunProposals(id),
   });
 }

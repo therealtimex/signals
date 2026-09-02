@@ -3,6 +3,7 @@ import { z } from "zod";
 import { authorizeAgentToolRequest } from "@/lib/agent-tools/auth";
 import { invokeAgentTool } from "@/lib/agent-tools/invoke";
 import { AgentToolError } from "@/lib/agent-tools/types";
+import { agentToolErrorStatus } from "@/lib/agent-tools/http-status";
 
 const invokeBodySchema = z.object({
   tool: z.string().min(1),
@@ -46,23 +47,6 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     if (error instanceof AgentToolError) {
-      const status =
-        error.code === "TOOL_NOT_FOUND" || error.code === "NOT_FOUND"
-          ? 404
-          : error.code === "VALIDATION_ERROR" ||
-              error.code === "CAPABILITY_UNSUPPORTED" ||
-              error.code === "TARGET_REQUIRED"
-            ? 400
-            : error.code === "CONFLICT" ||
-                error.code === "AUDIT_STALE" ||
-                error.code === "AUDIT_BLOCKED" ||
-                error.code === "APPROVAL_REQUIRED" ||
-                error.code === "STORE_CONFLICT"
-              ? 409
-              : error.code === "STORE_BUSY" || error.code === "WORKSPACE_UNAVAILABLE"
-                ? 503
-                : 500;
-
       return NextResponse.json(
         {
           success: false,
@@ -70,7 +54,7 @@ export async function POST(request: NextRequest) {
           code: error.code,
           details: error.details,
         },
-        { status }
+        { status: agentToolErrorStatus(error.code) }
       );
     }
 
