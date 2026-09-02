@@ -29,6 +29,7 @@ import {
 import type { PersonalityCapabilityState } from "@/lib/rtx/capabilities";
 import { setRepresentedOrgId } from "@/lib/settings/signals-config";
 import { buildWritingUnits } from "@/lib/writing/content-writing";
+import { hardLimit } from "@/lib/writing/variant-writing";
 import { sha256Canonical } from "@/lib/writing/hash";
 import { materializeVariantWithRunner } from "@/lib/writing/materialize";
 import {
@@ -272,8 +273,12 @@ export function personalityVariantPayload(input: {
   bindingId: string;
   targetId?: string;
   body?: string;
-  surface?: "x/post" | "threads/post";
+  surface?: "x/post" | "threads/post" | "x/reply";
   voiceProfile?: { id: string; version: number; hash: string } | null;
+  /** Composed writing-intent record (#410); omitted for Platform-native fixtures. */
+  intent?: Record<string, unknown>;
+  /** Run the artifact is attributed to; the server resolves composition from this row. */
+  workflowRunId?: string;
 }) {
   const body = input.body ?? "Personality-bound publish proof.";
   const launch = getLaunchById(input.launchId)!;
@@ -288,7 +293,7 @@ export function personalityVariantPayload(input: {
       mode: "draft",
       model: "test-model",
       skill: { name: "signals-writing", version: "1.1.0" },
-      agent: { workflowRunId: "run-personality-proof" },
+      agent: { workflowRunId: input.workflowRunId ?? "run-personality-proof" },
       requestHash: `request-${surface}-${body}`,
       generatedAt: 20,
     },
@@ -326,7 +331,7 @@ export function personalityVariantPayload(input: {
           hard: {
             units: 1,
             chars: [body.length],
-            limit: surface.startsWith("x/") ? 280 : 500,
+            limit: hardLimit(surface),
             hashtags: 0,
             links: 0,
             mediaCount: 0,
@@ -343,6 +348,69 @@ export function personalityVariantPayload(input: {
         },
         lineage: { sourceIds: ["src_personality1"] },
         personality: { bindingId: input.bindingId },
+        ...(input.intent ? { intent: input.intent } : {}),
+      },
+    },
+  };
+}
+
+/**
+ * Launch payload used by the fixture and by tests that need a second launch.
+ *
+ * `workflowRunId` matters: `mergeLaunchMetadata` stamps the server-owned composition scope from the
+ * run a launch names, so naming a composed run is how a launch becomes a composed scope (#410).
+ */
+export function personalityLaunchPayload(input: {
+  name: string;
+  targetId: string;
+  workflowRunId?: string;
+  surfaces?: { platform: string; surface: string; targetId?: string }[];
+}) {
+  const workflowRunId = input.workflowRunId ?? "run-personality-proof";
+  const source = {
+    id: "src_personality1",
+    kind: "note" as const,
+    text: "Personality-bound publish proof.",
+    enteredAt: 10,
+    sensitivity: { level: "public" as const, reason: "public_default" as const },
+  };
+  return {
+    name: input.name,
+    metadata: {
+      writing: {
+        schemaVersion: 1,
+        goal: "likes",
+        surfaces: input.surfaces
+          ?? [{ platform: "x", surface: "x/post", targetId: input.targetId }],
+        sources: [source],
+        spine: {
+          schemaVersion: 1,
+          id: "spn_personality1",
+          launchId: "placeholder",
+          goal: "likes",
+          audience: { nicheIds: [] },
+          sources: [source],
+          claims: [{
+            id: "clm_personality1",
+            kind: "fact",
+            text: "Personality-bound publish proof.",
+            sourceId: "src_personality1",
+            verbatimRequired: false,
+            sensitivity: "public",
+            includeInOutput: true,
+          }],
+          message: {
+            core: "Personality-bound publish proof.",
+            supporting: [],
+            proofClaimIds: ["clm_personality1"],
+          },
+          extractedBy: { at: 10 },
+          hash: "server-replaces-this",
+        },
+        voiceProfile: null,
+        voicePrecedence: "voice_first",
+        approvalPolicy: "auto_low_risk",
+        runs: [{ workflowRunId, mode: "draft", startedAt: 10 }],
       },
     },
   };
@@ -370,57 +438,10 @@ export async function createPersonalityWritingFixture(
     represents: { kind: "self", contactId: authority.self.id },
     evidence: { kind: "ui", route: "/settings/personality" },
   }, authority.dependencies);
-  const created = await invokeAgentTool("upsert_launch", {
-    name: "Personality publish proof",
-    metadata: {
-      writing: {
-        schemaVersion: 1,
-        goal: "likes",
-        surfaces: [{ platform: "x", surface: "x/post", targetId: target.id }],
-        sources: [{
-          id: "src_personality1",
-          kind: "note",
-          text: "Personality-bound publish proof.",
-          enteredAt: 10,
-          sensitivity: { level: "public", reason: "public_default" },
-        }],
-        spine: {
-          schemaVersion: 1,
-          id: "spn_personality1",
-          launchId: "placeholder",
-          goal: "likes",
-          audience: { nicheIds: [] },
-          sources: [{
-            id: "src_personality1",
-            kind: "note",
-            text: "Personality-bound publish proof.",
-            enteredAt: 10,
-            sensitivity: { level: "public", reason: "public_default" },
-          }],
-          claims: [{
-            id: "clm_personality1",
-            kind: "fact",
-            text: "Personality-bound publish proof.",
-            sourceId: "src_personality1",
-            verbatimRequired: false,
-            sensitivity: "public",
-            includeInOutput: true,
-          }],
-          message: {
-            core: "Personality-bound publish proof.",
-            supporting: [],
-            proofClaimIds: ["clm_personality1"],
-          },
-          extractedBy: { at: 10 },
-          hash: "server-replaces-this",
-        },
-        voiceProfile: null,
-        voicePrecedence: "voice_first",
-        approvalPolicy: "auto_low_risk",
-        runs: [{ workflowRunId: "run-personality-proof", mode: "draft", startedAt: 10 }],
-      },
-    },
-  }) as { id: string };
+  const created = await invokeAgentTool(
+    "upsert_launch",
+    personalityLaunchPayload({ name: "Personality publish proof", targetId: target.id }),
+  ) as { id: string };
   const variant = await upsertVariantUseCase(personalityVariantPayload({
     launchId: created.id,
     bindingId: authority.binding.id,

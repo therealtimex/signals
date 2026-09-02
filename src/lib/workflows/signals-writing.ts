@@ -1,6 +1,18 @@
 import { PLATFORMS, type Platform } from "@/lib/db/platforms";
-import { getSurfaceCapabilities } from "@/lib/writing/capabilities";
 import { parseSurfaceId, type SurfaceId } from "@/lib/writing/surfaces";
+import {
+  WRITING_HARD_RULES,
+  WRITING_LANE_DRIFTED_STEP,
+  WRITING_LANE_GATE_STEP,
+  WRITING_LANE_REVISION_STEP,
+  WRITING_LANE_UNBOUND_STEP,
+  WRITING_LINEAGE_STEP,
+  WRITING_PERSONALITY_FILES_STEP,
+  WRITING_SKILL_LOAD_STEP,
+  WRITING_SOURCE_STEPS,
+  buildWritingCapabilityRows,
+  buildWritingLaneBoundStep,
+} from "@/lib/workflows/writing-contract";
 
 export const WRITING_CONFIG_KEY = "signalsWriting";
 
@@ -123,16 +135,14 @@ export function buildWritingBriefSection(input: {
 }): string {
   const writing = readSignalsWritingTemplateConfig(input.config);
   if (!writing) return "";
-  const capabilityRows = writing.surfaces.length
-    ? writing.surfaces.map(({ platform, surface, targetId }) => {
-        const capability = getSurfaceCapabilities(surface);
-        return `- ${surface} (platform=${platform}${targetId ? `, target=${targetId}` : ""}): draft=${capability.draft}, audit=${capability.audit}, export=${capability.export}, publish=${capability.publish}, metrics=${capability.metrics}`;
-      })
-    : ["- No surfaces configured — stop and ask the operator which platform-native surfaces to draft."];
+  const capabilityRows = buildWritingCapabilityRows(
+    writing.surfaces,
+    "No surfaces configured — stop and ask the operator which platform-native surfaces to draft.",
+  );
 
   return [
     "Signals Writing execution contract:",
-    "0. Load the signals-writing workspace skill (.claude/skills/signals-writing/SKILL.md) and use its scripts/writing-cli.cjs for ids, unit measurement, verdicts, and prechecks.",
+    WRITING_SKILL_LOAD_STEP,
     `Template: ${input.template.name} (${input.template.id})`,
     `Workflow run: ${input.workflowRunId}`,
     `Signals base URL: ${input.signalsBaseUrl}`,
@@ -143,32 +153,20 @@ export function buildWritingBriefSection(input: {
     "Capability truth:",
     ...capabilityRows,
     "Tool sequence:",
-    "1. Read the workspace Personality files (IDENTITY.md, SOUL.md, VOICE.md, BRAND.md) first. Treat both get_writing_context.personality.status and get_writing_context.personality.host.capability as the binding gate; bound work submits only its active bindingId.",
+    WRITING_PERSONALITY_FILES_STEP,
     `2. Call get_writing_context with launchId=${writing.launchId ?? "<create a launch from the operator brief first>"} and the configured surfaces. Treat its redactions and capability rows as authoritative.`,
-    "3. Call get_content only for explicit content-item sources; a private body is usable only when the persisted launch source grants context approval.",
-    "4. Use list_voice_profiles/get_voice_profile for existing voice. Register new immutable content with upsert_voice_profile; only approve_voice_profile may activate it, and only with real user evidence.",
-    "5. Persist the validated launch spine with upsert_launch, preserving every source hash, claim reference, and approval. Never put redacted source text back into the spine.",
-    "6. Gate on both persisted Personality fields before selecting a lane. If `get_writing_context.personality.host.capability` is not `available`, refuse Personality-required writing and report the persisted host capability and Personality status. Otherwise persist by `get_writing_context.personality.status`:",
-    "   - For `bound`/`source_stale`, draft one platform-native artifact per surface, run `measure`, create the structured audit, run `verdict` then `precheck`, and call `upsert_variant` with `generationMetadata.kind=signals-writing`, the complete `metadata.writing` contract, and only the current `bindingId`. `source_stale` remains a full lane with its persisted warning and requires fresh explicit approval before materialization.",
-    "   - For `unbound`, create only a targetless, unaudited sketch: run `measure`; omit `metadata.writing.targetId` and `metadata.writing.personality`; send `metadata.writing.audit: null`; set the top-level `label` suffix to `legacy_unbound sketch`; call `upsert_variant`; re-read `get_writing_context` and confirm the selected `variants[].personalityState` is `legacy_unbound`. Stop before audit, verdict, precheck, approval, materialization, export, or publish.",
-    "   - For `drifted`/`unavailable`, refuse Personality-required writing and report the persisted state; never repair drift by editing Personality files.",
-    "   In-place revisions reuse the returned variant id; new derived alternatives omit id and carry the source variant in writing lineage.",
-    "7. Read lineageEdges from the persisted variant response. Use query_graph from the variant ID only when verifying a real derived, adapted, sourced-content, materialized, or published edge; launch membership remains variant.launchId.",
+    ...WRITING_SOURCE_STEPS,
+    WRITING_LANE_GATE_STEP,
+    buildWritingLaneBoundStep({ deliverable: "draft one platform-native artifact per surface" }),
+    WRITING_LANE_UNBOUND_STEP,
+    WRITING_LANE_DRIFTED_STEP,
+    WRITING_LANE_REVISION_STEP,
+    WRITING_LINEAGE_STEP,
     "8. In the `bound`/`source_stale` full lane only, render the persisted approval card after audit and precheck, then follow `get_writing_context.approvalPolicy` and the selected variant's `approvalState`, `riskTier`, and `auditStale`:",
     "   - For `explicit`, `source_stale`, medium/high risk, or `APPROVAL_REQUIRED`, wait for fresh explicit user approval and call `materialize_variant` with the real user evidence.",
     "   - For `auto_low_risk`, call `materialize_variant` without a user approval payload only when the selected variant has `approvalState: approved`, `riskTier: low`, and `auditStale: false`; Signals owns that policy decision.",
     "   Never manufacture approval evidence. Use `revoke_variant_approval` when the user withdraws approval.",
     "9. Call complete_workflow_run with the variant/content IDs and any missing surfaces or blockers.",
-    "Hard rules:",
-    "- Use only manifest-backed agent tools; do not call removed in-process helpers or lib wrappers.",
-    "- Do not write a content item directly for a variant; materialize_variant owns that boundary.",
-    "- Do not introduce a fact, number, date, name, quote, or citation absent from the source spine.",
-    "- Do not use an unapproved voice profile or derive voice from AI-generated or third-party text.",
-    "- Do not edit workspace Personality files; Personality changes are proposals approved by the user.",
-    "- Do not scrub protected quirks under voice-first precedence.",
-    "- Describe non-direct/non-beta capability honestly as draft/export only.",
-    "- Do not use platform-manipulation tactics, engagement bait, or detector gaming.",
-    "- Do not approve on the operator's behalf under explicit policy.",
-    "- Do not publish; publishing is a separate explicit instruction executed by signals-publish.",
+    ...WRITING_HARD_RULES,
   ].join("\n");
 }

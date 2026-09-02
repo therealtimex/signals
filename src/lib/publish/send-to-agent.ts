@@ -40,10 +40,12 @@ import {
   writeRtxWorkspaceBriefFile,
 } from "@/lib/rtx/workspace-brief-files";
 import {
+  canReachPublishAdapter,
   getSurfaceCapabilities,
   publishCapabilityForPlatform,
   type PublishCapability,
 } from "@/lib/writing/capabilities";
+import { isAssistOnlyIntent } from "@/lib/writing/writing-intent";
 import { readContentWritingState } from "@/lib/writing/content-writing";
 import { surfaceForDraft } from "@/lib/writing/surfaces";
 import {
@@ -232,10 +234,20 @@ export async function sendContentToAgent(
         ? publishCapabilityForPlatform(item.platformTarget)
         : "unsupported"
     : null;
-  if (writing && writingCapability !== "direct" && writingCapability !== "beta") {
+  if (writing && !canReachPublishAdapter(writingCapability ?? "unsupported")) {
     return {
       success: false,
       error: `Writing surface cannot be published (${writingCapability ?? "unsupported"})`,
+      errorCode: "capability_unsupported",
+      httpStatus: 400,
+    };
+  }
+  // Composition provenance outranks surface capability: an `assist_only` proposal never reaches a
+  // send adapter, even when it happens to sit on a publish-capable surface (#377, #410).
+  if (writing && isAssistOnlyIntent(writing.intent)) {
+    return {
+      success: false,
+      error: "Assist-only writing proposals cannot be published or sent",
       errorCode: "capability_unsupported",
       httpStatus: 400,
     };
@@ -357,7 +369,7 @@ export async function sendContentToAgent(
   } else {
     for (const platform of platforms) {
       const capability = publishCapabilityForPlatform(platform);
-      if (capability !== "direct" && capability !== "beta") {
+      if (!canReachPublishAdapter(capability)) {
         return {
           success: false,
           error: `Publish capability is unavailable for ${platform}`,

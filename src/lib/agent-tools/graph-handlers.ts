@@ -595,6 +595,7 @@ export async function handleUpsertLaunch(input: z.infer<typeof upsertLaunchSchem
     metadata: input.metadata,
     launchedAt: input.launchedAt,
     completedAt: input.completedAt,
+    writingScopeToken: input.writingScopeToken,
   });
 
   return {

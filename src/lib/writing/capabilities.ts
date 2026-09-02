@@ -19,6 +19,15 @@ export type SurfaceCapabilities = {
   publish: PublishCapability;
   metrics: CapabilityState;
   engage: CapabilityState;
+  /**
+   * Mandate the surface itself carries.
+   *
+   * `assist_only` is a property of the artifact, not of the request that created it: a reply, a
+   * comment, and a direct message exist only as proposals. Anchoring the mandate here means a
+   * caller cannot recover policy approval by pointing `generationMetadata.agent.workflowRunId` at
+   * some other run — changing the mandate would mean changing what the artifact *is*.
+   */
+  mandate: "assist_only" | null;
   notes?: string;
 };
 
@@ -35,6 +44,28 @@ const supportedPublish = (
   publish,
   metrics,
   engage: "unsupported",
+  mandate: null,
+  notes,
+});
+
+/**
+ * A surface Signals can research, draft, audit, and export, but never send.
+ *
+ * Replies, comments, and direct messages have no publish adapter and are not getting one here
+ * (#377 keeps nurture `assist_only`), so `publish` stays `draft_only` and `engage` stays
+ * `unsupported`. Draft and audit are supported because the shared writing-intent lane needs a real
+ * audited artifact before approval.
+ */
+const assistOnlySurface = (notes: string): SurfaceCapabilities => ({
+  research: "supported",
+  draft: "supported",
+  audit: "supported",
+  export: "supported",
+  target: "supported",
+  publish: "draft_only",
+  metrics: "unsupported",
+  engage: "unsupported",
+  mandate: "assist_only",
   notes,
 });
 
@@ -51,32 +82,37 @@ const futureSurface = (
   publish,
   metrics: "unsupported",
   engage: "unsupported",
+  mandate: null,
   notes,
 });
 
 export const WRITING_SURFACE_CAPABILITIES: Record<SurfaceId, SurfaceCapabilities> = {
   "x/post": supportedPublish("direct", "supported", "x-publish.cjs"),
   "x/thread": supportedPublish("direct", "supported", "x-publish.cjs"),
-  "x/reply": futureSurface("draft_only", "supported", "Writing overlay lands in #353."),
+  "x/reply": assistOnlySurface("Draft/audit only; reply submission has no adapter."),
   "x/quote": futureSurface(
     "draft_only",
     "supported",
     "Quote publish exists; its writing overlay lands in #353.",
   ),
+  "x/direct_message": assistOnlySurface("Draft/audit only; DM sending has no adapter."),
   "linkedin/post": supportedPublish(
     "beta",
     "supported",
     "Shared connections are verify-only; use a dedicated connection for multiple members.",
   ),
-  "linkedin/comment": futureSurface(
-    "draft_only",
-    "supported",
-    "Writing overlay lands in #353.",
+  "linkedin/comment": assistOnlySurface("Draft/audit only; comment submission has no adapter."),
+  "linkedin/direct_message": assistOnlySurface(
+    "Draft/audit only; message and InMail sending have no adapter.",
   ),
   "facebook/post": supportedPublish(
     "direct",
     "beta",
     "Target kind may be profile or page; publisher is facebook-publish.cjs.",
+  ),
+  "facebook/comment": assistOnlySurface("Draft/audit only; comment submission has no adapter."),
+  "facebook/direct_message": assistOnlySurface(
+    "Draft/audit only; message sending has no adapter.",
   ),
   "threads/post": futureSurface("draft_only", "unsupported", "No target adapter or publisher."),
   "threads/thread": futureSurface("draft_only", "unsupported", "No target adapter or publisher."),
@@ -98,6 +134,27 @@ export const WRITING_SURFACE_CAPABILITIES: Record<SurfaceId, SurfaceCapabilities
 export function getSurfaceCapabilities(surface: SurfaceId): SurfaceCapabilities {
   return WRITING_SURFACE_CAPABILITIES[surface];
 }
+
+/**
+ * Whether a surface may reach a publish/send adapter at all.
+ *
+ * The publish lane asks this instead of re-deriving the `direct | beta` pair, so a surface added
+ * with `draft_only`/`export_only`/`unsupported` is unreachable by construction.
+ */
+export function canReachPublishAdapter(capability: PublishCapability): boolean {
+  return capability === "direct" || capability === "beta";
+}
+
+/**
+ * Whether the surface is an assist-only proposal surface.
+ *
+ * Intrinsic to the artifact, so it holds even when the caller's run pointer is wrong or forged.
+ */
+export function isAssistOnlySurface(surface: SurfaceId): boolean {
+  return WRITING_SURFACE_CAPABILITIES[surface].mandate === "assist_only";
+}
+
+export const ASSIST_ONLY_SURFACES: readonly SurfaceId[] = SURFACE_IDS.filter(isAssistOnlySurface);
 
 const PUBLISH_RANK: Record<PublishCapability, number> = {
   unsupported: 0,

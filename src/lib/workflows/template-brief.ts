@@ -12,6 +12,7 @@ import {
 import {
   buildContactNurtureBriefSection,
   isContactNurtureTemplateConfig,
+  type ContactNurtureTargetInfo,
 } from "@/lib/workflows/contact-relationship-nurture";
 import {
   buildNetworkSnowballBriefSection,
@@ -22,6 +23,10 @@ import {
   buildWritingBriefSection,
   isSignalsWritingTemplateConfig,
 } from "@/lib/workflows/signals-writing";
+import {
+  buildComposedWritingBriefSection,
+  readWritingIntentComposition,
+} from "@/lib/workflows/writing-composition";
 import {
   CONTACT_WEB_RESEARCH_THREAD_NAME,
   CONTACT_WEB_RESEARCH_TOOLS,
@@ -67,6 +72,27 @@ const TOOLS_BY_TYPE: Record<string, string[]> = {
   nurture: ["query_contacts", "get_contact", "update_contact", "query_goals", "create_task"],
 };
 
+/**
+ * Tools the shared writing contract requires, whatever the workflow's own category is.
+ *
+ * A composed workflow prints its category tools *and* these; otherwise requirement 8 would list a
+ * CRM-only tool set while the contract below it calls for the whole writing pipeline.
+ */
+const WRITING_COMPOSITION_TOOLS = [
+  "get_writing_context",
+  "get_content",
+  "list_voice_profiles",
+  "get_voice_profile",
+  "upsert_voice_profile",
+  "approve_voice_profile",
+  "upsert_launch",
+  "upsert_variant",
+  "materialize_variant",
+  "revoke_variant_approval",
+  "query_graph",
+  "complete_workflow_run",
+] as const;
+
 export function getTemplateToolsHint(
   templateType: string,
   config?: Record<string, unknown>,
@@ -74,7 +100,9 @@ export function getTemplateToolsHint(
   if (config && isContactWebResearchTemplateConfig(config)) {
     return [...CONTACT_WEB_RESEARCH_TOOLS];
   }
-  return TOOLS_BY_TYPE[templateType] ?? ["query_contacts", "create_task"];
+  const base = TOOLS_BY_TYPE[templateType] ?? ["query_contacts", "create_task"];
+  if (!config || !readWritingIntentComposition(config)) return base;
+  return [...new Set([...base, ...WRITING_COMPOSITION_TOOLS])];
 }
 
 /**
@@ -122,6 +150,25 @@ function stripInternalConfigKeys(config: Record<string, unknown>): Record<string
     : visible;
 }
 
+/**
+ * The acting profile a composed contract is written for, or `null` when none is configured.
+ *
+ * Prefers the resolved row; falls back to the platform the dispatcher wrote onto the run config.
+ * Never guesses `x` — an unresolved target means "resolve it per contact", not "assume X".
+ */
+function resolveActingTarget(
+  config: Record<string, unknown>,
+  platformTarget?: ContactNurtureTargetInfo | null,
+): { platform: string; targetId: string | null } | null {
+  if (platformTarget) {
+    return { platform: platformTarget.platform.toLowerCase(), targetId: platformTarget.id };
+  }
+  const platform = typeof config.targetPlatform === "string" ? config.targetPlatform.trim() : "";
+  if (!platform) return null;
+  const targetId = typeof config.targetId === "string" ? config.targetId.trim() : "";
+  return { platform: platform.toLowerCase(), targetId: targetId || null };
+}
+
 export function buildAgentWorkflowBrief(input: {
   template: Pick<
     WorkflowTemplate,
@@ -132,6 +179,16 @@ export function buildAgentWorkflowBrief(input: {
   signalsBaseUrl: string;
   systemPromptOverride?: string;
   contactWebResearchContext?: ContactWebResearchBriefContext;
+  /**
+   * The acting profile row, already resolved from `config.targetId` by the caller.
+   *
+   * A brief builder must not query the database, but it must not guess a platform either: a
+   * LinkedIn target described as X produces the wrong touchpoint surfaces and an invalid writing
+   * intent. `run-template-via-rtx.ts` resolves it once and passes it here.
+   */
+  platformTarget?: ContactNurtureTargetInfo | null;
+  /** Dispatch-issued capability for a composed run; omitted for every other workflow. */
+  writingScopeToken?: string;
 }): string {
   const category = CATEGORY_LABELS[input.template.templateType] ?? input.template.templateType;
   const instructions = input.systemPromptOverride?.trim() || input.template.systemPrompt?.trim();
@@ -156,6 +213,7 @@ export function buildAgentWorkflowBrief(input: {
         workflowRunId: input.workflowRunId,
         config: input.config,
         signalsBaseUrl: input.signalsBaseUrl,
+        platformTarget: input.platformTarget,
       })}\n`
     : null;
   const snowballContract = isNetworkSnowballTemplateConfig(input.config)
@@ -172,6 +230,20 @@ export function buildAgentWorkflowBrief(input: {
         config: input.config,
         workflowRunId: input.workflowRunId,
         signalsBaseUrl: input.signalsBaseUrl,
+      })}\n`
+    : null;
+  // The reusable opt-in: any workflow carrying a writing-intent composition gets the same shared
+  // contract without becoming the Platform-native writing template.
+  const composition = readWritingIntentComposition(input.config);
+  const composedWritingContract = composition
+    ? `${buildComposedWritingBriefSection({
+        composition,
+        templateId: input.template.id,
+        templateName: input.template.name,
+        workflowRunId: input.workflowRunId,
+        signalsBaseUrl: input.signalsBaseUrl,
+        target: resolveActingTarget(input.config, input.platformTarget),
+        writingScopeToken: input.writingScopeToken,
       })}\n`
     : null;
   const contactWebResearchContract =
@@ -235,6 +307,7 @@ export function buildAgentWorkflowBrief(input: {
     nurtureContract,
     snowballContract,
     writingContract,
+    composedWritingContract,
     contactWebResearchContract,
     "Do not call legacy in-process workflow runners. This thread is the execution lane.",
   ];

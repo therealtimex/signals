@@ -1645,9 +1645,13 @@
                                 "x/thread",
                                 "x/reply",
                                 "x/quote",
+                                "x/direct_message",
                                 "linkedin/post",
                                 "linkedin/comment",
+                                "linkedin/direct_message",
                                 "facebook/post",
+                                "facebook/comment",
+                                "facebook/direct_message",
                                 "threads/post",
                                 "threads/thread",
                                 "instagram/caption",
@@ -3767,9 +3771,13 @@
                                             "x/thread",
                                             "x/reply",
                                             "x/quote",
+                                            "x/direct_message",
                                             "linkedin/post",
                                             "linkedin/comment",
+                                            "linkedin/direct_message",
                                             "facebook/post",
+                                            "facebook/comment",
+                                            "facebook/direct_message",
                                             "threads/post",
                                             "threads/thread",
                                             "instagram/caption",
@@ -3883,6 +3891,9 @@
                           },
                           "completedAt": {
                             "type": "number"
+                          },
+                          "writingScopeToken": {
+                            "type": "string"
                           }
                         },
                         "required": [

@@ -251,6 +251,8 @@ export const upsertLaunchSchema = z.object({
   metadata: z.object({ writing: launchWritingPatchSchema.optional() }).passthrough().optional(),
   launchedAt: z.number().int().optional(),
   completedAt: z.number().int().optional(),
+  /** Dispatch-issued capability from a composed workflow brief; binds this launch to that run. */
+  writingScopeToken: z.string().min(1).optional(),
 });
 
 export const upsertVariantSchema = z.object({

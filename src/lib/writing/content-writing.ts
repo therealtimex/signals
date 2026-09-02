@@ -3,6 +3,7 @@ import type { ContentItem } from "@/lib/db/types";
 import { PLATFORMS } from "@/lib/db/platforms";
 import { SURFACE_IDS } from "@/lib/writing/surfaces";
 import { variantPersonalitySnapshotSchema } from "@/lib/writing/personality-lineage";
+import { writingIntentRecordSchema } from "@/lib/writing/writing-intent";
 
 export const CONTENT_WRITING_KEY = "writing";
 
@@ -59,6 +60,13 @@ export const contentWritingSchema = z
     platform: z.enum(PLATFORMS).optional(),
     materialization: materializationSnapshotSchema.optional(),
     personality: variantPersonalitySnapshotSchema.nullable().optional(),
+    /**
+     * Composition provenance carried from the variant (#410).
+     *
+     * The publish lane reads it: an `assist_only` artifact may be approved and materialized, but it
+     * may never become a publish job.
+     */
+    intent: writingIntentRecordSchema.nullable().optional(),
   })
   .passthrough();
 

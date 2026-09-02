@@ -9,6 +9,56 @@ import {
   userApprovalSchema,
 } from "@/lib/writing/contracts";
 import { computeSpineHash, sha256 } from "@/lib/writing/hash";
+import { db } from "@/lib/db/client";
+import { launchCompositionSchema, type LaunchComposition } from "@/lib/writing/contracts";
+import { resolveComposedRunAuthorityByToken } from "@/lib/writing/writing-intent-authority";
+
+/**
+ * Resolve a presented capability, or refuse the whole call.
+ *
+ * Presenting a token is an explicit composed-lane attempt, so a malformed, unknown, or mismatched
+ * one is an error rather than a silent downgrade to ordinary writing — otherwise a real dispatch
+ * whose capability failed to verify would quietly get an unscoped launch and only discover the
+ * problem when its first proposal is rejected. Omitting the token remains ordinary writing.
+ */
+function resolvePresentedWritingScope(token: string | undefined) {
+  if (token === undefined) return null;
+  const authority = resolveComposedRunAuthorityByToken(db, token);
+  if (!authority) {
+    throw new AgentToolError("VALIDATION_ERROR", "Writing scope token is invalid or unknown", {
+      reason: "writing_scope_token_invalid",
+      path: ["writingScopeToken"],
+    });
+  }
+  return authority;
+}
+
+/**
+ * Stamp the server-owned composition scope onto a launch.
+ *
+ * Minted only from a dispatch-issued capability token. Naming a composed run in caller-owned
+ * `writing.runs` deliberately does **not** mint a scope: a run id is a selector the caller can
+ * choose, so honouring it would let any launch claim any composed dispatch. Immutable once stamped,
+ * so a later `upsert_launch` can neither shed the mandate nor repoint the association.
+ */
+function stampLaunchComposition(input: {
+  stored: Record<string, unknown>;
+  authority: ReturnType<typeof resolvePresentedWritingScope>;
+}): LaunchComposition | null {
+  const existing = launchCompositionSchema.safeParse(parseObject(input.stored).composition);
+  if (existing.success) return existing.data;
+  if (!input.authority) return null;
+  const { workflowRunId, templateId, composition } = input.authority;
+  return launchCompositionSchema.parse({
+    schemaVersion: 1,
+    workflowRunId,
+    templateId,
+    consumer: composition.consumer,
+    mandate: composition.mandate,
+    surfaces: composition.surfaces,
+    stampedAt: Math.floor(Date.now() / 1000),
+  });
+}
 
 function parseObject(value: unknown): Record<string, unknown> {
   if (typeof value === "string") {
@@ -143,7 +193,11 @@ export function mergeLaunchMetadata(input: {
   incomingMetadata: Record<string, unknown> | undefined;
   launchId: string;
   scope: "shared" | "local_only";
+  /** Dispatch-issued capability; the only way a launch becomes a composed scope. */
+  writingScopeToken?: string;
 }): { metadata: Record<string, unknown>; writing: LaunchWritingDocument | null; spineChanged: boolean } {
+  // Before any early return: a presented capability is validated whatever the metadata shape is.
+  const presentedScope = resolvePresentedWritingScope(input.writingScopeToken);
   const existingRoot = parseObject(input.existingMetadata);
   if (!input.incomingMetadata) {
     return { metadata: existingRoot, writing: readLaunchWriting(existingRoot), spineChanged: false };
@@ -224,6 +278,10 @@ export function mergeLaunchMetadata(input: {
     const sources = (Array.isArray(spine.sources) ? spine.sources : []).map((value) => normalizeSource(value, value, input.scope));
     merged.spine = { ...spine, sources, hash: computeSpineHash({ ...spine, sources }) };
   }
+  // Composition is server-owned: drop whatever the caller sent and re-derive it.
+  delete merged.composition;
+  const composition = stampLaunchComposition({ stored, authority: presentedScope });
+  if (composition) merged.composition = composition;
   const parsed = launchWritingSchema.safeParse(merged);
   if (!parsed.success) throw new AgentToolError("VALIDATION_ERROR", "Incomplete launch writing metadata", parsed.error.flatten());
   if (parsed.data.spine && parsed.data.spine.launchId !== input.launchId) validation("Spine launch does not match launch", "spine_launch_mismatch");

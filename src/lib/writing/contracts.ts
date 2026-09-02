@@ -8,6 +8,7 @@ import {
   variantPersonalitySnapshotSchema,
   writingAuditPersonalitySchema,
 } from "@/lib/writing/personality-lineage";
+import { writingIntentRecordSchema } from "@/lib/writing/writing-intent";
 
 const unixSeconds = z.number().int().nonnegative();
 const id = (prefix: string) => z.string().regex(new RegExp(`^${prefix}_[A-Za-z0-9_-]{6,}$`));
@@ -117,6 +118,8 @@ export const variantWritingSchema = z.object({
   formulaId: z.string().refine((value) => parseFormulaId(value) !== null, "invalid formula id"), overlay: z.object({ id: z.string().min(1), version: z.number().int().positive() }).passthrough(), core: z.object({ version: z.number().int().positive() }).passthrough(), voiceProfile: voiceProfileRefSchema.nullable(), voicePrecedence: voicePrecedenceSchema, spine: z.object({ id: id("spn"), hash: z.string().min(1) }).passthrough(), units: writingUnitsSchema,
   claimMap: z.array(z.object({ claimId: id("clm"), present: z.boolean(), unit: z.number().int().nonnegative().optional(), verbatim: z.boolean().optional() }).passthrough()), audit: writingAuditSchema.nullable(), auditHistory: z.array(z.object({ id: id("aud"), auditedAt: unixSeconds, verdict: z.enum(["pass", "warn", "block"]) }).passthrough()).max(5).optional(), approval: approvalStateSchema,
   lineage: z.object({ derivedFromVariantId: z.string().optional(), adaptedFromContentItemId: z.string().optional(), adaptedFromVariantId: z.string().optional(), sourceIds: z.array(id("src")) }).passthrough(), capability: z.object({ publish: z.enum(["direct", "beta", "draft_only", "export_only", "unsupported"]) }).passthrough(), materializedContentItemId: z.string().optional(), media: z.object({ assetIds: z.array(z.string()).max(10) }).passthrough().optional(), personality: variantPersonalitySnapshotSchema.nullable().optional(),
+  /** Set when a workflow composed this artifact through the shared writing-intent contract (#410). */
+  intent: writingIntentRecordSchema.nullable().optional(),
 }).passthrough();
 
 export const writingAuditInputSchema = writingAuditSchema.omit({
@@ -143,8 +146,28 @@ export const variantGenerationSchema = z.object({ schemaVersion: z.literal(1), k
 
 const launchSurfaceSchema = z.object({ platform: platformSchema, surface: z.enum(SURFACE_IDS), targetId: z.string().optional() }).passthrough();
 const launchRunSchema = z.object({ workflowRunId: z.string().min(1), mode: generationModeSchema, startedAt: unixSeconds, rtxThreadSlug: z.string().optional() }).passthrough();
-export const launchWritingSchema = z.object({ schemaVersion: z.literal(1).optional(), goal: writingGoalSchema.optional(), surfaces: z.array(launchSurfaceSchema).optional(), sources: z.array(sourceRefSchema).optional(), spine: evidenceSpineSchema.optional(), voiceProfile: voiceProfileRefSchema.nullable().optional(), voicePrecedence: voicePrecedenceSchema.optional(), approvalPolicy: approvalPolicySchema.optional(), runs: z.array(launchRunSchema).optional() }).passthrough();
-export const completeLaunchWritingSchema = z.object({ schemaVersion: z.literal(1), goal: writingGoalSchema, surfaces: z.array(launchSurfaceSchema), sources: z.array(sourceRefSchema), spine: evidenceSpineSchema.optional(), voiceProfile: voiceProfileRefSchema.nullable(), voicePrecedence: voicePrecedenceSchema, approvalPolicy: approvalPolicySchema, runs: z.array(launchRunSchema) }).passthrough();
+/**
+ * Server-stamped composition scope (#410).
+ *
+ * Written by `mergeLaunchMetadata` from the workflow run the launch names, never by the caller, and
+ * immutable once present. This is the server-owned association an artifact is bound to: a variant's
+ * `launchId` is structurally required and validated, so the mandate cannot be dropped by editing a
+ * payload field.
+ */
+export const launchCompositionSchema = z.object({
+  schemaVersion: z.literal(1),
+  workflowRunId: z.string().min(1),
+  templateId: z.string().min(1).nullable(),
+  consumer: z.string().min(1),
+  mandate: z.literal("assist_only"),
+  surfaces: z.array(z.enum(SURFACE_IDS)).min(1),
+  stampedAt: unixSeconds,
+}).strict();
+
+export type LaunchComposition = z.infer<typeof launchCompositionSchema>;
+
+export const launchWritingSchema = z.object({ schemaVersion: z.literal(1).optional(), composition: launchCompositionSchema.optional(), goal: writingGoalSchema.optional(), surfaces: z.array(launchSurfaceSchema).optional(), sources: z.array(sourceRefSchema).optional(), spine: evidenceSpineSchema.optional(), voiceProfile: voiceProfileRefSchema.nullable().optional(), voicePrecedence: voicePrecedenceSchema.optional(), approvalPolicy: approvalPolicySchema.optional(), runs: z.array(launchRunSchema).optional() }).passthrough();
+export const completeLaunchWritingSchema = z.object({ schemaVersion: z.literal(1), composition: launchCompositionSchema.optional(), goal: writingGoalSchema, surfaces: z.array(launchSurfaceSchema), sources: z.array(sourceRefSchema), spine: evidenceSpineSchema.optional(), voiceProfile: voiceProfileRefSchema.nullable(), voicePrecedence: voicePrecedenceSchema, approvalPolicy: approvalPolicySchema, runs: z.array(launchRunSchema) }).passthrough();
 
 export const launchWritingPatchSchema = z.object({ schemaVersion: z.literal(1).optional(), goal: writingGoalSchema.optional(), surfaces: z.array(z.object({ platform: platformSchema, surface: z.enum(SURFACE_IDS), targetId: z.string().optional() }).passthrough()).optional(), sources: z.array(sourceRefInputSchema).optional(), spine: z.record(z.unknown()).optional(), voiceProfile: voiceProfileRefSchema.nullable().optional(), voicePrecedence: voicePrecedenceSchema.optional(), approvalPolicy: approvalPolicySchema.optional(), runs: z.array(z.object({ workflowRunId: z.string().min(1), mode: generationModeSchema, startedAt: unixSeconds, rtxThreadSlug: z.string().optional() }).passthrough()).optional() }).passthrough();
 
@@ -153,6 +176,7 @@ export type EvidenceSpine = z.infer<typeof evidenceSpineSchema>;
 export type LaunchWritingDocument = z.infer<typeof launchWritingSchema>;
 export type LaunchWriting = z.infer<typeof completeLaunchWritingSchema>;
 export type VariantWriting = z.infer<typeof variantWritingSchema>;
+export type VariantWritingIntent = NonNullable<VariantWriting["intent"]>;
 export type VariantWritingInput = z.infer<typeof variantWritingInputSchema>;
 export type AuthoritativeVariantWritingInput = z.infer<typeof authoritativeVariantWritingInputSchema>;
 export type VariantGeneration = z.infer<typeof variantGenerationSchema>;

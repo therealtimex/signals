@@ -25,6 +25,9 @@ import {
   withPersonalityWritingGuard,
 } from "@/lib/writing/personality-guard";
 import { revokeWritingVariantWithRunner } from "@/lib/writing/personality-revocation";
+import { isAssistOnlySurface } from "@/lib/writing/capabilities";
+import { contentTypeForSurface } from "@/lib/writing/surfaces";
+import { isAssistOnlyIntent } from "@/lib/writing/writing-intent";
 
 type MaterializeApproval = { by: "user"; evidence: ApprovalEvidence; note?: string };
 const LANE = new Set(["queued", "publishing", "published", "scheduled"]);
@@ -70,7 +73,8 @@ function snapshotMatches(item: typeof contentItems.$inferSelect, writing: Return
     stored.materialization?.inputHash === writing.audit?.inputHash &&
     stored.materialization?.approvalAt === approval.at &&
     stored.materialization?.approvalBy === approval.by &&
-    JSON.stringify(stored.personality ?? null) === JSON.stringify(writing.personality ?? null),
+    JSON.stringify(stored.personality ?? null) === JSON.stringify(writing.personality ?? null) &&
+    JSON.stringify(stored.intent ?? null) === JSON.stringify(writing.intent ?? null),
   );
 }
 
@@ -151,6 +155,12 @@ export function materializeVariantWithRunner(
   const now = Math.floor(Date.now() / 1000);
   const approval = effectiveApproval({ stored: writing.approval, auditId: writing.audit.id, call: input.approval, now });
   if ((writing.approval.riskTier === "high" || writing.approval.policy === "explicit") && approval.by !== "user") throw new AgentToolError("APPROVAL_REQUIRED", "This variant requires explicit user approval");
+  // A composed `assist_only` proposal always needs a human, whatever policy the launch recorded.
+  // Keyed on the surface as well as the intent so a variant persisted before this rule, or one
+  // whose provenance was stripped, still cannot be policy-approved into a content item.
+  if ((isAssistOnlySurface(writing.surface) || isAssistOnlyIntent(writing.intent)) && approval.by !== "user") {
+    throw new AgentToolError("APPROVAL_REQUIRED", "Assist-only writing proposals require explicit user approval");
+  }
   if (writing.audit.personality?.statusAtAudit === "source_stale" && (approval.by !== "user" || !approval.evidence)) {
     throw new AgentToolError("APPROVAL_REQUIRED", "Source-stale Personality audits require fresh explicit user approval");
   }
@@ -191,12 +201,13 @@ export function materializeVariantWithRunner(
       approval: { state: approval.state, by: approval.by, at: approval.at, auditId: approval.auditId, riskTier: approval.riskTier, policy: approval.policy },
       ...(writing.media ? { media: writing.media } : {}),
       ...(writing.personality !== undefined ? { personality: writing.personality } : {}),
+      ...(writing.intent !== undefined ? { intent: writing.intent } : {}),
       materialization: { auditId: writing.audit!.id, inputHash: writing.audit!.inputHash, approvalAt: approval.at!, approvalBy: approval.by! },
       origin: priorWriting?.origin ?? { launchId: variant.launchId, variantId: variant.id },
       ...(priorWriting?.idempotencyKey ? { idempotencyKey: priorWriting.idempotencyKey } : {}),
   };
   const platformData = mergeContentWriting(existing?.platformData ?? {}, snapshot);
-  const values = { title: variant.label, body: writing.units.texts[0], contentType: (writing.surface.endsWith("/thread") ? "thread" : "post") as "thread" | "post", platformTarget: writing.platform, status: "approved" as const, aiGenerated: true, generationPrompt: null, origin: "authored" as const, direction: "outbound" as const, platformData, updatedAt: now };
+  const values = { title: variant.label, body: writing.units.texts[0], contentType: contentTypeForSurface(writing.surface), platformTarget: writing.platform, status: "approved" as const, aiGenerated: true, generationPrompt: null, origin: "authored" as const, direction: "outbound" as const, platformData, updatedAt: now };
   if (existing) tx.update(contentItems).set(values).where(eq(contentItems.id, contentItemId)).run();
   else tx.insert(contentItems).values({ id: contentItemId, ...values, createdAt: now }).run();
   replaceMedia(tx, contentItemId, writing.media?.assetIds ?? []);

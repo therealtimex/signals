@@ -21,6 +21,7 @@ import {
   withPersonalityWritingGuard,
   type PersonalityGuardDependencies,
 } from "@/lib/writing/personality-guard";
+import { readLaunchComposition } from "@/lib/writing/writing-intent-authority";
 
 function object(value: unknown): Record<string, unknown> {
   if (typeof value === "string") {
@@ -57,7 +58,17 @@ export async function upsertVariantUseCase(
   if (!aware && !selector && !previouslyBound) return upsertVariant(input);
 
   return withPersonalityWritingGuard((guard, tx) => {
+    // A composed run speaks as the workspace Personality, so it has neither a legacy-unbound sketch
+    // lane nor a relaxed target check — `draft_only` does not mean "any target will do".
+    const composed = readLaunchComposition(tx, input.launchId) !== null;
     if (!selector) {
+      if (composed) {
+        throw new AgentToolError(
+          "VALIDATION_ERROR",
+          "A composed writing proposal requires the active Personality binding",
+          { reason: "personality_binding_required" },
+        );
+      }
       if (previouslyBound || (aware && guard.binding)) {
         throw new AgentToolError(
           "VALIDATION_ERROR",
@@ -78,9 +89,10 @@ export async function upsertVariantUseCase(
       guard,
       bindingId: selector.bindingId,
       targetId: writingInput.data.targetId,
-      requireCompatibleTarget: Boolean(writingInput.data.audit) && ["direct", "beta"].includes(
-        getSurfaceCapabilities(writingInput.data.surface).publish,
-      ),
+      requireCompatibleTarget: composed
+        || (Boolean(writingInput.data.audit) && ["direct", "beta"].includes(
+          getSurfaceCapabilities(writingInput.data.surface).publish,
+        )),
     });
     return upsertPersonalityBoundWritingVariant(input, {
       snapshot,

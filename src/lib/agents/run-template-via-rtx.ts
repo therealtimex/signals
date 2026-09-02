@@ -38,6 +38,11 @@ import {
 import type { TemplateThreadResolution } from "@/lib/rtx/template-thread";
 import type { WorkflowType } from "@/lib/workflows/types";
 import { getWritingApprovalPolicy } from "@/lib/settings/writing-approval-policy";
+import { readWritingIntentComposition } from "@/lib/workflows/writing-composition";
+import {
+  WRITING_SCOPE_TOKEN_CONFIG_KEY,
+  mintWritingScopeToken,
+} from "@/lib/writing/writing-scope-token";
 import { getContactById } from "@/lib/db/queries/contacts";
 import { loadAndProjectContactToArpp } from "@/lib/arpp/load";
 import {
@@ -337,6 +342,28 @@ export async function runTemplateViaRtx(
 
   let preparedLeaseId: string | null = null;
   let dispatchAccepted = false;
+  let writingScopeMinted = false;
+
+  /**
+   * Drop the composed dispatch's capability when the dispatch never happened.
+   *
+   * The plaintext token is already sitting in the brief file on disk by the time a send can be
+   * rejected, so leaving the hash on the run row would let anyone who can read that file mint a
+   * scope for a dispatch that does not exist. Only called while `dispatchAccepted` is false: an
+   * agent that *was* accepted keeps its capability even if later bookkeeping fails.
+   */
+  function revokeWritingScopeIfUnaccepted(): string {
+    if (!writingScopeMinted || dispatchAccepted) return "";
+    try {
+      const current = parseObject(getWorkflowRun(run.id)?.config);
+      delete current[WRITING_SCOPE_TOKEN_CONFIG_KEY];
+      updateWorkflowRun(run.id, { config: JSON.stringify(current) });
+      writingScopeMinted = false;
+      return "";
+    } catch (error) {
+      return ` Writing scope revocation failed: ${error instanceof Error ? error.message : "unknown error"}`;
+    }
+  }
   const releaseLauncherOwnedLease = () => {
     if (!preparedLeaseId) return null;
     const leaseId = preparedLeaseId;
@@ -364,16 +391,40 @@ export async function runTemplateViaRtx(
     const { threadSlug, resolution: threadResolution } = thread;
 
     let runtimeConfig = { ...mergedConfig };
-    if (typeof mergedConfig.targetId === "string" && !mergedConfig.targetPlatform) {
-      const target = getPlatformTargetById(mergedConfig.targetId);
-      if (target) {
-        runtimeConfig = {
-          ...runtimeConfig,
-          targetPlatform: target.platform,
-          targetName: target.name || target.handle,
-          targetHandle: target.handle,
-        };
-      }
+    // Mint the composed dispatch's capability here, where the server still owns the whole context.
+    // Only the hash is persisted (under a `_` key, so `stripInternalConfigKeys` keeps it out of the
+    // brief's config block); the plaintext goes to this run's brief and nowhere else.
+    const writingScope = readWritingIntentComposition(mergedConfig)
+      ? mintWritingScopeToken(run.id)
+      : null;
+    if (writingScope) {
+      runtimeConfig = {
+        ...runtimeConfig,
+        [WRITING_SCOPE_TOKEN_CONFIG_KEY]: writingScope.tokenHash,
+      };
+      // Persist before the plaintext leaves the server. Handing an agent a capability whose hash is
+      // not yet stored would leave an accepted dispatch holding a token that verifies against
+      // nothing — permanently, if the process dies before the post-dispatch config write below.
+      updateWorkflowRun(run.id, {
+        config: JSON.stringify({
+          ...parseObject(getWorkflowRun(run.id)?.config),
+          [WRITING_SCOPE_TOKEN_CONFIG_KEY]: writingScope.tokenHash,
+        }),
+      });
+      writingScopeMinted = true;
+    }
+    // Resolve the acting profile once, and hand the row to the brief rather than letting the brief
+    // re-derive a platform from loose config keys.
+    const actingTarget = typeof mergedConfig.targetId === "string" && mergedConfig.targetId.trim()
+      ? getPlatformTargetById(mergedConfig.targetId.trim())
+      : undefined;
+    if (actingTarget && !mergedConfig.targetPlatform) {
+      runtimeConfig = {
+        ...runtimeConfig,
+        targetPlatform: actingTarget.platform,
+        targetName: actingTarget.name || actingTarget.handle,
+        targetHandle: actingTarget.handle,
+      };
     }
 
     let researchTarget: ContactWebResearchPreparedTarget | undefined;
@@ -459,6 +510,15 @@ export async function runTemplateViaRtx(
       signalsBaseUrl,
       systemPromptOverride: input.systemPrompt,
       contactWebResearchContext,
+      writingScopeToken: writingScope?.token,
+      platformTarget: actingTarget
+        ? {
+            id: actingTarget.id,
+            platform: actingTarget.platform,
+            name: actingTarget.name ?? "",
+            handle: actingTarget.handle,
+          }
+        : null,
     });
 
     const briefPath = workflowRunBriefRelativePath(run.id);
@@ -495,6 +555,7 @@ export async function runTemplateViaRtx(
       } catch (error) {
         errorMessage += ` Lease cleanup failed: ${error instanceof Error ? error.message : "unknown error"}`;
       }
+      errorMessage += revokeWritingScopeIfUnaccepted();
       updateWorkflowRun(run.id, {
         status: "failed",
         completedAt: now,
@@ -600,6 +661,7 @@ export async function runTemplateViaRtx(
       } catch (releaseError) {
         message += ` Lease cleanup failed: ${releaseError instanceof Error ? releaseError.message : "unknown error"}`;
       }
+      message += revokeWritingScopeIfUnaccepted();
     }
     updateWorkflowRun(run.id, {
       status: "failed",

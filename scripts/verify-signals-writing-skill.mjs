@@ -76,15 +76,20 @@ for (const rel of ["overlays/x.md", "overlays/linkedin.md", "overlays/facebook.m
 }
 
 const catalog = {
-  "x.md": ["x/post/one-liner-contrarian@1", "x/post/data-point@1", "x/post/build-in-public-confession@1", "x/post/mini-list@1", "x/post/relatable-cold-open@1", "x/post/third-party-case-study@1", "x/thread/listicle-promise@1", "x/thread/story-arc@1", "x/thread/curiosity-gap-opener@1", "x/thread/how-i-teardown@1"],
-  "linkedin.md": ["linkedin/post/anaphora@1", "linkedin/post/rip-obituary@1", "linkedin/post/year-over-year-pivot@1", "linkedin/post/time-anchor-confession@1", "linkedin/post/self-proving-meta@1", "linkedin/post/precise-ledger@1", "linkedin/post/paid-vs-free-reversal@1", "linkedin/post/curiosity-gap@1", "linkedin/post/contrarian-with-receipts@1", "linkedin/post/emotional-cold-open@1", "linkedin/post/permission-slip@1", "linkedin/post/expectation-reversal@1", "linkedin/post/named-tribute@1", "linkedin/post/explain-simply@1", "linkedin/post/status-strip@1", "linkedin/post/controlled-comparison@1", "linkedin/post/false-binary-dissolve@1", "linkedin/post/anecdote-evidence-bridge@1", "linkedin/post/diverging-curves-close@1"],
-  "facebook.md": ["facebook/post/one-line-opinion@1", "facebook/post/tiny-number@1", "facebook/post/genuine-question@1", "facebook/post/relatable-one-liner@1", "facebook/post/behind-the-scenes@1", "facebook/post/useful-tip@1", "facebook/post/story-with-a-turn@1", "facebook/post/announcement-with-stakes@1", "facebook/post/community-spotlight@1"],
+  "x.md": ["x/post/one-liner-contrarian@1", "x/post/data-point@1", "x/post/build-in-public-confession@1", "x/post/mini-list@1", "x/post/relatable-cold-open@1", "x/post/third-party-case-study@1", "x/thread/listicle-promise@1", "x/thread/story-arc@1", "x/thread/curiosity-gap-opener@1", "x/thread/how-i-teardown@1", "x/reply/direct-answer@1", "x/reply/evidence-addition@1", "x/direct_message/referenced-opener@1", "x/direct_message/bounded-ask@1"],
+  "linkedin.md": ["linkedin/post/anaphora@1", "linkedin/post/rip-obituary@1", "linkedin/post/year-over-year-pivot@1", "linkedin/post/time-anchor-confession@1", "linkedin/post/self-proving-meta@1", "linkedin/post/precise-ledger@1", "linkedin/post/paid-vs-free-reversal@1", "linkedin/post/curiosity-gap@1", "linkedin/post/contrarian-with-receipts@1", "linkedin/post/emotional-cold-open@1", "linkedin/post/permission-slip@1", "linkedin/post/expectation-reversal@1", "linkedin/post/named-tribute@1", "linkedin/post/explain-simply@1", "linkedin/post/status-strip@1", "linkedin/post/controlled-comparison@1", "linkedin/post/false-binary-dissolve@1", "linkedin/post/anecdote-evidence-bridge@1", "linkedin/post/diverging-curves-close@1", "linkedin/comment/specific-addition@1", "linkedin/comment/practitioner-note@1", "linkedin/direct_message/shared-context-opener@1", "linkedin/direct_message/bounded-proposal@1"],
+  "facebook.md": ["facebook/post/one-line-opinion@1", "facebook/post/tiny-number@1", "facebook/post/genuine-question@1", "facebook/post/relatable-one-liner@1", "facebook/post/behind-the-scenes@1", "facebook/post/useful-tip@1", "facebook/post/story-with-a-turn@1", "facebook/post/announcement-with-stakes@1", "facebook/post/community-spotlight@1", "facebook/comment/plain-answer@1", "facebook/comment/shared-experience@1", "facebook/direct_message/friendly-context-opener@1", "facebook/direct_message/bounded-ask@1"],
 };
 const overlayRuleCatalog = {
-  "x.md": ["x/post/hard/char-limit", "x/thread/hard/char-limit", "x/post/hard/single-unit", "x/thread/hard/min-units", "x/post/hard/media-count", "x/post/heuristic/hook-first-line", "x/post/heuristic/hashtags-0-1", "x/post/heuristic/no-link-in-body", "x/post/heuristic/emoji-0-1", "x/thread/heuristic/thread-promise-open-loop", "x/thread/heuristic/thread-5-9-units", "x/thread/heuristic/thread-no-link-unit-1", "x/thread/heuristic/thread-no-numbering-required"],
-  "linkedin.md": ["linkedin/post/hard/char-limit", "linkedin/post/hard/single-unit", "linkedin/post/heuristic/hook-before-fold", "linkedin/post/heuristic/no-external-link-in-body", "linkedin/post/heuristic/hashtags-0-2", "linkedin/post/heuristic/line-breaks-for-scan", "linkedin/post/heuristic/no-comment-gate", "linkedin/post/heuristic/passive-voice-ceiling"],
-  "facebook.md": ["facebook/post/hard/char-limit", "facebook/post/hard/single-unit", "facebook/post/heuristic/short-post-sweet-spot", "facebook/post/heuristic/link-in-first-comment", "facebook/post/heuristic/hashtags-0-2", "facebook/post/heuristic/emoji-0-2", "facebook/post/heuristic/page-vs-profile-cta", "facebook/post/heuristic/genuine-question-only"],
+  "x.md": ["x/post/hard/char-limit", "x/thread/hard/char-limit", "x/post/hard/single-unit", "x/thread/hard/min-units", "x/post/hard/media-count", "x/post/heuristic/hook-first-line", "x/post/heuristic/hashtags-0-1", "x/post/heuristic/no-link-in-body", "x/post/heuristic/emoji-0-1", "x/thread/heuristic/thread-promise-open-loop", "x/thread/heuristic/thread-5-9-units", "x/thread/heuristic/thread-no-link-unit-1", "x/thread/heuristic/thread-no-numbering-required", "x/reply/hard/char-limit", "x/reply/hard/single-unit", "x/direct_message/hard/char-limit", "x/direct_message/hard/single-unit", "x/reply/heuristic/answer-before-pitch", "x/reply/heuristic/no-generic-agreement", "x/direct_message/heuristic/one-ask", "x/direct_message/heuristic/no-cold-pitch"],
+  "linkedin.md": ["linkedin/post/hard/char-limit", "linkedin/post/hard/single-unit", "linkedin/post/heuristic/hook-before-fold", "linkedin/post/heuristic/no-external-link-in-body", "linkedin/post/heuristic/hashtags-0-2", "linkedin/post/heuristic/line-breaks-for-scan", "linkedin/post/heuristic/no-comment-gate", "linkedin/post/heuristic/passive-voice-ceiling", "linkedin/comment/hard/char-limit", "linkedin/comment/hard/single-unit", "linkedin/direct_message/hard/char-limit", "linkedin/direct_message/hard/single-unit", "linkedin/comment/heuristic/no-generic-praise", "linkedin/comment/heuristic/no-link-drop", "linkedin/direct_message/heuristic/one-ask", "linkedin/direct_message/heuristic/no-template-open"],
+  "facebook.md": ["facebook/post/hard/char-limit", "facebook/post/hard/single-unit", "facebook/post/heuristic/short-post-sweet-spot", "facebook/post/heuristic/link-in-first-comment", "facebook/post/heuristic/hashtags-0-2", "facebook/post/heuristic/emoji-0-2", "facebook/post/heuristic/page-vs-profile-cta", "facebook/post/heuristic/genuine-question-only", "facebook/comment/hard/char-limit", "facebook/comment/hard/single-unit", "facebook/direct_message/hard/char-limit", "facebook/direct_message/hard/single-unit", "facebook/comment/heuristic/no-generic-praise", "facebook/comment/heuristic/no-link-drop", "facebook/direct_message/heuristic/one-ask", "facebook/direct_message/heuristic/no-cold-pitch"],
 };
+function sectionIndexOrEnd(text, heading) {
+  const index = text.indexOf(heading);
+  return index < 0 ? text.length : index;
+}
+
 const seenRules = new Set();
 const ruleById = new Map();
 for (const rel of ["core/claims.md", "core/voice.md", "core/audit.md", "overlays/x.md", "overlays/linkedin.md", "overlays/facebook.md"]) {
@@ -130,9 +135,23 @@ for (const [file, ids] of Object.entries(catalog)) {
   try {
     const { data } = parseFrontmatter(text, rel);
     const platform = file.replace(".md", "");
-    const allowedSurfaces = { x: ["x/post", "x/thread"], linkedin: ["linkedin/post"], facebook: ["facebook/post"] }[platform];
+    const allowedSurfaces = { x: ["x/post", "x/thread", "x/reply", "x/direct_message"], linkedin: ["linkedin/post", "linkedin/comment", "linkedin/direct_message"], facebook: ["facebook/post", "facebook/comment", "facebook/direct_message"] }[platform];
     if (data.overlayId !== `overlay:${platform}` || data.version !== 1 || data.platform !== platform || !Array.isArray(data.surfaces) || !data.surfaces.every((surface) => allowedSurfaces.includes(surface)) || !/^\d{4}-\d{2}-\d{2}$/.test(data.reviewedAt ?? "") || !Array.isArray(data.sources) || !data.sources.length) fail(`${rel}: invalid overlay frontmatter`);
   } catch (error) { fail(error.message); }
+  // Prose and catalog must agree. The overlays once said "use this overlay only for <post>" while
+  // their frontmatter listed reply/comment/DM surfaces, so an agent following the executable
+  // instructions would refuse exactly the artifacts the catalog enables (#410).
+  {
+    const { data } = parseFrontmatter(text, rel);
+    const intro = text.slice(text.indexOf("# "), sectionIndexOrEnd(text, "## Hard constraints"));
+    for (const surface of data.surfaces ?? []) {
+      if (!intro.includes(`\`${surface}\``)) fail(`${rel}: operating prose does not name ${surface}`);
+    }
+    if (/only for/.test(intro) && (data.surfaces ?? []).length > 1) {
+      const named = (data.surfaces ?? []).filter((surface) => intro.includes(`\`${surface}\``));
+      if (named.length !== (data.surfaces ?? []).length) fail(`${rel}: prose restricts a multi-surface overlay`);
+    }
+  }
   const sectionOrder = ["## Hard constraints", "## Formulas", "## Heuristics & aesthetics"].map((heading) => text.indexOf(heading));
   if (sectionOrder.some((index) => index < 0) || sectionOrder.some((index, position) => position > 0 && index <= sectionOrder[position - 1])) fail(`${rel}: required sections are missing or out of order`);
   const formulas = extractTaggedBlocks(text, "signals-writing:formulas", rel).flat();
@@ -153,11 +172,27 @@ for (const [file, ids] of Object.entries(catalog)) {
   }
 }
 for (const excluded of ["comment-gate", "this-or-that", "vote", "quote-dunk", "dunk", "engagement-pod", "detector"]) if (Object.values(catalog).flat().some((id) => id.includes(excluded))) fail(`excluded formula slug present: ${excluded}`);
-for (const [id, value] of Object.entries({ "x/post/hard/char-limit": 280, "x/thread/hard/char-limit": 280, "linkedin/post/hard/char-limit": 3000, "facebook/post/hard/char-limit": 63206 })) {
+for (const [id, value] of Object.entries({ "x/post/hard/char-limit": 280, "x/thread/hard/char-limit": 280, "x/reply/hard/char-limit": 280, "x/direct_message/hard/char-limit": 10000, "linkedin/post/hard/char-limit": 3000, "linkedin/comment/hard/char-limit": 1250, "linkedin/direct_message/hard/char-limit": 8000, "facebook/post/hard/char-limit": 63206, "facebook/comment/hard/char-limit": 8000, "facebook/direct_message/hard/char-limit": 20000 })) {
   const rule = ruleById.get(id);
   if (rule?.value !== value || rule?.enforcedBy !== "server:hardLimit") fail(`${id}: hard-limit value/enforcement mismatch`);
 }
 if (ruleById.get("x/thread/hard/min-units")?.value !== 2) fail("x/thread/hard/min-units: value must be 2");
+
+// Every surface an overlay can draft must appear in SKILL.md's capability table; otherwise the
+// required instructions tell the agent a drawable surface "gets no writing variant".
+if (actual.includes("SKILL.md")) {
+  const capabilityTable = read("SKILL.md").split("## Capability honesty")[1] ?? "";
+  const overlaySurfaces = new Set(
+    Object.keys(catalog)
+      .filter((file) => actual.includes(`overlays/${file}`))
+      .flatMap((file) => parseFrontmatter(read(`overlays/${file}`), `overlays/${file}`).data.surfaces ?? []),
+  );
+  for (const surface of overlaySurfaces) {
+    if (!capabilityTable.includes(`\`${surface}\``)) {
+      fail(`SKILL.md: capability table omits drawable surface ${surface}`);
+    }
+  }
+}
 
 if (actual.includes("reference.md")) {
   const tags = [...read("reference.md").matchAll(/```json (signals-writing:example:[^\s]+)/g)].map((match) => match[1]);

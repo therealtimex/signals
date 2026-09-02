@@ -43,6 +43,10 @@ export function computeAuditInputHash(
     "units",
     "claimMap",
     "personality",
+    // Rebinding an approved proposal to a different recipient, goal, or evidence set must stale the
+    // audit — same body, different artifact. Absent on every non-composed variant, where `normalize`
+    // drops the undefined entry and the hash is unchanged.
+    "intent",
   ];
   return sha256Canonical({
     body: body ?? null,

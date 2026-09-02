@@ -1,9 +1,15 @@
 /**
- * "Contact Relationship Nurture" — an autonomous relationship progression workflow executed in the Terminal Agent lane.
+ * "Contact Relationship Nurture" — a relationship progression workflow executed in the Terminal
+ * Agent lane.
  *
- * It queries active CRM contacts with assigned relationship goals (follow_back, repost_amplification,
- * mutual_engagement, warm_conversation, partnership), applies persona-grounded tactics, inspects live
- * social streams, executes high-signal touchpoints with salted pacing delays, and syncs goal milestones.
+ * It queries active CRM contacts with assigned relationship goals (follow_back,
+ * repost_amplification, mutual_engagement, warm_conversation, partnership), observes live social
+ * streams for milestones, and proposes persona-grounded touchpoints.
+ *
+ * Since #410 it does not author prose from its own instructions. Every touchpoint is a
+ * `WritingIntent` handed to the shared writing pipeline (`writing-composition.ts`), which owns
+ * Personality voice, target gates, audit, explicit approval, materialization, and lineage. The
+ * mandate is `assist_only` (#377): draft, audit, propose — never publish, comment, reply, or send.
  */
 
 import {
@@ -12,8 +18,13 @@ import {
 } from "@/lib/workflows/template-field-utils";
 import {
   RELATIONSHIP_GOAL_ENUM,
+  RELATIONSHIP_GOAL_LABELS,
   type RelationshipGoal,
 } from "@/lib/relationship-goals";
+import { parseSurfaceId, type SurfaceId } from "@/lib/writing/surfaces";
+import { NURTURE_WRITING_SURFACES } from "@/lib/writing/writing-intent";
+import { buildWritingIntentCompositionConfig } from "@/lib/workflows/writing-composition";
+import type { WritingGoal } from "@/lib/workflows/signals-writing";
 
 export const CONTACT_RELATIONSHIP_NURTURE_TEMPLATE_NAME = "Contact Relationship Nurture";
 
@@ -42,6 +53,56 @@ export interface ContactNurtureConfig {
   delayBetweenActionsSeconds: number;
   requireApproval: boolean;
   autoAchieveOnMilestone: boolean;
+}
+
+/**
+ * How a relationship goal becomes a writing surface.
+ *
+ * Every entry lands on a send-less surface: an assist-only workflow proposes, so a publish-capable
+ * spotlight post is deliberately absent (a repost ask is earned in a comment here).
+ */
+export const NURTURE_TOUCHPOINT_PLAN: Record<
+  RelationshipGoal,
+  { surfaceKind: "comment" | "direct_message"; writingGoal: WritingGoal; deliverable: string }
+> = {
+  follow_back: {
+    surfaceKind: "comment",
+    writingGoal: "follows",
+    deliverable: "a high-signal comment on their recent post that earns the follow back",
+  },
+  repost_amplification: {
+    surfaceKind: "comment",
+    writingGoal: "reposts",
+    deliverable: "a comment that gives them a reason to amplify our work",
+  },
+  mutual_engagement: {
+    surfaceKind: "comment",
+    writingGoal: "replies",
+    deliverable: "an authoritative answer or perspective on their active discussion",
+  },
+  warm_conversation: {
+    surfaceKind: "direct_message",
+    writingGoal: "replies",
+    deliverable: "a draft-only direct message referencing a real public interaction",
+  },
+  partnership: {
+    surfaceKind: "direct_message",
+    writingGoal: "leads",
+    deliverable: "a draft-only partnership proposal grounded in allowlisted evidence",
+  },
+};
+
+/** The writing surface for an acting platform and touchpoint kind, or null when unsupported. */
+export function resolveNurtureSurface(
+  platform: string,
+  surfaceKind: "comment" | "direct_message",
+): SurfaceId | null {
+  const surface = parseSurfaceId(
+    `${platform.toLowerCase()}/${surfaceKind === "comment" && platform.toLowerCase() === "x" ? "reply" : surfaceKind}`,
+  );
+  return surface && (NURTURE_WRITING_SURFACES as readonly SurfaceId[]).includes(surface)
+    ? surface
+    : null;
 }
 
 export function isContactNurtureTemplateConfig(config: Record<string, unknown>): boolean {
@@ -74,11 +135,22 @@ export function readContactNurtureConfig(config: Record<string, unknown>): Conta
   };
 }
 
+/**
+ * The writing-intent opt-in nurture carries.
+ *
+ * Kept as its own export so `seedTemplates` can merge it into an existing install's config without
+ * clobbering operator-tuned sliders.
+ */
+export function buildContactNurtureWritingComposition(): Record<string, unknown> {
+  return buildWritingIntentCompositionConfig({ consumer: "contact_relationship_nurture" });
+}
+
 export function buildContactNurtureRunConfig(
   config: ContactNurtureConfig,
 ): Record<string, unknown> {
   return {
     [CONTACT_NURTURE_CONFIG_KEY]: { version: CONTACT_NURTURE_CONFIG_VERSION },
+    ...buildContactNurtureWritingComposition(),
     targetId: config.targetId,
     relationshipGoalFilter: config.relationshipGoalFilter,
     maxTargets: clampContactNurtureSlider("maxTargets", config.maxTargets),
@@ -107,6 +179,7 @@ export function buildContactNurtureTemplateConfig(
 
   return {
     [CONTACT_NURTURE_CONFIG_KEY]: CONTACT_NURTURE_CONFIG_VERSION,
+    ...buildContactNurtureWritingComposition(),
     ...defaults,
     ...(overrides ?? {}),
   };
@@ -130,14 +203,14 @@ export function buildContactNurtureBriefSection(input: {
     ? "All assigned relationship goals (follow_back, repost_amplification, mutual_engagement, warm_conversation, partnership)"
     : `Only "${nurture.relationshipGoalFilter}" goals`;
 
-  const targetPlatform = (
+  // Null when no acting profile is configured. Do not fall back to "x": claiming a platform the
+  // operator never selected produces the wrong touchpoint surfaces and an invalid writing intent.
+  const resolvedPlatform = (
     input.platformTarget?.platform ||
-    (typeof input.config.targetPlatform === "string" ? input.config.targetPlatform : "") ||
-    "x"
-  ).toLowerCase();
-
-  const isLinkedIn = targetPlatform === "linkedin";
-  const isFacebook = targetPlatform === "facebook";
+    (typeof input.config.targetPlatform === "string" ? input.config.targetPlatform : "")
+  ).toLowerCase() || null;
+  const isLinkedIn = resolvedPlatform === "linkedin";
+  const isFacebook = resolvedPlatform === "facebook";
   const platformLabel = isLinkedIn ? "LinkedIn" : isFacebook ? "Facebook" : "X";
 
   const targetName = input.platformTarget
@@ -146,50 +219,52 @@ export function buildContactNurtureBriefSection(input: {
         ? `${platformLabel}: ${input.config.targetName}${input.config.targetHandle ? ` (${input.config.targetHandle})` : ""}${nurture.targetId ? ` [ID: ${nurture.targetId}]` : ""}`
         : (nurture.targetId ? `Target ID: ${nurture.targetId}` : "Auto-detect default acting target per contact platform"));
 
-  const defaultInteractionType = isLinkedIn ? "linkedin_comment" : isFacebook ? "facebook_post" : "reply";
+  const goalsInScope = (nurture.relationshipGoalFilter === "all"
+    ? RELATIONSHIP_GOAL_ENUM
+    : [nurture.relationshipGoalFilter]) as readonly RelationshipGoal[];
+
+  const touchpointRows = goalsInScope.map((goal) => {
+    const plan = NURTURE_TOUCHPOINT_PLAN[goal];
+    const label = `    - ${goal} (${RELATIONSHIP_GOAL_LABELS[goal]})`;
+    if (!resolvedPlatform) {
+      return `${label}: surfaceKind=${plan.surfaceKind}, writingGoal=${plan.writingGoal} — resolve the acting profile for this contact's platform, pick the matching ${plan.surfaceKind} surface from the capability rows, and propose ${plan.deliverable}.`;
+    }
+    const surface = resolveNurtureSurface(resolvedPlatform, plan.surfaceKind);
+    return surface
+      ? `${label}: surface=${surface}, writingGoal=${plan.writingGoal} — propose ${plan.deliverable}.`
+      : `${label}: no ${plan.surfaceKind} surface on ${resolvedPlatform} — report it as unsupported and skip.`;
+  });
 
   const lines = [
     "Contact Relationship Nurture execution contract:",
-    `N0. Goal filter: ${goalText}. Max targets to inspect: ${nurture.maxTargets}. Max actions: ${nurture.maxActionsPerRun}.`,
-    `    Acting Profile: ${targetName}. Active Platform: ${targetPlatform}.`,
+    `N0. Goal filter: ${goalText}. Max targets to inspect: ${nurture.maxTargets}. Max touchpoint proposals: ${nurture.maxActionsPerRun}.`,
+    `    Acting Profile: ${targetName}. Active Platform: ${resolvedPlatform ?? "unresolved — detect per contact"}.`,
+    "    Mandate: assist_only. This workflow drafts, audits, and proposes. It never publishes, comments, replies, sends a message, opens a publish job, or schedules one.",
     `N1. Query unachieved contacts via query_contacts({ relationshipGoalStatus: "not_started" }) and query_contacts({ relationshipGoalStatus: "in_progress" }).`,
-    "N2. For each contact, call get_contact({ contactId }) to inspect their persona, conversion triggers, tone, and platform.",
+    "N2. For each contact, call get_contact({ contactId }) for recipient context — persona, conversion triggers, tone, platform. This answers \"who is receiving and what is relevant\"; it never answers \"who is speaking\" and never becomes a fact in the artifact.",
     isLinkedIn
-      ? "N3. Open RealTimeX Browser session for LinkedIn and inspect the contact's live profile / post stream to check for milestone achievements."
+      ? "N3. Observe only: inspect the contact's live LinkedIn profile / post stream for milestone achievements. Read, never interact."
       : isFacebook
-        ? "N3. Open RealTimeX Browser session for Facebook and inspect the contact's profile / activity stream to check for milestone achievements."
-        : "N3. Open RealTimeX Browser session and inspect the contact's live social stream to check for milestone achievements.",
+        ? "N3. Observe only: inspect the contact's Facebook profile / activity stream for milestone achievements. Read, never interact."
+        : "N3. Observe only: inspect the contact's live social stream for milestone achievements. Read, never interact.",
     nurture.autoAchieveOnMilestone
       ? isLinkedIn
         ? "    Auto-achieve is ON: If contact is now connected / following the acting profile or reposted our content, immediately call update_contact({ contactId, relationshipGoalStatus: \"achieved\" }) and record milestone."
         : "    Auto-achieve is ON: If contact is now following the acting profile or reposted our content, immediately call update_contact({ contactId, relationshipGoalStatus: \"achieved\" }) and record milestone."
       : "    Auto-achieve is OFF: Log observed milestone in thread for operator review.",
-    "N4. Grounded tactical execution:",
-    isLinkedIn
-      ? "    - follow_back: Comment with high-signal domain value on recent post -> wait salted delay -> send connection request / follow."
-      : "    - follow_back: Comment with high-signal technical value on recent post -> wait salted delay -> follow.",
-    isLinkedIn
-      ? "    - repost_amplification: Curate organic spotlight post / breakdown on LinkedIn mentioning them."
-      : "    - repost_amplification: Curate organic spotlight post / breakdown tagging them.",
-    isLinkedIn
-      ? "    - mutual_engagement: Contribute authoritative answer or perspective on their active post discussions."
-      : "    - mutual_engagement: Answer question or debate thread authoritatively.",
-    isLinkedIn
-      ? "    - warm_conversation: Send personalized LinkedIn message / InMail referencing public interaction."
-      : "    - warm_conversation: Send personalized DM referencing public interaction.",
-    "    - partnership: Stage co-marketing proposal brief.",
-    `N5. Account Safety: Sleep ${nurture.delayBetweenActionsSeconds}s (with salted random variance) between consecutive posts/interactions.`,
+    "N4. Touchpoint proposals — emit one writing intent per contact and follow the shared writing-intent contract below. Do not draft prose from these instructions:",
+    ...touchpointRows,
+    "    For each intent set `recipient` to the contact reference, `goal.id` to the relationship goal, `target` to the acting profile above, and `sourceRefs` to the allowlisted evidence you actually read. Attach the intent as `metadata.writing.intent` on upsert_variant.",
+    "    Personality is the speaker; the contact is the recipient. Never write contact facts, persona attributes, relationship notes, or private CRM fields into IDENTITY.md, SOUL.md, VOICE.md, or BRAND.md.",
     nurture.requireApproval
-      ? "N6. Approval gate is ON: Present touchpoints/drafts in this thread in batches of 3–5 and wait for operator confirmation before publishing."
-      : "N6. Approval gate is OFF: Execute touchpoints directly and log evidence in this thread.",
-    "    - Submission & Verification: On Facebook, LinkedIn, or X (especially Lexical/Draft.js contenteditable inputs), locate and click the native submit button element (e.g. 'Post comment', 'Comment', 'Reply', or 'Send') rather than relying solely on synthetic Enter keys. Always take a DOM snapshot to verify that the input box is cleared and the published comment/post appears in the live comment stream BEFORE proceeding to CRM write-back.",
-    "N7. MANDATORY WRITE-BACK TO SIGNALS (Record every action):",
-    `    a. For any comment/reply or post published, write it to Signals Content immediately via:`,
-    `       POST ${input.signalsBaseUrl}/api/content with JSON:`,
-    `       { "body": "<published text>", "contentType": "reply", "status": "published", "origin": "authored", "direction": "outbound", "platformTarget": "${targetPlatform}", "platformUrl": "<url of published post/reply on ${platformLabel}>", "contactId": "<contactId>" }`,
-    `    b. Log the interaction touchpoint in Signals via:`,
+      ? "N5. Approval gate: present proposals in this thread in batches of 3–5 and wait for explicit operator approval before calling materialize_variant. `auto_low_risk` does not apply to nurture proposals."
+      : "N5. Approval gate: explicit user approval is still required for every nurture proposal — the assist-only mandate outranks this run control, and Signals rejects a policy approval on these artifacts.",
+    "N6. A refused intent is a result, not a failure: report the persisted Personality status, capability, or target reason and move on. Never repair drift by editing Personality files.",
+    "N7. WRITE-BACK TO SIGNALS (record every proposal):",
+    `    a. The approved, materialized proposal is the content record — materialize_variant owns that boundary. Do not POST ${input.signalsBaseUrl}/api/content for a proposal, and never mark one published.`,
+    `    b. Log the proposed touchpoint in Signals via:`,
     `       POST ${input.signalsBaseUrl}/api/agent-tools/invoke with JSON:`,
-    `       { "tool": "log_interaction", "input": { "contactId": "<contactId>", "interactionType": "${defaultInteractionType}", "summary": "<description of action taken>" } }`,
+    `       { "tool": "log_interaction", "input": { "contactId": "<contactId>", "interactionType": "${isLinkedIn ? "linkedin_comment" : isFacebook ? "facebook_post" : "reply"}", "summary": "<proposed touchpoint, variant id, and approval state>" } }`,
     `    c. If target taskId is provided in config/brief, complete the task:`,
     `       POST ${input.signalsBaseUrl}/api/agent-tools/invoke with JSON:`,
     `       { "tool": "update_task", "input": { "taskId": "<taskId>", "status": "done" } }`,

@@ -1,5 +1,8 @@
-export const RULE_ID_RE = /^(?:core|x\/(?:post|thread)|linkedin\/post|facebook\/post)\/(?:hard|claim|voice|heuristic|aesthetic)\/[a-z0-9]+(?:-[a-z0-9]+)*$/;
-export const FORMULA_ID_RE = /^(?:x\/(?:post|thread)|linkedin\/post|facebook\/post)\/[a-z0-9]+(?:-[a-z0-9]+)*@[1-9]\d*$/;
+// Surfaces registered in src/lib/writing/surfaces.ts that carry an overlay. Nurture surfaces
+// (reply/comment/direct_message) joined in #410 with draft/audit contracts and no send adapter.
+const OVERLAY_SURFACE = "(?:x\\/(?:post|thread|reply|direct_message)|linkedin\\/(?:post|comment|direct_message)|facebook\\/(?:post|comment|direct_message))";
+export const RULE_ID_RE = new RegExp(`^(?:core|${OVERLAY_SURFACE})\\/(?:hard|claim|voice|heuristic|aesthetic)\\/[a-z0-9]+(?:-[a-z0-9]+)*$`);
+export const FORMULA_ID_RE = new RegExp(`^${OVERLAY_SURFACE}\\/[a-z0-9]+(?:-[a-z0-9]+)*@[1-9]\\d*$`);
 
 function scalar(value) {
   const trimmed = value.trim();
