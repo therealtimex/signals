@@ -16,9 +16,12 @@ Package and distribute Signals through the **RealtimeX marketplace** — not pub
 Plugin id: `com.realtimex.signals`  
 Local app id: `47e45f71-3279-42f5-8e95-731de01b6eae`
 
-Version 0.2.4 packages `signals-writing` 1.1.0. Writing agents read the four workspace Personality
-files first, use only the active binding selector, and refuse the full audited/materialized lane
-until Personality is bound. The provisioned `AGENTS.md` includes the permanent Personality pointer.
+Version 0.2.5 packages `signals-writing` 1.1.0 with reusable writing intents for nurture workflows.
+Writing agents read the four workspace Personality files first, use only the active binding
+selector, and refuse the full audited/materialized lane until Personality is bound. Contact
+Relationship Nurture composes assist-only reply, comment, message, and proposal drafts through the
+same Personality, target, audit, approval, materialization, and lineage boundary. The provisioned
+`AGENTS.md` includes the permanent Personality pointer.
 
 ## Build
 
