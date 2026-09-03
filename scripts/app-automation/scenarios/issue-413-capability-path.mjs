@@ -89,6 +89,8 @@ export default async function run(ctx) {
       // still be a control claiming a choice that does not exist.
       switchCount: await gate.getByRole("switch").count(),
       status: (await gate.getByTestId("nurture-approval-status").innerText()).replace(/\s+/g, " ").trim(),
+      // The state marker must sit in the control column, not only in the prose.
+      stateChip: (await gate.getByTestId("nurture-approval-state").innerText()).replace(/\s+/g, " ").trim(),
       surfaceRows,
       lockedCopy: (await gate.innerText()).replace(/\s+/g, " ").trim(),
       operatorChoiceCopyCount: await gate.getByText(/operator choice/i).count(),
