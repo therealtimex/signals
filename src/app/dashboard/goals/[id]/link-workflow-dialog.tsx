@@ -47,7 +47,7 @@ export function LinkWorkflowDialog({
   useEffect(() => {
     if (!open) return;
     fetch("/api/workflows/templates?status=active&pageSize=100")
-      .then((r) => r.json())
+      .then((r) => (r.ok ? r.json() : { data: [] }))
       .then((data) => {
         const available = (data.data ?? data.templates ?? []).filter(
           (t: WorkflowTemplateOption) => !existingTemplateIds.includes(t.id)

@@ -53,6 +53,24 @@ interface ChecklistState {
   mailConnected: boolean;
 }
 
+/**
+ * Read a checklist probe, falling back on anything that is not a 2xx JSON body.
+ *
+ * `fetch` resolves for 4xx and 5xx, so parsing unconditionally turned an error
+ * payload into checklist state: `/api/platforms/x` answering 500 has no
+ * `connected` field, and the checklist read that as "not connected" — the same
+ * shape a real answer has, with none of the meaning.
+ */
+async function readJsonOr<T>(url: string, fallback: T): Promise<T> {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) return fallback;
+    return (await response.json()) as T;
+  } catch {
+    return fallback;
+  }
+}
+
 function useSetupChecklist(): ChecklistState {
   const [state, setState] = useState<ChecklistState>({
     loading: true,
@@ -67,27 +85,16 @@ function useSetupChecklist(): ChecklistState {
 
   useEffect(() => {
     Promise.all([
-      fetch("/api/health")
-        .then((r) => r.json())
-        .catch(() => ({ rtx: { mode: "standalone" } })),
-      fetch("/api/rtx/status")
-        .then((r) => r.json())
-        .catch(() => ({ bootstrap: { mode: "standalone", permissions: null } })),
-      fetch("/api/settings")
-        .then((r) => r.json())
-        .catch(() => ({ source: "none" })),
-      fetch("/api/platforms/x")
-        .then((r) => r.json())
-        .catch(() => ({ connected: false })),
-      fetch("/api/platforms/linkedin")
-        .then((r) => r.json())
-        .catch(() => ({ connected: false })),
-      fetch("/api/platforms/facebook")
-        .then((r) => r.json())
-        .catch(() => ({ connected: false })),
-      fetch("/api/mail-accounts")
-        .then((r) => r.json())
-        .catch(() => ({ accounts: [] })),
+      readJsonOr("/api/health", { rtx: { mode: "standalone" } }),
+      readJsonOr<{ bootstrap?: { mode?: string; permissions?: { granted?: string[] } | null } }>(
+        "/api/rtx/status",
+        { bootstrap: { mode: "standalone", permissions: null } },
+      ),
+      readJsonOr("/api/settings", { source: "none" }),
+      readJsonOr("/api/platforms/x", { connected: false }),
+      readJsonOr("/api/platforms/linkedin", { connected: false }),
+      readJsonOr("/api/platforms/facebook", { connected: false }),
+      readJsonOr("/api/mail-accounts", { accounts: [] }),
     ]).then(([health, rtxStatus, settings, xStatus, linkedinStatus, facebookStatus, mailStatus]) => {
       const rtxEmbedded = health?.rtx?.mode === "embedded";
       const permissions = rtxStatus?.bootstrap?.permissions;

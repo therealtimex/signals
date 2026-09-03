@@ -32,6 +32,7 @@ export function usePublishJobs(contentItemIds: string[]) {
       contentItemIds.map(async (id) => {
         try {
           const res = await fetch(`/api/content/publish-jobs?contentItemId=${encodeURIComponent(id)}`);
+          if (!res.ok) return [id, null] as const;
           const data = await res.json();
           const latest = (data.jobs?.[0] ?? null) as PublishJobSummary | null;
           return [id, latest] as const;

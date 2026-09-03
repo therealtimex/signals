@@ -131,13 +131,17 @@ export function HimalayaMailAccountsSection() {
     setError(null);
     try {
       const res = await fetch(`/api/mail-accounts/${id}/check`, { method: "POST" });
-      const data = await res.json();
+      // A failing route may answer with HTML; parsing that threw before the
+      // status was read, so the user saw a JSON parse error instead of the
+      // check failure.
+      const data = (await res.json().catch(() => ({}))) as { error?: string; account?: MailAccount };
       if (!res.ok) {
-        setError(data.error || "Check failed");
+        setError(data.error || `Check failed (${res.status})`);
         return;
       }
-      if (data.account) {
-        setAccounts((prev) => prev.map((row) => (row.id === id ? data.account : row)));
+      const checked = data.account;
+      if (checked) {
+        setAccounts((prev) => prev.map((row) => (row.id === id ? checked : row)));
       }
     } catch {
       setError("Check failed");

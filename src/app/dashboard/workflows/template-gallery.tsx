@@ -181,7 +181,7 @@ export function TemplateGallery() {
   const fetchTemplates = useCallback(() => {
     setLoading(true);
     fetch("/api/workflows/templates?pageSize=100")
-      .then((r) => r.json())
+      .then((r) => (r.ok ? r.json() : { data: [] }))
       .then((result) => {
         setTemplates(result.data ?? []);
         setLoading(false);

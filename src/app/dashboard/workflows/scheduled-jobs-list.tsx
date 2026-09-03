@@ -112,8 +112,10 @@ export function ScheduledJobsList() {
 
   function refreshJobs() {
     Promise.all([
-      fetch("/api/workflows/schedule").then((r) => r.json()),
-      fetch("/api/workflows/templates?pageSize=50").then((r) => r.json()),
+      // `fetch` resolves for 4xx/5xx, so an error body used to land in
+      // `scheduleData.data ?? []` and render as "no scheduled jobs".
+      fetch("/api/workflows/schedule").then((r) => (r.ok ? r.json() : { data: [] })),
+      fetch("/api/workflows/templates?pageSize=50").then((r) => (r.ok ? r.json() : { data: [] })),
     ])
       .then(([scheduleData, templateData]) => {
         setJobs(scheduleData.data ?? []);
