@@ -67,6 +67,41 @@ export const GUIDE_JOURNEYS = [
       { path: (ids) => `/dashboard/contacts/${ids.contact}`, needs: "contact", caption: "Identities across platforms, unified into one person.", act: "tab:Identities" },
     ],
   },
+  {
+    id: "nurture-approval",
+    title: "The agent drafts, you approve",
+    // Opt-in: `seed:demo` cannot produce this journey's data. Proposals only
+    // exist once the `nurture-proposals` fixture has run against a bound
+    // Personality and a represented target, so including it by default would
+    // fail every ordinary tour run with `missing_seed_data`.
+    optIn: true,
+    fixture: "nurture-proposals",
+    steps: [
+      { path: "/dashboard/workflows", caption: "Automation runs through RealTimeX agents — and stops before anything is sent." },
+      {
+        path: "/dashboard/workflows",
+        caption: "Nurture is draft-only on every surface, so approval stays locked on.",
+        act: "activate:nurture",
+        ready: '[data-testid="nurture-approval-gate"]',
+      },
+      {
+        path: (ids) => `/dashboard/workflows/${ids.nurtureRun}`,
+        needs: "nurtureRun",
+        caption: "The run finishes with proposals awaiting review, not posts.",
+        // The section renders before its fetch resolves, so waiting on it holds
+        // the caption over "Loading proposals…". Wait for a card instead.
+        ready: '[data-testid="workflow-proposal-card"]',
+        scroll: true,
+      },
+      {
+        path: (ids) => `/dashboard/workflows/${ids.nurtureRun}`,
+        needs: "nurtureRun",
+        caption: "Approve one and it becomes an export-only draft — never an automatic post.",
+        act: "approve-proposal",
+        ready: '[data-testid="proposal-status"]:has-text("Materialized")',
+      },
+    ],
+  },
 ];
 
 /** Interactions a step can ask for, named so the journey data stays serialisable. */
@@ -76,6 +111,27 @@ export const STEP_ACTIONS = {
   },
   "tab:Identities": async (page) => {
     await page.getByRole("tab", { name: /Identities/ }).first().click();
+  },
+  // Scoped to the template card rather than the first "Run" on the page: the
+  // gallery renders one per template, and the tour is about this one.
+  //
+  // The dialog opens scrolled to the top, where the approval gate is below the
+  // fold — so the caption would promise a locked gate over a frame of sliders.
+  // Bringing it into view is part of the action, not a separate step.
+  "activate:nurture": async (page) => {
+    await page
+      .locator('[data-testid="workflow-template-card"]', { hasText: "Contact Relationship Nurture" })
+      .first()
+      .getByRole("button", { name: "Run" })
+      .click();
+    await page.getByTestId("nurture-approval-gate").scrollIntoViewIfNeeded();
+  },
+  "approve-proposal": async (page) => {
+    await page
+      .locator('[data-testid="workflow-proposal-card"]')
+      .first()
+      .getByRole("button", { name: "Approve & materialize" })
+      .click();
   },
 };
 
@@ -94,7 +150,11 @@ export function journeyById(id, journeys = GUIDE_JOURNEYS) {
 }
 
 export function selectJourneys(only, journeys = GUIDE_JOURNEYS) {
-  if (!only || only.length === 0) return journeys;
+  // A default run records what the demo seed can show. An `optIn` journey needs
+  // fixture data the seed cannot create, so it has to be asked for by id —
+  // otherwise every plain `record-guide-tour` would fail on missing seed data
+  // instead of recording the tours it can.
+  if (!only || only.length === 0) return journeys.filter((journey) => !journey.optIn);
   // Resolve through journeyById so an unknown id is an error rather than an
   // empty run that exits 0 having recorded nothing.
   const wanted = new Set(only.map((id) => journeyById(id, journeys).id));
@@ -268,7 +328,13 @@ export function createHelpText() {
     "  -h, --help         Show this help.",
     "",
     "Journeys:",
-    ...GUIDE_JOURNEYS.map((j) => `  ${j.id.padEnd(20)} ${j.steps.length} steps — ${j.title}`),
+    ...GUIDE_JOURNEYS.map(
+      (j) =>
+        `  ${j.id.padEnd(20)} ${j.steps.length} steps — ${j.title}` +
+        (j.optIn ? ` (opt-in; needs the ${j.fixture} fixture)` : ""),
+    ),
+    "",
+    "Opt-in journeys are recorded only when named with --only.",
   ].join("\n");
 }
 

@@ -87,6 +87,29 @@ export const ID_SOURCES = {
   },
   goal: { path: "/api/goals?pageSize=1", pick: (body) => body?.data?.[0]?.id ?? null },
   workflow: { path: "/api/workflows?pageSize=1", pick: (body) => body?.data?.[0]?.id ?? null },
+  // A nurture run is only worth showing once it carries proposals, and the run
+  // list says nothing about those. The server-stamped `approvalGate` block (#413)
+  // is the one field that marks a run as the gated nurture kind, so match on it
+  // rather than on a template name a user is free to rename.
+  nurtureRun: {
+    path: "/api/workflows?workflowType=agent&pageSize=25",
+    pick: (body) => {
+      const runs = body?.data ?? [];
+      const gated = runs.filter((run) => {
+        const raw = run?.config;
+        if (!raw) return false;
+        try {
+          const config = typeof raw === "string" ? JSON.parse(raw) : raw;
+          return Boolean(config?.approvalGate);
+        } catch {
+          return false;
+        }
+      });
+      // A completed run reads as the finished journey; anything still running
+      // would record a half-drawn page under a caption that promises proposals.
+      return (gated.find((run) => run.status === "completed") ?? gated[0])?.id ?? null;
+    },
+  },
 };
 
 /**

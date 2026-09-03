@@ -54,6 +54,26 @@ Captions are burned in as DOM rather than added in post, so a tour is reproducib
 anyone with the demo seed — the same property that made the screenshots worth automating. There is
 no audio and no edit step.
 
+#### Opt-in journeys
+
+A journey marked `optIn` is recorded only when it is named with `--only`. It needs data
+`seed:demo` cannot create, so including it in a default run would fail every ordinary recording
+with `missing_seed_data` instead of recording the tours that *can* run.
+
+`nurture-approval` is the first of them: it shows the #413 approval gate, the run-page proposal
+inbox, and an approval turning into an export-only draft. Its data comes from the same fixture the
+Experience Contracts use, which needs a bound Personality and a represented acting target — so
+record it against an instance prepared the way `## Experience Contracts` describes:
+
+```bash
+npm run seed:fixture -- --fixture nurture-proposals --json
+npm run automation:record-guide-tour -- --only nurture-approval --base-url http://127.0.0.1:3033
+npm run automation:convert-guide-video -- --only nurture-approval
+```
+
+Re-seed the fixture before re-recording: the last step approves a proposal, so a second take
+against the same run would open on a partly decided inbox.
+
 Routes are warmed in a throwaway context first. A dev server compiles on demand, so without warming
 the first visit to each page spends seconds on a skeleton: the first take ran 50s to show ~25s of
 content, and 41s after warming.

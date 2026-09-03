@@ -109,6 +109,40 @@ test("the content id source prefers a titled item but tolerates none", () => {
   assert.equal(pick(null), null);
 });
 
+test("the nurture run id source matches the gate, not a template name", () => {
+  // A user can rename the template; only the server stamps `approvalGate` on the
+  // run config, so that is what identifies a gated nurture run.
+  const { pick } = ID_SOURCES.nurtureRun;
+  const gated = JSON.stringify({ approvalGate: { mode: "locked_explicit" } });
+  assert.equal(
+    pick({
+      data: [
+        { id: "plain", status: "completed", config: "{}" },
+        { id: "gated", status: "completed", config: gated },
+      ],
+    }),
+    "gated",
+  );
+  assert.equal(
+    pick({
+      data: [
+        { id: "running", status: "running", config: gated },
+        { id: "done", status: "completed", config: gated },
+      ],
+    }),
+    "done",
+    "a completed run reads as the finished journey",
+  );
+  assert.equal(
+    pick({ data: [{ id: "only", status: "running", config: { approvalGate: {} } }] }),
+    "only",
+    "an already-parsed config still matches",
+  );
+  assert.equal(pick({ data: [{ id: "broken", config: "{not json" }] }), null);
+  assert.equal(pick({ data: [] }), null);
+  assert.equal(pick(null), null);
+});
+
 test("viewPath interpolates ids for detail routes", () => {
   const detail = GUIDE_VIEWS.find((v) => v.id === "goal-detail");
   assert.equal(viewPath(detail, "g1"), "/dashboard/goals/g1");
