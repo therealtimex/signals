@@ -2,6 +2,7 @@
 
 import { useCallback } from "react";
 import Link from "next/link";
+import { Lock } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -202,27 +203,41 @@ export function ContactNurtureFields({
           data-mode={gate.mode}
           data-reason={gate.reason}
         >
-          <div className="flex items-start justify-between gap-3">
-            <div className="space-y-0.5 pr-3">
-              <Label htmlFor="nurture-approval" className="text-sm">
-                Require approval before anything is sent
-              </Label>
-              <p id="nurture-approval-reason" className="text-xs text-muted-foreground">
-                {gate.mode === "locked_explicit"
-                  ? `Locked: every nurture surface on ${platformLabel(gate.platform)} is draft-only. The agent drafts and audits; you approve each proposal in the thread or on the run page.`
-                  : "Public surfaces with a publish adapter may run without a second prompt. Direct messages always require explicit approval."}
+          {gate.mode === "locked_explicit" ? (
+            // Status, not a setting. The gate is derived from surface
+            // capabilities, so there is no choice to offer — and a switch, even
+            // a disabled one, still claims there is. A disabled control also
+            // leaves the tab order, so the reason never reaches a keyboard user.
+            <div className="space-y-0.5" data-testid="nurture-approval-status">
+              <p className="flex items-center gap-1.5 text-sm font-medium">
+                <Lock className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+                Approval required
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {`Nothing is sent from this run — every nurture surface on ${platformLabel(gate.platform)} is draft-only. The agent drafts and audits; you approve each proposal in the thread or on the run page.`}
               </p>
             </div>
-            <Switch
-              id="nurture-approval"
-              aria-describedby="nurture-approval-reason"
-              checked={gate.mode === "locked_explicit" ? true : value.requireApproval}
-              onCheckedChange={(requireApproval) =>
-                emit({ ...value, requireApproval })
-              }
-              disabled={disabled || gate.mode === "locked_explicit"}
-            />
-          </div>
+          ) : (
+            <div className="flex items-start justify-between gap-3">
+              <div className="space-y-0.5 pr-3">
+                <Label htmlFor="nurture-approval" className="text-sm">
+                  Require approval before anything is sent
+                </Label>
+                <p id="nurture-approval-reason" className="text-xs text-muted-foreground">
+                  Public surfaces with a publish adapter may run without a second prompt. Direct messages always require explicit approval.
+                </p>
+              </div>
+              <Switch
+                id="nurture-approval"
+                aria-describedby="nurture-approval-reason"
+                checked={value.requireApproval}
+                onCheckedChange={(requireApproval) =>
+                  emit({ ...value, requireApproval })
+                }
+                disabled={disabled}
+              />
+            </div>
+          )}
           <div className="grid gap-1 text-xs text-muted-foreground sm:grid-cols-2">
             {gate.surfaces.map((surface) => (
               <div
