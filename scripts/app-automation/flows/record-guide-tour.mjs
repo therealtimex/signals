@@ -80,7 +80,7 @@ export const GUIDE_JOURNEYS = [
       { path: "/dashboard/workflows", caption: "Automation runs through RealTimeX agents — and stops before anything is sent." },
       {
         path: "/dashboard/workflows",
-        caption: "Nurture is draft-only on every surface, so approval stays locked on.",
+        caption: "Nurture is draft-only on every surface, so approval is not optional.",
         act: "activate:nurture",
         ready: '[data-testid="nurture-approval-gate"]',
       },
