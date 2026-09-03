@@ -27,6 +27,29 @@
 | ADR-413-12 | The review-path fixture is a **server-side seed** (`scripts/seed-experience-fixture.ts` → `src/lib/db/seed-fixtures/nurture-proposals.ts`) behind `demo-seed-guard`, that mints a real scope token, creates the launch through `upsert_launch` (so the composition is server-stamped) and the variants through `upsertVariantUseCase` with valid intents, audits, and Personality snapshots. It **requires** an existing bound Personality and a represented acting target and fails with `fixture_precondition_unmet` otherwise. It never writes rows around the use-cases. | The scenario proves UI ↔ persisted-state agreement and the approval path, not the LLM. A fixture that bypassed the use-cases would prove nothing about the gates the approve button must pass. |
 | ADR-413-13 | The nurture brief's N5 no longer branches on `requireApproval`. It states the persisted gate and tells the agent that approvals, rejections, and revision requests may arrive from the Signals run page, so it must **re-read persisted variant state** before `materialize_variant` and before `complete_workflow_run`. | Two approval channels, one persisted truth. Idempotent materialization already handles the race; the brief has to stop the agent from re-presenting an already-decided proposal. |
 
+### Amendment ADR-413-2a (2026-09-02, post-v0.2.6)
+
+**ADR-413-2's locked switch is replaced by a locked *status*.** In `locked_explicit` the gate now
+renders a lock chip reading **Approval required** over the same reason line and surface rows, and
+no `Switch` at all. The control is instantiated only in `operator_choice`, where there is a real
+decision to make.
+
+The original decision kept the switch — rendered checked and disabled — so that a future unlock
+would be a registry change rather than a UI rebuild. That benefit was ours, not the user's. A
+switch is a promise that a value is theirs to set; a disabled one keeps the promise on screen while
+refusing it, and still implies that "off" is a product mode. Nurture has no publish adapter, no
+`reply` job kind, and a mandate pinned to `assist_only`, so that mode does not exist — which is the
+same class of untruth #413 was opened to fix, one notch quieter. A `disabled` control also leaves
+the tab order, taking its `aria-describedby` explanation with it, so the reason never reaches a
+keyboard user.
+
+The future unlock stays cheap: `mode === "operator_choice"` already selects the switch branch, and
+`applyNurtureApprovalGate` is unchanged, so `requireApproval` keeps its meaning in config either
+way. The `activation-gate-locked` checkpoint moves with it — from `ui.checked && ui.disabled` to
+`ui.switchCount === 0 && ui.status` — because the contract states the promise, and the promise is
+"Signals tells me before activation that nurture is proposal-only", not "there is a switch".
+
+
 ---
 
 ## 1. What is already on `main` (do not rebuild)

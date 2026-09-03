@@ -48,10 +48,19 @@ describe("ContactNurtureFields", () => {
     expect(html).toContain("8 actions");
     expect(html).toContain("Safety sleep delay");
     expect(html).toContain("45s delay");
-    expect(html).toContain("Require approval before anything is sent");
     expect(html).toContain('data-mode="locked_explicit"');
     expect(html).toContain('data-reason="assist_only_mandate"');
-    expect(html).toContain("Locked: every nurture surface on X is draft-only");
+    expect(html).toContain("Approval required");
+    expect(html).toContain("Nothing is sent from this run");
+    expect(html).toContain("every nurture surface on X is draft-only");
+    // A derived gate is state, not a setting: no switch claims a choice that
+    // does not exist, and no disabled control drops out of the tab order with
+    // the explanation attached to it.
+    expect(html).not.toContain('id="nurture-approval"');
+    expect(html).not.toContain("nurture-approval-reason");
+    expect(html).not.toContain("Require approval before anything is sent");
+    // The switch next to it is a real setting and stays one.
+    expect(html).toContain('id="nurture-auto-achieve"');
     expect(html).toContain("X reply");
     expect(html).toContain("X DM");
     expect(html).toContain("always explicit");
@@ -110,6 +119,11 @@ describe("ContactNurtureFields", () => {
     expect(html).toContain("Public surfaces with a publish adapter may run without a second prompt");
     expect(html).toContain("operator choice");
     expect(html).toContain("always explicit");
+    // The switch only exists where there is a decision to make, and there it is
+    // a real one.
+    expect(html).toContain("Require approval before anything is sent");
+    expect(html).toContain('id="nurture-approval"');
     expect(html).not.toMatch(/id="nurture-approval"[^>]*disabled/);
+    expect(html).not.toContain("Approval required");
   });
 });

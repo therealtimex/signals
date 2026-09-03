@@ -70,20 +70,25 @@ export default async function run(ctx) {
   await card.getByRole("button", { name: "Run" }).click();
   const gate = page.getByTestId("nurture-approval-gate");
   await gate.waitFor();
-  const toggle = gate.getByRole("switch");
   const config = object(template.config);
   const surfaceRows = await gate.locator("[data-testid=nurture-approval-surface]")
     .evaluateAll((nodes) => nodes.map((node) => Array.from(node.children)
       .map((child) => (child.textContent ?? "").replace(/\s+/g, " ").trim())
       .filter(Boolean)
       .join(" ")));
+  // The dialog scrolls internally and opens above the gate, so a full-page shot
+  // taken as-is is evidence of the sliders, not of the approval state.
+  await gate.scrollIntoViewIfNeeded();
   await capture("nurture-approval-gate");
   record("activation-gate-locked", {
     ui: {
       mode: await gate.getAttribute("data-mode"),
       reason: await gate.getAttribute("data-reason"),
-      checked: await toggle.isChecked(),
-      disabled: await toggle.isDisabled(),
+      // A locked gate is derived state, so it must not render a control at all.
+      // Counting switches inside the gate is the probe; a disabled one would
+      // still be a control claiming a choice that does not exist.
+      switchCount: await gate.getByRole("switch").count(),
+      status: (await gate.getByTestId("nurture-approval-status").innerText()).replace(/\s+/g, " ").trim(),
       surfaceRows,
       lockedCopy: (await gate.innerText()).replace(/\s+/g, " ").trim(),
       operatorChoiceCopyCount: await gate.getByText(/operator choice/i).count(),
