@@ -25,6 +25,9 @@ import { ID_SOURCES } from "./capture-guide-assets.mjs";
 
 const ORIGIN = "http://127.0.0.1:3010";
 
+/** What a run with no --only records: every journey the demo seed can show. */
+const DEFAULT_JOURNEY_IDS = GUIDE_JOURNEYS.filter((journey) => !journey.optIn).map((j) => j.id);
+
 test("journey ids are unique and every journey has steps", () => {
   assert.equal(new Set(GUIDE_JOURNEYS.map((j) => j.id)).size, GUIDE_JOURNEYS.length);
   for (const journey of GUIDE_JOURNEYS) {
@@ -67,8 +70,20 @@ test("an unknown journey is an error, not an empty run", () => {
   // `--only produkt-tour` must not exit 0 having recorded nothing.
   assert.throws(() => journeyById("nope"), /Unknown journey/);
   assert.throws(() => selectJourneys(["nope"]), /Unknown journey/);
-  assert.equal(selectJourneys([]).length, GUIDE_JOURNEYS.length);
+  assert.deepEqual(selectJourneys([]).map((j) => j.id), DEFAULT_JOURNEY_IDS);
   assert.deepEqual(selectJourneys(["product-tour"]).map((j) => j.id), ["product-tour"]);
+});
+
+test("an opt-in journey is recorded only when it is named", () => {
+  // Its fixture data cannot come from `seed:demo`, so a default run that
+  // included it would fail on missing seed data instead of recording anything.
+  const optIn = GUIDE_JOURNEYS.filter((journey) => journey.optIn);
+  assert.ok(optIn.length > 0, "the opt-in path needs at least one journey to pin");
+  for (const journey of optIn) {
+    assert.ok(journey.fixture, `${journey.id} must name the fixture it needs`);
+    assert.ok(!selectJourneys([]).some((selected) => selected.id === journey.id));
+    assert.deepEqual(selectJourneys([journey.id]).map((j) => j.id), [journey.id]);
+  }
 });
 
 test("requiredIdKindsForJourneys dedupes across steps and journeys", () => {
@@ -431,8 +446,8 @@ test("a failed promotion is a partial result, not an aborted run", async () => {
   assert.equal(result.code, "partial");
   assert.match(result.failures[0].error, /EXDEV/);
   // The second journey still ran and still succeeded.
-  assert.equal(result.recorded.length, GUIDE_JOURNEYS.length - 1);
-  assert.equal(attempts, GUIDE_JOURNEYS.length, "every journey attempted promotion");
+  assert.equal(result.recorded.length, DEFAULT_JOURNEY_IDS.length - 1);
+  assert.equal(attempts, DEFAULT_JOURNEY_IDS.length, "every journey attempted promotion");
   // The take that could not be promoted was cleaned up.
   assert.deepEqual(discarded, ["/tmp/raw-video.webm"]);
 });
@@ -469,7 +484,7 @@ test("a context that fails to open does not abort the remaining tours", async ()
 
   assert.equal(result.code, "partial");
   assert.equal(result.failures.length, 1);
-  assert.equal(result.recorded.length, GUIDE_JOURNEYS.length - 1);
+  assert.equal(result.recorded.length, DEFAULT_JOURNEY_IDS.length - 1);
 });
 
 test("every journey has a committed mp4, and guide/video holds nothing else", async () => {
