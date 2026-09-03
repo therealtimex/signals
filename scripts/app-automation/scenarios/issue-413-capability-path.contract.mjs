@@ -30,7 +30,7 @@ export default defineContract({
   checkpoints: [
     {
       id: "activation-gate-locked",
-      ui: "approval reads as locked status rather than a control, and explains the assist-only surface matrix",
+      ui: "approval reads as a locked state marker in the control column rather than a control, and explains the assist-only surface matrix",
       data: "template requireApproval is true",
       capture: "nurture-approval-gate",
       never: ["approval switch while the gate is locked", "autonomous or publish promise"],
@@ -38,13 +38,14 @@ export default defineContract({
         ok: ui.mode === "locked_explicit"
           && ui.reason === "assist_only_mandate"
           && ui.switchCount === 0
-          && ui.status.startsWith("Approval required")
+          && ui.status.startsWith("Approval before anything is sent")
+          && ui.stateChip === "Required"
           && JSON.stringify(ui.surfaceRows) === JSON.stringify(data.surfaceRows)
           && ui.lockedCopy.includes("every nurture surface")
           && ui.operatorChoiceCopyCount === 0
           && ui.autonomyActionCount === 0
           && data.requireApproval === true,
-        detail: `gate=${ui.mode}/${ui.reason}; status="${ui.status}"; switches=${ui.switchCount}; rows=${ui.surfaceRows.length}/${data.surfaceRows.length}; operatorChoice=${ui.operatorChoiceCopyCount}; autonomyActions=${ui.autonomyActionCount}; config=${data.requireApproval}`,
+        detail: `gate=${ui.mode}/${ui.reason}; state="${ui.stateChip}"; switches=${ui.switchCount}; rows=${ui.surfaceRows.length}/${data.surfaceRows.length}; operatorChoice=${ui.operatorChoiceCopyCount}; autonomyActions=${ui.autonomyActionCount}; config=${data.requireApproval}`,
       }),
     },
     {

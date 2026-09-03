@@ -50,7 +50,11 @@ describe("ContactNurtureFields", () => {
     expect(html).toContain("45s delay");
     expect(html).toContain('data-mode="locked_explicit"');
     expect(html).toContain('data-reason="assist_only_mandate"');
-    expect(html).toContain("Approval required");
+    expect(html).toContain("Approval before anything is sent");
+    // State has to be visible in the control column, not only in prose: an
+    // empty state column read as "nothing is enforcing approval".
+    expect(html).toContain('data-testid="nurture-approval-state"');
+    expect(html).toContain("Required");
     expect(html).toContain("Nothing is sent from this run");
     expect(html).toContain("every nurture surface on X is draft-only");
     // A derived gate is state, not a setting: no switch claims a choice that
@@ -124,6 +128,6 @@ describe("ContactNurtureFields", () => {
     expect(html).toContain("Require approval before anything is sent");
     expect(html).toContain('id="nurture-approval"');
     expect(html).not.toMatch(/id="nurture-approval"[^>]*disabled/);
-    expect(html).not.toContain("Approval required");
+    expect(html).not.toContain('data-testid="nurture-approval-state"');
   });
 });

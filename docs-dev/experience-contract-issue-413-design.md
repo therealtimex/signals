@@ -27,6 +27,25 @@
 | ADR-413-12 | The review-path fixture is a **server-side seed** (`scripts/seed-experience-fixture.ts` → `src/lib/db/seed-fixtures/nurture-proposals.ts`) behind `demo-seed-guard`, that mints a real scope token, creates the launch through `upsert_launch` (so the composition is server-stamped) and the variants through `upsertVariantUseCase` with valid intents, audits, and Personality snapshots. It **requires** an existing bound Personality and a represented acting target and fails with `fixture_precondition_unmet` otherwise. It never writes rows around the use-cases. | The scenario proves UI ↔ persisted-state agreement and the approval path, not the LLM. A fixture that bypassed the use-cases would prove nothing about the gates the approve button must pass. |
 | ADR-413-13 | The nurture brief's N5 no longer branches on `requireApproval`. It states the persisted gate and tells the agent that approvals, rejections, and revision requests may arrive from the Signals run page, so it must **re-read persisted variant state** before `materialize_variant` and before `complete_workflow_run`. | Two approval channels, one persisted truth. Idempotent materialization already handles the race; the brief has to stop the agent from re-presenting an already-decided proposal. |
 
+### Follow-up to ADR-413-2a (2026-09-03, post-v0.2.7)
+
+**A derived state still has to occupy the control column.** The first status treatment put a lock
+glyph at label weight inside a muted card and left the right-hand column — where every other row in
+the dialog shows its state — empty. Read at a glance next to an obviously-on *Auto-achieve* switch
+and an obviously-off *Start fresh thread* switch, the approval block registered as explanatory
+chrome, and the first reader of the shipped build concluded the opposite of what its copy says:
+that nothing was enforcing approval and the agent could act unattended.
+
+Removing a false affordance was right; removing the signal with it was not, and the failure mode is
+worse than the one it replaced. A disabled switch misrepresents *the operator's* control; an absent
+marker misrepresents *the system's* guarantee, which is the direction that costs trust.
+
+So `locked_explicit` now renders `Approval before anything is sent` with a **`🔒 Required` badge in
+the switches' column**, in the accent colour and at their visual weight. It is still not a control:
+no role, no focus, nothing to operate. The checkpoint gains `ui.stateChip === "Required"` beside
+`ui.switchCount === 0`, so "the state is legible where state lives" is asserted rather than assumed
+— the assertion the previous revision was missing.
+
 ### Amendment ADR-413-2a (2026-09-02, post-v0.2.6)
 
 **ADR-413-2's locked switch is replaced by a locked *status*.** In `locked_explicit` the gate now

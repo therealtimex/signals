@@ -3,6 +3,7 @@
 import { useCallback } from "react";
 import Link from "next/link";
 import { Lock } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -204,15 +205,29 @@ export function ContactNurtureFields({
           data-reason={gate.reason}
         >
           {gate.mode === "locked_explicit" ? (
-            // Status, not a setting. The gate is derived from surface
-            // capabilities, so there is no choice to offer — and a switch, even
-            // a disabled one, still claims there is. A disabled control also
-            // leaves the tab order, so the reason never reaches a keyboard user.
-            <div className="space-y-0.5" data-testid="nurture-approval-status">
-              <p className="flex items-center gap-1.5 text-sm font-medium">
-                <Lock className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
-                Approval required
-              </p>
+            // Status, not a setting: the gate is derived from surface
+            // capabilities, so there is no choice to offer, and a switch — even
+            // a disabled one — claims there is.
+            //
+            // But state still has to be *loud*. The first pass put the lock at
+            // label weight and left the control column empty, and a reader
+            // scanning the dialog read "no control, no state" and concluded the
+            // agent might act unattended — the opposite of what the copy says,
+            // and the dangerous direction to be wrong in. So the chip sits
+            // where the row's state belongs, in the same column and at the same
+            // visual weight as the switches below it.
+            <div className="space-y-1" data-testid="nurture-approval-status">
+              <div className="flex items-start justify-between gap-3">
+                <p className="text-sm font-medium">Approval before anything is sent</p>
+                <Badge
+                  variant="outline"
+                  className="gap-1 border-primary/40 bg-primary/15 font-semibold text-primary"
+                  data-testid="nurture-approval-state"
+                >
+                  <Lock className="h-3 w-3" aria-hidden="true" />
+                  Required
+                </Badge>
+              </div>
               <p className="text-xs text-muted-foreground">
                 {`Nothing is sent from this run — every nurture surface on ${platformLabel(gate.platform)} is draft-only. The agent drafts and audits; you approve each proposal in the thread or on the run page.`}
               </p>
