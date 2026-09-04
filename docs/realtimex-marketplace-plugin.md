@@ -16,12 +16,12 @@ Package and distribute Signals through the **RealtimeX marketplace** — not pub
 Plugin id: `com.realtimex.signals`  
 Local app id: `47e45f71-3279-42f5-8e95-731de01b6eae`
 
-Version 0.2.11 unblocks the contact enrichment pipeline. A deferred X hydration no longer ends all
-work for that contact: avatar and persona steps are independent of hydration and now run regardless,
-so a single tripped scraping breaker — which holds a fifteen-minute cooldown — can no longer withhold
-avatar caching from every remaining contact in a batch. Runs also report how many contacts were
-deferred, so a stalled pipeline is visible in its own record rather than only in aggregate. This
-builds on 0.2.10, which made avatars render reliably by caching them locally.
+Version 0.2.12 fills the avatar cache on its own. A scheduled sweep works through contacts that
+still lack a locally stored avatar, doing avatar work only — so it keeps running when profile
+hydration or persona generation are unavailable, which previously stalled the whole pass. Contacts
+whose photo comes from a platform CDN are taken first, since those hosts are unmetered and the
+public avatar resolver is capped at roughly fifty requests a day; the sweep stands down for a while
+once that resolver starts refusing, rather than spending the remaining allowance to no effect.
 `signals-writing` stays at 1.1.0.
 
 ## Build
