@@ -25,6 +25,12 @@ import {
 } from "@/lib/db/contact-profile-embed-sweep";
 import { PROFILE_PIPELINE_DRAIN_JOB_TYPE } from "@/lib/db/profile-pipeline-drain";
 import {
+  AVATAR_CACHE_SWEEP_JOB_TYPE,
+  ensureAvatarCacheSweepJob,
+  runAvatarCacheSweep,
+} from "@/lib/db/avatar-cache-sweep";
+import { AVATAR_THROTTLE_COOLDOWN_SECONDS } from "@/lib/db/queries/profile-pipeline-backlog";
+import {
   DEDUPE_MERGE_JOB_TYPE,
   runScheduledDedupeMerge,
 } from "@/lib/contacts/dedupe/scheduled-merge";
@@ -45,6 +51,9 @@ const TEMPLATE_TO_WORKFLOW_TYPE: Record<string, WorkflowType> = {
   nurture: "agent",
 };
 
+/** Gap between productive avatar sweeps — paced, since the resolver behind them is metered. */
+const AVATAR_CACHE_SWEEP_DELAY_SECONDS = 15 * 60;
+
 type MaintenanceHandler = (payload: Record<string, unknown>) => unknown;
 
 const MAINTENANCE_HANDLERS: Record<string, MaintenanceHandler> = {
@@ -64,6 +73,18 @@ const MAINTENANCE_HANDLERS: Record<string, MaintenanceHandler> = {
     const report = await runContactProfileEmbedSweep();
     if (!report.complete && report.remaining > 0 && report.errors.length === 0) {
       ensureContactProfileEmbedSweepJob();
+    }
+    return report;
+  },
+  [AVATAR_CACHE_SWEEP_JOB_TYPE]: async () => {
+    const report = await runAvatarCacheSweep();
+    if (!report.complete) {
+      const now = Math.floor(Date.now() / 1000);
+      // A sweep that gave up on throttling waits out the same cooldown the contacts got; a
+      // productive one comes back promptly. Without the first case this would spin against a
+      // resolver that is refusing everything.
+      const delay = report.stoppedEarly ? AVATAR_THROTTLE_COOLDOWN_SECONDS : AVATAR_CACHE_SWEEP_DELAY_SECONDS;
+      ensureAvatarCacheSweepJob(now, now + delay);
     }
     return report;
   },
@@ -97,6 +118,13 @@ export function initScheduler(): void {
   initialized = true;
 
   console.log("[scheduler] Initializing background scheduler...");
+
+  // Avatar caching has to make progress without anyone pressing Run (#435).
+  try {
+    ensureAvatarCacheSweepJob();
+  } catch (error) {
+    console.error("[scheduler] Failed to arm avatar cache sweep:", error);
+  }
 
   // Check for overdue jobs immediately
   checkDueJobs();
