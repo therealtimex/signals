@@ -87,7 +87,16 @@ export type PipelineRunResult = {
   failed: number;
   aborted: number;
   avatarOutcomes: { updated: number; gravatarVerified: number };
-  hydrationOutcomes: { updated: number; notFound: number };
+  hydrationOutcomes: {
+    updated: number;
+    notFound: number;
+    /**
+     * Contacts whose hydration was skipped by the anonymous-X cooldown. Surfaced because that
+     * breaker lives in a module-level variable — without this a stalled pipeline leaves no trace
+     * in the run record and takes aggregating many runs to spot (#436).
+     */
+    deferred: number;
+  };
   cleared: number;
   remainingBacklog: number;
   complete: boolean;

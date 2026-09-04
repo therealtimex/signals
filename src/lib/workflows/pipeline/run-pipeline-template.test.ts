@@ -764,18 +764,20 @@ describe("runPipelineTemplate", () => {
       env: process.env,
     });
 
-    expect(avatar).not.toHaveBeenCalled();
-    expect(persona).not.toHaveBeenCalled();
+    // A deferred hydration must not withhold unrelated work: the avatar and persona steps do not
+    // depend on X hydration, and hydration is not a backlog criterion (#436).
+    expect(avatar).toHaveBeenCalled();
+    expect(persona).toHaveBeenCalled();
     expect(
       listWorkflowSteps(run.id)
         .filter((step) => step.stepType === "tool_call")
         .map((step) => `${step.tool}:${step.contactId}`),
-    ).toEqual([`x_profile_hydrate:${contact.id}`]);
+    ).toContain(`x_profile_hydrate:${contact.id}`);
     expect(JSON.parse(getWorkflowRun(run.id)?.result ?? "{}")).toMatchObject({
       processed: 1,
-      cleared: 0,
-      remainingBacklog: 1,
       skipped: { x_web_deferred: 1 },
+      // The stalled breaker now explains itself in the run record.
+      hydrationOutcomes: { deferred: 1 },
     });
   });
 
@@ -852,7 +854,9 @@ describe("runPipelineTemplate", () => {
       env: process.env,
     });
 
-    expect(visited).toEqual([contactIds[1]]);
+    // The deferred contact now reaches persona too — deferral no longer ends its work (#436) —
+    // and the abort on the second contact still leaves the third untouched.
+    expect(visited).toEqual([contactIds[0], contactIds[1]]);
     const completed = getWorkflowRun(run.id);
     expect(completed?.processedItems).toBe(2);
     expect(JSON.parse(completed?.result ?? "{}")).toMatchObject({
