@@ -1,7 +1,11 @@
 import { and, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import { db } from "@/lib/db/client";
-import { planProfilePipelineRun } from "@/lib/db/queries/profile-pipeline-backlog";
+import { db, sqlite } from "@/lib/db/client";
+import {
+  AVATAR_ENRICH_RETRY_SECONDS,
+  AVATAR_THROTTLE_COOLDOWN_SECONDS,
+  planProfilePipelineRun,
+} from "@/lib/db/queries/profile-pipeline-backlog";
 import { scheduledJobs } from "@/lib/db/schema";
 import { enrichContactAvatars } from "@/lib/workflows/pipeline/handlers/enrich-contact-avatars";
 
@@ -39,16 +43,70 @@ function nowUnix(): number {
   return Math.floor(Date.now() / 1000);
 }
 
-/** Contacts still needing a locally cached avatar, lowest enrichment first. */
+/**
+ * Contacts eligible for avatar work whose source is a platform CDN rather than the metered
+ * resolver. Selecting these directly matters: the general backlog is ordered by enrichment score,
+ * so a 25-contact window almost never contains one of the ~335 CDN-backed contacts scattered
+ * through a ~2,900-row backlog, and the sweep trips its transient guard without ever reaching work
+ * it could have done (#435).
+ *
+ * The eligibility guards mirror `needsAvatarPredicate`; only the source filter is extra.
+ */
+function listUnmeteredCandidates(limit: number, now: number): string[] {
+  const retryCutoff = now - AVATAR_ENRICH_RETRY_SECONDS;
+  const throttleCutoff = now - AVATAR_THROTTLE_COOLDOWN_SECONDS;
+
+  return sqlite
+    .prepare(
+      `SELECT c.id AS id
+         FROM contacts c
+         JOIN contact_identities i ON i.contact_id = c.id AND i.is_active = 1
+        WHERE json_extract(c.metadata, '$.archived') IS NOT 1
+          AND c.is_self = 0
+          AND json_extract(c.metadata, '$.platformActor') IS NOT 1
+          AND json_extract(c.metadata, '$.avatarEnrich.gravatarVerifiedAt') IS NULL
+          AND (json_extract(c.metadata, '$.avatarEnrich.exhaustedAt') IS NULL
+               OR json_extract(c.metadata, '$.avatarEnrich.exhaustedAt') < ?)
+          AND (json_extract(c.metadata, '$.avatarEnrich.throttledAt') IS NULL
+               OR json_extract(c.metadata, '$.avatarEnrich.throttledAt') < ?)
+          AND NOT EXISTS (SELECT 1 FROM media_attachments m
+                           WHERE m.parent_type = 'contact' AND m.parent_id = c.id
+                             AND m.role = 'avatar')
+          AND (i.avatar_url LIKE '%licdn.com%'
+               OR i.avatar_url LIKE '%pbs.twimg.com%'
+               OR i.platform_data LIKE '%profile_image_url%'
+               OR i.platform_data LIKE '%photoUrl%'
+               OR i.platform_data LIKE '%"picture"%')
+        GROUP BY c.id
+        ORDER BY c.enrichment_score ASC, c.updated_at ASC, c.id ASC
+        LIMIT ?`,
+    )
+    .all(retryCutoff, throttleCutoff, limit)
+    .map((row) => (row as { id: string }).id);
+}
+
+/**
+ * Contacts still needing a locally cached avatar. Unmetered sources are selected first and the
+ * remainder topped up from the general backlog, so a refusing resolver never hides available work.
+ */
 export function planAvatarCacheSweep(limit = AVATAR_CACHE_SWEEP_BATCH): {
   contactIds: string[];
   backlogTotal: number;
 } {
+  const now = Math.floor(Date.now() / 1000);
+  const unmetered = listUnmeteredCandidates(limit, now);
   const plan = planProfilePipelineRun({
     batchSize: limit,
     filters: { needsAvatar: true, needsPersona: false, personaStale: false },
   });
-  return { contactIds: plan.selectedContactIds, backlogTotal: plan.backlogTotal };
+
+  const seen = new Set(unmetered);
+  const topUp = plan.selectedContactIds.filter((id) => !seen.has(id));
+
+  return {
+    contactIds: [...unmetered, ...topUp].slice(0, limit),
+    backlogTotal: plan.backlogTotal,
+  };
 }
 
 export async function runAvatarCacheSweep(opts?: {

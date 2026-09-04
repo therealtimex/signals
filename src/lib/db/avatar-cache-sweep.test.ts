@@ -6,6 +6,7 @@ import { contactIdentities, scheduledJobs } from "@/lib/db/schema";
 import { loadContactAvatarUploadAssetId } from "@/lib/db/queries/contact-dto";
 import {
   AVATAR_CACHE_SWEEP_JOB_TYPE,
+  planAvatarCacheSweep,
   AVATAR_CACHE_SWEEP_TRANSIENT_LIMIT,
   ensureAvatarCacheSweepJob,
   runAvatarCacheSweep,
@@ -90,6 +91,47 @@ describe("runAvatarCacheSweep", () => {
     expect(report.cached).toBe(2);
     expect(report.complete).toBe(false);
     expect(report.remaining).toBe(2);
+  });
+});
+
+describe("planAvatarCacheSweep", () => {
+  beforeEach(() => {
+    resetCoreTables();
+  });
+
+  it("selects CDN-backed contacts ahead of resolver-only ones", () => {
+    // The general backlog is ordered by enrichment score, so without an explicit pull the handful
+    // of CDN-backed contacts never appear in a small window and the sweep trips its transient
+    // guard on resolver-only contacts instead (#435).
+    const resolverOnly: string[] = [];
+    for (let i = 0; i < 30; i++) resolverOnly.push(seedContactNeedingAvatar(`Resolver ${i}`));
+
+    const cdnBacked = createContact({ name: "CDN backed" });
+    db.insert(contactIdentities)
+      .values({
+        id: nanoid(),
+        contactId: cdnBacked.id,
+        platform: "linkedin",
+        platformUserId: "cdn-backed",
+        avatarUrl: "https://media.licdn.com/dms/image/photo.jpg",
+        isPrimary: 1,
+        isActive: 1,
+      })
+      .run();
+
+    const plan = planAvatarCacheSweep(5);
+
+    expect(plan.contactIds[0]).toBe(cdnBacked.id);
+    expect(plan.contactIds).toHaveLength(5);
+    expect(plan.backlogTotal).toBeGreaterThan(5);
+  });
+
+  it("still fills the batch from the general backlog when no unmetered work exists", () => {
+    for (let i = 0; i < 4; i++) seedContactNeedingAvatar(`Resolver ${i}`);
+
+    const plan = planAvatarCacheSweep(10);
+
+    expect(plan.contactIds).toHaveLength(4);
   });
 });
 
