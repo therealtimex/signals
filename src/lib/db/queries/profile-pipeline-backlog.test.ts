@@ -5,6 +5,7 @@ import { createContact, updateContact } from "@/lib/db/queries/contacts";
 import { upsertPersona } from "@/lib/db/queries/personas";
 import {
   AVATAR_ENRICH_RETRY_SECONDS,
+  AVATAR_THROTTLE_COOLDOWN_SECONDS,
   countProfilePipelineBacklog,
   PIPELINE_PLANNERS,
   planProfilePipelineRun,
@@ -146,6 +147,36 @@ describe("profile pipeline backlog", () => {
     expect(() => planProfilePipelineRun({ contactIds: ["missing-id"] })).toThrow(
       ProfilePipelineValidationError,
     );
+  });
+
+  it("stands a throttled contact down so the queue advances past it", () => {
+    // Selection order is deterministic: without a cooldown the same failing batch is re-picked
+    // every run and every contact behind it starves.
+    const now = Math.floor(Date.now() / 1000);
+    const throttled = createContact({
+      name: "Throttled",
+      metadata: JSON.stringify({ avatarEnrich: { throttledAt: now - 60 } }),
+    });
+    db.insert(contactIdentities)
+      .values({
+        id: nanoid(),
+        contactId: throttled.id,
+        platform: "linkedin",
+        platformUserId: "throttled-slug",
+        isPrimary: 1,
+        isActive: 1,
+      })
+      .run();
+
+    expect(countProfilePipelineBacklog({ needsAvatar: true, needsPersona: false })).toBe(0);
+
+    updateContact(throttled.id, {
+      metadata: JSON.stringify({
+        avatarEnrich: { throttledAt: now - AVATAR_THROTTLE_COOLDOWN_SECONDS - 60 },
+      }),
+    });
+
+    expect(countProfilePipelineBacklog({ needsAvatar: true, needsPersona: false })).toBe(1);
   });
 
   it("keeps a contact with only a remote avatar in the backlog until it is cached", () => {
