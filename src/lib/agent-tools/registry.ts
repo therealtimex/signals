@@ -253,7 +253,8 @@ export const AGENT_TOOLS: Record<string, AgentToolDefinition> = {
   },
   create_contact: {
     name: "create_contact",
-    description: "Create a new contact record. At minimum a name is required.",
+    description:
+      "Create a new contact record. At minimum a name is required. Pass avatarUrl whenever a profile photo is obtainable — contacts saved without one render as bare initials and are not backfilled automatically.",
     category: "contacts",
     schema: createContactSchema,
     parameters: zodToParameters(createContactSchema),

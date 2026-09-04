@@ -54,11 +54,15 @@ function convert(schema: z.ZodTypeAny): Record<string, unknown> {
   };
 
   switch (def.typeName) {
+    // `.optional().describe(...)` hangs the description on the wrapper, so unwrapping blind
+    // silently drops it — and the tool schema is the only place an agent reads field guidance.
     case "ZodOptional":
     case "ZodNullable":
-      return convert(def.innerType!);
     case "ZodDefault":
-      return convert(def.innerType!);
+      return {
+        ...convert(def.innerType!),
+        ...(def.description ? { description: def.description } : {}),
+      };
     case "ZodObject": {
       const shape = def.shape?.() ?? {};
       const properties: Record<string, unknown> = {};

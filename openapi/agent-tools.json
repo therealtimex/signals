@@ -466,7 +466,8 @@
                             "type": "string"
                           },
                           "avatarUrl": {
-                            "type": "string"
+                            "type": "string",
+                            "description": "Public https URL of the contact's profile photo. Set it whenever a photo is obtainable — a contact saved without one renders as bare initials in the Contacts list and nothing backfills it automatically. When a page scrape yields nothing, resolve it: https://unavatar.io/linkedin/user:{slug} for a LinkedIn person, https://unavatar.io/linkedin/company:{slug} for a LinkedIn organization page (the namespaces are not interchangeable — each 404s for the other's slugs), or https://unavatar.io/x/{handle} for X. Must be http(s); file:// URLs and local paths are rejected."
                           },
                           "notes": {
                             "type": "string"
@@ -770,10 +771,12 @@
                                   "type": "string"
                                 },
                                 "startedAt": {
-                                  "type": "number"
+                                  "type": "number",
+                                  "description": "UTC Unix seconds; omit when the profile date is too vague to normalize"
                                 },
                                 "endedAt": {
-                                  "type": "number"
+                                  "type": "number",
+                                  "description": "UTC Unix seconds; omit for current roles or vague profile dates"
                                 },
                                 "isCurrent": {
                                   "type": "boolean"
@@ -879,7 +882,8 @@
                             "type": "string"
                           },
                           "avatarUrl": {
-                            "type": "string"
+                            "type": "string",
+                            "description": "Public https URL of the contact's profile photo. Set it whenever a photo is obtainable — a contact saved without one renders as bare initials in the Contacts list and nothing backfills it automatically. When a page scrape yields nothing, resolve it: https://unavatar.io/linkedin/user:{slug} for a LinkedIn person, https://unavatar.io/linkedin/company:{slug} for a LinkedIn organization page (the namespaces are not interchangeable — each 404s for the other's slugs), or https://unavatar.io/x/{handle} for X. Must be http(s); file:// URLs and local paths are rejected."
                           },
                           "location": {
                             "type": "string"
@@ -1246,28 +1250,34 @@
                             "enum": [
                               "completed",
                               "failed"
-                            ]
+                            ],
+                            "description": "Final status of the workflow run"
                           },
                           "processedItems": {
-                            "type": "number"
+                            "type": "number",
+                            "description": "Number of items processed"
                           },
                           "successItems": {
-                            "type": "number"
+                            "type": "number",
+                            "description": "Number of items successfully processed"
                           },
                           "createdContactIds": {
                             "type": "array",
                             "items": {
                               "type": "string"
-                            }
+                            },
+                            "description": "IDs of newly created/discovered contacts in this run"
                           },
                           "summary": {
-                            "type": "string"
+                            "type": "string",
+                            "description": "Summary of the run results and mapped cluster"
                           },
                           "errors": {
                             "type": "array",
                             "items": {
                               "type": "string"
-                            }
+                            },
+                            "description": "Any error messages encountered during the run"
                           },
                           "result": {
                             "type": "object",
@@ -1355,7 +1365,8 @@
                                 "type": "string"
                               }
                             },
-                            "additionalProperties": false
+                            "additionalProperties": false,
+                            "description": "Structured workflow-specific result fields persisted on the run"
                           }
                         },
                         "required": [
@@ -1541,7 +1552,8 @@
                             "items": {
                               "type": "string",
                               "description": "Ordered continuation unit; allowed only for thread drafts."
-                            }
+                            },
+                            "description": "Required and non-empty for threads; forbidden for posts."
                           },
                           "mediaAssetIds": {
                             "type": "array",
@@ -1550,7 +1562,8 @@
                             }
                           },
                           "targetId": {
-                            "type": "string"
+                            "type": "string",
+                            "description": "When present, the target must be active and match platform."
                           },
                           "origin": {
                             "type": "object",
@@ -1601,7 +1614,8 @@
                             "type": "array",
                             "items": {
                               "type": "string"
-                            }
+                            },
+                            "description": "Only valid for a thread; replaces all continuation units."
                           },
                           "mediaAssetIds": {
                             "type": "array",

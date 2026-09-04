@@ -26,6 +26,19 @@ function buildCtx(fetchImpl: typeof fetch): PipelineStepContext {
   };
 }
 
+/** unavatar/gravatar probes only care about status + content-type. */
+function imageResponse(status = 200, contentType = "image/jpeg"): Response {
+  return new Response(null, { status, headers: { "content-type": contentType } });
+}
+
+/** Answers `hit` for the listed URLs and 404 for everything else. */
+function avatarFetch(hits: string[]): typeof fetch {
+  return vi.fn(async (input: RequestInfo | URL) => {
+    const url = typeof input === "string" ? input : input.toString();
+    return hits.includes(url) ? imageResponse() : new Response(null, { status: 404 });
+  }) as unknown as typeof fetch;
+}
+
 function readAvatarEnrich(contactId: string) {
   const row = db.select().from(contacts).where(eq(contacts.id, contactId)).get();
   const metadata = JSON.parse(row?.metadata ?? "{}") as {
@@ -339,7 +352,10 @@ describe("enrichContactAvatars", () => {
       isActive: 1,
     });
 
-    const report = await enrichContactAvatars([contact.id], buildCtx(vi.fn()));
+    const report = await enrichContactAvatars(
+      [contact.id],
+      buildCtx(avatarFetch(["https://unavatar.io/x/torvalds"])),
+    );
 
     expect(report.outcomes[0]).toMatchObject({
       contactId: contact.id,
@@ -360,7 +376,10 @@ describe("enrichContactAvatars", () => {
       isActive: 1,
     });
 
-    const report = await enrichContactAvatars([contact.id], buildCtx(vi.fn()));
+    const report = await enrichContactAvatars(
+      [contact.id],
+      buildCtx(avatarFetch(["https://unavatar.io/linkedin/user:timi-digifa"])),
+    );
 
     expect(report.outcomes[0]).toMatchObject({
       contactId: contact.id,
@@ -370,6 +389,86 @@ describe("enrichContactAvatars", () => {
     expect(getIdentityById(identity.id)?.avatarUrl).toBe(
       "https://unavatar.io/linkedin/user:timi-digifa",
     );
+  });
+
+  it("falls back to the company: namespace when a LinkedIn slug is an organization page", async () => {
+    const contact = createContact({ name: "a16z Speedrun" });
+    const identity = createIdentity({
+      contactId: contact.id,
+      platform: "linkedin",
+      platformUserId: "a16zspeedrun",
+      platformHandle: "a16zspeedrun",
+      isPrimary: 1,
+      isActive: 1,
+    });
+
+    const report = await enrichContactAvatars(
+      [contact.id],
+      buildCtx(avatarFetch(["https://unavatar.io/linkedin/company:a16zspeedrun"])),
+    );
+
+    expect(report.outcomes[0]).toMatchObject({ contactId: contact.id, status: "updated" });
+    expect(getIdentityById(identity.id)?.avatarUrl).toBe(
+      "https://unavatar.io/linkedin/company:a16zspeedrun",
+    );
+  });
+
+  it("never persists a resolver URL that does not serve an image", async () => {
+    const contact = createContact({ name: "Nobody Home" });
+    const identity = createIdentity({
+      contactId: contact.id,
+      platform: "linkedin",
+      platformUserId: "ghost-slug",
+      platformHandle: "ghost-slug",
+      isPrimary: 1,
+      isActive: 1,
+    });
+
+    const report = await enrichContactAvatars([contact.id], buildCtx(avatarFetch([])));
+
+    expect(report.outcomes[0]).toMatchObject({ status: "skipped", reason: "no_source" });
+    expect(getIdentityById(identity.id)?.avatarUrl).toBeNull();
+  });
+
+  it("treats an HTML error page served with 200 as a miss", async () => {
+    const contact = createContact({ name: "Html Body" });
+    const identity = createIdentity({
+      contactId: contact.id,
+      platform: "linkedin",
+      platformUserId: "html-slug",
+      platformHandle: "html-slug",
+      isPrimary: 1,
+      isActive: 1,
+    });
+
+    const fetchImpl = vi.fn(async () => imageResponse(200, "text/html")) as unknown as typeof fetch;
+    const report = await enrichContactAvatars([contact.id], buildCtx(fetchImpl));
+
+    expect(report.outcomes[0]).toMatchObject({ status: "skipped", reason: "no_source" });
+    expect(getIdentityById(identity.id)?.avatarUrl).toBeNull();
+  });
+
+  it("keeps a throttled contact in the backlog instead of banking it as exhausted", async () => {
+    const contact = createContact({ name: "Rate Limited" });
+    const identity = createIdentity({
+      contactId: contact.id,
+      platform: "linkedin",
+      platformUserId: "throttled-slug",
+      platformHandle: "throttled-slug",
+      isPrimary: 1,
+      isActive: 1,
+    });
+
+    const fetchImpl = vi.fn(async () => new Response(null, { status: 429 })) as unknown as typeof fetch;
+    const report = await enrichContactAvatars([contact.id], buildCtx(fetchImpl));
+
+    expect(report.outcomes[0]).toMatchObject({
+      contactId: contact.id,
+      status: "failed",
+      detail: { source: "identity_platform" },
+    });
+    expect(getIdentityById(identity.id)?.avatarUrl).toBeNull();
+    expect(readAvatarEnrich(contact.id).exhaustedAt).toBeUndefined();
   });
 });
 
