@@ -16,16 +16,15 @@ Package and distribute Signals through the **RealtimeX marketplace** — not pub
 Plugin id: `com.realtimex.signals`  
 Local app id: `47e45f71-3279-42f5-8e95-731de01b6eae`
 
-Version 0.2.8 packages `signals-writing` 1.1.0 with reusable writing intents for nurture workflows.
-Writing agents read the four workspace Personality files first, use only the active binding
-selector, and refuse the full audited/materialized lane until Personality is bound. Contact
-Relationship Nurture composes assist-only reply, comment, message, and proposal drafts through the
-same Personality, target, audit, approval, materialization, and lineage boundary. Its approval gate
-is derived from surface capabilities rather than operator choice: every current nurture surface is
-draft-only, so activation presents approval as a locked state marker rather than a setting, a stale
-`requireApproval: false` dispatch is rejected instead of silently converted, and completed runs
-surface their pending proposals for approval, revision, or rejection on the run page. The provisioned
-`AGENTS.md` includes the permanent Personality pointer.
+Version 0.2.9 closes the contact-avatar gap end to end. Network Snowball no longer treats a blank
+avatar as an acceptable outcome: the unavatar fallback is mandatory, split across the `user:` and
+`company:` namespaces so LinkedIn organization pages resolve instead of 404ing, verified for an
+`image/*` 200 before it is saved, and reported as `avatars: N/M` so an incomplete run is visible.
+The avatar field is named on the write path agents actually use rather than only in a CSV header.
+The Contact profile pipeline now chains batches, so the enrichment backlog drains instead of
+clearing one batch per manual run, and avatar resolution stops handing the UI Gravatar URLs for
+addresses that have no Gravatar — those contacts fall straight through to initials rather than a
+broken image. `signals-writing` stays at 1.1.0.
 
 ## Build
 
