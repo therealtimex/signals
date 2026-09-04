@@ -484,6 +484,8 @@ describe("enrichContactAvatars", () => {
     });
     expect(getIdentityById(identity.id)?.avatarUrl).toBeNull();
     expect(readAvatarEnrich(contact.id).exhaustedAt).toBeUndefined();
+    // Backed off so the next batch moves past it instead of re-picking the same head of queue.
+    expect(readAvatarEnrich(contact.id).throttledAt).toEqual(expect.any(Number));
   });
 });
 
