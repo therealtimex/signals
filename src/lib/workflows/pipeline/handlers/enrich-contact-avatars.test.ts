@@ -7,6 +7,7 @@ import { createContact } from "@/lib/db/queries/contacts";
 import { createIdentity, getIdentityById, updateIdentity } from "@/lib/db/queries/identities";
 import { createMediaAsset } from "@/lib/db/queries/media";
 import { createMediaAttachment } from "@/lib/db/queries/media-attachments";
+import { loadContactAvatarUploadAssetId } from "@/lib/db/queries/contact-dto";
 import { db } from "@/lib/db/client";
 import { contacts } from "@/lib/db/schema";
 import type { PipelineStepContext } from "@/lib/workflows/pipeline/types";
@@ -26,9 +27,18 @@ function buildCtx(fetchImpl: typeof fetch): PipelineStepContext {
   };
 }
 
-/** unavatar/gravatar probes only care about status + content-type. */
-function imageResponse(status = 200, contentType = "image/jpeg"): Response {
-  return new Response(null, { status, headers: { "content-type": contentType } });
+/** The avatar cache downloads the body, so responses need real bytes. */
+const PIXEL = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+  "base64",
+);
+
+function imageResponse(status = 200, contentType = "image/png"): Response {
+  return new Response(new Uint8Array(PIXEL), { status, headers: { "content-type": contentType } });
+}
+
+function avatarAssetIdFor(contactId: string): string | null {
+  return loadContactAvatarUploadAssetId(contactId);
 }
 
 /** Answers `hit` for the listed URLs and 404 for everything else. */
@@ -53,7 +63,8 @@ describe("enrichContactAvatars", () => {
     vi.restoreAllMocks();
   });
 
-  it("skips avatar_present when an active identity already has avatar_url", async () => {
+  it("pulls an existing remote identity avatar into the local cache", async () => {
+    // A remote URL is not "present" — it breaks as soon as the host throttles (#431).
     const contact = createContact({ name: "Has Avatar", platform: "x", platformUserId: "has-avatar" });
     createIdentity({
       contactId: contact.id,
@@ -64,13 +75,17 @@ describe("enrichContactAvatars", () => {
       isActive: 1,
     });
 
-    const recalcSpy = vi.spyOn(enrichmentRecalc, "recalcContactEnrichment");
-    const report = await enrichContactAvatars([contact.id], buildCtx(vi.fn()));
+    const report = await enrichContactAvatars(
+      [contact.id],
+      buildCtx(avatarFetch(["https://cdn.example/avatar.jpg"])),
+    );
 
-    expect(report.outcomes).toEqual([
-      { contactId: contact.id, status: "skipped", reason: "avatar_present" },
-    ]);
-    expect(recalcSpy).not.toHaveBeenCalled();
+    expect(report.outcomes[0]).toMatchObject({
+      contactId: contact.id,
+      status: "updated",
+      detail: { source: "identity_avatar" },
+    });
+    expect(avatarAssetIdFor(contact.id)).toBeTruthy();
   });
 
   it("skips avatar_present when a contact avatar upload attachment exists", async () => {
@@ -134,7 +149,7 @@ describe("enrichContactAvatars", () => {
     updateIdentity(identity.id, { avatarUrl: null });
 
     const recalcSpy = vi.spyOn(enrichmentRecalc, "recalcContactEnrichment");
-    const report = await enrichContactAvatars([contact.id], buildCtx(vi.fn()));
+    const report = await enrichContactAvatars([contact.id], buildCtx(avatarFetch(["https://pbs.twimg.com/profile_400x400.jpg"])));
 
     expect(report.outcomes[0]).toMatchObject({
       contactId: contact.id,
@@ -157,7 +172,7 @@ describe("enrichContactAvatars", () => {
     });
     updateIdentity(identity.id, { avatarUrl: null });
 
-    const report = await enrichContactAvatars([contact.id], buildCtx(vi.fn()));
+    const report = await enrichContactAvatars([contact.id], buildCtx(avatarFetch(["https://media.licdn.com/photo.jpg"])));
 
     expect(report.outcomes[0]?.status).toBe("updated");
     expect(getIdentityById(identity.id)?.avatarUrl).toBe("https://media.licdn.com/photo.jpg");
@@ -175,7 +190,7 @@ describe("enrichContactAvatars", () => {
     });
     updateIdentity(identity.id, { avatarUrl: null });
 
-    const report = await enrichContactAvatars([contact.id], buildCtx(vi.fn()));
+    const report = await enrichContactAvatars([contact.id], buildCtx(avatarFetch(["https://lh3.googleusercontent.com/a/photo"])));
 
     expect(report.outcomes[0]?.status).toBe("updated");
     expect(getIdentityById(identity.id)?.avatarUrl).toBe("https://lh3.googleusercontent.com/a/photo");
@@ -219,7 +234,7 @@ describe("enrichContactAvatars", () => {
     });
 
     const recalcSpy = vi.spyOn(enrichmentRecalc, "recalcContactEnrichment");
-    const report = await enrichContactAvatars([contact.id], buildCtx(vi.fn()));
+    const report = await enrichContactAvatars([contact.id], buildCtx(avatarFetch(["https://legacy.example/avatar.jpg"])));
 
     expect(report.outcomes[0]).toMatchObject({
       contactId: contact.id,
@@ -465,7 +480,7 @@ describe("enrichContactAvatars", () => {
     expect(report.outcomes[0]).toMatchObject({
       contactId: contact.id,
       status: "failed",
-      detail: { source: "identity_platform" },
+      detail: { source: "avatar_cache" },
     });
     expect(getIdentityById(identity.id)?.avatarUrl).toBeNull();
     expect(readAvatarEnrich(contact.id).exhaustedAt).toBeUndefined();

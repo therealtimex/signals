@@ -4,6 +4,8 @@ import { db } from "@/lib/db/client";
 import { createContact, archiveContact } from "@/lib/db/queries/contacts";
 import { createIdentity } from "@/lib/db/queries/identities";
 import { upsertPersona } from "@/lib/db/queries/personas";
+import { createMediaAsset } from "@/lib/db/queries/media";
+import { createMediaAttachment } from "@/lib/db/queries/media-attachments";
 import {
   contactPersonas,
   contacts,
@@ -107,6 +109,28 @@ export function setContactOrdering(
     .run();
 }
 
+/**
+ * Avatar work is complete only once the bytes are local (#431) — a remote URL on the identity is
+ * still pending. Cohorts that model "avatar done" need the cached attachment, not just a URL.
+ */
+export function seedCachedAvatar(contactId: string): void {
+  const asset = createMediaAsset({
+    filename: "avatar.png",
+    storagePath: `${nanoid()}.png`,
+    mimeType: "image/png",
+    fileSize: 16,
+    origin: "platform_cache",
+    sourceUrl: "https://example.com/avatar.jpg",
+    scope: "local_only",
+  });
+  createMediaAttachment({
+    mediaAssetId: asset.id,
+    parentType: "contact",
+    parentId: contactId,
+    role: "avatar",
+  });
+}
+
 function seedProfiledContact(index: number): FixtureContact {
   const contact = createContact({
     name: `Profiled ${index}`,
@@ -114,6 +138,7 @@ function seedProfiledContact(index: number): FixtureContact {
     platformUserId: nanoid(),
   });
   seedActiveIdentity(contact.id, { avatarUrl: "https://example.com/avatar.jpg" });
+  seedCachedAvatar(contact.id);
   seedSharedPersona(contact.id);
   const enrichmentScore = 10_000 + index;
   const updatedAt = 20_000 + index;
@@ -142,6 +167,7 @@ function seedPersonaOnlyBacklog(index: number): FixtureContact {
     platformUserId: nanoid(),
   });
   seedActiveIdentity(contact.id, { avatarUrl: "https://example.com/avatar.jpg" });
+  seedCachedAvatar(contact.id);
   seedEvidence(contact.id);
   const enrichmentScore = index;
   const updatedAt = 1_000 + index;
@@ -170,6 +196,7 @@ function seedStaleOnly(index: number, now: number): FixtureContact {
     platformUserId: nanoid(),
   });
   seedActiveIdentity(contact.id, { avatarUrl: "https://example.com/avatar.jpg" });
+  seedCachedAvatar(contact.id);
   seedSharedPersona(contact.id, now - PERSONA_STALE_AFTER_SECONDS - 10);
   const enrichmentScore = 50_000 + index;
   const updatedAt = 50_000 + index;
@@ -240,6 +267,7 @@ export function buildProfilePipelineFixture(
     platformUserId: nanoid(),
   });
   seedActiveIdentity(localOnlyPersona.id, { avatarUrl: "https://example.com/avatar.jpg" });
+  seedCachedAvatar(localOnlyPersona.id);
   upsertPersona({
     contactId: localOnlyPersona.id,
     archetype: "Local",

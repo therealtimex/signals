@@ -123,7 +123,8 @@ describe("buildNetworkSnowballBriefSection", () => {
     expect(brief).toContain("pv-top-card-profile-picture__image");
     expect(brief).toContain("unavatar.io/linkedin/user:");
     expect(brief).toContain("unavatar.io/linkedin/company:");
-    expect(brief).toContain("Fallback is required, not optional");
+    expect(brief).toContain("Prefer the platform CDN");
+    expect(brief).toContain("Resolver is the last resort");
     // Blank was once an explicitly sanctioned outcome, which made avatar capture a coin flip.
     expect(brief).not.toContain("or leave avatar_url blank");
     expect(brief).toContain("avatarUrl");

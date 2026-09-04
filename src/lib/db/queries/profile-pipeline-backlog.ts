@@ -103,24 +103,6 @@ function hasActiveIdentity(): SQL {
   );
 }
 
-function activeIdentityWithAvatar(): SQL {
-  return exists(
-    db
-      .select({ id: contactIdentities.id })
-      .from(contactIdentities)
-      .where(
-        and(
-          eq(contactIdentities.contactId, contacts.id),
-          eq(contactIdentities.isActive, 1),
-          // Must match the runtime's trimmed-truthy check (`hasAvatarPresent`, `pickIdentityAvatar`).
-          // A bare IS NOT NULL counts an empty string as "has avatar", which would drop the contact
-          // out of the backlog forever while it still renders initials.
-          sql`${contactIdentities.avatarUrl} IS NOT NULL AND trim(${contactIdentities.avatarUrl}) <> ''`,
-        ),
-      ),
-  );
-}
-
 function hasAvatarMediaAttachment(): SQL {
   return exists(
     db
@@ -138,9 +120,10 @@ function hasAvatarMediaAttachment(): SQL {
 
 function needsAvatarPredicate(now: number): SQL {
   const retryCutoff = now - AVATAR_ENRICH_RETRY_SECONDS;
+  // A locally cached avatar is the only completion signal. A remote identity URL is *not* done:
+  // it still has to be pulled local, or it breaks the moment the resolver throttles (#431).
   return and(
     hasActiveIdentity(),
-    not(activeIdentityWithAvatar()),
     not(hasAvatarMediaAttachment()),
     sql`json_extract(${contacts.metadata}, '$.avatarEnrich.gravatarVerifiedAt') IS NULL`,
     or(
