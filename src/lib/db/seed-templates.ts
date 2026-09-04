@@ -28,7 +28,7 @@ import { buildWritingTemplateConfig } from "@/lib/workflows/signals-writing";
 import { buildContactWebResearchTemplateConfig } from "@/lib/workflows/contact-web-research";
 
 /** Bump this when seed template prompts change to trigger updates on existing installs. */
-const SEED_VERSION = 30;
+const SEED_VERSION = 31;
 
 export const CONTACT_PROFILE_PIPELINE_TEMPLATE_NAME = "Contact profile pipeline";
 export const CONTACT_WEB_RESEARCH_TEMPLATE_NAME = "Contact Web Research";
@@ -264,7 +264,11 @@ Find email addresses for contacts that don't have one.
         planner: "contact_profile",
         batchSize: 20,
         filters: { needsAvatar: true, needsPersona: true, personaStale: false },
-        scheduleDrain: false,
+        // Without this a run clears at most `batchSize` contacts and stops, so the backlog only
+        // shrinks as fast as someone presses Run. The re-arm in run-pipeline-template already
+        // requires `cleared > 0`, so a batch that makes no progress (e.g. a throttled resolver)
+        // ends the chain instead of looping.
+        scheduleDrain: true,
         steps: [
           { id: "hydrate", executor: "code", handler: "hydrate_x_profiles" },
           { id: "avatar", executor: "code", handler: "enrich_contact_avatars" },
@@ -726,6 +730,10 @@ export function seedTemplates(): { seeded: number; updated: number; skipped: boo
               version: seededPipeline.version,
               planner: seededPipeline.planner,
               steps: seededPipeline.steps,
+              // Structural, like the nurture opt-in above: batch chaining is the mechanism that
+              // makes the backlog drain at all, not an operator-tuned budget. `batchSize` stays
+              // whatever the install chose.
+              scheduleDrain: seededPipeline.scheduleDrain,
             };
           }
         }

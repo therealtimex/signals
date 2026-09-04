@@ -112,7 +112,10 @@ function activeIdentityWithAvatar(): SQL {
         and(
           eq(contactIdentities.contactId, contacts.id),
           eq(contactIdentities.isActive, 1),
-          sql`${contactIdentities.avatarUrl} IS NOT NULL`,
+          // Must match the runtime's trimmed-truthy check (`hasAvatarPresent`, `pickIdentityAvatar`).
+          // A bare IS NOT NULL counts an empty string as "has avatar", which would drop the contact
+          // out of the backlog forever while it still renders initials.
+          sql`${contactIdentities.avatarUrl} IS NOT NULL AND trim(${contactIdentities.avatarUrl}) <> ''`,
         ),
       ),
   );

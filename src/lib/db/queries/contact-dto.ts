@@ -3,7 +3,10 @@ import { db } from "@/lib/db/client";
 import { contactChannels, mediaAttachments } from "@/lib/db/schema";
 import type { Contact, ContactChannel, ContactEmployment, ContactIdentity } from "@/lib/db/types";
 import type { CreatedSource } from "@/lib/db/creation-sources";
-import { resolveContactAvatar } from "@/lib/db/queries/resolve-contact-avatar";
+import {
+  hasVerifiedGravatar,
+  resolveContactAvatar,
+} from "@/lib/db/queries/resolve-contact-avatar";
 import {
   resolveContactProfile,
   type ContactProfile,
@@ -116,6 +119,7 @@ export function assembleContactDto(
     avatarUploadAssetId,
     identities,
     primaryEmail,
+    gravatarVerified: hasVerifiedGravatar(contact.metadata),
   });
   const profile = resolveContactProfile({ identities });
   const profileUrl = resolvePrimaryIdentityPlatformUrl(identities);
