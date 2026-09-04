@@ -10,7 +10,7 @@ import {
 } from "@/lib/db/queries/contact-dto";
 import { updateIdentity } from "@/lib/db/queries/identities";
 import type { ContactIdentity } from "@/lib/db/types";
-import { buildLinkedInUnavatarUrl } from "@/lib/platforms/linkedin/unavatar-url";
+import { buildLinkedInUnavatarCandidates } from "@/lib/platforms/linkedin/unavatar-url";
 import type {
   PipelineContactOutcome,
   PipelineStepContext,
@@ -19,6 +19,7 @@ import type {
 
 export const ENRICH_CONTACT_AVATARS_HANDLER = "enrich_contact_avatars";
 const GRAVATAR_PROBE_TIMEOUT_MS = 5_000;
+const AVATAR_PROBE_TIMEOUT_MS = 5_000;
 
 type AvatarEnrichMetadata = {
   gravatarVerifiedAt?: number;
@@ -178,26 +179,77 @@ function recoverAvatarFromLegacyMetadata(
   return { identity: primary, avatarUrl };
 }
 
-function recoverAvatarFromIdentityPlatform(
+type AvatarProbe =
+  | { status: "hit" }
+  | { status: "miss" }
+  | { status: "transient"; message: string };
+
+/**
+ * A resolver URL is only worth persisting once it actually serves an image. unavatar answers
+ * 404 for a slug that does not exist in the requested namespace, so an unprobed URL silently
+ * becomes a permanent broken avatar in the contact list.
+ */
+async function probeAvatarUrl(url: string, fetchImpl: typeof fetch): Promise<AvatarProbe> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), AVATAR_PROBE_TIMEOUT_MS);
+
+  try {
+    const response = await fetchImpl(url, { method: "GET", signal: controller.signal });
+    // 429 is unavatar throttling us, not a verdict on the slug — retry on a later run.
+    if (response.status === 429 || response.status >= 500) {
+      return { status: "transient", message: `Avatar probe returned ${response.status}` };
+    }
+    if (!response.ok) return { status: "miss" };
+    const contentType = response.headers.get("content-type") ?? "";
+    return contentType.toLowerCase().startsWith("image/") ? { status: "hit" } : { status: "miss" };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Avatar probe failed";
+    return { status: "transient", message };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function identityAvatarCandidates(identity: ContactIdentity): string[] {
+  if (identity.platform === "x" && identity.platformHandle?.trim()) {
+    const cleanHandle = identity.platformHandle.trim().replace(/^@/, "");
+    if (/^[a-zA-Z0-9_]{1,15}$/.test(cleanHandle)) {
+      return [`https://unavatar.io/x/${cleanHandle}`];
+    }
+    return [];
+  }
+  if (identity.platform === "linkedin") {
+    const slug = identity.platformHandle?.trim() || identity.platformUserId?.trim() || "";
+    return buildLinkedInUnavatarCandidates(slug);
+  }
+  return [];
+}
+
+type IdentityPlatformRecovery =
+  | { status: "found"; identity: ContactIdentity; avatarUrl: string }
+  | { status: "none" }
+  | { status: "transient"; message: string };
+
+async function recoverAvatarFromIdentityPlatform(
   identities: ContactIdentity[],
-): { identity: ContactIdentity; avatarUrl: string } | undefined {
+  fetchImpl: typeof fetch,
+): Promise<IdentityPlatformRecovery> {
+  let transient: string | undefined;
+
   for (const identity of orderIdentitiesForRecovery(identities)) {
     if (identity.avatarUrl?.trim()) continue;
-    if (identity.platform === "x" && identity.platformHandle?.trim()) {
-      const cleanHandle = identity.platformHandle.trim().replace(/^@/, "");
-      if (/^[a-zA-Z0-9_]{1,15}$/.test(cleanHandle)) {
-        return { identity, avatarUrl: `https://unavatar.io/x/${cleanHandle}` };
+    for (const avatarUrl of identityAvatarCandidates(identity)) {
+      const probe = await probeAvatarUrl(avatarUrl, fetchImpl);
+      if (probe.status === "hit") {
+        return { status: "found", identity, avatarUrl };
       }
-    }
-    if (identity.platform === "linkedin") {
-      const slug = identity.platformHandle?.trim() || identity.platformUserId?.trim() || "";
-      const avatarUrl = buildLinkedInUnavatarUrl(slug);
-      if (avatarUrl) {
-        return { identity, avatarUrl };
+      if (probe.status === "transient") {
+        transient ??= probe.message;
       }
     }
   }
-  return undefined;
+
+  return transient ? { status: "transient", message: transient } : { status: "none" };
 }
 
 function gravatarProbeUrl(email: string): string {
@@ -275,14 +327,23 @@ async function enrichOneContact(
     };
   }
 
-  const identityPlatformRecovery = recoverAvatarFromIdentityPlatform(identities);
-  if (identityPlatformRecovery) {
+  const identityPlatformRecovery = await recoverAvatarFromIdentityPlatform(identities, ctx.fetchImpl);
+  if (identityPlatformRecovery.status === "found") {
     updateIdentity(identityPlatformRecovery.identity.id, { avatarUrl: identityPlatformRecovery.avatarUrl });
     recalcContactEnrichment(contactId);
     return {
       contactId,
       status: "updated",
       detail: { source: "identity_platform", identityId: identityPlatformRecovery.identity.id },
+    };
+  }
+  // Leave the contact in the backlog rather than banking a throttled probe as "no source".
+  if (identityPlatformRecovery.status === "transient") {
+    return {
+      contactId,
+      status: "failed",
+      reason: identityPlatformRecovery.message,
+      detail: { source: "identity_platform" },
     };
   }
 

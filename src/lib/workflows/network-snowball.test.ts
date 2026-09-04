@@ -122,6 +122,12 @@ describe("buildNetworkSnowballBriefSection", () => {
     expect(brief).toContain("Identity-First Avatar Extraction");
     expect(brief).toContain("pv-top-card-profile-picture__image");
     expect(brief).toContain("unavatar.io/linkedin/user:");
+    expect(brief).toContain("unavatar.io/linkedin/company:");
+    expect(brief).toContain("Fallback is required, not optional");
+    // Blank was once an explicitly sanctioned outcome, which made avatar capture a coin flip.
+    expect(brief).not.toContain("or leave avatar_url blank");
+    expect(brief).toContain("avatarUrl");
+    expect(brief).toContain("avatars: N/M");
     expect(brief).toContain("workflow-runs/run_snow_1/contacts.csv");
     expect(brief).toContain(
       ".claude/skills/realtimex-signals/scripts/run-signals-pp-cli.sh import contacts --file workflow-runs/run_snow_1/contacts.csv --dedupe --workflow-run-id run_snow_1 --template-id tpl_snow_1",

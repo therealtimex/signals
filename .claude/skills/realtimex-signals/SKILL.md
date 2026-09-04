@@ -181,6 +181,23 @@ Signals resolves avatars in this order:
 - **Never** set `avatarUrl` to `file://`, absolute filesystem paths, or bare filenames — they will not render in Signals.
 - **Never** treat `GenerateImage` output as linked until you upload it through Signals media.
 - After upload, `get_contact` returns `resolvedAvatarUrl` like `/api/media/<assetId>` (served by the Local App).
+- **Set an avatar on every contact you create.** Nothing backfills one automatically — `enrich_contact_avatars`
+  only runs as a step of the "Contact profile pipeline" template, so a contact written without an avatar
+  renders as bare initials until that pipeline happens to reach it.
+
+### Resolver fallback when you have no scraped photo
+
+Use unavatar, and pick the namespace by the profile URL you actually visited — they are **not**
+interchangeable, each 404s for the other's slugs:
+
+| Profile | Resolver |
+|---|---|
+| `linkedin.com/in/{slug}` (person) | `https://unavatar.io/linkedin/user:{slug}` |
+| `linkedin.com/company/{slug}` (organization) | `https://unavatar.io/linkedin/company:{slug}` |
+| `x.com/{handle}` | `https://unavatar.io/x/{handle}` |
+
+Verify HTTP 200 with an `image/*` content-type before saving. HTTP 429 means unavatar is throttling —
+back off and retry rather than dropping the avatar.
 
 ### Set avatar from a local/generated image
 
