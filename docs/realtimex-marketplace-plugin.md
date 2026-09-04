@@ -16,17 +16,13 @@ Package and distribute Signals through the **RealtimeX marketplace** — not pub
 Plugin id: `com.realtimex.signals`  
 Local app id: `47e45f71-3279-42f5-8e95-731de01b6eae`
 
-Version 0.2.10 makes contact avatars render reliably. Avatars are now fetched once and cached as
-local media assets, so the contact list is served from disk instead of re-fetching every row from a
-third party on each render — the previous behaviour depended on a resolver capped near 50 requests
-a day, which meant a single scroll exhausted the quota and rows fell back to initials. A locally
-cached avatar, rather than a URL stored on the identity, is now what counts as done, so contacts
-holding only a remote URL are re-queued and pulled local; throttled fetches are treated as
-temporary and retried rather than written off. Network Snowball now always records an avatar,
-prefers the platform CDN over the metered resolver, and addresses LinkedIn organization pages
-through the correct namespace. The enrichment backlog drains in chained batches instead of one
-batch per manual run, and contacts without a verified Gravatar resolve to initials directly rather
-than to a URL that cannot load. `signals-writing` stays at 1.1.0.
+Version 0.2.11 unblocks the contact enrichment pipeline. A deferred X hydration no longer ends all
+work for that contact: avatar and persona steps are independent of hydration and now run regardless,
+so a single tripped scraping breaker — which holds a fifteen-minute cooldown — can no longer withhold
+avatar caching from every remaining contact in a batch. Runs also report how many contacts were
+deferred, so a stalled pipeline is visible in its own record rather than only in aggregate. This
+builds on 0.2.10, which made avatars render reliably by caching them locally.
+`signals-writing` stays at 1.1.0.
 
 ## Build
 
