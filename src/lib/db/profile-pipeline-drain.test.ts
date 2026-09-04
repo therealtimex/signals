@@ -2,7 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { createTemplate } from "@/lib/db/queries/workflow-templates";
 import { createWorkflowRun, getWorkflowRun } from "@/lib/db/queries/workflows";
-import { buildProfilePipelineFixture } from "@/test/profile-pipeline-fixture";
+import {
+  buildProfilePipelineFixture,
+  seedCachedAvatar,
+} from "@/test/profile-pipeline-fixture";
 import { planProfilePipelineRun } from "@/lib/db/queries/profile-pipeline-backlog";
 import { db } from "@/lib/db/client";
 import { contactIdentities, scheduledJobs, workflowRuns } from "@/lib/db/schema";
@@ -124,10 +127,8 @@ describe("profile pipeline drain", () => {
       async (ids, ctx) => {
         const now = Math.floor(Date.now() / 1000);
         const outcomes = ids.map((contactId) => {
-          db.update(contactIdentities)
-            .set({ avatarUrl: "https://example.com/fixed.jpg", updatedAt: now })
-            .where(eq(contactIdentities.contactId, contactId))
-            .run();
+          // Real handler completion is a cached avatar, not a remote URL (#431).
+          seedCachedAvatar(contactId);
           return {
             contactId,
             status: "updated" as const,

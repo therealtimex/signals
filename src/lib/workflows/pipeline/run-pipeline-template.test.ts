@@ -10,6 +10,7 @@ import {
 import { createTemplate, getTemplate } from "@/lib/db/queries/workflow-templates";
 import { createWorkflowRun, getWorkflowRun, listWorkflowSteps } from "@/lib/db/queries/workflows";
 import { getRtxRefsFromRunConfig } from "@/lib/agents/run-template-via-rtx";
+import { seedCachedAvatar } from "@/test/profile-pipeline-fixture";
 import { db } from "@/lib/db/client";
 import { contentItems, contentPosts, platformAccounts } from "@/lib/db/schema";
 import { X_ANON_DEFERRED_REASON } from "@/lib/platforms/x/anon-web-constants";
@@ -45,6 +46,8 @@ function seedPersonaOnlyBacklogContact(name: string) {
     isActive: 1,
     avatarUrl: "https://example.com/avatar.jpg",
   });
+  // Persona-only means avatar work is complete, which now means cached locally (#431).
+  seedCachedAvatar(contact.id);
   const now = Math.floor(Date.now() / 1000);
   const itemId = nanoid();
   db.insert(contentItems)

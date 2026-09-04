@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { nanoid } from "nanoid";
+import { loadContactAvatarUploadAssetId } from "@/lib/db/queries/contact-dto";
 import { db } from "@/lib/db/client";
 import { createContact, getContactById } from "@/lib/db/queries/contacts";
 import { createIdentity, getIdentityById, updateIdentity } from "@/lib/db/queries/identities";
@@ -117,6 +118,21 @@ function xProfileHtml(id: string, handle: string): string {
 </head><body>Public profile</body></html>`;
 }
 
+const AVATAR_PIXEL = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+  "base64",
+);
+
+/** The avatar step downloads now (#431); keep it off the real network. */
+function stubAvatarFetch(): typeof fetch {
+  return vi.fn(async () =>
+    new Response(new Uint8Array(AVATAR_PIXEL), {
+      status: 200,
+      headers: { "content-type": "image/png" },
+    }),
+  ) as unknown as typeof fetch;
+}
+
 describe("hydrateXProfiles", () => {
   beforeEach(() => {
     resetCoreTables();
@@ -169,12 +185,11 @@ describe("hydrateXProfiles", () => {
     });
     const avatarReport = await enrichContactAvatars(
       [contact.id],
-      { ...ctx, stepId: "avatar" },
+      { ...ctx, stepId: "avatar", fetchImpl: stubAvatarFetch() },
     );
-    expect(avatarReport.outcomes[0]).toMatchObject({
-      status: "skipped",
-      reason: "avatar_present",
-    });
+    // The hydrated CDN URL is pulled local rather than left as a render-time dependency (#431).
+    expect(avatarReport.outcomes[0]).toMatchObject({ status: "updated" });
+    expect(loadContactAvatarUploadAssetId(contact.id)).toBeTruthy();
   });
 
   it("does not overwrite user-edited identity/contact fields or accept an invalid avatar URL", async () => {
@@ -449,9 +464,10 @@ describe("hydrateXProfiles", () => {
     });
     const avatarReport = await enrichContactAvatars(
       [disconnected.contact.id],
-      { ...ctx, stepId: "avatar" },
+      { ...ctx, stepId: "avatar", fetchImpl: stubAvatarFetch() },
     );
-    expect(avatarReport.outcomes[0]).toMatchObject({ status: "skipped", reason: "avatar_present" });
+    expect(avatarReport.outcomes[0]).toMatchObject({ status: "updated" });
+    expect(loadContactAvatarUploadAssetId(disconnected.contact.id)).toBeTruthy();
   });
 
   it("reuses and disposes one anonymous web session across contact-major calls", async () => {

@@ -19,6 +19,7 @@ import {
   type FixtureContact,
   seedActiveIdentity,
   seedEvidence,
+  seedCachedAvatar,
   seedSharedPersona,
   setContactOrdering,
 } from "@/test/profile-pipeline-fixture";
@@ -117,17 +118,8 @@ describe("profile pipeline backlog", () => {
     const clearedCount = 5;
 
     for (const contactId of firstPlan.selectedContactIds.slice(0, clearedCount)) {
-      const identity = db
-        .select()
-        .from(contactIdentities)
-        .where(eq(contactIdentities.contactId, contactId))
-        .get();
-      if (identity) {
-        db.update(contactIdentities)
-          .set({ avatarUrl: "https://example.com/cleared.jpg" })
-          .where(eq(contactIdentities.id, identity.id))
-          .run();
-      }
+      // Clearing avatar work means the bytes are local, not that a remote URL was written (#431).
+      seedCachedAvatar(contactId);
       seedSharedPersona(contactId);
     }
 
@@ -156,17 +148,16 @@ describe("profile pipeline backlog", () => {
     );
   });
 
-  it("counts an empty-string identity avatar as still needing one", () => {
-    // The runtime uses a trimmed-truthy check, so `''` renders as initials. A bare IS NOT NULL in
-    // the predicate would call that "has avatar" and strand the contact outside the backlog.
-    const contact = createContact({ name: "Empty Avatar" });
+  it("keeps a contact with only a remote avatar in the backlog until it is cached", () => {
+    // A URL on the identity is not completion — it breaks as soon as the host throttles (#431).
+    const contact = createContact({ name: "Remote Only" });
     db.insert(contactIdentities)
       .values({
         id: nanoid(),
         contactId: contact.id,
         platform: "linkedin",
-        platformUserId: "empty-avatar",
-        avatarUrl: "",
+        platformUserId: "remote-only",
+        avatarUrl: "https://unavatar.io/linkedin/user:remote-only",
         isPrimary: 1,
         isActive: 1,
       })
@@ -174,10 +165,7 @@ describe("profile pipeline backlog", () => {
 
     expect(countProfilePipelineBacklog({ needsAvatar: true, needsPersona: false })).toBe(1);
 
-    db.update(contactIdentities)
-      .set({ avatarUrl: "https://cdn.example/real.jpg" })
-      .where(eq(contactIdentities.contactId, contact.id))
-      .run();
+    seedCachedAvatar(contact.id);
 
     expect(countProfilePipelineBacklog({ needsAvatar: true, needsPersona: false })).toBe(0);
   });
