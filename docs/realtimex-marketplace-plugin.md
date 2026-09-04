@@ -16,16 +16,17 @@ Package and distribute Signals through the **RealtimeX marketplace** — not pub
 Plugin id: `com.realtimex.signals`  
 Local app id: `47e45f71-3279-42f5-8e95-731de01b6eae`
 
-Version 0.2.8 packages `signals-writing` 1.1.0 with reusable writing intents for nurture workflows.
-Writing agents read the four workspace Personality files first, use only the active binding
-selector, and refuse the full audited/materialized lane until Personality is bound. Contact
-Relationship Nurture composes assist-only reply, comment, message, and proposal drafts through the
-same Personality, target, audit, approval, materialization, and lineage boundary. Its approval gate
-is derived from surface capabilities rather than operator choice: every current nurture surface is
-draft-only, so activation presents approval as a locked state marker rather than a setting, a stale
-`requireApproval: false` dispatch is rejected instead of silently converted, and completed runs
-surface their pending proposals for approval, revision, or rejection on the run page. The provisioned
-`AGENTS.md` includes the permanent Personality pointer.
+Version 0.2.10 makes contact avatars render reliably. Avatars are now fetched once and cached as
+local media assets, so the contact list is served from disk instead of re-fetching every row from a
+third party on each render — the previous behaviour depended on a resolver capped near 50 requests
+a day, which meant a single scroll exhausted the quota and rows fell back to initials. A locally
+cached avatar, rather than a URL stored on the identity, is now what counts as done, so contacts
+holding only a remote URL are re-queued and pulled local; throttled fetches are treated as
+temporary and retried rather than written off. Network Snowball now always records an avatar,
+prefers the platform CDN over the metered resolver, and addresses LinkedIn organization pages
+through the correct namespace. The enrichment backlog drains in chained batches instead of one
+batch per manual run, and contacts without a verified Gravatar resolve to initials directly rather
+than to a URL that cannot load. `signals-writing` stays at 1.1.0.
 
 ## Build
 

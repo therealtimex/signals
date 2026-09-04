@@ -26,6 +26,8 @@ type AvatarEnrichMetadata = {
   gravatarVerifiedAt?: number;
   gravatarMissAt?: number;
   exhaustedAt?: number;
+  /** Last transient failure (throttling, 5xx, network). Backs the contact off so the queue moves. */
+  throttledAt?: number;
 };
 
 function nowUnix(): number {
@@ -73,6 +75,7 @@ function readAvatarEnrich(metadata: string | null): AvatarEnrichMetadata {
     gravatarMissAt:
       typeof record.gravatarMissAt === "number" ? record.gravatarMissAt : undefined,
     exhaustedAt: typeof record.exhaustedAt === "number" ? record.exhaustedAt : undefined,
+    throttledAt: typeof record.throttledAt === "number" ? record.throttledAt : undefined,
   };
 }
 
@@ -361,8 +364,11 @@ async function enrichOneContact(
       },
     };
   }
-  // Throttling is not a verdict on the contact — leave it in the backlog for a later batch.
+  // Throttling is not a verdict on the contact, so it stays in the backlog — but it must not stay
+  // at the *head* of it. The planner orders deterministically, so without a cooldown the same
+  // throttled batch is re-selected forever and everything behind it starves.
   if (commit.status === "transient") {
+    patchAvatarEnrichMetadata(contactId, { throttledAt: nowUnix() });
     return {
       contactId,
       status: "failed",
