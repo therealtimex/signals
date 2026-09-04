@@ -13,7 +13,10 @@ import {
 import { getOwnerContactId } from "@/lib/db/queries/contacts";
 import { loadContactAvatarUploadAssetId, resolveContactPrimaryEmail } from "@/lib/db/queries/contact-dto";
 import { getActivePersona } from "@/lib/db/queries/personas";
-import { resolveContactAvatar } from "@/lib/db/queries/resolve-contact-avatar";
+import {
+  hasVerifiedGravatar,
+  resolveContactAvatar,
+} from "@/lib/db/queries/resolve-contact-avatar";
 import { resolveContactProfile } from "@/lib/db/queries/resolve-contact-profile";
 import { isPersonaAgeStale } from "@/lib/persona/staleness";
 import type { ContactIdentity, IdentityMetric } from "@/lib/db/types";
@@ -478,6 +481,8 @@ export function getContactExploreCard(contactId: string): ContactExploreCard | u
       lastName: contacts.lastName,
       relationshipGoal: contacts.relationshipGoal,
       relationshipGoalStatus: contacts.relationshipGoalStatus,
+      // Carries `avatarEnrich.gravatarVerifiedAt` for the avatar resolver.
+      metadata: contacts.metadata,
     })
     .from(contacts)
     .where(eq(contacts.id, contactId))
@@ -503,6 +508,7 @@ export function getContactExploreCard(contactId: string): ContactExploreCard | u
     avatarUploadAssetId: loadContactAvatarUploadAssetId(contactId),
     identities: identityRows,
     primaryEmail: resolveContactPrimaryEmail(contactId),
+    gravatarVerified: hasVerifiedGravatar(contactRow.metadata),
   });
   const org = primaryOrgForContact(contactId);
 

@@ -5,6 +5,13 @@ export type ResolveContactAvatarInput = {
   avatarUploadAssetId?: string | null;
   identities: ContactIdentity[];
   primaryEmail?: string | null;
+  /**
+   * Whether `enrich_contact_avatars` has seen this address answer a Gravatar HEAD probe with 200.
+   * Gravatar is requested with `?d=404`, so an unverified address yields a broken image rather
+   * than a portrait — resolving to one is worse than resolving to nothing, because the caller
+   * treats a non-null URL as "this contact has an avatar".
+   */
+  gravatarVerified?: boolean;
 };
 
 function pickPrimaryIdentity(identities: ContactIdentity[]): ContactIdentity | undefined {
@@ -38,7 +45,18 @@ function gravatarUrlForEmail(email: string): string {
   return `https://www.gravatar.com/avatar/${hash}?d=404`;
 }
 
-/** Avatar resolution order: local upload → identity → Gravatar → null (initials client-side). */
+/** Reads `metadata.avatarEnrich.gravatarVerifiedAt`, written by the avatar-enrich handler. */
+export function hasVerifiedGravatar(metadata: string | null | undefined): boolean {
+  if (!metadata) return false;
+  try {
+    const root = JSON.parse(metadata) as { avatarEnrich?: { gravatarVerifiedAt?: unknown } };
+    return typeof root?.avatarEnrich?.gravatarVerifiedAt === "number";
+  } catch {
+    return false;
+  }
+}
+
+/** Avatar resolution order: local upload → identity → verified Gravatar → null (initials client-side). */
 export function resolveContactAvatar(input: ResolveContactAvatarInput): string | null {
   if (input.avatarUploadAssetId) {
     return `/api/media/${input.avatarUploadAssetId}`;
@@ -47,7 +65,7 @@ export function resolveContactAvatar(input: ResolveContactAvatarInput): string |
   const identityAvatar = pickIdentityAvatar(input.identities);
   if (identityAvatar) return identityAvatar;
 
-  if (input.primaryEmail?.trim()) {
+  if (input.gravatarVerified && input.primaryEmail?.trim()) {
     return gravatarUrlForEmail(input.primaryEmail);
   }
 

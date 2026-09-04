@@ -156,6 +156,32 @@ describe("profile pipeline backlog", () => {
     );
   });
 
+  it("counts an empty-string identity avatar as still needing one", () => {
+    // The runtime uses a trimmed-truthy check, so `''` renders as initials. A bare IS NOT NULL in
+    // the predicate would call that "has avatar" and strand the contact outside the backlog.
+    const contact = createContact({ name: "Empty Avatar" });
+    db.insert(contactIdentities)
+      .values({
+        id: nanoid(),
+        contactId: contact.id,
+        platform: "linkedin",
+        platformUserId: "empty-avatar",
+        avatarUrl: "",
+        isPrimary: 1,
+        isActive: 1,
+      })
+      .run();
+
+    expect(countProfilePipelineBacklog({ needsAvatar: true, needsPersona: false })).toBe(1);
+
+    db.update(contactIdentities)
+      .set({ avatarUrl: "https://cdn.example/real.jpg" })
+      .where(eq(contactIdentities.contactId, contact.id))
+      .run();
+
+    expect(countProfilePipelineBacklog({ needsAvatar: true, needsPersona: false })).toBe(0);
+  });
+
   it("keeps loop-unsafe contacts out of the backlog predicates", () => {
     const now = Math.floor(Date.now() / 1000);
     const fixture = buildProfilePipelineFixture(now);

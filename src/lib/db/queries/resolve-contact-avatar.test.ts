@@ -4,7 +4,10 @@ import { nanoid } from "nanoid";
 import { createContact } from "@/lib/db/queries/contacts";
 import { createMediaAttachment } from "@/lib/db/queries/media-attachments";
 import { createMediaAsset } from "@/lib/db/queries/media";
-import { resolveContactAvatar } from "@/lib/db/queries/resolve-contact-avatar";
+import {
+  hasVerifiedGravatar,
+  resolveContactAvatar,
+} from "@/lib/db/queries/resolve-contact-avatar";
 import { db } from "@/lib/db/client";
 import { contactIdentities } from "@/lib/db/schema";
 import { resetCoreTables } from "@/test/db";
@@ -75,9 +78,36 @@ describe("resolveContactAvatar", () => {
       resolveContactAvatar({
         identities: [],
         primaryEmail: "ada@example.com",
+        gravatarVerified: true,
       }),
     ).toBe(
       `https://www.gravatar.com/avatar/${createHash("md5").update("ada@example.com").digest("hex")}?d=404`,
     );
+  });
+
+  it("returns null rather than an unverified gravatar URL", () => {
+    // `?d=404` means an address with no Gravatar yields a broken image, and every caller reads a
+    // non-null result as "this contact has an avatar".
+    expect(resolveContactAvatar({ identities: [], primaryEmail: "ada@example.com" })).toBeNull();
+    expect(
+      resolveContactAvatar({
+        identities: [],
+        primaryEmail: "ada@example.com",
+        gravatarVerified: false,
+      }),
+    ).toBeNull();
+  });
+});
+
+describe("hasVerifiedGravatar", () => {
+  it("reads the enrich handler's verification stamp", () => {
+    expect(hasVerifiedGravatar('{"avatarEnrich":{"gravatarVerifiedAt":1700000000}}')).toBe(true);
+  });
+
+  it("is false for a miss, a missing stamp, junk, and null", () => {
+    expect(hasVerifiedGravatar('{"avatarEnrich":{"gravatarMissAt":1700000000}}')).toBe(false);
+    expect(hasVerifiedGravatar("{}")).toBe(false);
+    expect(hasVerifiedGravatar("not json")).toBe(false);
+    expect(hasVerifiedGravatar(null)).toBe(false);
   });
 });
