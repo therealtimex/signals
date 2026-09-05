@@ -23,6 +23,18 @@ function requireReplace(filePath, pattern, replacement, label) {
   }
 }
 
+/**
+ * Append generated-source helpers. Printing Press regenerates the tree on every build, so an
+ * appended function has to be re-appended each time rather than committed into `source/`.
+ */
+function appendToFile(filePath, contents, label) {
+  const current = fs.readFileSync(filePath, "utf8");
+  if (current.includes(contents.trim().split("\n")[0])) {
+    throw new Error(`patchSignalsCliSource: ${label} appears to be applied already in ${filePath}`);
+  }
+  fs.writeFileSync(filePath, `${current.replace(/\s*$/, "")}\n${contents}`);
+}
+
 export function replaceAllInTree(rootDir, replacer) {
   if (!fs.existsSync(rootDir)) return;
   for (const entry of fs.readdirSync(rootDir, { withFileTypes: true })) {
@@ -75,6 +87,90 @@ export function patchSignalsCliSource(sourceDir, version) {
     `if v := os.Getenv("SIGNALS_BASE_URL"); v != "" {\n\t\tcfg.BaseURL = v\n\t\tcfg.AuthSource = "env:SIGNALS_BASE_URL"\n\t} else if v := os.Getenv("SIGNALS_PP_CLI_BASE_URL"); v != "" {\n\t\tcfg.BaseURL = v\n\t}`,
     "SIGNALS_BASE_URL env override"
   );
+  // Without a base URL the generated CLI falls back to a hardcoded 127.0.0.1:3000 and fails,
+  // so every caller has had to export SIGNALS_BASE_URL by hand (#447). RealTimeX hosts the Local
+  // App and knows where it is; resolve it instead of making the caller say.
+  requireReplace(
+    configPath,
+    /\tif v := os\.Getenv\("SIGNALS_BASE_URL"\); v != "" \{\n\t\tcfg\.BaseURL = v\n\t\tcfg\.AuthSource = "env:SIGNALS_BASE_URL"\n\t\} else if v := os\.Getenv\("SIGNALS_PP_CLI_BASE_URL"\); v != "" \{\n\t\tcfg\.BaseURL = v\n\t\}/,
+    `\tif v := os.Getenv("SIGNALS_BASE_URL"); v != "" {\n\t\tcfg.BaseURL = v\n\t\tcfg.AuthSource = "env:SIGNALS_BASE_URL"\n\t} else if v := os.Getenv("SIGNALS_PP_CLI_BASE_URL"); v != "" {\n\t\tcfg.BaseURL = v\n\t} else if resolved := resolveSignalsBaseURL(); resolved != "" {\n\t\tcfg.BaseURL = resolved\n\t\tcfg.AuthSource = "resolved:" + resolved\n\t}`,
+    "Signals Local App base URL resolution"
+  );
+
+  requireReplace(
+    configPath,
+    /import \(\n\t"fmt"\n\t"os"\n/,
+    `import (\n\t"encoding/json"\n\t"fmt"\n\t"io"\n\t"net/http"\n\t"os"\n`,
+    "base URL resolution imports"
+  );
+
+  appendToFile(
+    configPath,
+    `
+
+// signalsHealthProbeTimeout bounds each candidate so an unreachable port cannot stall a command.
+const signalsHealthProbeTimeout = 2 * time.Second
+
+// resolveSignalsBaseURL locates the Signals Local App when no base URL was supplied (#447).
+//
+// It probes rather than reading the Local App registry, because a single RealtimeX install can
+// hold many Signals records — a live one plus stopped QA instances, several configured on the same
+// port. The registry answers "which Signals apps exist", not "which one is answering now", and a
+// Local App's own credential cannot enumerate its peers regardless.
+//
+// RTX_PORT and PORT come first: a process launched by the Local App runtime already knows its port.
+func resolveSignalsBaseURL() string {
+	candidates := make([]string, 0, 6)
+	for _, key := range []string{"RTX_PORT", "PORT"} {
+		if port := strings.TrimSpace(os.Getenv(key)); port != "" {
+			candidates = append(candidates, "http://localhost:"+port)
+		}
+	}
+	candidates = append(candidates,
+		"http://localhost:3010",
+		"http://localhost:3000",
+		"http://127.0.0.1:3010",
+		"http://127.0.0.1:3000",
+	)
+
+	client := &http.Client{Timeout: signalsHealthProbeTimeout}
+	seen := make(map[string]bool, len(candidates))
+	for _, base := range candidates {
+		base = strings.TrimSuffix(base, "/")
+		if seen[base] {
+			continue
+		}
+		seen[base] = true
+		if isSignalsHealthy(client, base) {
+			return base
+		}
+	}
+	return ""
+}
+
+// isSignalsHealthy accepts a candidate only when it identifies itself as Signals. Matching on a
+// reachable port alone would hand the CLI whatever else happens to be listening on 3000.
+func isSignalsHealthy(client *http.Client, base string) bool {
+	resp, err := client.Get(base + "/api/health")
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return false
+	}
+	var payload struct {
+		App string \`json:"app"\`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&payload); err != nil {
+		return false
+	}
+	return payload.App == "signals"
+}
+`,
+    "Signals base URL resolution helpers"
+  );
+
   requireReplace(
     configPath,
     /if v := os\.Getenv\("SIGNALS_AGENT_TOOL_TOKEN"\); v != "" \{\n\t\tcfg\.SignalsAgentToolToken = v\n\t\tcfg\.AuthSource = "env:SIGNALS_AGENT_TOOL_TOKEN"\n\t\}/,
