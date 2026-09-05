@@ -1,4 +1,4 @@
-import { and, eq, like, desc, count, or, isNotNull, isNull, sql, SQL } from "drizzle-orm";
+import { and, asc, eq, like, desc, count, or, isNotNull, isNull, sql, SQL } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db/client";
 import { contacts, graphEdges, orgDomains, orgs } from "@/lib/db/schema";
@@ -24,7 +24,20 @@ export type OrgRelationshipQueryOptions = {
   includeLocalOnly?: boolean;
 };
 
-export type OrgListRow = Org & { contactCount: number };
+export type OrgListRow = Org & {
+  contactCount: number;
+  /** Names of a few linked people, for the row subtitle. Orgs hold little else worth showing. */
+  linkedContactNames: string[];
+};
+
+/**
+ * Filters restricted to org fields that actually carry data. `accountStage`, `followedAt`,
+ * `ownerContactId` and `industry` are near-empty across a real install (#442), so exposing them as
+ * list filters would be chrome with nothing behind it.
+ */
+export type OrgListPeopleFilter = "any" | "multiple" | "unlinked";
+export type OrgListSource = "any" | "import" | "agent";
+export type OrgListSort = "updated" | "people" | "name";
 
 export type OrgLinkedContact = ContactWithIdentities & {
   worksAtTitle: string | null;
@@ -109,6 +122,9 @@ export function listOrgs(opts?: {
   owner?: string;
   followed?: boolean;
   tag?: string;
+  people?: OrgListPeopleFilter;
+  source?: OrgListSource;
+  sort?: OrgListSort;
 }): PaginatedResult<Org> {
   const page = opts?.page ?? 1;
   const pageSize = opts?.pageSize ?? 20;
@@ -133,13 +149,37 @@ export function listOrgs(opts?: {
     )`);
   }
 
+  if (opts?.source === "import") {
+    conditions.push(sql`${orgs.createdSourceDetail} LIKE 'import:%'`);
+  }
+  if (opts?.source === "agent") {
+    conditions.push(sql`${orgs.createdSourceDetail} LIKE 'agent:%'`);
+  }
+
+  // Linked people live on the graph edge, not a column, so this counts rather than joins.
+  const linkedCount = sql`(
+    SELECT COUNT(*) FROM ${graphEdges}
+     WHERE ${graphEdges.dstType} = 'org' AND ${graphEdges.dstId} = ${orgs.id}
+       AND ${graphEdges.srcType} = 'contact' AND ${graphEdges.edgeType} = 'works_at'
+       ${opts?.includeLocalOnly ? sql`` : sql`AND ${graphEdges.scope} = 'shared'`}
+  )`;
+  if (opts?.people === "multiple") conditions.push(sql`${linkedCount} > 1`);
+  if (opts?.people === "unlinked") conditions.push(sql`${linkedCount} = 0`);
+
   const where = conditions.length ? and(...conditions) : undefined;
   const total = db.select({ value: count() }).from(orgs).where(where).get()?.value ?? 0;
+
+  const orderBy = (() => {
+    if (opts?.sort === "name") return [asc(orgs.name)];
+    if (opts?.sort === "people") return [desc(linkedCount), desc(orgs.updatedAt)];
+    return [desc(orgs.updatedAt)];
+  })();
+
   const data = db
     .select()
     .from(orgs)
     .where(where)
-    .orderBy(desc(orgs.updatedAt))
+    .orderBy(...orderBy)
     .limit(pageSize)
     .offset((page - 1) * pageSize)
     .all();
@@ -418,6 +458,13 @@ export function listOrgsWithContactCounts(
     data: result.data.map((org) => ({
       ...org,
       contactCount: countOrgLinkedContacts(org.id, relationshipOpts),
+      // A company page stored as a contact links to its own org, so "Clearbit · Clearbit" would
+      // otherwise read as if the company employed itself. The count still includes it; only the
+      // name list drops it, since naming the org again tells the reader nothing.
+      linkedContactNames: listOrgLinkedContacts(org.id, relationshipOpts)
+        .map((contact) => contact.name)
+        .filter((name) => name.trim().toLowerCase() !== org.name.trim().toLowerCase())
+        .slice(0, 3),
     })),
   };
 }
