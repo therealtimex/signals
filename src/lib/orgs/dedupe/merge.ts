@@ -187,8 +187,11 @@ function mergeEmailPatterns(
   );
 
   const rows = db.select().from(orgEmailPatterns).where(eq(orgEmailPatterns.orgId, secondaryId)).all();
-  const collisions = rows.filter((row) => existing.has(row.pattern)).map((row) => row.id);
-  const movable = rows.filter((row) => !existing.has(row.pattern)).map((row) => row.id);
+  const collisions: string[] = [];
+  const movable: string[] = [];
+  for (const row of rows) {
+    (existing.has(row.pattern) ? collisions : movable).push(row.id);
+  }
 
   if (collisions.length > 0) {
     db.delete(orgEmailPatterns).where(inArray(orgEmailPatterns.id, collisions)).run();
@@ -483,12 +486,12 @@ function mergeDomains(
     db.update(orgs).set({ domain: nextPrimary, updatedAt: nowUnix() }).where(eq(orgs.id, primaryId)).run();
   }
 
-  return {
-    primary: nextPrimary,
-    aliases: [...union.entries()]
-      .filter(([domain]) => domain !== nextPrimary)
-      .map(([domain, meta]) => ({ domain, ...meta })),
-  };
+  const aliases: OrgMergeDomainPlan["aliases"] = [];
+  for (const [domain, meta] of union) {
+    if (domain !== nextPrimary) aliases.push({ domain, ...meta });
+  }
+
+  return { primary: nextPrimary, aliases };
 }
 
 function tombstone(secondaryId: string, primaryId: string, options: MergeOrgsOptions | undefined): void {
