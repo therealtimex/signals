@@ -28,6 +28,33 @@ import { ActionToast } from "@/components/action-toast";
 
 const CONTACT_PROFILE_PIPELINE_TEMPLATE_NAME = "Contact profile pipeline";
 
+/**
+ * Reject non-2xx so `Promise.allSettled` records it as rejected.
+ *
+ * `fetch` resolves for 4xx and 5xx, so parsing unconditionally handed the error
+ * body to the status merge below: a 500 from `/api/platforms/x` has no
+ * `syncStats`, and the card rendered "not connected" as if the platform had
+ * answered.
+ */
+async function fetchOkJson(url: string) {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`${url} responded ${response.status}`);
+  return await response.json();
+}
+
+interface ActionResponse {
+  delegated?: boolean;
+  message?: string;
+  error?: string;
+  workflowRunId?: string;
+  result?: { added?: number; updated?: number; skipped?: number };
+}
+
+/** Parse a JSON body without letting a non-JSON error page mask its status. */
+async function readActionResponse(response: Response): Promise<ActionResponse> {
+  return (await response.json().catch(() => ({}))) as ActionResponse;
+}
+
 type ActionDef = {
   id: string;
   label: string;
@@ -279,10 +306,10 @@ export function ActionCards() {
   useEffect(() => {
     // Fetch platform statuses + enrich capability in parallel
     Promise.allSettled([
-      fetch("/api/platforms/x").then((r) => r.json()),
-      fetch("/api/platforms/linkedin").then((r) => r.json()),
-      fetch("/api/platforms/gmail/status").then((r) => r.json()),
-      fetch("/api/platforms/x/enrich").then((r) => r.json()),
+      fetchOkJson("/api/platforms/x"),
+      fetchOkJson("/api/platforms/linkedin"),
+      fetchOkJson("/api/platforms/gmail/status"),
+      fetchOkJson("/api/platforms/x/enrich"),
     ]).then(([xRes, liRes, gmRes, xEnrichRes]) => {
       const xData = xRes.status === "fulfilled" ? xRes.value : {};
       const liData = liRes.status === "fulfilled" ? liRes.value : {};
@@ -360,9 +387,13 @@ export function ActionCards() {
         body: JSON.stringify(action.body),
       });
 
-      const data = await res.json();
+      // A failing endpoint may answer with HTML rather than JSON, and parsing
+      // that threw before the status was ever read — surfacing "Unexpected
+      // token <" instead of the failure. `delegated` still wins, since a
+      // delegated action reports itself through a non-2xx.
+      const data = await readActionResponse(res);
       if (!res.ok && !data.delegated) {
-        setError(data.error || "Action failed");
+        setError(data.error || `Action failed (${res.status})`);
         return;
       }
 
@@ -450,6 +481,10 @@ export function ActionCards() {
     setPipelineFollowUp((prev) => (prev ? { ...prev, running: true } : prev));
     try {
       const templatesRes = await fetch("/api/workflows/templates?isSystem=true&pageSize=50");
+      if (!templatesRes.ok) {
+        setError(`Could not load workflow templates (${templatesRes.status}).`);
+        return;
+      }
       const templatesPayload = await templatesRes.json();
       const template = (templatesPayload.data ?? []).find(
         (row: { name: string }) => row.name === CONTACT_PROFILE_PIPELINE_TEMPLATE_NAME

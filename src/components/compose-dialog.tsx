@@ -122,7 +122,7 @@ export function ComposeDialog({
   useEffect(() => {
     if (!open) return;
     fetch("/api/health")
-      .then((res) => res.json())
+      .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         setEmbedded(data?.rtx?.mode === "embedded" && Boolean(data?.rtx?.appId));
       })
@@ -132,6 +132,7 @@ export function ComposeDialog({
   const hydrateMedia = useCallback(async (contentItemId: string): Promise<MediaAttachment[]> => {
     try {
       const res = await fetch(`/api/media?contentItemId=${contentItemId}`);
+      if (!res.ok) return [];
       const data = await res.json();
       return (data.assets || []).map((a: { id: string; filename: string; mimeType: string; fileSize: number }) => ({
         id: a.id,
@@ -161,7 +162,9 @@ export function ComposeDialog({
     setError(null);
 
     fetch(`/api/content/${draftId}`)
-      .then((res) => res.json())
+      // `fetch` resolves for 4xx/5xx, and the error branch below keys off a
+      // `error` field the failure body may not carry — so give it one.
+      .then(async (res) => (res.ok ? res.json() : { error: `Could not load draft (${res.status})` }))
       .then(async (data) => {
         if (data.error) {
           setError(data.error);
@@ -236,7 +239,7 @@ export function ComposeDialog({
         formData.append("platformTarget", selectedPlatforms.join(","));
 
         fetch("/api/media", { method: "POST", body: formData })
-          .then((res) => res.json())
+          .then(async (res) => (res.ok ? res.json() : { error: `Upload failed (${res.status})` }))
           .then((data) => {
             if (data.error) {
               setError(data.error);

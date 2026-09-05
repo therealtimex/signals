@@ -100,7 +100,7 @@ export function TemplateBuilder({ open, onClose, onSaved, editTemplate }: Templa
   useEffect(() => {
     if (!open || isEdit) return;
     fetch("/api/workflows/templates?isSystem=true&pageSize=50")
-      .then((r) => r.json())
+      .then((r) => (r.ok ? r.json() : { data: [] }))
       .then((result) => setSystemTemplates(result.data ?? []))
       .catch(() => setSystemTemplates([]));
   }, [open, isEdit]);
@@ -108,8 +108,9 @@ export function TemplateBuilder({ open, onClose, onSaved, editTemplate }: Templa
   useEffect(() => {
     if (!startFromTemplateId || startFromTemplateId === "none" || isEdit) return;
     fetch(`/api/workflows/templates/${startFromTemplateId}`)
-      .then((r) => r.json())
-      .then((template: Template) => {
+      .then((r) => (r.ok ? r.json() : null))
+      .then((template: Template | null) => {
+        if (!template) return;
         setName(template.name);
         setDescription(template.description ?? "");
         setTemplateType(template.templateType);

@@ -217,6 +217,7 @@ function ContentListInner({
       const response = await fetch(`/api/content/publish-jobs/${jobId}/open-thread`, {
         method: "POST",
       });
+      if (!response.ok) return;
       const data = await response.json();
       if (data.threadPath) setSentBanner({ jobId, threadPath: data.threadPath });
     } finally {
@@ -242,6 +243,7 @@ function ContentListInner({
           mediaAssetIds: job.payload.mediaAssetIds?.length ? job.payload.mediaAssetIds : undefined,
         }),
       });
+      if (!response.ok) return;
       const data = await response.json();
       if (data.success) {
         const threadPath = data.rtxWorkspaceSlug && data.rtxThreadSlug
