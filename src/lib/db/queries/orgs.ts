@@ -3,6 +3,7 @@ import { nanoid } from "nanoid";
 import { db } from "@/lib/db/client";
 import { contacts, graphEdges, orgDomains, orgs } from "@/lib/db/schema";
 import { normalizeOrgName, orgDedupeKey } from "@/lib/db/backfills/org-names";
+import { resolveSurvivingOrgId } from "@/lib/orgs/tombstone";
 import { getContactsByIds } from "@/lib/db/queries/contacts";
 import type { ContactWithIdentities, Org, PaginatedResult } from "@/lib/db/types";
 import { listOrgIdentitiesByOrg } from "@/lib/db/queries/org-identities";
@@ -133,6 +134,10 @@ export function listOrgs(opts?: {
   if (!opts?.includeLocalOnly) {
     conditions.push(eq(orgs.scope, "shared"));
   }
+
+  // A merged-away org keeps its row as a tombstone and its name as an alias, but it is not a
+  // company anyone should browse (ADR-445-3).
+  conditions.push(sql`json_extract(${orgs.metadata}, '$.archived') IS NOT 1`);
 
   if (opts?.search) {
     const term = `%${opts.search}%`;
@@ -655,7 +660,16 @@ export function ensureOrgByName(
     .all()
     .find((org) => orgDedupeKey(org.name) === key);
 
-  if (existing) return existing;
+  if (existing) {
+    // The tombstone keeps its name, which is what lets it act as the secondary's alias. Resolve
+    // through the chain rather than skipping: skipping would mint a third record and the merge
+    // would quietly un-happen on the next import (ADR-445-3).
+    const surviving = resolveSurvivingOrgId(existing.id);
+    if (surviving === existing.id) return existing;
+    const survivor = db.select().from(orgs).where(eq(orgs.id, surviving)).get();
+    if (survivor) return survivor;
+    return existing;
+  }
 
   const id = nanoid();
   const birthFields = provenance

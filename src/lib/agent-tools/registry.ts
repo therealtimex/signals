@@ -3,6 +3,7 @@ import {
   createContactSchema,
   findDuplicateContactsSchema,
   findDuplicateOrgsSchema,
+  mergeOrgsSchema,
   mergeContactsSchema,
   createTaskSchema,
   enrichContactSchema,
@@ -141,6 +142,7 @@ import {
   handleCreateContact,
   handleFindDuplicateContacts,
   handleFindDuplicateOrgs,
+  handleMergeOrgs,
   handleMergeContacts,
   handleCreateTask,
   handleEnrichContact,
@@ -313,6 +315,15 @@ export const AGENT_TOOLS: Record<string, AgentToolDefinition> = {
     schema: findDuplicateOrgsSchema,
     parameters: zodToParameters(findDuplicateOrgsSchema),
     execute: handleFindDuplicateOrgs,
+  },
+  merge_orgs: {
+    name: "merge_orgs",
+    description:
+      "Merge duplicate organization records into one survivor. Call with dryRun first and show the returned plan — which domain wins and whose employment rows fold — before committing; the server does not enforce that order. Secondaries are tombstoned, not deleted, and keep their name so later imports resolve through them. A wrong merge is recoverable only by hand, so review the plan rather than trusting the duplicate detector, whose containment tier is suggestive.",
+    category: "contacts",
+    schema: mergeOrgsSchema,
+    parameters: zodToParameters(mergeOrgsSchema),
+    execute: handleMergeOrgs,
   },
   merge_contacts: {
     name: "merge_contacts",
