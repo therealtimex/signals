@@ -1,4 +1,5 @@
 import { listContacts, getContactById, createContact, updateContact, recalcEnrichment } from "@/lib/db/queries/contacts";
+import { findDuplicateOrgs } from "@/lib/orgs/dedupe/detect";
 import { createIdentity, getIdentityById, updateIdentity } from "@/lib/db/queries/identities";
 import { resolvePlatformClaim } from "@/lib/db/identity-claims";
 import { getDashboardMetrics } from "@/lib/db/queries/dashboard";
@@ -37,6 +38,7 @@ import type { WorkflowType } from "@/lib/workflows/types";
 import type {
   archiveContactSchema,
   findDuplicateContactsSchema,
+  findDuplicateOrgsSchema,
   mergeContactsSchema,
   createContactSchema,
   createTaskSchema,
@@ -735,6 +737,31 @@ export async function handleUpsertContactIdentity(
 
 export async function handleArchiveContact(input: z.infer<typeof archiveContactSchema>) {
   return archiveContactTool(input.contactId, input.reason);
+}
+
+export async function handleFindDuplicateOrgs(
+  input: z.infer<typeof findDuplicateOrgsSchema>,
+) {
+  const candidates = findDuplicateOrgs(input);
+  return {
+    candidates: candidates.map((candidate) => ({
+      primaryOrgId: candidate.primaryOrgId,
+      secondaryOrgIds: candidate.secondaryOrgIds,
+      tier: candidate.tier,
+      confidence: candidate.confidence,
+      reason: candidate.reason,
+      orgs: candidate.members.map((member) => ({
+        id: member.orgId,
+        name: member.name,
+        domain: member.domain,
+        // The reviewer needs this to judge the suggested survivor: merging into the record with
+        // fewer people means moving more employment edges.
+        contactCount: member.contactCount,
+        createdAt: member.createdAt,
+      })),
+    })),
+    total: candidates.length,
+  };
 }
 
 export async function handleFindDuplicateContacts(
