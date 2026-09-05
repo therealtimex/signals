@@ -216,55 +216,62 @@ function mergeGraphEdges(
   moved: Record<string, number>,
   dropped: Record<string, number>,
 ): void {
-  for (const side of ["src", "dst"] as const) {
-    const typeCol = side === "src" ? graphEdges.srcType : graphEdges.dstType;
-    const idCol = side === "src" ? graphEdges.srcId : graphEdges.dstId;
+  const rows = db
+    .select()
+    .from(graphEdges)
+    .where(
+      sql`(${graphEdges.srcType} = 'org' AND ${graphEdges.srcId} = ${secondaryId})
+          OR (${graphEdges.dstType} = 'org' AND ${graphEdges.dstId} = ${secondaryId})`,
+    )
+    .all();
+  if (rows.length === 0) return;
 
-    const rows = db
+  const identity = (edgeType: string, srcType: string, srcId: string, dstType: string, dstId: string) =>
+    `${edgeType} ${srcType} ${srcId} ${dstType} ${dstId}`;
+
+  const survivorKeys = new Set(
+    db
       .select()
       .from(graphEdges)
-      .where(and(eq(typeCol, "org"), eq(idCol, secondaryId)))
-      .all();
-    if (rows.length === 0) continue;
+      .where(
+        sql`(${graphEdges.srcType} = 'org' AND ${graphEdges.srcId} = ${primaryId})
+            OR (${graphEdges.dstType} = 'org' AND ${graphEdges.dstId} = ${primaryId})`,
+      )
+      .all()
+      .map((row) => identity(row.edgeType, row.srcType, row.srcId, row.dstType, row.dstId)),
+  );
 
-    const survivorKeys = new Set(
-      db
-        .select()
-        .from(graphEdges)
-        .where(and(eq(typeCol, "org"), eq(idCol, primaryId)))
-        .all()
-        .map((row) => `${row.edgeType} ${row.srcType} ${row.srcId} ${row.dstType} ${row.dstId}`),
-    );
+  const collisions: string[] = [];
+  const updates: { id: string; srcId: string; dstId: string }[] = [];
 
-    const collisions: string[] = [];
-    const movable: string[] = [];
-    for (const row of rows) {
-      const projected =
-        side === "src"
-          ? `${row.edgeType} ${row.srcType} ${primaryId} ${row.dstType} ${row.dstId}`
-          : `${row.edgeType} ${row.srcType} ${row.srcId} ${row.dstType} ${primaryId}`;
-      // A self-edge would be created if the other end is the survivor; drop rather than point at self.
-      const selfEdge =
-        side === "src" ? row.dstType === "org" && row.dstId === primaryId : row.srcType === "org" && row.srcId === primaryId;
-      if (selfEdge || survivorKeys.has(projected)) collisions.push(row.id);
-      else {
-        movable.push(row.id);
-        survivorKeys.add(projected);
-      }
-    }
+  for (const row of rows) {
+    // Both endpoints are projected before the row is classified. Handling src and dst in separate
+    // passes let a secondary→secondary edge be re-pointed once and then dropped, counting one row
+    // as both moved and dropped.
+    const srcId = row.srcType === "org" && row.srcId === secondaryId ? primaryId : row.srcId;
+    const dstId = row.dstType === "org" && row.dstId === secondaryId ? primaryId : row.dstId;
+    const key = identity(row.edgeType, row.srcType, srcId, row.dstType, dstId);
 
-    if (collisions.length > 0) {
-      db.delete(graphEdges).where(inArray(graphEdges.id, collisions)).run();
-      bump(dropped, "graphEdges", collisions.length);
+    const selfLoop = row.srcType === "org" && row.dstType === "org" && srcId === dstId;
+    if (selfLoop || survivorKeys.has(key)) {
+      collisions.push(row.id);
+      continue;
     }
-    if (movable.length > 0) {
-      db.update(graphEdges)
-        .set(side === "src" ? { srcId: primaryId } : { dstId: primaryId })
-        .where(inArray(graphEdges.id, movable))
-        .run();
-      bump(moved, "graphEdges", movable.length);
-    }
+    survivorKeys.add(key);
+    updates.push({ id: row.id, srcId, dstId });
   }
+
+  if (collisions.length > 0) {
+    db.delete(graphEdges).where(inArray(graphEdges.id, collisions)).run();
+    bump(dropped, "graphEdges", collisions.length);
+  }
+  for (const update of updates) {
+    db.update(graphEdges)
+      .set({ srcId: update.srcId, dstId: update.dstId })
+      .where(eq(graphEdges.id, update.id))
+      .run();
+  }
+  bump(moved, "graphEdges", updates.length);
 }
 
 /**
@@ -546,6 +553,21 @@ export function mergeOrgs(input: MergeOrgsInput): MergeOrgsResult {
         });
         continue;
       }
+      // Tombstone first. Replaying a merge must report what happened to the record, not re-judge
+      // its name: a pair merged under `force` would otherwise come back as `skipped` on replay,
+      // and the retry semantics `mergeContacts` relies on would not hold.
+      const existingTarget = mergedIntoOrgId(secondary.metadata);
+      if (existingTarget) {
+        const isSameTarget = resolveSurvivingOrgId(existingTarget) === survivingPrimaryId;
+        merged.push({
+          orgId: secondaryId,
+          name: secondary.name,
+          status: isSameTarget ? "already_merged" : "skipped",
+          detail: isSameTarget ? undefined : `Already merged into ${existingTarget}`,
+        });
+        continue;
+      }
+
       if (!options?.force && describesDistinctEntities(primary.name, secondary.name)) {
         merged.push({
           orgId: secondaryId,
@@ -553,16 +575,6 @@ export function mergeOrgs(input: MergeOrgsInput): MergeOrgsResult {
           status: "skipped",
           detail:
             "Names describe distinct entities (venture arm, division, region, or shared industry). Pass force to merge anyway.",
-        });
-        continue;
-      }
-      const existingTarget = mergedIntoOrgId(secondary.metadata);
-      if (existingTarget) {
-        merged.push({
-          orgId: secondaryId,
-          name: secondary.name,
-          status: "already_merged",
-          detail: `Already merged into ${existingTarget}`,
         });
         continue;
       }

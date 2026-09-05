@@ -361,6 +361,58 @@ describe("mergeOrgs", () => {
     ).toThrow(/at most/i);
   });
 
+  it("reports a forced pair as already_merged on replay, not as a distinct-name refusal", () => {
+    // The name guard must not run ahead of the tombstone check: replaying a merge has to report
+    // what happened to the record, not re-judge its name.
+    const parent = createOrg({ name: "Replay Martin", source: "test" });
+    const arm = createOrg({ name: "Replay Martin Ventures", source: "test" });
+
+    mergeOrgs({ primaryOrgId: parent.id, secondaryOrgIds: [arm.id], options: { force: true } });
+    const replay = mergeOrgs({ primaryOrgId: parent.id, secondaryOrgIds: [arm.id] });
+
+    expect(replay.merged[0]?.status).toBe("already_merged");
+  });
+
+  it("skips a secondary already merged somewhere else rather than claiming it", () => {
+    const a = createOrg({ name: "Target A", source: "test" });
+    const b = createOrg({ name: "Target B", source: "test" });
+    const moved = createOrg({ name: "Wanderer", source: "test" });
+
+    mergeOrgs({ primaryOrgId: b.id, secondaryOrgIds: [moved.id] });
+    const wrongTarget = mergeOrgs({ primaryOrgId: a.id, secondaryOrgIds: [moved.id] });
+
+    expect(wrongTarget.merged[0]?.status).toBe("skipped");
+    expect(wrongTarget.merged[0]?.detail).toContain(b.id);
+    expect(mergedIntoOrgId(getOrgById(moved.id)?.metadata)).toBe(b.id);
+  });
+
+  it("counts a secondary-to-secondary edge once, as dropped", () => {
+    const survivor = createOrg({ name: "Loopco", source: "test" });
+    const doomed = createOrg({ name: "Loopco Two", source: "test" });
+    db.insert(graphEdges)
+      .values({
+        id: nanoid(),
+        srcType: "org",
+        srcId: doomed.id,
+        dstType: "org",
+        dstId: doomed.id,
+        edgeType: "related_to",
+        scope: "shared",
+        source: "test",
+      })
+      .run();
+
+    const result = mergeOrgs({ primaryOrgId: survivor.id, secondaryOrgIds: [doomed.id] });
+
+    // Re-pointing both endpoints would make this a self-loop on the survivor, so it is dropped —
+    // and it must be classified once, not counted as moved by one pass and dropped by another.
+    expect(result.dropped.graphEdges).toBe(1);
+    expect(result.moved.graphEdges).toBeUndefined();
+    expect(
+      db.select().from(graphEdges).where(eq(graphEdges.edgeType, "related_to")).all(),
+    ).toHaveLength(0);
+  });
+
   it("reports an already-merged secondary instead of merging it twice", () => {
     const survivor = createOrg({ name: "Idem", source: "test" });
     const doomed = createOrg({ name: "Idem Two", source: "test" });
