@@ -1,4 +1,5 @@
 import { and, eq, inArray, ne, sql } from "drizzle-orm";
+import { nanoid } from "nanoid";
 import { db } from "@/lib/db/client";
 import {
   employmentFoldUpdates,
@@ -7,6 +8,7 @@ import {
 import { afterEmploymentMutation } from "@/lib/db/queries/contact-employments";
 import { recalcOrgEnrichment } from "@/lib/db/queries/orgs";
 import { mergedIntoOrgId, resolveSurvivingOrgId } from "@/lib/orgs/tombstone";
+import { describesDistinctEntities } from "@/lib/orgs/dedupe/detect";
 import {
   contactEmployments,
   graphEdges,
@@ -31,6 +33,12 @@ export interface MergeOrgsOptions {
   dryRun?: boolean;
   /** Which member domain becomes the survivor's primary. Must already belong to a member. */
   domain?: string;
+  /**
+   * Merge a pair the duplicate detector would refuse to suggest — a venture arm into its parent,
+   * a division, a regional unit (§5 guard 3). Off by default so a wrong pair cannot arrive by
+   * accident from a caller that trusted the containment tier.
+   */
+  force?: boolean;
   reason?: string;
   workflowRunId?: string;
 }
@@ -126,6 +134,20 @@ function repointSimpleTables(primaryId: string, secondaryId: string, moved: Reco
       )?.n ?? 0,
     );
 
+  // Two primary identities would make the survivor's profile resolution ambiguous, exactly as two
+  // primary contact identities do — mergeContacts demotes for the same reason.
+  const survivorHasPrimaryIdentity =
+    (
+      db.get(
+        sql`SELECT COUNT(*) AS n FROM org_identities WHERE org_id = ${primaryId} AND is_primary = 1`,
+      ) as { n: number } | undefined
+    )?.n ?? 0;
+  if (survivorHasPrimaryIdentity > 0) {
+    db.run(
+      sql`UPDATE org_identities SET is_primary = 0 WHERE org_id = ${secondaryId} AND is_primary = 1`,
+    );
+  }
+
   // Plain re-points: none of these carry a key both sides could hold (ADR-445-5).
   // `org_identity_metrics` follows its identity rather than the org, so it needs no pass of its own.
   for (const [table, column, key] of [
@@ -173,7 +195,16 @@ function mergeEmailPatterns(
     bump(dropped, "orgEmailPatterns", collisions.length);
   }
   if (movable.length > 0) {
-    db.update(orgEmailPatterns).set({ orgId: primaryId }).where(inArray(orgEmailPatterns.id, movable)).run();
+    // Two selected patterns leave the downstream email-candidate choice ambiguous (§4).
+    const survivorHasSelected = db
+      .select()
+      .from(orgEmailPatterns)
+      .where(and(eq(orgEmailPatterns.orgId, primaryId), eq(orgEmailPatterns.isSelected, true)))
+      .all().length > 0;
+    db.update(orgEmailPatterns)
+      .set({ orgId: primaryId, ...(survivorHasSelected ? { isSelected: false } : {}) })
+      .where(inArray(orgEmailPatterns.id, movable))
+      .run();
     bump(moved, "orgEmailPatterns", movable.length);
   }
 }
@@ -297,8 +328,26 @@ function mergeOrgEmployments(
   }
 }
 
+/** `orgs.tags` is free-form text on older rows, so a non-array value is not a tag set. */
+function parseTagArray(raw: string | null | undefined): string[] | null {
+  try {
+    const parsed: unknown = JSON.parse(raw ?? "[]");
+    if (!Array.isArray(parsed)) return null;
+    return parsed.filter((tag): tag is string => typeof tag === "string");
+  } catch {
+    return null;
+  }
+}
+
 /** Fill only where the survivor is empty; never overwrite a curated value (§4). */
-const FILLABLE_FIELDS = ["industry", "description", "location", "companySize", "website"] as const;
+const FILLABLE_FIELDS = [
+  "industry",
+  "description",
+  "location",
+  "companySize",
+  "website",
+  "avatarUrl",
+] as const;
 
 function fillEmptyFields(primaryId: string, secondaryId: string): void {
   const primary = db.select().from(orgs).where(eq(orgs.id, primaryId)).get();
@@ -314,17 +363,15 @@ function fillEmptyFields(primaryId: string, secondaryId: string): void {
     }
   }
 
-  const tags = new Set<string>();
-  for (const raw of [primary.tags, secondary.tags]) {
-    try {
-      const parsed: unknown = JSON.parse(raw ?? "[]");
-      if (Array.isArray(parsed)) for (const tag of parsed) if (typeof tag === "string") tags.add(tag);
-    } catch {
-      // A non-JSON tags column is left alone rather than guessed at.
-    }
+  // The union is only safe when the survivor's own value is a parseable array. If it holds raw
+  // legacy text, writing a JSON array over it would destroy the survivor's value to gain the
+  // secondary's — the one thing §4 says never to do.
+  const survivorTags = parseTagArray(primary.tags);
+  if (survivorTags) {
+    const tags = new Set(survivorTags);
+    for (const tag of parseTagArray(secondary.tags) ?? []) tags.add(tag);
+    if (tags.size > survivorTags.length) updates.tags = JSON.stringify([...tags]);
   }
-  const mergedTags = [...tags];
-  if (mergedTags.length > 0) updates.tags = JSON.stringify(mergedTags);
 
   if (Object.keys(updates).length > 0) {
     updates.updatedAt = nowUnix();
@@ -384,6 +431,29 @@ function mergeDomains(
       .where(inArray(orgDomains.id, repointed.map((row) => row.id)))
       .run();
     bump(moved, "orgDomains", repointed.length);
+  }
+
+  // Older records carry `orgs.domain` with no `org_domains` row. Re-pointing only moves rows that
+  // exist, so without materializing these first the secondary's domain is erased by the NULL below
+  // rather than kept as an alias — "nothing is discarded" (ADR-445-1) has to hold for them too.
+  const persisted = new Set(
+    db.select().from(orgDomains).where(eq(orgDomains.orgId, primaryId)).all().map((row) => row.domain),
+  );
+  for (const [domain, meta] of union) {
+    if (persisted.has(domain)) continue;
+    db.insert(orgDomains)
+      .values({
+        id: nanoid(),
+        orgId: primaryId,
+        domain,
+        kind: "alias",
+        source: meta.source,
+        mxStatus: meta.mxStatus as "ok" | "none" | "error" | "unknown",
+      })
+      .onConflictDoNothing({ target: orgDomains.domain })
+      .run();
+    persisted.add(domain);
+    bump(moved, "orgDomains");
   }
 
   db.update(orgs)
@@ -473,6 +543,16 @@ export function mergeOrgs(input: MergeOrgsInput): MergeOrgsResult {
           name: secondary.name,
           status: "skipped",
           detail: "Already the surviving org",
+        });
+        continue;
+      }
+      if (!options?.force && describesDistinctEntities(primary.name, secondary.name)) {
+        merged.push({
+          orgId: secondaryId,
+          name: secondary.name,
+          status: "skipped",
+          detail:
+            "Names describe distinct entities (venture arm, division, region, or shared industry). Pass force to merge anyway.",
         });
         continue;
       }

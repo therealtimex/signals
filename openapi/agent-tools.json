@@ -1059,6 +1059,10 @@
                             "type": "string",
                             "description": "Which member domain becomes the survivor's primary. Must already belong to one of the merged orgs; adding a new domain is updateOrg's job."
                           },
+                          "force": {
+                            "type": "boolean",
+                            "description": "Merge a pair the duplicate detector refuses to suggest — a venture arm into its parent, a division, or a regional unit. Off by default; only set it when a human has confirmed the two records are one organization."
+                          },
                           "reason": {
                             "type": "string"
                           },

@@ -173,6 +173,34 @@ function isTokenContained(shortKey: string, longKey: string): boolean {
   return !extra.some((token) => DISTINCT_ENTITY_TOKENS.has(token));
 }
 
+/**
+ * True when the two names read as *different* organizations rather than two renderings of one —
+ * a venture arm, a division, a regional unit, or a shared industry description.
+ *
+ * `findDuplicateOrgs` uses this to decline suggesting the pair. `mergeOrgs` uses it as guard 3
+ * (§5): a pair the detector would not suggest is not merged by accident either.
+ */
+export function describesDistinctEntities(nameA: string, nameB: string): boolean {
+  if (isDualAffiliationName(nameA) || isDualAffiliationName(nameB)) return true;
+
+  const keyA = orgNameKey(nameA);
+  const keyB = orgNameKey(nameB);
+  if (!keyA || !keyB || keyA === keyB) return false;
+
+  const [shortKey, longKey] = keyA.split(" ").length <= keyB.split(" ").length ? [keyA, keyB] : [keyB, keyA];
+  const short = shortKey.split(" ");
+  const long = longKey.split(" ");
+  const head = long.slice(0, short.length).join(" ");
+  const tail = long.slice(long.length - short.length).join(" ");
+  // Only a containing pair can be "the same name plus an entity marker". Unrelated names are not
+  // evidence of distinctness — a human may know two differently-named records are one company.
+  if (short.length >= long.length || (head !== shortKey && tail !== shortKey)) return false;
+  if (GENERIC_ORG_NAMES.has(shortKey)) return true;
+
+  const extra = head === shortKey ? long.slice(short.length) : long.slice(0, long.length - short.length);
+  return extra.some((token) => DISTINCT_ENTITY_TOKENS.has(token));
+}
+
 function evidenceFor(a: OrgFacts, b: OrgFacts): { tier: OrgDuplicateTier; confidence: number; reason: string } | null {
   if (a.nameKey && a.nameKey === b.nameKey) {
     return { tier: 1, confidence: 0.9, reason: "Identical normalized name" };

@@ -7,10 +7,19 @@ import {
   ensureOrgByName,
   listOrgsWithContactCounts,
   getOrgById,
+  getOrgByDomain,
 } from "@/lib/db/queries/orgs";
+import { upsertOrgIdentity } from "@/lib/db/queries/org-identities";
 import { db, sqlite } from "@/lib/db/client";
-import { contactEmployments, orgDomains, orgEmailPatterns, graphEdges } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import {
+  contactEmployments,
+  graphEdges,
+  orgDomains,
+  orgEmailPatterns,
+  orgIdentities,
+  orgs,
+} from "@/lib/db/schema";
+import { and, eq } from "drizzle-orm";
 import { mergeOrgs, MergeOrgsError, mergedIntoOrgId, resolveSurvivingOrgId } from "@/lib/orgs/dedupe/merge";
 import { resetCoreTables } from "@/test/db";
 
@@ -234,6 +243,113 @@ describe("mergeOrgs", () => {
     const listed = listOrgsWithContactCounts({ pageSize: 100 }).data.map((o) => o.id);
     expect(listed).toContain(survivor.id);
     expect(listed).not.toContain(doomed.id);
+  });
+
+  it("keeps a legacy orgs.domain-only secondary domain as an alias", () => {
+    // Review found this: the union carried the domain for the plan, but no org_domains row existed
+    // to re-point, so nulling orgs.domain erased it from persistent state entirely.
+    const survivor = createOrg({ name: "Legacy Keeper", domain: "keeper.com", source: "test" });
+    const doomed = createOrg({ name: "Legacy Goner", domain: "goner.com", source: "test" });
+    db.delete(orgDomains).where(eq(orgDomains.orgId, doomed.id)).run();
+
+    const result = mergeOrgs({ primaryOrgId: survivor.id, secondaryOrgIds: [doomed.id] });
+
+    expect(result.plan.domain.primary).toBe("keeper.com");
+    expect(result.plan.domain.aliases.map((a) => a.domain)).toContain("goner.com");
+    const persisted = db.select().from(orgDomains).where(eq(orgDomains.orgId, survivor.id)).all();
+    expect(persisted.map((r) => r.domain).sort()).toEqual(["goner.com", "keeper.com"]);
+    expect(getOrgByDomain("goner.com")?.id).toBe(survivor.id);
+  });
+
+  it("refuses a pair the duplicate detector would not suggest, unless forced", () => {
+    const parent = createOrg({ name: "Lockheed Martin", source: "test" });
+    const arm = createOrg({ name: "Lockheed Martin Ventures", source: "test" });
+
+    const refused = mergeOrgs({ primaryOrgId: parent.id, secondaryOrgIds: [arm.id] });
+    expect(refused.merged[0]?.status).toBe("skipped");
+    expect(refused.merged[0]?.detail).toMatch(/distinct entities/i);
+    expect(mergedIntoOrgId(getOrgById(arm.id)?.metadata)).toBeNull();
+
+    const forced = mergeOrgs({
+      primaryOrgId: parent.id,
+      secondaryOrgIds: [arm.id],
+      options: { force: true },
+    });
+    expect(forced.merged[0]?.status).toBe("merged");
+    expect(mergedIntoOrgId(getOrgById(arm.id)?.metadata)).toBe(parent.id);
+  });
+
+  it("leaves the survivor with one primary identity and one selected email pattern", () => {
+    const survivor = createOrg({ name: "Flagco", source: "test" });
+    const doomed = createOrg({ name: "Flagco Two", source: "test" });
+
+    // `org_identities.is_primary` is a plain integer column, not boolean-mode.
+    for (const [orgId, handle] of [[survivor.id, "flagco"], [doomed.id, "flagco2"]] as const) {
+      const identity = upsertOrgIdentity({ orgId, platform: "linkedin", platformUserId: handle });
+      db.update(orgIdentities).set({ isPrimary: 1 }).where(eq(orgIdentities.id, identity.id)).run();
+    }
+    for (const [orgId, pattern] of [[survivor.id, "{first}"], [doomed.id, "{last}"]] as const) {
+      db.insert(orgEmailPatterns)
+        .values({
+          id: nanoid(),
+          orgId,
+          pattern,
+          rank: 1,
+          confidence: "medium",
+          score: 0.5,
+          evaluatedAt: 0,
+          isSelected: true,
+          source: "test",
+        })
+        .run();
+    }
+
+    mergeOrgs({ primaryOrgId: survivor.id, secondaryOrgIds: [doomed.id] });
+
+    const primaries = db
+      .select()
+      .from(orgIdentities)
+      .where(and(eq(orgIdentities.orgId, survivor.id), eq(orgIdentities.isPrimary, 1)))
+      .all();
+    expect(primaries).toHaveLength(1);
+
+    const selected = db
+      .select()
+      .from(orgEmailPatterns)
+      .where(and(eq(orgEmailPatterns.orgId, survivor.id), eq(orgEmailPatterns.isSelected, true)))
+      .all();
+    expect(selected).toHaveLength(1);
+  });
+
+  it("absorbs avatarUrl but never overwrites a non-JSON tags column", () => {
+    const survivor = createOrg({ name: "Absorb", source: "test" });
+    const doomed = createOrg({ name: "Absorb Two", source: "test" });
+    db.update(orgs)
+      .set({ tags: "legacy-primary-tag" })
+      .where(eq(orgs.id, survivor.id))
+      .run();
+    db.update(orgs)
+      .set({ avatarUrl: "https://cdn.example/logo.png", tags: JSON.stringify(["secondary"]) })
+      .where(eq(orgs.id, doomed.id))
+      .run();
+
+    mergeOrgs({ primaryOrgId: survivor.id, secondaryOrgIds: [doomed.id] });
+
+    const after = getOrgById(survivor.id)!;
+    expect(after.avatarUrl).toBe("https://cdn.example/logo.png");
+    // Raw legacy text is the survivor's value; a JSON array must not be written over it.
+    expect(after.tags).toBe("legacy-primary-tag");
+  });
+
+  it("unions tags when the survivor's column is a parseable array", () => {
+    const survivor = createOrg({ name: "Taggy", source: "test" });
+    const doomed = createOrg({ name: "Taggy Two", source: "test" });
+    db.update(orgs).set({ tags: JSON.stringify(["a"]) }).where(eq(orgs.id, survivor.id)).run();
+    db.update(orgs).set({ tags: JSON.stringify(["b"]) }).where(eq(orgs.id, doomed.id)).run();
+
+    mergeOrgs({ primaryOrgId: survivor.id, secondaryOrgIds: [doomed.id] });
+
+    expect(JSON.parse(getOrgById(survivor.id)!.tags ?? "[]").sort()).toEqual(["a", "b"]);
   });
 
   it("refuses a self-merge, an empty set, and an oversized batch", () => {

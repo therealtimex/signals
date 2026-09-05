@@ -200,6 +200,9 @@ export const mergeOrgsSchema = z.object({
   domain: z.string().optional().describe(
     "Which member domain becomes the survivor's primary. Must already belong to one of the merged orgs; adding a new domain is updateOrg's job.",
   ),
+  force: z.boolean().optional().describe(
+    "Merge a pair the duplicate detector refuses to suggest — a venture arm into its parent, a division, or a regional unit. Off by default; only set it when a human has confirmed the two records are one organization.",
+  ),
   reason: z.string().optional(),
   workflowRunId: z.string().min(1).optional(),
 });
