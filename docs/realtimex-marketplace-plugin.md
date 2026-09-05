@@ -16,13 +16,16 @@ Package and distribute Signals through the **RealtimeX marketplace** — not pub
 Plugin id: `com.realtimex.signals`  
 Local app id: `47e45f71-3279-42f5-8e95-731de01b6eae`
 
-Version 0.2.12 fills the avatar cache on its own. A scheduled sweep works through contacts that
-still lack a locally stored avatar, doing avatar work only — so it keeps running when profile
-hydration or persona generation are unavailable, which previously stalled the whole pass. Contacts
-whose photo comes from a platform CDN are taken first, since those hosts are unmetered and the
-public avatar resolver is capped at roughly fifty requests a day; the sweep stands down for a while
-once that resolver starts refusing, rather than spending the remaining allowance to no effect.
-`signals-writing` stays at 1.1.0.
+Version 0.2.13 adds organization consolidation and makes the CLI find Signals on its own. Duplicate
+company records — the same firm split across several rows, each holding part of its people — can now
+be found and merged: the merge re-points everything that referenced the absorbed record, folds
+duplicate employment rows, and keeps the absorbed record as a tombstone so later imports resolve
+through it rather than recreating it. Merges are previewed before they are committed and are not
+reversible automatically, so the preview is the safeguard. The Companies list gains logos, a summary
+of each company's linked people, and filters. `signals-pp-cli` no longer needs to be told where the
+app is: it locates the running Signals Local App itself and verifies what answers is really Signals.
+Response handling across the dashboard now checks request status before reading a body, so a failed
+load reads as a failure rather than as empty data. `signals-writing` stays at 1.1.0.
 
 ## Build
 
