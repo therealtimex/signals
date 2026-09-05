@@ -5,6 +5,7 @@ import { createContact, updateContact } from "@/lib/db/queries/contacts";
 import { upsertPersona } from "@/lib/db/queries/personas";
 import {
   AVATAR_ENRICH_RETRY_SECONDS,
+  AVATAR_THROTTLE_COOLDOWN_SECONDS,
   countProfilePipelineBacklog,
   PIPELINE_PLANNERS,
   planProfilePipelineRun,
@@ -19,6 +20,7 @@ import {
   type FixtureContact,
   seedActiveIdentity,
   seedEvidence,
+  seedCachedAvatar,
   seedSharedPersona,
   setContactOrdering,
 } from "@/test/profile-pipeline-fixture";
@@ -117,17 +119,8 @@ describe("profile pipeline backlog", () => {
     const clearedCount = 5;
 
     for (const contactId of firstPlan.selectedContactIds.slice(0, clearedCount)) {
-      const identity = db
-        .select()
-        .from(contactIdentities)
-        .where(eq(contactIdentities.contactId, contactId))
-        .get();
-      if (identity) {
-        db.update(contactIdentities)
-          .set({ avatarUrl: "https://example.com/cleared.jpg" })
-          .where(eq(contactIdentities.id, identity.id))
-          .run();
-      }
+      // Clearing avatar work means the bytes are local, not that a remote URL was written (#431).
+      seedCachedAvatar(contactId);
       seedSharedPersona(contactId);
     }
 
@@ -154,6 +147,58 @@ describe("profile pipeline backlog", () => {
     expect(() => planProfilePipelineRun({ contactIds: ["missing-id"] })).toThrow(
       ProfilePipelineValidationError,
     );
+  });
+
+  it("stands a throttled contact down so the queue advances past it", () => {
+    // Selection order is deterministic: without a cooldown the same failing batch is re-picked
+    // every run and every contact behind it starves.
+    const now = Math.floor(Date.now() / 1000);
+    const throttled = createContact({
+      name: "Throttled",
+      metadata: JSON.stringify({ avatarEnrich: { throttledAt: now - 60 } }),
+    });
+    db.insert(contactIdentities)
+      .values({
+        id: nanoid(),
+        contactId: throttled.id,
+        platform: "linkedin",
+        platformUserId: "throttled-slug",
+        isPrimary: 1,
+        isActive: 1,
+      })
+      .run();
+
+    expect(countProfilePipelineBacklog({ needsAvatar: true, needsPersona: false })).toBe(0);
+
+    updateContact(throttled.id, {
+      metadata: JSON.stringify({
+        avatarEnrich: { throttledAt: now - AVATAR_THROTTLE_COOLDOWN_SECONDS - 60 },
+      }),
+    });
+
+    expect(countProfilePipelineBacklog({ needsAvatar: true, needsPersona: false })).toBe(1);
+  });
+
+  it("keeps a contact with only a remote avatar in the backlog until it is cached", () => {
+    // A URL on the identity is not completion — it breaks as soon as the host throttles (#431).
+    const contact = createContact({ name: "Remote Only" });
+    db.insert(contactIdentities)
+      .values({
+        id: nanoid(),
+        contactId: contact.id,
+        platform: "linkedin",
+        platformUserId: "remote-only",
+        avatarUrl: "https://unavatar.io/linkedin/user:remote-only",
+        isPrimary: 1,
+        isActive: 1,
+      })
+      .run();
+
+    expect(countProfilePipelineBacklog({ needsAvatar: true, needsPersona: false })).toBe(1);
+
+    seedCachedAvatar(contact.id);
+
+    expect(countProfilePipelineBacklog({ needsAvatar: true, needsPersona: false })).toBe(0);
   });
 
   it("keeps loop-unsafe contacts out of the backlog predicates", () => {

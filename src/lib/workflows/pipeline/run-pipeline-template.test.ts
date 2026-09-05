@@ -10,6 +10,7 @@ import {
 import { createTemplate, getTemplate } from "@/lib/db/queries/workflow-templates";
 import { createWorkflowRun, getWorkflowRun, listWorkflowSteps } from "@/lib/db/queries/workflows";
 import { getRtxRefsFromRunConfig } from "@/lib/agents/run-template-via-rtx";
+import { seedCachedAvatar } from "@/test/profile-pipeline-fixture";
 import { db } from "@/lib/db/client";
 import { contentItems, contentPosts, platformAccounts } from "@/lib/db/schema";
 import { X_ANON_DEFERRED_REASON } from "@/lib/platforms/x/anon-web-constants";
@@ -45,6 +46,8 @@ function seedPersonaOnlyBacklogContact(name: string) {
     isActive: 1,
     avatarUrl: "https://example.com/avatar.jpg",
   });
+  // Persona-only means avatar work is complete, which now means cached locally (#431).
+  seedCachedAvatar(contact.id);
   const now = Math.floor(Date.now() / 1000);
   const itemId = nanoid();
   db.insert(contentItems)
@@ -761,18 +764,20 @@ describe("runPipelineTemplate", () => {
       env: process.env,
     });
 
-    expect(avatar).not.toHaveBeenCalled();
-    expect(persona).not.toHaveBeenCalled();
+    // A deferred hydration must not withhold unrelated work: the avatar and persona steps do not
+    // depend on X hydration, and hydration is not a backlog criterion (#436).
+    expect(avatar).toHaveBeenCalled();
+    expect(persona).toHaveBeenCalled();
     expect(
       listWorkflowSteps(run.id)
         .filter((step) => step.stepType === "tool_call")
         .map((step) => `${step.tool}:${step.contactId}`),
-    ).toEqual([`x_profile_hydrate:${contact.id}`]);
+    ).toContain(`x_profile_hydrate:${contact.id}`);
     expect(JSON.parse(getWorkflowRun(run.id)?.result ?? "{}")).toMatchObject({
       processed: 1,
-      cleared: 0,
-      remainingBacklog: 1,
       skipped: { x_web_deferred: 1 },
+      // The stalled breaker now explains itself in the run record.
+      hydrationOutcomes: { deferred: 1 },
     });
   });
 
@@ -849,7 +854,9 @@ describe("runPipelineTemplate", () => {
       env: process.env,
     });
 
-    expect(visited).toEqual([contactIds[1]]);
+    // The deferred contact now reaches persona too — deferral no longer ends its work (#436) —
+    // and the abort on the second contact still leaves the third untouched.
+    expect(visited).toEqual([contactIds[0], contactIds[1]]);
     const completed = getWorkflowRun(run.id);
     expect(completed?.processedItems).toBe(2);
     expect(JSON.parse(completed?.result ?? "{}")).toMatchObject({

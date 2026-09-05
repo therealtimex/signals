@@ -13,6 +13,13 @@ import type { ContactIdentity } from "@/lib/db/types";
 import { PERSONA_STALE_AFTER_SECONDS } from "@/lib/persona/staleness";
 
 export const AVATAR_ENRICH_RETRY_SECONDS = 30 * 24 * 60 * 60;
+
+/**
+ * How long a transiently-failed avatar sits out. The resolver's daily quota resets on roughly this
+ * cadence, and without a cooldown a throttled batch is re-selected every run — the queue order is
+ * deterministic, so head-of-line blocking starves every contact behind it.
+ */
+export const AVATAR_THROTTLE_COOLDOWN_SECONDS = 6 * 60 * 60;
 export const PROFILE_PIPELINE_MAX_BATCH = 50;
 
 const DEFAULT_BATCH_SIZE = 20;
@@ -103,21 +110,6 @@ function hasActiveIdentity(): SQL {
   );
 }
 
-function activeIdentityWithAvatar(): SQL {
-  return exists(
-    db
-      .select({ id: contactIdentities.id })
-      .from(contactIdentities)
-      .where(
-        and(
-          eq(contactIdentities.contactId, contacts.id),
-          eq(contactIdentities.isActive, 1),
-          sql`${contactIdentities.avatarUrl} IS NOT NULL`,
-        ),
-      ),
-  );
-}
-
 function hasAvatarMediaAttachment(): SQL {
   return exists(
     db
@@ -135,14 +127,20 @@ function hasAvatarMediaAttachment(): SQL {
 
 function needsAvatarPredicate(now: number): SQL {
   const retryCutoff = now - AVATAR_ENRICH_RETRY_SECONDS;
+  const throttleCutoff = now - AVATAR_THROTTLE_COOLDOWN_SECONDS;
+  // A locally cached avatar is the only completion signal. A remote identity URL is *not* done:
+  // it still has to be pulled local, or it breaks the moment the resolver throttles (#431).
   return and(
     hasActiveIdentity(),
-    not(activeIdentityWithAvatar()),
     not(hasAvatarMediaAttachment()),
     sql`json_extract(${contacts.metadata}, '$.avatarEnrich.gravatarVerifiedAt') IS NULL`,
     or(
       sql`json_extract(${contacts.metadata}, '$.avatarEnrich.exhaustedAt') IS NULL`,
       sql`json_extract(${contacts.metadata}, '$.avatarEnrich.exhaustedAt') < ${retryCutoff}`,
+    )!,
+    or(
+      sql`json_extract(${contacts.metadata}, '$.avatarEnrich.throttledAt') IS NULL`,
+      sql`json_extract(${contacts.metadata}, '$.avatarEnrich.throttledAt') < ${throttleCutoff}`,
     )!,
   )!;
 }

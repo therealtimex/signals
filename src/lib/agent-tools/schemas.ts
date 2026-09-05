@@ -89,7 +89,9 @@ export const createContactSchema = z.object({
   platformUserId: z.string().min(1).optional(),
   platformHandle: z.string().optional(),
   platformUrl: z.string().optional(),
-  avatarUrl: z.string().optional(),
+  avatarUrl: z.string().optional().describe(
+    "Public https URL of the contact's profile photo. Set it whenever a photo is obtainable — a contact saved without one renders as bare initials in the Contacts list and nothing backfills it automatically. When a page scrape yields nothing, resolve it: https://unavatar.io/linkedin/user:{slug} for a LinkedIn person, https://unavatar.io/linkedin/company:{slug} for a LinkedIn organization page (the namespaces are not interchangeable — each 404s for the other's slugs), or https://unavatar.io/x/{handle} for X. Must be http(s); file:// URLs and local paths are rejected.",
+  ),
   notes: z.string().optional(),
   funnelStage: funnelStage.optional(),
   relationshipGoal: relationshipGoal.optional(),
@@ -206,7 +208,9 @@ export const upsertContactIdentitySchema = z
     displayName: z.string().optional(),
     headline: z.string().optional(),
     bio: z.string().optional(),
-    avatarUrl: z.string().optional(),
+    avatarUrl: z.string().optional().describe(
+      "Public https URL of the contact's profile photo. Set it whenever a photo is obtainable — a contact saved without one renders as bare initials in the Contacts list and nothing backfills it automatically. When a page scrape yields nothing, resolve it: https://unavatar.io/linkedin/user:{slug} for a LinkedIn person, https://unavatar.io/linkedin/company:{slug} for a LinkedIn organization page (the namespaces are not interchangeable — each 404s for the other's slugs), or https://unavatar.io/x/{handle} for X. Must be http(s); file:// URLs and local paths are rejected.",
+    ),
     location: z.string().optional(),
     websiteUrl: z.string().optional(),
     isVerified: z.boolean().optional(),

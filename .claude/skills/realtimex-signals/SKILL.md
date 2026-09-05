@@ -171,7 +171,9 @@ provenance tags as user-facing descriptions.
 
 Signals resolves avatars in this order:
 
-1. **Local upload** — `POST /api/media` + attachment with `role: "avatar"` (best for generated or edited photos)
+1. **Local media asset** — `/api/media/<id>`, served from disk. Either an operator upload or a
+   remote avatar the pipeline has cached (`origin: "platform_cache"`). This is the only source that
+   cannot break: everything below is a live third-party fetch on every render.
 2. **Identity `avatarUrl`** — `https://` URL from a synced platform via `upsert_contact_identity`
 3. **Gravatar** — from primary email
 4. **Initials** — UI fallback when nothing else resolves
@@ -181,6 +183,28 @@ Signals resolves avatars in this order:
 - **Never** set `avatarUrl` to `file://`, absolute filesystem paths, or bare filenames — they will not render in Signals.
 - **Never** treat `GenerateImage` output as linked until you upload it through Signals media.
 - After upload, `get_contact` returns `resolvedAvatarUrl` like `/api/media/<assetId>` (served by the Local App).
+- **Set an avatar on every contact you create.** Nothing backfills one automatically — `enrich_contact_avatars`
+  only runs as a step of the "Contact profile pipeline" template, so a contact written without an avatar
+  renders as bare initials until that pipeline happens to reach it.
+
+### Resolver fallback when you have no scraped photo
+
+**Prefer a scraped platform-CDN URL** (`media.licdn.com`, `pbs.twimg.com`). Those have no request
+quota. `unavatar.io` is capped near **50 requests/day for the whole install**, so an avatar sourced
+there will not render until the enrichment pipeline has cached it locally — use it only when the
+scrape genuinely fails, and still never leave the field blank.
+
+Pick the namespace by the profile URL you actually visited — they are **not** interchangeable, each
+404s for the other's slugs:
+
+| Profile | Resolver |
+|---|---|
+| `linkedin.com/in/{slug}` (person) | `https://unavatar.io/linkedin/user:{slug}` |
+| `linkedin.com/company/{slug}` (organization) | `https://unavatar.io/linkedin/company:{slug}` |
+| `x.com/{handle}` | `https://unavatar.io/x/{handle}` |
+
+Verify HTTP 200 with an `image/*` content-type before saving. HTTP 429 means unavatar is throttling —
+back off and retry rather than dropping the avatar.
 
 ### Set avatar from a local/generated image
 

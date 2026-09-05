@@ -10,7 +10,8 @@ import {
 } from "@/lib/db/queries/contact-dto";
 import { updateIdentity } from "@/lib/db/queries/identities";
 import type { ContactIdentity } from "@/lib/db/types";
-import { buildLinkedInUnavatarUrl } from "@/lib/platforms/linkedin/unavatar-url";
+import { buildLinkedInUnavatarCandidates } from "@/lib/platforms/linkedin/unavatar-url";
+import { cacheAvatarFromUrl } from "@/lib/avatars/cache-avatar";
 import type {
   PipelineContactOutcome,
   PipelineStepContext,
@@ -19,11 +20,14 @@ import type {
 
 export const ENRICH_CONTACT_AVATARS_HANDLER = "enrich_contact_avatars";
 const GRAVATAR_PROBE_TIMEOUT_MS = 5_000;
+const AVATAR_PROBE_TIMEOUT_MS = 5_000;
 
 type AvatarEnrichMetadata = {
   gravatarVerifiedAt?: number;
   gravatarMissAt?: number;
   exhaustedAt?: number;
+  /** Last transient failure (throttling, 5xx, network). Backs the contact off so the queue moves. */
+  throttledAt?: number;
 };
 
 function nowUnix(): number {
@@ -71,6 +75,7 @@ function readAvatarEnrich(metadata: string | null): AvatarEnrichMetadata {
     gravatarMissAt:
       typeof record.gravatarMissAt === "number" ? record.gravatarMissAt : undefined,
     exhaustedAt: typeof record.exhaustedAt === "number" ? record.exhaustedAt : undefined,
+    throttledAt: typeof record.throttledAt === "number" ? record.throttledAt : undefined,
   };
 }
 
@@ -109,9 +114,23 @@ function loadActiveIdentities(contactId: string): ContactIdentity[] {
     .filter((identity) => identity.isActive);
 }
 
-function hasAvatarPresent(contactId: string, identities: ContactIdentity[]): boolean {
-  if (loadContactAvatarUploadAssetId(contactId)) return true;
-  return identities.some((identity) => Boolean(identity.avatarUrl?.trim()));
+/**
+ * Only a locally stored avatar counts as present. An identity carrying a remote URL still needs a
+ * cache pass — that URL is what breaks when the resolver throttles (#431).
+ */
+function hasAvatarPresent(contactId: string): boolean {
+  return Boolean(loadContactAvatarUploadAssetId(contactId));
+}
+
+/** A remote URL already on an identity, ready to be pulled local. */
+function existingRemoteAvatar(
+  identities: ContactIdentity[],
+): { identity: ContactIdentity; avatarUrl: string } | undefined {
+  for (const identity of orderIdentitiesForRecovery(identities)) {
+    const avatarUrl = identity.avatarUrl?.trim();
+    if (avatarUrl) return { identity, avatarUrl };
+  }
+  return undefined;
 }
 
 function readPlatformDataObject(platformData: string | null | undefined): Record<string, unknown> {
@@ -178,26 +197,101 @@ function recoverAvatarFromLegacyMetadata(
   return { identity: primary, avatarUrl };
 }
 
-function recoverAvatarFromIdentityPlatform(
+type AvatarCandidate = { identity?: ContactIdentity; avatarUrl: string; source: string };
+
+function identityAvatarCandidates(identity: ContactIdentity): string[] {
+  if (identity.platform === "x" && identity.platformHandle?.trim()) {
+    const cleanHandle = identity.platformHandle.trim().replace(/^@/, "");
+    if (/^[a-zA-Z0-9_]{1,15}$/.test(cleanHandle)) {
+      return [`https://unavatar.io/x/${cleanHandle}`];
+    }
+    return [];
+  }
+  if (identity.platform === "linkedin") {
+    const slug = identity.platformHandle?.trim() || identity.platformUserId?.trim() || "";
+    return buildLinkedInUnavatarCandidates(slug);
+  }
+  return [];
+}
+
+/**
+ * Ordered by durability, not convenience. A URL already scraped from the platform CDN
+ * (`media.licdn.com`, `pbs.twimg.com`) has no request quota; the `unavatar.io` resolver is capped
+ * near 50/day, so it is genuinely last (#431).
+ */
+function buildAvatarCandidates(
+  metadata: string | null,
   identities: ContactIdentity[],
-): { identity: ContactIdentity; avatarUrl: string } | undefined {
+): AvatarCandidate[] {
+  const candidates: AvatarCandidate[] = [];
+
+  const existing = existingRemoteAvatar(identities);
+  if (existing) {
+    candidates.push({ ...existing, source: "identity_avatar" });
+  }
+
   for (const identity of orderIdentitiesForRecovery(identities)) {
     if (identity.avatarUrl?.trim()) continue;
-    if (identity.platform === "x" && identity.platformHandle?.trim()) {
-      const cleanHandle = identity.platformHandle.trim().replace(/^@/, "");
-      if (/^[a-zA-Z0-9_]{1,15}$/.test(cleanHandle)) {
-        return { identity, avatarUrl: `https://unavatar.io/x/${cleanHandle}` };
-      }
-    }
-    if (identity.platform === "linkedin") {
-      const slug = identity.platformHandle?.trim() || identity.platformUserId?.trim() || "";
-      const avatarUrl = buildLinkedInUnavatarUrl(slug);
-      if (avatarUrl) {
-        return { identity, avatarUrl };
-      }
+    const fromPlatformData = tryValidateAvatarUrl(
+      readPlatformAvatarCandidate(readPlatformDataObject(identity.platformData)),
+    );
+    if (fromPlatformData) {
+      candidates.push({ identity, avatarUrl: fromPlatformData, source: "platform_data" });
     }
   }
-  return undefined;
+
+  const legacy = tryValidateAvatarUrl(readLegacyAvatarUrl(metadata) ?? undefined);
+  const primary = pickPrimaryIdentity(identities);
+  if (legacy && primary) {
+    candidates.push({ identity: primary, avatarUrl: legacy, source: "legacy_metadata" });
+  }
+
+  for (const identity of orderIdentitiesForRecovery(identities)) {
+    if (identity.avatarUrl?.trim()) continue;
+    for (const avatarUrl of identityAvatarCandidates(identity)) {
+      candidates.push({ identity, avatarUrl, source: "identity_platform" });
+    }
+  }
+
+  const seen = new Set<string>();
+  return candidates.filter((candidate) => {
+    if (seen.has(candidate.avatarUrl)) return false;
+    seen.add(candidate.avatarUrl);
+    return true;
+  });
+}
+
+type AvatarCommit =
+  | { status: "cached"; candidate: AvatarCandidate; mediaAssetId: string }
+  | { status: "none" }
+  | { status: "transient"; message: string };
+
+/**
+ * One network round trip per candidate: the download *is* the probe. Probing and then fetching
+ * would spend two of a ~50/day allowance to land one avatar.
+ */
+async function commitFirstWorkingCandidate(
+  contactId: string,
+  candidates: AvatarCandidate[],
+  fetchImpl: typeof fetch,
+): Promise<AvatarCommit> {
+  let transient: string | undefined;
+
+  for (const candidate of candidates) {
+    const result = await cacheAvatarFromUrl(contactId, candidate.avatarUrl, fetchImpl);
+    if (result.status === "cached") {
+      if (candidate.identity && !candidate.identity.avatarUrl?.trim()) {
+        // Keep the source URL on the identity for provenance; rendering uses the cached bytes.
+        updateIdentity(candidate.identity.id, { avatarUrl: candidate.avatarUrl });
+      }
+      return { status: "cached", candidate, mediaAssetId: result.mediaAssetId };
+    }
+    if (result.status === "transient") {
+      transient ??= result.message;
+    }
+  }
+
+  return transient ? { status: "transient", message: transient } : { status: "none" };
 }
 
 function gravatarProbeUrl(email: string): string {
@@ -245,7 +339,7 @@ async function enrichOneContact(
 
   const identities = loadActiveIdentities(contactId);
 
-  if (hasAvatarPresent(contactId, identities)) {
+  if (hasAvatarPresent(contactId)) {
     return { contactId, status: "skipped", reason: "avatar_present" };
   }
 
@@ -253,36 +347,33 @@ async function enrichOneContact(
     return { contactId, status: "skipped", reason: "no_identity" };
   }
 
-  const platformRecovery = recoverAvatarFromPlatformData(identities);
-  if (platformRecovery) {
-    updateIdentity(platformRecovery.identity.id, { avatarUrl: platformRecovery.avatarUrl });
+  const commit = await commitFirstWorkingCandidate(
+    contactId,
+    buildAvatarCandidates(contact.metadata, identities),
+    ctx.fetchImpl,
+  );
+  if (commit.status === "cached") {
     recalcContactEnrichment(contactId);
     return {
       contactId,
       status: "updated",
-      detail: { source: "platform_data", identityId: platformRecovery.identity.id },
+      detail: {
+        source: commit.candidate.source,
+        identityId: commit.candidate.identity?.id,
+        mediaAssetId: commit.mediaAssetId,
+      },
     };
   }
-
-  const legacyRecovery = recoverAvatarFromLegacyMetadata(contact.metadata, identities);
-  if (legacyRecovery) {
-    updateIdentity(legacyRecovery.identity.id, { avatarUrl: legacyRecovery.avatarUrl });
-    recalcContactEnrichment(contactId);
+  // Throttling is not a verdict on the contact, so it stays in the backlog — but it must not stay
+  // at the *head* of it. The planner orders deterministically, so without a cooldown the same
+  // throttled batch is re-selected forever and everything behind it starves.
+  if (commit.status === "transient") {
+    patchAvatarEnrichMetadata(contactId, { throttledAt: nowUnix() });
     return {
       contactId,
-      status: "updated",
-      detail: { source: "legacy_metadata", identityId: legacyRecovery.identity.id },
-    };
-  }
-
-  const identityPlatformRecovery = recoverAvatarFromIdentityPlatform(identities);
-  if (identityPlatformRecovery) {
-    updateIdentity(identityPlatformRecovery.identity.id, { avatarUrl: identityPlatformRecovery.avatarUrl });
-    recalcContactEnrichment(contactId);
-    return {
-      contactId,
-      status: "updated",
-      detail: { source: "identity_platform", identityId: identityPlatformRecovery.identity.id },
+      status: "failed",
+      reason: commit.message,
+      detail: { source: "avatar_cache" },
     };
   }
 

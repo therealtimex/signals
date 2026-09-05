@@ -16,16 +16,13 @@ Package and distribute Signals through the **RealtimeX marketplace** — not pub
 Plugin id: `com.realtimex.signals`  
 Local app id: `47e45f71-3279-42f5-8e95-731de01b6eae`
 
-Version 0.2.8 packages `signals-writing` 1.1.0 with reusable writing intents for nurture workflows.
-Writing agents read the four workspace Personality files first, use only the active binding
-selector, and refuse the full audited/materialized lane until Personality is bound. Contact
-Relationship Nurture composes assist-only reply, comment, message, and proposal drafts through the
-same Personality, target, audit, approval, materialization, and lineage boundary. Its approval gate
-is derived from surface capabilities rather than operator choice: every current nurture surface is
-draft-only, so activation presents approval as a locked state marker rather than a setting, a stale
-`requireApproval: false` dispatch is rejected instead of silently converted, and completed runs
-surface their pending proposals for approval, revision, or rejection on the run page. The provisioned
-`AGENTS.md` includes the permanent Personality pointer.
+Version 0.2.12 fills the avatar cache on its own. A scheduled sweep works through contacts that
+still lack a locally stored avatar, doing avatar work only — so it keeps running when profile
+hydration or persona generation are unavailable, which previously stalled the whole pass. Contacts
+whose photo comes from a platform CDN are taken first, since those hosts are unmetered and the
+public avatar resolver is capped at roughly fifty requests a day; the sweep stands down for a while
+once that resolver starts refusing, rather than spending the remaining allowance to no effect.
+`signals-writing` stays at 1.1.0.
 
 ## Build
 

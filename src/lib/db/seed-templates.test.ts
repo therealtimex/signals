@@ -57,7 +57,7 @@ describe("Platform-native writing seed", () => {
     expect(migrated.id).toBe(legacy.id);
     expect(getSystemTemplateByName("Thought Leadership Posts")).toBeUndefined();
     const config = JSON.parse(migrated.config ?? "{}") as Record<string, unknown>;
-    expect(config).toMatchObject({ _seedVersion: 30, topics: ["keep"] });
+    expect(config).toMatchObject({ _seedVersion: 31, topics: ["keep"] });
     expect(isSignalsWritingTemplateConfig(config)).toBe(true);
   });
 });
@@ -75,7 +75,7 @@ describe("Contact profile pipeline seed", () => {
       pipeline?: { version?: number; steps?: Array<{ id: string; handler: string }> };
     };
 
-    expect(config._seedVersion).toBe(30);
+    expect(config._seedVersion).toBe(31);
     expect(config.pipeline?.version).toBe(2);
     expect(config.pipeline?.steps).toEqual([
       { id: "hydrate", executor: "code", handler: "hydrate_x_profiles" },
@@ -119,7 +119,7 @@ describe("Contact profile pipeline seed", () => {
       };
     };
     expect(config).toMatchObject({
-      _seedVersion: 30,
+      _seedVersion: 31,
       customTopLevel: true,
       pipeline: {
         version: 2,
@@ -136,6 +136,47 @@ describe("Contact profile pipeline seed", () => {
       "persona",
     ]);
   });
+
+  it("seeds batch chaining on", () => {
+    seedTemplates();
+    const template = getSystemTemplateByName(CONTACT_PROFILE_PIPELINE_TEMPLATE_NAME)!;
+    const config = JSON.parse(template.config ?? "{}") as {
+      pipeline?: { scheduleDrain?: boolean };
+    };
+
+    expect(config.pipeline?.scheduleDrain).toBe(true);
+  });
+
+  it("turns batch chaining on for an existing install without touching its batch size", () => {
+    seedTemplates();
+    const template = getSystemTemplateByName(CONTACT_PROFILE_PIPELINE_TEMPLATE_NAME)!;
+    // An install seeded before #426: one batch per manual run, backlog never drains.
+    db.update(workflowTemplates).set({
+      config: JSON.stringify({
+        _seedVersion: 30,
+        pipeline: {
+          version: 2,
+          planner: "contact_profile",
+          batchSize: 7,
+          filters: { needsAvatar: true, needsPersona: true, personaStale: false },
+          scheduleDrain: false,
+          steps: [
+            { id: "hydrate", executor: "code", handler: "hydrate_x_profiles" },
+            { id: "avatar", executor: "code", handler: "enrich_contact_avatars" },
+            { id: "persona", executor: "llm", handler: "generate_persona" },
+          ],
+        },
+      }),
+    }).where(eq(workflowTemplates.id, template.id)).run();
+
+    expect(seedTemplates().updated).toBe(1);
+    const config = JSON.parse(
+      getSystemTemplateByName(CONTACT_PROFILE_PIPELINE_TEMPLATE_NAME)!.config ?? "{}",
+    ) as { pipeline?: { scheduleDrain?: boolean; batchSize?: number } };
+
+    expect(config.pipeline?.scheduleDrain).toBe(true);
+    expect(config.pipeline?.batchSize).toBe(7);
+  });
 });
 
 describe("Contact Web Research seed", () => {
@@ -149,7 +190,7 @@ describe("Contact Web Research seed", () => {
     expect(template.templateType).toBe("enrichment");
     expect(template.estimatedCost).toBe(0.2);
     expect(config).toMatchObject({
-      _seedVersion: 30,
+      _seedVersion: 31,
       contactWebResearch: { version: 2 },
       acceptsContactId: true,
     });
@@ -261,7 +302,7 @@ describe("Social Intent Patrol seed", () => {
 
     expect(config).not.toHaveProperty("maxPosts");
     expect(config).not.toHaveProperty("durationMinutes");
-    expect(config._seedVersion).toBe(30);
+    expect(config._seedVersion).toBe(31);
     expect(config.maxComments).toBe(8);
     // The card copy is structural — an existing install must not keep describing a shift that
     // still posts to your own timeline.
@@ -385,7 +426,7 @@ describe("Contact Relationship Nurture seed", () => {
     const migrated = JSON.parse(
       getSystemTemplateByName("Contact Relationship Nurture")!.config ?? "{}",
     ) as Record<string, unknown>;
-    expect(migrated).toMatchObject({ _seedVersion: 30, requireApproval: true, maxTargets: 42 });
+    expect(migrated).toMatchObject({ _seedVersion: 31, requireApproval: true, maxTargets: 42 });
     expect(info).toHaveBeenCalledTimes(1);
 
     seedTemplates();
@@ -411,7 +452,7 @@ describe("Snowball Seed Scout seed", () => {
       snowballSeedScout?: { version?: number; executionKind?: string };
       maxLinksPerRun?: number;
     };
-    expect(config._seedVersion).toBe(30);
+    expect(config._seedVersion).toBe(31);
     expect(config.snowballSeedScout?.executionKind).toBe("heartbeat_shell");
     expect(config.maxLinksPerRun).toBe(5);
   });
@@ -440,7 +481,7 @@ describe("Network Snowball seed", () => {
       maxContacts?: number;
       maxHops?: number;
     };
-    expect(config._seedVersion).toBe(30);
+    expect(config._seedVersion).toBe(31);
     expect(config.networkSnowball?.version).toBe(1);
     expect(config.focus).toBe("investors_and_angels");
     expect(config.maxContacts).toBe(10);
@@ -464,6 +505,6 @@ describe("Network Snowball seed", () => {
 
     expect(updated.systemPrompt).toContain("--workflow-run-id <runId>");
     expect(updated.systemPrompt).toContain("--template-id <templateId>");
-    expect(updatedConfig._seedVersion).toBe(30);
+    expect(updatedConfig._seedVersion).toBe(31);
   });
 });

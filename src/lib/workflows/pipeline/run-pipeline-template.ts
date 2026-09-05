@@ -227,6 +227,7 @@ function formatFinalMessage(workflowRunId: string, result: PipelineRunResult): s
 }
 
 function aggregateRunResult(input: {
+  hydrationDeferred?: number;
   plan: ProfilePipelineRunPlan;
   stepReports: PipelineStepReport[];
   pipeline: PipelineConfig;
@@ -310,7 +311,11 @@ function aggregateRunResult(input: {
     failed: failedContactIds.size,
     aborted,
     avatarOutcomes: { updated: avatarUpdated, gravatarVerified },
-    hydrationOutcomes: { updated: profilesHydrated, notFound: hydrationNotFound },
+    hydrationOutcomes: {
+      updated: profilesHydrated,
+      notFound: hydrationNotFound,
+      deferred: input.hydrationDeferred ?? 0,
+    },
     cleared,
     remainingBacklog,
     complete: remainingBacklog === 0,
@@ -737,6 +742,8 @@ export async function executePipelineRun(input: ExecutePipelineRunInput): Promis
     };
   });
 
+  const hydrationDeferredContactIds = new Set<string>();
+
   try {
     contactLoop: for (const contactId of input.plan.selectedContactIds) {
       for (const state of stepStates) {
@@ -789,6 +796,13 @@ export async function executePipelineRun(input: ExecutePipelineRunInput): Promis
           break contactLoop;
         }
 
+        // A deferred hydration used to end all work for the contact, to stop downstream steps
+        // clearing it from the backlog while its hydration was incomplete. But hydration is not a
+        // backlog criterion — `buildBacklogPredicate` is needsAvatar/needsPersona/personaStale only
+        // — so a contact is never queued *for* hydration, and withholding avatar and persona work
+        // buys nothing. It costs a great deal: the anonymous X breaker holds a 15-minute cooldown,
+        // so one tripped breaker starved every remaining contact in the batch of avatar work it
+        // could have done from a completely unrelated source (#436).
         if (
           state.stepDecl.handler === "hydrate_x_profiles" &&
           invocationReport.outcomes.some(
@@ -798,7 +812,7 @@ export async function executePipelineRun(input: ExecutePipelineRunInput): Promis
               outcome.reason === X_ANON_DEFERRED_REASON,
           )
         ) {
-          continue contactLoop;
+          hydrationDeferredContactIds.add(contactId);
         }
       }
     }
@@ -837,6 +851,7 @@ export async function executePipelineRun(input: ExecutePipelineRunInput): Promis
   }
 
   const result = aggregateRunResult({
+    hydrationDeferred: hydrationDeferredContactIds.size,
     plan: input.plan,
     stepReports,
     pipeline: input.pipeline,
