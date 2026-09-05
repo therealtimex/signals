@@ -1,18 +1,36 @@
-import { listOrgsWithContactCounts } from "@/lib/db/queries/orgs";
+import {
+  listOrgsWithContactCounts,
+  type OrgListPeopleFilter,
+  type OrgListSort,
+  type OrgListSource,
+} from "@/lib/db/queries/orgs";
 import { parsePaginationParams } from "@/lib/pagination";
 import { OrganizationListClient } from "./organization-list-client";
 
 export default async function OrganizationsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ search?: string; page?: string }>;
+  searchParams: Promise<{
+    search?: string;
+    page?: string;
+    people?: string;
+    source?: string;
+    sort?: string;
+  }>;
 }) {
   const params = await searchParams;
   const { page, pageSize } = parsePaginationParams(params);
+  const people = (["multiple", "unlinked"] as const).find((v) => v === params.people);
+  const source = (["import", "agent"] as const).find((v) => v === params.source);
+  const sort = (["people", "name"] as const).find((v) => v === params.sort);
+
   const { data, total } = listOrgsWithContactCounts({
     search: params.search,
     page,
     pageSize,
+    people: people as OrgListPeopleFilter | undefined,
+    source: source as OrgListSource | undefined,
+    sort: sort as OrgListSort | undefined,
   });
 
   return (
@@ -29,6 +47,9 @@ export default async function OrganizationsPage({
         page={page}
         pageSize={pageSize}
         currentSearch={params.search}
+        currentPeople={people}
+        currentSource={source}
+        currentSort={sort}
       />
     </div>
   );

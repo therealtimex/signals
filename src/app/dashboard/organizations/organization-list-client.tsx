@@ -14,10 +14,18 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { AddOrganizationDialog } from "@/components/add-organization-dialog";
 import { PaginationControls } from "@/components/pagination-controls";
 import type { OrgListRow } from "@/lib/db/queries/orgs";
+import { orgInitials, peopleSummary } from "@/lib/orgs/org-list-display";
 
 function formatUpdatedAt(updatedAt: number): string {
   const date = new Date(updatedAt * 1000);
@@ -31,6 +39,9 @@ interface OrganizationListClientProps {
   page: number;
   pageSize: number;
   currentSearch?: string;
+  currentPeople?: string;
+  currentSource?: string;
+  currentSort?: string;
 }
 
 export function OrganizationListClient(props: OrganizationListClientProps) {
@@ -47,6 +58,9 @@ function OrganizationListInner({
   page,
   pageSize,
   currentSearch,
+  currentPeople,
+  currentSource,
+  currentSort,
 }: OrganizationListClientProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -105,8 +119,8 @@ function OrganizationListInner({
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-4">
-        <form onSubmit={handleSearchSubmit} className="flex-1">
+      <div className="flex flex-wrap items-center gap-3">
+        <form onSubmit={handleSearchSubmit} className="flex-1 min-w-[16rem]">
           <Input
             placeholder="Search companies..."
             value={search}
@@ -114,6 +128,43 @@ function OrganizationListInner({
             className="max-w-sm"
           />
         </form>
+
+        <Select
+          value={currentPeople ?? "any"}
+          onValueChange={(value) => updateParams("people", value === "any" ? "" : value)}
+        >
+          <SelectTrigger className="w-44"><SelectValue placeholder="All companies" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="any">All companies</SelectItem>
+            <SelectItem value="multiple">2+ people</SelectItem>
+            <SelectItem value="unlinked">No linked people</SelectItem>
+          </SelectContent>
+        </Select>
+
+        <Select
+          value={currentSource ?? "any"}
+          onValueChange={(value) => updateParams("source", value === "any" ? "" : value)}
+        >
+          <SelectTrigger className="w-40"><SelectValue placeholder="Any source" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="any">Any source</SelectItem>
+            <SelectItem value="import">Imported</SelectItem>
+            <SelectItem value="agent">Agent-created</SelectItem>
+          </SelectContent>
+        </Select>
+
+        <Select
+          value={currentSort ?? "updated"}
+          onValueChange={(value) => updateParams("sort", value === "updated" ? "" : value)}
+        >
+          <SelectTrigger className="w-44"><SelectValue placeholder="Recently updated" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="updated">Recently updated</SelectItem>
+            <SelectItem value="people">Most people</SelectItem>
+            <SelectItem value="name">Name (A–Z)</SelectItem>
+          </SelectContent>
+        </Select>
+
         <AddOrganizationDialog />
       </div>
 
@@ -131,9 +182,8 @@ function OrganizationListInner({
             <TableHeader>
               <TableRow>
                 <TableHead>Name</TableHead>
-                <TableHead className="w-28">Type</TableHead>
                 <TableHead className="w-40">Domain</TableHead>
-                <TableHead className="w-28 text-right">Contacts</TableHead>
+                <TableHead className="w-28 text-right">People</TableHead>
                 <TableHead className="w-36">Updated</TableHead>
               </TableRow>
             </TableHeader>
@@ -141,17 +191,22 @@ function OrganizationListInner({
               {orgs.map((org) => (
                 <TableRow key={org.id}>
                   <TableCell>
-                    <Link
-                      href={`/dashboard/organizations/${org.id}`}
-                      className="font-medium hover:underline"
-                    >
-                      {org.name}
-                    </Link>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="secondary" className="capitalize">
-                      {org.orgType}
-                    </Badge>
+                    <div className="flex items-center gap-3">
+                      <Avatar className="size-9 shrink-0">
+                        <AvatarFallback>{orgInitials(org.name)}</AvatarFallback>
+                      </Avatar>
+                      <div className="min-w-0">
+                        <Link
+                          href={`/dashboard/organizations/${org.id}`}
+                          className="font-medium hover:underline"
+                        >
+                          {org.name}
+                        </Link>
+                        <p className="text-sm text-muted-foreground truncate">
+                          {peopleSummary(org.contactCount, org.linkedContactNames)}
+                        </p>
+                      </div>
+                    </div>
                   </TableCell>
                   <TableCell className="text-muted-foreground">
                     {org.domain ?? "—"}

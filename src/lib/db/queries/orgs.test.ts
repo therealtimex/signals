@@ -36,6 +36,64 @@ describe("orgs queries and API", () => {
     expect(linked[0]?.worksAtTitle).toBe("Engineer");
   });
 
+  it("filters and sorts the list on the fields that actually carry data", () => {
+    const solo = createOrg({ name: "Zeta Solo", source: "test" });
+    const crowd = createOrg({ name: "Alpha Crowd", source: "test" });
+    createOrg({ name: "Empty Co", source: "test" });
+
+    for (const name of ["Solo Person"]) {
+      const c = createContact({ name });
+      dualWriteContactCompany(c.id, "Zeta Solo", "Role");
+    }
+    for (const name of ["Crowd One", "Crowd Two", "Crowd Three"]) {
+      const c = createContact({ name });
+      dualWriteContactCompany(c.id, "Alpha Crowd", "Role");
+    }
+
+    const multiple = listOrgsWithContactCounts({ people: "multiple" });
+    expect(multiple.data.map((o) => o.id)).toEqual([crowd.id]);
+
+    const unlinked = listOrgsWithContactCounts({ people: "unlinked" });
+    expect(unlinked.data.map((o) => o.name)).toContain("Empty Co");
+    expect(unlinked.data.map((o) => o.id)).not.toContain(solo.id);
+
+    // Most-people ordering is what makes the list useful when almost every org has exactly one.
+    const byPeople = listOrgsWithContactCounts({ sort: "people" });
+    expect(byPeople.data[0]?.id).toBe(crowd.id);
+
+    const byName = listOrgsWithContactCounts({ sort: "name" });
+    expect(byName.data[0]?.name).toBe("Alpha Crowd");
+  });
+
+  it("omits the org's own name from its linked-people summary", () => {
+    // A company page stored as a contact links to its own org (#442).
+    createOrg({ name: "Selfsame Inc", source: "test" });
+    const twin = createContact({ name: "Selfsame Inc" });
+    const person = createContact({ name: "Real Employee" });
+    dualWriteContactCompany(twin.id, "Selfsame Inc", "Company Profile");
+    dualWriteContactCompany(person.id, "Selfsame Inc", "Engineer");
+
+    const row = listOrgsWithContactCounts({ search: "Selfsame" }).data[0]!;
+    expect(row.contactCount).toBe(2);
+    expect(row.linkedContactNames).toEqual(["Real Employee"]);
+  });
+
+  it("splits the list by creation source", () => {
+    const imported = createOrg({
+      name: "Imported Co",
+      source: "test",
+      provenance: "import:linkedin_csv",
+    });
+    const agentMade = createOrg({
+      name: "Agent Co",
+      source: "test",
+      provenance: "agent:create_contact",
+    });
+
+    expect(listOrgsWithContactCounts({ source: "import" }).data.map((o) => o.id)).toEqual([imported.id]);
+    expect(listOrgsWithContactCounts({ source: "agent" }).data.map((o) => o.id)).toEqual([agentMade.id]);
+  });
+
   it("excludes local_only works_at edges by default", () => {
     const org = createOrg({ name: "Scoped Corp", source: "test" });
     const sharedContact = createContact({ name: "Shared Person" });
