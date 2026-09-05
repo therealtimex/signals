@@ -1003,6 +1003,40 @@
                     "type": "object",
                     "properties": {
                       "tool": {
+                        "const": "find_duplicate_orgs"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "tiers": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "enum": [
+                                1,
+                                2
+                              ]
+                            }
+                          },
+                          "minConfidence": {
+                            "type": "number"
+                          },
+                          "limit": {
+                            "type": "number"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
                         "const": "merge_contacts"
                       },
                       "input": {
@@ -4801,6 +4835,7 @@
                       "upsert_contact_identity",
                       "archive_contact",
                       "find_duplicate_contacts",
+                      "find_duplicate_orgs",
                       "merge_contacts",
                       "query_analytics",
                       "query_workflows",
@@ -5026,6 +5061,6 @@
   ],
   "x-signals-agent-tools": {
     "manifestVersion": "1",
-    "toolCount": 89
+    "toolCount": 90
   }
 }

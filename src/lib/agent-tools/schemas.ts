@@ -183,6 +183,14 @@ export const findDuplicateContactsSchema = z.object({
   contactIds: z.array(z.string().min(1)).optional(),
 });
 
+export const findDuplicateOrgsSchema = z.object({
+  // Two tiers only: a shared domain or platform identity would be stronger evidence, but the write
+  // path already refuses both, so no such duplicate can exist.
+  tiers: z.array(z.union([z.literal(1), z.literal(2)])).optional(),
+  minConfidence: z.number().min(0).max(1).optional(),
+  limit: z.number().int().positive().max(200).optional(),
+});
+
 export const mergeContactsSchema = z.object({
   primaryContactId: z.string().min(1),
   secondaryContactIds: z.array(z.string().min(1)).min(1),

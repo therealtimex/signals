@@ -2,6 +2,7 @@ import {
   archiveContactSchema,
   createContactSchema,
   findDuplicateContactsSchema,
+  findDuplicateOrgsSchema,
   mergeContactsSchema,
   createTaskSchema,
   enrichContactSchema,
@@ -139,6 +140,7 @@ import {
   handleArchiveContact,
   handleCreateContact,
   handleFindDuplicateContacts,
+  handleFindDuplicateOrgs,
   handleMergeContacts,
   handleCreateTask,
   handleEnrichContact,
@@ -302,6 +304,15 @@ export const AGENT_TOOLS: Record<string, AgentToolDefinition> = {
     schema: findDuplicateContactsSchema,
     parameters: zodToParameters(findDuplicateContactsSchema),
     execute: handleFindDuplicateContacts,
+  },
+  find_duplicate_orgs: {
+    name: "find_duplicate_orgs",
+    description:
+      "Scan organizations for duplicate records. Tier 1 is an identical suffix-stripped name, tier 2 is one name containing the other. Read-only, and tier 2 is suggestive rather than certain — a venture arm, division or regional subsidiary can contain its parent's name without being the same entity, so review before merging. Shared domains and platform identities are not checked because the write path already rejects them.",
+    category: "contacts",
+    schema: findDuplicateOrgsSchema,
+    parameters: zodToParameters(findDuplicateOrgsSchema),
+    execute: handleFindDuplicateOrgs,
   },
   merge_contacts: {
     name: "merge_contacts",
