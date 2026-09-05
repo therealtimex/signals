@@ -446,6 +446,25 @@ export function countOrgsByCreatedWorkflowRun(runId: string): number {
   );
 }
 
+/**
+ * A company page stored as a contact links to its own org, so "Clearbit · Clearbit" would read as
+ * if the company employed itself. The count still includes it; only the name list drops it.
+ */
+function pickLinkedContactNames(
+  org: Org,
+  relationshipOpts: OrgRelationshipQueryOptions,
+  limit = 3,
+): string[] {
+  const selfKey = org.name.trim().toLowerCase();
+  const names: string[] = [];
+  for (const contact of listOrgLinkedContacts(org.id, relationshipOpts)) {
+    if (contact.name.trim().toLowerCase() === selfKey) continue;
+    names.push(contact.name);
+    if (names.length === limit) break;
+  }
+  return names;
+}
+
 export function listOrgsWithContactCounts(
   opts?: Parameters<typeof listOrgs>[0],
 ): PaginatedResult<OrgListRow> {
@@ -461,10 +480,7 @@ export function listOrgsWithContactCounts(
       // A company page stored as a contact links to its own org, so "Clearbit · Clearbit" would
       // otherwise read as if the company employed itself. The count still includes it; only the
       // name list drops it, since naming the org again tells the reader nothing.
-      linkedContactNames: listOrgLinkedContacts(org.id, relationshipOpts)
-        .map((contact) => contact.name)
-        .filter((name) => name.trim().toLowerCase() !== org.name.trim().toLowerCase())
-        .slice(0, 3),
+      linkedContactNames: pickLinkedContactNames(org, relationshipOpts),
     })),
   };
 }

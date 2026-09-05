@@ -25,29 +25,12 @@ import {
 import { AddOrganizationDialog } from "@/components/add-organization-dialog";
 import { PaginationControls } from "@/components/pagination-controls";
 import type { OrgListRow } from "@/lib/db/queries/orgs";
+import { orgInitials, peopleSummary } from "@/lib/orgs/org-list-display";
 
 function formatUpdatedAt(updatedAt: number): string {
   const date = new Date(updatedAt * 1000);
   const month = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   return `${month[date.getUTCMonth()]} ${date.getUTCDate()}, ${date.getUTCFullYear()}`;
-}
-
-/** Initials for the logo placeholder — same treatment contacts get, so rows read as rows. */
-export function orgInitials(name: string): string {
-  const words = name.trim().split(/\s+/).filter(Boolean);
-  if (words.length === 0) return "?";
-  if (words.length === 1) return words[0]!.slice(0, 2).toUpperCase();
-  return `${words[0]![0]}${words[1]![0]}`.toUpperCase();
-}
-
-/** "3 people · Ada Lovelace, Alan Turing +1" — the org-side mirror of a contact's employment line. */
-export function peopleSummary(count: number, names: string[]): string {
-  if (count === 0) return "No linked people";
-  const label = count === 1 ? "1 person" : `${count} people`;
-  if (names.length === 0) return label;
-  const shown = names.slice(0, 2).join(", ");
-  const extra = count - Math.min(names.length, 2);
-  return extra > 0 ? `${label} · ${shown} +${extra}` : `${label} · ${shown}`;
 }
 
 interface OrganizationListClientProps {

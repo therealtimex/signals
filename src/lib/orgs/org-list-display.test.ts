@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { orgInitials, peopleSummary } from "./organization-list-client";
+import { orgInitials, peopleSummary } from "@/lib/orgs/org-list-display";
 
 describe("orgInitials", () => {
   it("uses the first two words, like the contact avatar does", () => {
