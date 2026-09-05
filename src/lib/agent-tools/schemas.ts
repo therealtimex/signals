@@ -191,6 +191,22 @@ export const findDuplicateOrgsSchema = z.object({
   limit: z.number().int().positive().max(200).optional(),
 });
 
+export const mergeOrgsSchema = z.object({
+  primaryOrgId: z.string().min(1),
+  secondaryOrgIds: z.array(z.string().min(1)).min(1).max(20),
+  dryRun: z.boolean().optional().describe(
+    "Run the merge and roll it back, returning exactly what a committed call would do. Call this first and show the plan before merging.",
+  ),
+  domain: z.string().optional().describe(
+    "Which member domain becomes the survivor's primary. Must already belong to one of the merged orgs; adding a new domain is updateOrg's job.",
+  ),
+  force: z.boolean().optional().describe(
+    "Merge a pair the duplicate detector refuses to suggest — a venture arm into its parent, a division, or a regional unit. Off by default; only set it when a human has confirmed the two records are one organization.",
+  ),
+  reason: z.string().optional(),
+  workflowRunId: z.string().min(1).optional(),
+});
+
 export const mergeContactsSchema = z.object({
   primaryContactId: z.string().min(1),
   secondaryContactIds: z.array(z.string().min(1)).min(1),

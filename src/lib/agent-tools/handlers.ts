@@ -1,5 +1,6 @@
 import { listContacts, getContactById, createContact, updateContact, recalcEnrichment } from "@/lib/db/queries/contacts";
 import { findDuplicateOrgs } from "@/lib/orgs/dedupe/detect";
+import { mergeOrgs, MergeOrgsError } from "@/lib/orgs/dedupe/merge";
 import { createIdentity, getIdentityById, updateIdentity } from "@/lib/db/queries/identities";
 import { resolvePlatformClaim } from "@/lib/db/identity-claims";
 import { getDashboardMetrics } from "@/lib/db/queries/dashboard";
@@ -39,6 +40,7 @@ import type {
   archiveContactSchema,
   findDuplicateContactsSchema,
   findDuplicateOrgsSchema,
+  mergeOrgsSchema,
   mergeContactsSchema,
   createContactSchema,
   createTaskSchema,
@@ -737,6 +739,21 @@ export async function handleUpsertContactIdentity(
 
 export async function handleArchiveContact(input: z.infer<typeof archiveContactSchema>) {
   return archiveContactTool(input.contactId, input.reason);
+}
+
+export async function handleMergeOrgs(input: z.infer<typeof mergeOrgsSchema>) {
+  const { primaryOrgId, secondaryOrgIds, ...options } = input;
+  try {
+    return mergeOrgs({ primaryOrgId, secondaryOrgIds, options });
+  } catch (error) {
+    if (error instanceof MergeOrgsError) {
+      throw new AgentToolError(
+        error.code === "NOT_FOUND" ? "NOT_FOUND" : "VALIDATION_ERROR",
+        error.message,
+      );
+    }
+    throw error;
+  }
 }
 
 export async function handleFindDuplicateOrgs(

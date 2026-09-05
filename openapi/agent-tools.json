@@ -1037,6 +1037,55 @@
                     "type": "object",
                     "properties": {
                       "tool": {
+                        "const": "merge_orgs"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "primaryOrgId": {
+                            "type": "string"
+                          },
+                          "secondaryOrgIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "dryRun": {
+                            "type": "boolean",
+                            "description": "Run the merge and roll it back, returning exactly what a committed call would do. Call this first and show the plan before merging."
+                          },
+                          "domain": {
+                            "type": "string",
+                            "description": "Which member domain becomes the survivor's primary. Must already belong to one of the merged orgs; adding a new domain is updateOrg's job."
+                          },
+                          "force": {
+                            "type": "boolean",
+                            "description": "Merge a pair the duplicate detector refuses to suggest — a venture arm into its parent, a division, or a regional unit. Off by default; only set it when a human has confirmed the two records are one organization."
+                          },
+                          "reason": {
+                            "type": "string"
+                          },
+                          "workflowRunId": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "primaryOrgId",
+                          "secondaryOrgIds"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
                         "const": "merge_contacts"
                       },
                       "input": {
@@ -4836,6 +4885,7 @@
                       "archive_contact",
                       "find_duplicate_contacts",
                       "find_duplicate_orgs",
+                      "merge_orgs",
                       "merge_contacts",
                       "query_analytics",
                       "query_workflows",
@@ -5061,6 +5111,6 @@
   ],
   "x-signals-agent-tools": {
     "manifestVersion": "1",
-    "toolCount": 90
+    "toolCount": 91
   }
 }

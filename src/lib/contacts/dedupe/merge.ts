@@ -15,6 +15,10 @@
  */
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
+import {
+  employmentFoldUpdates,
+  pickEmploymentFoldTarget,
+} from "@/lib/db/employment-fold";
 import { recalcContactEnrichment } from "@/lib/db/contact-enrichment-recalc";
 import { projectWorksAtFromEmployments } from "@/lib/db/employment-works-at-projection";
 import {
@@ -362,24 +366,16 @@ function mergeEmployments(primaryId: string, secondaryId: string, counters: Coun
   const movable: typeof rows = [];
 
   for (const row of rows) {
+    // Shared with mergeOrgs so the two merges cannot drift (ADR-445-2).
     const sameOrg = primaryRows.filter((existing) => existing.orgId === row.orgId);
-    const target =
-      sameOrg.find((existing) => normalizeTitle(existing.title) === normalizeTitle(row.title)) ??
-      // A blank title on either side means "same job, less detail", not a second job.
-      (normalizeTitle(row.title) === ""
-        ? sameOrg[0]
-        : sameOrg.find((existing) => normalizeTitle(existing.title) === ""));
+    const target = pickEmploymentFoldTarget(row, sameOrg);
 
     if (!target) {
       movable.push(row);
       continue;
     }
 
-    const updates: Record<string, unknown> = {};
-    if (!target.title && row.title) updates.title = row.title;
-    if (target.startedAt === null && row.startedAt !== null) updates.startedAt = row.startedAt;
-    if (target.endedAt === null && row.endedAt !== null) updates.endedAt = row.endedAt;
-    if (!target.isCurrent && row.isCurrent) updates.isCurrent = true;
+    const updates: Record<string, unknown> = employmentFoldUpdates(target, row);
     if (Object.keys(updates).length > 0) {
       updates.updatedAt = nowUnix();
       db.update(contactEmployments).set(updates).where(eq(contactEmployments.id, target.id)).run();
