@@ -16,11 +16,12 @@ Package and distribute Signals through the **RealtimeX marketplace** — not pub
 Plugin id: `com.realtimex.signals`  
 Local app id: `47e45f71-3279-42f5-8e95-731de01b6eae`
 
-Version 0.2.15 fixes the Deduplicate & Merge Companies workflow added in 0.2.14, which opened the
-contact deduplication panel instead of its own: it listed people and their social handles under the
-companies title, and its company tools could not be reached. The workflow now opens its own review,
-and an install that already has the 0.2.14 version is corrected on upgrade, keeping any settings
-already tuned. `signals-writing` stays at 1.1.0.
+Version 0.2.16 completes the Deduplicate & Merge Companies workflow fix begun in 0.2.15. Starting
+it asked for a company name and an inactivity period — settings belonging to the pruning workflows —
+while the settings it actually uses were unavailable, so a run was configured with values it could
+not act on. It now asks how strict the duplicate matching should be and how many candidates to
+review per run, and says plainly that the looser setting is a suggestion needing approval rather
+than a finding. `signals-writing` stays at 1.1.0.
 
 ## Build
 
