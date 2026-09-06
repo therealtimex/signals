@@ -16,16 +16,15 @@ Package and distribute Signals through the **RealtimeX marketplace** — not pub
 Plugin id: `com.realtimex.signals`  
 Local app id: `47e45f71-3279-42f5-8e95-731de01b6eae`
 
-Version 0.2.13 adds organization consolidation and makes the CLI find Signals on its own. Duplicate
-company records — the same firm split across several rows, each holding part of its people — can now
-be found and merged: the merge re-points everything that referenced the absorbed record, folds
-duplicate employment rows, and keeps the absorbed record as a tombstone so later imports resolve
-through it rather than recreating it. Merges are previewed before they are committed and are not
-reversible automatically, so the preview is the safeguard. The Companies list gains logos, a summary
-of each company's linked people, and filters. `signals-pp-cli` no longer needs to be told where the
-app is: it locates the running Signals Local App itself and verifies what answers is really Signals.
-Response handling across the dashboard now checks request status before reading a body, so a failed
-load reads as a failure rather than as empty data. `signals-writing` stays at 1.1.0.
+Version 0.2.14 adds a Deduplicate & Merge Companies workflow, so consolidating duplicate company
+records is something to start from the automation catalog rather than assemble by hand. It reviews
+every candidate against a preview of exactly what the merge would change — which company record
+survives, which domain it keeps, whose employment rows collapse — presents them together, and waits
+for approval before merging anything. It merges only the pairs approved and reports how many
+duplicates remained and how many people moved onto surviving records. It deliberately asks rather
+than deciding: two company names being similar is a weaker signal than two people sharing an email
+address, a subsidiary or regional office can carry its parent's name, and a merge cannot be undone
+automatically. It consolidates records and does not enrich them. `signals-writing` stays at 1.1.0.
 
 ## Build
 
