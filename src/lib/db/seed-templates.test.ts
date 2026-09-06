@@ -20,6 +20,7 @@ import {
   isProfilePublishTemplateConfig,
   readProfilePublishConfig,
 } from "@/lib/workflows/profile-publish";
+import { isDedupeTemplateConfig } from "@/lib/workflows/dedupe-template";
 import { resetCoreTables } from "@/test/db";
 import { isSignalsWritingTemplateConfig } from "@/lib/workflows/signals-writing";
 import {
@@ -57,7 +58,7 @@ describe("Platform-native writing seed", () => {
     expect(migrated.id).toBe(legacy.id);
     expect(getSystemTemplateByName("Thought Leadership Posts")).toBeUndefined();
     const config = JSON.parse(migrated.config ?? "{}") as Record<string, unknown>;
-    expect(config).toMatchObject({ _seedVersion: 32, topics: ["keep"] });
+    expect(config).toMatchObject({ _seedVersion: 33, topics: ["keep"] });
     expect(isSignalsWritingTemplateConfig(config)).toBe(true);
   });
 });
@@ -75,7 +76,7 @@ describe("Contact profile pipeline seed", () => {
       pipeline?: { version?: number; steps?: Array<{ id: string; handler: string }> };
     };
 
-    expect(config._seedVersion).toBe(32);
+    expect(config._seedVersion).toBe(33);
     expect(config.pipeline?.version).toBe(2);
     expect(config.pipeline?.steps).toEqual([
       { id: "hydrate", executor: "code", handler: "hydrate_x_profiles" },
@@ -119,7 +120,7 @@ describe("Contact profile pipeline seed", () => {
       };
     };
     expect(config).toMatchObject({
-      _seedVersion: 32,
+      _seedVersion: 33,
       customTopLevel: true,
       pipeline: {
         version: 2,
@@ -189,9 +190,7 @@ describe("Deduplicate & Merge Companies seed", () => {
     expect(template.templateType).toBe("pruning");
     expect(template.estimatedCost).toBe(0);
     expect(JSON.parse(template.config ?? "{}")).toMatchObject({
-      tiers: [1, 2],
-      minConfidence: 0.6,
-      limit: 25,
+      orgDedupe: { version: 1, tiers: [1, 2], minConfidence: 0.6, limit: 25 },
     });
   });
 
@@ -208,6 +207,38 @@ describe("Deduplicate & Merge Companies seed", () => {
     expect(prompt).toContain("There is no un-merge");
     // It must not promise enrichment it does not do.
     expect(prompt).toContain("It does not enrich them");
+  });
+
+  it("migrates a v0.2.14 install off the colliding top-level tiers", () => {
+    seedTemplates();
+    const template = getSystemTemplateByName("Deduplicate & Merge Companies")!;
+    // Exactly what v0.2.14 shipped, with an operator-tuned limit to prove tuning survives.
+    db.update(workflowTemplates).set({
+      config: JSON.stringify({ _seedVersion: 32, limit: 10, minConfidence: 0.6, tiers: [1] }),
+    }).where(eq(workflowTemplates.id, template.id)).run();
+
+    seedTemplates();
+    const config = JSON.parse(
+      getSystemTemplateByName("Deduplicate & Merge Companies")!.config ?? "{}",
+    );
+
+    expect(config.tiers).toBeUndefined();
+    expect(config.limit).toBeUndefined();
+    expect(config.orgDedupe).toMatchObject({ tiers: [1], limit: 10, minConfidence: 0.6 });
+    expect(isDedupeTemplateConfig(config)).toBe(false);
+  });
+
+  it("does not get mistaken for the contact deduper by the template gallery", () => {
+    // Both are templateType "pruning". Shipping this one with a top-level `tiers` made the gallery
+    // open the *contact* dedupe dialog under this template's title.
+    seedTemplates();
+    const companies = getSystemTemplateByName("Deduplicate & Merge Companies")!;
+    const contacts = getSystemTemplateByName("Deduplicate & Merge Contacts")!;
+
+    expect(companies.templateType).toBe("pruning");
+    expect(contacts.templateType).toBe("pruning");
+    expect(isDedupeTemplateConfig(JSON.parse(companies.config ?? "{}"))).toBe(false);
+    expect(isDedupeTemplateConfig(JSON.parse(contacts.config ?? "{}"))).toBe(true);
   });
 
   it("names both tools it drives", () => {
@@ -229,7 +260,7 @@ describe("Contact Web Research seed", () => {
     expect(template.templateType).toBe("enrichment");
     expect(template.estimatedCost).toBe(0.2);
     expect(config).toMatchObject({
-      _seedVersion: 32,
+      _seedVersion: 33,
       contactWebResearch: { version: 2 },
       acceptsContactId: true,
     });
@@ -341,7 +372,7 @@ describe("Social Intent Patrol seed", () => {
 
     expect(config).not.toHaveProperty("maxPosts");
     expect(config).not.toHaveProperty("durationMinutes");
-    expect(config._seedVersion).toBe(32);
+    expect(config._seedVersion).toBe(33);
     expect(config.maxComments).toBe(8);
     // The card copy is structural — an existing install must not keep describing a shift that
     // still posts to your own timeline.
@@ -465,7 +496,7 @@ describe("Contact Relationship Nurture seed", () => {
     const migrated = JSON.parse(
       getSystemTemplateByName("Contact Relationship Nurture")!.config ?? "{}",
     ) as Record<string, unknown>;
-    expect(migrated).toMatchObject({ _seedVersion: 32, requireApproval: true, maxTargets: 42 });
+    expect(migrated).toMatchObject({ _seedVersion: 33, requireApproval: true, maxTargets: 42 });
     expect(info).toHaveBeenCalledTimes(1);
 
     seedTemplates();
@@ -491,7 +522,7 @@ describe("Snowball Seed Scout seed", () => {
       snowballSeedScout?: { version?: number; executionKind?: string };
       maxLinksPerRun?: number;
     };
-    expect(config._seedVersion).toBe(32);
+    expect(config._seedVersion).toBe(33);
     expect(config.snowballSeedScout?.executionKind).toBe("heartbeat_shell");
     expect(config.maxLinksPerRun).toBe(5);
   });
@@ -520,7 +551,7 @@ describe("Network Snowball seed", () => {
       maxContacts?: number;
       maxHops?: number;
     };
-    expect(config._seedVersion).toBe(32);
+    expect(config._seedVersion).toBe(33);
     expect(config.networkSnowball?.version).toBe(1);
     expect(config.focus).toBe("investors_and_angels");
     expect(config.maxContacts).toBe(10);
@@ -544,6 +575,6 @@ describe("Network Snowball seed", () => {
 
     expect(updated.systemPrompt).toContain("--workflow-run-id <runId>");
     expect(updated.systemPrompt).toContain("--template-id <templateId>");
-    expect(updatedConfig._seedVersion).toBe(32);
+    expect(updatedConfig._seedVersion).toBe(33);
   });
 });
