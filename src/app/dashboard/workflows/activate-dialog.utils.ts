@@ -1,3 +1,4 @@
+import { readOrgDedupeControls, tierPresetFor } from "@/lib/orgs/dedupe/template";
 import {
   PROFILE_PIPELINE_DEFAULT_BATCH,
   PROFILE_PIPELINE_MAX_BATCH,
@@ -22,7 +23,10 @@ export function readRunLimitFromTemplateConfig(
   topics: string;
   tone: string;
   maxEngagements: string;
+  orgDedupeTiers: string;
+  orgDedupeLimit: string;
 } {
+  const orgDedupe = readOrgDedupeControls(templateConfig);
   return {
     maxResults: String(templateConfig.maxResults ?? 20),
     maxContacts: String(templateConfig.maxContacts ?? 10),
@@ -34,6 +38,8 @@ export function readRunLimitFromTemplateConfig(
     maxEngagements: String(
       templateConfig.maxEngagements ?? templateConfig.maxReplies ?? 10,
     ),
+    orgDedupeTiers: tierPresetFor(orgDedupe.tiers),
+    orgDedupeLimit: String(orgDedupe.limit),
   };
 }
 
