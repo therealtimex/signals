@@ -31,6 +31,8 @@ describe("readRunLimitFromTemplateConfig", () => {
       topics: "",
       tone: "professional",
       maxEngagements: "10",
+      orgDedupeTiers: "1-2",
+      orgDedupeLimit: "25",
     });
   });
 
@@ -44,6 +46,8 @@ describe("readRunLimitFromTemplateConfig", () => {
       topics: "",
       tone: "professional",
       maxEngagements: "10",
+      orgDedupeTiers: "1-2",
+      orgDedupeLimit: "25",
     });
   });
 });

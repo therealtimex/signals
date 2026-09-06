@@ -23,6 +23,18 @@ import {
   clampPipelineBatchSize,
   readRunLimitFromTemplateConfig,
 } from "@/app/dashboard/workflows/activate-dialog.utils";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  ORG_DEDUPE_TIER_PRESETS,
+  isOrgDedupeTemplateConfig,
+  readOrgDedupeControls,
+} from "@/lib/orgs/dedupe/template";
 import { SocialPatrolFields } from "@/app/dashboard/workflows/social-patrol-fields";
 import { ProfilePublishFields } from "@/app/dashboard/workflows/profile-publish-fields";
 import { ContactNurtureFields } from "@/app/dashboard/workflows/contact-nurture-fields";
@@ -312,6 +324,7 @@ function ActivateDialogFormFields({
   isProfilePublish,
   isContactNurture,
   isNetworkSnowball,
+  isOrgDedupe,
   dispatch,
 }: {
   template: Template;
@@ -324,6 +337,7 @@ function ActivateDialogFormFields({
   freshThread: boolean;
   running: boolean;
   isPatrol: boolean;
+  isOrgDedupe: boolean;
   isProfilePublish: boolean;
   isContactNurture: boolean;
   isNetworkSnowball: boolean;
@@ -384,7 +398,47 @@ function ActivateDialogFormFields({
         </>
       )}
 
-      {template.templateType === "pruning" && (
+      {template.templateType === "pruning" && isOrgDedupe && (
+        <>
+          <div className="space-y-2">
+            <Label htmlFor="org-dedupe-tiers">Detection tiers</Label>
+            <Select
+              value={limits.orgDedupeTiers}
+              onValueChange={(value) =>
+                dispatch({ type: "SET_LIMIT", key: "orgDedupeTiers", value })
+              }
+            >
+              <SelectTrigger id="org-dedupe-tiers">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {ORG_DEDUPE_TIER_PRESETS.map((preset) => (
+                  <SelectItem key={preset.value} value={preset.value}>
+                    {preset.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Tier 2 is suggestive — a venture arm or regional office can carry its parent&apos;s
+              name. Every candidate is previewed and needs your approval before it merges.
+            </p>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="org-dedupe-limit">Max candidates per run</Label>
+            <Input
+              id="org-dedupe-limit"
+              type="number"
+              value={limits.orgDedupeLimit}
+              onChange={(e) =>
+                dispatch({ type: "SET_LIMIT", key: "orgDedupeLimit", value: e.target.value })
+              }
+            />
+          </div>
+        </>
+      )}
+
+      {template.templateType === "pruning" && !isOrgDedupe && (
         <>
           <div className="space-y-2">
             <Label htmlFor="company-name">Company Name</Label>
@@ -573,6 +627,8 @@ function ActivateDialogContent({
   const isProfilePublish = isProfilePublishTemplateConfig(templateConfig);
   const isContactNurture = isContactNurtureTemplateConfig(templateConfig);
   const isNetworkSnowball = isNetworkSnowballTemplateConfig(templateConfig);
+  const isOrgDedupe = isOrgDedupeTemplateConfig(templateConfig);
+  const orgDedupeControls = readOrgDedupeControls(templateConfig);
 
   const {
     running,
@@ -651,7 +707,16 @@ function ActivateDialogContent({
           config.maxContacts = parseInt(limits.maxContacts, 10) || 10;
           config.maxEnrichmentScore = parseInt(limits.maxEnrichmentScore, 10) || 50;
         }
-        if (template.templateType === "pruning") {
+        if (template.templateType === "pruning" && isOrgDedupe) {
+          // companyName / inactivityDays belong to the prune templates and mean nothing here;
+          // sending them would hand the agent run config it cannot act on.
+          const preset = ORG_DEDUPE_TIER_PRESETS.find((p) => p.value === limits.orgDedupeTiers);
+          config.orgDedupe = {
+            ...orgDedupeControls,
+            tiers: preset ? [...preset.tiers] : orgDedupeControls.tiers,
+            limit: parseInt(limits.orgDedupeLimit, 10) || orgDedupeControls.limit,
+          };
+        } else if (template.templateType === "pruning") {
           config.maxContacts = parseInt(limits.maxContacts, 10) || 20;
           config.companyName = limits.companyName || undefined;
           config.inactivityDays = parseInt(limits.inactivityDays, 10) || 365;
@@ -812,6 +877,7 @@ function ActivateDialogContent({
             isProfilePublish={isProfilePublish}
             isContactNurture={isContactNurture}
             isNetworkSnowball={isNetworkSnowball}
+            isOrgDedupe={isOrgDedupe}
             dispatch={dispatch}
           />
         )}
