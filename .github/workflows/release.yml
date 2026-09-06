@@ -86,7 +86,7 @@ jobs:
         run: npm ci
 
       - name: Run quality gate
-        run: npm run check
+        run: npm run check:all
         env:
           SIGNALS_DATA_DIR: ${{ github.workspace }}/.ci/signals-data
 

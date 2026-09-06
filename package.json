@@ -8,6 +8,11 @@
     "signals": "./dist/cli.js"
   },
   "scripts": {
+    "check:fast": "npm run typecheck && npm run lint && vitest run --project unit",
+    "check": "npm run typecheck && npm run lint && npm run check:agent-tools-openapi && npm run automation:test && npm run verify:writing-corpus && npm run test:writing-corpus && npm run test:writing-skill && npm run test:coverage && npm run test:skill-package && npm run test:provision-verifier && npm run test:qa-local-app && npm run db:migrate",
+    "check:build": "npm run db:migrate && npm run build",
+    "check:all": "npm run check && npm run check:build",
+    "reseed": "vite-node --config vitest.config.ts scripts/reseed-templates.ts",
     "preinstall": "node scripts/node-runtime-contract.mjs",
     "dev": "next dev --turbopack -p ${RTX_PORT:-${PORT:-3000}}",
     "build": "next build",
@@ -39,7 +44,6 @@
     "sign:release-manifest": "node scripts/sign-release-manifest.mjs",
     "verify:fresh-import": "vitest run --project import-safety",
     "test:integration": "vitest run --project integration",
-    "check": "npm run typecheck && npm run lint && npm run check:agent-tools-openapi && npm run automation:test && npm run verify:writing-corpus && npm run test:writing-corpus && npm run test:writing-skill && npm run test:coverage && npm run test:skill-package && npm run test:provision-verifier && npm run test:qa-local-app && npm run db:migrate && npm run build",
     "qa:local-app:provision": "node scripts/qa/provision-signals-qa-local-app.mjs",
     "qa:local-app:cleanup": "node scripts/qa/cleanup-signals-qa-local-app.mjs",
     "qa:local-app:verify": "node scripts/qa/verify-signals-local-app-hygiene.mjs",

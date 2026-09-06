@@ -24,18 +24,22 @@ Node, `better-sqlite3`, or Next.js, and do not `npm rebuild` — run `nvm use` i
 
 ## 2) Data-directory safety
 
-Signals reads and writes `~/.signals` unless `SIGNALS_DATA_DIR` overrides it. `npm run check`
+Signals reads and writes `~/.signals` unless `SIGNALS_DATA_DIR` overrides it. `npm run check:all`
 includes `db:migrate`, so running the gate with the default env **migrates the real user
 database**. Point it somewhere disposable first:
 
 ```bash
 export SIGNALS_DATA_DIR=/private/tmp/signals-agent-$$
-npm run check
+npm run check:all
 ```
 
 Vitest isolates SQLite per worker on its own (`src/test/setup-env.ts`); `db:migrate`, `dev`, and
 `build` do not. Never delete or hand-edit `data.db*` or committed migrations in
 `src/lib/db/migrations/` (31 files) — add a new one with `npm run db:generate`.
+
+**Seed changes need no restart.** `seedTemplates()` runs at boot, and the dev server hot-reloads
+code without re-running instrumentation, so a seed edit looks like it did not land. `npm run reseed`
+applies it in about a second (`SIGNALS_DATA_DIR=/tmp/copy npm run reseed` to rehearse first).
 
 ## 3) Commands
 
@@ -43,7 +47,8 @@ Vitest isolates SQLite per worker on its own (`src/test/setup-env.ts`); `db:migr
 |---|---|
 | Install | `nvm use && npm ci` |
 | Dev server | `npm run dev` (port `${RTX_PORT:-${PORT:-3000}}`) |
-| **Full gate (run before finishing)** | `npm run check` |
+| **Iterate** | `npm run check:fast` (~85s: typecheck, lint, unit tests) |
+| **Full gate (run before finishing)** | `npm run check:all` |
 | Typecheck only | `npm run typecheck` |
 | Lint only | `npm run lint` (`--max-warnings 0`) |
 | Tests, once | `npm run test:run` |
@@ -56,13 +61,28 @@ Vitest isolates SQLite per worker on its own (`src/test/setup-env.ts`); `db:migr
 | React Doctor (blocking in CI) | `npm run doctor` |
 | Production build | `npm run build` |
 
-`npm run check` = typecheck → lint → `check:agent-tools-openapi` → coverage → skill-package →
-provision-verifier → `db:migrate` → build. It is the same gate CI runs.
+`npm run check:all` = `check` → `check:build`, and is the same gate CI runs.
+
+- `check:fast` — typecheck, lint, and the whole unit project. Roughly 85 seconds against about
+  15 minutes for the full gate, and it catches everything a change under `src/` can break in those
+  three. Use it while iterating. Narrow it further by passing paths to `vitest run` directly:
+  `npx vitest run src/lib/orgs` is a few seconds.
+- `check` — the non-build gate: typecheck → lint → `check:agent-tools-openapi` → automation →
+  writing corpus/skill → coverage → skill-package → provision-verifier → qa-local-app →
+  `db:migrate`.
+**Run the gate in this checkout, not a fresh worktree.** `check:all` takes about 2.5 minutes here
+with warm `.next` and Vitest caches; the same gate in a newly created worktree took 12–15 minutes,
+because those caches start cold. Worktrees are for attributing a failure to a baseline (see the
+`SQLITE_BUSY` note below), not for routine verification.
+
+- `check:build` — `db:migrate` → `next build`. About 35 seconds. Split out not because it is slow
+  but because it is where the `SQLITE_BUSY` analytics flake lands, and it used to run *last*: a
+  flake meant re-running the whole 15-minute gate to retry a 35-second step. Retry this alone.
 
 ## 4) Verification and CI gates
 
 - `.github/workflows/pr-ci.yml` runs on every PR: **react-doctor** (`blocking: error`),
-  `verify:node-runtime`, `verify:marketplace-versions`, `npm run check`, `verify:fresh-import`,
+  `verify:node-runtime`, `verify:marketplace-versions`, `npm run check:all`, `verify:fresh-import`,
   and `test:integration` — each with `SIGNALS_DATA_DIR` pinned into the workspace.
 - `.github/workflows/release.yml` runs only on `main` pushes and `v*` tags. Never on PRs.
 - Coverage thresholds gate the build (`vitest.config.ts`: lines 80 / functions 75 / branches 48 /
