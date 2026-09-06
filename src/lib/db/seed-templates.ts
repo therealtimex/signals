@@ -28,9 +28,10 @@ import { buildWritingTemplateConfig } from "@/lib/workflows/signals-writing";
 import { buildContactWebResearchTemplateConfig } from "@/lib/workflows/contact-web-research";
 
 /** Bump this when seed template prompts change to trigger updates on existing installs. */
-const SEED_VERSION = 31;
+const SEED_VERSION = 32;
 
 export const CONTACT_PROFILE_PIPELINE_TEMPLATE_NAME = "Contact profile pipeline";
+export const DEDUPE_MERGE_ORGS_TEMPLATE_NAME = "Deduplicate & Merge Companies";
 export const CONTACT_WEB_RESEARCH_TEMPLATE_NAME = "Contact Web Research";
 export const COMPANY_PROFILE_ENRICHMENT_TEMPLATE_NAME = "Company Profile Enrichment";
 export const COMPANY_SIGNAL_SCAN_TEMPLATE_NAME = "Company Signal Scan";
@@ -369,6 +370,59 @@ identities. Find those duplicates and merge them into a single surviving record.
 - Merging is idempotent — a group that was already merged reports \`already_merged\`, so a
   re-run is safe.`,
     config: { limit: 25, minConfidence: 0.8, tiers: [1, 2] },
+  },
+  {
+    name: DEDUPE_MERGE_ORGS_TEMPLATE_NAME,
+    description:
+      "Find company records that are the same organization split across several rows, review each candidate, and consolidate the confirmed ones so their people land on a single record.",
+    templateType: "pruning",
+    targetPersona: "Companies duplicated by imports and agent runs (same name, or one name containing another)",
+    // Detection and merging are in-app; the model only reviews. No artifact generation.
+    estimatedCost: 0,
+    systemPrompt: `You are a data quality agent consolidating duplicate companies.
+
+## Objective
+The same firm ends up as several org records — an import writes one name, an agent writes a
+longer one, an acronym arrives later. Their people split across those records, so each shows a
+partial roster and the linked-people count everything sorts on is wrong. Find those duplicates,
+confirm which are genuinely one organization, and merge the confirmed ones.
+
+## Process
+1. Call \`find_duplicate_orgs\` with this template's \`tiers\`, \`minConfidence\` and \`limit\` config
+   values as the tool arguments of the same names. Each candidate reports:
+   - \`tier\` 1 — identical name once corporate suffixes and punctuation are stripped
+   - \`tier\` 2 — one name contains the other; suggestive, not evidence
+   - \`primaryOrgId\` — the suggested survivor (most linked people, then oldest record)
+   - each side's \`name\`, \`domain\` and \`contactCount\`
+2. For every candidate, call \`merge_orgs\` with \`dryRun: true\`. This runs the real transaction and
+   rolls it back, so \`moved\`, \`dropped\` and \`plan\` are exactly what a committed call would do.
+   Read \`plan.domain\` (which domain survives, which become aliases) and \`plan.employments\`
+   (which contacts' employment rows fold rather than move).
+3. Present every candidate in this thread as one table: survivor, absorbed record, tier, people on
+   each side, surviving domain, and any \`fold\` entry naming the contact. Say which ones you
+   believe are wrong and why. Then **stop and wait for approval**.
+4. Merge only the pairs the operator names, by calling \`merge_orgs\` without \`dryRun\`.
+5. Call \`find_duplicate_orgs\` once more and report the candidate count before and after, plus how
+   many people moved onto survivors. That number is the result of this run.
+
+## Rules
+- **Never merge without approval.** Unlike contact dedupe, the evidence here is weaker: tier 1 is a
+  name match, not a shared email or handle, and tier 2 only means one name contains the other. The
+  server does not enforce dry-run-first — you do.
+- **A longer name is not always the same company.** A venture arm, a division, a country unit or a
+  research institute can carry its parent's name. The detector refuses the ones it can recognise,
+  but not all of them: a regional suffix it does not know will pass. Read every tier 2 candidate as
+  a question, not a finding.
+- **Never pass \`force\`.** It exists to override the guard that stops a subsidiary being merged into
+  its parent, and using it needs a human decision, not an agent's.
+- **There is no un-merge.** The absorbed record is archived, keeps its name so later imports resolve
+  through it, and can only be recovered by hand. Prefer leaving a doubtful pair alone; it will be
+  offered again next run.
+- Re-running is safe. A pair already merged into this survivor reports \`already_merged\`; one merged
+  somewhere else reports \`skipped\` and names where it went.
+- This template consolidates records. It does not enrich them — it will not add domains, logos or
+  industries, and should not claim to.`,
+    config: { limit: 25, minConfidence: 0.6, tiers: [1, 2] },
   },
   // --- Phase 6E: New seed templates ---
   {

@@ -57,7 +57,7 @@ describe("Platform-native writing seed", () => {
     expect(migrated.id).toBe(legacy.id);
     expect(getSystemTemplateByName("Thought Leadership Posts")).toBeUndefined();
     const config = JSON.parse(migrated.config ?? "{}") as Record<string, unknown>;
-    expect(config).toMatchObject({ _seedVersion: 31, topics: ["keep"] });
+    expect(config).toMatchObject({ _seedVersion: 32, topics: ["keep"] });
     expect(isSignalsWritingTemplateConfig(config)).toBe(true);
   });
 });
@@ -75,7 +75,7 @@ describe("Contact profile pipeline seed", () => {
       pipeline?: { version?: number; steps?: Array<{ id: string; handler: string }> };
     };
 
-    expect(config._seedVersion).toBe(31);
+    expect(config._seedVersion).toBe(32);
     expect(config.pipeline?.version).toBe(2);
     expect(config.pipeline?.steps).toEqual([
       { id: "hydrate", executor: "code", handler: "hydrate_x_profiles" },
@@ -119,7 +119,7 @@ describe("Contact profile pipeline seed", () => {
       };
     };
     expect(config).toMatchObject({
-      _seedVersion: 31,
+      _seedVersion: 32,
       customTopLevel: true,
       pipeline: {
         version: 2,
@@ -179,6 +179,45 @@ describe("Contact profile pipeline seed", () => {
   });
 });
 
+describe("Deduplicate & Merge Companies seed", () => {
+  beforeEach(() => resetCoreTables());
+
+  it("seeds a pruning template that reviews before it merges", () => {
+    seedTemplates();
+    const template = getSystemTemplateByName("Deduplicate & Merge Companies")!;
+
+    expect(template.templateType).toBe("pruning");
+    expect(template.estimatedCost).toBe(0);
+    expect(JSON.parse(template.config ?? "{}")).toMatchObject({
+      tiers: [1, 2],
+      minConfidence: 0.6,
+      limit: 25,
+    });
+  });
+
+  it("gates on approval, unlike the contact deduper it mirrors", () => {
+    // Contact tier 1 is a shared email or handle; org tier 1 is only a name match and tier 2 is
+    // containment, so the org merge is not safe to run autonomously (ADR-445-6).
+    seedTemplates();
+    const prompt = getSystemTemplateByName("Deduplicate & Merge Companies")!.systemPrompt ?? "";
+
+    expect(prompt).toContain("stop and wait for approval");
+    expect(prompt).toContain("Never merge without approval");
+    expect(prompt).toContain("dryRun: true");
+    expect(prompt).toContain("Never pass");
+    expect(prompt).toContain("There is no un-merge");
+    // It must not promise enrichment it does not do.
+    expect(prompt).toContain("It does not enrich them");
+  });
+
+  it("names both tools it drives", () => {
+    seedTemplates();
+    const prompt = getSystemTemplateByName("Deduplicate & Merge Companies")!.systemPrompt ?? "";
+    expect(prompt).toContain("find_duplicate_orgs");
+    expect(prompt).toContain("merge_orgs");
+  });
+});
+
 describe("Contact Web Research seed", () => {
   beforeEach(() => resetCoreTables());
 
@@ -190,7 +229,7 @@ describe("Contact Web Research seed", () => {
     expect(template.templateType).toBe("enrichment");
     expect(template.estimatedCost).toBe(0.2);
     expect(config).toMatchObject({
-      _seedVersion: 31,
+      _seedVersion: 32,
       contactWebResearch: { version: 2 },
       acceptsContactId: true,
     });
@@ -302,7 +341,7 @@ describe("Social Intent Patrol seed", () => {
 
     expect(config).not.toHaveProperty("maxPosts");
     expect(config).not.toHaveProperty("durationMinutes");
-    expect(config._seedVersion).toBe(31);
+    expect(config._seedVersion).toBe(32);
     expect(config.maxComments).toBe(8);
     // The card copy is structural — an existing install must not keep describing a shift that
     // still posts to your own timeline.
@@ -426,7 +465,7 @@ describe("Contact Relationship Nurture seed", () => {
     const migrated = JSON.parse(
       getSystemTemplateByName("Contact Relationship Nurture")!.config ?? "{}",
     ) as Record<string, unknown>;
-    expect(migrated).toMatchObject({ _seedVersion: 31, requireApproval: true, maxTargets: 42 });
+    expect(migrated).toMatchObject({ _seedVersion: 32, requireApproval: true, maxTargets: 42 });
     expect(info).toHaveBeenCalledTimes(1);
 
     seedTemplates();
@@ -452,7 +491,7 @@ describe("Snowball Seed Scout seed", () => {
       snowballSeedScout?: { version?: number; executionKind?: string };
       maxLinksPerRun?: number;
     };
-    expect(config._seedVersion).toBe(31);
+    expect(config._seedVersion).toBe(32);
     expect(config.snowballSeedScout?.executionKind).toBe("heartbeat_shell");
     expect(config.maxLinksPerRun).toBe(5);
   });
@@ -481,7 +520,7 @@ describe("Network Snowball seed", () => {
       maxContacts?: number;
       maxHops?: number;
     };
-    expect(config._seedVersion).toBe(31);
+    expect(config._seedVersion).toBe(32);
     expect(config.networkSnowball?.version).toBe(1);
     expect(config.focus).toBe("investors_and_angels");
     expect(config.maxContacts).toBe(10);
@@ -505,6 +544,6 @@ describe("Network Snowball seed", () => {
 
     expect(updated.systemPrompt).toContain("--workflow-run-id <runId>");
     expect(updated.systemPrompt).toContain("--template-id <templateId>");
-    expect(updatedConfig._seedVersion).toBe(31);
+    expect(updatedConfig._seedVersion).toBe(32);
   });
 });
