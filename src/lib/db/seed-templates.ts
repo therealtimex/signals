@@ -28,7 +28,7 @@ import { buildWritingTemplateConfig } from "@/lib/workflows/signals-writing";
 import { buildContactWebResearchTemplateConfig } from "@/lib/workflows/contact-web-research";
 
 /** Bump this when seed template prompts change to trigger updates on existing installs. */
-const SEED_VERSION = 32;
+const SEED_VERSION = 33;
 
 export const CONTACT_PROFILE_PIPELINE_TEMPLATE_NAME = "Contact profile pipeline";
 export const DEDUPE_MERGE_ORGS_TEMPLATE_NAME = "Deduplicate & Merge Companies";
@@ -388,8 +388,8 @@ partial roster and the linked-people count everything sorts on is wrong. Find th
 confirm which are genuinely one organization, and merge the confirmed ones.
 
 ## Process
-1. Call \`find_duplicate_orgs\` with this template's \`tiers\`, \`minConfidence\` and \`limit\` config
-   values as the tool arguments of the same names. Each candidate reports:
+1. Call \`find_duplicate_orgs\` with this template's \`orgDedupe.tiers\`, \`orgDedupe.minConfidence\`
+   and \`orgDedupe.limit\` config values as the tool arguments \`tiers\`, \`minConfidence\` and \`limit\`. Each candidate reports:
    - \`tier\` 1 — identical name once corporate suffixes and punctuation are stripped
    - \`tier\` 2 — one name contains the other; suggestive, not evidence
    - \`primaryOrgId\` — the suggested survivor (most linked people, then oldest record)
@@ -422,7 +422,7 @@ confirm which are genuinely one organization, and merge the confirmed ones.
   somewhere else reports \`skipped\` and names where it went.
 - This template consolidates records. It does not enrich them — it will not add domains, logos or
   industries, and should not claim to.`,
-    config: { limit: 25, minConfidence: 0.6, tiers: [1, 2] },
+    config: { orgDedupe: { version: 1, tiers: [1, 2], minConfidence: 0.6, limit: 25 } },
   },
   // --- Phase 6E: New seed templates ---
   {
@@ -774,6 +774,26 @@ export function seedTemplates(): { seeded: number; updated: number; skipped: boo
               `[signals] Normalized stale Contact Relationship Nurture approval gate on template ${existing.id}; assist-only surfaces require explicit approval.`,
             );
           }
+        }
+        if (seed.name === DEDUPE_MERGE_ORGS_TEMPLATE_NAME) {
+          // v0.2.14 shipped this template with top-level `tiers`, which made the workflow gallery
+          // open the *contact* dedupe dialog under its title — both are templateType "pruning" and
+          // the gallery keys off `tiers`. Move the controls under `orgDedupe`, preserving whatever
+          // the operator had tuned, and drop the keys that caused the collision.
+          const seededOrgDedupe = readObject(seed.config.orgDedupe) ?? {};
+          const existingOrgDedupe = readObject(existingConfig.orgDedupe) ?? {};
+          updatedConfig.orgDedupe = {
+            ...seededOrgDedupe,
+            ...existingOrgDedupe,
+            ...(Array.isArray(existingConfig.tiers) ? { tiers: existingConfig.tiers } : {}),
+            ...(typeof existingConfig.minConfidence === "number"
+              ? { minConfidence: existingConfig.minConfidence }
+              : {}),
+            ...(typeof existingConfig.limit === "number" ? { limit: existingConfig.limit } : {}),
+          };
+          delete updatedConfig.tiers;
+          delete updatedConfig.minConfidence;
+          delete updatedConfig.limit;
         }
         if (seed.name === CONTACT_PROFILE_PIPELINE_TEMPLATE_NAME) {
           const existingPipeline = readObject(existingConfig.pipeline);

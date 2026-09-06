@@ -22,12 +22,22 @@ export const DEDUPE_TIER_PRESETS = [
 export type DedupeTierPreset = (typeof DEDUPE_TIER_PRESETS)[number]["value"];
 
 /**
+ * Discriminators belonging to other prune-category surfaces. A template carrying one of these is
+ * not contact dedupe, however similar its run controls look.
+ */
+const FOREIGN_TEMPLATE_DISCRIMINATORS = ["orgDedupe"] as const;
+
+/**
  * A dedupe template is identified by its run controls, not by name.
  *
- * `tiers` is unique to this template among the prune category, and a user who duplicates the
- * built-in gets a differently named copy that must still behave like the original.
+ * `tiers` alone is a weak signal: the org deduper is also `templateType: "pruning"` and also has
+ * tiers, so shipping it with a top-level `tiers` made the gallery open the *contact* review dialog
+ * under the companies template's title. Its controls now live under `orgDedupe`, and this check
+ * rejects any known foreign discriminator so the next similar template fails loudly here rather
+ * than silently borrowing this surface.
  */
 export function isDedupeTemplateConfig(config: Record<string, unknown>): boolean {
+  if (FOREIGN_TEMPLATE_DISCRIMINATORS.some((key) => config[key] != null)) return false;
   return Array.isArray(config.tiers);
 }
 
