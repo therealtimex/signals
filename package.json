@@ -67,7 +67,8 @@
     "publish:signals-pp-cli-npm": "node scripts/publish-signals-pp-cli-npm.mjs",
     "gate": "npm run check",
     "prepublishOnly": "npm run build:cli",
-    "doctor": "npx react-doctor@latest"
+    "doctor": "npx react-doctor@latest",
+    "probe:ui": "node scripts/probe-ui.mjs"
   },
   "files": [
     "dist/",

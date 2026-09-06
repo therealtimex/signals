@@ -108,6 +108,19 @@ because those caches start cold. Worktrees are for attributing a failure to a ba
   teardown path for 100+ commits (#295, shipped dead in #297). The probe asserts our parser
   against a *live* RealTimeX; it skips when none is reachable and fails when `RTX_API_BASE_URL` is
   set but unusable. Run every contract project with `npm run contract`.
+- **A passing test does not mean the screen is right.** Unit tests assert on the data a component
+  receives, and jsdom resolves neither layout nor hit-testing. `npm run probe:ui` renders a page in
+  the running app and reports what is actually there:
+
+  ```bash
+  npm run probe:ui -- --path /dashboard/organizations --eval "document.querySelectorAll('tbody tr').length"
+  npm run probe:ui -- --path /dashboard/workflows --click "Deduplicate & Merge Companies" --dialog
+  ```
+
+  It exits non-zero when the app is unreachable, the element is missing, or the expression throws,
+  so it can gate a script. Three defects shipped in one workflow template while every test passed —
+  the template seeded, its config was right, its dispatch was right, and the dialog still rendered
+  another template's fields, because nothing had opened it.
 - A mock you wrote cannot falsify an assumption you made. When the shape comes from outside this
   repo, pin it with captured bytes (see `src/lib/rtx/host-fixtures/`) or a contract probe.
 - Decide what proves the change *before* patching: name the observable that moves if the fix
