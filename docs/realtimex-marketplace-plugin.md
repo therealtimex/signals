@@ -16,15 +16,11 @@ Package and distribute Signals through the **RealtimeX marketplace** — not pub
 Plugin id: `com.realtimex.signals`  
 Local app id: `47e45f71-3279-42f5-8e95-731de01b6eae`
 
-Version 0.2.14 adds a Deduplicate & Merge Companies workflow, so consolidating duplicate company
-records is something to start from the automation catalog rather than assemble by hand. It reviews
-every candidate against a preview of exactly what the merge would change — which company record
-survives, which domain it keeps, whose employment rows collapse — presents them together, and waits
-for approval before merging anything. It merges only the pairs approved and reports how many
-duplicates remained and how many people moved onto surviving records. It deliberately asks rather
-than deciding: two company names being similar is a weaker signal than two people sharing an email
-address, a subsidiary or regional office can carry its parent's name, and a merge cannot be undone
-automatically. It consolidates records and does not enrich them. `signals-writing` stays at 1.1.0.
+Version 0.2.15 fixes the Deduplicate & Merge Companies workflow added in 0.2.14, which opened the
+contact deduplication panel instead of its own: it listed people and their social handles under the
+companies title, and its company tools could not be reached. The workflow now opens its own review,
+and an install that already has the 0.2.14 version is corrected on upgrade, keeping any settings
+already tuned. `signals-writing` stays at 1.1.0.
 
 ## Build
 
