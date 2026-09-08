@@ -33,6 +33,34 @@ import {
 } from "@/lib/platforms/x/anon-browser-resolver";
 import { X_ANON_SESSION_NAME } from "@/lib/platforms/x/anon-web-constants";
 
+/** A logged-out standalone Chromium that always lands on https://x.com/tri_dao. */
+function standaloneBrowser() {
+  let pageUrl = "about:blank";
+  const page = {
+    route: vi.fn(async () => undefined),
+    goto: vi.fn(async (url: string) => { pageUrl = "https://x.com/tri_dao"; return null; }),
+    url: vi.fn(() => pageUrl),
+    content: vi.fn(async () => '<html><head><meta property="og:title" content="Tri Dao (@tri_dao) on X"></head></html>'),
+    waitForLoadState: vi.fn(async () => undefined),
+    locator: vi.fn((selector: string) => ({
+      first: () => ({
+        isVisible: async () => selector === '[data-testid="loginButton"]',
+        textContent: async () => null,
+      }),
+      innerText: async () => "Log in Sign up",
+    })),
+  };
+  const context = {
+    newPage: vi.fn(async () => page),
+    close: vi.fn(async () => undefined),
+  };
+  const browser = {
+    newContext: vi.fn(async () => context),
+    close: vi.fn(async () => undefined),
+  };
+  return { page, context, browser };
+}
+
 describe("anonymous X browser safety", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -59,42 +87,66 @@ describe("anonymous X browser safety", () => {
   });
 
   it("resolves in a fresh logged-out standalone context and disposes it", async () => {
-    let pageUrl = "about:blank";
-    const page = {
-      route: vi.fn(async () => undefined),
-      goto: vi.fn(async (url: string) => { pageUrl = "https://x.com/tri_dao"; return url; }),
-      url: vi.fn(() => pageUrl),
-      locator: vi.fn((selector: string) => ({
-        first: () => ({
-          isVisible: async () => selector === '[data-testid="loginButton"]',
-          textContent: async () => null,
-        }),
-        innerText: async () => "Log in Sign up",
-      })),
-    };
-    const context = {
-      newPage: vi.fn(async () => page),
-      close: vi.fn(async () => undefined),
-    };
-    const browser = {
-      newContext: vi.fn(async () => context),
-      close: vi.fn(async () => undefined),
-    };
+    const { page, context, browser } = standaloneBrowser();
     playwright.launch.mockResolvedValue(browser);
 
     const resolver = await createAnonHandleResolver({}, fetch);
-    await expect(resolver.resolve("568879807")).resolves.toEqual({
-      status: "resolved",
-      handle: "tri_dao",
-    });
-    expect(browser.newContext).toHaveBeenCalledWith();
-    expect(page.goto).toHaveBeenCalledWith(
-      "https://x.com/i/user/568879807",
-      expect.objectContaining({ waitUntil: "domcontentloaded" }),
-    );
-    await resolver.dispose();
+    try {
+      await expect(resolver.resolve("568879807")).resolves.toEqual({
+        status: "resolved",
+        handle: "tri_dao",
+      });
+      expect(browser.newContext).toHaveBeenCalledWith(
+        expect.objectContaining({ userAgent: expect.stringContaining("Chrome/") }),
+      );
+      expect(page.goto).toHaveBeenCalledWith(
+        "https://x.com/i/user/568879807",
+        expect.objectContaining({ waitUntil: "domcontentloaded" }),
+      );
+    } finally {
+      await resolver.dispose();
+    }
     expect(context.close).toHaveBeenCalledOnce();
     expect(browser.close).toHaveBeenCalledOnce();
+  });
+
+  it("launches headed with the automation flag suppressed, because X refuses headless", async () => {
+    const { browser } = standaloneBrowser();
+    playwright.launch.mockResolvedValue(browser);
+
+    const resolver = await createAnonHandleResolver({}, fetch);
+    await resolver.dispose();
+
+    expect(playwright.launch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        headless: false,
+        args: expect.arrayContaining(["--disable-blink-features=AutomationControlled"]),
+      }),
+    );
+  });
+
+  it("returns the landed profile markup and refuses a page that redirected elsewhere", async () => {
+    const { page, browser } = standaloneBrowser();
+    playwright.launch.mockResolvedValue(browser);
+
+    const resolver = await createAnonHandleResolver({}, fetch);
+    try {
+      await expect(resolver.fetchProfile("tri_dao")).resolves.toMatchObject({
+        status: "ok",
+        finalUrl: "https://x.com/tri_dao",
+        html: expect.stringContaining("og:title"),
+      });
+      // X redirects a renamed handle to whoever owns it now; that is not the profile we asked for.
+      await expect(resolver.fetchProfile("somebody_else")).resolves.toEqual({
+        status: "unexpected_redirect",
+      });
+      expect(page.goto).toHaveBeenCalledWith(
+        "https://x.com/somebody_else",
+        expect.objectContaining({ waitUntil: "domcontentloaded" }),
+      );
+    } finally {
+      await resolver.dispose();
+    }
   });
 
   it("uses only signals-x-anon for every RTX browser lifecycle call", async () => {
@@ -132,7 +184,7 @@ describe("anonymous X browser safety", () => {
       fetch,
     );
     expect(rtx.start).toHaveBeenCalledWith(
-      { sessionName: X_ANON_SESSION_NAME, url: "https://x.com/i/user/568879807" },
+      { sessionName: X_ANON_SESSION_NAME, url: "https://x.com/" },
       expect.any(Object),
       fetch,
     );

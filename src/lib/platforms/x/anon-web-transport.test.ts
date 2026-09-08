@@ -6,55 +6,58 @@ import {
   resetXAnonWebCooldownForTests,
 } from "@/lib/platforms/x/anon-web-transport";
 import type {
-  XAnonHandleResolver,
+  XAnonBrowser,
   XAnonHandleResolverFactory,
+  XAnonPageResult,
+  XAnonResolveResult,
 } from "@/lib/platforms/x/anon-browser-resolver";
 
-const fullProfile = readFileSync(
-  new URL("./web-fixtures/full-profile.html", import.meta.url),
-  "utf8",
-);
+const fixture = (name: string) =>
+  readFileSync(new URL(`./web-fixtures/${name}`, import.meta.url), "utf8");
 
-function htmlResponse(html = fullProfile, init: ResponseInit = {}): Response {
-  return new Response(html, {
-    status: 200,
-    headers: { "content-type": "text/html", ...(init.headers ?? {}) },
-    ...init,
-  });
-}
+const fullProfile = fixture("full-profile.html");
+/** Real anonymous render: no JSON-LD, ID recoverable only from the banner URL. */
+const anonProfile = fixture("anon-rendered-profile.html");
+/** Real anonymous render of an account with no banner, so no numeric ID at all. */
+const anonNoBanner = fixture("anon-rendered-no-banner.html");
 
 function profileHtml(userId: string, handle: string): string {
-  return fullProfile
-    .replaceAll("568879807", userId)
-    .replaceAll("tri_dao", handle);
+  return fullProfile.replaceAll("568879807", userId).replaceAll("tri_dao", handle);
 }
 
-function safeFetch(response: Response | ((url: string) => Response)) {
-  return vi.fn<typeof fetch>(async (input, init) => {
-    const url = String(input);
-    expect(new URL(url).origin).toBe("https://x.com");
-    const headers = new Headers(init?.headers);
-    expect(headers.has("cookie")).toBe(false);
-    expect(headers.has("authorization")).toBe(false);
-    expect(headers.get("user-agent")).toBe("curl/8.7.1");
-    expect(init?.redirect).toBe("manual");
-    expect(init?.credentials).toBe("omit");
-    return typeof response === "function" ? response(url) : response.clone();
-  });
+function okPage(html = fullProfile, httpStatus = 200): XAnonPageResult {
+  return { status: "ok", html, finalUrl: "https://x.com/tri_dao", httpStatus };
 }
 
-function resolverFactory(
-  resolve: XAnonHandleResolver["resolve"],
-): { factory: XAnonHandleResolverFactory; dispose: ReturnType<typeof vi.fn> } {
+type BrowserStub = {
+  resolve?: (userId: string) => Promise<XAnonResolveResult>;
+  fetchProfile?: (handle: string) => Promise<XAnonPageResult>;
+  capturePage?: (handle: string) => Promise<XAnonPageResult>;
+};
+
+function browserFactory(stub: BrowserStub) {
+  const unavailable = async (): Promise<XAnonPageResult> =>
+    ({ status: "unavailable", message: "not stubbed" });
+  const unresolvable = async (): Promise<XAnonResolveResult> =>
+    ({ status: "unavailable", message: "not stubbed" });
   const dispose = vi.fn(async () => undefined);
-  return {
+  const browser: XAnonBrowser = {
+    resolve: vi.fn(stub.resolve ?? unresolvable),
+    fetchProfile: vi.fn(stub.fetchProfile ?? unavailable),
+    capturePage: vi.fn(stub.capturePage ?? (async () => okPage())),
     dispose,
-    factory: vi.fn(async () => ({ resolve, dispose })),
   };
+  const factory: XAnonHandleResolverFactory = vi.fn(async () => browser);
+  return { browser, factory, dispose };
 }
 
-const deps = (fetchImpl: typeof fetch, resolver?: XAnonHandleResolverFactory) => ({
-  fetchImpl,
+/** `fetchImpl` only reaches the RTX session API, so any transport call through it is a bug. */
+const forbiddenFetch = () => vi.fn<typeof fetch>(async () => {
+  throw new Error("the anonymous transport must not fetch profiles over HTTP");
+});
+
+const deps = (resolver?: XAnonHandleResolverFactory) => ({
+  fetchImpl: forbiddenFetch(),
   env: {},
   resolver,
   minRequestGapMs: 0,
@@ -66,65 +69,125 @@ describe("hydrateXProfilesViaAnonWeb", () => {
   beforeEach(() => resetXAnonWebCooldownForTests());
 
   it("hydrates a handle-only request and reports the ID the profile page carries", async () => {
-    const fetchImpl = safeFetch(htmlResponse());
-    const resolver = vi.fn<XAnonHandleResolverFactory>();
+    const { browser, factory } = browserFactory({ fetchProfile: async () => okPage() });
     const outcomes = await hydrateXProfilesViaAnonWeb(
       [{ userId: "handle:tri_dao", knownHandle: "@tri_dao", handleOnly: true }],
-      deps(fetchImpl, resolver),
+      deps(factory),
     );
     expect(outcomes.get("handle:tri_dao")).toMatchObject({
       status: "hydrated",
       user: { id: "568879807", username: "tri_dao" },
       resolvedHandle: "tri_dao",
     });
-    expect(fetchImpl).toHaveBeenCalledOnce();
-    expect(resolver).not.toHaveBeenCalled();
+    expect(browser.fetchProfile).toHaveBeenCalledWith("tri_dao");
+    expect(browser.resolve).not.toHaveBeenCalled();
+  });
+
+  it("hydrates a real anonymous render that carries no JSON-LD", async () => {
+    const { factory } = browserFactory({ fetchProfile: async () => okPage(anonProfile) });
+    const outcomes = await hydrateXProfilesViaAnonWeb(
+      [{ userId: "handle:DrJimFan", knownHandle: "DrJimFan", handleOnly: true }],
+      deps(factory),
+    );
+    expect(outcomes.get("handle:DrJimFan")).toMatchObject({
+      status: "hydrated",
+      user: {
+        id: "1007413134",
+        username: "DrJimFan",
+        name: "Jim Fan",
+        profile_image_url:
+          "https://pbs.twimg.com/profile_images/1554922493101559808/SYSZhbcd_normal.jpg",
+      },
+    });
+  });
+
+  it("hydrates an account with no banner even though the page names no numeric ID", async () => {
+    const { factory } = browserFactory({ fetchProfile: async () => okPage(anonNoBanner) });
+    const outcomes = await hydrateXProfilesViaAnonWeb(
+      [{ userId: "handle:sama", knownHandle: "sama", handleOnly: true }],
+      deps(factory),
+    );
+    const outcome = outcomes.get("handle:sama");
+    expect(outcome).toMatchObject({ status: "hydrated", user: { username: "sama", name: "Sam Altman" } });
+    expect(outcome?.status === "hydrated" && outcome.user.id).toBeUndefined();
   });
 
   it("skips a handle-only request whose handle is not a usable X handle", async () => {
-    const fetchImpl = vi.fn<typeof fetch>();
-    const resolver = vi.fn<XAnonHandleResolverFactory>();
+    const { browser, factory } = browserFactory({});
     const outcomes = await hydrateXProfilesViaAnonWeb(
       [{ userId: "handle:bad", knownHandle: "not a handle", handleOnly: true }],
-      deps(fetchImpl, resolver),
+      deps(factory),
     );
     expect(outcomes.get("handle:bad")).toEqual({ status: "skip", reason: "x_handle_invalid" });
-    expect(fetchImpl).not.toHaveBeenCalled();
-    expect(resolver).not.toHaveBeenCalled();
+    expect(browser.fetchProfile).not.toHaveBeenCalled();
+    // Opening a browser to look up a handle that cannot exist is pure cost.
+    expect(factory).not.toHaveBeenCalled();
   });
 
-  it("uses a known handle without opening a browser and sends no credentials", async () => {
-    const fetchImpl = safeFetch(htmlResponse());
-    const resolver = vi.fn<XAnonHandleResolverFactory>();
+  it("uses a known handle without resolving when the page confirms the numeric ID", async () => {
+    const { browser, factory } = browserFactory({ fetchProfile: async () => okPage() });
     const outcomes = await hydrateXProfilesViaAnonWeb(
       [{ userId: "568879807", knownHandle: "@tri_dao" }],
-      deps(fetchImpl, resolver),
+      deps(factory),
     );
     expect(outcomes.get("568879807")).toMatchObject({
       status: "hydrated",
       user: { id: "568879807", username: "tri_dao", name: "Tri Dao" },
     });
-    expect(fetchImpl).toHaveBeenCalledOnce();
-    expect(resolver).not.toHaveBeenCalled();
+    expect(browser.resolve).not.toHaveBeenCalled();
   });
 
-  it("resolves numeric-only identities in the anonymous browser before fetching", async () => {
-    const { factory, dispose } = resolverFactory(async () => ({ status: "resolved", handle: "tri_dao" }));
+  it("re-resolves a known handle whose page names a different numeric ID", async () => {
+    const { browser, factory } = browserFactory({
+      fetchProfile: async () => okPage(profileHtml("999", "old_handle")),
+      resolve: async () => ({ status: "resolved", handle: "tri_dao" }),
+      capturePage: async () => okPage(),
+    });
     const outcomes = await hydrateXProfilesViaAnonWeb(
-      [{ userId: "568879807" }],
-      deps(safeFetch(htmlResponse()), factory),
+      [{ userId: "568879807", knownHandle: "old_handle" }],
+      deps(factory),
     );
+    expect(browser.resolve).toHaveBeenCalledWith("568879807");
+    expect(outcomes.get("568879807")).toMatchObject({ status: "hydrated", resolvedHandle: "tri_dao" });
+  });
+
+  it("re-resolves a known handle whose page names no numeric ID to verify against", async () => {
+    const { browser, factory } = browserFactory({
+      // A banner-less page cannot prove the handle still belongs to this ID.
+      fetchProfile: async () => okPage(anonNoBanner),
+      resolve: async () => ({ status: "resolved", handle: "tri_dao" }),
+      capturePage: async () => okPage(),
+    });
+    const outcomes = await hydrateXProfilesViaAnonWeb(
+      [{ userId: "568879807", knownHandle: "sama" }],
+      deps(factory),
+    );
+    expect(browser.resolve).toHaveBeenCalledWith("568879807");
     expect(outcomes.get("568879807")).toMatchObject({
       status: "hydrated",
+      user: { id: "568879807" },
       resolvedHandle: "tri_dao",
     });
+  });
+
+  it("reads the page the resolver already landed on instead of navigating twice", async () => {
+    const { browser, factory, dispose } = browserFactory({
+      resolve: async () => ({ status: "resolved", handle: "tri_dao" }),
+      capturePage: async () => okPage(),
+    });
+    const outcomes = await hydrateXProfilesViaAnonWeb([{ userId: "568879807" }], deps(factory));
+    expect(outcomes.get("568879807")).toMatchObject({ status: "hydrated", resolvedHandle: "tri_dao" });
+    expect(browser.capturePage).toHaveBeenCalledWith("tri_dao");
+    expect(browser.fetchProfile).not.toHaveBeenCalled();
     expect(dispose).toHaveBeenCalledOnce();
   });
 
-  it("reuses one resolver across contact-major calls and disposes it exactly once", async () => {
-    const resolve = vi.fn(async () => ({ status: "resolved" as const, handle: "tri_dao" }));
-    const { factory, dispose } = resolverFactory(resolve);
-    const session = createXAnonWebSession(deps(safeFetch(htmlResponse()), factory));
+  it("reuses one browser across contact-major calls and disposes it exactly once", async () => {
+    const { browser, factory, dispose } = browserFactory({
+      resolve: async () => ({ status: "resolved", handle: "tri_dao" }),
+      capturePage: async () => okPage(),
+    });
+    const session = createXAnonWebSession(deps(factory));
 
     await session.hydrate([{ userId: "568879807" }]);
     await session.hydrate([{ userId: "568879807" }]);
@@ -132,21 +195,16 @@ describe("hydrateXProfilesViaAnonWeb", () => {
     await session.dispose();
 
     expect(factory).toHaveBeenCalledOnce();
-    expect(resolve).toHaveBeenCalledTimes(2);
+    expect(browser.resolve).toHaveBeenCalledTimes(2);
     expect(dispose).toHaveBeenCalledOnce();
   });
 
   it("does not cap browser resolutions below the pipeline batch limit", async () => {
-    const resolve = vi.fn(async (userId: string) => ({
-      status: "resolved" as const,
-      handle: `person${userId}`,
-    }));
-    const { factory, dispose } = resolverFactory(resolve);
-    const fetchImpl = safeFetch((url) => {
-      const handle = new URL(url).pathname.slice(1);
-      return htmlResponse(profileHtml(handle.slice("person".length), handle));
+    const { browser, factory, dispose } = browserFactory({
+      resolve: async (userId) => ({ status: "resolved", handle: `person${userId}` }),
+      capturePage: async (handle) => okPage(profileHtml(handle.slice("person".length), handle)),
     });
-    const session = createXAnonWebSession(deps(fetchImpl, factory));
+    const session = createXAnonWebSession(deps(factory));
     const userIds = Array.from({ length: 12 }, (_, index) => String(1_000 + index));
     const outcomes = [];
 
@@ -156,88 +214,62 @@ describe("hydrateXProfilesViaAnonWeb", () => {
     await session.dispose();
 
     expect(outcomes.every((outcome) => outcome?.status === "hydrated")).toBe(true);
-    expect(resolve).toHaveBeenCalledTimes(12);
-    expect(fetchImpl).toHaveBeenCalledTimes(12);
+    expect(browser.resolve).toHaveBeenCalledTimes(12);
+    expect(browser.capturePage).toHaveBeenCalledTimes(12);
     expect(dispose).toHaveBeenCalledOnce();
   });
 
-  it("defers a later session while a breaker cooldown is active", async () => {
-    const now = () => 1_000;
-    const firstFetch = safeFetch(new Response("", {
-      status: 429,
-      headers: { "content-type": "text/html" },
-    }));
-    const firstSession = createXAnonWebSession({ ...deps(firstFetch), now });
-
-    await firstSession.hydrate([{ userId: "1", knownHandle: "person1" }]);
-    await firstSession.dispose();
-
-    const secondFetch = safeFetch(htmlResponse());
-    const secondSession = createXAnonWebSession({ ...deps(secondFetch), now });
-    const deferred = await secondSession.hydrate([{ userId: "2" }]);
-    await secondSession.dispose();
-
-    expect(deferred.get("2")).toEqual({
-      status: "skip",
-      reason: "x_web_deferred",
-      detail: { cooldownReason: "x_web_rate_limited" },
+  it("reports a 404 profile page as a miss", async () => {
+    const { factory } = browserFactory({
+      fetchProfile: async () => ({
+        status: "ok",
+        html: "<html><head><title>X</title></head><body></body></html>",
+        finalUrl: "https://x.com/gone",
+        httpStatus: 404,
+      }),
     });
-    expect(secondFetch).not.toHaveBeenCalled();
+    const outcomes = await hydrateXProfilesViaAnonWeb(
+      [{ userId: "handle:gone", knownHandle: "gone", handleOnly: true }],
+      deps(factory),
+    );
+    expect(outcomes.get("handle:gone")).toMatchObject({ status: "miss", missStatus: "not_found" });
   });
 
-  it("re-resolves a stale known handle and validates the numeric identifier", async () => {
-    const { factory } = resolverFactory(async () => ({ status: "resolved", handle: "tri_dao" }));
-    const fetchImpl = safeFetch(htmlResponse());
-    const outcomes = await hydrateXProfilesViaAnonWeb(
-      [{ userId: "568879807", knownHandle: "old_handle" }],
-      deps(fetchImpl, factory),
-    );
-    expect(fetchImpl).toHaveBeenCalledTimes(2);
-    expect(outcomes.get("568879807")).toMatchObject({ status: "hydrated", resolvedHandle: "tri_dao" });
-  });
-
-  it("rejects redirects away from the X origin", async () => {
-    const fetchImpl = safeFetch(new Response(null, {
-      status: 302,
-      headers: { location: "https://evil.example/profile" },
-    }));
-    const { factory } = resolverFactory(async () => ({ status: "resolved", handle: "tri_dao" }));
-    const outcomes = await hydrateXProfilesViaAnonWeb(
-      [{ userId: "568879807" }],
-      deps(fetchImpl, factory),
-    );
+  it("reports a redirect away from the requested profile", async () => {
+    const { factory } = browserFactory({
+      resolve: async () => ({ status: "resolved", handle: "tri_dao" }),
+      capturePage: async () => ({ status: "unexpected_redirect" }),
+    });
+    const outcomes = await hydrateXProfilesViaAnonWeb([{ userId: "568879807" }], deps(factory));
     expect(outcomes.get("568879807")).toMatchObject({
       status: "skip",
       reason: "x_web_unexpected_redirect",
     });
   });
 
-  it("aborts the batch on session contamination without issuing HTTP requests", async () => {
-    const { factory } = resolverFactory(async () => ({ status: "contaminated" }));
-    const fetchImpl = safeFetch(htmlResponse());
+  it("aborts the batch on session contamination without reading any page", async () => {
+    const { browser, factory } = browserFactory({ resolve: async () => ({ status: "contaminated" }) });
     const outcomes = await hydrateXProfilesViaAnonWeb(
       [{ userId: "1" }, { userId: "2" }],
-      deps(fetchImpl, factory),
+      deps(factory),
     );
     expect([...outcomes.values()]).toEqual([
       { status: "skip", reason: "x_anon_session_contaminated" },
       { status: "skip", reason: "x_anon_session_contaminated" },
     ]);
-    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(browser.capturePage).not.toHaveBeenCalled();
   });
 
-  it("trips on 429 and reports retry timing for the triggering request", async () => {
-    const response = new Response("", {
-      status: 429,
-      headers: { "content-type": "text/html", "retry-after": "90" },
+  it("trips on a rate limit and reports retry timing for the triggering request", async () => {
+    const { browser, factory } = browserFactory({
+      fetchProfile: async () => ({ status: "rate_limited", retryAfterSeconds: 90 }),
     });
-    const fetchImpl = safeFetch(response);
     const outcomes = await hydrateXProfilesViaAnonWeb(
       [
         { userId: "568879807", knownHandle: "tri_dao" },
         { userId: "2", knownHandle: "person2" },
       ],
-      deps(fetchImpl),
+      deps(factory),
     );
     expect(outcomes.get("568879807")).toMatchObject({
       status: "skip",
@@ -245,15 +277,23 @@ describe("hydrateXProfilesViaAnonWeb", () => {
       detail: { retryAfter: 90 },
     });
     expect(outcomes.get("2")).toEqual({ status: "skip", reason: "x_web_rate_limited" });
-    expect(fetchImpl).toHaveBeenCalledOnce();
+    expect(browser.fetchProfile).toHaveBeenCalledOnce();
+  });
+
+  it("omits retry timing when the rate limit carried none", async () => {
+    const { factory } = browserFactory({ fetchProfile: async () => ({ status: "rate_limited" }) });
+    const outcomes = await hydrateXProfilesViaAnonWeb(
+      [{ userId: "568879807", knownHandle: "tri_dao" }],
+      deps(factory),
+    );
+    expect(outcomes.get("568879807")).toEqual({ status: "skip", reason: "x_web_rate_limited" });
   });
 
   it("carries a breaker reason across contact-major calls without more traffic", async () => {
-    const fetchImpl = safeFetch(new Response("", {
-      status: 429,
-      headers: { "content-type": "text/html", "retry-after": "90" },
-    }));
-    const session = createXAnonWebSession(deps(fetchImpl));
+    const { browser, factory } = browserFactory({
+      fetchProfile: async () => ({ status: "rate_limited", retryAfterSeconds: 90 }),
+    });
+    const session = createXAnonWebSession(deps(factory));
 
     const first = await session.hydrate([{ userId: "568879807", knownHandle: "tri_dao" }]);
     const second = await session.hydrate([{ userId: "2", knownHandle: "person2" }]);
@@ -265,37 +305,44 @@ describe("hydrateXProfilesViaAnonWeb", () => {
       detail: { retryAfter: 90 },
     });
     expect(second.get("2")).toEqual({ status: "skip", reason: "x_web_rate_limited" });
-    expect(fetchImpl).toHaveBeenCalledOnce();
+    expect(browser.fetchProfile).toHaveBeenCalledOnce();
   });
 
-  it("falls back to x-rate-limit-reset when Retry-After is absent", async () => {
-    const fetchImpl = safeFetch(new Response("", {
-      status: 429,
-      headers: { "content-type": "text/html", "x-rate-limit-reset": "1090" },
-    }));
-    const outcomes = await hydrateXProfilesViaAnonWeb(
-      [{ userId: "568879807", knownHandle: "tri_dao" }],
-      { ...deps(fetchImpl), now: () => 1_000_000 },
-    );
-    expect(outcomes.get("568879807")).toEqual({
-      status: "skip",
-      reason: "x_web_rate_limited",
-      detail: { retryAfter: 90 },
+  it("defers a later session while a breaker cooldown is active", async () => {
+    const now = () => 1_000;
+    const first = browserFactory({
+      fetchProfile: async () => ({ status: "rate_limited" }),
     });
+    const firstSession = createXAnonWebSession({ ...deps(first.factory), now });
+    await firstSession.hydrate([{ userId: "1", knownHandle: "person1" }]);
+    await firstSession.dispose();
+
+    const second = browserFactory({ capturePage: async () => okPage() });
+    const secondSession = createXAnonWebSession({ ...deps(second.factory), now });
+    const deferred = await secondSession.hydrate([{ userId: "2" }]);
+    await secondSession.dispose();
+
+    expect(deferred.get("2")).toEqual({
+      status: "skip",
+      reason: "x_web_deferred",
+      detail: { cooldownReason: "x_web_rate_limited" },
+    });
+    expect(second.factory).not.toHaveBeenCalled();
   });
 
-  it("omits retry timing when a 429 has neither rate-limit header", async () => {
-    const fetchImpl = safeFetch(new Response("", {
-      status: 429,
-      headers: { "content-type": "text/html" },
-    }));
-    const outcomes = await hydrateXProfilesViaAnonWeb(
-      [{ userId: "568879807", knownHandle: "tri_dao" }],
-      deps(fetchImpl),
-    );
-    expect(outcomes.get("568879807")).toEqual({
-      status: "skip",
-      reason: "x_web_rate_limited",
+  it("skips the batch when the anonymous browser cannot start", async () => {
+    const factory: XAnonHandleResolverFactory = vi.fn(async () => {
+      throw new Error("RTX browser session unavailable");
     });
+    const outcomes = await hydrateXProfilesViaAnonWeb(
+      [{ userId: "1" }, { userId: "2" }],
+      deps(factory),
+    );
+    expect(outcomes.get("1")).toMatchObject({
+      status: "skip",
+      reason: "x_web_unavailable",
+      detail: { message: "RTX browser session unavailable" },
+    });
+    expect(outcomes.get("2")).toEqual({ status: "skip", reason: "x_web_unavailable" });
   });
 });

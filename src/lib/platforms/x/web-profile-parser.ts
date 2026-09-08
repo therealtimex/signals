@@ -7,7 +7,8 @@ const X_RESERVED_HANDLES = new Set([
 ]);
 
 export type XWebProfile = {
-  id: string;
+  /** Absent on anonymous renders of accounts that publish no banner. See `readBannerUserId`. */
+  id?: string;
   handle: string;
   name?: string;
   description?: string;
@@ -83,7 +84,10 @@ function readImage(person: JsonRecord): string | undefined {
   if (!raw) return undefined;
   try {
     const url = new URL(raw);
-    if (url.origin !== "https://pbs.twimg.com") return undefined;
+    // The default egg lives on abs.twimg.com and banners share the pbs origin; neither is an avatar.
+    if (url.origin !== "https://pbs.twimg.com" || !url.pathname.startsWith("/profile_images/")) {
+      return undefined;
+    }
     url.pathname = url.pathname.replace(/_(?:normal|200x200|400x400|bigger)(?=\.[^.]+$)/, "_normal");
     return url.href;
   } catch {
@@ -133,8 +137,40 @@ function readCounts(person: JsonRecord): Pick<XWebProfile, "followersCount" | "f
   return result;
 }
 
+const X_PROFILE_BANNER_PATTERN = /^https:\/\/pbs\.twimg\.com\/profile_banners\/(\d+)\//;
+
+const X_JOIN_MONTHS = [
+  "january", "february", "march", "april", "may", "june",
+  "july", "august", "september", "october", "november", "december",
+];
+
 function metaContent($: cheerio.CheerioAPI, key: string): string | undefined {
   return asString($(`meta[property="${key}"], meta[name="${key}"]`).first().attr("content"));
+}
+
+/**
+ * Anonymous profile markup carries no numeric user ID, but the banner URL X puts in
+ * `twitter:image` is keyed by it. Both IDs extracted this way round-trip: navigating
+ * `https://x.com/i/user/<id>` redirects back to the same handle. Accounts without a banner
+ * publish no `twitter:image` at all, so the ID stays optional.
+ */
+function readBannerUserId($: cheerio.CheerioAPI): string | undefined {
+  const raw = metaContent($, "twitter:image");
+  return raw ? X_PROFILE_BANNER_PATTERN.exec(raw)?.[1] : undefined;
+}
+
+/**
+ * `twitter:label2`/`twitter:data2` carry "Joined" / "December 2012". Month precision only, so
+ * callers must treat this as a gap-filler and never overwrite an exact API timestamp with it.
+ */
+function readJoinDate($: cheerio.CheerioAPI): string | undefined {
+  if (metaContent($, "twitter:label2")?.toLowerCase() !== "joined") return undefined;
+  const parts = metaContent($, "twitter:data2")?.trim().split(/\s+/);
+  if (parts?.length !== 2) return undefined;
+  const month = X_JOIN_MONTHS.indexOf(parts[0].toLowerCase());
+  const year = Number(parts[1]);
+  if (month < 0 || !Number.isInteger(year) || year < 2006 || year > 2100) return undefined;
+  return new Date(Date.UTC(year, month, 1)).toISOString();
 }
 
 function readMicrodataPerson($: cheerio.CheerioAPI): JsonRecord | null {
@@ -183,6 +219,7 @@ function classifyTerminalPage(text: string): "suspended" | "not_found" | null {
     return "suspended";
   }
   if (
+    normalized.includes("user profile not found") ||
     normalized.includes("this account doesn't exist") ||
     normalized.includes("account doesn't exist") ||
     normalized.includes("page doesn't exist")
@@ -232,12 +269,11 @@ export function parseXWebProfile(html: string): XWebParseResult {
   const canonical = canonicalRaw ? parseCanonicalXProfileUrl(canonicalRaw) : null;
   const ogTitle = metaContent($, "og:title") ?? metaContent($, "twitter:title");
   const ogMatch = ogTitle?.match(/^(.*?)\s*\(@([A-Za-z0-9_]{1,15})\)/);
-  const id = profilePerson ? readIdentifier(profilePerson) : undefined;
+  const id = (profilePerson ? readIdentifier(profilePerson) : undefined) ?? readBannerUserId($);
   const handle = validHandle(profilePerson?.additionalName) ?? canonical?.handle ?? validHandle(ogMatch?.[2]);
 
   const hasProfileMetadata = !!profilePerson || !!canonical || !!ogMatch || !!metaContent($, "og:image");
   if (!hasProfileMetadata) return { status: "shell" };
-  if (!id) return { status: "parse_failed", reason: "no_verifiable_identifier" };
   if (!handle) return { status: "parse_failed", reason: "missing_handle" };
 
   const personImage = profilePerson ? readImage(profilePerson) : undefined;
@@ -253,7 +289,7 @@ export function parseXWebProfile(html: string): XWebParseResult {
     canonicalUrl: canonical ? `https://x.com/${canonical.handle}` : `https://x.com/${handle}`,
     location,
     websiteUrl: profilePerson ? readWebsite(profilePerson) : undefined,
-    createdAt: asString(profilePerson?.dateCreated),
+    createdAt: asString(profilePerson?.dateCreated) ?? readJoinDate($),
     ...(profilePerson ? readCounts(profilePerson) : {}),
   };
   return { status: "ok", profile };
