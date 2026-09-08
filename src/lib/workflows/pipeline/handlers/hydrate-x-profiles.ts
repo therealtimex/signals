@@ -194,12 +194,16 @@ function updateIdentityFromUser(
 ): void {
   const platformData = readPlatformData(identity.platformData);
   delete platformData.profileHydrationMiss;
+  // The anonymous web path reports only the stats X publishes to logged-out visitors. Absent is
+  // not zero and not unknown-here: keep whatever a previous API hydration already established.
+  const keep = <T>(incoming: T | null | undefined, existing: T | null | undefined): T | null =>
+    incoming ?? existing ?? null;
   Object.assign(platformData, {
     profile_image_url: user.profile_image_url ?? null,
-    followersCount: user.public_metrics?.followers_count ?? null,
-    followingCount: user.public_metrics?.following_count ?? null,
-    tweetCount: user.public_metrics?.tweet_count ?? null,
-    listedCount: user.public_metrics?.listed_count ?? null,
+    followersCount: keep(user.public_metrics?.followers_count, identity.followersCount),
+    followingCount: keep(user.public_metrics?.following_count, identity.followingCount),
+    tweetCount: keep(user.public_metrics?.tweet_count, identity.postsCount),
+    listedCount: keep(user.public_metrics?.listed_count, identity.listedCount),
     verified: user.verified ?? false,
     createdAt: user.created_at ?? null,
     profileHydratedAt: now,
@@ -220,11 +224,12 @@ function updateIdentityFromUser(
     location: identity.location?.trim() ? identity.location : user.location || null,
     websiteUrl: identity.websiteUrl?.trim() ? identity.websiteUrl : user.url || null,
     isVerified: user.verified ?? false,
-    followersCount: user.public_metrics?.followers_count ?? null,
-    followingCount: user.public_metrics?.following_count ?? null,
-    postsCount: user.public_metrics?.tweet_count ?? null,
-    listedCount: user.public_metrics?.listed_count ?? null,
-    platformCreatedAt: isoToUnix(user.created_at),
+    followersCount: keep(user.public_metrics?.followers_count, identity.followersCount),
+    followingCount: keep(user.public_metrics?.following_count, identity.followingCount),
+    postsCount: keep(user.public_metrics?.tweet_count, identity.postsCount),
+    listedCount: keep(user.public_metrics?.listed_count, identity.listedCount),
+    // Anonymous markup dates the account to the month, so it only fills a gap.
+    platformCreatedAt: identity.platformCreatedAt ?? isoToUnix(user.created_at),
     statsUpdatedAt: now,
     lastSyncedAt: now,
     platformData: JSON.stringify(platformData),
@@ -305,7 +310,8 @@ function hydrateIdentity(
   state.updatedIdentityIds.push(identity.id);
   state.handles.push(`@${user.username}`);
 
-  if (!isNumericUserId(priorUserId)) {
+  // An anonymous profile names its numeric ID only when the account publishes a banner.
+  if (!isNumericUserId(priorUserId) && isNumericUserId(user.id)) {
     const conflict = promoteIdentityUserId(identity, user.id, now);
     if (conflict) state.idConflicts.push(conflict);
   }
@@ -707,6 +713,7 @@ export async function hydrateXProfiles(
   lookup: XUserLookup = getUsersByIds,
   webTransport: XAnonWebTransport = hydrateXProfilesViaAnonWeb,
   handleLookup: XUsernameLookup = getUsersByUsernames,
+  anonSession: typeof createXAnonWebSession = createXAnonWebSession,
 ): Promise<PipelineStepReport> {
   const scope = ctx.runScope;
   if (!scope) {
@@ -738,7 +745,7 @@ export async function hydrateXProfiles(
     const resourceKey = `${HYDRATE_X_PROFILES_HANDLER}:${ctx.stepId}:anon-session`;
     let session = scope.resources.get(resourceKey) as ReturnType<typeof createXAnonWebSession> | undefined;
     if (!session) {
-      session = createXAnonWebSession({
+      session = anonSession({
         fetchImpl: ctx.fetchImpl,
         env: ctx.env,
         minRequestGapMs: optionalNumericOption(ctx.options?.minRequestGapMs),

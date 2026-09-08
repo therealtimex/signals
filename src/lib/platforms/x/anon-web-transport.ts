@@ -2,18 +2,14 @@ import type { XUser } from "@/lib/platforms/x/client";
 import {
   X_ANON_COOLDOWN_MS,
   X_ANON_DEFERRED_REASON,
-  X_ANON_HTTP_MAX_BYTES,
-  X_ANON_HTTP_TIMEOUT_MS,
-  X_ANON_MAX_REDIRECTS,
   X_ANON_MIN_REQUEST_GAP_MS,
   X_ANON_PARSE_FAILURE_BREAK_THRESHOLD,
-  X_ANON_USER_AGENT,
-  isAllowedXNavigationOrigin,
 } from "@/lib/platforms/x/anon-web-constants";
 import {
   createAnonHandleResolver,
-  type XAnonHandleResolver,
+  type XAnonBrowser,
   type XAnonHandleResolverFactory,
+  type XAnonPageResult,
 } from "@/lib/platforms/x/anon-browser-resolver";
 import {
   parseCanonicalXProfileUrl,
@@ -46,6 +42,7 @@ export type XAnonWebOutcome =
     };
 
 export type XAnonWebTransportDeps = {
+  /** Talks to the RTX browser-session API. Never used to fetch a profile: see `fetchProfile`. */
   fetchImpl: typeof fetch;
   env: EnvLike;
   resolver?: XAnonHandleResolverFactory;
@@ -65,10 +62,12 @@ export type XAnonWebSession = {
   dispose: () => Promise<void>;
 };
 
+type SkipOutcome = { status: "skip"; reason: string; detail?: Record<string, unknown> };
+
 type FetchOutcome =
   | { status: "hydrated"; user: XUser }
   | { status: "miss"; missStatus: "not_found" | "suspended" }
-  | { status: "skip"; reason: string; detail?: Record<string, unknown> };
+  | SkipOutcome;
 
 let cooldown: { until: number; reason: string } | null = null;
 
@@ -78,7 +77,9 @@ export function resetXAnonWebCooldownForTests(): void {
 
 export function webProfileToXUser(profile: XWebProfile): XUser {
   return {
-    id: profile.id,
+    // Anonymous profiles name an ID only when the account publishes a banner. Callers must check
+    // it before writing it: `hydrate_x_profiles` promotes only a value matching /^\d+$/.
+    id: profile.id as XUser["id"],
     name: profile.name ?? `@${profile.handle}`,
     username: profile.handle,
     description: profile.description,
@@ -96,146 +97,64 @@ export function webProfileToXUser(profile: XWebProfile): XUser {
   };
 }
 
-/** The sole anonymous HTTP request builder. Caller headers cannot be forwarded. */
-export function anonXFetch(
-  url: string,
-  fetchImpl: typeof fetch,
-  signal?: AbortSignal,
-): Promise<Response> {
-  return fetchImpl(url, {
-    method: "GET",
-    redirect: "manual",
-    credentials: "omit",
-    signal,
-    headers: {
-      "user-agent": X_ANON_USER_AGENT,
-      accept: "text/html",
-      "accept-language": "en",
-    },
-  });
-}
-
-function retryAfter(response: Response, nowMs: number): number | undefined {
-  const directRaw = response.headers.get("retry-after")?.trim();
-  if (directRaw) {
-    const direct = Number(directRaw);
-    if (Number.isFinite(direct) && direct >= 0) return direct;
-  }
-  const resetRaw = response.headers.get("x-rate-limit-reset")?.trim();
-  if (resetRaw) {
-    const reset = Number(resetRaw);
-    if (Number.isFinite(reset)) return Math.max(0, Math.ceil(reset - nowMs / 1000));
-  }
-  return undefined;
-}
-
-async function readCappedHtml(response: Response): Promise<string | null> {
-  if (!response.body) {
-    const text = await response.text();
-    return new TextEncoder().encode(text).byteLength <= X_ANON_HTTP_MAX_BYTES ? text : null;
-  }
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.byteLength;
-    if (total > X_ANON_HTTP_MAX_BYTES) {
-      await reader.cancel().catch(() => undefined);
-      return null;
-    }
-    chunks.push(value);
-  }
-  const bytes = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return new TextDecoder().decode(bytes);
-}
-
-async function fetchProfile(
+/** Map one browser page result onto the transport's outcome vocabulary. */
+function classifyPageResult(
+  page: XAnonPageResult,
   userId: string | null,
   handle: string,
-  fetchImpl: typeof fetch,
-  nowMs: number,
-): Promise<FetchOutcome> {
-  let currentUrl = `https://x.com/${handle}`;
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), X_ANON_HTTP_TIMEOUT_MS);
-  try {
-    for (let redirects = 0; redirects <= X_ANON_MAX_REDIRECTS; redirects++) {
-      if (!isAllowedXNavigationOrigin(currentUrl)) {
-        return { status: "skip", reason: "x_web_unexpected_redirect" };
-      }
-      const response = await anonXFetch(currentUrl, fetchImpl, controller.signal);
-      if (response.status >= 300 && response.status < 400) {
-        const location = response.headers.get("location");
-        if (!location || redirects === X_ANON_MAX_REDIRECTS) {
-          return { status: "skip", reason: "x_web_unexpected_redirect" };
-        }
-        const nextUrl = new URL(location, currentUrl).href;
-        if (!isAllowedXNavigationOrigin(nextUrl)) {
-          return { status: "skip", reason: "x_web_unexpected_redirect" };
-        }
-        currentUrl = nextUrl;
-        continue;
-      }
-      if (response.status === 429) {
-        const seconds = retryAfter(response, nowMs);
-        return {
-          status: "skip",
-          reason: "x_web_rate_limited",
-          ...(seconds === undefined ? {} : { detail: { retryAfter: seconds } }),
-        };
-      }
-      if (response.status === 403) return { status: "skip", reason: "x_web_challenged" };
-      if (!response.ok) return { status: "skip", reason: `x_web_http_${response.status}` };
-      if (!(response.headers.get("content-type") ?? "").toLowerCase().includes("text/html")) {
-        return { status: "skip", reason: "x_web_parse_failed", detail: { parserReason: "non_html" } };
-      }
-
-      const finalProfile = parseCanonicalXProfileUrl(currentUrl);
-      if (!finalProfile || finalProfile.handle.toLowerCase() !== handle.toLowerCase()) {
-        return { status: "skip", reason: "x_web_unexpected_redirect" };
-      }
-      const html = await readCappedHtml(response);
-      if (html === null) {
-        return { status: "skip", reason: "x_web_parse_failed", detail: { parserReason: "body_too_large" } };
-      }
-      const parsed = parseXWebProfile(html);
-      if (parsed.status === "not_found" || parsed.status === "suspended") {
-        return { status: "miss", missStatus: parsed.status };
-      }
-      if (parsed.status === "shell") {
-        return { status: "skip", reason: "x_web_parse_failed", detail: { parserReason: "shell" } };
-      }
-      if (parsed.status === "parse_failed") {
-        return { status: "skip", reason: "x_web_parse_failed", detail: { parserReason: parsed.reason } };
-      }
-      if (userId !== null && parsed.profile.id !== userId) {
-        return { status: "skip", reason: "x_web_id_mismatch" };
-      }
-      if (parsed.profile.handle.toLowerCase() !== handle.toLowerCase()) {
-        return { status: "skip", reason: "x_web_unexpected_redirect" };
-      }
-      return { status: "hydrated", user: webProfileToXUser(parsed.profile) };
-    }
-    return { status: "skip", reason: "x_web_unexpected_redirect" };
-  } catch (error) {
-    if (error instanceof Error && error.name === "AbortError") {
+): FetchOutcome {
+  switch (page.status) {
+    case "rate_limited":
+      return {
+        status: "skip",
+        reason: "x_web_rate_limited",
+        ...(page.retryAfterSeconds === undefined ? {} : { detail: { retryAfter: page.retryAfterSeconds } }),
+      };
+    case "challenged":
+      return { status: "skip", reason: "x_web_challenged" };
+    case "login_wall":
+      return { status: "skip", reason: "x_web_login_wall" };
+    case "contaminated":
+      return { status: "skip", reason: "x_anon_session_contaminated" };
+    case "unexpected_redirect":
+      return { status: "skip", reason: "x_web_unexpected_redirect" };
+    case "timeout":
       return { status: "skip", reason: "x_web_http_timeout" };
-    }
-    return {
-      status: "skip",
-      reason: "x_web_unavailable",
-      detail: { message: error instanceof Error ? error.message : "Anonymous X fetch failed" },
-    };
-  } finally {
-    clearTimeout(timeout);
+    case "unavailable":
+      return { status: "skip", reason: "x_web_unavailable", detail: { message: page.message } };
+    case "ok":
+      break;
   }
+
+  const parsed = parseXWebProfile(page.html);
+  if (parsed.status === "not_found" || parsed.status === "suspended") {
+    return { status: "miss", missStatus: parsed.status };
+  }
+  // A 404 the markup did not explain is still X saying this handle has no account.
+  if (page.httpStatus === 404) return { status: "miss", missStatus: "not_found" };
+  if (page.httpStatus >= 400) return { status: "skip", reason: `x_web_http_${page.httpStatus}` };
+  if (parsed.status === "shell") {
+    return { status: "skip", reason: "x_web_parse_failed", detail: { parserReason: "shell" } };
+  }
+  if (parsed.status === "parse_failed") {
+    return { status: "skip", reason: "x_web_parse_failed", detail: { parserReason: parsed.reason } };
+  }
+  if (userId !== null && parsed.profile.id !== undefined && parsed.profile.id !== userId) {
+    return { status: "skip", reason: "x_web_id_mismatch" };
+  }
+  if (parsed.profile.handle.toLowerCase() !== handle.toLowerCase()) {
+    return { status: "skip", reason: "x_web_unexpected_redirect" };
+  }
+  return { status: "hydrated", user: webProfileToXUser(parsed.profile) };
+}
+
+/**
+ * A profile page names its numeric ID only when the account publishes a banner. Without one
+ * there is nothing to check a caller-supplied handle against, so a handle that may have been
+ * renamed or recycled cannot be trusted on its own.
+ */
+function isUnverifiedAgainst(outcome: FetchOutcome, userId: string): boolean {
+  return outcome.status === "hydrated" && outcome.user.id !== userId;
 }
 
 function normalizeKnownHandle(value: string | undefined): string | undefined {
@@ -270,7 +189,7 @@ export function createXAnonWebSession(deps: XAnonWebTransportDeps): XAnonWebSess
     lastRequestAt = now();
   };
 
-  let resolver: XAnonHandleResolver | null = null;
+  let browser: XAnonBrowser | null = null;
   let consecutiveParseFailures = 0;
   let breakerReason: string | null = null;
   let disposed = false;
@@ -278,6 +197,37 @@ export function createXAnonWebSession(deps: XAnonWebTransportDeps): XAnonWebSess
   const trip = (reason: string) => {
     breakerReason = reason;
     cooldown = { until: now() + X_ANON_COOLDOWN_MS, reason };
+  };
+
+  /** Advance the consecutive-parse-failure breaker for one completed request. */
+  const recordOutcome = (outcome: FetchOutcome) => {
+    if (outcome.status === "hydrated" || outcome.status === "miss") {
+      consecutiveParseFailures = 0;
+    } else if (isImmediateBreaker(outcome.reason)) {
+      trip(outcome.reason);
+    } else if (isParseFailure(outcome.reason)) {
+      consecutiveParseFailures++;
+      if (consecutiveParseFailures >= X_ANON_PARSE_FAILURE_BREAK_THRESHOLD) trip(outcome.reason);
+    } else {
+      consecutiveParseFailures = 0;
+    }
+  };
+
+  /** Bring the shared anonymous browser up once per session. */
+  const ensureBrowser = async (): Promise<XAnonBrowser | { error: SkipOutcome }> => {
+    if (browser) return browser;
+    try {
+      browser = await (deps.resolver ?? createAnonHandleResolver)(deps.env, deps.fetchImpl);
+      return browser;
+    } catch (error) {
+      return {
+        error: {
+          status: "skip",
+          reason: "x_web_unavailable",
+          detail: { message: error instanceof Error ? error.message : "Anonymous X browser unavailable" },
+        },
+      };
+    }
   };
 
   const hydrate = async (requests: XAnonWebRequest[]) => {
@@ -307,33 +257,37 @@ export function createXAnonWebSession(deps: XAnonWebTransportDeps): XAnonWebSess
         continue;
       }
 
-      if (request.handleOnly) {
-        const handle = normalizeKnownHandle(request.knownHandle);
-        if (!handle) {
-          outcomes.set(request.userId, { status: "skip", reason: "x_handle_invalid" });
-          continue;
-        }
-        await pace();
-        const fetched = await fetchProfile(null, handle, deps.fetchImpl, now());
-        outcomes.set(request.userId, withResolvedHandle(fetched, handle));
-        if (fetched.status === "hydrated" || fetched.status === "miss") {
-          consecutiveParseFailures = 0;
-        } else if (isImmediateBreaker(fetched.reason)) {
-          trip(fetched.reason);
-        } else if (isParseFailure(fetched.reason)) {
-          consecutiveParseFailures++;
-          if (consecutiveParseFailures >= X_ANON_PARSE_FAILURE_BREAK_THRESHOLD) trip(fetched.reason);
-        } else {
-          consecutiveParseFailures = 0;
-        }
+      // Reject an unusable handle before paying for a browser.
+      const requestedHandle = normalizeKnownHandle(request.knownHandle);
+      if (request.handleOnly && !requestedHandle) {
+        outcomes.set(request.userId, { status: "skip", reason: "x_handle_invalid" });
         continue;
       }
 
-      let knownHandle = normalizeKnownHandle(request.knownHandle);
+      const ready = await ensureBrowser();
+      if ("error" in ready) {
+        outcomes.set(request.userId, ready.error);
+        breakerReason = ready.error.reason;
+        continue;
+      }
+
+      if (request.handleOnly) {
+        const handle = requestedHandle!;
+        await pace();
+        const fetched = classifyPageResult(await ready.fetchProfile(handle), null, handle);
+        outcomes.set(request.userId, withResolvedHandle(fetched, handle));
+        recordOutcome(fetched);
+        continue;
+      }
+
+      const knownHandle = requestedHandle;
       if (knownHandle) {
         await pace();
-        const direct = await fetchProfile(request.userId, knownHandle, deps.fetchImpl, now());
-        if (direct.status === "hydrated" || direct.status === "miss" && direct.missStatus === "suspended") {
+        const page = await ready.fetchProfile(knownHandle);
+        const direct = classifyPageResult(page, request.userId, knownHandle);
+        const trustworthy = !isUnverifiedAgainst(direct, request.userId);
+        if (trustworthy && (direct.status === "hydrated"
+          || (direct.status === "miss" && direct.missStatus === "suspended"))) {
           outcomes.set(request.userId, direct);
           consecutiveParseFailures = 0;
           continue;
@@ -343,27 +297,12 @@ export function createXAnonWebSession(deps: XAnonWebTransportDeps): XAnonWebSess
           trip(direct.reason);
           continue;
         }
-        // A stale/recycled handle is ambiguous. Resolve the numeric ID once before caching/skipping.
-        knownHandle = undefined;
-      }
-
-      if (!resolver) {
-        try {
-          resolver = await (deps.resolver ?? createAnonHandleResolver)(deps.env, deps.fetchImpl);
-        } catch (error) {
-          const outcome: XAnonWebOutcome = {
-            status: "skip",
-            reason: "x_web_unavailable",
-            detail: { message: error instanceof Error ? error.message : "Anonymous X browser unavailable" },
-          };
-          outcomes.set(request.userId, outcome);
-          breakerReason = outcome.reason;
-          continue;
-        }
+        // A stale, recycled, or unverifiable handle is ambiguous. Let X redirect the numeric ID
+        // to the handle it owns today before caching or skipping.
       }
 
       await pace();
-      const resolved = await resolver.resolve(request.userId);
+      const resolved = await ready.resolve(request.userId);
       if (resolved.status === "terminal") {
         outcomes.set(request.userId, { status: "miss", missStatus: resolved.missStatus });
         consecutiveParseFailures = 0;
@@ -386,19 +325,14 @@ export function createXAnonWebSession(deps: XAnonWebTransportDeps): XAnonWebSess
         continue;
       }
 
-      await pace();
-      const fetched = await fetchProfile(request.userId, resolved.handle, deps.fetchImpl, now());
+      // `resolve` already left the tab on the profile X redirected to, so read it in place.
+      const fetched = classifyPageResult(
+        await ready.capturePage(resolved.handle),
+        request.userId,
+        resolved.handle,
+      );
       outcomes.set(request.userId, withResolvedHandle(fetched, resolved.handle));
-      if (fetched.status === "hydrated" || fetched.status === "miss") {
-        consecutiveParseFailures = 0;
-      } else if (isImmediateBreaker(fetched.reason)) {
-        trip(fetched.reason);
-      } else if (isParseFailure(fetched.reason)) {
-        consecutiveParseFailures++;
-        if (consecutiveParseFailures >= X_ANON_PARSE_FAILURE_BREAK_THRESHOLD) trip(fetched.reason);
-      } else {
-        consecutiveParseFailures = 0;
-      }
+      recordOutcome(fetched);
     }
 
     return outcomes;
@@ -409,9 +343,9 @@ export function createXAnonWebSession(deps: XAnonWebTransportDeps): XAnonWebSess
     dispose: async () => {
       if (disposed) return;
       disposed = true;
-      const activeResolver = resolver;
-      resolver = null;
-      await activeResolver?.dispose().catch(() => undefined);
+      const active = browser;
+      browser = null;
+      await active?.dispose().catch(() => undefined);
     },
   };
 }

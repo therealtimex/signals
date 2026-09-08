@@ -6,6 +6,8 @@ import { createContact, getContactById } from "@/lib/db/queries/contacts";
 import { createIdentity, getIdentityById, updateIdentity } from "@/lib/db/queries/identities";
 import { platformAccounts } from "@/lib/db/schema";
 import { TierRestrictedError, type XUser } from "@/lib/platforms/x/client";
+import { createXAnonWebSession } from "@/lib/platforms/x/anon-web-transport";
+import type { XAnonBrowser } from "@/lib/platforms/x/anon-browser-resolver";
 import type {
   XAnonWebSession,
   XAnonWebTransport,
@@ -481,37 +483,38 @@ describe("hydrateXProfiles", () => {
       `person${identity.platformUserId}`,
       xProfileHtml(identity.platformUserId, `person${identity.platformUserId}`),
     ]));
-    const fetchImpl = vi.fn<typeof fetch>(async (input) => {
-      const handle = new URL(String(input)).pathname.slice(1);
-      const html = profiles.get(handle);
-      return new Response(html ?? "", {
-        status: html ? 200 : 404,
-        headers: { "content-type": "text/html" },
-      });
-    });
+    const fetched: string[] = [];
+    const anonBrowser: XAnonBrowser = {
+      resolve: async () => ({ status: "unavailable", message: "handles are already known" }),
+      fetchProfile: async (handle) => {
+        fetched.push(handle);
+        const html = profiles.get(handle);
+        return html
+          ? { status: "ok", html, finalUrl: `https://x.com/${handle}`, httpStatus: 200 }
+          : { status: "ok", html: "", finalUrl: `https://x.com/${handle}`, httpStatus: 404 };
+      },
+      capturePage: async () => ({ status: "unavailable", message: "never resolved" }),
+      dispose: async () => undefined,
+    };
     const runScope = {
       contactIds,
       resources: new Map<string, unknown>(),
       deferCleanup: vi.fn(),
     };
-    const scopedCtx = {
-      ...ctx,
-      fetchImpl,
-      options: { minRequestGapMs: 0 },
-      runScope,
-    };
+    const scopedCtx = { ...ctx, options: { minRequestGapMs: 0 }, runScope };
+    const anonSession = vi.fn((deps: Parameters<typeof createXAnonWebSession>[0]) =>
+      createXAnonWebSession({ ...deps, resolver: async () => anonBrowser }));
 
-    const first = await hydrateXProfiles([contactIds[0]!], scopedCtx);
+    const first = await hydrateXProfiles(
+      [contactIds[0]!], scopedCtx, undefined, undefined, undefined, anonSession);
     const session = [...runScope.resources.values()][0] as XAnonWebSession;
-    const second = await hydrateXProfiles([contactIds[1]!], scopedCtx);
+    const second = await hydrateXProfiles(
+      [contactIds[1]!], scopedCtx, undefined, undefined, undefined, anonSession);
 
     expect(first.outcomes[0]).toMatchObject({ status: "updated" });
     expect(second.outcomes[0]).toMatchObject({ status: "updated" });
-    expect(fetchImpl).toHaveBeenCalledTimes(2);
-    expect(fetchImpl.mock.calls.map(([input]) => String(input))).toEqual([
-      "https://x.com/person201",
-      "https://x.com/person202",
-    ]);
+    expect(anonSession).toHaveBeenCalledOnce();
+    expect(fetched).toEqual(["person201", "person202"]);
     expect(runScope.resources.size).toBe(1);
     expect([...runScope.resources.values()][0]).toBe(session);
     expect(runScope.deferCleanup).toHaveBeenCalledOnce();

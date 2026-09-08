@@ -2,6 +2,8 @@ import { chromium, type Browser, type BrowserContext, type Page } from "playwrig
 import { RTX_PUBLISH_SESSION_NAME } from "@/lib/publish/constants";
 import { X_SELECTORS } from "@/lib/publish/x-browser/x-publish-selectors";
 import {
+  X_ANON_BROWSER_ARGS,
+  X_ANON_BROWSER_USER_AGENT,
   X_ANON_NAV_ORIGINS,
   X_ANON_NAV_TIMEOUT_MS,
   X_ANON_SESSION_NAME,
@@ -26,15 +28,41 @@ export type XAnonResolveResult =
   | { status: "unavailable"; message: string }
   | { status: "timeout" };
 
-export type XAnonHandleResolver = {
+/**
+ * One anonymous profile page as the browser received it. `httpStatus` is reported rather than
+ * interpreted: a 404 still carries the markup that tells apart "no such account" from
+ * "suspended", so only the statuses that must stop the batch short-circuit here.
+ */
+export type XAnonPageResult =
+  | { status: "ok"; html: string; finalUrl: string; httpStatus: number }
+  | { status: "rate_limited"; retryAfterSeconds?: number }
+  | { status: "challenged" }
+  | { status: "login_wall" }
+  | { status: "contaminated" }
+  | { status: "unexpected_redirect" }
+  | { status: "unavailable"; message: string }
+  | { status: "timeout" };
+
+export type XAnonBrowser = {
+  /** Numeric X user ID to handle, via the redirect X itself performs on `/i/user/<id>`. */
   resolve(userId: string): Promise<XAnonResolveResult>;
+  /** The rendered profile page for a handle. */
+  fetchProfile(handle: string): Promise<XAnonPageResult>;
+  /**
+   * The page the tab is already sitting on, without navigating again. `resolve` leaves the tab
+   * on the canonical profile it redirected to, so the numeric path costs one page load, not two.
+   */
+  capturePage(expectedHandle: string): Promise<XAnonPageResult>;
   dispose(): Promise<void>;
 };
+
+/** @deprecated Name kept for callers that only resolve; `XAnonBrowser` also fetches profiles. */
+export type XAnonHandleResolver = XAnonBrowser;
 
 export type XAnonHandleResolverFactory = (
   env: EnvLike,
   fetchImpl: typeof fetch,
-) => Promise<XAnonHandleResolver>;
+) => Promise<XAnonBrowser>;
 
 const X_LOGGED_IN_PRIVATE_MARKERS = [
   X_SELECTORS.composeButton,
@@ -42,6 +70,9 @@ const X_LOGGED_IN_PRIVATE_MARKERS = [
   X_SELECTORS.profileLink,
   X_SELECTORS.desktopProfileLink,
 ] as const;
+
+/** Where the session lands before its first profile request, so a guest context exists. */
+const X_ANON_ENTRY_URL = "https://x.com/";
 
 let resolverQueue: Promise<void> = Promise.resolve();
 
@@ -82,7 +113,13 @@ async function installOriginFence(page: Page): Promise<void> {
   });
 }
 
-async function probeContamination(page: Page): Promise<boolean> {
+/**
+ * Logged-in markers mean the session is carrying somebody's credentials and every read from it
+ * is contaminated. The bootstrap probe polls, because markers render asynchronously; later
+ * requests only re-check, because nothing in this session can log itself in mid-batch.
+ */
+async function probeContamination(page: Page, poll: boolean): Promise<boolean> {
+  if (!poll) return hasVisibleMarker(page, X_LOGGED_IN_PRIVATE_MARKERS);
   const deadline = Date.now() + 3_000;
   for (;;) {
     if (await hasVisibleMarker(page, X_LOGGED_IN_PRIVATE_MARKERS)) return true;
@@ -155,6 +192,37 @@ async function findRtxXPage(browser: Browser): Promise<Page | null> {
   }
 }
 
+function readRetryAfterSeconds(headers: Record<string, string>, nowMs: number): number | undefined {
+  const directRaw = headers["retry-after"]?.trim();
+  if (directRaw) {
+    const direct = Number(directRaw);
+    if (Number.isFinite(direct) && direct >= 0) return direct;
+  }
+  const resetRaw = headers["x-rate-limit-reset"]?.trim();
+  if (resetRaw) {
+    const reset = Number(resetRaw);
+    if (Number.isFinite(reset)) return Math.max(0, Math.ceil(reset - nowMs / 1000));
+  }
+  return undefined;
+}
+
+/** Confirm the tab is on the canonical profile it was asked for, then take its markup. */
+async function readLandedPage(
+  page: Page,
+  expectedHandle: string,
+  httpStatus: number,
+): Promise<XAnonPageResult> {
+  const finalUrl = page.url();
+  const landed = parseCanonicalXProfileUrl(finalUrl);
+  if (!landed) {
+    return isLoginOrChallengeUrl(finalUrl) ? { status: "login_wall" } : { status: "unexpected_redirect" };
+  }
+  if (landed.handle.toLowerCase() !== expectedHandle.toLowerCase()) {
+    return { status: "unexpected_redirect" };
+  }
+  return { status: "ok", html: await page.content(), finalUrl, httpStatus };
+}
+
 async function acquireQueue(): Promise<() => void> {
   const previous = resolverQueue;
   let release!: () => void;
@@ -167,7 +235,7 @@ export async function createAnonHandleResolver(
   env: EnvLike = process.env,
   fetchImpl: typeof fetch = fetch,
   sessionName: string = X_ANON_SESSION_NAME,
-): Promise<XAnonHandleResolver> {
+): Promise<XAnonBrowser> {
   if (sessionName === RTX_PUBLISH_SESSION_NAME) {
     throw new Error("Anonymous X resolver refuses the connected publish session");
   }
@@ -176,14 +244,16 @@ export async function createAnonHandleResolver(
   }
 
   const release = await acquireQueue();
+  const embedded = isRtxEmbedded(env);
   let browser: Browser | null = null;
   let context: BrowserContext | null = null;
   let page: Page | null = null;
-  let firstNavigation = true;
+  let started = false;
+  let bootstrapProbed = false;
   let disposed = false;
 
   try {
-    if (isRtxEmbedded(env)) {
+    if (embedded) {
       await createRtxBrowserSession({
         sessionName,
         guardrails: {
@@ -193,8 +263,9 @@ export async function createAnonHandleResolver(
         },
       }, env, fetchImpl);
     } else {
-      browser = await chromium.launch({ headless: true });
-      context = await browser.newContext();
+      // Headless Chrome is refused by X outright, so the local fallback runs headed too.
+      browser = await chromium.launch({ headless: false, args: [...X_ANON_BROWSER_ARGS] });
+      context = await browser.newContext({ userAgent: X_ANON_BROWSER_USER_AGENT, locale: "en-US" });
       page = await context.newPage();
       await installOriginFence(page);
     }
@@ -203,27 +274,40 @@ export async function createAnonHandleResolver(
     throw error;
   }
 
+  /** Bring up the shared tab on first use. Returns null when the browser never became usable. */
+  const ensurePage = async (): Promise<Page | null> => {
+    if (page || !embedded || started) return page;
+    started = true;
+    await startRtxBrowserSession({ sessionName, url: X_ANON_ENTRY_URL }, env, fetchImpl);
+    const port = await waitForRtxDebugPort(env, fetchImpl);
+    if (!port) return null;
+    browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
+    page = await findRtxXPage(browser);
+    if (page) await installOriginFence(page).catch(() => undefined);
+    return page;
+  };
+
+  /** Navigate the shared tab and report contamination once the page has settled. */
+  const goto = async (target: string) => {
+    const active = await ensurePage();
+    if (!active) return { page: null, response: null, contaminated: false };
+    const response = await active.goto(target, {
+      waitUntil: "domcontentloaded",
+      timeout: X_ANON_NAV_TIMEOUT_MS,
+    });
+    const contaminated = await probeContamination(active, !bootstrapProbed);
+    bootstrapProbed = true;
+    return { page: active, response, contaminated };
+  };
+
   return {
     async resolve(userId: string): Promise<XAnonResolveResult> {
       if (!/^\d+$/.test(userId)) return { status: "unavailable", message: "X user ID must be numeric" };
       try {
-        const target = `https://x.com/i/user/${userId}`;
-        if (isRtxEmbedded(env) && firstNavigation) {
-          await startRtxBrowserSession({ sessionName, url: target }, env, fetchImpl);
-          const port = await waitForRtxDebugPort(env, fetchImpl);
-          if (!port) return { status: "unavailable", message: "Anonymous X browser debug port unavailable" };
-          browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
-          page = await findRtxXPage(browser);
-          if (!page) return { status: "unavailable", message: "Anonymous X browser tab unavailable" };
-          await installOriginFence(page).catch(() => undefined);
-        } else if (page) {
-          await page.goto(target, { waitUntil: "domcontentloaded", timeout: X_ANON_NAV_TIMEOUT_MS }).catch(() => undefined);
-        }
-        firstNavigation = false;
-        if (!page) return { status: "unavailable", message: "Anonymous X browser page unavailable" };
-        const result = await waitForResolution(page, userId);
-        if (await probeContamination(page)) return { status: "contaminated" };
-        return result;
+        const { page: active, contaminated } = await goto(`https://x.com/i/user/${userId}`);
+        if (!active) return { status: "unavailable", message: "Anonymous X browser page unavailable" };
+        if (contaminated) return { status: "contaminated" };
+        return await waitForResolution(active, userId);
       } catch (error) {
         return {
           status: "unavailable",
@@ -231,13 +315,45 @@ export async function createAnonHandleResolver(
         };
       }
     },
+
+    async fetchProfile(handle: string): Promise<XAnonPageResult> {
+      try {
+        const { page: active, response, contaminated } = await goto(`https://x.com/${handle}`);
+        if (!active) return { status: "unavailable", message: "Anonymous X browser page unavailable" };
+        if (contaminated) return { status: "contaminated" };
+
+        const httpStatus = response?.status() ?? 0;
+        if (httpStatus === 429) {
+          const seconds = readRetryAfterSeconds(response?.headers() ?? {}, Date.now());
+          return { status: "rate_limited", ...(seconds === undefined ? {} : { retryAfterSeconds: seconds }) };
+        }
+        if (httpStatus === 403) return { status: "challenged" };
+        return await readLandedPage(active, handle, httpStatus);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Anonymous X browser failed";
+        return /timeout/i.test(message) ? { status: "timeout" } : { status: "unavailable", message };
+      }
+    },
+
+    async capturePage(expectedHandle: string): Promise<XAnonPageResult> {
+      if (!page) return { status: "unavailable", message: "Anonymous X browser page unavailable" };
+      try {
+        await page.waitForLoadState("domcontentloaded", { timeout: X_ANON_NAV_TIMEOUT_MS });
+        // The redirect target's status is not observable from here; the markup carries the verdict.
+        return await readLandedPage(page, expectedHandle, 200);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Anonymous X browser failed";
+        return /timeout/i.test(message) ? { status: "timeout" } : { status: "unavailable", message };
+      }
+    },
+
     async dispose(): Promise<void> {
       if (disposed) return;
       disposed = true;
       try {
         await context?.close().catch(() => undefined);
         await browser?.close().catch(() => undefined);
-        if (isRtxEmbedded(env)) {
+        if (embedded) {
           await stopRtxBrowserSession(sessionName, env, fetchImpl).catch(() => undefined);
         }
       } finally {

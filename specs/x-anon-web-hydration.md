@@ -2,19 +2,37 @@
 
 Extends `specs/contact-profile-pipeline-workflow.md` §5.4. When the official X API path is
 unusable because no OAuth credentials exist, `hydrate_x_profiles` falls back to a best-effort
-anonymous-web transport: numeric ID → canonical handle resolution in a dedicated logged-out
-browser session, then anonymous HTTP fetch + parse of public profile HTML metadata, projected
-through the **same fill-gaps-only write path** as the API transport.
+anonymous-web transport: every read runs in a dedicated logged-out browser session — numeric ID →
+canonical handle resolution, then the profile page's public metadata — projected through the
+**same fill-gaps-only write path** as the API transport.
 
-Verified runtime evidence (2026-08-19, account `568879807`):
-- Logged-out browser navigation to `https://x.com/i/user/568879807` client-side-resolves to
-  `https://x.com/tri_dao` (Log in / Sign up visible — no authenticated user).
-- Anonymous `curl https://x.com/tri_dao` returns HTML metadata with name, handle, bio, avatar,
-  numeric identifier, canonical URL, and public counts.
-- Anonymous `curl https://x.com/i/user/<id>` returns only the generic logged-out shell — the
-  browser stage is required for numeric-only identities. An identity that already knows its
-  handle has what that stage would produce, so it skips the browser and fetches
-  `https://x.com/<handle>` directly.
+> **Revised 2026-09-06 (issue #438).** The original design fetched profile pages over plain HTTP
+> with a `curl/8.7.1` user agent. That stopped working: X now serves a metadata-free shell to any
+> non-browser client, so the transport parsed nothing, tripped its own breaker every third
+> request, and hydrated no one. §5 and §6 below describe the browser-based replacement. The
+> superseded HTTP design is recorded in ADR-8.
+
+Verified runtime evidence (2026-09-06, headed Chrome, no storage state, `loggedIn: false`
+asserted in-page):
+- Logged-out navigation to `https://x.com/i/user/568879807` resolves to `https://x.com/tri_dao`,
+  unchanged from the original evidence. The browser stage still works.
+- `https://x.com/DrJimFan` returns `og:title` "Jim Fan (@DrJimFan) on X", `og:description` (full
+  bio), `og:image` `pbs.twimg.com/profile_images/…_200x200.jpg`, `link rel=canonical`, and
+  `twitter:label2`/`twitter:data2` = "Joined" / "December 2012" — **in the initial response body**,
+  before any script runs.
+- `application/ld+json` is **absent**, in the browser as well as over HTTP. The original primary
+  parser source is gone for good; `og:*` and `twitter:*` replace it.
+- `curl https://x.com/DrJimFan` returns 240 KB with 57 meta tags and **no** `og:title`,
+  `og:image`, or canonical link — the app shell. Sending a real Chrome user agent changes
+  nothing, so the gate is not the UA and not JavaScript execution. Headless Chrome is refused
+  outright (403 / `ERR_HTTP_RESPONSE_CODE_FAILURE`).
+- A missing handle answers **404** with `og:title` "User Profile Not Found - X | 404 Error" and a
+  body reading "this page doesn't exist"; a real account with no picture (`torvalds`) answers 200
+  with an `abs.twimg.com/sticky/default_profile_images/…` avatar. The two are distinguishable.
+- `twitter:image` is `pbs.twimg.com/profile_banners/<numeric user id>/<ts>` when the account has a
+  banner. Both IDs sampled this way round-trip: `x.com/i/user/3888491` → `LinusEkenstam`,
+  `x.com/i/user/1007413134` → `DrJimFan`. Accounts without a banner publish no `twitter:image`,
+  so the numeric ID is **optional** now (§6, §6.5).
 
 ## 1. Scope & Hard Constraints
 
@@ -27,8 +45,9 @@ Non-negotiable invariants (each has a required test, §12):
 - **I1 — API preferred.** When `platform_accounts.x` has `credentialsEncrypted`, the existing API
   path runs unchanged. The web fallback replaces **only** the `x_not_connected` early return.
 - **I2 — no user credentials, ever.** The anonymous transport never reads, receives, or sends the
-  connected user's cookies or tokens. Every anonymous HTTP request is sent with **no `Cookie` and
-  no `Authorization` header**, enforced structurally (§5) and proven by test spies.
+  connected user's cookies or tokens. It owns a dedicated logged-out browser session and reads
+  only through it (§4, §5); the contamination probe (§4.4) aborts the run if that session ever
+  shows a signed-in marker. Proven by test spies over the session lifecycle calls.
 - **I3 — never `signals-publish`.** The anonymous browser session is a dedicated named session
   (`signals-x-anon`). The resolver refuses to operate on `RTX_PUBLISH_SESSION_NAME` and never
   loads `src/lib/browser/session.ts` stored sessions (those hold logged-in cookies).
@@ -180,43 +199,47 @@ to leave `/i/user/…` (poll, reusing the redirect-grace pattern), then classify
   `timeout`-class retryable (do **not** cache ambiguous states as misses).
 - Otherwise → `timeout` (retryable).
 
-## 5. Anonymous HTTP Fetch
+## 5. Anonymous Profile Read (browser)
 
-### 5.1 Request shape
+### 5.1 Why there is no HTTP client here
 
-One helper builds every request; there is no other call site (structural enforcement of I2):
+X answers a plain HTTP client with an app shell containing none of the profile metadata, whatever
+user agent it claims, and refuses headless Chrome outright. The only client it serves is a headed
+browser — and the resolver already owns one. So `XAnonBrowser` (in `anon-browser-resolver.ts`)
+exposes both stages and the transport never calls `fetch` for a profile:
 
 ```ts
-function anonXFetch(url: string, fetchImpl: typeof fetch): Promise<Response> {
-  return fetchImpl(url, {
-    method: "GET",
-    redirect: "manual",
-    headers: {
-      "user-agent": X_ANON_USER_AGENT,
-      accept: "text/html",
-      "accept-language": "en",
-    }, // exhaustive — never spread caller headers; no cookie, no authorization
-  });
-}
+export type XAnonBrowser = {
+  resolve(userId: string): Promise<XAnonResolveResult>;      // /i/user/<id> → handle
+  fetchProfile(handle: string): Promise<XAnonPageResult>;    // navigate to /<handle>
+  capturePage(expectedHandle: string): Promise<XAnonPageResult>;  // read without navigating
+  dispose(): Promise<void>;
+};
 ```
 
-`X_ANON_USER_AGENT = "curl/8.7.1"` — matches the verified evidence exactly (X serves full profile
-metadata to curl's UA). Deliberately not a browser impersonation and not the connected user's UA.
-Single constant so behavior drift is a one-line fix.
+`deps.fetchImpl` survives only to reach the RTX browser-session REST API. A transport test asserts
+it is never called for a profile.
 
-### 5.2 Redirect & response policy
+`capturePage` exists because `resolve` **leaves the tab on the canonical profile X redirected
+to**. Reading it in place makes the numeric path cost one page load instead of two.
 
-- Follow at most `X_ANON_MAX_REDIRECTS = 3` manual hops; every hop's absolute `Location` must
-  have origin in `{"https://x.com", "https://twitter.com", "https://mobile.x.com"}`, else abort
-  → skip `x_web_unexpected_redirect`.
-- Final URL must satisfy `parseCanonicalXProfileUrl` and match the requested handle
-  case-insensitively; mismatch → `x_web_unexpected_redirect`.
-- `429` → skip `x_web_rate_limited` (+ `retryAfter` from `retry-after`/`x-rate-limit-reset` when
-  present) → breaker. `403` → `x_web_challenged` → breaker. Other non-2xx → `x_web_http_<n>`
-  retryable skip, counts toward the parse-failure breaker.
-- Body read with a hard timeout `X_ANON_HTTP_TIMEOUT_MS = 15_000` (AbortController, like the
-  gravatar probe) and size cap `X_ANON_HTTP_MAX_BYTES = 3_000_000`; content-type must contain
-  `text/html`.
+### 5.2 Landing & response policy
+
+- Navigation uses `waitUntil: "domcontentloaded"` with `X_ANON_NAV_TIMEOUT_MS = 20_000`. The
+  metadata is server-rendered, so no settle delay is needed.
+- Redirects are followed by the browser, and the **origin fence** (`page.route`, §4.2) aborts any
+  request off the X/twimg allowlist, so a redirect off-origin fails the navigation rather than
+  being followed.
+- The landed URL must satisfy `parseCanonicalXProfileUrl` (§6.4) and match the requested handle
+  case-insensitively → else `unexpected_redirect`. A login/challenge path → `login_wall`.
+- `429` → `rate_limited` (+ `retryAfterSeconds` from `retry-after`/`x-rate-limit-reset` on the
+  navigation response) → breaker. `403` → `challenged` → breaker.
+- Every other status, **including 404**, returns `ok` with the markup and the status. The page,
+  not the status line, distinguishes "no such account" from "suspended" (§6). A 404 the markup did
+  not explain is still treated as `not_found`.
+- Headless is not an option: the local standalone fallback launches `headless: false` with
+  `X_ANON_BROWSER_ARGS` and a real user agent, matching what `src/lib/browser/session.ts` already
+  does for every other browser path in this repo.
 
 ## 6. Parser Contract (`web-profile-parser.ts`)
 
@@ -224,7 +247,7 @@ Pure function; no network, no DB. Fixture-tested exhaustively.
 
 ```ts
 export type XWebProfile = {
-  id: string;                    // numeric, from JSON-LD identifier — REQUIRED
+  id?: string;                   // numeric; only when the page names one (§6.5)
   handle: string;                // canonical, without '@'
   name?: string;
   description?: string;
@@ -232,7 +255,7 @@ export type XWebProfile = {
   canonicalUrl?: string;         // https://x.com/<handle>
   location?: string;
   websiteUrl?: string;
-  createdAt?: string;            // ISO, from JSON-LD dateCreated
+  createdAt?: string;            // ISO; month precision when read from "Joined <Month> <Year>"
   followersCount?: number;
   followingCount?: number;
   tweetCount?: number;           // listedCount is not exposed anonymously
@@ -247,23 +270,32 @@ export type XWebParseResult =
 
 Sources, in priority order:
 
-1. **Schema.org ProfilePage metadata** — current anonymous responses use HTML microdata
-   (`itemType="https://schema.org/ProfilePage"`); JSON-LD
-   `<script type="application/ld+json">` is also accepted. The Person node
-   (`mainEntity`/`author`) supplies `identifier` (numeric id), `additionalName` (handle),
-   `name`, `description`, `image.contentUrl`/`thumbnailUrl` (avatar), `url` in `sameAs`/related
-   links (website), `homeLocation.name`, `dateCreated`, and `interactionStatistic`
-   (followers / friends → following / posts → tweets).
-2. `<link rel="canonical">` for `canonicalUrl`.
-3. OpenGraph/Twitter meta (`og:title` "Name (@handle)…", `og:description`, `og:image`) as
-   fallback for name/handle/bio/avatar.
+1. **Schema.org ProfilePage metadata** — HTML microdata
+   (`itemType="https://schema.org/ProfilePage"`) or JSON-LD
+   `<script type="application/ld+json">`. The Person node supplies `identifier` (numeric id),
+   `additionalName` (handle), `name`, `description`, `image.contentUrl`/`thumbnailUrl`,
+   `sameAs`/`url` (website), `homeLocation.name`, `dateCreated`, and `interactionStatistic`.
+   **Neither form appears in anonymous responses any more** (evidence, above). The readers stay
+   because they cost nothing and X has served both before; nothing may depend on them.
+2. `<link rel="canonical">` for `canonicalUrl` and handle.
+3. **OpenGraph/Twitter meta — the live source.** `og:title` "Name (@handle) on X" → name and
+   handle; `og:description` → bio; `og:image` → avatar; `twitter:image` → the numeric user ID,
+   when it is a `profile_banners/<id>/…` URL; `twitter:label2`/`twitter:data2` → join month.
 
 Rules:
 
-- `status: "ok"` **requires** a numeric `id` and a valid `handle`. A page with og: data but no
-  extractable numeric identifier is `parse_failed` ("no verifiable identifier") — the caller
-  cannot cross-check it, so it must not hydrate (prevents handle-reuse poisoning).
-- `avatarUrl` is dropped (left undefined) unless its origin is exactly `https://pbs.twimg.com`.
+- `status: "ok"` requires a valid `handle` and at least one profile signal; `id` is **optional**,
+  because X names it anonymously only for accounts that publish a banner. The handle-reuse
+  poisoning this rule used to prevent is now handled where it belongs, in the transport: a
+  caller that already knows the numeric ID re-resolves through `/i/user/<id>` whenever the page
+  cannot confirm it (§6.5). A page with neither profile metadata nor an error marker is still
+  `shell`.
+- `createdAt` from `twitter:data2` is month precision ("December 2012" → `2012-12-01T00:00:00Z`),
+  so §7 only ever lets it fill a gap, never overwrite an API timestamp.
+- `avatarUrl` is dropped (left undefined) unless its origin is exactly `https://pbs.twimg.com`
+  **and** its path starts with `/profile_images/`. That excludes both the default egg
+  (`abs.twimg.com/sticky/default_profile_images/…`) and banner URLs on the same origin, so an
+  account with no picture falls through to initials instead of caching a grey egg.
   Known size suffixes (`_normal`, `_200x200`, `_400x400`, `_bigger`) are normalized to `_normal`
   so the avatar step's existing `_normal → _400x400` upgrade keeps working (§7).
 - Explicit suspension / doesn't-exist markers (title/og/empty-state strings captured in
@@ -286,20 +318,27 @@ the HTTP redirect validator.
 
 ### 6.5 Identifier verification (transport)
 
-`profile.id !== identity.platformUserId` →
-- if the fetch used a possibly stale `knownHandle`: discard and fall through to browser
-  resolution (the handle was renamed/recycled);
-- if the fetch used a freshly browser-resolved handle: skip `x_web_id_mismatch` (retryable,
-  counts toward breaker) — something is wrong, don't write.
+The numeric ID is now evidence the page may or may not carry, so verification is stated as: **a
+caller-supplied handle is only trusted when the page proves it still belongs to the requested ID.**
 
-A `handleOnly` request has no numeric ID to verify against, so `fetchProfile` takes `userId:
-null` and the mismatch guard is bypassed — the ID the page reports *is* the answer. That is safe
-because the parser only ever yields a numeric identifier (`status: "ok"` requires a truthy `id`
-matching `/^\d+$/`), so nothing non-numeric can reach `platformUserId`. The handle is still
-verified twice — the final canonical URL (§6.4) and the parsed `profile.handle` must both match
-the requested handle — so a redirect cannot bind the wrong account. A renamed handle therefore
-resolves to `x_web_unexpected_redirect` rather than following the rename: with no ID to check
-against, following it is exactly how handle recycling would silently bind the wrong person.
+| request | ID on the page | outcome |
+|---|---|---|
+| `handleOnly` (no ID to check) | any | hydrate; the page's ID, if present, *is* the answer |
+| `knownHandle` + numeric `userId` | matches | hydrate |
+| `knownHandle` + numeric `userId` | differs | re-resolve through `/i/user/<id>` |
+| `knownHandle` + numeric `userId` | **absent** | re-resolve through `/i/user/<id>` |
+| browser-resolved handle | any | hydrate — X's own redirect established the binding |
+
+The last-but-one row is the one that changed. A banner-less page cannot prove the handle was not
+renamed or recycled, so it is not trusted on its own; X redirecting `/i/user/<id>` to a handle is
+the authority, and the resolver's landing page is read in place (§5.1), so this costs one extra
+navigation and never a wrong write.
+
+Once a handle is browser-resolved, no ID check is applied: the redirect *is* the id→handle
+binding, and re-checking it against a page that may not name an ID would reject valid profiles.
+
+An identity is only promoted to a numeric `platformUserId` when the profile actually named one
+(`/^\d+$/`); otherwise it stays handle-keyed and is retried later.
 
 ## 7. Projection, Provenance, Avatar Handoff
 
@@ -388,15 +427,17 @@ budget + breaker is the whole rate policy.
 export const X_ANON_SESSION_NAME = "signals-x-anon";
 export const X_ANON_NAV_ORIGINS = ["https://x.com", "https://twitter.com", "https://mobile.x.com"];
 export const X_ANON_ASSET_ORIGINS = ["https://pbs.twimg.com", "https://abs.twimg.com", "https://api.x.com"];
-export const X_ANON_USER_AGENT = "curl/8.7.1";
+export const X_ANON_BROWSER_ARGS = ["--disable-blink-features=AutomationControlled", "--no-first-run", "--no-default-browser-check"];
+export const X_ANON_BROWSER_USER_AGENT = "Mozilla/5.0 (Macintosh; …) Chrome/131.0.0.0 Safari/537.36";
 export const X_ANON_NAV_TIMEOUT_MS = 20_000;
-export const X_ANON_HTTP_TIMEOUT_MS = 15_000;
-export const X_ANON_HTTP_MAX_BYTES = 3_000_000;
-export const X_ANON_MAX_REDIRECTS = 3;
 export const X_ANON_MIN_REQUEST_GAP_MS = 1_000;
 export const X_ANON_PARSE_FAILURE_BREAK_THRESHOLD = 3;
 export const X_ANON_COOLDOWN_MS = 15 * 60 * 1000;
 ```
+
+The HTTP constants (`X_ANON_USER_AGENT`, `X_ANON_HTTP_TIMEOUT_MS`, `X_ANON_HTTP_MAX_BYTES`,
+`X_ANON_MAX_REDIRECTS`) are gone with the HTTP transport; the browser enforces the navigation
+timeout, the redirect policy, and the response size.
 
 Overridable per step via existing `PipelineStepDecl.options`
 (`{ webFallback?: boolean /* default true */, minRequestGapMs? }`) —
@@ -504,8 +545,10 @@ promotion and unique-index conflict contract.
   gives up web hydration for reauth/tier-restricted installs (revisit on demand).
 - **D2 Adapter into `updateIdentityFromUser`.** One projection to maintain; write semantics
   provably identical. Gives up web-only fields that don't fit `XUser` (none needed today).
-- **D3 Handle-first, browser-second.** Minimizes browser dependency and X traffic; costs one
-  wasted HTTP fetch when a known handle is stale.
+- **D3 Handle-first, browser-second.** ~~Minimizes browser dependency~~ — superseded by ADR-8;
+  every read is a browser read now. Handle-first survives as *navigate straight to `/<handle>`
+  when one is known*, which still saves the `/i/user/<id>` hop; it costs one wasted navigation
+  when the handle is stale or unverifiable (§6.5).
 - **D4 Dedicated RTX session `signals-x-anon`, per-run acquire/stop, in-process mutex.**
   Auditable in RTX Settings → Browser; persistent guest profile reduces challenges. Gives up
   per-run cold anonymity in RTX mode (standalone mode is fully cold each run).
@@ -514,9 +557,23 @@ promotion and unique-index conflict contract.
 - **D6 Ambiguity never caches a miss.** Only browser-classified or explicitly-marked terminal
   states write 30-day misses; the generic shell is always retryable. Prevents page drift from
   silently freezing the backlog for a month.
-- **D7 curl UA constant.** Matches the only verified-working evidence; honest, deterministic,
-  one-line revisable. Gives up browser-UA camouflage on the HTTP stage (browser stage covers the
-  paths that need a real browser).
+- **D7 curl UA constant.** ~~Matches the only verified-working evidence~~ — superseded by ADR-8.
+  The evidence expired and nothing detected it, which is the real lesson: the transport's only
+  signal was `x_web_parse_failed`, a reason it also emits for ordinary drift.
+- **D8 (2026-09-06, issue #438) Read every anonymous profile through the browser.** X stopped
+  serving profile metadata to non-browser clients, so the HTTP transport in the original §5 could
+  not work regardless of parsing. Rejected alternatives: **retire the anonymous path** (the data
+  is public and reachable, so this discards working capability); **fail fast with a distinct
+  reason** (honest, but still hydrates nobody); **fingerprint-matched HTTP client** (a real
+  browser's TLS/HTTP2 signature is what X actually checks — chasing it is unbounded maintenance,
+  and the resolver already owns a compliant browser). Cost: the numeric path pays a browser
+  navigation it used to skip, and the local standalone fallback opens a visible window. Both were
+  already true of the resolver stage.
+- **D9 Numeric ID is optional evidence, not a precondition.** The old "no id ⇒ `parse_failed`"
+  rule was a parser-level proxy for handle-reuse safety. With the ID usually absent it would
+  reject nearly every real profile, so the check moved to the transport, where it can respond by
+  re-resolving rather than by refusing (§6.5). Strictly safer: the parser refused, the transport
+  verifies.
 
 ## 16. Implementation Order (dev slices)
 
