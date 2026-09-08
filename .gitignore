@@ -41,6 +41,9 @@ coverage/
 test-results/
 playwright-report/
 .evidence/experience/
+# Per-run agent scratch: the workflow prompts stage contacts.csv here before importing
+# (network-snowball.ts, social-patrol.ts, contact-web-research.ts). Real contact PII.
+workflow-runs/
 
 # generated marketplace release metadata
 marketplace/release-manifest.json
