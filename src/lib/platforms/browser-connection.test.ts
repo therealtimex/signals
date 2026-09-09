@@ -360,12 +360,14 @@ describe("publish session guardrails", () => {
       isVisible,
       getHref,
       navigate,
+      settleNavigation,
     }: {
       visible?: string[];
       hrefs?: Record<string, string>;
       isVisible?: (selector: string) => boolean;
       getHref?: (selector: string) => string | null;
       navigate?: (url: string) => string;
+      settleNavigation?: (url: string) => string;
     } = {},
   ) {
     let currentUrl = url;
@@ -373,6 +375,10 @@ describe("publish session guardrails", () => {
       url: () => currentUrl,
       goto: vi.fn(async (targetUrl: string) => {
         currentUrl = navigate?.(targetUrl) ?? targetUrl;
+      }),
+      waitForURL: vi.fn(async (match: (url: URL) => boolean) => {
+        currentUrl = settleNavigation?.(currentUrl) ?? currentUrl;
+        if (!match(new URL(currentUrl))) throw new Error("URL did not settle");
       }),
       locator: (selector: string) => ({
         first: () => ({
@@ -573,9 +579,9 @@ describe("publish session guardrails", () => {
   it("resolves the authenticated LinkedIn handle through the self-profile redirect", async () => {
     const page = fakePage("https://www.linkedin.com/feed/", {
       visible: [".global-nav__me"],
-      navigate: (url) =>
+      settleNavigation: (url) =>
         url === "https://www.linkedin.com/in/me/"
-          ? "https://www.linkedin.com/in/session-owner/"
+          ? "https://www.linkedin.com/in/session-owner/?isSelfProfile=true"
           : url,
     });
 
@@ -586,7 +592,11 @@ describe("publish session guardrails", () => {
       detectedHandle: "/in/session-owner",
     });
     expect(page.goto).toHaveBeenCalledWith("https://www.linkedin.com/in/me/", {
-      waitUntil: "domcontentloaded",
+      waitUntil: "commit",
+      timeout: expect.any(Number),
+    });
+    expect(page.waitForURL).toHaveBeenCalledWith(expect.any(Function), {
+      waitUntil: "commit",
       timeout: expect.any(Number),
     });
   });
@@ -594,7 +604,17 @@ describe("publish session guardrails", () => {
   it("rejects a LinkedIn self-profile redirect that lands on an authwall", async () => {
     const page = fakePage("https://www.linkedin.com/feed/", {
       visible: [".global-nav__me"],
-      navigate: () => "https://www.linkedin.com/authwall?trk=profile-self",
+      settleNavigation: () => "https://www.linkedin.com/authwall?trk=profile-self",
+    });
+
+    await expect(
+      probeAuthenticatedPlatformIdentity("linkedin", page as never, 0),
+    ).resolves.toEqual({ loggedIn: false, detectedHandle: null });
+  });
+
+  it("rejects an unresolved LinkedIn self-profile route", async () => {
+    const page = fakePage("https://www.linkedin.com/feed/", {
+      visible: [".global-nav__me"],
     });
 
     await expect(

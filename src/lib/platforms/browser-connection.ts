@@ -639,11 +639,25 @@ async function detectLinkedInHandleViaSelfRedirect(
   page: Page,
   timeoutMs: number,
 ): Promise<string | null> {
+  const deadline = Date.now() + timeoutMs;
   try {
     await page.goto(LINKEDIN_SELF_PROFILE_REDIRECT_URL, {
-      waitUntil: "domcontentloaded",
+      // Only the account-owned URL is needed. LinkedIn can commit `/in/me/` while its feed scripts
+      // keep DOMContentLoaded pending beyond the identity probe budget.
+      waitUntil: "commit",
       timeout: timeoutMs,
     });
+    // `/in/me/` can then resolve client-side. Wait only for that URL transition, not page load.
+    await page.waitForURL(
+      (url) => {
+        const vanity = extractLinkedInVanityFromUrl(url.toString());
+        return !vanity || vanity.toLowerCase() !== "me";
+      },
+      {
+        waitUntil: "commit",
+        timeout: Math.max(1, deadline - Date.now()),
+      },
+    );
   } catch {
     return null;
   }
