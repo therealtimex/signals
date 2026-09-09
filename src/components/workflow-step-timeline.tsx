@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import { StepOutputRenderer } from "@/components/step-output-renderer";
 import {
@@ -96,11 +97,13 @@ export function WorkflowStepTimeline({
   animate,
   subjectById = {},
   runStartedAt = null,
+  agentThreadAction,
 }: {
   steps: WorkflowStep[];
   animate?: boolean;
   subjectById?: Record<string, WorkflowRunSubject>;
   runStartedAt?: number | null;
+  agentThreadAction?: ReactNode;
 }) {
   if (steps.length === 0) {
     return animate ? (
@@ -122,6 +125,8 @@ export function WorkflowStepTimeline({
         const StepIcon = config.icon;
         const StatusIcon = STATUS_ICONS[step.status] ?? Clock;
         const output = parseJson(step.output);
+        const isAgentDispatch = step.tool === "rtx_terminal_agent";
+        if (isAgentDispatch && output) delete output.runtimeSessionId;
         const offsetLabel = formatStepOffsetFromRunStart(step.createdAt, runStartedAt);
 
         return (
@@ -170,6 +175,7 @@ export function WorkflowStepTimeline({
                   subjectById={subjectById}
                 />
               )}
+              {isAgentDispatch && !step.error ? agentThreadAction : null}
             </div>
 
             {/* Status + duration */}

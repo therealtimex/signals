@@ -9,17 +9,25 @@ import { WorkflowStepTimeline } from "@/components/workflow-step-timeline";
 import { WorkflowGraphView } from "@/components/workflow-graph-view";
 import type { WorkflowStep } from "@/lib/db/types";
 import type { WorkflowRunSubject } from "@/lib/workflows/workflow-run-subjects-shared";
+import type { WorkflowRunAgentThread } from "@/lib/workflows/workflow-run-agent-thread";
+import { WorkflowRunAgentThreadButton } from "./workflow-run-agent-thread-button";
 
 export function WorkflowDetailSteps({
   steps,
   animate,
   subjectById = {},
   runStartedAt = null,
+  runId,
+  runStatus,
+  agentThread,
 }: {
   steps: WorkflowStep[];
   animate?: boolean;
   subjectById?: Record<string, WorkflowRunSubject>;
   runStartedAt?: number | null;
+  runId: string;
+  runStatus: string;
+  agentThread: WorkflowRunAgentThread;
 }) {
   const [view, setView] = useState<"timeline" | "graph">("timeline");
 
@@ -61,6 +69,14 @@ export function WorkflowDetailSteps({
             animate={animate}
             subjectById={subjectById}
             runStartedAt={runStartedAt}
+            agentThreadAction={
+              <WorkflowRunAgentThreadButton
+                runId={runId}
+                runStatus={runStatus}
+                agentThread={agentThread}
+                compact
+              />
+            }
           />
         ) : (
           <WorkflowGraphView steps={steps} animate={animate} />

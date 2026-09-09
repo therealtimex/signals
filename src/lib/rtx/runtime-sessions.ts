@@ -745,7 +745,12 @@ export async function terminateTerminalRuntimeSession(
 }
 
 export async function openRtxRuntimeLauncher(
-  input: { workspaceSlug: string; threadSlug: string; reason?: string },
+  input: {
+    workspaceSlug: string;
+    threadSlug: string;
+    reason?: string;
+    presentationMode?: "panel" | "tab";
+  },
   env: EnvLike = process.env,
   fetchImpl: typeof fetch = fetch
 ): Promise<{ success: boolean; error?: string }> {
@@ -764,6 +769,7 @@ export async function openRtxRuntimeLauncher(
         body: JSON.stringify({
           workspaceSlug: input.workspaceSlug,
           threadSlug: input.threadSlug,
+          ...(input.presentationMode ? { presentationMode: input.presentationMode } : {}),
           reason: input.reason ?? "Signals publish thread",
           requestedBy: "Signals",
         }),

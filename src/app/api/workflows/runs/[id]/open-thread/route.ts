@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getWorkflowRun } from "@/lib/db/queries/workflows";
-import { getRtxRefsFromRunConfig } from "@/lib/agents/run-template-via-rtx";
 import { openRtxRuntimeLauncher } from "@/lib/rtx/runtime-sessions";
+import { getWorkflowRunAgentThreadTarget } from "@/lib/workflows/workflow-run-agent-thread";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -16,8 +16,8 @@ export async function POST(_req: Request, context: RouteContext) {
     return NextResponse.json({ success: false, error: "Workflow run not found" }, { status: 404 });
   }
 
-  const { workspaceSlug, threadSlug } = getRtxRefsFromRunConfig(run.config);
-  if (!workspaceSlug || !threadSlug) {
+  const target = getWorkflowRunAgentThreadTarget(run);
+  if (!target) {
     return NextResponse.json(
       { success: false, error: "This run has no RTX thread reference" },
       { status: 400 }
@@ -25,16 +25,17 @@ export async function POST(_req: Request, context: RouteContext) {
   }
 
   const opened = await openRtxRuntimeLauncher({
-    workspaceSlug,
-    threadSlug,
+    workspaceSlug: target.workspaceSlug,
+    threadSlug: target.threadSlug,
+    presentationMode: "tab",
     reason: `Open workflow run ${run.id}`,
   });
 
   return NextResponse.json({
     success: opened.success,
-    threadPath: `/workspace/${workspaceSlug}/t/${threadSlug}`,
-    workspaceSlug,
-    threadSlug,
+    threadPath: target.threadPath,
+    workspaceSlug: target.workspaceSlug,
+    threadSlug: target.threadSlug,
     error: opened.error,
   });
 }
