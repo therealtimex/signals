@@ -110,10 +110,11 @@ func (state *importAttributionState) add(ids []string) {
 // attach. OrgID matters because a platform account can be claimed by an org identity
 // as well, which blocks a contact identity just as hard.
 type contactMatch struct {
-	ID           string
-	Archived     bool
-	OrgID        string
-	CandidateIDs []string
+	ID                      string
+	Archived                bool
+	OrgID                   string
+	CandidateIDs            []string
+	PlatformIdentityIsBound bool
 }
 
 // matched reports whether the row resolved to an existing owner of any kind.
@@ -507,7 +508,13 @@ func importAttributedContactChunkWithInvoker(
 			}
 			if existing.ID != "" {
 				attribute(existing.ID)
-				if enriched, err := enrichExistingContact(existing.ID, row, workflowRunID, templateID, true, invoke); err != nil {
+				includeIdentity, err := existingContactNeedsIdentityWrite(existing, row, invoke)
+				if err != nil {
+					summary.Failed++
+					summary.Errors = append(summary.Errors, err.Error())
+					continue
+				}
+				if enriched, err := enrichExistingContact(existing.ID, row, workflowRunID, templateID, includeIdentity, invoke); err != nil {
 					summary.Failed++
 					summary.Errors = append(summary.Errors, err.Error())
 				} else if enriched {
@@ -722,29 +729,55 @@ func findExistingContactWithInvoker(row contactRow, invoke agentToolInvoker) (co
 			return contactMatch{CandidateIDs: candidateIDs}, nil
 		}
 	}
-	if row.Platform != "" && (row.PlatformUserID != "" || row.PlatformHandle != "") {
-		targetUser := row.PlatformUserID
-		if targetUser == "" {
-			targetUser = row.PlatformHandle
-		}
-		targetUser = strings.TrimPrefix(targetUser, "@")
-		// platformUserId is an exact identity-claim filter. Free-text search does
-		// not cover contact_identities, so searching the handle never matched and
-		// the import created a duplicate that upsert_contact_identity then
-		// rejected as an already-claimed platform account (#202).
-		// resolve_platform_claim is the same resolution upsert_contact_identity
-		// enforces, so this cannot disagree with the guard the way a query_contacts
-		// reconstruction could (#206).
-		result, err := invoke("resolve_platform_claim", map[string]any{
-			"platform":       row.Platform,
-			"platformUserId": targetUser,
-		})
-		if err != nil {
-			return contactMatch{}, err
-		}
-		return platformClaimMatch(result)
+	return findExistingPlatformClaimWithInvoker(row, invoke)
+}
+
+func findExistingPlatformClaimWithInvoker(row contactRow, invoke agentToolInvoker) (contactMatch, error) {
+	if row.Platform == "" || (row.PlatformUserID == "" && row.PlatformHandle == "") {
+		return contactMatch{}, nil
 	}
-	return contactMatch{}, nil
+	targetUser := row.PlatformUserID
+	if targetUser == "" {
+		targetUser = row.PlatformHandle
+	}
+	targetUser = strings.TrimPrefix(targetUser, "@")
+	// platformUserId is an exact identity-claim filter. Free-text search does
+	// not cover contact_identities, so searching the handle never matched and
+	// the import created a duplicate that upsert_contact_identity then
+	// rejected as an already-claimed platform account (#202).
+	// resolve_platform_claim is the same resolution upsert_contact_identity
+	// enforces, so this cannot disagree with the guard the way a query_contacts
+	// reconstruction could (#206).
+	result, err := invoke("resolve_platform_claim", map[string]any{
+		"platform":       row.Platform,
+		"platformUserId": targetUser,
+	})
+	if err != nil {
+		return contactMatch{}, err
+	}
+	return platformClaimMatch(result)
+}
+
+func existingContactNeedsIdentityWrite(
+	existing contactMatch,
+	row contactRow,
+	invoke agentToolInvoker,
+) (bool, error) {
+	if row.IdentityEvidenceToken == "" {
+		return true, nil
+	}
+	if existing.PlatformIdentityIsBound {
+		return false, nil
+	}
+	platformMatch, err := findExistingPlatformClaimWithInvoker(row, invoke)
+	if err != nil {
+		return false, err
+	}
+	// A repeated evidence-backed import is a no-op for the identity only when
+	// the exact platform claim is already attached to the same contact. An
+	// unclaimed or differently-owned identity still goes through the evidence
+	// gate, preserving one-use enforcement for every new write.
+	return platformMatch.ID != existing.ID, nil
 }
 
 func normalizeEmail(email string) string {
@@ -825,7 +858,11 @@ func platformClaimMatch(result map[string]any) (contactMatch, error) {
 				"resolve_platform_claim contact claimant missing boolean archived",
 			))
 		}
-		return contactMatch{ID: contactID, Archived: archived}, nil
+		return contactMatch{
+			ID:                      contactID,
+			Archived:                archived,
+			PlatformIdentityIsBound: true,
+		}, nil
 	default:
 		return contactMatch{}, apiErr(fmt.Errorf(
 			"resolve_platform_claim claimant has unsupported kind %q",
