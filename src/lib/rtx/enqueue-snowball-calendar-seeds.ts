@@ -11,7 +11,8 @@ import {
   pruneSnowballSeedLedger,
   releaseSeedClaim,
 } from "@/lib/db/queries/snowball-seed-ledger";
-import { resolveRtxApiBase, type EnvLike } from "@/lib/rtx/env";
+import { getRtxAppId, resolveRtxApiBase, type EnvLike } from "@/lib/rtx/env";
+import { resolveSignalsBaseUrlFromEnv } from "@/lib/rtx/resolve-signals-base-url";
 import { NETWORK_SNOWBALL_TEMPLATE_NAME } from "@/lib/workflows/network-snowball";
 import type { SnowballSeedScoutConfig } from "@/lib/workflows/snowball-seed-scout";
 
@@ -25,7 +26,12 @@ export interface EnqueueSnowballSeedInput {
 export type EnqueueSnowballSeedsResult =
   | {
       success: true;
-      queued: Array<{ url: string; calendarEventUuid: string | null; scheduledAt: string }>;
+      queued: Array<{
+        url: string;
+        calendarEventUuid: string | null;
+        externalTaskUuid: string | null;
+        scheduledAt: string;
+      }>;
       /** Seeds intentionally not queued (blank URL) — not an error. */
       skipped: string[];
       /** Seeds already queued inside the dedupe window — not an error. */
@@ -83,12 +89,13 @@ export function formatSnowballCalendarTitle(url: string): string {
   }
 }
 
-function snowballDispatchPrompt(url: string, templateName: string): string {
+export function snowballDispatchPrompt(signalsBaseUrl: string): string {
   return [
-    `Start Network Snowball (${templateName}) for this seed URL.`,
-    `Use workflowRunConfig.seedValue exactly — do not use the calendar title as the URL.`,
-    `seedValue: ${url}`,
-  ].join(" ");
+    "This is a dispatcher-only task. Do not inspect files, source code, package metadata, skills, or implementation details.",
+    `Copy the JSON object inside <calendar_dispatch_context> below unchanged and POST it as application/json to ${signalsBaseUrl}/api/snowball-seed-scout/calendar-dispatch.`,
+    "Make exactly that one launch request. The Signals endpoint resolves the template, starts the workflow with workflowRunConfig.seedValue, acknowledges this Calendar task, and schedules release of this dispatcher terminal session.",
+    "Report the returned workflowRunId, then end this turn. Do not call the external-task webhook yourself and do not continue into the Snowball research workflow in this thread.",
+  ].join("\n");
 }
 
 export async function enqueueSnowballCalendarSeeds(
@@ -105,6 +112,7 @@ export async function enqueueSnowballCalendarSeeds(
   const queued: Array<{
     url: string;
     calendarEventUuid: string | null;
+    externalTaskUuid: string | null;
     scheduledAt: string;
   }> = [];
   const skipped: string[] = [];
@@ -186,46 +194,46 @@ export async function enqueueSnowballCalendarSeeds(
     const title = formatSnowballCalendarTitle(url);
     const templateName =
       scoutConfig.networkSnowballTemplateName || NETWORK_SNOWBALL_TEMPLATE_NAME;
+    const signalsBaseUrl = resolveSignalsBaseUrlFromEnv(env);
 
     const body = {
       title,
       description: `Queued by Snowball Seed Scout for ${templateName}.\nSeed URL: ${url}`,
       startDate: scheduledAt,
-      allDay: false,
       color: "#22c55e",
-      metadata: {
-        source: "signals",
-        sourceApp: "com.realtimex.signals",
-        dispatchKind: "workflow.run",
-        triggerMode: "scheduled",
-        dispatchStatus: "scheduled",
-        workflowTemplate: templateName,
-        workflowRunConfig: {
-          seedType: "event_url",
-          seedValue: url,
-          focus: scoutConfig.snowballFocus,
+      sourceApp: "com.realtimex.signals",
+      sourceAppName: "Signals",
+      dispatchKind: "workflow.run",
+      workflowTemplate: templateName,
+      workflowRunConfig: {
+        seedType: "event_url",
+        seedValue: url,
+        focus: scoutConfig.snowballFocus,
+      },
+      agentHandlers: [
+        {
+          agent: "cursor",
+          agentName: "cursor",
+          workspace: workspaceSlug,
+          thread: dispatchThreadSlug,
+          prompt: snowballDispatchPrompt(signalsBaseUrl),
         },
-        agentHandlers: [
-          {
-            agent: "cursor",
-            agentName: "cursor",
-            workspace: workspaceSlug,
-            thread: dispatchThreadSlug,
-            prompt: snowballDispatchPrompt(url, templateName),
-          },
-        ],
-        queueMeta: {
-          producerRunId: seed.producerRunId ?? null,
-          platform: seed.platform ?? null,
-          dedupeKey,
-        },
+      ],
+      queueMeta: {
+        producerRunId: seed.producerRunId ?? null,
+        platform: seed.platform ?? null,
+        dedupeKey,
       },
     };
 
     try {
-      const response = await fetchImpl(`${apiBase}/api/calendar-events`, {
+      const appId = getRtxAppId(env);
+      const response = await fetchImpl(`${apiBase}/api/calendar-events/schedule-agent`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          ...(appId ? { "x-app-id": appId } : {}),
+        },
         body: JSON.stringify(body),
         // Bound the request well inside the claim TTL: a POST that outlived its
         // own claim could be taken over mid-flight and queue the URL twice.
@@ -235,6 +243,7 @@ export async function enqueueSnowballCalendarSeeds(
       });
       const payload = (await response.json().catch(() => ({}))) as {
         event?: { uuid?: string };
+        taskUuid?: string;
         error?: string;
       };
 
@@ -249,8 +258,9 @@ export async function enqueueSnowballCalendarSeeds(
       }
 
       const calendarEventUuid = payload.event?.uuid ?? null;
+      const externalTaskUuid = payload.taskUuid ?? null;
       confirmSeed(dedupeKey, claimToken, calendarEventUuid, scheduledAt);
-      queued.push({ url, calendarEventUuid, scheduledAt });
+      queued.push({ url, calendarEventUuid, externalTaskUuid, scheduledAt });
     } catch (error) {
       // Every thrown request error is ambiguous. A timeout, a connection reset,
       // and a bare `fetch failed` can all occur after the server committed but

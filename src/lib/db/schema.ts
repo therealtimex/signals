@@ -776,9 +776,8 @@ export const chatConversations = sqliteTable("chat_conversations", {
  *
  * Signals is the source of truth for which seeds exist, so it must not emit the
  * same post twice — the scout has no memory across heartbeat ticks and a popular
- * post stays in a feed for hours. RTX dedupes on `queueMeta.dedupeKey`, but only
- * on the `/calendar-events/schedule-agent` ingest path, so that guard cannot be
- * relied on here.
+ * post stays in a feed for hours. RTX also dedupes the schedule-agent request,
+ * while this ledger prevents overlapping Signals workers from sending it twice.
  */
 export const snowballSeedLedger = sqliteTable(
   "snowball_seed_ledger",

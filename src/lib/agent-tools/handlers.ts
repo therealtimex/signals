@@ -102,6 +102,7 @@ import {
   bindSnowballLinkedInEvidence,
   claimSnowballLinkedInEvidence,
   hasRunningNetworkSnowballRun,
+  isRunningLinkedInNetworkSnowballRun,
   isRunningNetworkSnowballRun,
   snowballEvidencePlatformData,
   type ClaimedSnowballLinkedInEvidence,
@@ -131,7 +132,7 @@ function snowballEvidenceToolError(error: unknown): AgentToolError {
 function snowballEvidenceRequiredError(): AgentToolError {
   return new AgentToolError(
     "VALIDATION_ERROR",
-    "Network Snowball cannot write a LinkedIn identity without a fresh identityEvidenceToken from attest_snowball_linkedin_identity.",
+    "Network Snowball cannot persist a LinkedIn-sourced candidate without a fresh identityEvidenceToken from attest_snowball_linkedin_identity.",
     { reason: "linkedin_identity_evidence_required" },
   );
 }
@@ -478,11 +479,11 @@ export async function handleCreateContact(input: z.infer<typeof createContactSch
       throw snowballEvidenceToolError(error);
     }
   } else if (
-    input.platform === "linkedin" &&
-    (
-      isRunningNetworkSnowballRun(suppliedIds.workflowRunId) ||
-      (!suppliedIds.workflowRunId && hasRunningNetworkSnowballRun())
-    )
+    isRunningLinkedInNetworkSnowballRun(suppliedIds.workflowRunId) ||
+    (input.platform === "linkedin" &&
+      (isRunningNetworkSnowballRun(suppliedIds.workflowRunId) ||
+        (!suppliedIds.workflowRunId && hasRunningNetworkSnowballRun())
+      ))
   ) {
     throw snowballEvidenceRequiredError();
   }

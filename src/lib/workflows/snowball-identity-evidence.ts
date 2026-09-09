@@ -606,6 +606,23 @@ export function isRunningNetworkSnowballRun(workflowRunId: string | null | undef
   );
 }
 
+/**
+ * Whether an attributed contact write belongs to a live LinkedIn-backed
+ * Snowball run. The browser target is server-owned, so callers cannot bypass
+ * the gate by omitting `platform` from a contact payload.
+ */
+export function isRunningLinkedInNetworkSnowballRun(
+  workflowRunId: string | null | undefined,
+): boolean {
+  if (!workflowRunId) return false;
+  const run = getWorkflowRun(workflowRunId);
+  return Boolean(
+    run?.status === "running" &&
+    isNetworkSnowballTemplateConfig(parseJsonObject(run.config)) &&
+    getNetworkSnowballTargetFromRunConfig(run.config)?.platform === "linkedin",
+  );
+}
+
 export function hasRunningNetworkSnowballRun(): boolean {
   return listWorkflowRuns({ status: "running", pageSize: 100 }).data.some((run) =>
     isNetworkSnowballTemplateConfig(parseJsonObject(run.config)),
@@ -775,15 +792,25 @@ export function auditSnowballLinkedInIdentityEvidence(
   const errors: string[] = [];
   const auditedIdentityIds: string[] = [];
   const runStartedAt = run.startedAt ?? run.createdAt;
+  const requiresAttestedContact =
+    getNetworkSnowballTargetFromRunConfig(run.config)?.platform === "linkedin";
 
   for (const contactId of contactIds) {
     const contact = getContactById(contactId);
     if (!contact) continue;
-    for (const identity of contact.identities) {
-      if (identity.platform !== "linkedin") continue;
+    const linkedInIdentities = contact.identities.filter(
+      (identity) => identity.platform === "linkedin",
+    );
+    if (requiresAttestedContact && linkedInIdentities.length === 0) {
+      errors.push(`snowball_linkedin_identity_missing:${contact.id}`);
+      continue;
+    }
+
+    let validAttestedIdentity = false;
+    for (const identity of linkedInIdentities) {
       const createdByRun = contact.createdWorkflowRunId === run.id;
       const identityCreatedDuringRun = identity.createdAt >= runStartedAt;
-      if (!createdByRun && !identityCreatedDuringRun) continue;
+      if (!requiresAttestedContact && !createdByRun && !identityCreatedDuringRun) continue;
       auditedIdentityIds.push(identity.id);
       const platformData = parseJsonObject(identity.platformData);
       const marker = platformData[SNOWBALL_IDENTITY_PLATFORM_DATA_KEY];
@@ -815,9 +842,15 @@ export function auditSnowballLinkedInIdentityEvidence(
         record.platformUrl === identity.platformUrl &&
         markerObject?.workflowRunId === run.id,
       );
-      if (!valid) {
+      if (valid) {
+        validAttestedIdentity = true;
+      } else if (!requiresAttestedContact) {
         errors.push(`snowball_linkedin_identity_evidence_missing:${identity.id}`);
       }
+    }
+
+    if (requiresAttestedContact && !validAttestedIdentity) {
+      errors.push(`snowball_linkedin_identity_evidence_missing:${contact.id}`);
     }
   }
 

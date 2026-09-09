@@ -548,6 +548,49 @@ describe("complete_workflow_run terminal teardown", () => {
     });
   });
 
+  it("fails LinkedIn Snowball completion instead of passing an empty audit for bare contacts", async () => {
+    const { run } = createSnowballRunWithTarget();
+    const contact = createContact(
+      { name: "Bare LinkedIn Candidate", company: "Acme Inc.", title: "Investor" },
+      { tag: "agent:create_contact", workflowRunId: run.id, templateId: run.templateId },
+    );
+
+    vi.spyOn(workflowEvents, "emitWorkflowCompletedEvent").mockResolvedValue(
+      mockWorkflowCompletedEvent,
+    );
+    vi.spyOn(workflowCompletionThread, "postWorkflowCompletionThreadMessage").mockResolvedValue({
+      posted: true,
+    });
+    vi.spyOn(resourceTeardown, "stopRunningRtxBrowserSessions").mockResolvedValue({
+      stopped: [],
+      failed: [],
+    });
+    vi.spyOn(resourceTeardown, "scheduleWorkflowTerminalSessionRelease").mockReturnValue({
+      scheduled: true,
+      sessionId: null,
+    });
+
+    const result = await handleCompleteWorkflowRun({
+      runId: run.id,
+      status: "completed",
+      createdContactIds: [contact.id],
+    });
+    if (!result.success) throw new Error(result.error);
+
+    expect(result.status).toBe("failed");
+    const stored = getWorkflowRun(run.id)!;
+    expect(JSON.parse(stored.errors ?? "[]")).toContain(
+      `snowball_linkedin_identity_missing:${contact.id}`,
+    );
+    expect(JSON.parse(stored.result ?? "{}")).toMatchObject({
+      partial: true,
+      identityEvidenceAudit: {
+        passed: false,
+        auditedIdentityIds: [],
+      },
+    });
+  });
+
   it("releases the research lease even when browser teardown throws", async () => {
     const { run, leaseId } = createResearchRun("linkedin");
     vi.spyOn(resourceTeardown, "stopRunningRtxBrowserSessions").mockRejectedValue(

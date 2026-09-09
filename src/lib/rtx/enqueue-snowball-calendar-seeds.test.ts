@@ -27,7 +27,7 @@ describe("enqueueSnowballCalendarSeeds", () => {
   it("posts calendar events with snowball metadata", async () => {
     const fetchImpl = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ event: { uuid: "evt-1" } }),
+      json: async () => ({ event: { uuid: "evt-1" }, taskUuid: "task-1" }),
     });
 
     const scoutConfig = readSnowballSeedScoutConfig(buildSnowballSeedScoutTemplateConfig());
@@ -36,6 +36,8 @@ describe("enqueueSnowballCalendarSeeds", () => {
       scoutConfig,
       {
         RTX_API_BASE_URL: "http://127.0.0.1:3101",
+        RTX_APP_ID: "signals-app",
+        RTX_PORT: "3010",
         SIGNALS_RTX_WORKSPACE_SLUG: "signals",
       },
       fetchImpl as unknown as typeof fetch,
@@ -47,20 +49,29 @@ describe("enqueueSnowballCalendarSeeds", () => {
     expect(result.queued).toHaveLength(1);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
 
-    const [, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://127.0.0.1:3101/api/calendar-events/schedule-agent");
     expect(String(init?.method)).toBe("POST");
+    expect(init?.headers).toMatchObject({ "x-app-id": "signals-app" });
     const body = JSON.parse(String(init?.body));
-    expect(body.metadata.workflowRunConfig.seedValue).toBe("https://x.com/acme/status/1");
-    expect(body.metadata.dispatchStatus).toBe("scheduled");
+    expect(body.workflowRunConfig.seedValue).toBe("https://x.com/acme/status/1");
+    expect(body.dispatchKind).toBe("workflow.run");
     expect(body.title).toBe("[Signals] Snowball: x.com/acme/status");
     expect(body.description).toContain("https://x.com/acme/status/1");
-    expect(body.metadata.agentHandlers[0].workspace).toBe(
+    expect(body.agentHandlers[0].workspace).toBe(
       "f3a8c2e1-4d5b-4a7c-8e9f-0a1b2c3d4e5f",
     );
-    expect(body.metadata.agentHandlers[0].thread).toBe(
+    expect(body.agentHandlers[0].thread).toBe(
       "f0238db7-6620-4452-9a91-bcdb9dd23fdd",
     );
-    expect(body.metadata.agentHandlers[0].prompt).toContain("https://x.com/acme/status/1");
+    expect(body.agentHandlers[0].prompt).toContain(
+      "http://127.0.0.1:3010/api/snowball-seed-scout/calendar-dispatch",
+    );
+    expect(body.agentHandlers[0].prompt).toContain("Do not inspect files");
+    expect(result.queued[0]).toMatchObject({
+      calendarEventUuid: "evt-1",
+      externalTaskUuid: "task-1",
+    });
   });
 
   it("reports rejected seeds as failures rather than silent skips", async () => {
@@ -576,7 +587,7 @@ describe("enqueueSnowballCalendarSeeds", () => {
 
     const fetchImpl = vi.fn((_url: string, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body));
-      const seedValue = body.metadata?.workflowRunConfig?.seedValue as string;
+      const seedValue = body.workflowRunConfig?.seedValue as string;
       if (seedValue === "https://x.com/acme/status/overlap-a") {
         return firstBlocked.then(() => ({
           ok: true,
