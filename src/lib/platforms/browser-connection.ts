@@ -151,6 +151,8 @@ const LINKEDIN_SELF_PROFILE_LINK_SELECTORS = [
   'a.global-nav__primary-link[href*="/in/"]',
 ] as const;
 
+const LINKEDIN_SELF_PROFILE_REDIRECT_URL = "https://www.linkedin.com/in/me/";
+
 function asBrowserPlatform(platform: SocialPlatform): BrowserPlatform {
   return platform;
 }
@@ -585,6 +587,7 @@ export async function probeAuthenticatedPlatformIdentity(
 ): Promise<AuthenticatedPlatformIdentity> {
   const start = Date.now();
   const deadline = start + timeoutMs;
+  let linkedInSelfRedirectAttempted = false;
 
   for (;;) {
     if (await isAnySelectorVisible(page, LOGGED_OUT_SELECTORS[platform])) {
@@ -600,7 +603,18 @@ export async function probeAuthenticatedPlatformIdentity(
     const loginSurfaceDetected =
       loggedIn || (await isAnySelectorVisible(page, LOGGED_IN_SELECTORS[platform]));
     if (loginSurfaceDetected) {
-      const detectedHandle = await detectPlatformHandle(platform, page, pageUrl);
+      let detectedHandle = await detectPlatformHandle(platform, page, pageUrl);
+      if (
+        platform === "linkedin" &&
+        !detectedHandle &&
+        !linkedInSelfRedirectAttempted
+      ) {
+        linkedInSelfRedirectAttempted = true;
+        detectedHandle = await detectLinkedInHandleViaSelfRedirect(
+          page,
+          Math.max(1, deadline - Date.now()),
+        );
+      }
       if (detectedHandle) return { loggedIn: true, detectedHandle };
     }
 
@@ -613,6 +627,37 @@ export async function probeAuthenticatedPlatformIdentity(
 
     await sleep(PROBE_POLL_MS);
   }
+}
+
+/**
+ * LinkedIn's current feed can render an authenticated "Me" control without putting its
+ * `/in/<vanity>` link in the DOM until the menu opens. Resolve `/in/me/` instead: only an
+ * authenticated session redirects that account-owned route to the signed-in profile. Never use
+ * an arbitrary profile link from feed content as the current identity.
+ */
+async function detectLinkedInHandleViaSelfRedirect(
+  page: Page,
+  timeoutMs: number,
+): Promise<string | null> {
+  try {
+    await page.goto(LINKEDIN_SELF_PROFILE_REDIRECT_URL, {
+      waitUntil: "domcontentloaded",
+      timeout: timeoutMs,
+    });
+  } catch {
+    return null;
+  }
+
+  const finalUrl = page.url();
+  if (
+    !urlMatchesPlatformHost(finalUrl, "linkedin.com") ||
+    isLinkedInLoggedOutUrl(finalUrl)
+  ) {
+    return null;
+  }
+  const vanity = extractLinkedInVanityFromUrl(finalUrl);
+  if (!vanity || vanity.toLowerCase() === "me") return null;
+  return formatLinkedInHandle(vanity);
 }
 
 async function detectLoggedInViaCdp(
