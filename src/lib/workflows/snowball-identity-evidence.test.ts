@@ -182,6 +182,18 @@ describe("Snowball LinkedIn identity evidence", () => {
     const { template, run } = createSnowballRun();
 
     await expect(invokeAgentTool("create_contact", {
+      name: "Bare LinkedIn Candidate",
+      company: "Acme Inc.",
+      title: "Investor",
+      workflowRunId: run.id,
+      templateId: template.id,
+    })).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+      details: { reason: "linkedin_identity_evidence_required" },
+    });
+    expect(countContacts()).toBe(0);
+
+    await expect(invokeAgentTool("create_contact", {
       name: "Guessed Person",
       platform: "linkedin",
       platformUserId: "guessed-person",
@@ -216,6 +228,66 @@ describe("Snowball LinkedIn identity evidence", () => {
       details: { reason: "linkedin_identity_evidence_required" },
     });
     expect(getContactById(contact.id)?.identities).toHaveLength(0);
+  });
+
+  it("requires every accepted LinkedIn cohort contact to have run-bound evidence", () => {
+    const { template, run } = createSnowballRun();
+    const bareContact = createContact(
+      { name: "Bare Candidate", company: "Acme Inc.", title: "Investor" },
+      { tag: "agent:create_contact", workflowRunId: run.id, templateId: template.id },
+    );
+
+    expect(auditSnowballLinkedInIdentityEvidence(
+      getWorkflowRun(run.id)!,
+      [bareContact.id],
+    )).toEqual({
+      errors: [`snowball_linkedin_identity_missing:${bareContact.id}`],
+      auditedIdentityIds: [],
+    });
+  });
+
+  it("keeps bare contact creation available to X-only Snowball runs", async () => {
+    const template = createTemplate({
+      name: "Network Snowball",
+      templateType: "prospecting",
+      status: "active",
+      config: JSON.stringify(buildNetworkSnowballTemplateConfig()),
+    });
+    const run = createWorkflowRun({
+      templateId: template.id,
+      workflowType: "search",
+      status: "running",
+      trigger: "template",
+      config: JSON.stringify({
+        ...buildNetworkSnowballTemplateConfig(),
+        targetPlatform: "x",
+        [SNOWBALL_BROWSER_TARGET_CONFIG_KEY]: {
+          targetId: "target-x",
+          platform: "x",
+          source: "session",
+          sessionName: "signals-publish",
+          startUrl: "https://x.com/operator",
+          expectedHandle: "@operator",
+          verifiedHandle: "@operator",
+          leaseId: "lease-x",
+          leaseExpiresAt: Math.floor(Date.now() / 1_000) + 1_800,
+          preparedAt: Math.floor(Date.now() / 1_000),
+        },
+      }),
+    });
+
+    const created = await invokeAgentTool("create_contact", {
+      name: "X Candidate",
+      company: "Acme Inc.",
+      workflowRunId: run.id,
+      templateId: template.id,
+    }) as { id: string };
+
+    expect(getContactById(created.id)).toMatchObject({
+      name: "X Candidate",
+      createdWorkflowRunId: run.id,
+      identities: [],
+    });
   });
 
   it("rejects mismatched, uncorroborated, and unauthenticated browser observations", async () => {
@@ -304,7 +376,7 @@ describe("Snowball LinkedIn identity evidence", () => {
       getWorkflowRun(run.id)!,
       [created.id],
     )).toEqual({
-      errors: [`snowball_linkedin_identity_evidence_missing:${identityId}`],
+      errors: [`snowball_linkedin_identity_evidence_missing:${created.id}`],
       auditedIdentityIds: [identityId],
     });
   });

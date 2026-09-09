@@ -236,7 +236,7 @@ describe("getWorkspaceDefaultTerminalAgent", () => {
 });
 
 describe("resolveNetworkSnowballDispatchThread", () => {
-  it("reuses the legacy network-snowball slug when it exists", async () => {
+  it("reuses the stable network-snowball scheduler slug when it exists", async () => {
     const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
       if (url.includes("/cli/get-thread/signals/network-snowball") && init?.method === "GET") {
@@ -257,7 +257,34 @@ describe("resolveNetworkSnowballDispatchThread", () => {
     ).resolves.toBe("network-snowball");
   });
 
-  it("reuses an existing Network Snowball thread by name", async () => {
+  it("renames the legacy dispatcher so it cannot be confused with a workflow thread", async () => {
+    let renamedTo: string | null = null;
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes("/cli/get-thread/signals/network-snowball") && init?.method === "GET") {
+        return new Response(JSON.stringify({
+          thread: { slug: "network-snowball", name: "Network Snowball" },
+        }), { status: 200 });
+      }
+      if (url.includes("/cli/rename-thread/signals/network-snowball") && init?.method === "POST") {
+        renamedTo = JSON.parse(String(init.body)).name;
+        return new Response(JSON.stringify({ success: true }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ error: "unexpected" }), { status: 500 });
+    });
+
+    const { resolveNetworkSnowballDispatchThread } = await import("@/lib/rtx/cli-provisioning");
+    await expect(
+      resolveNetworkSnowballDispatchThread(
+        "signals",
+        { RTX_APP_ID: "app-1", SERVER_URL: "http://127.0.0.1:3101" },
+        fetchImpl,
+      ),
+    ).resolves.toBe("network-snowball");
+    expect(renamedTo).toBe("Snowball Scheduler");
+  });
+
+  it("reuses an existing Snowball Scheduler thread by name", async () => {
     const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
       if (url.includes("/cli/get-thread/signals/network-snowball") && init?.method === "GET") {
@@ -269,7 +296,7 @@ describe("resolveNetworkSnowballDispatchThread", () => {
             threads: [
               {
                 slug: "f0238db7-6620-4452-9a91-bcdb9dd23fdd",
-                name: "Network Snowball",
+                name: "Snowball Scheduler",
               },
             ],
           }),
@@ -299,7 +326,7 @@ describe("resolveNetworkSnowballDispatchThread", () => {
       if (url.endsWith("/cli/list-threads/signals")) {
         return new Response(
           JSON.stringify({
-            threads: [{ slug: "  f0238db7-padded  ", name: "Network Snowball" }],
+            threads: [{ slug: "  f0238db7-padded  ", name: "Snowball Scheduler" }],
           }),
           { status: 200 },
         );
@@ -391,7 +418,7 @@ describe("resolveNetworkSnowballDispatchThread", () => {
       if (url.includes("/cli/create-thread")) {
         createCalls += 1;
         const slug = `created-${createCalls}`;
-        threads.push({ slug, name: "Network Snowball" });
+        threads.push({ slug, name: "Snowball Scheduler" });
         return new Response(JSON.stringify({ thread: { slug } }), { status: 200 });
       }
       return new Response(JSON.stringify({ error: "unexpected" }), { status: 500 });

@@ -309,7 +309,7 @@ export async function createRtxPublishThread(
 }
 
 export const NETWORK_SNOWBALL_DISPATCH_THREAD_SLUG = "network-snowball";
-export const NETWORK_SNOWBALL_DISPATCH_THREAD_NAME = "Network Snowball";
+export const NETWORK_SNOWBALL_DISPATCH_THREAD_NAME = "Snowball Scheduler";
 export const PERSONA_GENERATION_DISPATCH_THREAD_SLUG = "persona-generation";
 export const PERSONA_GENERATION_DISPATCH_THREAD_NAME = "Persona Generation";
 
@@ -364,8 +364,9 @@ const inFlightThreadResolutions = new Map<string, Promise<string>>();
 /**
  * Resolve the workspace thread Snowball calendar dispatches should hand off to.
  *
- * Prefers the legacy `network-snowball` slug when present, otherwise reuses an
- * existing "Network Snowball" thread, and only creates one when none exists.
+ * Prefers the stable `network-snowball` slug when present, otherwise reuses an
+ * existing "Snowball Scheduler" thread, and only creates one when none exists.
+ * The scheduler name is deliberately distinct from the workflow template thread.
  */
 export async function resolveNetworkSnowballDispatchThread(
   workspaceSlug: string,
@@ -440,13 +441,26 @@ async function resolveDedicatedDispatchThreadUncached(
   env: EnvLike,
   fetchImpl: typeof fetch,
 ): Promise<string> {
-  const preferredPresence = await getRtxThreadPresence(
+  const preferredThread = await getRtxThread(
     workspace,
     dedicatedThread.preferredSlug,
     env,
     fetchImpl,
   );
+  const preferredPresence = preferredThread.presence;
   if (preferredPresence === "exists") {
+    if (
+      preferredThread.name &&
+      preferredThread.name !== dedicatedThread.threadName
+    ) {
+      await renameRtxThread(
+        workspace,
+        dedicatedThread.preferredSlug,
+        dedicatedThread.threadName,
+        env,
+        fetchImpl,
+      );
+    }
     return dedicatedThread.preferredSlug;
   }
 
