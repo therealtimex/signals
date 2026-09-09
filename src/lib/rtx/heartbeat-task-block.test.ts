@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   defaultHeartbeatSkeleton,
@@ -51,6 +53,25 @@ Do the thing.
 `;
 
 describe("heartbeat task block", () => {
+  it("schedules the scout in the provisioned Signals heartbeat starter", () => {
+    const starter = readFileSync(
+      resolve(process.cwd(), "realtimex-plugin/templates/signals/HEARTBEAT.md"),
+      "utf8",
+    );
+    const next = upsertHeartbeatShellTask(starter, {
+      name: "snowball-seed-scout",
+      executor: "shell",
+      command: "bash ./scripts/snowball-seed-scout/scout.sh",
+      interval: "4h",
+      timeout: 900,
+    });
+
+    expect(tasksVisibleToRealtimeX(next)).toEqual(["snowball-seed-scout"]);
+    expect(next).not.toContain("tasks: []");
+    expect(next).toContain("## Mission");
+    expect(next).toContain("## Never do");
+  });
+
   it("schedules the scout in the RealTimeX starter's `tasks: []` heartbeat", () => {
     const next = upsertHeartbeatShellTask(REALTIMEX_STARTER, {
       name: "snowball-seed-scout",
