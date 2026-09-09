@@ -3,6 +3,7 @@ import { resetCoreTables } from "@/test/db";
 import { createContact } from "@/lib/db/queries/contacts";
 import { createWorkflowRun, getWorkflowRun, updateWorkflowRun } from "@/lib/db/queries/workflows";
 import { createTemplate } from "@/lib/db/queries/workflow-templates";
+import { createIdentity } from "@/lib/db/queries/identities";
 import { handleCompleteWorkflowRun } from "@/lib/agent-tools/handlers";
 import * as workflowEvents from "@/lib/webhooks/workflow-events";
 import * as resourceTeardown from "@/lib/rtx/resource-teardown";
@@ -392,6 +393,69 @@ describe("complete_workflow_run terminal teardown", () => {
         "https://www.google.com/search?q=same-url-captcha",
         "https://www.linkedin.com/authwall",
       ],
+    });
+  });
+
+  it("fails Snowball completion when a run-created LinkedIn identity lacks server evidence", async () => {
+    const template = createTemplate({
+      name: "Network Snowball",
+      templateType: "prospecting",
+      status: "active",
+      config: JSON.stringify({ networkSnowball: { version: 1 } }),
+    });
+    const run = createWorkflowRun({
+      templateId: template.id,
+      workflowType: "search",
+      status: "running",
+      trigger: "template",
+      config: JSON.stringify({ networkSnowball: { version: 1 } }),
+    });
+    const contact = createContact(
+      { name: "Invented Identity" },
+      { tag: "agent:create_contact", workflowRunId: run.id, templateId: template.id },
+    );
+    const identity = createIdentity({
+      contactId: contact.id,
+      platform: "linkedin",
+      platformUserId: "invented-identity",
+      platformHandle: "invented-identity",
+      platformUrl: "https://www.linkedin.com/in/invented-identity/",
+    });
+
+    vi.spyOn(workflowEvents, "emitWorkflowCompletedEvent").mockResolvedValue(
+      mockWorkflowCompletedEvent,
+    );
+    vi.spyOn(workflowCompletionThread, "postWorkflowCompletionThreadMessage").mockResolvedValue({
+      posted: true,
+    });
+    vi.spyOn(resourceTeardown, "stopRunningRtxBrowserSessions").mockResolvedValue({
+      stopped: [],
+      failed: [],
+    });
+    vi.spyOn(resourceTeardown, "scheduleWorkflowTerminalSessionRelease").mockReturnValue({
+      scheduled: true,
+      sessionId: null,
+    });
+
+    const result = await handleCompleteWorkflowRun({
+      runId: run.id,
+      status: "completed",
+      createdContactIds: [contact.id],
+    });
+    if (!result.success) throw new Error(result.error);
+
+    expect(result.status).toBe("failed");
+    const stored = getWorkflowRun(run.id)!;
+    expect(stored.status).toBe("failed");
+    expect(JSON.parse(stored.errors ?? "[]")).toContain(
+      `snowball_linkedin_identity_evidence_missing:${identity.id}`,
+    );
+    expect(JSON.parse(stored.result ?? "{}")).toMatchObject({
+      partial: true,
+      identityEvidenceAudit: {
+        passed: false,
+        auditedIdentityIds: [identity.id],
+      },
     });
   });
 

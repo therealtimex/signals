@@ -30,6 +30,8 @@ import { resolveComposedRunAuthorityByToken } from "@/lib/writing/writing-intent
 import { sha256 } from "@/lib/writing/hash";
 import { WRITING_SCOPE_TOKEN_CONFIG_KEY } from "@/lib/writing/writing-scope-token";
 import { buildContactWebResearchTemplateConfig } from "@/lib/workflows/contact-web-research";
+import { buildNetworkSnowballTemplateConfig } from "@/lib/workflows/network-snowball";
+import { SNOWBALL_IDENTITY_SCOPE_TOKEN_CONFIG_KEY } from "@/lib/workflows/snowball-identity-evidence";
 import { resetCoreTables } from "@/test/db";
 
 const preparedResearchTarget = {
@@ -244,6 +246,77 @@ describe("runTemplateViaRtx health preflight", () => {
         ],
       },
     });
+  });
+
+  it("mints and persists the Snowball identity scope before dispatch", async () => {
+    const template = createTemplate({
+      name: "Network Snowball",
+      templateType: "prospecting",
+      status: "active",
+      config: JSON.stringify(buildNetworkSnowballTemplateConfig()),
+      isSystem: 1,
+    });
+    let hashAtDispatch: unknown;
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url =
+        typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.endsWith("/api/health")) {
+        return new Response(JSON.stringify({ app: "signals", status: "ok" }), { status: 200 });
+      }
+      if (url.endsWith("/cli/get-workspace/signals")) {
+        return new Response(JSON.stringify({ workspace: { slug: "signals" } }), { status: 200 });
+      }
+      if (url.endsWith("/cli/create-thread/signals")) {
+        return new Response(JSON.stringify({ thread: { slug: "network-snowball" } }), {
+          status: 200,
+        });
+      }
+      if (url.endsWith("/cli/send-message/signals/network-snowball")) {
+        const rows = db.select().from(workflowRuns).all();
+        hashAtDispatch = JSON.parse(rows.at(-1)?.config ?? "{}")[
+          SNOWBALL_IDENTITY_SCOPE_TOKEN_CONFIG_KEY
+        ];
+        return new Response(JSON.stringify({
+          success: true,
+          terminalDispatchAccepted: true,
+          descriptor: { id: "runtime-snowball" },
+        }), { status: 200 });
+      }
+      if (url.endsWith("/sdk/desktop/runtime-sessions/open-launcher")) {
+        return new Response(JSON.stringify({ success: true }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ error: `Unexpected request: ${url}` }), { status: 500 });
+    }) as unknown as typeof fetch;
+
+    const result = await runTemplateViaRtx(
+      {
+        templateId: template.id,
+        signalsBaseUrl: "http://127.0.0.1:3099",
+      },
+      {
+        ...process.env,
+        RTX_APP_ID: "test-app-id",
+        RTX_API_BASE_URL: "http://127.0.0.1:3001",
+        STORAGE_DIR: storageDir,
+      },
+      fetchImpl,
+    );
+    expect(result.success).toBe(true);
+    if (!result.success) throw new Error(result.error);
+
+    const brief = readFileSync(join(
+      storageDir,
+      "working-data/signals/workflow-runs",
+      result.workflowRunId,
+      "brief.md",
+    ), "utf8");
+    const token = /snowballScopeToken: "([^"]+)"/.exec(brief)?.[1];
+    expect(token).toBeTruthy();
+    expect(hashAtDispatch).toBe(sha256(token!));
+    expect(JSON.parse(getWorkflowRun(result.workflowRunId)?.config ?? "{}")[
+      SNOWBALL_IDENTITY_SCOPE_TOKEN_CONFIG_KEY
+    ]).toBe(sha256(token!));
+    expect(brief).not.toContain(SNOWBALL_IDENTITY_SCOPE_TOKEN_CONFIG_KEY);
   });
 
   it("persists the writing scope hash before the brief or dispatch leaves the server", async () => {

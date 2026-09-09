@@ -178,9 +178,10 @@ Agents stage `contacts.csv` or `contacts.json` under `workflow-runs/<runId>/`. B
 | `platform_user_id` | no | `upsert_contact_identity.platformUserId` |
 | `platform_handle` | no | `upsert_contact_identity.platformHandle` |
 | `profile_url` | no | `upsert_contact_identity.avatarUrl` when `https://` |
+| `identity_evidence_token` | no | `create_contact.identityEvidenceToken` / `upsert_contact_identity.identityEvidenceToken`; required for Network Snowball LinkedIn identities |
 | `notes` | no | `enrich_contact.notes` (fill-gaps) |
 
-**JSON:** array of objects with the same keys (camelCase aliases accepted: `platformUserId`, `platformHandle`, `profileUrl`).
+**JSON:** array of objects with the same keys (camelCase aliases accepted: `platformUserId`, `platformHandle`, `profileUrl`, `identityEvidenceToken`).
 
 Dedupe before create: exact normalized `email` (any email channel, not just primary), else `(platform, platformUserId)` via `resolve_platform_claim`.
 

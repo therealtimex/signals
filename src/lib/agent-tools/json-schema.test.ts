@@ -32,11 +32,12 @@ describe("zodToParameters", () => {
     expect(params.properties.note.description).toBe("inner note");
   });
 
-  it("exposes avatar guidance on create_contact so agents stop omitting it", () => {
+  it("keeps avatar guidance downstream of LinkedIn identity evidence", () => {
     const params = zodToParameters(createContactSchema) as {
       properties: Record<string, { description?: string }>;
     };
 
-    expect(params.properties.avatarUrl.description).toContain("unavatar.io/linkedin/company:");
+    expect(params.properties.avatarUrl.description).toContain("server-attested identity");
+    expect(params.properties.avatarUrl.description).toContain("never synthesize a profile slug");
   });
 });

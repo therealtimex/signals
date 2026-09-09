@@ -189,6 +189,8 @@ export function buildAgentWorkflowBrief(input: {
   platformTarget?: ContactNurtureTargetInfo | null;
   /** Dispatch-issued capability for a composed run; omitted for every other workflow. */
   writingScopeToken?: string;
+  /** Dispatch-issued capability used to mint browser-attested Snowball identity evidence. */
+  snowballIdentityScopeToken?: string;
 }): string {
   const category = CATEGORY_LABELS[input.template.templateType] ?? input.template.templateType;
   const instructions = input.systemPromptOverride?.trim() || input.template.systemPrompt?.trim();
@@ -222,6 +224,7 @@ export function buildAgentWorkflowBrief(input: {
         templateId: input.template.id,
         config: input.config,
         signalsBaseUrl: input.signalsBaseUrl,
+        snowballIdentityScopeToken: input.snowballIdentityScopeToken,
       })}\n`
     : null;
   const writingContract = isSignalsWritingTemplateConfig(input.config)

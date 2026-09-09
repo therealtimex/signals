@@ -98,7 +98,7 @@ describe("buildNetworkSnowballTemplateConfig & buildNetworkSnowballRunConfig", (
 });
 
 describe("buildNetworkSnowballBriefSection", () => {
-  it("generates comprehensive execution contract with bot gate and avatar extraction", () => {
+  it("generates the server evidence gate while preserving automatic write-back", () => {
     const brief = buildNetworkSnowballBriefSection({
       workflowRunId: "run_snow_1",
       templateId: "tpl_snow_1",
@@ -110,6 +110,7 @@ describe("buildNetworkSnowballBriefSection", () => {
         maxContacts: 12,
         maxHops: 1,
       },
+      snowballIdentityScopeToken: "run_snow_1.scope-secret",
     });
 
     expect(brief).toContain("Network Snowball execution contract:");
@@ -119,15 +120,18 @@ describe("buildNetworkSnowballBriefSection", () => {
     expect(brief).toContain("Anti-Hallucination & Bot Filter Gate");
     expect(brief).toContain("Engage for visibility, skip for contacts");
     expect(brief).toContain("Anti-Hallucination Rule");
-    expect(brief).toContain("Identity-First Avatar Extraction");
+    expect(brief).toContain("Server-Enforced LinkedIn Gate");
+    expect(brief).toContain("attest_snowball_linkedin_identity");
+    expect(brief).toContain('snowballScopeToken: "run_snow_1.scope-secret"');
+    expect(brief).toContain("identity_evidence_token");
+    expect(brief).toContain("Auto-commit & Graph Edge Linking");
+    expect(brief).toContain("Avatar Enrichment (downstream of identity attestation)");
     expect(brief).toContain("pv-top-card-profile-picture__image");
     expect(brief).toContain("unavatar.io/linkedin/user:");
-    expect(brief).toContain("unavatar.io/linkedin/company:");
     expect(brief).toContain("Prefer the platform CDN");
-    expect(brief).toContain("Resolver is the last resort");
-    // Blank was once an explicitly sanctioned outcome, which made avatar capture a coin flip.
-    expect(brief).not.toContain("or leave avatar_url blank");
-    expect(brief).toContain("avatarUrl");
+    expect(brief).toContain("Resolver is optional and downstream");
+    expect(brief).toContain("leave avatar_url blank");
+    expect(brief).toContain("missing imagery must never create pressure to guess an identity");
     expect(brief).toContain("avatars: N/M");
     expect(brief).toContain("workflow-runs/run_snow_1/contacts.csv");
     expect(brief).toContain(

@@ -11,15 +11,16 @@ import (
 
 func TestMapContactRow(t *testing.T) {
 	item := map[string]any{
-		"name":            "David Founder",
-		"company":         "AuraBid",
-		"title":           "CEO",
-		"email":           "david@example.com",
-		"platform":        "x",
-		"platform_handle": "chhddavid",
-		"profile_url":     "https://x.com/chhddavid",
-		"avatar_url":      "https://pbs.twimg.com/profile_images/123/avatar.jpg",
-		"notes":           "Top bidder",
+		"name":                    "David Founder",
+		"company":                 "AuraBid",
+		"title":                   "CEO",
+		"email":                   "david@example.com",
+		"platform":                "x",
+		"platform_handle":         "chhddavid",
+		"profile_url":             "https://x.com/chhddavid",
+		"avatar_url":              "https://pbs.twimg.com/profile_images/123/avatar.jpg",
+		"identity_evidence_token": "run.evidence.secret",
+		"notes":                   "Top bidder",
 	}
 
 	row, err := mapContactRow(item)
@@ -36,14 +37,17 @@ func TestMapContactRow(t *testing.T) {
 	if row.AvatarURL != "https://pbs.twimg.com/profile_images/123/avatar.jpg" {
 		t.Errorf("expected AvatarURL 'https://pbs.twimg.com/profile_images/123/avatar.jpg', got %q", row.AvatarURL)
 	}
+	if row.IdentityEvidenceToken != "run.evidence.secret" {
+		t.Errorf("expected IdentityEvidenceToken to be mapped, got %q", row.IdentityEvidenceToken)
+	}
 }
 
 func TestReadContactCSVWithAvatarURL(t *testing.T) {
 	tmpDir := t.TempDir()
 	csvPath := filepath.Join(tmpDir, "contacts.csv")
 
-	csvContent := `name,company,title,email,platform,platform_handle,profile_url,avatar_url,notes
-Miguel Peixoto,bidwall.app,Founder,miguel@example.com,x,mcpeixoto457,https://x.com/mcpeixoto457,https://pbs.twimg.com/profile_images/456/miguel.jpg,Met on X
+	csvContent := `name,company,title,email,platform,platform_handle,profile_url,avatar_url,identity_evidence_token,notes
+Miguel Peixoto,bidwall.app,Founder,miguel@example.com,x,mcpeixoto457,https://x.com/mcpeixoto457,https://pbs.twimg.com/profile_images/456/miguel.jpg,run.evidence.secret,Met on X
 `
 	if err := os.WriteFile(csvPath, []byte(csvContent), 0o600); err != nil {
 		t.Fatalf("failed to write test csv: %v", err)
@@ -70,6 +74,9 @@ Miguel Peixoto,bidwall.app,Founder,miguel@example.com,x,mcpeixoto457,https://x.c
 	}
 	if row.AvatarURL != "https://pbs.twimg.com/profile_images/456/miguel.jpg" {
 		t.Errorf("expected AvatarURL 'https://pbs.twimg.com/profile_images/456/miguel.jpg', got %q", row.AvatarURL)
+	}
+	if row.IdentityEvidenceToken != "run.evidence.secret" {
+		t.Errorf("expected IdentityEvidenceToken to be parsed, got %q", row.IdentityEvidenceToken)
 	}
 }
 
@@ -383,6 +390,80 @@ func TestImportContactChunkAttributesCreatedAndMatchedContacts(t *testing.T) {
 	}
 	if !reflect.DeepEqual(calls, wantCalls) {
 		t.Fatalf("calls = %#v, want %#v", calls, wantCalls)
+	}
+}
+
+func TestImportContactChunkForwardsSnowballIdentityEvidenceExactlyOnce(t *testing.T) {
+	var createInput map[string]any
+	var upsertCalls int
+	invoke := func(tool string, input map[string]any) (map[string]any, error) {
+		switch tool {
+		case "create_contact":
+			createInput = input
+			return map[string]any{"id": "contact-new"}, nil
+		case "upsert_contact_identity":
+			upsertCalls++
+			return map[string]any{}, nil
+		case "record_workflow_run_contacts":
+			return map[string]any{"runId": "run-1", "templateId": "tpl-1", "cohortSize": float64(1)}, nil
+		default:
+			t.Fatalf("unexpected tool call %q", tool)
+			return nil, nil
+		}
+	}
+
+	attribution := newImportAttributionState("run-1", "tpl-1")
+	summary := importContactsSummary{Success: true, Errors: []string{}, Notes: []string{}, Attribution: attribution.summary}
+	err := importAttributedContactChunkWithInvoker([]contactRow{{
+		Name:                  "Jane Doe",
+		Platform:              "linkedin",
+		PlatformUserID:        "jane-doe",
+		ProfileURL:            "https://www.linkedin.com/in/jane-doe/",
+		IdentityEvidenceToken: "run-1.evidence.secret",
+	}}, false, false, "run-1", "tpl-1", attribution, &summary, invoke)
+	if err != nil {
+		t.Fatalf("importAttributedContactChunkWithInvoker() error = %v", err)
+	}
+	if createInput["identityEvidenceToken"] != "run-1.evidence.secret" {
+		t.Fatalf("create evidence token = %#v", createInput["identityEvidenceToken"])
+	}
+	if upsertCalls != 0 {
+		t.Fatalf("new contact replayed one-use evidence through %d extra upsert(s)", upsertCalls)
+	}
+}
+
+func TestImportContactChunkForwardsSnowballEvidenceToExistingIdentityUpsert(t *testing.T) {
+	var upsertInput map[string]any
+	invoke := func(tool string, input map[string]any) (map[string]any, error) {
+		switch tool {
+		case "query_contacts":
+			return map[string]any{"contacts": []any{map[string]any{"id": "contact-existing"}}}, nil
+		case "upsert_contact_identity":
+			upsertInput = input
+			return map[string]any{}, nil
+		case "record_workflow_run_contacts":
+			return map[string]any{"runId": "run-1", "templateId": "tpl-1", "cohortSize": float64(1)}, nil
+		default:
+			t.Fatalf("unexpected tool call %q", tool)
+			return nil, nil
+		}
+	}
+
+	attribution := newImportAttributionState("run-1", "tpl-1")
+	summary := importContactsSummary{Success: true, Errors: []string{}, Notes: []string{}, Attribution: attribution.summary}
+	err := importAttributedContactChunkWithInvoker([]contactRow{{
+		Name:                  "Jane Doe",
+		Email:                 "jane@example.com",
+		Platform:              "linkedin",
+		PlatformUserID:        "jane-doe",
+		IdentityEvidenceToken: "run-1.evidence.secret",
+	}}, true, false, "run-1", "tpl-1", attribution, &summary, invoke)
+	if err != nil {
+		t.Fatalf("importAttributedContactChunkWithInvoker() error = %v", err)
+	}
+	if upsertInput["identityEvidenceToken"] != "run-1.evidence.secret" ||
+		upsertInput["workflowRunId"] != "run-1" || upsertInput["templateId"] != "tpl-1" {
+		t.Fatalf("upsert evidence context = %#v", upsertInput)
 	}
 }
 

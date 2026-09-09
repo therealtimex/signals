@@ -31,16 +31,17 @@ var contactImportTools = map[string]struct{}{
 }
 
 type contactRow struct {
-	Name           string
-	Company        string
-	Title          string
-	Email          string
-	Platform       string
-	PlatformUserID string
-	PlatformHandle string
-	ProfileURL     string
-	AvatarURL      string
-	Notes          string
+	Name                  string
+	Company               string
+	Title                 string
+	Email                 string
+	Platform              string
+	PlatformUserID        string
+	PlatformHandle        string
+	ProfileURL            string
+	AvatarURL             string
+	IdentityEvidenceToken string
+	Notes                 string
 }
 
 type importContactsSummary struct {
@@ -395,16 +396,17 @@ func mapContactRow(item map[string]any) (contactRow, error) {
 		return ""
 	}
 	row := contactRow{
-		Name:           get("name"),
-		Company:        get("company"),
-		Title:          get("title"),
-		Email:          normalizeEmail(get("email")),
-		Platform:       get("platform"),
-		PlatformUserID: get("platform_user_id", "platformUserId"),
-		PlatformHandle: get("platform_handle", "platformHandle"),
-		ProfileURL:     get("profile_url", "profileUrl"),
-		AvatarURL:      get("avatar_url", "avatarUrl"),
-		Notes:          get("notes"),
+		Name:                  get("name"),
+		Company:               get("company"),
+		Title:                 get("title"),
+		Email:                 normalizeEmail(get("email")),
+		Platform:              get("platform"),
+		PlatformUserID:        get("platform_user_id", "platformUserId"),
+		PlatformHandle:        get("platform_handle", "platformHandle"),
+		ProfileURL:            get("profile_url", "profileUrl"),
+		AvatarURL:             get("avatar_url", "avatarUrl"),
+		IdentityEvidenceToken: get("identity_evidence_token", "identityEvidenceToken"),
+		Notes:                 get("notes"),
 	}
 	if row.Email != "" && !strings.Contains(row.Email, "@") {
 		return contactRow{}, usageErr(fmt.Errorf("invalid email %q", row.Email))
@@ -505,7 +507,7 @@ func importAttributedContactChunkWithInvoker(
 			}
 			if existing.ID != "" {
 				attribute(existing.ID)
-				if enriched, err := enrichExistingContact(existing.ID, row, invoke); err != nil {
+				if enriched, err := enrichExistingContact(existing.ID, row, workflowRunID, templateID, true, invoke); err != nil {
 					summary.Failed++
 					summary.Errors = append(summary.Errors, err.Error())
 				} else if enriched {
@@ -529,7 +531,7 @@ func importAttributedContactChunkWithInvoker(
 		}
 		summary.Created++
 		attribute(contactID)
-		if enriched, err := enrichExistingContact(contactID, row, invoke); err != nil {
+		if enriched, err := enrichExistingContact(contactID, row, workflowRunID, templateID, false, invoke); err != nil {
 			summary.Failed++
 			summary.Errors = append(summary.Errors, err.Error())
 		} else if enriched {
@@ -895,6 +897,9 @@ func createContactFromRow(
 	if row.Notes != "" {
 		input["notes"] = row.Notes
 	}
+	if row.IdentityEvidenceToken != "" {
+		input["identityEvidenceToken"] = row.IdentityEvidenceToken
+	}
 	if workflowRunID != "" {
 		input["workflowRunId"] = workflowRunID
 	}
@@ -916,7 +921,14 @@ func createContactFromRow(
 	return contactID, nil
 }
 
-func enrichExistingContact(contactID string, row contactRow, invoke agentToolInvoker) (bool, error) {
+func enrichExistingContact(
+	contactID string,
+	row contactRow,
+	workflowRunID string,
+	templateID string,
+	includeIdentity bool,
+	invoke agentToolInvoker,
+) (bool, error) {
 	enriched := false
 	enrichInput := map[string]any{
 		"contactId": contactID,
@@ -934,7 +946,7 @@ func enrichExistingContact(contactID string, row contactRow, invoke agentToolInv
 		enriched = true
 	}
 
-	if row.Platform != "" && (row.PlatformUserID != "" || row.PlatformHandle != "") {
+	if includeIdentity && row.Platform != "" && (row.PlatformUserID != "" || row.PlatformHandle != "" || row.IdentityEvidenceToken != "") {
 		identity := map[string]any{
 			"contactId": contactID,
 			"platform":  row.Platform,
@@ -958,6 +970,15 @@ func enrichExistingContact(contactID string, row contactRow, invoke agentToolInv
 		}
 		if avatarURL != "" {
 			identity["avatarUrl"] = avatarURL
+		}
+		if workflowRunID != "" {
+			identity["workflowRunId"] = workflowRunID
+		}
+		if templateID != "" {
+			identity["templateId"] = templateID
+		}
+		if row.IdentityEvidenceToken != "" {
+			identity["identityEvidenceToken"] = row.IdentityEvidenceToken
 		}
 		if _, err := invoke("upsert_contact_identity", identity); err != nil {
 			return enriched, err

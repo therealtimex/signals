@@ -291,6 +291,46 @@
                     "type": "object",
                     "properties": {
                       "tool": {
+                        "const": "attest_snowball_linkedin_identity"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "snowballScopeToken": {
+                            "type": "string",
+                            "description": "Dispatch capability copied exactly from the Network Snowball brief."
+                          },
+                          "candidateName": {
+                            "type": "string"
+                          },
+                          "candidateCompany": {
+                            "type": "string"
+                          },
+                          "candidateTitle": {
+                            "type": "string"
+                          },
+                          "profileUrl": {
+                            "type": "string",
+                            "description": "Proposed LinkedIn /in/ URL. Signals opens it in the trusted browser session and derives the stored identity from the final URL."
+                          }
+                        },
+                        "required": [
+                          "snowballScopeToken",
+                          "candidateName",
+                          "profileUrl"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
                         "const": "get_contact"
                       },
                       "input": {
@@ -467,7 +507,11 @@
                           },
                           "avatarUrl": {
                             "type": "string",
-                            "description": "Public https URL of the contact's profile photo. Set it whenever a photo is obtainable — a contact saved without one renders as bare initials in the Contacts list and nothing backfills it automatically. When a page scrape yields nothing, resolve it: https://unavatar.io/linkedin/user:{slug} for a LinkedIn person, https://unavatar.io/linkedin/company:{slug} for a LinkedIn organization page (the namespaces are not interchangeable — each 404s for the other's slugs), or https://unavatar.io/x/{handle} for X. Must be http(s); file:// URLs and local paths are rejected."
+                            "description": "Optional public https URL of the contact's profile photo. For LinkedIn, derive any resolver slug only from a server-attested identity; never synthesize a profile slug to fill this field. Must be http(s); file:// URLs and local paths are rejected."
+                          },
+                          "identityEvidenceToken": {
+                            "type": "string",
+                            "description": "One-use token returned by attest_snowball_linkedin_identity. Required before a Network Snowball run can write a LinkedIn identity."
                           },
                           "notes": {
                             "type": "string"
@@ -883,7 +927,7 @@
                           },
                           "avatarUrl": {
                             "type": "string",
-                            "description": "Public https URL of the contact's profile photo. Set it whenever a photo is obtainable — a contact saved without one renders as bare initials in the Contacts list and nothing backfills it automatically. When a page scrape yields nothing, resolve it: https://unavatar.io/linkedin/user:{slug} for a LinkedIn person, https://unavatar.io/linkedin/company:{slug} for a LinkedIn organization page (the namespaces are not interchangeable — each 404s for the other's slugs), or https://unavatar.io/x/{handle} for X. Must be http(s); file:// URLs and local paths are rejected."
+                            "description": "Optional public https URL of the contact's profile photo. For LinkedIn, derive any resolver slug only from a server-attested identity; never synthesize a profile slug to fill this field. Must be http(s); file:// URLs and local paths are rejected."
                           },
                           "location": {
                             "type": "string"
@@ -917,6 +961,16 @@
                           },
                           "lastSyncedAt": {
                             "type": "number"
+                          },
+                          "workflowRunId": {
+                            "type": "string"
+                          },
+                          "templateId": {
+                            "type": "string"
+                          },
+                          "identityEvidenceToken": {
+                            "type": "string",
+                            "description": "One-use token returned by attest_snowball_linkedin_identity. Required before a Network Snowball run can write a LinkedIn identity."
                           }
                         },
                         "required": [
@@ -4876,6 +4930,7 @@
                     "enum": [
                       "query_contacts",
                       "resolve_platform_claim",
+                      "attest_snowball_linkedin_identity",
                       "get_contact",
                       "get_contact_arpp",
                       "create_contact",
@@ -5111,6 +5166,6 @@
   ],
   "x-signals-agent-tools": {
     "manifestVersion": "1",
-    "toolCount": 91
+    "toolCount": 92
   }
 }
