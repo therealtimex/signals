@@ -76,6 +76,56 @@ function createResearchRun(platform: "linkedin" | "x", leaseId?: string) {
   return { run, leaseId: lease.leaseId };
 }
 
+function createSnowballRunWithTarget() {
+  const template = createTemplate({
+    name: "Network Snowball",
+    templateType: "prospecting",
+    status: "active",
+    config: JSON.stringify({ networkSnowball: { version: 1 } }),
+  });
+  const run = createWorkflowRun({
+    templateId: template.id,
+    workflowType: "search",
+    status: "running",
+    trigger: "template",
+    config: JSON.stringify({ networkSnowball: { version: 1 } }),
+  });
+  const connection = ensureBrowserConnection({ sessionName: "snowball-bound-session" });
+  const target = registerPlatformTarget({
+    connectionId: connection.id,
+    platform: "linkedin",
+    kind: "profile",
+    name: "/in/operator",
+    handle: "/in/operator",
+    capabilities: ["browse", "publish"],
+    source: "test",
+  });
+  const lease = acquireSessionLease(connection.id, {
+    holder: `network-snowball:${run.id}`,
+    targetId: target.id,
+    intent: "browse",
+    ttlSeconds: 1_800,
+  });
+  updateWorkflowRun(run.id, {
+    config: JSON.stringify({
+      networkSnowball: { version: 1 },
+      _snowballBrowserTarget: {
+        targetId: target.id,
+        platform: "linkedin",
+        source: "session",
+        sessionName: connection.sessionName,
+        startUrl: "https://www.linkedin.com/in/operator",
+        expectedHandle: "/in/operator",
+        verifiedHandle: "/in/operator",
+        leaseId: lease.leaseId,
+        leaseExpiresAt: lease.expiresAt,
+        preparedAt: Math.floor(Date.now() / 1_000),
+      },
+    }),
+  });
+  return { run: getWorkflowRun(run.id)!, leaseId: lease.leaseId };
+}
+
 describe("complete_workflow_run terminal teardown", () => {
   beforeEach(() => {
     resetCoreTables();
@@ -140,6 +190,45 @@ describe("complete_workflow_run terminal teardown", () => {
     );
     expect(workflowCompletionThread.postWorkflowCompletionThreadMessage).toHaveBeenCalled();
     expect(result.message).toContain("Browser sessions stopped: network-snowball.");
+  });
+
+  it("stops only the Snowball-bound browser session and releases its lease", async () => {
+    const { run, leaseId } = createSnowballRunWithTarget();
+    vi.spyOn(workflowEvents, "emitWorkflowCompletedEvent").mockResolvedValue(
+      mockWorkflowCompletedEvent,
+    );
+    vi.spyOn(workflowCompletionThread, "postWorkflowCompletionThreadMessage").mockResolvedValue({
+      posted: true,
+    });
+    const browserSpy = vi.spyOn(
+      resourceTeardown,
+      "stopRunningRtxBrowserSessions",
+    ).mockResolvedValue({
+      stopped: ["snowball-bound-session"],
+      failed: [],
+    });
+    vi.spyOn(resourceTeardown, "scheduleWorkflowTerminalSessionRelease").mockReturnValue({
+      scheduled: true,
+      sessionId: null,
+    });
+
+    const result = await handleCompleteWorkflowRun({
+      runId: run.id,
+      status: "completed",
+      summary: "Mapped the verified cluster",
+    });
+    if (!result.success) throw new Error(result.error);
+
+    expect(browserSpy).toHaveBeenCalledOnce();
+    expect(browserSpy).toHaveBeenCalledWith({
+      sessionNames: ["snowball-bound-session"],
+    });
+    expect(result.leaseRelease).toEqual({
+      leaseId,
+      released: true,
+      alreadyGone: false,
+    });
+    expect(getSessionLeaseById(leaseId)).toBeUndefined();
   });
 
   it("still completes the workflow when no runtime session is stored", async () => {

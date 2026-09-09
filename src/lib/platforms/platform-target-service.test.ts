@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const adapterMocks = vi.hoisted(() => ({ activate: vi.fn() }));
 const browserMocks = vi.hoisted(() => ({
+  goto: vi.fn(),
   pageUrl: vi.fn(),
   probeAuthenticatedPlatformIdentity: vi.fn(),
 }));
@@ -15,7 +16,7 @@ vi.mock("@/lib/platforms/browser-connection", () => ({
     _platform: string,
     _sessionName: string,
     callback: (page: object) => unknown,
-  ) => callback({ url: browserMocks.pageUrl }),
+  ) => callback({ goto: browserMocks.goto, url: browserMocks.pageUrl }),
   getPlatformHomeUrl: (platform: string) => `https://www.${platform}.com/`,
   probeAuthenticatedPlatformIdentity: browserMocks.probeAuthenticatedPlatformIdentity,
 }));
@@ -37,6 +38,7 @@ describe("preparePlatformTarget login classification", () => {
   beforeEach(() => {
     resetCoreTables();
     adapterMocks.activate.mockReset();
+    browserMocks.goto.mockReset().mockResolvedValue(undefined);
     browserMocks.pageUrl.mockReset();
     browserMocks.pageUrl.mockReturnValue("https://www.linkedin.com/feed/");
     browserMocks.probeAuthenticatedPlatformIdentity.mockReset();
@@ -98,11 +100,18 @@ describe("preparePlatformTarget login classification", () => {
       holder: "contact-web-research:run-live",
       leaseTtlSeconds: 600,
     });
+    await vi.waitFor(() => {
+      expect(browserMocks.probeAuthenticatedPlatformIdentity).toHaveBeenCalled();
+    });
     expect(browserMocks.probeAuthenticatedPlatformIdentity).toHaveBeenCalledWith(
       "linkedin",
-      expect.objectContaining({ url: browserMocks.pageUrl }),
+      expect.objectContaining({ goto: browserMocks.goto, url: browserMocks.pageUrl }),
       8_000,
     );
+    expect(browserMocks.goto).toHaveBeenCalledWith("https://www.linkedin.com/", {
+      waitUntil: "domcontentloaded",
+      timeout: 30_000,
+    });
     expect(listPlatformTargets({ platform: "linkedin" })).toEqual([
       expect.objectContaining({ id: stale.id, handle: "/in/stale" }),
     ]);

@@ -9,6 +9,19 @@ import {
   readNetworkSnowballConfig,
 } from "@/lib/workflows/network-snowball";
 
+const browserTarget = {
+  targetId: "target-linkedin",
+  platform: "linkedin" as const,
+  source: "session" as const,
+  sessionName: "signals-publish",
+  startUrl: "https://www.linkedin.com/in/operator",
+  expectedHandle: "/in/operator",
+  verifiedHandle: "/in/operator",
+  leaseId: "lease-snowball",
+  leaseExpiresAt: 1_800_000_000,
+  preparedAt: 1_799_999_400,
+};
+
 describe("clampNetworkSnowballSlider", () => {
   it("clamps maxContacts into range 1..30", () => {
     expect(clampNetworkSnowballSlider("maxContacts", 0)).toBe(1);
@@ -111,6 +124,7 @@ describe("buildNetworkSnowballBriefSection", () => {
         maxHops: 1,
       },
       snowballIdentityScopeToken: "run_snow_1.scope-secret",
+      browserTarget,
     });
 
     expect(brief).toContain("Network Snowball execution contract:");
@@ -139,9 +153,36 @@ describe("buildNetworkSnowballBriefSection", () => {
     expect(brief).toContain(
       ".claude/skills/realtimex-signals/scripts/run-signals-pp-cli.sh import contacts --file workflow-runs/run_snow_1/contacts.csv --dedupe --workflow-run-id run_snow_1 --template-id tpl_snow_1",
     );
-    expect(brief).toContain("Terminate Spawned Browser Sessions");
+    expect(brief).toContain("server-bound session named `signals-publish` only");
+    expect(brief).toContain("Never read document.cookie");
+    expect(brief).toContain("Never inspect or edit the Signals source tree");
+    expect(brief).toContain("Server-Owned Browser Teardown");
+    expect(brief).toContain("stops the exact bound session `signals-publish`");
+    expect(brief).toContain("releases this run's lease");
     expect(brief).toContain(
       "schedules release of this workflow's linked terminal session after the chat-linked turn finishes"
     );
+  });
+
+  it("keeps LinkedIn identities out of scope for an X-only bound session", () => {
+    const brief = buildNetworkSnowballBriefSection({
+      workflowRunId: "run_x_only",
+      config: {
+        networkSnowball: { version: 1 },
+        targetPlatform: "x",
+      },
+      snowballIdentityScopeToken: "run_x_only.scope-secret",
+      browserTarget: {
+        ...browserTarget,
+        targetId: "target-x",
+        platform: "x",
+        startUrl: "https://x.com/operator",
+        expectedHandle: "@operator",
+        verifiedHandle: "@operator",
+      },
+    });
+
+    expect(brief).toContain("This is an X-only run with no bound LinkedIn target");
+    expect(brief).toContain("Do not discover or write LinkedIn identities");
   });
 });

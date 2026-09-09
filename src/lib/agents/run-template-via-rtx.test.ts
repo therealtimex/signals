@@ -8,11 +8,23 @@ const researchTargetMocks = vi.hoisted(() => ({
   releaseContactWebResearchTarget: vi.fn(),
 }));
 
+const snowballTargetMocks = vi.hoisted(() => ({
+  prepareNetworkSnowballTarget: vi.fn(),
+  releaseNetworkSnowballTarget: vi.fn(),
+}));
+
 vi.mock("@/lib/workflows/contact-web-research-target", async (importOriginal) => {
   const actual = await importOriginal<
     typeof import("@/lib/workflows/contact-web-research-target")
   >();
   return { ...actual, ...researchTargetMocks };
+});
+
+vi.mock("@/lib/workflows/network-snowball-target", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@/lib/workflows/network-snowball-target")
+  >();
+  return { ...actual, ...snowballTargetMocks };
 });
 
 import { runTemplateViaRtx } from "@/lib/agents/run-template-via-rtx";
@@ -32,6 +44,7 @@ import { WRITING_SCOPE_TOKEN_CONFIG_KEY } from "@/lib/writing/writing-scope-toke
 import { buildContactWebResearchTemplateConfig } from "@/lib/workflows/contact-web-research";
 import { buildNetworkSnowballTemplateConfig } from "@/lib/workflows/network-snowball";
 import { SNOWBALL_IDENTITY_SCOPE_TOKEN_CONFIG_KEY } from "@/lib/workflows/snowball-identity-evidence";
+import { SNOWBALL_BROWSER_TARGET_CONFIG_KEY } from "@/lib/workflows/network-snowball-target";
 import { resetCoreTables } from "@/test/db";
 
 const preparedResearchTarget = {
@@ -47,6 +60,19 @@ const preparedResearchTarget = {
   preparedAt: 1_799_999_400,
 };
 
+const preparedSnowballTarget = {
+  targetId: "target-snowball-linkedin",
+  platform: "linkedin" as const,
+  source: "session" as const,
+  sessionName: "signals-publish",
+  startUrl: "https://www.linkedin.com/in/session-owner",
+  expectedHandle: "/in/session-owner",
+  verifiedHandle: "/in/session-owner",
+  leaseId: "lease-snowball",
+  leaseExpiresAt: 1_800_000_000,
+  preparedAt: 1_799_999_400,
+};
+
 describe("runTemplateViaRtx health preflight", () => {
   let storageDir = "";
 
@@ -57,6 +83,15 @@ describe("runTemplateViaRtx health preflight", () => {
     researchTargetMocks.prepareContactWebResearchTarget.mockReset();
     researchTargetMocks.releaseContactWebResearchTarget.mockReset().mockReturnValue({
       leaseId: "lease-research",
+      released: true,
+      alreadyGone: false,
+    });
+    snowballTargetMocks.prepareNetworkSnowballTarget.mockReset().mockResolvedValue({
+      ok: true,
+      target: preparedSnowballTarget,
+    });
+    snowballTargetMocks.releaseNetworkSnowballTarget.mockReset().mockReturnValue({
+      leaseId: "lease-snowball",
       released: true,
       alreadyGone: false,
     });
@@ -291,6 +326,7 @@ describe("runTemplateViaRtx health preflight", () => {
     const result = await runTemplateViaRtx(
       {
         templateId: template.id,
+        config: { networkSnowball: false },
         signalsBaseUrl: "http://127.0.0.1:3099",
       },
       {
@@ -316,7 +352,76 @@ describe("runTemplateViaRtx health preflight", () => {
     expect(JSON.parse(getWorkflowRun(result.workflowRunId)?.config ?? "{}")[
       SNOWBALL_IDENTITY_SCOPE_TOKEN_CONFIG_KEY
     ]).toBe(sha256(token!));
+    expect(JSON.parse(getWorkflowRun(result.workflowRunId)?.config ?? "{}")[
+      SNOWBALL_BROWSER_TARGET_CONFIG_KEY
+    ]).toEqual(preparedSnowballTarget);
+    expect(snowballTargetMocks.prepareNetworkSnowballTarget).toHaveBeenCalledWith(
+      expect.objectContaining({ workflowRunId: result.workflowRunId }),
+      expect.anything(),
+      expect.anything(),
+    );
+    expect(brief).toContain("server-bound session named `signals-publish` only");
+    expect(brief).toContain("authenticated as linkedin identity `/in/session-owner`");
+    expect(brief).toContain("Never read document.cookie");
+    expect(brief).toContain("Never inspect or edit the Signals source tree");
+    expect(brief).toContain("stops the exact bound session `signals-publish`");
     expect(brief).not.toContain(SNOWBALL_IDENTITY_SCOPE_TOKEN_CONFIG_KEY);
+    expect(brief).not.toContain(SNOWBALL_BROWSER_TARGET_CONFIG_KEY);
+    expect(snowballTargetMocks.releaseNetworkSnowballTarget).not.toHaveBeenCalled();
+  });
+
+  it("releases the Snowball browser lease when terminal dispatch is rejected", async () => {
+    const template = createTemplate({
+      name: "Network Snowball",
+      templateType: "prospecting",
+      status: "active",
+      config: JSON.stringify(buildNetworkSnowballTemplateConfig()),
+      isSystem: 1,
+    });
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url =
+        typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.endsWith("/api/health")) {
+        return new Response(JSON.stringify({ app: "signals", status: "ok" }), { status: 200 });
+      }
+      if (url.endsWith("/cli/get-workspace/signals")) {
+        return new Response(JSON.stringify({ workspace: { slug: "signals" } }), { status: 200 });
+      }
+      if (url.endsWith("/cli/create-thread/signals")) {
+        return new Response(JSON.stringify({ thread: { slug: "network-snowball" } }), {
+          status: 200,
+        });
+      }
+      if (url.endsWith("/cli/send-message/signals/network-snowball")) {
+        return new Response(JSON.stringify({
+          success: false,
+          terminalDispatchAccepted: false,
+          code: "TERMINAL_DISPATCH_REQUIRED",
+          error: "dispatch rejected",
+        }), { status: 409 });
+      }
+      return new Response(JSON.stringify({ error: `Unexpected request: ${url}` }), { status: 500 });
+    }) as unknown as typeof fetch;
+
+    const result = await runTemplateViaRtx(
+      { templateId: template.id, signalsBaseUrl: "http://127.0.0.1:3099" },
+      {
+        ...process.env,
+        RTX_APP_ID: "test-app-id",
+        RTX_API_BASE_URL: "http://127.0.0.1:3001",
+        STORAGE_DIR: storageDir,
+      },
+      fetchImpl,
+    );
+
+    expect(result.success).toBe(false);
+    expect(snowballTargetMocks.releaseNetworkSnowballTarget).toHaveBeenCalledOnce();
+    expect(snowballTargetMocks.releaseNetworkSnowballTarget).toHaveBeenCalledWith(
+      "lease-snowball",
+    );
+    if (result.success || !result.workflowRunId) throw new Error("expected rejected dispatch");
+    expect(JSON.parse(getWorkflowRun(result.workflowRunId)?.config ?? "{}"))
+      .not.toHaveProperty(SNOWBALL_IDENTITY_SCOPE_TOKEN_CONFIG_KEY);
   });
 
   it("persists the writing scope hash before the brief or dispatch leaves the server", async () => {

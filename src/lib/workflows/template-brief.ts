@@ -34,6 +34,7 @@ import {
   isContactWebResearchTemplateConfig,
   type ContactWebResearchBriefContext,
 } from "@/lib/workflows/contact-web-research";
+import type { NetworkSnowballPreparedTarget } from "@/lib/workflows/network-snowball-target";
 
 const CATEGORY_LABELS: Record<string, string> = {
   prospecting: "Search",
@@ -191,6 +192,8 @@ export function buildAgentWorkflowBrief(input: {
   writingScopeToken?: string;
   /** Dispatch-issued capability used to mint browser-attested Snowball identity evidence. */
   snowballIdentityScopeToken?: string;
+  /** Server-prepared browser target whose session and lease are bound to this Snowball run. */
+  snowballBrowserTarget?: NetworkSnowballPreparedTarget;
 }): string {
   const category = CATEGORY_LABELS[input.template.templateType] ?? input.template.templateType;
   const instructions = input.systemPromptOverride?.trim() || input.template.systemPrompt?.trim();
@@ -225,6 +228,7 @@ export function buildAgentWorkflowBrief(input: {
         config: input.config,
         signalsBaseUrl: input.signalsBaseUrl,
         snowballIdentityScopeToken: input.snowballIdentityScopeToken,
+        browserTarget: input.snowballBrowserTarget,
       })}\n`
     : null;
   const writingContract = isSignalsWritingTemplateConfig(input.config)
