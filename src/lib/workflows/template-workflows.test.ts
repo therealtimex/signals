@@ -179,12 +179,15 @@ describe("template-brief", () => {
         maxHops: 1,
       },
       signalsBaseUrl: "http://localhost:3000",
+      snowballIdentityScopeToken: "run_snow_2.scope-secret",
     });
 
     expect(brief).toContain("Network Snowball execution contract:");
     expect(brief).toContain("https://x.com/seed/status/456");
     expect(brief).toContain("Lead VCs, participating funds, and angel investors");
     expect(brief).toContain("Anti-Hallucination & Bot Filter Gate");
+    expect(brief).toContain("attest_snowball_linkedin_identity");
+    expect(brief).toContain('snowballScopeToken: "run_snow_2.scope-secret"');
     expect(brief).not.toContain("Social Intent Patrol execution contract");
   });
 

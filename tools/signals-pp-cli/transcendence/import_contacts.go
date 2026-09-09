@@ -31,16 +31,17 @@ var contactImportTools = map[string]struct{}{
 }
 
 type contactRow struct {
-	Name           string
-	Company        string
-	Title          string
-	Email          string
-	Platform       string
-	PlatformUserID string
-	PlatformHandle string
-	ProfileURL     string
-	AvatarURL      string
-	Notes          string
+	Name                  string
+	Company               string
+	Title                 string
+	Email                 string
+	Platform              string
+	PlatformUserID        string
+	PlatformHandle        string
+	ProfileURL            string
+	AvatarURL             string
+	IdentityEvidenceToken string
+	Notes                 string
 }
 
 type importContactsSummary struct {
@@ -109,10 +110,11 @@ func (state *importAttributionState) add(ids []string) {
 // attach. OrgID matters because a platform account can be claimed by an org identity
 // as well, which blocks a contact identity just as hard.
 type contactMatch struct {
-	ID           string
-	Archived     bool
-	OrgID        string
-	CandidateIDs []string
+	ID                      string
+	Archived                bool
+	OrgID                   string
+	CandidateIDs            []string
+	PlatformIdentityIsBound bool
 }
 
 // matched reports whether the row resolved to an existing owner of any kind.
@@ -395,16 +397,17 @@ func mapContactRow(item map[string]any) (contactRow, error) {
 		return ""
 	}
 	row := contactRow{
-		Name:           get("name"),
-		Company:        get("company"),
-		Title:          get("title"),
-		Email:          normalizeEmail(get("email")),
-		Platform:       get("platform"),
-		PlatformUserID: get("platform_user_id", "platformUserId"),
-		PlatformHandle: get("platform_handle", "platformHandle"),
-		ProfileURL:     get("profile_url", "profileUrl"),
-		AvatarURL:      get("avatar_url", "avatarUrl"),
-		Notes:          get("notes"),
+		Name:                  get("name"),
+		Company:               get("company"),
+		Title:                 get("title"),
+		Email:                 normalizeEmail(get("email")),
+		Platform:              get("platform"),
+		PlatformUserID:        get("platform_user_id", "platformUserId"),
+		PlatformHandle:        get("platform_handle", "platformHandle"),
+		ProfileURL:            get("profile_url", "profileUrl"),
+		AvatarURL:             get("avatar_url", "avatarUrl"),
+		IdentityEvidenceToken: get("identity_evidence_token", "identityEvidenceToken"),
+		Notes:                 get("notes"),
 	}
 	if row.Email != "" && !strings.Contains(row.Email, "@") {
 		return contactRow{}, usageErr(fmt.Errorf("invalid email %q", row.Email))
@@ -505,7 +508,13 @@ func importAttributedContactChunkWithInvoker(
 			}
 			if existing.ID != "" {
 				attribute(existing.ID)
-				if enriched, err := enrichExistingContact(existing.ID, row, invoke); err != nil {
+				includeIdentity, err := existingContactNeedsIdentityWrite(existing, row, invoke)
+				if err != nil {
+					summary.Failed++
+					summary.Errors = append(summary.Errors, err.Error())
+					continue
+				}
+				if enriched, err := enrichExistingContact(existing.ID, row, workflowRunID, templateID, includeIdentity, invoke); err != nil {
 					summary.Failed++
 					summary.Errors = append(summary.Errors, err.Error())
 				} else if enriched {
@@ -529,7 +538,7 @@ func importAttributedContactChunkWithInvoker(
 		}
 		summary.Created++
 		attribute(contactID)
-		if enriched, err := enrichExistingContact(contactID, row, invoke); err != nil {
+		if enriched, err := enrichExistingContact(contactID, row, workflowRunID, templateID, false, invoke); err != nil {
 			summary.Failed++
 			summary.Errors = append(summary.Errors, err.Error())
 		} else if enriched {
@@ -720,29 +729,55 @@ func findExistingContactWithInvoker(row contactRow, invoke agentToolInvoker) (co
 			return contactMatch{CandidateIDs: candidateIDs}, nil
 		}
 	}
-	if row.Platform != "" && (row.PlatformUserID != "" || row.PlatformHandle != "") {
-		targetUser := row.PlatformUserID
-		if targetUser == "" {
-			targetUser = row.PlatformHandle
-		}
-		targetUser = strings.TrimPrefix(targetUser, "@")
-		// platformUserId is an exact identity-claim filter. Free-text search does
-		// not cover contact_identities, so searching the handle never matched and
-		// the import created a duplicate that upsert_contact_identity then
-		// rejected as an already-claimed platform account (#202).
-		// resolve_platform_claim is the same resolution upsert_contact_identity
-		// enforces, so this cannot disagree with the guard the way a query_contacts
-		// reconstruction could (#206).
-		result, err := invoke("resolve_platform_claim", map[string]any{
-			"platform":       row.Platform,
-			"platformUserId": targetUser,
-		})
-		if err != nil {
-			return contactMatch{}, err
-		}
-		return platformClaimMatch(result)
+	return findExistingPlatformClaimWithInvoker(row, invoke)
+}
+
+func findExistingPlatformClaimWithInvoker(row contactRow, invoke agentToolInvoker) (contactMatch, error) {
+	if row.Platform == "" || (row.PlatformUserID == "" && row.PlatformHandle == "") {
+		return contactMatch{}, nil
 	}
-	return contactMatch{}, nil
+	targetUser := row.PlatformUserID
+	if targetUser == "" {
+		targetUser = row.PlatformHandle
+	}
+	targetUser = strings.TrimPrefix(targetUser, "@")
+	// platformUserId is an exact identity-claim filter. Free-text search does
+	// not cover contact_identities, so searching the handle never matched and
+	// the import created a duplicate that upsert_contact_identity then
+	// rejected as an already-claimed platform account (#202).
+	// resolve_platform_claim is the same resolution upsert_contact_identity
+	// enforces, so this cannot disagree with the guard the way a query_contacts
+	// reconstruction could (#206).
+	result, err := invoke("resolve_platform_claim", map[string]any{
+		"platform":       row.Platform,
+		"platformUserId": targetUser,
+	})
+	if err != nil {
+		return contactMatch{}, err
+	}
+	return platformClaimMatch(result)
+}
+
+func existingContactNeedsIdentityWrite(
+	existing contactMatch,
+	row contactRow,
+	invoke agentToolInvoker,
+) (bool, error) {
+	if row.IdentityEvidenceToken == "" {
+		return true, nil
+	}
+	if existing.PlatformIdentityIsBound {
+		return false, nil
+	}
+	platformMatch, err := findExistingPlatformClaimWithInvoker(row, invoke)
+	if err != nil {
+		return false, err
+	}
+	// A repeated evidence-backed import is a no-op for the identity only when
+	// the exact platform claim is already attached to the same contact. An
+	// unclaimed or differently-owned identity still goes through the evidence
+	// gate, preserving one-use enforcement for every new write.
+	return platformMatch.ID != existing.ID, nil
 }
 
 func normalizeEmail(email string) string {
@@ -823,7 +858,11 @@ func platformClaimMatch(result map[string]any) (contactMatch, error) {
 				"resolve_platform_claim contact claimant missing boolean archived",
 			))
 		}
-		return contactMatch{ID: contactID, Archived: archived}, nil
+		return contactMatch{
+			ID:                      contactID,
+			Archived:                archived,
+			PlatformIdentityIsBound: true,
+		}, nil
 	default:
 		return contactMatch{}, apiErr(fmt.Errorf(
 			"resolve_platform_claim claimant has unsupported kind %q",
@@ -895,6 +934,9 @@ func createContactFromRow(
 	if row.Notes != "" {
 		input["notes"] = row.Notes
 	}
+	if row.IdentityEvidenceToken != "" {
+		input["identityEvidenceToken"] = row.IdentityEvidenceToken
+	}
 	if workflowRunID != "" {
 		input["workflowRunId"] = workflowRunID
 	}
@@ -916,25 +958,18 @@ func createContactFromRow(
 	return contactID, nil
 }
 
-func enrichExistingContact(contactID string, row contactRow, invoke agentToolInvoker) (bool, error) {
+func enrichExistingContact(
+	contactID string,
+	row contactRow,
+	workflowRunID string,
+	templateID string,
+	includeIdentity bool,
+	invoke agentToolInvoker,
+) (bool, error) {
 	enriched := false
-	enrichInput := map[string]any{
-		"contactId": contactID,
-	}
-	if row.Title != "" {
-		enrichInput["title"] = row.Title
-	}
-	if row.Notes != "" {
-		enrichInput["notes"] = row.Notes
-	}
-	if len(enrichInput) > 1 {
-		if _, err := invoke("enrich_contact", enrichInput); err != nil {
-			return false, err
-		}
-		enriched = true
-	}
-
-	if row.Platform != "" && (row.PlatformUserID != "" || row.PlatformHandle != "") {
+	// Validate and persist the evidence-gated identity before changing any other field on an
+	// existing contact. A rejected Snowball row must leave the matched contact untouched.
+	if includeIdentity && row.Platform != "" && (row.PlatformUserID != "" || row.PlatformHandle != "" || row.IdentityEvidenceToken != "") {
 		identity := map[string]any{
 			"contactId": contactID,
 			"platform":  row.Platform,
@@ -959,7 +994,41 @@ func enrichExistingContact(contactID string, row contactRow, invoke agentToolInv
 		if avatarURL != "" {
 			identity["avatarUrl"] = avatarURL
 		}
+		if workflowRunID != "" {
+			identity["workflowRunId"] = workflowRunID
+		}
+		if templateID != "" {
+			identity["templateId"] = templateID
+		}
+		if row.IdentityEvidenceToken != "" {
+			identity["identityEvidenceToken"] = row.IdentityEvidenceToken
+			if row.Company != "" {
+				identity["candidateCompany"] = row.Company
+			}
+			if row.Title != "" {
+				identity["candidateTitle"] = row.Title
+			}
+		}
 		if _, err := invoke("upsert_contact_identity", identity); err != nil {
+			return false, err
+		}
+		enriched = true
+	}
+
+	enrichInput := map[string]any{
+		"contactId": contactID,
+	}
+	if row.Company != "" {
+		enrichInput["company"] = row.Company
+	}
+	if row.Title != "" {
+		enrichInput["title"] = row.Title
+	}
+	if row.Notes != "" {
+		enrichInput["notes"] = row.Notes
+	}
+	if len(enrichInput) > 1 {
+		if _, err := invoke("enrich_contact", enrichInput); err != nil {
 			return enriched, err
 		}
 		enriched = true

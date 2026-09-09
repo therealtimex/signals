@@ -24,6 +24,7 @@ describe("agent-tools registry", () => {
     expect(names).toContain("create_contact");
     expect(names).toContain("enrich_contact");
     expect(names).toContain("upsert_contact_identity");
+    expect(names).toContain("attest_snowball_linkedin_identity");
     expect(names).toContain("query_org_identities");
     expect(names).toContain("get_org");
     expect(names).toContain("create_org");

@@ -29,6 +29,7 @@ import {
   completePersonaJobSchema,
   listMailAccountsSchema,
   recordWorkflowRunContactsSchema,
+  attestSnowballLinkedInIdentitySchema,
 } from "@/lib/agent-tools/schemas";
 import {
   logInteractionSchema,
@@ -164,6 +165,7 @@ import {
   handleGeneratePersona,
   handleUpsertPersona,
   handleRecordWorkflowRunContacts,
+  handleAttestSnowballLinkedInIdentity,
 } from "@/lib/agent-tools/handlers";
 import { handleListMailAccounts } from "@/lib/agent-tools/mail-handlers";
 import {
@@ -238,6 +240,15 @@ export const AGENT_TOOLS: Record<string, AgentToolDefinition> = {
     parameters: zodToParameters(resolvePlatformClaimSchema),
     execute: handleResolvePlatformClaim,
   },
+  attest_snowball_linkedin_identity: {
+    name: "attest_snowball_linkedin_identity",
+    description:
+      "Open a proposed LinkedIn /in/ profile in Signals' trusted authenticated browser session, verify visible name plus company/role evidence, and return a short-lived one-use identityEvidenceToken. The final browser URL determines the stored LinkedIn handle; caller-supplied slugs are not trusted.",
+    category: "platforms",
+    schema: attestSnowballLinkedInIdentitySchema,
+    parameters: zodToParameters(attestSnowballLinkedInIdentitySchema),
+    execute: handleAttestSnowballLinkedInIdentity,
+  },
   get_contact: {
     name: "get_contact",
     description: "Get full details for a single contact by ID, including linked identities.",
@@ -258,7 +269,7 @@ export const AGENT_TOOLS: Record<string, AgentToolDefinition> = {
   create_contact: {
     name: "create_contact",
     description:
-      "Create a new contact record. At minimum a name is required. Pass avatarUrl whenever a profile photo is obtainable — contacts saved without one render as bare initials and are not backfilled automatically.",
+      "Create a new contact record. At minimum a name is required. Network Snowball LinkedIn writes require a fresh identityEvidenceToken from attest_snowball_linkedin_identity; Signals derives the identity from that browser evidence before Auto-commit.",
     category: "contacts",
     schema: createContactSchema,
     parameters: zodToParameters(createContactSchema),
@@ -284,7 +295,7 @@ export const AGENT_TOOLS: Record<string, AgentToolDefinition> = {
   upsert_contact_identity: {
     name: "upsert_contact_identity",
     description:
-      "Create or update a platform identity for a contact. Cross-claim conflicts return a reassign error.",
+      "Create or update a platform identity for a contact. Cross-claim conflicts return a reassign error. Network Snowball LinkedIn writes require a fresh identityEvidenceToken from attest_snowball_linkedin_identity.",
     category: "contacts",
     schema: upsertContactIdentitySchema,
     parameters: zodToParameters(upsertContactIdentitySchema),

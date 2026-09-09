@@ -90,7 +90,10 @@ export const createContactSchema = z.object({
   platformHandle: z.string().optional(),
   platformUrl: z.string().optional(),
   avatarUrl: z.string().optional().describe(
-    "Public https URL of the contact's profile photo. Set it whenever a photo is obtainable — a contact saved without one renders as bare initials in the Contacts list and nothing backfills it automatically. When a page scrape yields nothing, resolve it: https://unavatar.io/linkedin/user:{slug} for a LinkedIn person, https://unavatar.io/linkedin/company:{slug} for a LinkedIn organization page (the namespaces are not interchangeable — each 404s for the other's slugs), or https://unavatar.io/x/{handle} for X. Must be http(s); file:// URLs and local paths are rejected.",
+    "Optional public https URL of the contact's profile photo. For LinkedIn, derive any resolver slug only from a server-attested identity; never synthesize a profile slug to fill this field. Must be http(s); file:// URLs and local paths are rejected.",
+  ),
+  identityEvidenceToken: z.string().min(1).optional().describe(
+    "One-use token returned by attest_snowball_linkedin_identity. Required before a Network Snowball run can write a LinkedIn identity.",
   ),
   notes: z.string().optional(),
   funnelStage: funnelStage.optional(),
@@ -233,7 +236,7 @@ export const upsertContactIdentitySchema = z
     headline: z.string().optional(),
     bio: z.string().optional(),
     avatarUrl: z.string().optional().describe(
-      "Public https URL of the contact's profile photo. Set it whenever a photo is obtainable — a contact saved without one renders as bare initials in the Contacts list and nothing backfills it automatically. When a page scrape yields nothing, resolve it: https://unavatar.io/linkedin/user:{slug} for a LinkedIn person, https://unavatar.io/linkedin/company:{slug} for a LinkedIn organization page (the namespaces are not interchangeable — each 404s for the other's slugs), or https://unavatar.io/x/{handle} for X. Must be http(s); file:// URLs and local paths are rejected.",
+      "Optional public https URL of the contact's profile photo. For LinkedIn, derive any resolver slug only from a server-attested identity; never synthesize a profile slug to fill this field. Must be http(s); file:// URLs and local paths are rejected.",
     ),
     location: z.string().optional(),
     websiteUrl: z.string().optional(),
@@ -246,9 +249,36 @@ export const upsertContactIdentitySchema = z
     isPrimary: z.boolean().optional(),
     isActive: z.boolean().optional(),
     lastSyncedAt: z.number().int().optional(),
+    workflowRunId: z.string().min(1).optional(),
+    templateId: z.string().min(1).optional(),
+    candidateCompany: z.string().min(1).optional().describe(
+      "Candidate company used during Snowball attestation. Signals also checks any existing contact company and will not let this field override a conflicting contact.",
+    ),
+    candidateTitle: z.string().min(1).optional().describe(
+      "Candidate title used during Snowball attestation. Signals also checks any existing contact title and will not let this field override a conflicting contact.",
+    ),
+    identityEvidenceToken: z.string().min(1).optional().describe(
+      "One-use token returned by attest_snowball_linkedin_identity. Required before a Network Snowball run can write a LinkedIn identity.",
+    ),
   })
-  .refine((data) => data.id || (data.platform && data.platformUserId), {
-    message: "platform and platformUserId are required when creating a new identity",
+  .refine((data) => data.id || data.identityEvidenceToken || (data.platform && data.platformUserId), {
+    message: "platform and platformUserId, or identityEvidenceToken, are required when creating a new identity",
+  });
+
+export const attestSnowballLinkedInIdentitySchema = z
+  .object({
+    snowballScopeToken: z.string().min(1).describe(
+      "Dispatch capability copied exactly from the Network Snowball brief.",
+    ),
+    candidateName: z.string().min(1),
+    candidateCompany: z.string().min(1).optional(),
+    candidateTitle: z.string().min(1).optional(),
+    profileUrl: z.string().url().describe(
+      "Proposed LinkedIn /in/ URL. Signals opens it in the trusted browser session and derives the stored identity from the final URL.",
+    ),
+  })
+  .refine((data) => data.candidateCompany || data.candidateTitle, {
+    message: "candidateCompany or candidateTitle is required for browser-visible corroboration",
   });
 
 export const queryGoalsSchema = z.object({

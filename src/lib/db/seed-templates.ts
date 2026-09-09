@@ -28,7 +28,7 @@ import { buildWritingTemplateConfig } from "@/lib/workflows/signals-writing";
 import { buildContactWebResearchTemplateConfig } from "@/lib/workflows/contact-web-research";
 
 /** Bump this when seed template prompts change to trigger updates on existing installs. */
-const SEED_VERSION = 33;
+const SEED_VERSION = 34;
 
 export const CONTACT_PROFILE_PIPELINE_TEMPLATE_NAME = "Contact profile pipeline";
 export const DEDUPE_MERGE_ORGS_TEMPLATE_NAME = "Deduplicate & Merge Companies";
@@ -700,7 +700,7 @@ Follow the numbered "Network Snowball execution contract" below.
 3. Apply the Anti-Hallucination & Bot Gate:
    - Anti-Hallucination: Never guess or synthesize vanity profile URLs (e.g. guessing https://linkedin.com/in/<name> from a person's name). Only attach a profile URL/handle if verified from the page links/DOM or search. If unverified, leave profile_url blank.
    - Bot Gate: Skip automated bots (*bot, *_agent, *digest), scraper clones, and news feeds.
-4. Extract rich profile details: name, handle, avatarUrl (real photo image URL from platform DOM / Bookface / Twitter CDN, never synthetic redirecting URLs), bio/headline, company, and role.
+4. For every LinkedIn candidate, use the server-attested identity gate in the execution contract before write-back. Extract avatarUrl only after identity attestation, from the platform DOM/CDN when available.
 5. Ingest contacts via signals-pp-cli import contacts --file workflow-runs/<runId>/contacts.csv --dedupe --workflow-run-id <runId> --template-id <templateId>.
 6. In the notes column, clearly record the causal anchor (e.g. "role: Lead Investor in Acme Seed round").
 7. Report the mapped ecosystem cluster with links in this thread.
@@ -709,7 +709,7 @@ Follow the numbered "Network Snowball execution contract" below.
 ## Rules
 - Focus on real human decision-makers. Apply the 'Engage for visibility, skip for contacts' bot rule.
 - Never guess vanity profile links — verify handles against authentic source links or leave blank.
-- Always capture real, working avatarUrl (HTTP 200 image URL) so profiles render with real photos across the CRM.
+- Treat avatarUrl as downstream enrichment. Leave it blank when no real image can be confirmed; never guess a LinkedIn slug to satisfy avatar coverage.
 - Always call complete_workflow_run when finished; Signals stops browser sessions immediately and schedules linked terminal session release after the chat-linked turn finishes.
 - Keep within the maxContacts and maxHops limits in the runtime config.`,
     config: buildNetworkSnowballTemplateConfig(),

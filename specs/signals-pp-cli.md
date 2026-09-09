@@ -158,7 +158,9 @@ duplicate contact.
 
 **Exit codes:** `0` all succeeded or skipped cleanly · `3` file not found · `4` auth / `SIGNALS_NOT_RUNNING` · `5` partial row failure · `7` rate limited.
 
-**Idempotency:** re-running import with same file should skip existing contacts (dedupe), not duplicate.
+**Idempotency:** re-running import with the same file should skip or enrich existing contacts
+(dedupe), not duplicate them. For an evidence-backed row whose exact platform identity is already
+bound to the matched contact, the rerun does not resubmit the consumed one-use evidence token.
 
 **Batching (v1):** process rows in chunks of **50** (`--batch-size`, default 50, max 50). Hard cap **500 rows** per invocation (`--limit`, default unlimited up to 500); refuse above 500 with exit `2` and actionable message.
 
@@ -171,18 +173,25 @@ Agents stage `contacts.csv` or `contacts.json` under `workflow-runs/<runId>/`. B
 | Column | Required | Maps to |
 |--------|----------|---------|
 | `name` | yes | `create_contact.name` |
-| `company` | no | `create_contact.company` |
-| `title` | no | `enrich_contact.title` (fill-gaps) |
+| `company` | no | `create_contact.company` / `enrich_contact.company`; also `upsert_contact_identity.candidateCompany` when identity evidence is present |
+| `title` | no | `create_contact.title` / `enrich_contact.title` (fill-gaps); also `upsert_contact_identity.candidateTitle` when identity evidence is present |
 | `email` | no | primary `channels[]` entry (`channelType: email`) |
 | `platform` | no | `upsert_contact_identity.platform` |
 | `platform_user_id` | no | `upsert_contact_identity.platformUserId` |
 | `platform_handle` | no | `upsert_contact_identity.platformHandle` |
 | `profile_url` | no | `upsert_contact_identity.avatarUrl` when `https://` |
+| `identity_evidence_token` | no | `create_contact.identityEvidenceToken` / `upsert_contact_identity.identityEvidenceToken`; required for Network Snowball LinkedIn identities |
 | `notes` | no | `enrich_contact.notes` (fill-gaps) |
 
-**JSON:** array of objects with the same keys (camelCase aliases accepted: `platformUserId`, `platformHandle`, `profileUrl`).
+**JSON:** array of objects with the same keys (camelCase aliases accepted: `platformUserId`, `platformHandle`, `profileUrl`, `identityEvidenceToken`).
 
 Dedupe before create: exact normalized `email` (any email channel, not just primary), else `(platform, platformUserId)` via `resolve_platform_claim`.
+
+For a row matched to an existing contact, any required identity write runs before company,
+title, or notes enrichment. This lets the server validate Snowball identity evidence before the
+CLI mutates any existing contact fields. A rerun skips that identity write only when
+`resolve_platform_claim` confirms the row's exact identity is already bound to the same contact;
+an unclaimed or differently owned identity still requires fresh one-use evidence.
 
 ### 4.3 Layer 3 — local mirror (v1.1, optional)
 

@@ -64,6 +64,11 @@ import {
   releaseContactWebResearchTarget,
   type ContactWebResearchPreparedTarget,
 } from "@/lib/workflows/contact-web-research-target";
+import { isNetworkSnowballTemplateConfig } from "@/lib/workflows/network-snowball";
+import {
+  SNOWBALL_IDENTITY_SCOPE_TOKEN_CONFIG_KEY,
+  mintSnowballIdentityScopeToken,
+} from "@/lib/workflows/snowball-identity-evidence";
 
 const TEMPLATE_TO_WORKFLOW_TYPE: Record<string, WorkflowType> = {
   prospecting: "search",
@@ -378,6 +383,7 @@ export async function runTemplateViaRtx(
   let preparedLeaseId: string | null = null;
   let dispatchAccepted = false;
   let writingScopeMinted = false;
+  let snowballIdentityScopeMinted = false;
 
   /**
    * Drop the composed dispatch's capability when the dispatch never happened.
@@ -397,6 +403,18 @@ export async function runTemplateViaRtx(
       return "";
     } catch (error) {
       return ` Writing scope revocation failed: ${error instanceof Error ? error.message : "unknown error"}`;
+    }
+  }
+  function revokeSnowballIdentityScopeIfUnaccepted(): string {
+    if (!snowballIdentityScopeMinted || dispatchAccepted) return "";
+    try {
+      const current = parseObject(getWorkflowRun(run.id)?.config);
+      delete current[SNOWBALL_IDENTITY_SCOPE_TOKEN_CONFIG_KEY];
+      updateWorkflowRun(run.id, { config: JSON.stringify(current) });
+      snowballIdentityScopeMinted = false;
+      return "";
+    } catch (error) {
+      return ` Snowball identity scope revocation failed: ${error instanceof Error ? error.message : "unknown error"}`;
     }
   }
   const releaseLauncherOwnedLease = () => {
@@ -447,6 +465,22 @@ export async function runTemplateViaRtx(
         }),
       });
       writingScopeMinted = true;
+    }
+    const snowballIdentityScope = isNetworkSnowballTemplateConfig(mergedConfig)
+      ? mintSnowballIdentityScopeToken(run.id)
+      : null;
+    if (snowballIdentityScope) {
+      runtimeConfig = {
+        ...runtimeConfig,
+        [SNOWBALL_IDENTITY_SCOPE_TOKEN_CONFIG_KEY]: snowballIdentityScope.tokenHash,
+      };
+      updateWorkflowRun(run.id, {
+        config: JSON.stringify({
+          ...parseObject(getWorkflowRun(run.id)?.config),
+          [SNOWBALL_IDENTITY_SCOPE_TOKEN_CONFIG_KEY]: snowballIdentityScope.tokenHash,
+        }),
+      });
+      snowballIdentityScopeMinted = true;
     }
     // Resolve the acting profile once, and hand the row to the brief rather than letting the brief
     // re-derive a platform from loose config keys.
@@ -543,6 +577,7 @@ export async function runTemplateViaRtx(
       systemPromptOverride: input.systemPrompt,
       contactWebResearchContext,
       writingScopeToken: writingScope?.token,
+      snowballIdentityScopeToken: snowballIdentityScope?.token,
       platformTarget: actingTarget
         ? {
             id: actingTarget.id,
@@ -588,6 +623,7 @@ export async function runTemplateViaRtx(
         errorMessage += ` Lease cleanup failed: ${error instanceof Error ? error.message : "unknown error"}`;
       }
       errorMessage += revokeWritingScopeIfUnaccepted();
+      errorMessage += revokeSnowballIdentityScopeIfUnaccepted();
       updateWorkflowRun(run.id, {
         status: "failed",
         completedAt: now,
@@ -694,6 +730,7 @@ export async function runTemplateViaRtx(
         message += ` Lease cleanup failed: ${releaseError instanceof Error ? releaseError.message : "unknown error"}`;
       }
       message += revokeWritingScopeIfUnaccepted();
+      message += revokeSnowballIdentityScopeIfUnaccepted();
     }
     updateWorkflowRun(run.id, {
       status: "failed",
