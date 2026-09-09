@@ -3,11 +3,19 @@
  * Regression: provision verifier must bootstrap without ENOENT on repo paths.
  */
 import { spawnSync } from "node:child_process";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const script = path.join(root, "scripts/qa/verify-signals-plugin-provision.mjs");
+const manifest = JSON.parse(
+  fs.readFileSync(path.join(root, "realtimex-plugin/realtimex.plugin.json"), "utf8"),
+);
+const heartbeat = fs.readFileSync(
+  path.join(root, "realtimex-plugin/templates/signals/HEARTBEAT.md"),
+  "utf8",
+);
 
 const result = spawnSync(process.execPath, [script, "--deploy-instructions"], {
   cwd: root,
@@ -27,6 +35,23 @@ if (!out.includes("Settings") || !out.includes("Deploy")) {
 
 if (out.includes("ENOENT") || out.includes("package.json")) {
   console.error("deploy-instructions should not touch missing repo paths:", out);
+  process.exit(1);
+}
+
+if (!/^tasks:\s*\[\s*\]\s*$/m.test(heartbeat)) {
+  console.error("provisioned HEARTBEAT.md must contain a safe empty tasks starter");
+  process.exit(1);
+}
+
+const signalsProvision = manifest.provisions?.workspaces?.find(
+  (workspace) => workspace.key === "signals",
+);
+if (signalsProvision?.workingDirectory?.copyPolicy !== "copy-missing") {
+  console.error("Signals workspace provision must use copy-missing");
+  process.exit(1);
+}
+if (signalsProvision?.workingDirectory?.managedPaths?.includes("HEARTBEAT.md")) {
+  console.error("HEARTBEAT.md must not be managed or overwrite user edits on redeploy");
   process.exit(1);
 }
 

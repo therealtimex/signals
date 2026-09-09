@@ -37,6 +37,7 @@ const entries = listing
 const required = [
   "realtimex.plugin.json",
   "templates/signals/AGENTS.md",
+  "templates/signals/HEARTBEAT.md",
   "skills/realtimex-signals/SKILL.md",
   "skills/realtimex-signals/scripts/resolve-base-url.sh",
   "skills/realtimex-signals/scripts/run-signals-pp-cli.sh",
@@ -263,6 +264,10 @@ const workspaceAgentsMd = execSync(
   `unzip -p "${zipPath}" templates/signals/AGENTS.md`,
   { encoding: "utf8" }
 );
+const workspaceHeartbeatMd = execSync(
+  `unzip -p "${zipPath}" templates/signals/HEARTBEAT.md`,
+  { encoding: "utf8" }
+);
 if (!workspaceAgentsMd.includes("run-signals-pp-cli.sh health")) {
   errors.push("Signals workspace AGENTS.md missing health-pinned CLI bootstrap");
 }
@@ -274,6 +279,18 @@ if (workspaceAgentsMd.includes("run `scripts/resolve-base-url.sh`")) {
 }
 if (!workspaceAgentsMd.includes("Read IDENTITY.md, SOUL.md, VOICE.md, and BRAND.md when present; they are the canonical identity and voice for this workspace. HEARTBEAT.md is scheduling, not personality.")) {
   errors.push("Signals workspace AGENTS.md missing the static Personality pointer");
+}
+if (!/^tasks:\s*\[\s*\]\s*$/m.test(workspaceHeartbeatMd)) {
+  errors.push("Signals workspace HEARTBEAT.md missing the safe empty tasks starter");
+}
+const signalsProvision = manifest.provisions?.workspaces?.find(
+  (workspace) => workspace.key === "signals"
+);
+if (signalsProvision?.workingDirectory?.copyPolicy !== "copy-missing") {
+  errors.push("Signals workspace files must use copy-missing");
+}
+if (signalsProvision?.workingDirectory?.managedPaths?.includes("HEARTBEAT.md")) {
+  errors.push("Signals workspace HEARTBEAT.md must remain user-owned after initial copy");
 }
 
 const bundledNativeCli = entries.filter(
