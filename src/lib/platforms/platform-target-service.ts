@@ -218,12 +218,19 @@ export async function prepareCurrentPlatformTarget(
     const liveIdentity = await withPlatformBrowserPage(
       input.platform,
       RTX_PUBLISH_SESSION_NAME,
-      (page) =>
-        probeAuthenticatedPlatformIdentity(
+      async (page) => {
+        // Identity detection must run on an account-owned surface. A public profile tab can show
+        // another person's `/in/` URL and may omit the signed-in user's navigation controls.
+        await page.goto(getPlatformHomeUrl(input.platform), {
+          waitUntil: "domcontentloaded",
+          timeout: 30_000,
+        });
+        return probeAuthenticatedPlatformIdentity(
           input.platform,
           page,
           CURRENT_TARGET_LOGIN_TIMEOUT_MS,
-        ),
+        );
+      },
       env,
       fetchImpl,
     ).catch((error) => {

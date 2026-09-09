@@ -107,6 +107,11 @@ import {
   type ClaimedSnowballLinkedInEvidence,
 } from "@/lib/workflows/snowball-identity-evidence";
 import { isNetworkSnowballTemplateConfig } from "@/lib/workflows/network-snowball";
+import {
+  getNetworkSnowballTargetFromRunConfig,
+  releaseNetworkSnowballTargetFromRunConfig,
+} from "@/lib/workflows/network-snowball-target";
+import { RTX_PUBLISH_SESSION_NAME } from "@/lib/publish/constants";
 
 const DEFAULT_PAGE_SIZE = 20;
 
@@ -1378,6 +1383,7 @@ export async function handleCompleteWorkflowRun(input: z.infer<typeof completeWo
   const isContactResearch = isContactWebResearchTemplateConfig(runConfig);
   const isSnowball = isNetworkSnowballTemplateConfig(runConfig);
   const preparedTarget = getContactWebResearchTargetFromRunConfig(run.config);
+  const snowballBrowserTarget = getNetworkSnowballTargetFromRunConfig(run.config);
   const callbackResult: Record<string, unknown> = { ...(input.result ?? {}) };
   delete callbackResult[SNOWBALL_IDENTITY_EVIDENCE_RESULT_KEY];
   let effectiveStatus = input.status;
@@ -1472,6 +1478,14 @@ export async function handleCompleteWorkflowRun(input: z.infer<typeof completeWo
     } finally {
       leaseRelease = releaseContactWebResearchTargetFromRunConfig(run.config);
     }
+  } else if (isSnowball) {
+    try {
+      browserSessionTeardown = await stopRunningRtxBrowserSessions({
+        sessionNames: [snowballBrowserTarget?.sessionName ?? RTX_PUBLISH_SESSION_NAME],
+      });
+    } finally {
+      leaseRelease = releaseNetworkSnowballTargetFromRunConfig(run.config);
+    }
   }
 
   const [eventResult, completionMessage, parallelBrowserTeardown] = await Promise.all([
@@ -1485,7 +1499,7 @@ export async function handleCompleteWorkflowRun(input: z.infer<typeof completeWo
       processedItems: updatedRun?.processedItems ?? input.processedItems,
       successItems: updatedRun?.successItems ?? input.successItems,
     }),
-    isContactResearch
+    isContactResearch || isSnowball
       ? Promise.resolve(null)
       : stopRunningRtxBrowserSessions({ stopAllRunning: true }),
   ]);
@@ -1514,7 +1528,7 @@ export async function handleCompleteWorkflowRun(input: z.infer<typeof completeWo
       : { scheduled: false },
     completionThreadMessage: completionMessage,
     browserSessionTeardown,
-    ...(isContactResearch ? { leaseRelease } : {}),
+    ...(isContactResearch || isSnowball ? { leaseRelease } : {}),
     message: `Workflow run ${input.runId} marked as ${effectiveStatus}. Follow-on cascades and webhook dispatch completed.${teardownNote}`,
   };
 }

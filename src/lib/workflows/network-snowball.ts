@@ -17,6 +17,7 @@ import {
   readWorkflowCascadeConfig,
   type FollowOnActionType,
 } from "@/lib/workflows/cascade-types";
+import type { NetworkSnowballPreparedTarget } from "@/lib/workflows/network-snowball-target";
 
 export const NETWORK_SNOWBALL_TEMPLATE_NAME = "Network Snowball";
 
@@ -158,6 +159,7 @@ export function buildNetworkSnowballBriefSection(input: {
   config: Record<string, unknown>;
   signalsBaseUrl?: string;
   snowballIdentityScopeToken?: string;
+  browserTarget?: NetworkSnowballPreparedTarget;
 }): string {
   const snowball = readNetworkSnowballConfig(input.config);
   const seedDescriptor = snowball.seedValue
@@ -172,17 +174,26 @@ export function buildNetworkSnowballBriefSection(input: {
   };
   const attributionFlags = ` --workflow-run-id ${input.workflowRunId}${input.templateId ? ` --template-id ${input.templateId}` : ""}`;
   const identityScopeToken = input.snowballIdentityScopeToken ?? "<missing-dispatch-capability>";
+  const browserTarget = input.browserTarget;
+  const browserSessionName = browserTarget?.sessionName ?? "<missing-server-bound-session>";
+  const verifiedBrowserIdentity =
+    browserTarget?.verifiedHandle ?? browserTarget?.expectedHandle ?? "<missing-verified-identity>";
+  const linkedInGateInstruction = browserTarget?.platform === "x"
+    ? "    - Server-Enforced LinkedIn Gate: This is an X-only run with no bound LinkedIn target. Do not discover or write LinkedIn identities; Signals rejects LinkedIn attestation for this run."
+    : `    - Server-Enforced LinkedIn Gate: Before writing any LinkedIn identity, call \`attest_snowball_linkedin_identity\` with the proposed \`/in/\` URL, candidate name, and at least one candidate company or title. Signals renews this run's lease and navigates the same bound session \`${browserSessionName}\` itself, re-verifies its authenticated identity, checks the final URL plus visible top-card evidence, and returns a short-lived one-use \`identityEvidenceToken\` only on a match.`;
 
   const lines = [
     "Network Snowball execution contract:",
     `S0. Objective: Roll the network outward from seed signal ${seedDescriptor} to discover and map up to ${snowball.maxContacts} connected contact(s) focusing on ${focusDescriptions[snowball.focus]} (max depth: ${snowball.maxHops} hop(s)).`,
-    "S1. Inspect Seed Signal: Connect over CDP via agent-browser to navigate to the seed post URL, profile, or organization. Parse the core event context (e.g. Funding round amount, launch specs, executive hire, or partnership announcement).",
+    `S1. Inspect Seed Signal: Attach agent-browser over CDP to the already-running server-bound session named \`${browserSessionName}\` only. It was authenticated as ${browserTarget?.platform ?? "<missing-platform>"} identity \`${verifiedBrowserIdentity}\` before dispatch. Do not create, start, stop, delete, or substitute a browser session. Navigate in that session to the seed post URL, profile, or organization and parse the core event context (e.g. funding round amount, launch specs, executive hire, or partnership announcement).`,
+    "    - Browser privacy boundary: Never read document.cookie, localStorage, sessionStorage, browser profile files, authorization headers, or other credential material. Use visible page content and links only.",
+    "    - Workflow boundary: This is a data-plane run. Never inspect or edit the Signals source tree, package files, tests, or runtime implementation. If a workflow tool or identity gate fails, record the failure and finalize the run as partial/failed; do not patch around the gate.",
     `S2. Discover Connected Nodes: Traverse 1st-degree relational edges from the seed entity:`,
     `    - Backers / Investors: Extract tagged partner handles, mentioned VC funds, and congratulatory angels in replies.`,
     `    - Founding Team: Extract co-founders, CTO, and core team members mentioned or linked in the entity bio.`,
     "S3. Anti-Hallucination & Bot Filter Gate:",
     "    - Anti-Hallucination Rule: Never guess or synthesize vanity profile URLs (e.g. guessing https://linkedin.com/in/<name> from a person's name). Only attach a profile URL or handle if it was explicitly extracted from the page links/DOM or verified via direct search. If unverified, leave profile_url blank rather than mapping to a wrong individual.",
-    "    - Server-Enforced LinkedIn Gate: Before writing any LinkedIn identity, call `attest_snowball_linkedin_identity` with the proposed `/in/` URL, candidate name, and at least one candidate company or title. Signals navigates the trusted authenticated browser session itself, checks the final URL plus visible top-card evidence, and returns a short-lived one-use `identityEvidenceToken` only on a match.",
+    linkedInGateInstruction,
     `    - snowballScopeToken: "${identityScopeToken}". Copy it exactly into each attestation call; it is bound to workflow run ${input.workflowRunId}. Never put this scope token in contacts.csv.`,
     "    - Use only the `platformUserId`, `platformHandle`, and `platformUrl` returned by attestation. Put its `identityEvidenceToken` in that candidate's `identity_evidence_token` CSV field (or the direct write's `identityEvidenceToken`). Keep the corroborated company/title unchanged through write-back; for a direct identity upsert, pass them as `candidateCompany` / `candidateTitle`. A same-name candidate with different context, or any rejected or expired candidate, must not be committed; re-open and re-attest after approval if necessary.",
     "    - Bot/Clone Filter: Apply the 'Engage for visibility, skip for contacts' rule. Discard automated news bots, clone mirror accounts, and impersonal aggregators (*bot, *daily, *digest) from contacts.csv.",
@@ -194,8 +205,8 @@ export function buildNetworkSnowballBriefSection(input: {
       : `S5. Auto-commit & Graph Edge Linking: Keep Auto-commit enabled. For each accepted candidate, attest first, then stage workflow-runs/${input.workflowRunId}/contacts.csv (header: name,company,title,email,platform,platform_user_id,platform_handle,profile_url,avatar_url,identity_evidence_token,notes) and commit with:\n    .claude/skills/realtimex-signals/scripts/run-signals-pp-cli.sh import contacts --file workflow-runs/${input.workflowRunId}/contacts.csv --dedupe${attributionFlags}\n    The server rejects any Snowball LinkedIn row without valid evidence before persistence. In the notes field, explicitly record the causal relationship (e.g., 'role: Lead Investor in Acme Seed round' or 'role: Co-Founder & CTO').`,
     "S6. Report Progress: Provide a concise summary table in this thread listing discovered contacts, their roles, identity attestation outcome, avatar URLs when available, and platform links. State avatar coverage as `avatars: N/M`, but treat missing avatars as enrichment gaps rather than identity evidence failures.",
     "S7. Teardown & Resource Release:",
-    "    - Terminate Spawned Browser Sessions: Immediately stop/close any browser sessions opened during this run (agent-browser close / realtimex-pp-cli browser-session stop) to release Chromium RAM and CPU.",
-    "    - Terminate Agent Session: Call complete_workflow_run (step 10) when finished. Signals stops running browser sessions immediately and schedules release of this workflow's linked terminal session after the chat-linked turn finishes — do not send further messages in this thread after completion.",
+    `    - Server-Owned Browser Teardown: Do not close the browser yourself. Call complete_workflow_run (step 10) exactly once when finished. Before that call returns, Signals stops the exact bound session \`${browserSessionName}\` and releases this run's lease, freeing Chromium RAM and CPU without touching unrelated sessions.`,
+    "    - Terminate Agent Session: Completion also schedules release of this workflow's linked terminal session after the chat-linked turn finishes — do not send further messages in this thread after completion.",
   ];
 
   return lines.join("\n");

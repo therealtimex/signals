@@ -4,14 +4,20 @@ import { getContactById } from "@/lib/db/queries/contacts";
 import { getWorkflowRun, listWorkflowRuns, updateWorkflowRun } from "@/lib/db/queries/workflows";
 import type { WorkflowRunWithSteps } from "@/lib/db/types";
 import {
+  getPlatformHomeUrl,
   isLinkedInLoggedOutUrl,
-  probePlatformLogin,
+  probeAuthenticatedPlatformIdentity,
   urlMatchesPlatformHost,
   withPlatformBrowserPage,
 } from "@/lib/platforms/browser-connection";
-import { RTX_PUBLISH_SESSION_NAME } from "@/lib/publish/constants";
+import { normalizePlatformTargetIdentity } from "@/lib/platforms/target-identity";
+import { PlatformTargetError } from "@/lib/platforms/target-errors";
 import { sha256 } from "@/lib/writing/hash";
 import { isNetworkSnowballTemplateConfig } from "@/lib/workflows/network-snowball";
+import {
+  getNetworkSnowballTargetFromRunConfig,
+  renewNetworkSnowballTargetLease,
+} from "@/lib/workflows/network-snowball-target";
 
 export const SNOWBALL_IDENTITY_SCOPE_TOKEN_CONFIG_KEY =
   "_snowballIdentityScopeTokenHash";
@@ -89,6 +95,7 @@ export type SnowballIdentityEvidenceErrorReason =
   | "run_not_found"
   | "run_not_active"
   | "run_not_snowball"
+  | "browser_target_unavailable"
   | "profile_url_invalid"
   | "profile_not_authenticated"
   | "profile_unavailable"
@@ -303,15 +310,39 @@ function writeEvidenceLedger(
 
 async function observeLinkedInProfile(
   proposedProfileUrl: string,
-  sessionName = RTX_PUBLISH_SESSION_NAME,
+  sessionName: string,
+  expectedHandle: string,
 ): Promise<LinkedInProfileObservation> {
   return withPlatformBrowserPage("linkedin", sessionName, async (page: Page) => {
+    await page.goto(getPlatformHomeUrl("linkedin"), {
+      waitUntil: "domcontentloaded",
+      timeout: 30_000,
+    });
+    const liveIdentity = await probeAuthenticatedPlatformIdentity("linkedin", page, 8_000);
+    const expectedIdentity = normalizePlatformTargetIdentity("linkedin", expectedHandle);
+    const observedIdentity = normalizePlatformTargetIdentity(
+      "linkedin",
+      liveIdentity.detectedHandle,
+    );
+    const authenticated = Boolean(
+      liveIdentity.loggedIn &&
+      expectedIdentity.handleNormalized &&
+      expectedIdentity.handleNormalized === observedIdentity.handleNormalized,
+    );
+    if (!authenticated) {
+      return {
+        finalUrl: page.url(),
+        authenticated: false,
+        visibleName: "",
+        headline: "",
+        topCardText: "",
+      };
+    }
     await page.goto(proposedProfileUrl, {
       waitUntil: "domcontentloaded",
       timeout: 30_000,
     });
     await page.waitForTimeout(500);
-    const authenticated = await probePlatformLogin("linkedin", page, 5_000);
     const extracted = await page.evaluate(() => {
       const text = (element: Element | null): string =>
         element?.textContent?.replace(/\s+/g, " ").trim() ?? "";
@@ -432,7 +463,11 @@ export async function attestSnowballLinkedInIdentity(
     profileUrl: string;
   },
   options: {
-    observe?: (profileUrl: string, sessionName: string) => Promise<LinkedInProfileObservation>;
+    observe?: (
+      profileUrl: string,
+      sessionName: string,
+      expectedHandle: string,
+    ) => Promise<LinkedInProfileObservation>;
     now?: () => number;
   } = {},
 ): Promise<{
@@ -487,8 +522,27 @@ export async function attestSnowballLinkedInIdentity(
     );
   }
 
+  const browserTarget = getNetworkSnowballTargetFromRunConfig(run.config);
+  const expectedHandle = browserTarget?.verifiedHandle ?? browserTarget?.expectedHandle;
+  if (!browserTarget || browserTarget.platform !== "linkedin" || !expectedHandle) {
+    throw new SnowballIdentityEvidenceError(
+      "browser_target_unavailable",
+      "LinkedIn identity attestation requires the server-bound authenticated LinkedIn browser target for this run.",
+    );
+  }
+  try {
+    renewNetworkSnowballTargetLease(browserTarget, run.id);
+  } catch (error) {
+    if (!(error instanceof PlatformTargetError)) throw error;
+    throw new SnowballIdentityEvidenceError(
+      "browser_target_unavailable",
+      "The server-bound LinkedIn browser-session lease is no longer current. Restart Network Snowball to obtain a fresh authenticated session.",
+      { code: error.code, ...(error.details ?? {}) },
+    );
+  }
+
   const observe = options.observe ?? observeLinkedInProfile;
-  const observation = await observe(input.profileUrl, RTX_PUBLISH_SESSION_NAME);
+  const observation = await observe(input.profileUrl, browserTarget.sessionName, expectedHandle);
   const { identity, matchedSignals } = validateObservation({
     candidateName: input.candidateName,
     candidateCompany: input.candidateCompany,
@@ -512,7 +566,7 @@ export async function attestSnowballLinkedInIdentity(
     displayName: observation.visibleName.trim(),
     headline: observation.headline.trim() || null,
     matchedSignals,
-    browserSessionName: RTX_PUBLISH_SESSION_NAME,
+    browserSessionName: browserTarget.sessionName,
     pageDigest: sha256(JSON.stringify({
       finalUrl: identity.platformUrl,
       visibleName: observation.visibleName,

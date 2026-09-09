@@ -37,6 +37,7 @@ import {
   dispatchTerminalAgentViaSendMessage,
   openRtxRuntimeLauncher,
 } from "@/lib/rtx/runtime-sessions";
+import { stopRunningRtxBrowserSessions } from "@/lib/rtx/resource-teardown";
 import {
   buildWorkflowRunBriefRoutingMessage,
   workflowRunBriefRelativePath,
@@ -64,7 +65,17 @@ import {
   releaseContactWebResearchTarget,
   type ContactWebResearchPreparedTarget,
 } from "@/lib/workflows/contact-web-research-target";
-import { isNetworkSnowballTemplateConfig } from "@/lib/workflows/network-snowball";
+import {
+  NETWORK_SNOWBALL_CONFIG_KEY,
+  isNetworkSnowballTemplateConfig,
+} from "@/lib/workflows/network-snowball";
+import {
+  SNOWBALL_BROWSER_SETTINGS_PATH,
+  SNOWBALL_BROWSER_TARGET_CONFIG_KEY,
+  prepareNetworkSnowballTarget,
+  releaseNetworkSnowballTarget,
+  type NetworkSnowballPreparedTarget,
+} from "@/lib/workflows/network-snowball-target";
 import {
   SNOWBALL_IDENTITY_SCOPE_TOKEN_CONFIG_KEY,
   mintSnowballIdentityScopeToken,
@@ -266,6 +277,7 @@ export async function runTemplateViaRtx(
 
   const storedTemplateConfig = mergeRunConfig(template);
   const isContactNurture = isContactNurtureTemplateConfig(storedTemplateConfig);
+  const isNetworkSnowball = isNetworkSnowballTemplateConfig(storedTemplateConfig);
   let mergedConfig = mergeRunConfig(template, input.config);
   // The approval gate is capability-derived and server-owned. A caller may select a target and
   // request approval, but it cannot submit a gate that widens the surface policy. Workflow kind
@@ -277,6 +289,12 @@ export async function runTemplateViaRtx(
       ...mergedConfig,
       [CONTACT_NURTURE_CONFIG_KEY]: storedTemplateConfig[CONTACT_NURTURE_CONFIG_KEY],
       [WRITING_INTENT_CONFIG_KEY]: storedTemplateConfig[WRITING_INTENT_CONFIG_KEY],
+    };
+  }
+  if (isNetworkSnowball) {
+    mergedConfig = {
+      ...mergedConfig,
+      [NETWORK_SNOWBALL_CONFIG_KEY]: storedTemplateConfig[NETWORK_SNOWBALL_CONFIG_KEY],
     };
   }
   const actingTarget = typeof mergedConfig.targetId === "string" && mergedConfig.targetId.trim()
@@ -381,6 +399,8 @@ export async function runTemplateViaRtx(
   }
 
   let preparedLeaseId: string | null = null;
+  let preparedSessionName: string | null = null;
+  let preparedLeaseOwner: "contact_research" | "network_snowball" | null = null;
   let dispatchAccepted = false;
   let writingScopeMinted = false;
   let snowballIdentityScopeMinted = false;
@@ -417,11 +437,30 @@ export async function runTemplateViaRtx(
       return ` Snowball identity scope revocation failed: ${error instanceof Error ? error.message : "unknown error"}`;
     }
   }
-  const releaseLauncherOwnedLease = () => {
-    if (!preparedLeaseId) return null;
+  const releaseLauncherOwnedResources = async () => {
+    const sessionName = preparedSessionName;
+    preparedSessionName = null;
+    let browserError: unknown;
+    try {
+      if (sessionName) {
+        await stopRunningRtxBrowserSessions({ sessionNames: [sessionName] }, env, fetchImpl);
+      }
+    } catch (error) {
+      browserError = error;
+    }
+    if (!preparedLeaseId) {
+      if (browserError) throw browserError;
+      return null;
+    }
     const leaseId = preparedLeaseId;
+    const owner = preparedLeaseOwner;
     preparedLeaseId = null;
-    return releaseContactWebResearchTarget(leaseId);
+    preparedLeaseOwner = null;
+    const released = owner === "network_snowball"
+      ? releaseNetworkSnowballTarget(leaseId)
+      : releaseContactWebResearchTarget(leaseId);
+    if (browserError) throw browserError;
+    return released;
   };
 
   try {
@@ -465,22 +504,6 @@ export async function runTemplateViaRtx(
         }),
       });
       writingScopeMinted = true;
-    }
-    const snowballIdentityScope = isNetworkSnowballTemplateConfig(mergedConfig)
-      ? mintSnowballIdentityScopeToken(run.id)
-      : null;
-    if (snowballIdentityScope) {
-      runtimeConfig = {
-        ...runtimeConfig,
-        [SNOWBALL_IDENTITY_SCOPE_TOKEN_CONFIG_KEY]: snowballIdentityScope.tokenHash,
-      };
-      updateWorkflowRun(run.id, {
-        config: JSON.stringify({
-          ...parseObject(getWorkflowRun(run.id)?.config),
-          [SNOWBALL_IDENTITY_SCOPE_TOKEN_CONFIG_KEY]: snowballIdentityScope.tokenHash,
-        }),
-      });
-      snowballIdentityScopeMinted = true;
     }
     // Resolve the acting profile once, and hand the row to the brief rather than letting the brief
     // re-derive a platform from loose config keys.
@@ -542,6 +565,8 @@ export async function runTemplateViaRtx(
       }
       researchTarget = prepared.target;
       preparedLeaseId = researchTarget.leaseId;
+      preparedSessionName = researchTarget.sessionName;
+      preparedLeaseOwner = "contact_research";
       runtimeConfig = { ...runtimeConfig, researchTarget };
       updateWorkflowRun(run.id, {
         config: buildStoredRunConfig(template, runtimeConfig, {
@@ -549,6 +574,86 @@ export async function runTemplateViaRtx(
           threadSlug,
         }),
       });
+    }
+
+    let snowballTarget: NetworkSnowballPreparedTarget | undefined;
+    if (isNetworkSnowballTemplateConfig(runtimeConfig)) {
+      const prepared = await prepareNetworkSnowballTarget(
+        { config: runtimeConfig, workflowRunId: run.id },
+        env,
+        fetchImpl,
+      );
+      if (!prepared.ok) {
+        const completedAt = Math.floor(Date.now() / 1_000);
+        updateWorkflowRun(run.id, {
+          status: "failed",
+          completedAt,
+          errors: JSON.stringify([prepared.error.message]),
+          errorItems: 1,
+          result: JSON.stringify({
+            message: prepared.error.message,
+            partial: true,
+            blocked: prepared.error.code,
+          }),
+        });
+        createWorkflowStep({
+          workflowRunId: run.id,
+          stepIndex: nextStepIndex(run.id),
+          stepType: "error",
+          status: "failed",
+          tool: "snowball_browser_target_preflight",
+          error: prepared.error.message,
+          output: JSON.stringify({
+            code: prepared.error.code,
+            ...(prepared.error.details ?? {}),
+          }),
+          durationMs: 0,
+        });
+        return {
+          success: false,
+          error: prepared.error.message,
+          errorCode: "snowball_browser_target_unavailable",
+          httpStatus: 409,
+          workflowRunId: run.id,
+          details: {
+            reason: prepared.error.code,
+            ...(prepared.error.details ?? {}),
+            settingsPath: SNOWBALL_BROWSER_SETTINGS_PATH,
+            settingsTab: "Platform connections",
+          },
+        };
+      }
+      snowballTarget = prepared.target;
+      preparedLeaseId = snowballTarget.leaseId;
+      preparedSessionName = snowballTarget.sessionName;
+      preparedLeaseOwner = "network_snowball";
+      runtimeConfig = {
+        ...runtimeConfig,
+        [SNOWBALL_BROWSER_TARGET_CONFIG_KEY]: snowballTarget,
+      };
+      updateWorkflowRun(run.id, {
+        config: buildStoredRunConfig(template, runtimeConfig, {
+          workspaceSlug,
+          threadSlug,
+        }),
+      });
+    }
+
+    const snowballIdentityScope = snowballTarget
+      ? mintSnowballIdentityScopeToken(run.id)
+      : null;
+    if (snowballIdentityScope) {
+      runtimeConfig = {
+        ...runtimeConfig,
+        [SNOWBALL_IDENTITY_SCOPE_TOKEN_CONFIG_KEY]: snowballIdentityScope.tokenHash,
+      };
+      updateWorkflowRun(run.id, {
+        config: JSON.stringify({
+          ...parseObject(getWorkflowRun(run.id)?.config),
+          [SNOWBALL_IDENTITY_SCOPE_TOKEN_CONFIG_KEY]: snowballIdentityScope.tokenHash,
+        }),
+      });
+      snowballIdentityScopeMinted = true;
     }
 
     let contactWebResearchContext: ContactWebResearchBriefContext | undefined;
@@ -578,6 +683,7 @@ export async function runTemplateViaRtx(
       contactWebResearchContext,
       writingScopeToken: writingScope?.token,
       snowballIdentityScopeToken: snowballIdentityScope?.token,
+      snowballBrowserTarget: snowballTarget,
       platformTarget: actingTarget
         ? {
             id: actingTarget.id,
@@ -618,9 +724,9 @@ export async function runTemplateViaRtx(
     if (!launch.success) {
       let errorMessage = launch.error;
       try {
-        releaseLauncherOwnedLease();
+        await releaseLauncherOwnedResources();
       } catch (error) {
-        errorMessage += ` Lease cleanup failed: ${error instanceof Error ? error.message : "unknown error"}`;
+        errorMessage += ` Resource cleanup failed: ${error instanceof Error ? error.message : "unknown error"}`;
       }
       errorMessage += revokeWritingScopeIfUnaccepted();
       errorMessage += revokeSnowballIdentityScopeIfUnaccepted();
@@ -725,9 +831,9 @@ export async function runTemplateViaRtx(
     let message = error instanceof Error ? error.message : "Launch failed";
     if (!dispatchAccepted) {
       try {
-        releaseLauncherOwnedLease();
+        await releaseLauncherOwnedResources();
       } catch (releaseError) {
-        message += ` Lease cleanup failed: ${releaseError instanceof Error ? releaseError.message : "unknown error"}`;
+        message += ` Resource cleanup failed: ${releaseError instanceof Error ? releaseError.message : "unknown error"}`;
       }
       message += revokeWritingScopeIfUnaccepted();
       message += revokeSnowballIdentityScopeIfUnaccepted();

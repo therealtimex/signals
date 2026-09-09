@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { invokeAgentTool } from "@/lib/agent-tools/invoke";
 import {
   countContacts,
@@ -20,6 +20,12 @@ import {
   mintSnowballIdentityScopeToken,
 } from "@/lib/workflows/snowball-identity-evidence";
 import { buildNetworkSnowballTemplateConfig } from "@/lib/workflows/network-snowball";
+import {
+  ensureBrowserConnection,
+  registerPlatformTarget,
+} from "@/lib/db/queries/platform-targets";
+import { acquireSessionLease, releaseSessionLease } from "@/lib/leases/session-lease";
+import { SNOWBALL_BROWSER_TARGET_CONFIG_KEY } from "@/lib/workflows/network-snowball-target";
 
 function createSnowballRun() {
   const template = createTemplate({
@@ -36,14 +42,44 @@ function createSnowballRun() {
     startedAt: 1_800_000_000,
     config: JSON.stringify(buildNetworkSnowballTemplateConfig()),
   });
+  const sessionName = `signals-publish-${run.id}`;
+  const ownerHandle = `/in/session-owner-${run.id}`;
+  const connection = ensureBrowserConnection({ sessionName });
+  const target = registerPlatformTarget({
+    connectionId: connection.id,
+    platform: "linkedin",
+    kind: "profile",
+    name: ownerHandle,
+    handle: ownerHandle,
+    capabilities: ["browse", "publish"],
+    source: "test",
+  });
+  const lease = acquireSessionLease(connection.id, {
+    holder: `network-snowball:${run.id}`,
+    targetId: target.id,
+    intent: "browse",
+    ttlSeconds: 1_800,
+  });
   const scope = mintSnowballIdentityScopeToken(run.id);
   updateWorkflowRun(run.id, {
     config: JSON.stringify({
       ...buildNetworkSnowballTemplateConfig(),
       [SNOWBALL_IDENTITY_SCOPE_TOKEN_CONFIG_KEY]: scope.tokenHash,
+      [SNOWBALL_BROWSER_TARGET_CONFIG_KEY]: {
+        targetId: target.id,
+        platform: "linkedin",
+        source: "session",
+        sessionName,
+        startUrl: `https://www.linkedin.com${ownerHandle}`,
+        expectedHandle: ownerHandle,
+        verifiedHandle: ownerHandle,
+        leaseId: lease.leaseId,
+        leaseExpiresAt: lease.expiresAt,
+        preparedAt: Math.floor(Date.now() / 1_000),
+      },
     }),
   });
-  return { template, run: getWorkflowRun(run.id)!, scopeToken: scope.token };
+  return { template, run: getWorkflowRun(run.id)!, scopeToken: scope.token, sessionName };
 }
 
 function observe(overrides: Partial<{
@@ -87,7 +123,7 @@ describe("Snowball LinkedIn identity evidence", () => {
   });
 
   it("derives the persisted identity from the final browser URL before auto-commit", async () => {
-    const { template, run, scopeToken } = createSnowballRun();
+    const { template, run, scopeToken, sessionName } = createSnowballRun();
     const evidence = await attest(scopeToken);
 
     const created = await invokeAgentTool("create_contact", {
@@ -119,7 +155,7 @@ describe("Snowball LinkedIn identity evidence", () => {
     expect(platformData[SNOWBALL_IDENTITY_PLATFORM_DATA_KEY]).toMatchObject({
       version: 1,
       workflowRunId: run.id,
-      browserSessionName: "signals-publish",
+      browserSessionName: sessionName,
       matchedSignals: expect.arrayContaining(["company:Acme Inc.", "title:Founder"]),
     });
     const ledger = JSON.parse(getWorkflowRun(run.id)?.result ?? "{}")[
@@ -370,5 +406,25 @@ describe("Snowball LinkedIn identity evidence", () => {
       },
       { observe: observe() },
     )).rejects.toBeInstanceOf(SnowballIdentityEvidenceError);
+  });
+
+  it("rejects attestation before browser navigation when the bound lease is gone", async () => {
+    const { run, scopeToken } = createSnowballRun();
+    const config = JSON.parse(run.config ?? "{}") as Record<string, unknown>;
+    const target = config[SNOWBALL_BROWSER_TARGET_CONFIG_KEY] as { leaseId: string };
+    releaseSessionLease(target.leaseId);
+    const observer = vi.fn(observe());
+
+    await expect(attestSnowballLinkedInIdentity(
+      {
+        snowballScopeToken: scopeToken,
+        candidateName: "Jane Doe",
+        candidateCompany: "Acme Inc.",
+        candidateTitle: "Founder",
+        profileUrl: "https://www.linkedin.com/in/jane-doe/",
+      },
+      { observe: observer },
+    )).rejects.toMatchObject({ reason: "browser_target_unavailable" });
+    expect(observer).not.toHaveBeenCalled();
   });
 });
