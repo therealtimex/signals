@@ -26,6 +26,8 @@ import type { WorkflowRunSubject } from "@/lib/workflows/workflow-run-subjects-s
 import { workflowSubjectLookup } from "@/lib/workflows/workflow-run-subjects-shared";
 import type { WorkflowRunProposalSummary } from "@/lib/writing/workflow-run-proposals";
 import { WorkflowRunProposalsPanel } from "./workflow-run-proposals";
+import { WorkflowRunAgentThreadButton } from "./workflow-run-agent-thread-button";
+import type { WorkflowRunAgentThread } from "@/lib/workflows/workflow-run-agent-thread";
 
 type PipelineRunContext = {
   backlogTotal: number;
@@ -112,12 +114,14 @@ function StatCard({
 
 export function WorkflowRunLive({
   initialRun,
+  initialAgentThread,
   subjects = [],
   contactsCreated = 0,
   orgsCreated = 0,
   initialProposalSummary = null,
 }: {
   initialRun: WorkflowRunWithSteps;
+  initialAgentThread: WorkflowRunAgentThread;
   subjects?: WorkflowRunSubject[];
   contactsCreated?: number;
   orgsCreated?: number;
@@ -129,6 +133,7 @@ export function WorkflowRunLive({
   // Use polled data when available, fall back to server-rendered initial data
   const run = data?.run ?? initialRun;
   const steps = data?.steps ?? initialRun.steps;
+  const agentThread = data?.agentThread ?? initialAgentThread;
   const subjectById = workflowSubjectLookup(subjects);
 
   const statusConfig = STATUS_CONFIG[run.status] ?? STATUS_CONFIG.pending;
@@ -157,6 +162,11 @@ export function WorkflowRunLive({
             Live
           </span>
         )}
+        <WorkflowRunAgentThreadButton
+          runId={run.id}
+          runStatus={run.status}
+          agentThread={agentThread}
+        />
         <Badge
           variant={statusConfig.variant}
           className="text-xs px-2 py-0.5"
@@ -299,6 +309,9 @@ export function WorkflowRunLive({
         animate={isPolling}
         subjectById={subjectById}
         runStartedAt={run.startedAt}
+        runId={run.id}
+        runStatus={run.status}
+        agentThread={agentThread}
       />
 
       {/* Errors (if any) */}

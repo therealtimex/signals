@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import type { WorkflowStep } from "@/lib/db/types";
 import type { WorkflowRunProposalSummary } from "@/lib/writing/workflow-run-proposals";
+import type { WorkflowRunAgentThread } from "@/lib/workflows/workflow-run-agent-thread";
 
 const POLL_INTERVAL_MS = 2000;
 const TERMINAL_STATUSES = ["completed", "failed", "cancelled"];
@@ -28,6 +29,7 @@ export interface ProgressData {
     result: string | null;
   };
   steps: WorkflowStep[];
+  agentThread: WorkflowRunAgentThread;
   isComplete: boolean;
   totalSteps: number;
   proposalSummary: WorkflowRunProposalSummary | null;

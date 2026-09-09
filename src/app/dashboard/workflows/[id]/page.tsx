@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { WorkflowRunLive } from "./workflow-run-live";
 import { resolveWorkflowRunSubjectsForDetail } from "@/lib/workflows/workflow-run-subjects";
 import { summarizeWorkflowRunProposals } from "@/lib/writing/workflow-run-proposals";
+import { resolveWorkflowRunAgentThread } from "@/lib/workflows/workflow-run-agent-thread";
 
 const TYPE_ICONS: Record<string, typeof RefreshCw> = {
   sync: RefreshCw,
@@ -114,6 +115,7 @@ export default async function WorkflowDetailPage({
       {/* All dynamic content handled by client component */}
       <WorkflowRunLive
         initialRun={run}
+        initialAgentThread={resolveWorkflowRunAgentThread(run)}
         subjects={subjects}
         contactsCreated={countContactsByCreatedWorkflowRun(id)}
         orgsCreated={countOrgsByCreatedWorkflowRun(id)}

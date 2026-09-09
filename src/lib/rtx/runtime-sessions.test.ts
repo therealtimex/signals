@@ -5,6 +5,7 @@ import {
   isTerminalRuntimeSessionBusy,
   launchTerminalCliAgent,
   listTerminalRuntimeSessions,
+  openRtxRuntimeLauncher,
   readRtxJsonBody,
   resolveActiveTerminalSessionIdForThread,
   terminateTerminalRuntimeSession,
@@ -24,6 +25,40 @@ describe("readRtxJsonBody", () => {
       error: "Not Found",
       code: "RTX_RUNTIME_SESSIONS_UNAVAILABLE",
     });
+  });
+});
+
+describe("openRtxRuntimeLauncher", () => {
+  it("forwards tab presentation when opening an existing workflow thread", async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url =
+        typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      expect(url).toBe("http://127.0.0.1:3001/sdk/desktop/runtime-sessions/open-launcher");
+      expect(JSON.parse(String(init?.body))).toEqual({
+        workspaceSlug: "signals",
+        threadSlug: "network-snowball",
+        presentationMode: "tab",
+        reason: "Open workflow run run-1",
+        requestedBy: "Signals",
+      });
+      return new Response(JSON.stringify({ success: true }), { status: 200 });
+    });
+
+    await expect(
+      openRtxRuntimeLauncher(
+        {
+          workspaceSlug: "signals",
+          threadSlug: "network-snowball",
+          presentationMode: "tab",
+          reason: "Open workflow run run-1",
+        },
+        {
+          RTX_APP_ID: "app-1",
+          RTX_API_BASE_URL: "http://127.0.0.1:3001",
+        },
+        fetchImpl as typeof fetch,
+      ),
+    ).resolves.toEqual({ success: true });
   });
 });
 
