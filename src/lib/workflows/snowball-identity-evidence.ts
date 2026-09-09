@@ -72,6 +72,18 @@ export type SnowballEvidenceAudit = {
   auditedIdentityIds: string[];
 };
 
+type SnowballCandidateContext = {
+  candidateName: string;
+  candidateCompany?: string | null;
+  candidateTitle?: string | null;
+};
+
+type SnowballCandidateContextMismatch = {
+  field: "name" | "company" | "title";
+  attestedValue: string;
+  candidateValue: string | null;
+};
+
 export type SnowballIdentityEvidenceErrorReason =
   | "scope_invalid"
   | "run_not_found"
@@ -156,6 +168,59 @@ function normalizeHumanText(value: string): string {
     .replace(/[^\p{L}\p{N}]+/gu, " ")
     .trim()
     .replace(/\s+/g, " ");
+}
+
+function findCandidateContextMismatch(
+  evidence: Pick<
+    SnowballIdentityEvidenceRecord,
+    "candidateName" | "candidateNameKey" | "candidateCompany" | "candidateTitle"
+  >,
+  candidate: SnowballCandidateContext,
+  options: { allowMissingCorroboratedFields?: boolean } = {},
+): SnowballCandidateContextMismatch | null {
+  if (normalizeHumanText(candidate.candidateName) !== evidence.candidateNameKey) {
+    return {
+      field: "name",
+      attestedValue: evidence.candidateName,
+      candidateValue: candidate.candidateName.trim() || null,
+    };
+  }
+
+  for (const [field, attestedValue, candidateValue] of [
+    ["company", evidence.candidateCompany, candidate.candidateCompany],
+    ["title", evidence.candidateTitle, candidate.candidateTitle],
+  ] as const) {
+    if (!attestedValue) continue;
+    const normalizedCandidate = normalizeHumanText(candidateValue ?? "");
+    if (options.allowMissingCorroboratedFields && !normalizedCandidate) continue;
+    if (normalizedCandidate !== normalizeHumanText(attestedValue)) {
+      return {
+        field,
+        attestedValue,
+        candidateValue: candidateValue?.trim() || null,
+      };
+    }
+  }
+  return null;
+}
+
+export function assertSnowballLinkedInEvidenceMatchesCandidate(
+  evidence: ClaimedSnowballLinkedInEvidence,
+  candidate: SnowballCandidateContext,
+  options: { allowMissingCorroboratedFields?: boolean } = {},
+): void {
+  const mismatch = findCandidateContextMismatch(evidence, candidate, options);
+  if (!mismatch) return;
+  throw new SnowballIdentityEvidenceError(
+    "evidence_candidate_mismatch",
+    `LinkedIn identity evidence cannot be transferred to a candidate with a different ${mismatch.field}.`,
+    {
+      evidenceId: evidence.id,
+      candidateField: mismatch.field,
+      attestedValue: mismatch.attestedValue,
+      candidateValue: mismatch.candidateValue,
+    },
+  );
 }
 
 const COMPANY_SUFFIXES = new Set([
@@ -496,6 +561,8 @@ export function hasRunningNetworkSnowballRun(): boolean {
 export function claimSnowballLinkedInEvidence(input: {
   identityEvidenceToken: string;
   candidateName: string;
+  candidateCompany?: string | null;
+  candidateTitle?: string | null;
   workflowRunId?: string | null;
   templateId?: string | null;
   now?: number;
@@ -560,13 +627,7 @@ export function claimSnowballLinkedInEvidence(input: {
       { evidenceId: record.id, expiresAt: record.expiresAt },
     );
   }
-  if (normalizeHumanText(input.candidateName) !== record.candidateNameKey) {
-    throw new SnowballIdentityEvidenceError(
-      "evidence_candidate_mismatch",
-      "LinkedIn identity evidence cannot be transferred to a different candidate.",
-      { evidenceId: record.id, attestedCandidateName: record.candidateName },
-    );
-  }
+  assertSnowballLinkedInEvidenceMatchesCandidate(record, input);
 
   const consumed = { ...record, consumedAt: now };
   ledger[index] = consumed;
@@ -681,8 +742,17 @@ export function auditSnowballLinkedInIdentityEvidence(
       const record = evidenceId
         ? ledgerById.get(evidenceId)
         : undefined;
+      const candidateContextMatches = Boolean(
+        record &&
+        !findCandidateContextMismatch(record, {
+          candidateName: contact.name,
+          candidateCompany: contact.company ?? contact.currentEmployment?.orgName,
+          candidateTitle: contact.title ?? contact.currentEmployment?.title,
+        }),
+      );
       const valid = Boolean(
         record &&
+        candidateContextMatches &&
         record.consumedAt !== null &&
         record.workflowRunId === run.id &&
         record.contactId === contact.id &&

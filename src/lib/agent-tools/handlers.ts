@@ -96,6 +96,7 @@ import {
   SNOWBALL_IDENTITY_EVIDENCE_RESULT_KEY,
   SnowballIdentityEvidenceError,
   assertSnowballAvatarMatchesEvidence,
+  assertSnowballLinkedInEvidenceMatchesCandidate,
   attestSnowballLinkedInIdentity,
   auditSnowballLinkedInIdentityEvidence,
   bindSnowballLinkedInEvidence,
@@ -463,6 +464,8 @@ export async function handleCreateContact(input: z.infer<typeof createContactSch
       snowballEvidence = claimSnowballLinkedInEvidence({
         identityEvidenceToken: input.identityEvidenceToken,
         candidateName: input.name,
+        candidateCompany: input.company,
+        candidateTitle: input.title,
         workflowRunId: suppliedIds.workflowRunId,
         templateId: suppliedIds.templateId,
       });
@@ -531,20 +534,20 @@ export async function handleCreateContact(input: z.infer<typeof createContactSch
   // Auto-deduplication check: enrich existing contact if found
   const existing = findMatchingExistingContact(effectiveInput);
   if (existing) {
-    if (
-      snowballEvidence &&
-      personNameKey(existing.name) !== personNameKey(snowballEvidence.candidateName)
-    ) {
-      throw new AgentToolError(
-        "VALIDATION_ERROR",
-        "The attested LinkedIn profile is already claimed by a contact with a different name.",
-        {
-          reason: "evidence_candidate_mismatch",
-          attestedCandidateName: snowballEvidence.candidateName,
-          existingContactName: existing.name,
-          existingContactId: existing.id,
-        },
-      );
+    if (snowballEvidence) {
+      try {
+        assertSnowballLinkedInEvidenceMatchesCandidate(
+          snowballEvidence,
+          {
+            candidateName: existing.name,
+            candidateCompany: existing.company ?? existing.currentEmployment?.orgName,
+            candidateTitle: existing.title ?? existing.currentEmployment?.title,
+          },
+          { allowMissingCorroboratedFields: true },
+        );
+      } catch (error) {
+        throw snowballEvidenceToolError(error);
+      }
     }
     const enrichData: Record<string, unknown> = {};
     if (rest.company && !existing.company) enrichData.company = rest.company;
@@ -752,37 +755,45 @@ async function upsertContactIdentityWithEvidence(
     ? assertPlatform(input.platform)
     : existingIdentity?.platform;
   let snowballEvidence = preclaimedEvidence;
-  if (snowballEvidence) {
-    if (personNameKey(contact.name) !== personNameKey(snowballEvidence.candidateName)) {
-      throw new AgentToolError(
-        "VALIDATION_ERROR",
-        "LinkedIn identity evidence cannot be transferred to a contact with a different name.",
-        {
-          reason: "evidence_candidate_mismatch",
-          attestedCandidateName: snowballEvidence.candidateName,
-          contactName: contact.name,
-        },
-      );
+  if (!snowballEvidence) {
+    if (input.identityEvidenceToken) {
+      try {
+        snowballEvidence = claimSnowballLinkedInEvidence({
+          identityEvidenceToken: input.identityEvidenceToken,
+          candidateName: contact.name,
+          candidateCompany: input.candidateCompany ?? contact.company ?? contact.currentEmployment?.orgName,
+          candidateTitle: input.candidateTitle ?? contact.title ?? contact.currentEmployment?.title,
+          workflowRunId: resolvedIds.workflowRunId,
+          templateId: resolvedIds.templateId,
+        });
+      } catch (error) {
+        throw snowballEvidenceToolError(error);
+      }
+    } else if (
+      requestedPlatform === "linkedin" &&
+      (
+        isRunningNetworkSnowballRun(resolvedIds.workflowRunId) ||
+        (!resolvedIds.workflowRunId && hasRunningNetworkSnowballRun())
+      )
+    ) {
+      throw snowballEvidenceRequiredError();
     }
-  } else if (input.identityEvidenceToken) {
+  }
+
+  if (snowballEvidence) {
     try {
-      snowballEvidence = claimSnowballLinkedInEvidence({
-        identityEvidenceToken: input.identityEvidenceToken,
-        candidateName: contact.name,
-        workflowRunId: resolvedIds.workflowRunId,
-        templateId: resolvedIds.templateId,
-      });
+      assertSnowballLinkedInEvidenceMatchesCandidate(
+        snowballEvidence,
+        {
+          candidateName: contact.name,
+          candidateCompany: contact.company ?? contact.currentEmployment?.orgName,
+          candidateTitle: contact.title ?? contact.currentEmployment?.title,
+        },
+        { allowMissingCorroboratedFields: true },
+      );
     } catch (error) {
       throw snowballEvidenceToolError(error);
     }
-  } else if (
-    requestedPlatform === "linkedin" &&
-    (
-      isRunningNetworkSnowballRun(resolvedIds.workflowRunId) ||
-      (!resolvedIds.workflowRunId && hasRunningNetworkSnowballRun())
-    )
-  ) {
-    throw snowballEvidenceRequiredError();
   }
 
   const identityPlatform = snowballEvidence ? "linkedin" : requestedPlatform;

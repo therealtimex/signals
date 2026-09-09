@@ -968,6 +968,14 @@
                           "templateId": {
                             "type": "string"
                           },
+                          "candidateCompany": {
+                            "type": "string",
+                            "description": "Candidate company used during Snowball attestation. Signals also checks any existing contact company and will not let this field override a conflicting contact."
+                          },
+                          "candidateTitle": {
+                            "type": "string",
+                            "description": "Candidate title used during Snowball attestation. Signals also checks any existing contact title and will not let this field override a conflicting contact."
+                          },
                           "identityEvidenceToken": {
                             "type": "string",
                             "description": "One-use token returned by attest_snowball_linkedin_identity. Required before a Network Snowball run can write a LinkedIn identity."

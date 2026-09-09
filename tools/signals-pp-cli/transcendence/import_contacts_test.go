@@ -434,12 +434,16 @@ func TestImportContactChunkForwardsSnowballIdentityEvidenceExactlyOnce(t *testin
 
 func TestImportContactChunkForwardsSnowballEvidenceToExistingIdentityUpsert(t *testing.T) {
 	var upsertInput map[string]any
+	var calls []string
 	invoke := func(tool string, input map[string]any) (map[string]any, error) {
+		calls = append(calls, tool)
 		switch tool {
 		case "query_contacts":
 			return map[string]any{"contacts": []any{map[string]any{"id": "contact-existing"}}}, nil
 		case "upsert_contact_identity":
 			upsertInput = input
+			return map[string]any{}, nil
+		case "enrich_contact":
 			return map[string]any{}, nil
 		case "record_workflow_run_contacts":
 			return map[string]any{"runId": "run-1", "templateId": "tpl-1", "cohortSize": float64(1)}, nil
@@ -453,6 +457,8 @@ func TestImportContactChunkForwardsSnowballEvidenceToExistingIdentityUpsert(t *t
 	summary := importContactsSummary{Success: true, Errors: []string{}, Notes: []string{}, Attribution: attribution.summary}
 	err := importAttributedContactChunkWithInvoker([]contactRow{{
 		Name:                  "Jane Doe",
+		Company:               "Acme Inc.",
+		Title:                 "Founder",
 		Email:                 "jane@example.com",
 		Platform:              "linkedin",
 		PlatformUserID:        "jane-doe",
@@ -464,6 +470,63 @@ func TestImportContactChunkForwardsSnowballEvidenceToExistingIdentityUpsert(t *t
 	if upsertInput["identityEvidenceToken"] != "run-1.evidence.secret" ||
 		upsertInput["workflowRunId"] != "run-1" || upsertInput["templateId"] != "tpl-1" {
 		t.Fatalf("upsert evidence context = %#v", upsertInput)
+	}
+	if upsertInput["candidateCompany"] != "Acme Inc." || upsertInput["candidateTitle"] != "Founder" {
+		t.Fatalf("upsert candidate context = %#v", upsertInput)
+	}
+	wantCalls := []string{
+		"query_contacts", "upsert_contact_identity", "enrich_contact", "record_workflow_run_contacts",
+	}
+	if !reflect.DeepEqual(calls, wantCalls) {
+		t.Fatalf("calls = %#v, want evidence validation first %#v", calls, wantCalls)
+	}
+}
+
+func TestImportContactChunkRejectsSnowballEvidenceBeforeExistingContactMutation(t *testing.T) {
+	var calls []string
+	mutated := false
+	invoke := func(tool string, _ map[string]any) (map[string]any, error) {
+		calls = append(calls, tool)
+		switch tool {
+		case "query_contacts":
+			return map[string]any{"contacts": []any{map[string]any{"id": "contact-existing"}}}, nil
+		case "upsert_contact_identity":
+			return nil, usageErr(fmt.Errorf("identity evidence expired"))
+		case "enrich_contact":
+			mutated = true
+			return map[string]any{}, nil
+		case "record_workflow_run_contacts":
+			return map[string]any{"runId": "run-1", "templateId": "tpl-1", "cohortSize": float64(1)}, nil
+		default:
+			t.Fatalf("unexpected tool call %q", tool)
+			return nil, nil
+		}
+	}
+
+	attribution := newImportAttributionState("run-1", "tpl-1")
+	summary := importContactsSummary{Success: true, Errors: []string{}, Notes: []string{}, Attribution: attribution.summary}
+	err := importAttributedContactChunkWithInvoker([]contactRow{{
+		Name:                  "Jane Doe",
+		Company:               "Acme Inc.",
+		Title:                 "Founder",
+		Email:                 "jane@example.com",
+		Platform:              "linkedin",
+		IdentityEvidenceToken: "run-1.expired.secret",
+	}}, true, false, "run-1", "tpl-1", attribution, &summary, invoke)
+	if err != nil {
+		t.Fatalf("importAttributedContactChunkWithInvoker() error = %v", err)
+	}
+	if mutated {
+		t.Fatal("rejected identity evidence mutated the existing contact")
+	}
+	if summary.Failed != 1 || summary.Enriched != 0 {
+		t.Fatalf("summary = %+v", summary)
+	}
+	wantCalls := []string{
+		"query_contacts", "upsert_contact_identity", "record_workflow_run_contacts",
+	}
+	if !reflect.DeepEqual(calls, wantCalls) {
+		t.Fatalf("calls = %#v, want no contact mutation %#v", calls, wantCalls)
 	}
 }
 

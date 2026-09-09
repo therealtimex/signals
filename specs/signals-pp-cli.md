@@ -171,8 +171,8 @@ Agents stage `contacts.csv` or `contacts.json` under `workflow-runs/<runId>/`. B
 | Column | Required | Maps to |
 |--------|----------|---------|
 | `name` | yes | `create_contact.name` |
-| `company` | no | `create_contact.company` |
-| `title` | no | `enrich_contact.title` (fill-gaps) |
+| `company` | no | `create_contact.company` / `enrich_contact.company`; also `upsert_contact_identity.candidateCompany` when identity evidence is present |
+| `title` | no | `create_contact.title` / `enrich_contact.title` (fill-gaps); also `upsert_contact_identity.candidateTitle` when identity evidence is present |
 | `email` | no | primary `channels[]` entry (`channelType: email`) |
 | `platform` | no | `upsert_contact_identity.platform` |
 | `platform_user_id` | no | `upsert_contact_identity.platformUserId` |
@@ -184,6 +184,10 @@ Agents stage `contacts.csv` or `contacts.json` under `workflow-runs/<runId>/`. B
 **JSON:** array of objects with the same keys (camelCase aliases accepted: `platformUserId`, `platformHandle`, `profileUrl`, `identityEvidenceToken`).
 
 Dedupe before create: exact normalized `email` (any email channel, not just primary), else `(platform, platformUserId)` via `resolve_platform_claim`.
+
+For a row matched to an existing contact, the identity write runs before company,
+title, or notes enrichment. This lets the server validate Snowball identity
+evidence before the CLI mutates any existing contact fields.
 
 ### 4.3 Layer 3 — local mirror (v1.1, optional)
 

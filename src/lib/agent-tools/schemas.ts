@@ -251,6 +251,12 @@ export const upsertContactIdentitySchema = z
     lastSyncedAt: z.number().int().optional(),
     workflowRunId: z.string().min(1).optional(),
     templateId: z.string().min(1).optional(),
+    candidateCompany: z.string().min(1).optional().describe(
+      "Candidate company used during Snowball attestation. Signals also checks any existing contact company and will not let this field override a conflicting contact.",
+    ),
+    candidateTitle: z.string().min(1).optional().describe(
+      "Candidate title used during Snowball attestation. Signals also checks any existing contact title and will not let this field override a conflicting contact.",
+    ),
     identityEvidenceToken: z.string().min(1).optional().describe(
       "One-use token returned by attest_snowball_linkedin_identity. Required before a Network Snowball run can write a LinkedIn identity.",
     ),

@@ -930,22 +930,8 @@ func enrichExistingContact(
 	invoke agentToolInvoker,
 ) (bool, error) {
 	enriched := false
-	enrichInput := map[string]any{
-		"contactId": contactID,
-	}
-	if row.Title != "" {
-		enrichInput["title"] = row.Title
-	}
-	if row.Notes != "" {
-		enrichInput["notes"] = row.Notes
-	}
-	if len(enrichInput) > 1 {
-		if _, err := invoke("enrich_contact", enrichInput); err != nil {
-			return false, err
-		}
-		enriched = true
-	}
-
+	// Validate and persist the evidence-gated identity before changing any other field on an
+	// existing contact. A rejected Snowball row must leave the matched contact untouched.
 	if includeIdentity && row.Platform != "" && (row.PlatformUserID != "" || row.PlatformHandle != "" || row.IdentityEvidenceToken != "") {
 		identity := map[string]any{
 			"contactId": contactID,
@@ -979,8 +965,33 @@ func enrichExistingContact(
 		}
 		if row.IdentityEvidenceToken != "" {
 			identity["identityEvidenceToken"] = row.IdentityEvidenceToken
+			if row.Company != "" {
+				identity["candidateCompany"] = row.Company
+			}
+			if row.Title != "" {
+				identity["candidateTitle"] = row.Title
+			}
 		}
 		if _, err := invoke("upsert_contact_identity", identity); err != nil {
+			return false, err
+		}
+		enriched = true
+	}
+
+	enrichInput := map[string]any{
+		"contactId": contactID,
+	}
+	if row.Company != "" {
+		enrichInput["company"] = row.Company
+	}
+	if row.Title != "" {
+		enrichInput["title"] = row.Title
+	}
+	if row.Notes != "" {
+		enrichInput["notes"] = row.Notes
+	}
+	if len(enrichInput) > 1 {
+		if _, err := invoke("enrich_contact", enrichInput); err != nil {
 			return enriched, err
 		}
 		enriched = true

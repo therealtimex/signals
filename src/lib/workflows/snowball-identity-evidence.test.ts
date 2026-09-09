@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { invokeAgentTool } from "@/lib/agent-tools/invoke";
-import { createContact, getContactById } from "@/lib/db/queries/contacts";
+import {
+  countContacts,
+  createContact,
+  getContactById,
+  updateContact,
+} from "@/lib/db/queries/contacts";
 import { createTemplate } from "@/lib/db/queries/workflow-templates";
 import { createWorkflowRun, getWorkflowRun, updateWorkflowRun } from "@/lib/db/queries/workflows";
 import { resetCoreTables } from "@/test/db";
@@ -193,6 +198,81 @@ describe("Snowball LinkedIn identity evidence", () => {
     })).rejects.toMatchObject({ reason: "profile_not_authenticated" });
   });
 
+  it("binds direct create and upsert writes to the corroborated company and title", async () => {
+    const { template, run, scopeToken } = createSnowballRun();
+    const evidence = await attest(scopeToken);
+
+    await expect(invokeAgentTool("create_contact", {
+      name: "Jane Doe",
+      company: "Different Company",
+      title: "Founder",
+      platform: "linkedin",
+      identityEvidenceToken: evidence.identityEvidenceToken,
+      workflowRunId: run.id,
+      templateId: template.id,
+    })).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+      details: {
+        reason: "evidence_candidate_mismatch",
+        candidateField: "company",
+      },
+    });
+    expect(countContacts()).toBe(0);
+
+    const existing = createContact(
+      {
+        name: "Jane Doe",
+        company: "Acme Inc.",
+        title: "Chief Financial Officer",
+      },
+      { tag: "agent:create_contact", workflowRunId: run.id, templateId: template.id },
+    );
+    await expect(invokeAgentTool("upsert_contact_identity", {
+      contactId: existing.id,
+      platform: "linkedin",
+      candidateCompany: "Acme Inc.",
+      candidateTitle: "Founder",
+      identityEvidenceToken: evidence.identityEvidenceToken,
+      workflowRunId: run.id,
+      templateId: template.id,
+    })).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+      details: {
+        reason: "evidence_candidate_mismatch",
+        candidateField: "title",
+      },
+    });
+    expect(getContactById(existing.id)).toMatchObject({
+      company: "Acme Inc.",
+      title: "Chief Financial Officer",
+      identities: [],
+    });
+  });
+
+  it("does not let completion bless a contact whose candidate context drifted", async () => {
+    const { template, run, scopeToken } = createSnowballRun();
+    const evidence = await attest(scopeToken);
+    const created = await invokeAgentTool("create_contact", {
+      name: "Jane Doe",
+      company: "Acme Inc.",
+      title: "Founder",
+      platform: "linkedin",
+      identityEvidenceToken: evidence.identityEvidenceToken,
+      workflowRunId: run.id,
+      templateId: template.id,
+    }) as { id: string };
+
+    updateContact(created.id, { title: "Chief Financial Officer" }, "test:context-drift");
+    const identityId = getContactById(created.id)!.identities[0].id;
+    expect(auditSnowballLinkedInIdentityEvidence(
+      getWorkflowRun(run.id)!,
+      [created.id],
+    )).toEqual({
+      errors: [`snowball_linkedin_identity_evidence_missing:${identityId}`],
+      auditedIdentityIds: [identityId],
+    });
+  });
+
   it("binds tokens to one run and candidate and rejects replay", async () => {
     const first = createSnowballRun();
     const second = createSnowballRun();
@@ -220,6 +300,8 @@ describe("Snowball LinkedIn identity evidence", () => {
 
     await invokeAgentTool("create_contact", {
       name: "Jane Doe",
+      company: "Acme Inc.",
+      title: "Founder",
       platform: "linkedin",
       identityEvidenceToken: evidence.identityEvidenceToken,
       workflowRunId: first.run.id,
@@ -227,6 +309,8 @@ describe("Snowball LinkedIn identity evidence", () => {
     });
     await expect(invokeAgentTool("create_contact", {
       name: "Jane Doe",
+      company: "Acme Inc.",
+      title: "Founder",
       platform: "linkedin",
       identityEvidenceToken: evidence.identityEvidenceToken,
       workflowRunId: first.run.id,
@@ -242,6 +326,8 @@ describe("Snowball LinkedIn identity evidence", () => {
       claimSnowballLinkedInEvidence({
         identityEvidenceToken: evidence.identityEvidenceToken,
         candidateName: "Jane Doe",
+        candidateCompany: "Acme Inc.",
+        candidateTitle: "Founder",
         workflowRunId: run.id,
         templateId: template.id,
         now: 1_800_001_001,
@@ -259,6 +345,8 @@ describe("Snowball LinkedIn identity evidence", () => {
 
     await expect(invokeAgentTool("create_contact", {
       name: "Jane Doe",
+      company: "Acme Inc.",
+      title: "Founder",
       platform: "linkedin",
       avatarUrl: "https://unavatar.io/linkedin/user:guessed-jane",
       identityEvidenceToken: evidence.identityEvidenceToken,

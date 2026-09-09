@@ -124,6 +124,8 @@ describe("buildNetworkSnowballBriefSection", () => {
     expect(brief).toContain("attest_snowball_linkedin_identity");
     expect(brief).toContain('snowballScopeToken: "run_snow_1.scope-secret"');
     expect(brief).toContain("identity_evidence_token");
+    expect(brief).toContain("candidateCompany");
+    expect(brief).toContain("same-name candidate with different context");
     expect(brief).toContain("Auto-commit & Graph Edge Linking");
     expect(brief).toContain("Avatar Enrichment (downstream of identity attestation)");
     expect(brief).toContain("pv-top-card-profile-picture__image");
