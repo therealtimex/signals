@@ -32,6 +32,22 @@ function generateInitScript(): string {
   return result.stdout;
 }
 
+function generateLinkedInOpenMenuScript(intentKeywords: string[]): string {
+  const result = spawnSync(
+    "python3",
+    [
+      RESOLVE_SCRIPT,
+      "linkedin-open-menu",
+      JSON.stringify({ intentKeywords }),
+    ],
+    { encoding: "utf8" },
+  );
+  if (result.status !== 0) {
+    throw new Error(`resolve.py linkedin-open-menu failed: ${result.stderr}`);
+  }
+  return result.stdout;
+}
+
 /** Evaluate the real generated script against minimal browser stubs. */
 function evaluateInitScript(script: string): ScoutWindow {
   const win = { __scoutCopiedLinks: [] as string[] } as unknown as ScoutWindow;
@@ -107,5 +123,35 @@ describe("snowball seed scout runtime extractor", () => {
   it("rejects a profile or feed URL", () => {
     expect(scout.scoutExtractPostUrl("https://www.facebook.com/acme")).toBeNull();
     expect(scout.scoutExtractPostUrl("https://www.facebook.com/")).toBeNull();
+  });
+
+  it("uses LinkedIn's accessible list item as the keyword and marker scope", () => {
+    const attributes = new Map<string, string>();
+    const post = {
+      innerText: "Harvey raised funding led by Lightspeed Ventures",
+      setAttribute: (name: string, value: string) => attributes.set(name, value),
+    };
+    let clicked = false;
+    const button = {
+      parentElement: { innerText: "Followed by Anh Nguyen" },
+      closest: (selector: string) => {
+        if (selector === '[role="listitem"]') return post;
+        return null;
+      },
+      click: () => {
+        clicked = true;
+      },
+    };
+    const documentStub = {
+      querySelectorAll: (selector: string) =>
+        selector.includes("button[aria-label") ? [button] : [],
+    };
+    const script = generateLinkedInOpenMenuScript(["funding"]);
+    const run = new Function("document", `return ${script}`);
+
+    expect(run(documentStub)).toBe("opened");
+    expect(clicked).toBe(true);
+    expect(attributes.get("data-scout-processed")).toBe("1");
+    expect(attributes.get("data-scout-active")).toBe("1");
   });
 });

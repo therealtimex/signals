@@ -139,15 +139,20 @@ def resolve_signals_base_url(config: dict, env_override: str = "") -> str:
     return FALLBACK_SIGNALS_BASE_URL
 
 
-def should_stop_browser_session(session_name: str) -> bool:
-    """Whether the scout may shut this browser session down on exit.
+def should_stop_browser_session(
+    session_name: str,
+    *,
+    started_by_scout: bool = False,
+) -> bool:
+    """Whether the scout may shut this browser runtime down on exit.
 
-    Only sessions the scout creates are its to stop. An acting profile can
-    resolve to a dedicated, already-running Platform Connection (for example
-    `signals-contention`); harvesting through it and then stopping it would take
-    the operator's own browser session away.
+    A run owns any runtime it started, but never its persisted profile. For an
+    already-running Platform Connection, only scout-created session names are
+    safe to stop; other names may belong to an operator or concurrent workflow.
     """
     name = session_name.strip()
+    if started_by_scout:
+        return bool(name)
     if not name or name in SHARED_BROWSER_SESSIONS:
         return False
     return name.startswith(SCOUT_OWNED_SESSION_PREFIX)
@@ -508,6 +513,10 @@ def extract_post_url_from_share_href(href: str) -> str | None:
 
 FACEBOOK_INIT_JS = """(() => {
 window.__scoutCopiedLinks = window.__scoutCopiedLinks || [];
+document.querySelectorAll('[data-scout-processed], [data-scout-active]').forEach((node) => {
+  node.removeAttribute('data-scout-processed');
+  node.removeAttribute('data-scout-active');
+});
 if (!window.__scoutClipboardHooked) {
   const orig = navigator.clipboard.writeText.bind(navigator.clipboard);
   navigator.clipboard.writeText = async (text) => {
@@ -621,7 +630,8 @@ const buttons = [...document.querySelectorAll(selectors.join(','))]
   .filter((btn) => !btn.closest('[data-scout-processed="1"]'));
 if (!buttons.length) return 'none';
 const btn = buttons[0];
-const root = btn.closest('.feed-shared-update-v2, [data-urn*="activity"], [data-urn*="ugcPost"]')
+const root = btn.closest('[role="listitem"]')
+  || btn.closest('.feed-shared-update-v2, [data-urn*="activity"], [data-urn*="ugcPost"]')
   || btn.closest('div[data-urn]')
   || btn.parentElement;
 const text = (root?.innerText || '').toLowerCase();
@@ -850,7 +860,7 @@ def build_eval_script(platform: str, keywords: list[str], max_links: int) -> str
             " if (!/(\\/posts\\/|feed\\/update\\/)/.test(clean)) return null;"
             " return clean;"
             "};"
-            "for (const card of document.querySelectorAll('div.feed-shared-update-v2, article, li')) {"
+            "for (const card of document.querySelectorAll('[role=\"listitem\"], div.feed-shared-update-v2, article, li')) {"
             "const text = (card.innerText || '').toLowerCase();"
             "if (keywords.length && !keywords.some((kw) => text.includes(kw))) continue;"
             "for (const anchor of card.querySelectorAll('a[href]')) {"
@@ -936,6 +946,20 @@ def parse_eval_posts(
     return filter_post_urls([str(item) for item in payload], platform, keywords, max_links)
 
 
+def snapshot_ref_entries(snapshot: dict) -> list[dict]:
+    payload = (
+        snapshot.get("data")
+        if isinstance(snapshot.get("data"), dict)
+        else snapshot
+    )
+    refs = payload.get("refs") or payload.get("elements") or []
+    if isinstance(refs, dict):
+        refs = list(refs.values())
+    if not isinstance(refs, list):
+        return []
+    return [ref for ref in refs if isinstance(ref, dict)]
+
+
 def extract_posts_from_snapshot(
     config: dict,
     platform: str,
@@ -951,7 +975,7 @@ def extract_posts_from_snapshot(
     if not pattern:
         return []
 
-    refs = snapshot.get("refs") or snapshot.get("elements") or []
+    refs = snapshot_ref_entries(snapshot)
     seen: set[str] = set()
     urls: list[str] = []
 
@@ -1037,7 +1061,14 @@ def main() -> int:
         return 0
 
     if command == "should-stop":
-        print("1" if should_stop_browser_session(sys.argv[2]) else "0")
+        started_by_scout = len(sys.argv) > 3 and sys.argv[3] == "1"
+        print(
+            "1"
+            if should_stop_browser_session(
+                sys.argv[2], started_by_scout=started_by_scout
+            )
+            else "0"
+        )
         return 0
 
     if command == "targets":
@@ -1468,14 +1499,52 @@ class ResolveTests(unittest.TestCase):
     def test_should_not_stop_shared_session(self) -> None:
         self.assertFalse(should_stop_browser_session("signals-publish"))
 
+    def test_should_stop_shared_session_when_scout_started_runtime(self) -> None:
+        self.assertTrue(
+            should_stop_browser_session("signals-publish", started_by_scout=True)
+        )
+
     def test_should_not_stop_dedicated_platform_connection(self) -> None:
         # Resolved from an acting profile; the scout did not create it.
         self.assertFalse(should_stop_browser_session("signals-contention"))
         self.assertFalse(should_stop_browser_session("my-linkedin-profile"))
 
+    def test_should_stop_dedicated_connection_when_scout_started_runtime(self) -> None:
+        self.assertTrue(
+            should_stop_browser_session(
+                "my-linkedin-profile", started_by_scout=True
+            )
+        )
+
     def test_should_stop_scout_owned_session(self) -> None:
         self.assertTrue(should_stop_browser_session("signals-scout-x"))
         self.assertTrue(should_stop_browser_session("signals-scout-linkedin"))
+
+    def test_copy_link_init_resets_pass_markers(self) -> None:
+        self.assertIn("removeAttribute('data-scout-processed')", COPY_LINK_INIT_JS)
+        self.assertIn("removeAttribute('data-scout-active')", COPY_LINK_INIT_JS)
+
+    def test_linkedin_menu_uses_accessible_post_container(self) -> None:
+        self.assertIn("btn.closest('[role=\"listitem\"]')", LINKEDIN_OPEN_MENU_JS)
+
+    def test_extract_posts_supports_agent_browser_ref_map_envelope(self) -> None:
+        config = {"intentKeywords": ["funding"]}
+        snapshot = {
+            "success": True,
+            "data": {
+                "refs": {
+                    "e1": {
+                        "role": "link",
+                        "name": "raised funding today",
+                        "href": "https://x.com/acme/status/1234567890",
+                    }
+                }
+            },
+        }
+        self.assertEqual(
+            extract_posts_from_snapshot(config, "x", 5, snapshot),
+            ["https://x.com/acme/status/1234567890"],
+        )
 
     def test_extract_posts_filters_keywords(self) -> None:
         config = {"intentKeywords": ["funding"]}
