@@ -24,7 +24,7 @@ scout_harvest_dom_posts() {
 
   local harvested=""
   harvested="$(
-    agent-browser --session "${session_name}" snapshot -i --json 2>/dev/null \
+    agent-browser --session "${session_name}" snapshot -i -u --json 2>/dev/null \
       | python3 "${lib_dir}/resolve.py" extract-posts "${pass_config}" "${platform}" "${max_links}"
   )"
 
@@ -136,7 +136,13 @@ PY
   first_target="$(printf '%s\n' "${targets}" | sed -n '1p')"
 
   local port=""
+  local browser_was_running="0"
+  browser_was_running="$(scout_browser_running "${session_name}" 2>/dev/null || echo 0)"
   port="$(scout_start_browser "${platform}" "${first_target}" "${session_name}" || true)"
+  local browser_started_by_scout="0"
+  if [[ -n "${port}" ]] && [[ "${browser_was_running}" != "1" ]]; then
+    browser_started_by_scout="1"
+  fi
 
   if [[ -n "${port}" ]] && command -v agent-browser >/dev/null 2>&1; then
     agent-browser --session "${session_name}" connect "${port}" >/dev/null 2>&1 || true
@@ -186,7 +192,7 @@ PY
     done < <(python3 "${lib_dir}/resolve.py" fallback "${config_json}" "${platform}" "${max_links}")
   fi
 
-  scout_stop_browser "${session_name}" "${lib_dir}"
+  scout_stop_browser "${session_name}" "${lib_dir}" "${browser_started_by_scout}"
 
   if [[ "${#collected[@]}" -gt 0 ]]; then
     local filtered=""

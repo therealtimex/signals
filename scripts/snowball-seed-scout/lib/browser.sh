@@ -157,12 +157,13 @@ scout_select_content_tab() {
 scout_stop_browser() {
   local session_name="${1:-}"
   local lib_dir="${2:-}"
+  local started_by_scout="${3:-0}"
 
   if [[ -z "${session_name}" ]] || [[ -z "${lib_dir}" ]]; then
     return 0
   fi
 
-  if [[ "$(python3 "${lib_dir}/resolve.py" should-stop "${session_name}")" != "1" ]]; then
+  if [[ "$(python3 "${lib_dir}/resolve.py" should-stop "${session_name}" "${started_by_scout}")" != "1" ]]; then
     return 0
   fi
 
