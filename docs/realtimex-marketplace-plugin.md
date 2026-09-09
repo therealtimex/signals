@@ -16,12 +16,13 @@ Package and distribute Signals through the **RealtimeX marketplace** — not pub
 Plugin id: `com.realtimex.signals`  
 Local app id: `47e45f71-3279-42f5-8e95-731de01b6eae`
 
-Version 0.2.16 completes the Deduplicate & Merge Companies workflow fix begun in 0.2.15. Starting
-it asked for a company name and an inactivity period — settings belonging to the pruning workflows —
-while the settings it actually uses were unavailable, so a run was configured with values it could
-not act on. It now asks how strict the duplicate matching should be and how many candidates to
-review per run, and says plainly that the looser setting is a suggestion needing approval rather
-than a finding. `signals-writing` stays at 1.1.0.
+Version 0.2.17 makes Network Snowball identity-safe and easier to inspect. LinkedIn identities now
+require browser-backed profile evidence before completion or auto-commit, including an authoritative
+resolution of the authenticated member's own profile URL. Snowball runs own and close their
+authenticated browser sessions, while anonymous X reads use the browser instead of direct HTTP.
+Completed and in-progress workflow runs now expose a compact Agent thread link backed by the
+server-recorded RealtimeX workspace and thread reference, without inferring a destination from
+partial data. `signals-writing` stays at 1.1.0.
 
 ## Build
 
