@@ -134,7 +134,7 @@ SIGNALS_DATA_DIR=~/.signals
 
 | Category | Details |
 |----------|---------|
-| Framework | Next.js 16.1, React 19, TypeScript 5.8 |
+| Framework | Next.js 16.3, React 19, TypeScript 5.8 |
 | Database | SQLite (better-sqlite3), Drizzle ORM 0.45 |
 | AI | RealTimeX SDK (`llm.chat`, `llm.embed`) + local agent-tools API |
 | UI | Tailwind CSS 4, shadcn/ui (Radix), Lucide Icons |

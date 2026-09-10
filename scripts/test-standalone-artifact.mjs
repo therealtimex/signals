@@ -227,8 +227,15 @@ try {
   if (!optimizedImage.ok) {
     throw new Error(`Native image optimization failed (${optimizedImage.status})`);
   }
+  // Next.js 16.3 no longer evaluates route modules at boot, so the fresh
+  // database is migrated by the first request that reads it: the home page
+  // RealTimeX opens once /api/health answers.
+  const home = await fetch(`${baseUrl}/dashboard`);
+  if (!home.ok) {
+    throw new Error(`Home page request failed (${home.status})`);
+  }
   if (!existsSync(path.join(dataDir, "data.db"))) {
-    throw new Error("Fresh runtime boot did not create the Signals database");
+    throw new Error("Home page request did not create the Signals database");
   }
 
   console.log(
