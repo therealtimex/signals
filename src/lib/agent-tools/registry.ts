@@ -245,7 +245,7 @@ export const AGENT_TOOLS: Record<string, AgentToolDefinition> = {
   attest_snowball_linkedin_identity: {
     name: "attest_snowball_linkedin_identity",
     description:
-      "Open a proposed LinkedIn /in/ profile in Signals' trusted authenticated browser session, verify visible name plus company/role evidence, and return a short-lived one-use identityEvidenceToken. The final browser URL determines the stored LinkedIn handle; caller-supplied slugs are not trusted. A failed gate automatically persists the proposed person and company in the quarantined candidate inbox without creating canonical graph records.",
+      "Open a proposed LinkedIn /in/ profile in Signals' trusted authenticated browser session, verify visible name plus company/role evidence, and return a short-lived one-use identityEvidenceToken plus the top-card avatarUrl. The final browser URL determines the stored LinkedIn handle; caller-supplied slugs are not trusted. Navbar/session-viewer photos are never bound. A failed gate automatically persists the proposed person and company in the quarantined candidate inbox without creating canonical graph records.",
     category: "platforms",
     schema: attestSnowballLinkedInIdentitySchema,
     parameters: zodToParameters(attestSnowballLinkedInIdentitySchema),

@@ -56,6 +56,8 @@ describe("LinkedIn Snowball profile DOM extraction", () => {
       topCardText:
         "Jane Doe · 2nd Founder & CEO at Acme, Inc. Acme, Inc. · Example University San Francisco Bay Area · Contact info",
       unavailable: false,
+      avatarUrl: null,
+      sessionViewerAvatarUrl: null,
     });
 
     browserWindow.close();
@@ -80,6 +82,47 @@ describe("LinkedIn Snowball profile DOM extraction", () => {
       headline: "Founder at Acme",
       topCardText: "Jane Doe Founder at Acme Jane Doe Founder at Acme London",
       unavailable: false,
+      avatarUrl: null,
+      sessionViewerAvatarUrl: null,
+    });
+
+    browserWindow.close();
+  });
+
+  it("binds the top-card photo and ignores the authenticated nav Me thumbnail", () => {
+    const viewerThumb =
+      "https://media.licdn.com/dms/image/v2/C5103AQHThgCA9BePxw/profile-displayphoto-shrink_100_100/0/1";
+    const contactPhoto =
+      "https://media.licdn.com/dms/image/v2/D4E03AQOtherAsset99/profile-displayphoto-shrink_400_400/0/1";
+    const browserWindow = renderLinkedInProfile(
+      "https://www.linkedin.com/in/jane-doe/",
+      `
+        <nav class="global-nav">
+          <div class="global-nav__me">
+            <img src="${viewerThumb}" alt="viewer">
+          </div>
+        </nav>
+        <main>
+          <div class="obfuscated-top-card">
+            <a href="https://www.linkedin.com/in/jane-doe/"
+               componentkey="ProfileVerificationTriggerRef-jane-doe">
+              <div><h2>Jane Doe</h2></div>
+            </a>
+            <p>Founder &amp; CEO at Acme, Inc.</p>
+            <p>Acme, Inc. · Example University</p>
+            <img class="pv-top-card-profile-picture__image"
+                 src="${contactPhoto}"
+                 srcset="https://media.licdn.com/dms/image/v2/D4E03AQOtherAsset99/profile-displayphoto-shrink_100_100/0/1 1x, ${contactPhoto} 2x"
+                 alt="Jane Doe">
+          </div>
+        </main>
+      `,
+    );
+
+    expect(extractLinkedInProfileDomObservation()).toMatchObject({
+      visibleName: "Jane Doe",
+      avatarUrl: contactPhoto,
+      sessionViewerAvatarUrl: viewerThumb,
     });
 
     browserWindow.close();

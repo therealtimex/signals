@@ -542,7 +542,7 @@
                           },
                           "avatarUrl": {
                             "type": "string",
-                            "description": "Optional public https URL of the contact's profile photo. For LinkedIn, derive any resolver slug only from a server-attested identity; never synthesize a profile slug to fill this field. Must be http(s); file:// URLs and local paths are rejected."
+                            "description": "Optional public https URL of the contact's profile photo. For LinkedIn Snowball, prefer the avatarUrl returned by attest_snowball_linkedin_identity. Navbar thumbs (shrink_100_100 / shrink_50_50) and the authenticated session viewer's photo are rejected. Derive any resolver slug only from a server-attested identity; never synthesize a profile slug. Must be http(s); file:// URLs and local paths are rejected."
                           },
                           "identityEvidenceToken": {
                             "type": "string",
@@ -962,7 +962,7 @@
                           },
                           "avatarUrl": {
                             "type": "string",
-                            "description": "Optional public https URL of the contact's profile photo. For LinkedIn, derive any resolver slug only from a server-attested identity; never synthesize a profile slug to fill this field. Must be http(s); file:// URLs and local paths are rejected."
+                            "description": "Optional public https URL of the contact's profile photo. For LinkedIn Snowball, prefer the avatarUrl returned by attest_snowball_linkedin_identity. Navbar thumbs (shrink_100_100 / shrink_50_50) and the authenticated session viewer's photo are rejected. Derive any resolver slug only from a server-attested identity; never synthesize a profile slug. Must be http(s); file:// URLs and local paths are rejected."
                           },
                           "location": {
                             "type": "string"

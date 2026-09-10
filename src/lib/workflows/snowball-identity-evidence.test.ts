@@ -86,6 +86,13 @@ function createSnowballRun() {
   return { template, run: getWorkflowRun(run.id)!, scopeToken: scope.token, sessionName };
 }
 
+const VIEWER_NAV_THUMB =
+  "https://media.licdn.com/dms/image/v2/C5103AQHThgCA9BePxw/profile-displayphoto-shrink_100_100/0/1";
+const VIEWER_TOP_CARD =
+  "https://media.licdn.com/dms/image/v2/C5103AQHThgCA9BePxw/profile-displayphoto-shrink_400_400/0/1";
+const JANE_TOP_CARD =
+  "https://media.licdn.com/dms/image/v2/D4E03AQJaneAsset99/profile-displayphoto-shrink_400_400/0/1";
+
 function observe(overrides: Partial<{
   finalUrl: string;
   authenticated: boolean;
@@ -93,6 +100,8 @@ function observe(overrides: Partial<{
   headline: string;
   topCardText: string;
   unavailable: boolean;
+  avatarUrl: string | null;
+  sessionViewerAvatarUrl: string | null;
 }> = {}) {
   return async () => ({
     finalUrl: "https://www.linkedin.com/in/jane-doe/?trk=public_profile",
@@ -101,6 +110,8 @@ function observe(overrides: Partial<{
     headline: "Founder & CEO at Acme, Inc.",
     topCardText: "Jane Doe Founder & CEO at Acme San Francisco",
     unavailable: false,
+    avatarUrl: null,
+    sessionViewerAvatarUrl: null,
     ...overrides,
   });
 }
@@ -464,6 +475,74 @@ describe("Snowball LinkedIn identity evidence", () => {
       expect(error).toBeInstanceOf(SnowballIdentityEvidenceError);
       expect(error).toMatchObject({ reason: "evidence_expired" });
     }
+  });
+
+  it("binds the attested top-card avatar and drops a session-viewer navbar thumb", async () => {
+    const { template, run, scopeToken } = createSnowballRun();
+    const evidence = await attest(scopeToken, {
+      avatarUrl: JANE_TOP_CARD,
+      sessionViewerAvatarUrl: VIEWER_NAV_THUMB,
+    });
+    expect(evidence.avatarUrl).toBe(JANE_TOP_CARD);
+
+    const created = await invokeAgentTool("create_contact", {
+      name: "Jane Doe",
+      company: "Acme Inc.",
+      title: "Founder",
+      platform: "linkedin",
+      avatarUrl: VIEWER_NAV_THUMB,
+      identityEvidenceToken: evidence.identityEvidenceToken,
+      workflowRunId: run.id,
+      templateId: template.id,
+    }) as { id: string };
+
+    const contact = getContactById(created.id)!;
+    expect(contact.identities[0].avatarUrl).toBe(JANE_TOP_CARD);
+  });
+
+  it("drops a navbar thumbnail when attestation did not bind a top-card photo", async () => {
+    const { template, run, scopeToken } = createSnowballRun();
+    const evidence = await attest(scopeToken, {
+      avatarUrl: VIEWER_NAV_THUMB,
+      sessionViewerAvatarUrl: VIEWER_NAV_THUMB,
+    });
+    expect(evidence.avatarUrl).toBeNull();
+
+    const created = await invokeAgentTool("create_contact", {
+      name: "Jane Doe",
+      company: "Acme Inc.",
+      title: "Founder",
+      platform: "linkedin",
+      avatarUrl: VIEWER_NAV_THUMB,
+      identityEvidenceToken: evidence.identityEvidenceToken,
+      workflowRunId: run.id,
+      templateId: template.id,
+    }) as { id: string };
+
+    const contact = getContactById(created.id)!;
+    expect(contact.identities[0].avatarUrl).toBeNull();
+  });
+
+  it("drops a larger CDN photo that collides with the session viewer's asset", async () => {
+    const { template, run, scopeToken } = createSnowballRun();
+    const evidence = await attest(scopeToken, {
+      avatarUrl: null,
+      sessionViewerAvatarUrl: VIEWER_NAV_THUMB,
+    });
+
+    const created = await invokeAgentTool("create_contact", {
+      name: "Jane Doe",
+      company: "Acme Inc.",
+      title: "Founder",
+      platform: "linkedin",
+      avatarUrl: VIEWER_TOP_CARD,
+      identityEvidenceToken: evidence.identityEvidenceToken,
+      workflowRunId: run.id,
+      templateId: template.id,
+    }) as { id: string };
+
+    const contact = getContactById(created.id)!;
+    expect(contact.identities[0].avatarUrl).toBeNull();
   });
 
   it("rejects an avatar resolver slug that differs from the attested identity", async () => {
