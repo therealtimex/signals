@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 import {
   CANONICAL_SIGNALS_APP_ID,
   canonicalSignalsRepoRoot,
@@ -10,18 +9,15 @@ import {
   normalizeIssueId,
   parseFlagArgs,
   qaAppDisplayName,
+  realtimexDbPath,
 } from "./signals-qa-local-app.mjs";
 
 function defaultDbPath() {
   if (process.env.RTX_DB_PATH?.trim()) return process.env.RTX_DB_PATH.trim();
-  const userData =
-    process.env.REALTIMEX_USER_DATA?.trim() ||
-    join(homedir(), ".realtimex.ai", "desktop-user-data");
-  const user = process.env.REALTIMEX_USER?.trim() || "trungle_rta_vn";
   const storageRoot =
     process.env.REALTIMEX_STORAGE_ROOT?.trim() ||
     (process.env.REALTIMEX_RUNTIME === "dev" ? "dev" : "app");
-  return join(userData, storageRoot, "users", user, "storage", "realtimex.db");
+  return realtimexDbPath(storageRoot);
 }
 
 function defaultCanonicalRepoRoot() {
@@ -44,8 +40,9 @@ try {
   node scripts/qa/verify-signals-local-app-hygiene.mjs --issue <number> \\
     [--db /path/to/realtimex.db] [--canonical-repo /path/to/signals]
 
-Loop-close gate: the canonical Signals app must use ~/.signals and the canonical checkout,
-and the issue-specific QA Local App record must no longer exist.`);
+Loop-close gate: the canonical Signals app must use ~/.signals (literal on the dev host,
+expanded on the packaged host) and the canonical checkout, and the issue-specific QA Local App
+record must no longer exist.`);
     process.exit(0);
   }
 
