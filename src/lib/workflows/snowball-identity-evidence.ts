@@ -308,6 +308,101 @@ function writeEvidenceLedger(
   });
 }
 
+/**
+ * Read only identity evidence that is visibly attached to the canonical profile
+ * currently open in LinkedIn. Keep this function self-contained because
+ * Playwright serializes it into the browser context.
+ */
+export function extractLinkedInProfileDomObservation(): Pick<
+  LinkedInProfileObservation,
+  "visibleName" | "headline" | "topCardText" | "unavailable"
+> {
+  const text = (element: Element | null): string =>
+    element?.textContent?.replace(/\s+/g, " ").trim() ?? "";
+  const firstText = (selectors: string[]): string => {
+    for (const selector of selectors) {
+      const value = text(document.querySelector(selector));
+      if (value) return value;
+    }
+    return "";
+  };
+  const linkedInProfilePath = (value: string): string => {
+    try {
+      const url = new URL(value, window.location.href);
+      if (
+        url.hostname.toLocaleLowerCase("en-US") !==
+        window.location.hostname.toLocaleLowerCase("en-US")
+      ) {
+        return "";
+      }
+      const match = url.pathname.match(/^\/in\/([^/]+)/i);
+      return match ? `/in/${decodeURIComponent(match[1]).toLocaleLowerCase("en-US")}` : "";
+    } catch {
+      return "";
+    }
+  };
+
+  const main = document.querySelector("main");
+  const currentProfilePath = linkedInProfilePath(window.location.href);
+  const matchingProfileAnchors = main && currentProfilePath
+    ? Array.from(main.querySelectorAll<HTMLAnchorElement>("a[href]")).filter(
+        (anchor) => linkedInProfilePath(anchor.href) === currentProfilePath,
+      )
+    : [];
+  const profileAnchor = matchingProfileAnchors.find(
+    (anchor) =>
+      anchor.getAttribute("componentkey")?.startsWith("ProfileVerificationTriggerRef-") &&
+      text(anchor.querySelector("h1,h2,h3")),
+  ) ?? matchingProfileAnchors.find((anchor) => text(anchor.querySelector("h1,h2,h3"))) ?? null;
+
+  let structuralTopCard: Element | null = null;
+  let structuralParagraphs: Element[] = [];
+  for (
+    let candidate: Element | null = profileAnchor;
+    candidate && candidate !== main;
+    candidate = candidate.parentElement
+  ) {
+    const directParagraphs = Array.from(candidate.children).filter(
+      (child) => child.tagName === "P" && text(child),
+    );
+    // The current LinkedIn top card has separate direct paragraphs for the
+    // headline and affiliation. Requiring both avoids mistaking a connection
+    // degree badge (for example, "· 2nd") for the headline.
+    if (directParagraphs.length >= 2) {
+      structuralTopCard = candidate;
+      structuralParagraphs = directParagraphs;
+      break;
+    }
+  }
+
+  const visibleName =
+    text(profileAnchor?.querySelector("h1,h2,h3") ?? profileAnchor) ||
+    firstText([
+      "main h1",
+      "h1.text-heading-xlarge",
+      '[data-anonymize="person-name"]',
+    ]);
+  const headline = text(structuralParagraphs[0] ?? null) || firstText([
+    "main .text-body-medium.break-words",
+    ".pv-text-details__left-panel .text-body-medium",
+    '[data-generated-suggestion-target*="headline"]',
+  ]);
+  const topCardText = (text(structuralTopCard) || firstText([
+    "main section:first-of-type",
+    ".pv-top-card",
+    ".scaffold-layout__main",
+  ])).slice(0, 2_000);
+  const pageText = text(document.body).slice(0, 8_000).toLocaleLowerCase();
+  const unavailable = [
+    "this page doesn’t exist",
+    "this page doesn't exist",
+    "profile not found",
+    "page not found",
+  ].some((marker) => pageText.includes(marker));
+
+  return { visibleName, headline, topCardText, unavailable };
+}
+
 async function observeLinkedInProfile(
   proposedProfileUrl: string,
   sessionName: string,
@@ -343,40 +438,7 @@ async function observeLinkedInProfile(
       timeout: 30_000,
     });
     await page.waitForTimeout(500);
-    const extracted = await page.evaluate(() => {
-      const text = (element: Element | null): string =>
-        element?.textContent?.replace(/\s+/g, " ").trim() ?? "";
-      const firstText = (selectors: string[]): string => {
-        for (const selector of selectors) {
-          const value = text(document.querySelector(selector));
-          if (value) return value;
-        }
-        return "";
-      };
-      const visibleName = firstText([
-        "main h1",
-        "h1.text-heading-xlarge",
-        '[data-anonymize="person-name"]',
-      ]);
-      const headline = firstText([
-        "main .text-body-medium.break-words",
-        ".pv-text-details__left-panel .text-body-medium",
-        '[data-generated-suggestion-target*="headline"]',
-      ]);
-      const topCardText = firstText([
-        "main section:first-of-type",
-        ".pv-top-card",
-        ".scaffold-layout__main",
-      ]).slice(0, 2_000);
-      const pageText = text(document.body).slice(0, 8_000).toLocaleLowerCase();
-      const unavailable = [
-        "this page doesn’t exist",
-        "this page doesn't exist",
-        "profile not found",
-        "page not found",
-      ].some((marker) => pageText.includes(marker));
-      return { visibleName, headline, topCardText, unavailable };
-    });
+    const extracted = await page.evaluate(extractLinkedInProfileDomObservation);
     return {
       finalUrl: page.url(),
       authenticated,
