@@ -14,6 +14,13 @@ const { readFileSync } = require("node:fs");
 const { spawnSync } = require("node:child_process");
 
 const { parseEvalJsonArray, parseEvalJsonValue } = require("./parse-eval-json-array.cjs");
+const {
+  canonicalComposeText,
+  matchComposeSnapshot,
+  normalizeComposeText,
+  readComposeSnapshotEvalJs,
+  selectComposeContentsEvalJs,
+} = require("./x-compose-text.cjs");
 
 const SESSION = process.env.SIGNALS_PUBLISH_AB_SESSION || "signals-publish";
 const AB_BIN = process.env.AGENT_BROWSER_BIN || "agent-browser";
@@ -226,10 +233,37 @@ function readComposeText(wrapperSelector, scope = activeComposeScope) {
   return normalizeTweetText(String(value ?? ""));
 }
 
+function readComposeSnapshot(wrapperSelector) {
+  const raw = abText(["eval", readComposeSnapshotEvalJs(wrapperSelector)]);
+  const parsed = parseEvalJsonValue(raw);
+  return parsed && typeof parsed === "object" ? parsed : null;
+}
+
 function composeTextMatches(wrapperSelector, expected) {
-  const needle = normalizeTweetText(expected).slice(0, 80);
-  if (!needle) return true;
-  return readComposeText(wrapperSelector).includes(needle);
+  if (!canonicalComposeText(expected)) return true;
+  return matchComposeSnapshot(readComposeSnapshot(wrapperSelector), expected).ok;
+}
+
+function assertAllComposeSlotsReadyToSubmit(payload) {
+  const threadTexts = normalizeThreadTexts(payload);
+  const slots = [payload.text, ...threadTexts];
+  for (let i = 0; i < slots.length; i++) {
+    assertComposeReadyToSubmit(
+      activeComposeScope.tweetTextarea(i),
+      slots[i],
+      i === 0 ? "pre-submit compose" : `pre-submit thread slot ${i}`
+    );
+  }
+}
+
+function assertComposeReadyToSubmit(wrapperSelector, expected, context) {
+  const snapshot = readComposeSnapshot(wrapperSelector);
+  const match = matchComposeSnapshot(snapshot, expected);
+  if (match.ok) return snapshot;
+  throw {
+    message: `${context}: compose editor does not contain the full drafted text (${match.reason}; expected ${JSON.stringify(match.expected)}, actual ${JSON.stringify(match.actual)})`,
+    errorCode: "compose_invalid",
+  };
 }
 
 function focusComposeEditable(wrapperSelector, context) {
@@ -261,51 +295,15 @@ function focusComposeEditableEvalJs(wrapperSelector) {
   })()`;
 }
 
-function insertComposeTextViaEval(wrapperSelector, text) {
-  const js = `(() => {
-    const root = document.querySelector(${JSON.stringify(wrapperSelector)});
-    if (!root) return JSON.stringify({ ok: false, reason: "no_root" });
-    const editable =
-      root.querySelector('[contenteditable="true"]') ||
-      root.querySelector('[role="textbox"]') ||
-      root.querySelector('[data-contents="true"]') ||
-      root;
-    const payload = ${JSON.stringify(text)};
-    editable.focus();
-    try {
-      const selection = window.getSelection();
-      const range = document.createRange();
-      range.selectNodeContents(editable);
-      range.collapse(false);
-      selection.removeAllRanges();
-      selection.addRange(range);
-    } catch {}
-    let inserted = false;
-    try {
-      inserted = document.execCommand("insertText", false, payload);
-    } catch {}
-    try {
-      editable.dispatchEvent(
-        new InputEvent("input", {
-          bubbles: true,
-          cancelable: true,
-          inputType: "insertText",
-          data: payload,
-        })
-      );
-      editable.dispatchEvent(new Event("change", { bubbles: true }));
-    } catch {}
-    const normalized = String(editable.innerText || editable.textContent || "")
-      .replace(/\\s+/g, " ")
-      .trim();
-    return JSON.stringify({ ok: inserted || normalized.length > 0, text: normalized });
-  })()`;
-  const raw = abText(["eval", js]);
-  const parsed = parseEvalJsonValue(raw);
-  if (!parsed) return false;
-  const needle = normalizeTweetText(text).slice(0, 80);
-  const actual = normalizeTweetText(String(parsed.text ?? ""));
-  return actual.includes(needle);
+function selectComposeContents(wrapperSelector) {
+  parseEvalJsonValue(abText(["eval", selectComposeContentsEvalJs(wrapperSelector)]));
+}
+
+function insertComposeTextViaCdp(wrapperSelector, text, context) {
+  focusComposeEditable(wrapperSelector, context);
+  parseEvalJsonValue(abText(["eval", focusComposeEditableEvalJs(wrapperSelector)]));
+  selectComposeContents(wrapperSelector);
+  requireAb(["keyboard", "inserttext", text], `${context} CDP inserttext`);
 }
 
 function insertComposeTextViaClipboard(wrapperSelector, text, context) {
@@ -315,13 +313,15 @@ function insertComposeTextViaClipboard(wrapperSelector, text, context) {
 }
 
 function typeIntoComposeTextarea(wrapperSelector, text, context) {
-  focusComposeEditable(wrapperSelector, context);
-  parseEvalJsonValue(abText(["eval", focusComposeEditableEvalJs(wrapperSelector)]));
-
-  requireAb(["keyboard", "type", text], `${context} keyboard type`);
+  // One CDP Input.insertText of the entire payload, including newlines.
+  // Never split on newline / insertParagraph, and never use
+  // document.execCommand("selectAll"|"delete"|"insertText") — those paths
+  // either wipe Draft's DOM or serialize only the focused active block.
+  insertComposeTextViaCdp(wrapperSelector, text, context);
   sleep(400);
 
-  if (!composeTextMatches(wrapperSelector, text) && insertComposeTextViaEval(wrapperSelector, text)) {
+  if (!composeTextMatches(wrapperSelector, text)) {
+    insertComposeTextViaCdp(wrapperSelector, text, `${context} retry`);
     sleep(400);
   }
 
@@ -330,30 +330,7 @@ function typeIntoComposeTextarea(wrapperSelector, text, context) {
     sleep(400);
   }
 
-  if (!composeTextMatches(wrapperSelector, text)) {
-    focusComposeEditable(wrapperSelector, `${context} refocus`);
-    requireAb(["press", "Control+a"], `${context} select all`);
-    requireAb(["keyboard", "inserttext", text], `${context} inserttext`);
-    sleep(400);
-  }
-
-  if (!composeTextMatches(wrapperSelector, text)) {
-    for (const sel of composeEditableSelectors(wrapperSelector)) {
-      if (abCount(sel) === 0) continue;
-      requireAb(["click", sel], `${context} refocus editable`);
-      const typed = runAb(["type", sel, text]);
-      sleep(400);
-      if (typed.ok && composeTextMatches(wrapperSelector, text)) break;
-    }
-  }
-
-  if (!composeTextMatches(wrapperSelector, text)) {
-    throw {
-      message: `${context}: typed text did not commit to compose editor`,
-      errorCode: "unknown",
-    };
-  }
-
+  assertComposeReadyToSubmit(wrapperSelector, text, context);
   sleep(TYPE_SETTLE_MS);
 }
 
@@ -686,7 +663,8 @@ function validateComposeState(scope, payload) {
   }
 
   const slot0 = byIndex.get(0)?.[0];
-  if (!slot0 || !normalizeTweetText(slot0.text).includes(mainNeedle)) {
+  const mainText = slot0 ? normalizeTweetText(slot0.text) : "";
+  if (!slot0 || mainText !== normalizeTweetText(payload.text)) {
     errors.push("main tweet missing from tweetTextarea_0");
   }
 
@@ -702,7 +680,7 @@ function validateComposeState(scope, payload) {
       errors.push(`tweetTextarea_${threadIndex} is duplicated`);
     }
     const threadText = normalizeTweetText(numberedSlots[0].text);
-    if (!threadText.includes(threadNeedle)) {
+    if (threadText !== normalizeTweetText(threadTexts[i])) {
       errors.push(`thread slot ${threadIndex} text mismatch`);
     }
     if (mainNeedle && threadText.includes(mainNeedle) && threadNeedle !== mainNeedle) {
@@ -711,7 +689,6 @@ function validateComposeState(scope, payload) {
   }
 
   if (slot0 && threadTexts.length > 0) {
-    const mainText = normalizeTweetText(slot0.text);
     const firstThreadNeedle = normalizeTweetText(threadTexts[0]).slice(0, 80);
     if (firstThreadNeedle && mainText.includes(firstThreadNeedle)) {
       errors.push("main tweetTextarea_0 contains continuation text");
@@ -844,7 +821,7 @@ function abText(args) {
 }
 
 function normalizeTweetText(text) {
-  return text.replace(/\s+/g, " ").trim();
+  return normalizeComposeText(text);
 }
 
 function extractStatusIdFromHref(href) {
@@ -1126,13 +1103,17 @@ function fillCompose(payload) {
   validateComposeState(scope, { ...payload, threadTexts });
 }
 
-function waitForVerifiedPost(expectedText, handle, baseline, timeoutMs = 20_000) {
+function waitForVerifiedPost(expectedText, handle, baseline, timeoutMs) {
+  const budgetMs = Number(
+    timeoutMs ?? process.env.SIGNALS_PUBLISH_VERIFY_TIMEOUT_MS ?? 20_000
+  );
+  const pollMs = Math.min(2000, Math.max(50, budgetMs));
   const started = Date.now();
-  while (Date.now() - started < timeoutMs) {
+  while (Date.now() - started < budgetMs) {
     const candidates = readProfileStatusCandidates(handle);
     const match = selectNewOwnedStatus(candidates, handle, expectedText, baseline);
     if (match) return match;
-    sleep(2000);
+    sleep(pollMs);
   }
   return {
     success: false,
@@ -1192,8 +1173,12 @@ function runRepostOrQuote({ payload, kind, handle, dryRun }) {
   }
 
   const baseline = captureProfileStatusBaseline(handle);
-  waitForSelector(activeComposeScope.tweetButton, "wait for quote tweet button");
-  requireAb(["click", activeComposeScope.tweetButton], "click quote tweet button");
+    assertAllComposeSlotsReadyToSubmit({
+      ...payload,
+      threadTexts: normalizeThreadTexts(payload),
+    });
+    waitForSelector(activeComposeScope.tweetButton, "wait for quote tweet button");
+    requireAb(["click", activeComposeScope.tweetButton], "click quote tweet button");
   sleep(2000);
 
   const result = waitForVerifiedPost(payload.text, handle, baseline);
@@ -1258,6 +1243,7 @@ function main() {
         activeComposeScope,
         normalizedPayload
       );
+      assertAllComposeSlotsReadyToSubmit(normalizedPayload);
       emit({
         success: true,
         dryRun: true,
@@ -1270,6 +1256,7 @@ function main() {
       return;
     }
 
+    assertAllComposeSlotsReadyToSubmit(normalizedPayload);
     waitForSelector(activeComposeScope.tweetButton, "wait for tweet button");
     requireAb(["click", activeComposeScope.tweetButton], "click tweet button");
     sleep(2000);

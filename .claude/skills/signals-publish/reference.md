@@ -6,6 +6,7 @@ Requires **`agent-browser`** on PATH (locked external skill). The script delegat
 
 ```bash
 node scripts/x-publish.cjs --port <cdpPort> --payload <job.json> [--dry-run]
+node scripts/x-reply.cjs --port <cdpPort> --payload <reply.json> [--dry-run]
 ```
 
 ### Payload (`job.json`)
@@ -52,6 +53,31 @@ Failure:
 ## Compose flow
 
 Thread add: prefer `[role="dialog"]`-scoped textareas on compose/post, but add controls may be **global** (`[data-testid="addButton"]` outside dialog). Candidate list includes dialog-scoped then global fallbacks. X lazy-renders add after first tweet has content (~2.5s). **Do not click** add — focus last matching control + Enter (a11y). Duplicate `tweetTextarea_0` slots may appear instead of `tweetTextarea_1`.
+
+### Single-pass text insertion
+
+X Draft.js / Lexical serializes only the focused active block when paragraphs are created with separate `insertParagraph` or per-line `insertText` mutations. `innerText` can still show every line.
+
+1. Inject the full string with one CDP `Input.insertText` (`agent-browser keyboard inserttext` in `x-publish.cjs` and `x-reply.cjs`). Never `document.execCommand("insertText"|"selectAll"|"delete")`.
+2. Before Tweet / `[data-testid="tweetButtonInline"]` (modal fallback: `[role="dialog"] [data-testid="tweetButton"]`), compare per-editable selection, Draft leaf texts, and EditorState `getPlainText()` when readable. Missing leaf evidence, DOM/EditorState desync, or flattened paragraphs fail closed. Do not drop a readable EditorState that disagrees with the DOM — `editor_state_mismatch` is the issue's truncated-block mode. `range.toString()` may omit Draft block breaks; treat that collapsed join as the same selection when the block texts still match. Snapshot must not call `selectAll` (that reads the focused slot, not the target). `x-publish.cjs` rechecks every `threadTexts` slot immediately before submit. Re-inject with the same per-editable range select + CDP inserttext (not Control+a).
+3. After `[data-testid="reply"]`, prefer `[role="dialog"] [data-testid="tweetTextarea_0"]` + scoped `tweetButton` when that dialog exists (the inline `tweetTextarea_0` stays in the page and is covered). Otherwise use the inline composer + `tweetButtonInline`.
+4. On mismatch, re-inject once and recheck. If the snapshot still diverges, abort the command. Do not submit.
+5. After clicking Reply, `x-reply.cjs` refreshes the acting profile's `/with_replies` timeline, reads `[data-testid="tweetText"]` on owned cards, and requires the **full** canonical draft. Failure after click is `verify_uncertain` (do not retry / do not click Reply again).
+
+### x-reply.cjs payload
+
+```jsonc
+{
+  "text": "Entire multi-paragraph reply in one string",
+  "sourcePostUrl": "https://x.com/user/status/123"
+}
+```
+
+Inline replies are for Social Intent Patrol / agent-browser outbound comments. They are **not** a `PublishJobKind`. Success stdout is the new owned reply, not the parent:
+
+```json
+{"success":true,"kind":"reply","handle":"@user","platformPostId":"456","platformUrl":"https://x.com/user/status/456","sourcePostUrl":"https://x.com/user/status/123"}
+```
 
 ## Verification invariant (P6a port) (owned status ids + max snowflake) **before** compose.
 2. Post via compose UI.

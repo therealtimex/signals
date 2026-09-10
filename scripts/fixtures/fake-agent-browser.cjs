@@ -26,6 +26,12 @@ function defaultState() {
     activeTextareaIndex: 0,
     lastSelector: "",
     threadTextareaCount: 0,
+    statusOpen: false,
+    statusUrl: "",
+    currentUrl: "",
+    replySubmitClicks: 0,
+    replyMode: false,
+    replyLayout: "inline",
   };
 }
 
@@ -85,9 +91,11 @@ function shellTab(state) {
 }
 
 function contentTab(state) {
-  const url = state.composeOpen
-    ? "https://x.com/compose/post"
-    : "https://x.com/home";
+  const url =
+    state.currentUrl ||
+    (state.composeOpen
+      ? "https://x.com/compose/post"
+      : state.statusUrl || "https://x.com/home");
   return {
     active: state.activeTab === "t2",
     label: null,
@@ -118,8 +126,14 @@ function textareaCountForSelector(selector, state) {
   if (LOGGED_IN_MARKERS.some((marker) => selector.includes(marker))) {
     return 1;
   }
+  if (selector.includes('data-testid="reply"') || selector.includes("tweetButtonInline")) {
+    return state.statusOpen || state.replyMode || state.composeOpen ? 1 : 0;
+  }
   const isDialogScoped =
     selector.includes("role=\"dialog\"") || selector.includes('[role="dialog"]');
+  if (state.replyMode && isDialogScoped && selector.includes("tweetTextarea")) {
+    return state.replyLayout === "modal" && state.threadTextareaCount > 0 ? 1 : 0;
+  }
   if (state.composeOpen && state.composeUiMode === "page") {
     if (isDialogScoped && selector.includes("tweetTextarea")) {
       return 0;
@@ -187,6 +201,9 @@ function textareaCountForSelector(selector, state) {
     }
     return state.composeOpen && state.mainTweetTyped ? 1 : 0;
   }
+  if (selector.includes("tweetButtonInline")) {
+    return state.replyMode || state.composeOpen ? 1 : 0;
+  }
   if (selector.includes("tweetButton")) return 1;
   if (selector.includes("fileInput")) return 1;
   if (selector.includes("attachments")) return 1;
@@ -196,6 +213,8 @@ function textareaCountForSelector(selector, state) {
 function handleGet(rest, state) {
   const sub = rest[1];
   if (sub === "url") {
+    if (state.currentUrl) return ok(state.currentUrl);
+    if (state.statusUrl) return ok(state.statusUrl);
     return ok(state.composeOpen ? "https://x.com/compose/post" : "https://x.com/home");
   }
   if (sub === "count") {
@@ -227,6 +246,9 @@ function recordTypedText(state, selector, text) {
   const mark = sel.match(/signals-publish-thread-(\d+)/);
   const num = sel.match(/tweetTextarea_(\d+)/);
   const index = mark ? Number(mark[1]) : num ? Number(num[1]) : 0;
+  if (process.env.FAKE_AB_FAIL_THREAD_FILL === "1" && index === 1) {
+    fail("simulated thread fill failure");
+  }
   if (!state.composedTextByIndex) state.composedTextByIndex = {};
   state.composedTextByIndex[index] = text;
   if (index === 0) {
@@ -256,9 +278,105 @@ function focusableAddButtonFromEvalJs(js, state) {
   return false;
 }
 
+function composeSnapshotFromState(state, index = 0) {
+  const text =
+    state.composedTextByIndex?.[index] ?? (index === 0 ? state.mainTweetText : "") ?? "";
+  const blocks = String(text)
+    .split(/\n+/)
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  const last = blocks[blocks.length - 1] || "";
+  const truncatedActive =
+    process.env.FAKE_AB_TRUNCATE_ACTIVE_BLOCK === "1" && blocks.length > 1;
+  const staleEarlier =
+    process.env.FAKE_AB_STALE_EARLIER_SLOT === "1" &&
+    index > 0 &&
+    index < Number(state.activeTextareaIndex ?? 0) &&
+    blocks.length > 1;
+  const leafDesync =
+    process.env.FAKE_AB_DOM_LEAF_DESYNC === "1" && blocks.length > 1;
+  if (truncatedActive || staleEarlier) {
+    return {
+      ok: true,
+      innerText: text,
+      blocks: [last],
+      leafBlocks: [last],
+      leafText: last,
+      editorPlainText: last,
+      focusedBlockText: last,
+      selectionText: last,
+      text: String(text).replace(/\s+/g, " ").trim(),
+    };
+  }
+  if (leafDesync) {
+    return {
+      ok: true,
+      innerText: text,
+      blocks: blocks.length ? blocks : text ? [text] : [],
+      leafBlocks: [last],
+      leafText: last,
+      editorPlainText: last,
+      focusedBlockText: last,
+      selectionText: text,
+      text: String(text).replace(/\s+/g, " ").trim(),
+    };
+  }
+  return {
+    ok: true,
+    innerText: text,
+    blocks: blocks.length ? blocks : text ? [text] : [],
+    leafBlocks: blocks.length ? blocks : text ? [text] : [],
+    leafText: text,
+    editorPlainText: text,
+    focusedBlockText: last || text,
+    selectionText: text,
+    text: String(text).replace(/\s+/g, " ").trim(),
+  };
+}
+
+function publishedTweetBody(state) {
+  if (state.replyMode) {
+    const full = String(state.mainTweetText || state.composedTextByIndex?.[0] || "");
+    if (process.env.FAKE_AB_REPLY_PREFIX_ONLY === "1") {
+      return full.replace(/\s+/g, " ").trim().slice(0, 80);
+    }
+    return full;
+  }
+  const composed = state.composedTextByIndex || {};
+  const parts = Object.keys(composed)
+    .sort((a, b) => Number(a) - Number(b))
+    .map((key) => composed[key])
+    .filter(Boolean);
+  return String(parts.join(" ") || state.mainTweetText || "thread tweet one thread tweet two")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function textareaIndexFromEvalJs(js, fallback = 0) {
+  const mark = js.match(/signals-publish-thread-(\d+)/);
+  if (mark) return Number(mark[1]);
+  const num = js.match(/tweetTextarea_(\d+)/);
+  if (num) return Number(num[1]);
+  return fallback;
+}
+
 function handleEval(rest, state) {
   const js = rest[1] ?? "";
+  if (js.includes("signals-compose-select")) {
+    return ok(JSON.stringify(JSON.stringify({ ok: true, reason: "selected" })));
+  }
+  if (js.includes("signals-compose-snapshot")) {
+    const index = textareaIndexFromEvalJs(js, state.activeTextareaIndex ?? 0);
+    return ok(JSON.stringify(JSON.stringify(composeSnapshotFromState(state, index))));
+  }
   if (js.includes("ownedCandidates")) {
+    const onRepliesTimeline = /with_replies/i.test(String(state.currentUrl || ""));
+    if (
+      process.env.FAKE_AB_REPLY_HIDDEN_FROM_THREAD === "1" &&
+      !onRepliesTimeline
+    ) {
+      return ok(JSON.stringify("[]"));
+    }
     if (state.postPublished) {
       const ms = Date.now() - 1288834974657;
       const statusId = (BigInt(ms) << 22n).toString();
@@ -266,7 +384,7 @@ function handleEval(rest, state) {
         {
           statusId,
           href: `/${profileHandle}/status/${statusId}`,
-          text: "thread tweet one thread tweet two",
+          text: publishedTweetBody(state),
         },
       ];
       return ok(JSON.stringify(JSON.stringify(payload)));
@@ -387,7 +505,11 @@ function handleEval(rest, state) {
     }
     return ok(JSON.stringify(JSON.stringify({ ok: false })));
   }
-  if ((js.includes("innerText") || js.includes("textContent"))) {
+  if (
+    (js.includes("innerText") || js.includes("textContent")) &&
+    !js.includes("signals-compose-select") &&
+    !js.includes("signals-compose-snapshot")
+  ) {
     const zerosMatch = js.match(/zeros\[(\d+)\]/);
     if (zerosMatch) {
       const index = Number(zerosMatch[1]);
@@ -407,25 +529,7 @@ function handleEval(rest, state) {
     return ok(JSON.stringify(JSON.stringify(text)));
   }
   if (js.includes("execCommand") && js.includes("insertText")) {
-    const marker = "const payload = ";
-    const idx = js.indexOf(marker);
-    if (idx >= 0) {
-      try {
-        const slice = js.slice(idx + marker.length);
-        const end = slice.indexOf(";");
-        const text = JSON.parse(slice.slice(0, end).trim());
-        const index = state.activeTextareaIndex ?? 0;
-        recordTypedText(
-          state,
-          state.lastSelector || `tweetTextarea_${index}`,
-          text
-        );
-        const normalized = String(text).replace(/\s+/g, " ").trim();
-        return ok(JSON.stringify(JSON.stringify({ ok: true, text: normalized })));
-      } catch {
-        return ok(JSON.stringify(JSON.stringify({ ok: false, text: "" })));
-      }
-    }
+    return ok(JSON.stringify(JSON.stringify({ ok: false, reason: "eval_insert_disabled" })));
   }
   return ok("null");
 }
@@ -467,7 +571,13 @@ if (cmd === "get") return handleGet(rest, state);
 if (cmd === "is") return handleIs(rest);
 if (cmd === "open") {
   const url = rest[1] ?? "";
+  state.currentUrl = url;
   if (url.includes("compose/post")) openCompose(state, "page");
+  if (url.includes("/status/")) {
+    state.statusOpen = true;
+    state.statusUrl = url;
+  }
+  writeState(state);
   return ok();
 }
 if (cmd === "wait") return ok();
@@ -517,6 +627,43 @@ if (cmd === "click") {
   const markerMatch = selector.match(/signals-publish-thread-(\d+)/);
   if (markerMatch) {
     state.activeTextareaIndex = Number(markerMatch[1]);
+    writeState(state);
+  }
+  if (selector.includes('data-testid="reply"') || /\[data-testid="reply"\]/.test(selector)) {
+    const modal = process.env.FAKE_AB_REPLY_MODAL === "1";
+    openCompose(state, modal ? "modal" : "inline");
+    state.replyMode = true;
+    state.replyLayout = modal ? "modal" : "inline";
+    writeState(state);
+  }
+  if (
+    state.replyLayout === "modal" &&
+    selector.includes("tweetTextarea_0") &&
+    !(selector.includes('role="dialog"') || selector.includes('[role="dialog"]'))
+  ) {
+    fail(
+      'Element `[data-testid="tweetTextarea_0"]` is covered by `<div inside div#layers>` at its click point'
+    );
+  }
+  const isReplySubmit =
+    selector.includes("tweetButtonInline") ||
+    (state.replyMode &&
+      selector.includes("tweetButton") &&
+      !selector.includes("tweetButtonInline"));
+  if (process.env.FAKE_AB_REJECT_REPLY_CLICK === "1" && isReplySubmit) {
+    fail("simulated reply submit rejection");
+  }
+  if (process.env.FAKE_AB_REPLY_NOT_ACCEPTED === "1" && isReplySubmit) {
+    return ok();
+  }
+  if (isReplySubmit) {
+    state.replySubmitClicks = Number(state.replySubmitClicks || 0) + 1;
+    if (
+      process.env.FAKE_AB_REPLY_HIDDEN_FROM_THREAD === "1" &&
+      state.replySubmitClicks > 1
+    ) {
+      fail("repost after uncertain verify");
+    }
     writeState(state);
   }
   if (selector.includes("tweetButton")) {

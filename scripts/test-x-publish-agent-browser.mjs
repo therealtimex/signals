@@ -51,6 +51,41 @@ function runXPublish(payload, extraEnv = {}, extraArgs = []) {
   return result;
 }
 
+const replyScriptPath = join(
+  root,
+  "..",
+  ".claude",
+  "skills",
+  "signals-publish",
+  "scripts",
+  "x-reply.cjs"
+);
+
+function runXReply(payload, extraEnv = {}, extraArgs = []) {
+  const workDir = mkdtempSync(join(tmpdir(), "x-reply-adapter-"));
+  const payloadPath = join(workDir, "payload.json");
+  const stateFile = join(workDir, "fake-ab-state.json");
+  writeFileSync(payloadPath, JSON.stringify(payload));
+  const result = spawnSync(
+    process.execPath,
+    [replyScriptPath, "--port", "9222", "--payload", payloadPath, ...extraArgs],
+    {
+      cwd: join(root, "..", ".claude", "skills", "signals-publish"),
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        AGENT_BROWSER_BIN: process.execPath,
+        AGENT_BROWSER_BIN_ARGS: fakeAb,
+        SIGNALS_PUBLISH_AB_SESSION: "fake-session",
+        FAKE_AB_STATE_FILE: stateFile,
+        ...extraEnv,
+      },
+    }
+  );
+  rmSync(workDir, { recursive: true, force: true });
+  return result;
+}
+
 function lastJson(stdout) {
   const line = stdout.trim().split("\n").filter(Boolean).pop() ?? "";
   return JSON.parse(line);
@@ -125,19 +160,19 @@ if (!focusPayload?.ok) {
   process.exit(1);
 }
 
-// Eval insert path when keyboard type does not commit (fake simulates live Draft.js)
-const evalInsert = runXPublish(
+// Clipboard fallback when keyboard inserttext does not commit
+const clipboardInsert = runXPublish(
   { text: "thread tweet one", threadTexts: ["thread tweet two"] },
   { FAKE_AB_SKIP_KEYBOARD: "1" },
   ["--dry-run"]
 );
-if (evalInsert.status !== 0) {
-  console.error("eval insert path failed:", evalInsert.stdout, evalInsert.stderr);
+if (clipboardInsert.status !== 0) {
+  console.error("clipboard insert path failed:", clipboardInsert.stdout, clipboardInsert.stderr);
   process.exit(1);
 }
-const evalInsertJson = lastJson(evalInsert.stdout);
-if (!evalInsertJson.success || !evalInsertJson.dryRun) {
-  console.error("unexpected eval insert dry-run result:", evalInsertJson);
+const clipboardInsertJson = lastJson(clipboardInsert.stdout);
+if (!clipboardInsertJson.success || !clipboardInsertJson.dryRun) {
+  console.error("unexpected clipboard insert dry-run result:", clipboardInsertJson);
   process.exit(1);
 }
 
@@ -242,6 +277,255 @@ const legacyThreadField = runXPublish(
 );
 if (legacyThreadField.status === 0) {
   console.error("legacy threadText field should fail");
+  process.exit(1);
+}
+
+const multiParagraph = `Intro paragraph stays in the draft.
+
+1. First item must survive submit.
+2. Second item must survive submit.
+3. Test Codex in a separate git worktree first.`;
+
+const multiPublish = runXPublish({ text: multiParagraph }, {}, ["--dry-run"]);
+if (multiPublish.status !== 0) {
+  console.error("multi-paragraph dry-run failed:", multiPublish.stdout, multiPublish.stderr);
+  process.exit(1);
+}
+
+const truncatedPublish = runXPublish(
+  { text: multiParagraph },
+  { FAKE_AB_TRUNCATE_ACTIVE_BLOCK: "1" },
+  ["--dry-run"]
+);
+if (truncatedPublish.status === 0) {
+  console.error("truncated active-block compose should fail pre-submit");
+  process.exit(1);
+}
+const truncatedPublishJson = lastJson(truncatedPublish.stdout);
+if (
+  truncatedPublishJson.success ||
+  !String(truncatedPublishJson.error || "").includes("full drafted text")
+) {
+  console.error("unexpected truncated compose result:", truncatedPublishJson);
+  process.exit(1);
+}
+
+const leafDesyncPublish = runXPublish(
+  { text: multiParagraph },
+  { FAKE_AB_DOM_LEAF_DESYNC: "1" },
+  ["--dry-run"]
+);
+if (leafDesyncPublish.status === 0) {
+  console.error("DOM/EditorState leaf desync should fail pre-submit");
+  process.exit(1);
+}
+const leafDesyncJson = lastJson(leafDesyncPublish.stdout);
+if (
+  leafDesyncJson.success ||
+  !String(leafDesyncJson.error || "").includes("full drafted text") ||
+  !String(leafDesyncJson.error || "").includes("draft_leaf_mismatch")
+) {
+  console.error("unexpected leaf-desync compose result:", leafDesyncJson);
+  process.exit(1);
+}
+
+const staleEarlierSlot = runXPublish(
+  {
+    text: "thread tweet one",
+    threadTexts: [
+      "Continuation paragraph one.\n\nContinuation paragraph two.",
+      "Third slot stays intact.",
+    ],
+  },
+  { FAKE_AB_STALE_EARLIER_SLOT: "1" },
+  ["--dry-run"]
+);
+if (staleEarlierSlot.status === 0) {
+  console.error("stale earlier thread slot should fail final pre-submit");
+  process.exit(1);
+}
+const staleEarlierJson = lastJson(staleEarlierSlot.stdout);
+if (
+  staleEarlierJson.success ||
+  !String(staleEarlierJson.error || "").includes("pre-submit thread slot 1")
+) {
+  console.error("unexpected stale earlier-slot result:", staleEarlierJson);
+  process.exit(1);
+}
+
+const replyPayload = {
+  text: multiParagraph,
+  sourcePostUrl: "https://x.com/JaeHokes/status/2097877302017130541",
+};
+const replyOk = runXReply(replyPayload, {}, ["--dry-run"]);
+if (replyOk.status !== 0) {
+  console.error("x-reply dry-run failed:", replyOk.stdout, replyOk.stderr);
+  process.exit(1);
+}
+const replyOkJson = lastJson(replyOk.stdout);
+if (
+  !replyOkJson.success ||
+  !replyOkJson.dryRun ||
+  replyOkJson.kind !== "reply" ||
+  replyOkJson.composeMode !== "inline"
+) {
+  console.error("unexpected x-reply result:", replyOkJson);
+  process.exit(1);
+}
+
+const replyModalDry = runXReply(replyPayload, { FAKE_AB_REPLY_MODAL: "1" }, ["--dry-run"]);
+if (replyModalDry.status !== 0) {
+  console.error(
+    "modal x-reply dry-run failed (inline+dialog composers coexist):",
+    replyModalDry.stdout,
+    replyModalDry.stderr
+  );
+  process.exit(1);
+}
+const replyModalDryJson = lastJson(replyModalDry.stdout);
+if (
+  !replyModalDryJson.success ||
+  !replyModalDryJson.dryRun ||
+  replyModalDryJson.composeMode !== "modal"
+) {
+  console.error("unexpected modal x-reply dry-run result:", replyModalDryJson);
+  process.exit(1);
+}
+
+const replyTruncated = runXReply(
+  replyPayload,
+  { FAKE_AB_TRUNCATE_ACTIVE_BLOCK: "1" },
+  ["--dry-run"]
+);
+if (replyTruncated.status === 0) {
+  console.error("truncated inline reply should fail pre-submit");
+  process.exit(1);
+}
+const replyTruncatedJson = lastJson(replyTruncated.stdout);
+if (
+  replyTruncatedJson.success ||
+  !String(replyTruncatedJson.error || "").includes("full drafted reply")
+) {
+  console.error("unexpected truncated reply result:", replyTruncatedJson);
+  process.exit(1);
+}
+
+const replyPublished = runXReply(replyPayload);
+if (replyPublished.status !== 0) {
+  console.error("x-reply publish failed:", replyPublished.stdout, replyPublished.stderr);
+  process.exit(1);
+}
+const replyPublishedJson = lastJson(replyPublished.stdout);
+if (
+  !replyPublishedJson.success ||
+  replyPublishedJson.kind !== "reply" ||
+  !replyPublishedJson.platformPostId ||
+  !String(replyPublishedJson.platformUrl || "").includes(`/status/${replyPublishedJson.platformPostId}`) ||
+  replyPublishedJson.platformUrl === replyPayload.sourcePostUrl
+) {
+  console.error("x-reply must return the new reply URL, not the source post:", replyPublishedJson);
+  process.exit(1);
+}
+
+const replyModalPublished = runXReply(replyPayload, { FAKE_AB_REPLY_MODAL: "1" });
+if (replyModalPublished.status !== 0) {
+  console.error(
+    "modal x-reply publish failed:",
+    replyModalPublished.stdout,
+    replyModalPublished.stderr
+  );
+  process.exit(1);
+}
+const replyModalPublishedJson = lastJson(replyModalPublished.stdout);
+if (
+  !replyModalPublishedJson.success ||
+  replyModalPublishedJson.kind !== "reply" ||
+  !replyModalPublishedJson.platformPostId ||
+  replyModalPublishedJson.platformUrl === replyPayload.sourcePostUrl
+) {
+  console.error("unexpected modal x-reply publish result:", replyModalPublishedJson);
+  process.exit(1);
+}
+
+const replyModalRejected = runXReply(replyPayload, {
+  FAKE_AB_REPLY_MODAL: "1",
+  FAKE_AB_REJECT_REPLY_CLICK: "1",
+});
+if (replyModalRejected.status === 0) {
+  console.error("rejected modal reply click should not succeed");
+  process.exit(1);
+}
+
+const replyRejectedClick = runXReply(replyPayload, { FAKE_AB_REJECT_REPLY_CLICK: "1" });
+if (replyRejectedClick.status === 0) {
+  console.error("rejected reply click should not succeed");
+  process.exit(1);
+}
+const replyRejectedClickJson = lastJson(replyRejectedClick.stdout);
+if (
+  replyRejectedClickJson.success ||
+  !String(replyRejectedClickJson.error || "").includes("simulated reply submit rejection")
+) {
+  console.error("unexpected rejected-click reply result:", replyRejectedClickJson);
+  process.exit(1);
+}
+
+const replyNotAccepted = runXReply(replyPayload, {
+  FAKE_AB_REPLY_NOT_ACCEPTED: "1",
+  SIGNALS_PUBLISH_VERIFY_TIMEOUT_MS: "250",
+});
+if (replyNotAccepted.status === 0) {
+  console.error("unverified reply click should not succeed");
+  process.exit(1);
+}
+const replyNotAcceptedJson = lastJson(replyNotAccepted.stdout);
+if (
+  replyNotAcceptedJson.success ||
+  replyNotAcceptedJson.errorCode !== "verify_uncertain" ||
+  replyNotAcceptedJson.submitted !== true ||
+  !String(replyNotAcceptedJson.error || "").includes("Do not click Reply again") ||
+  replyNotAcceptedJson.platformUrl === replyPayload.sourcePostUrl
+) {
+  console.error("unexpected unverified reply result:", replyNotAcceptedJson);
+  process.exit(1);
+}
+
+const replyPrefixOnly = runXReply(replyPayload, {
+  FAKE_AB_REPLY_PREFIX_ONLY: "1",
+  SIGNALS_PUBLISH_VERIFY_TIMEOUT_MS: "250",
+});
+if (replyPrefixOnly.status === 0) {
+  console.error("prefix-only published reply should fail full-text verification");
+  process.exit(1);
+}
+const replyPrefixOnlyJson = lastJson(replyPrefixOnly.stdout);
+if (
+  replyPrefixOnlyJson.success ||
+  replyPrefixOnlyJson.errorCode !== "verify_uncertain" ||
+  replyPrefixOnlyJson.submitted !== true
+) {
+  console.error("unexpected prefix-only reply result:", replyPrefixOnlyJson);
+  process.exit(1);
+}
+
+const replyHiddenFromThread = runXReply(replyPayload, {
+  FAKE_AB_REPLY_HIDDEN_FROM_THREAD: "1",
+});
+if (replyHiddenFromThread.status !== 0) {
+  console.error(
+    "owned replies timeline should confirm a reply missing from the thread DOM:",
+    replyHiddenFromThread.stdout,
+    replyHiddenFromThread.stderr
+  );
+  process.exit(1);
+}
+const replyHiddenJson = lastJson(replyHiddenFromThread.stdout);
+if (
+  !replyHiddenJson.success ||
+  !replyHiddenJson.platformPostId ||
+  replyHiddenJson.platformUrl === replyPayload.sourcePostUrl
+) {
+  console.error("unexpected hidden-from-thread reply result:", replyHiddenJson);
   process.exit(1);
 }
 
