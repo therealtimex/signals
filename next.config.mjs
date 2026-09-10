@@ -42,6 +42,13 @@ const nextConfig = {
   output: "standalone",
   serverExternalPackages: ["better-sqlite3", "playwright", "playwright-core"],
   devIndicators: false,
+  // Since 16.3, dev resources are refused to origins outside this list
+  // (localhost is implicit). Tooling opens Signals at 127.0.0.1, where a refused
+  // HMR socket leaves the page reloading itself about once a minute.
+  allowedDevOrigins: ["127.0.0.1"],
+  // Since 16.3, `next dev` appends a managed block to AGENTS.md whenever it
+  // detects a coding agent in its environment; AGENTS.md here is curated.
+  agentRules: false,
   ...(turbopackRoot ? { turbopack: { root: turbopackRoot } } : {}),
 };
 
