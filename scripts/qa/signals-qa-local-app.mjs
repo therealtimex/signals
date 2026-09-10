@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { basename, delimiter, dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -280,7 +280,23 @@ export function parseFlagArgs(argv) {
   };
 }
 
-export function canonicalConfigProblems(row, canonicalRepoRoot) {
+// The dev host stores the literal `~/.signals`; the packaged host stores the expanded path.
+// Both name the same directory, so both are canonical.
+export function isCanonicalSignalsDataDir(value, home = homedir()) {
+  const text = String(value ?? "").trim();
+  if (!text) return false;
+  if (text === "~/.signals") return true;
+  return text.startsWith(sep) && resolve(text) === resolve(home, ".signals");
+}
+
+export function realtimexDbPath(storageRoot, env = process.env) {
+  const userData =
+    env.REALTIMEX_USER_DATA?.trim() || join(homedir(), ".realtimex.ai", "desktop-user-data");
+  const user = env.REALTIMEX_USER?.trim() || "trungle_rta_vn";
+  return join(userData, storageRoot, "users", user, "storage", "realtimex.db");
+}
+
+export function canonicalConfigProblems(row, canonicalRepoRoot, home = homedir()) {
   const problems = [];
   if (!row) return ["canonical Signals Local App record is missing"];
   if (row.id !== CANONICAL_SIGNALS_APP_ID) problems.push("canonical id does not match");
@@ -294,7 +310,7 @@ export function canonicalConfigProblems(row, canonicalRepoRoot) {
   } catch {
     return [...problems, "canonical config is not valid JSON"];
   }
-  if (config?.env?.SIGNALS_DATA_DIR !== "~/.signals") {
+  if (!isCanonicalSignalsDataDir(config?.env?.SIGNALS_DATA_DIR, home)) {
     problems.push("canonical SIGNALS_DATA_DIR is not ~/.signals");
   }
 
