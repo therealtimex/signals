@@ -72,9 +72,9 @@ X's inline and modal composers serialize **only the focused active block** if pa
 - Inject the entire string as **one** `insertText` payload (`x-compose-text.cjs` / `x-publish.cjs` / `x-reply.cjs`).
 - Never type line-by-line, press Enter between paragraphs, or split the payload.
 - Before clicking Tweet / `[data-testid="tweetButtonInline"]`, assert the editor snapshot has non-empty `selectAll` selection **and** block texts, and that paragraph structure matches the draft (newlines are not collapsed). Re-inject once on mismatch; if it still diverges, abort the command. Do not submit.
-- `x-reply.cjs` must not treat the Reply click as success. It waits for a newly created owned reply and prints `platformPostId` / `platformUrl` for that reply — never the parent post URL.
+- `x-reply.cjs` must not treat the Reply click as success. It confirms the **full** drafted text on the acting profile's `/with_replies` timeline (tweet body, not article chrome) and prints that reply's `platformPostId` / `platformUrl`. If confirmation fails after the click, it returns `verify_uncertain` — do **not** click Reply again.
 
-4. Parse the **last stdout line** as JSON. On success call `complete_publish` with `leaseId`, `handle`, `platformPostId`, and `platformUrl`. Include `targetId` only when the job target snapshot contains it; omit `targetId` from both success and failure callbacks for legacy platform-only jobs. On failure pass `leaseId`, optional snapshotted `targetId`, and `error` + `errorCode` (`session_expired`, `captcha`, `upload_failed`, `timeout`, `wrong_account`, `unknown`).
+4. Parse the **last stdout line** as JSON. On success call `complete_publish` with `leaseId`, `handle`, `platformPostId`, and `platformUrl`. Include `targetId` only when the job target snapshot contains it; omit `targetId` from both success and failure callbacks for legacy platform-only jobs. On failure pass `leaseId`, optional snapshotted `targetId`, and `error` + `errorCode` (`session_expired`, `captcha`, `upload_failed`, `timeout`, `wrong_account`, `verify_uncertain`, `unknown`).
 5. Always run `signals-pp-cli targets release --lease <leaseId>` after the completion callback, including failures.
 6. **LinkedIn (beta):** shared connections are verify-only. Use a dedicated connection for multiple members; use `agent-browser` interactively or report a clear failure if unsupported.
 
@@ -85,7 +85,8 @@ X's inline and modal composers serialize **only the focused active block** if pa
 | `session_expired` | Ask user to sign in in RealTimeX Browser `signals-publish`, then retry |
 | `captcha` | Report in thread; `complete_publish` failure — do not solve |
 | `upload_failed` | Report media issue; fail target |
-| `timeout` | Retry once or fail with note |
+| `timeout` | Retry once or fail with note — **except after an X Reply click** |
+| `verify_uncertain` | Reply was already clicked. Do **not** retry or click Reply again; inspect the acting profile's replies timeline |
 | `wrong_account` | Do not publish; re-run target preparation or ask the user to activate the expected account |
 
 ## Related

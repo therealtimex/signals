@@ -13,6 +13,7 @@ const {
   matchComposeSnapshot,
   normalizeComposeText,
   paragraphBlocks,
+  publishedReplyMatches,
   readComposeSnapshotEvalJs,
 } = require(
   join(
@@ -91,6 +92,20 @@ const flattened = matchComposeSnapshot(
 );
 if (flattened.ok || flattened.reason !== "editor_blocks_mismatch") {
   console.error("flattened single block must not match multi-paragraph draft", flattened);
+  process.exit(1);
+}
+
+if (!publishedReplyMatches(drafted, drafted)) {
+  console.error("full tweet body must match the drafted reply");
+  process.exit(1);
+}
+const prefixOnly = normalizeComposeText(drafted).slice(0, 80);
+if (publishedReplyMatches(prefixOnly, drafted)) {
+  console.error("first-80-character tweet body must not match the full draft");
+  process.exit(1);
+}
+if (publishedReplyMatches(paragraphBlocks(drafted)[0], drafted)) {
+  console.error("first paragraph alone must not match the full draft");
   process.exit(1);
 }
 

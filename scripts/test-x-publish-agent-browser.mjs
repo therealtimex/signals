@@ -409,10 +409,51 @@ if (replyNotAccepted.status === 0) {
 const replyNotAcceptedJson = lastJson(replyNotAccepted.stdout);
 if (
   replyNotAcceptedJson.success ||
-  replyNotAcceptedJson.errorCode !== "timeout" ||
+  replyNotAcceptedJson.errorCode !== "verify_uncertain" ||
+  replyNotAcceptedJson.submitted !== true ||
+  !String(replyNotAcceptedJson.error || "").includes("Do not click Reply again") ||
   replyNotAcceptedJson.platformUrl === replyPayload.sourcePostUrl
 ) {
   console.error("unexpected unverified reply result:", replyNotAcceptedJson);
+  process.exit(1);
+}
+
+const replyPrefixOnly = runXReply(replyPayload, {
+  FAKE_AB_REPLY_PREFIX_ONLY: "1",
+  SIGNALS_PUBLISH_VERIFY_TIMEOUT_MS: "250",
+});
+if (replyPrefixOnly.status === 0) {
+  console.error("prefix-only published reply should fail full-text verification");
+  process.exit(1);
+}
+const replyPrefixOnlyJson = lastJson(replyPrefixOnly.stdout);
+if (
+  replyPrefixOnlyJson.success ||
+  replyPrefixOnlyJson.errorCode !== "verify_uncertain" ||
+  replyPrefixOnlyJson.submitted !== true
+) {
+  console.error("unexpected prefix-only reply result:", replyPrefixOnlyJson);
+  process.exit(1);
+}
+
+const replyHiddenFromThread = runXReply(replyPayload, {
+  FAKE_AB_REPLY_HIDDEN_FROM_THREAD: "1",
+});
+if (replyHiddenFromThread.status !== 0) {
+  console.error(
+    "owned replies timeline should confirm a reply missing from the thread DOM:",
+    replyHiddenFromThread.stdout,
+    replyHiddenFromThread.stderr
+  );
+  process.exit(1);
+}
+const replyHiddenJson = lastJson(replyHiddenFromThread.stdout);
+if (
+  !replyHiddenJson.success ||
+  !replyHiddenJson.platformPostId ||
+  replyHiddenJson.platformUrl === replyPayload.sourcePostUrl
+) {
+  console.error("unexpected hidden-from-thread reply result:", replyHiddenJson);
   process.exit(1);
 }
 

@@ -21,7 +21,7 @@ const { parseEvalJsonArray, parseEvalJsonValue } = require("./parse-eval-json-ar
 const {
   insertComposeTextEvalJs,
   matchComposeSnapshot,
-  normalizeComposeText,
+  publishedReplyMatches,
   readComposeSnapshotEvalJs,
 } = require("./x-compose-text.cjs");
 
@@ -282,9 +282,13 @@ function statusIdToTimestampMs(statusId) {
   }
 }
 
+function ownedRepliesUrl(handle) {
+  return `https://x.com/${String(handle).replace(/^@/, "")}/with_replies`;
+}
+
 function selectNewOwnedStatus(candidates, handle, expectedText, baseline) {
-  const needle = normalizeComposeText(expectedText).slice(0, 80);
-  if (!needle) return null;
+  const want = String(expectedText ?? "");
+  if (!want.trim()) return null;
 
   for (const candidate of candidates) {
     if (baseline.statusIds.has(candidate.statusId)) continue;
@@ -296,7 +300,7 @@ function selectNewOwnedStatus(candidates, handle, expectedText, baseline) {
     }
     if (candidateId <= baseline.maxStatusId) continue;
     if (!isStatusOwnedByHandle(candidate.href, handle)) continue;
-    if (!normalizeComposeText(candidate.text).includes(needle)) continue;
+    if (!publishedReplyMatches(candidate.text, want)) continue;
     const createdAt = statusIdToTimestampMs(candidate.statusId);
     if (createdAt === null || createdAt < baseline.capturedAtMs) continue;
     return {
@@ -314,9 +318,6 @@ function selectNewOwnedStatus(candidates, handle, expectedText, baseline) {
 
 function readOwnedStatusCandidates(handle) {
   const js = `(() => {
-    function normalize(text) {
-      return String(text || "").replace(/\\s+/g, " ").trim();
-    }
     function extractStatusId(href) {
       if (!href) return null;
       const match = href.match(/\\/status\\/(\\d+)/);
@@ -332,12 +333,16 @@ function readOwnedStatusCandidates(handle) {
         return false;
       }
     }
+    function tweetBody(article) {
+      const node = article.querySelector('[data-testid="tweetText"]');
+      return String((node && (node.innerText || node.textContent)) || "");
+    }
     const handle = ${JSON.stringify(handle)};
     const articles = document.querySelectorAll("article");
     const ownedCandidates = [];
-    for (let i = 0; i < Math.min(articles.length, 12); i++) {
+    for (let i = 0; i < Math.min(articles.length, 24); i++) {
       const article = articles[i];
-      const text = normalize(article.innerText);
+      const text = tweetBody(article);
       const links = article.querySelectorAll("a[href*='/status/']");
       for (const link of links) {
         const href = link.getAttribute("href");
@@ -355,6 +360,8 @@ function readOwnedStatusCandidates(handle) {
 }
 
 function captureStatusBaseline(handle, sourcePostUrl) {
+  requireAb(["open", ownedRepliesUrl(handle)], "open owned replies timeline for baseline");
+  sleep(400);
   const candidates = readOwnedStatusCandidates(handle);
   const statusIds = new Set(candidates.map((c) => c.statusId));
   const sourceId = extractStatusIdFromHref(sourcePostUrl);
@@ -369,8 +376,11 @@ function captureStatusBaseline(handle, sourcePostUrl) {
 function waitForVerifiedReply(expectedText, handle, baseline) {
   const budgetMs = Number(process.env.SIGNALS_PUBLISH_VERIFY_TIMEOUT_MS ?? 20_000);
   const pollMs = Math.min(2000, Math.max(50, budgetMs));
+  const repliesUrl = ownedRepliesUrl(handle);
   const started = Date.now();
   while (Date.now() - started < budgetMs) {
+    requireAb(["open", repliesUrl], "refresh owned replies timeline");
+    sleep(Math.min(400, pollMs));
     const match = selectNewOwnedStatus(
       readOwnedStatusCandidates(handle),
       handle,
@@ -382,8 +392,9 @@ function waitForVerifiedReply(expectedText, handle, baseline) {
   }
   return {
     success: false,
-    error: "No newly published reply was detected after clicking Reply.",
-    errorCode: "timeout",
+    submitted: true,
+    error: `Reply was clicked but the full drafted text was not confirmed on ${repliesUrl}. Do not click Reply again.`,
+    errorCode: "verify_uncertain",
   };
 }
 
@@ -401,6 +412,9 @@ function main() {
         errorCode: "session_expired",
       };
     }
+    const baseline = dryRun ? null : captureStatusBaseline(handle, sourcePostUrl);
+    requireAb(["open", sourcePostUrl], "return to source post");
+    sleep(1000);
     waitForSelector(REPLY_BUTTON, "wait for reply button");
     requireAb(["click", REPLY_BUTTON], "open inline reply composer");
     waitForSelector(REPLY_TEXTAREA, "wait for inline reply textarea");
@@ -418,7 +432,6 @@ function main() {
       return;
     }
 
-    const baseline = captureStatusBaseline(handle, sourcePostUrl);
     waitForSelector(REPLY_SUBMIT, "wait for inline reply button");
     requireAb(["click", REPLY_SUBMIT], "submit inline reply");
     const result = waitForVerifiedReply(text, handle, baseline);

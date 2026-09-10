@@ -61,7 +61,7 @@ X Draft.js / Lexical serializes only the focused active block when paragraphs ar
 1. Inject the full string as one `insertText` payload (`scripts/x-compose-text.cjs`, used by `x-publish.cjs` and `x-reply.cjs`).
 2. Before Tweet / `[data-testid="tweetButtonInline"]`, compare `selectAll` selection **and** editor block texts to the drafted paragraph structure. Missing selection/block evidence or flattened paragraphs fail closed. `x-publish.cjs` rechecks every `threadTexts` slot immediately before submit.
 3. On mismatch, re-inject once and recheck. If the snapshot still diverges, abort the command. Do not submit.
-4. After clicking Reply, `x-reply.cjs` waits for a new owned status whose text matches the draft and returns that reply's `platformPostId` / `platformUrl`.
+4. After clicking Reply, `x-reply.cjs` refreshes the acting profile's `/with_replies` timeline, reads `[data-testid="tweetText"]` on owned cards, and requires the **full** canonical draft. Failure after click is `verify_uncertain` (do not retry / do not click Reply again).
 
 ### x-reply.cjs payload
 

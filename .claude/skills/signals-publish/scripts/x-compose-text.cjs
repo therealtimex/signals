@@ -25,6 +25,12 @@ function canonicalComposeText(text) {
   return paragraphBlocks(text).join("\n");
 }
 
+function publishedReplyMatches(actual, expected) {
+  const want = canonicalComposeText(expected);
+  const got = canonicalComposeText(actual);
+  return Boolean(want) && got === want;
+}
+
 function composeSnapshotFromText(text, options = {}) {
   const full = String(text ?? "");
   const blocks = paragraphBlocks(full);
@@ -251,6 +257,7 @@ function readComposeSnapshotEvalJs(wrapperSelector) {
 module.exports = {
   normalizeComposeText,
   canonicalComposeText,
+  publishedReplyMatches,
   paragraphBlocks,
   composeSnapshotFromText,
   matchComposeSnapshot,

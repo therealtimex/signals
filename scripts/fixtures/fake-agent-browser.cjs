@@ -28,6 +28,8 @@ function defaultState() {
     threadTextareaCount: 0,
     statusOpen: false,
     statusUrl: "",
+    currentUrl: "",
+    replySubmitClicks: 0,
     replyMode: false,
   };
 }
@@ -88,9 +90,11 @@ function shellTab(state) {
 }
 
 function contentTab(state) {
-  const url = state.composeOpen
-    ? "https://x.com/compose/post"
-    : "https://x.com/home";
+  const url =
+    state.currentUrl ||
+    (state.composeOpen
+      ? "https://x.com/compose/post"
+      : state.statusUrl || "https://x.com/home");
   return {
     active: state.activeTab === "t2",
     label: null,
@@ -205,6 +209,7 @@ function textareaCountForSelector(selector, state) {
 function handleGet(rest, state) {
   const sub = rest[1];
   if (sub === "url") {
+    if (state.currentUrl) return ok(state.currentUrl);
     if (state.statusUrl) return ok(state.statusUrl);
     return ok(state.composeOpen ? "https://x.com/compose/post" : "https://x.com/home");
   }
@@ -304,6 +309,24 @@ function composeSnapshotFromState(state, index = 0) {
   };
 }
 
+function publishedTweetBody(state) {
+  if (state.replyMode) {
+    const full = String(state.mainTweetText || state.composedTextByIndex?.[0] || "");
+    if (process.env.FAKE_AB_REPLY_PREFIX_ONLY === "1") {
+      return full.replace(/\s+/g, " ").trim().slice(0, 80);
+    }
+    return full;
+  }
+  const composed = state.composedTextByIndex || {};
+  const parts = Object.keys(composed)
+    .sort((a, b) => Number(a) - Number(b))
+    .map((key) => composed[key])
+    .filter(Boolean);
+  return String(parts.join(" ") || state.mainTweetText || "thread tweet one thread tweet two")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function parseInsertPayload(js) {
   const marker = "const payload = ";
   const idx = js.indexOf(marker);
@@ -358,24 +381,21 @@ function handleEval(rest, state) {
     return ok(JSON.stringify(JSON.stringify(composeSnapshotFromState(state, index))));
   }
   if (js.includes("ownedCandidates")) {
+    const onRepliesTimeline = /with_replies/i.test(String(state.currentUrl || ""));
+    if (
+      process.env.FAKE_AB_REPLY_HIDDEN_FROM_THREAD === "1" &&
+      !onRepliesTimeline
+    ) {
+      return ok(JSON.stringify("[]"));
+    }
     if (state.postPublished) {
       const ms = Date.now() - 1288834974657;
       const statusId = (BigInt(ms) << 22n).toString();
-      const composed = state.composedTextByIndex || {};
-      const parts = Object.keys(composed)
-        .sort((a, b) => Number(a) - Number(b))
-        .map((key) => composed[key])
-        .filter(Boolean);
-      const text = String(
-        parts.join(" ") || state.mainTweetText || "thread tweet one thread tweet two"
-      )
-        .replace(/\s+/g, " ")
-        .trim();
       const payload = [
         {
           statusId,
           href: `/${profileHandle}/status/${statusId}`,
-          text,
+          text: publishedTweetBody(state),
         },
       ];
       return ok(JSON.stringify(JSON.stringify(payload)));
@@ -580,12 +600,13 @@ if (cmd === "get") return handleGet(rest, state);
 if (cmd === "is") return handleIs(rest);
 if (cmd === "open") {
   const url = rest[1] ?? "";
+  state.currentUrl = url;
   if (url.includes("compose/post")) openCompose(state, "page");
   if (url.includes("/status/")) {
     state.statusOpen = true;
     state.statusUrl = url;
-    writeState(state);
   }
+  writeState(state);
   return ok();
 }
 if (cmd === "wait") return ok();
@@ -653,6 +674,16 @@ if (cmd === "click") {
     selector.includes("tweetButtonInline")
   ) {
     return ok();
+  }
+  if (selector.includes("tweetButtonInline")) {
+    state.replySubmitClicks = Number(state.replySubmitClicks || 0) + 1;
+    if (
+      process.env.FAKE_AB_REPLY_HIDDEN_FROM_THREAD === "1" &&
+      state.replySubmitClicks > 1
+    ) {
+      fail("repost after uncertain verify");
+    }
+    writeState(state);
   }
   if (selector.includes("tweetButton")) {
     state.postPublished = true;
