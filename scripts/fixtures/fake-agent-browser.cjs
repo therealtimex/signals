@@ -26,6 +26,9 @@ function defaultState() {
     activeTextareaIndex: 0,
     lastSelector: "",
     threadTextareaCount: 0,
+    statusOpen: false,
+    statusUrl: "",
+    replyMode: false,
   };
 }
 
@@ -118,6 +121,9 @@ function textareaCountForSelector(selector, state) {
   if (LOGGED_IN_MARKERS.some((marker) => selector.includes(marker))) {
     return 1;
   }
+  if (selector.includes('data-testid="reply"') || selector.includes("tweetButtonInline")) {
+    return state.statusOpen || state.replyMode || state.composeOpen ? 1 : 0;
+  }
   const isDialogScoped =
     selector.includes("role=\"dialog\"") || selector.includes('[role="dialog"]');
   if (state.composeOpen && state.composeUiMode === "page") {
@@ -187,6 +193,9 @@ function textareaCountForSelector(selector, state) {
     }
     return state.composeOpen && state.mainTweetTyped ? 1 : 0;
   }
+  if (selector.includes("tweetButtonInline")) {
+    return state.replyMode || state.composeOpen ? 1 : 0;
+  }
   if (selector.includes("tweetButton")) return 1;
   if (selector.includes("fileInput")) return 1;
   if (selector.includes("attachments")) return 1;
@@ -196,6 +205,7 @@ function textareaCountForSelector(selector, state) {
 function handleGet(rest, state) {
   const sub = rest[1];
   if (sub === "url") {
+    if (state.statusUrl) return ok(state.statusUrl);
     return ok(state.composeOpen ? "https://x.com/compose/post" : "https://x.com/home");
   }
   if (sub === "count") {
@@ -256,8 +266,89 @@ function focusableAddButtonFromEvalJs(js, state) {
   return false;
 }
 
+function composeSnapshotFromState(state, index = 0) {
+  const text =
+    state.composedTextByIndex?.[index] ?? (index === 0 ? state.mainTweetText : "") ?? "";
+  const blocks = String(text)
+    .split(/\n+/)
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  const last = blocks[blocks.length - 1] || "";
+  const truncated =
+    process.env.FAKE_AB_TRUNCATE_ACTIVE_BLOCK === "1" && blocks.length > 1;
+  if (truncated) {
+    return {
+      ok: true,
+      innerText: text,
+      blocks: [last],
+      focusedBlockText: last,
+      selectionText: last,
+      text: String(text).replace(/\s+/g, " ").trim(),
+    };
+  }
+  return {
+    ok: true,
+    innerText: text,
+    blocks: blocks.length ? blocks : text ? [text] : [],
+    focusedBlockText: last || text,
+    selectionText: text,
+    text: String(text).replace(/\s+/g, " ").trim(),
+  };
+}
+
+function parseInsertPayload(js) {
+  const marker = "const payload = ";
+  const idx = js.indexOf(marker);
+  if (idx < 0) return null;
+  const slice = js.slice(idx + marker.length).trimStart();
+  if (!slice.startsWith('"')) {
+    try {
+      return JSON.parse(slice);
+    } catch {
+      return null;
+    }
+  }
+  let i = 1;
+  while (i < slice.length) {
+    if (slice[i] === "\\") {
+      i += 2;
+      continue;
+    }
+    if (slice[i] === '"') {
+      try {
+        return JSON.parse(slice.slice(0, i + 1));
+      } catch {
+        return null;
+      }
+    }
+    i += 1;
+  }
+  return null;
+}
+
+function textareaIndexFromEvalJs(js, fallback = 0) {
+  const mark = js.match(/signals-publish-thread-(\d+)/);
+  if (mark) return Number(mark[1]);
+  const num = js.match(/tweetTextarea_(\d+)/);
+  if (num) return Number(num[1]);
+  return fallback;
+}
+
 function handleEval(rest, state) {
   const js = rest[1] ?? "";
+  if (js.includes("signals-compose-insert")) {
+    const text = parseInsertPayload(js);
+    if (text == null) {
+      return ok(JSON.stringify(JSON.stringify({ ok: false, reason: "no_payload" })));
+    }
+    const index = textareaIndexFromEvalJs(js, state.activeTextareaIndex ?? 0);
+    recordTypedText(state, state.lastSelector || `tweetTextarea_${index}`, text);
+    return ok(JSON.stringify(JSON.stringify(composeSnapshotFromState(state, index))));
+  }
+  if (js.includes("signals-compose-snapshot")) {
+    const index = textareaIndexFromEvalJs(js, state.activeTextareaIndex ?? 0);
+    return ok(JSON.stringify(JSON.stringify(composeSnapshotFromState(state, index))));
+  }
   if (js.includes("ownedCandidates")) {
     if (state.postPublished) {
       const ms = Date.now() - 1288834974657;
@@ -387,7 +478,11 @@ function handleEval(rest, state) {
     }
     return ok(JSON.stringify(JSON.stringify({ ok: false })));
   }
-  if ((js.includes("innerText") || js.includes("textContent"))) {
+  if (
+    (js.includes("innerText") || js.includes("textContent")) &&
+    !js.includes("signals-compose-insert") &&
+    !js.includes("signals-compose-snapshot")
+  ) {
     const zerosMatch = js.match(/zeros\[(\d+)\]/);
     if (zerosMatch) {
       const index = Number(zerosMatch[1]);
@@ -468,6 +563,11 @@ if (cmd === "is") return handleIs(rest);
 if (cmd === "open") {
   const url = rest[1] ?? "";
   if (url.includes("compose/post")) openCompose(state, "page");
+  if (url.includes("/status/")) {
+    state.statusOpen = true;
+    state.statusUrl = url;
+    writeState(state);
+  }
   return ok();
 }
 if (cmd === "wait") return ok();
@@ -517,6 +617,11 @@ if (cmd === "click") {
   const markerMatch = selector.match(/signals-publish-thread-(\d+)/);
   if (markerMatch) {
     state.activeTextareaIndex = Number(markerMatch[1]);
+    writeState(state);
+  }
+  if (selector.includes('data-testid="reply"') || /\[data-testid="reply"\]/.test(selector)) {
+    openCompose(state, "inline");
+    state.replyMode = true;
     writeState(state);
   }
   if (selector.includes("tweetButton")) {

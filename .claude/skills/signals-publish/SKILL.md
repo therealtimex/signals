@@ -42,6 +42,7 @@ Resolve/create/start the session with `realtimex-pp-cli` or the `agent-browser` 
 |----------|------|--------|
 | `x` | `original` (default) | `scripts/x-publish.cjs` |
 | `x` | `repost` or `quote` | `scripts/x-publish.cjs` (same script; `kind` in payload) |
+| `x` | outbound reply (Social Intent Patrol, not a publish job) | `scripts/x-reply.cjs` |
 | `facebook` | `original` | `scripts/facebook-publish.cjs` |
 
 ```bash
@@ -51,12 +52,26 @@ node .claude/skills/signals-publish/scripts/x-publish.cjs \
 ```
 
 ```bash
+node .claude/skills/signals-publish/scripts/x-reply.cjs \
+  --port <cdpPort> \
+  --payload /tmp/x-reply.json
+```
+
+```bash
 node .claude/skills/signals-publish/scripts/facebook-publish.cjs \
   --port <cdpPort> \
   --payload /tmp/facebook-publish-job.json
 ```
 
-For QA without sending a public post, add `--dry-run` (fills compose fields, skips Post/Tweet/Repost confirm).
+For QA without sending a public post, add `--dry-run` (fills compose fields, skips Post/Tweet/Repost/Reply confirm).
+
+### X compose insertion (Draft.js / Lexical)
+
+X's inline and modal composers serialize **only the focused active block** if paragraphs were inserted with separate `insertParagraph` / per-line `insertText` calls. `innerText` can still show every line.
+
+- Inject the entire string as **one** `insertText` payload (`x-compose-text.cjs` / `x-publish.cjs` / `x-reply.cjs`).
+- Never type line-by-line, press Enter between paragraphs, or split the payload.
+- Before clicking Tweet / `[data-testid="tweetButtonInline"]`, assert the editor snapshot (`selectAll` selection + block texts) equals the drafted text. Abort and re-inject on mismatch.
 
 4. Parse the **last stdout line** as JSON. On success call `complete_publish` with `leaseId`, `handle`, `platformPostId`, and `platformUrl`. Include `targetId` only when the job target snapshot contains it; omit `targetId` from both success and failure callbacks for legacy platform-only jobs. On failure pass `leaseId`, optional snapshotted `targetId`, and `error` + `errorCode` (`session_expired`, `captcha`, `upload_failed`, `timeout`, `wrong_account`, `unknown`).
 5. Always run `signals-pp-cli targets release --lease <leaseId>` after the completion callback, including failures.

@@ -204,6 +204,11 @@ describe("buildSocialPatrolBriefSection", () => {
     expect(section).toContain("recommend, lỗi");
     expect(section).toContain("8 high-intent comment(s)");
     expect(section).toContain("continuous hunting chain toward the shift target");
+    expect(section).toContain("X composer contract");
+    expect(section).toContain("x-reply.cjs");
+    expect(section).toContain("single-pass");
+    expect(section).toContain("insertParagraph");
+    expect(section).toContain("tweetButtonInline");
     expect(section).toContain("Salted sleep pacing: inject a randomized delay of 20s–45s");
     expect(section).toContain("batches of 3–5");
     expect(section).toContain("30 contact(s)");

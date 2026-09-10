@@ -28,7 +28,7 @@ import { buildWritingTemplateConfig } from "@/lib/workflows/signals-writing";
 import { buildContactWebResearchTemplateConfig } from "@/lib/workflows/contact-web-research";
 
 /** Bump this when seed template prompts change to trigger updates on existing installs. */
-const SEED_VERSION = 34;
+const SEED_VERSION = 35;
 
 export const CONTACT_PROFILE_PIPELINE_TEMPLATE_NAME = "Contact profile pipeline";
 export const DEDUPE_MERGE_ORGS_TEMPLATE_NAME = "Deduplicate & Merge Companies";
@@ -553,7 +553,7 @@ lease, connect, patrol, approve, mine, write back, release. Follow it in order.
 3. For each candidate thread:
    a. Draft a value-first technical reply that solves the poster's specific problem without pitching.
    b. If approval is ON, batch 3–5 drafts for user confirmation; if OFF, publish directly.
-   c. Publish with a randomized 20s–45s salted sleep delay between posts to maintain safe human cadence.
+   c. On X, publish with \`.claude/skills/signals-publish/scripts/x-reply.cjs\` (single-pass insertText of the entire reply, then a pre-submit full-text editor snapshot check). Never type paragraphs separately. Then apply a randomized 20s–45s salted sleep delay between posts to maintain safe human cadence.
    d. Scrape the post author plus likers/repliers (extracting profile picture image avatar_url) and stage them into \`contacts.csv\`.
    e. Advance to the next candidate thread.
 4. Methodically continue this hunting chain until the \`maxComments\` shift target is fulfilled or candidate feeds are exhausted.
@@ -567,6 +567,7 @@ checkpoint when it is enabled.
 - Apply a 20s–45s salted sleep between published comments to protect the acting profile.
 - Bot / Clone Rule (Engage for visibility, skip for contacts): Reply to popular bots, curators, or aggregators if their thread has high human visibility, but DO NOT ingest automated bots, mirror clones, or news feeds into \`contacts.csv\` (save the reply with \`contactId: null\`). Identify bots by handles ending in \`*bot\` / \`*_agent\` / \`*digest\`, automated bio disclosures, or zero-conversation link scraping.
 - One comment per post, and never comment twice in the same thread.
+- On X, never split a multi-paragraph reply across insertParagraph / per-line insertText. Use the signals-publish single-pass helper and refuse to click Reply if the editor snapshot does not match the full draft.
 - Skip posts that are already well answered, off-topic, or hostile.
 - Never fabricate a technical claim to look helpful. If you are unsure, do not reply.
 - Attribute every contact and content item you create to this workflow run.`,

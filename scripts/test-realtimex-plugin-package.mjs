@@ -43,6 +43,8 @@ const required = [
   "skills/realtimex-signals/scripts/run-signals-pp-cli.sh",
   "skills/signals-publish/SKILL.md",
   "skills/signals-publish/scripts/x-publish.cjs",
+  "skills/signals-publish/scripts/x-compose-text.cjs",
+  "skills/signals-publish/scripts/x-reply.cjs",
   "skills/signals-writing/SKILL.md",
   "skills/signals-writing/reference.md",
   "skills/signals-writing/core/claims.md",

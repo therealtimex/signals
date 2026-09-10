@@ -6,6 +6,7 @@ Requires **`agent-browser`** on PATH (locked external skill). The script delegat
 
 ```bash
 node scripts/x-publish.cjs --port <cdpPort> --payload <job.json> [--dry-run]
+node scripts/x-reply.cjs --port <cdpPort> --payload <reply.json> [--dry-run]
 ```
 
 ### Payload (`job.json`)
@@ -52,6 +53,25 @@ Failure:
 ## Compose flow
 
 Thread add: prefer `[role="dialog"]`-scoped textareas on compose/post, but add controls may be **global** (`[data-testid="addButton"]` outside dialog). Candidate list includes dialog-scoped then global fallbacks. X lazy-renders add after first tweet has content (~2.5s). **Do not click** add — focus last matching control + Enter (a11y). Duplicate `tweetTextarea_0` slots may appear instead of `tweetTextarea_1`.
+
+### Single-pass text insertion
+
+X Draft.js / Lexical serializes only the focused active block when paragraphs are created with separate `insertParagraph` or per-line `insertText` mutations. `innerText` can still show every line.
+
+1. Inject the full string as one `insertText` payload (`scripts/x-compose-text.cjs`, used by `x-publish.cjs` and `x-reply.cjs`).
+2. Before Tweet / `[data-testid="tweetButtonInline"]`, compare `readComposeText` plus the editor snapshot (`selectAll` selection and block texts) to the drafted string.
+3. On mismatch, abort and re-inject. Do not submit.
+
+### x-reply.cjs payload
+
+```jsonc
+{
+  "text": "Entire multi-paragraph reply in one string",
+  "sourcePostUrl": "https://x.com/user/status/123"
+}
+```
+
+Inline replies are for Social Intent Patrol / agent-browser outbound comments. They are **not** a `PublishJobKind`.
 
 ## Verification invariant (P6a port) (owned status ids + max snowflake) **before** compose.
 2. Post via compose UI.

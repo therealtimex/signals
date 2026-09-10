@@ -14,6 +14,12 @@ const { readFileSync } = require("node:fs");
 const { spawnSync } = require("node:child_process");
 
 const { parseEvalJsonArray, parseEvalJsonValue } = require("./parse-eval-json-array.cjs");
+const {
+  insertComposeTextEvalJs,
+  matchComposeSnapshot,
+  normalizeComposeText,
+  readComposeSnapshotEvalJs,
+} = require("./x-compose-text.cjs");
 
 const SESSION = process.env.SIGNALS_PUBLISH_AB_SESSION || "signals-publish";
 const AB_BIN = process.env.AGENT_BROWSER_BIN || "agent-browser";
@@ -226,10 +232,30 @@ function readComposeText(wrapperSelector, scope = activeComposeScope) {
   return normalizeTweetText(String(value ?? ""));
 }
 
+function readComposeSnapshot(wrapperSelector) {
+  const raw = abText(["eval", readComposeSnapshotEvalJs(wrapperSelector)]);
+  const parsed = parseEvalJsonValue(raw);
+  return parsed && typeof parsed === "object" ? parsed : null;
+}
+
 function composeTextMatches(wrapperSelector, expected) {
-  const needle = normalizeTweetText(expected).slice(0, 80);
-  if (!needle) return true;
-  return readComposeText(wrapperSelector).includes(needle);
+  const want = normalizeTweetText(expected);
+  if (!want) return true;
+  const snapshot = readComposeSnapshot(wrapperSelector);
+  if (snapshot) {
+    return matchComposeSnapshot(snapshot, expected).ok;
+  }
+  return readComposeText(wrapperSelector) === want;
+}
+
+function assertComposeReadyToSubmit(wrapperSelector, expected, context) {
+  const snapshot = readComposeSnapshot(wrapperSelector);
+  const match = matchComposeSnapshot(snapshot, expected);
+  if (match.ok) return snapshot;
+  throw {
+    message: `${context}: compose editor does not contain the full drafted text (${match.reason}; expected ${JSON.stringify(match.expected)}, actual ${JSON.stringify(match.actual)})`,
+    errorCode: "compose_invalid",
+  };
 }
 
 function focusComposeEditable(wrapperSelector, context) {
@@ -262,50 +288,10 @@ function focusComposeEditableEvalJs(wrapperSelector) {
 }
 
 function insertComposeTextViaEval(wrapperSelector, text) {
-  const js = `(() => {
-    const root = document.querySelector(${JSON.stringify(wrapperSelector)});
-    if (!root) return JSON.stringify({ ok: false, reason: "no_root" });
-    const editable =
-      root.querySelector('[contenteditable="true"]') ||
-      root.querySelector('[role="textbox"]') ||
-      root.querySelector('[data-contents="true"]') ||
-      root;
-    const payload = ${JSON.stringify(text)};
-    editable.focus();
-    try {
-      const selection = window.getSelection();
-      const range = document.createRange();
-      range.selectNodeContents(editable);
-      range.collapse(false);
-      selection.removeAllRanges();
-      selection.addRange(range);
-    } catch {}
-    let inserted = false;
-    try {
-      inserted = document.execCommand("insertText", false, payload);
-    } catch {}
-    try {
-      editable.dispatchEvent(
-        new InputEvent("input", {
-          bubbles: true,
-          cancelable: true,
-          inputType: "insertText",
-          data: payload,
-        })
-      );
-      editable.dispatchEvent(new Event("change", { bubbles: true }));
-    } catch {}
-    const normalized = String(editable.innerText || editable.textContent || "")
-      .replace(/\\s+/g, " ")
-      .trim();
-    return JSON.stringify({ ok: inserted || normalized.length > 0, text: normalized });
-  })()`;
-  const raw = abText(["eval", js]);
+  const raw = abText(["eval", insertComposeTextEvalJs(wrapperSelector, text)]);
   const parsed = parseEvalJsonValue(raw);
-  if (!parsed) return false;
-  const needle = normalizeTweetText(text).slice(0, 80);
-  const actual = normalizeTweetText(String(parsed.text ?? ""));
-  return actual.includes(needle);
+  if (!parsed || typeof parsed !== "object") return false;
+  return matchComposeSnapshot(parsed, text).ok;
 }
 
 function insertComposeTextViaClipboard(wrapperSelector, text, context) {
@@ -318,10 +304,11 @@ function typeIntoComposeTextarea(wrapperSelector, text, context) {
   focusComposeEditable(wrapperSelector, context);
   parseEvalJsonValue(abText(["eval", focusComposeEditableEvalJs(wrapperSelector)]));
 
-  requireAb(["keyboard", "type", text], `${context} keyboard type`);
-  sleep(400);
-
-  if (!composeTextMatches(wrapperSelector, text) && insertComposeTextViaEval(wrapperSelector, text)) {
+  // Single-pass insertText of the entire payload. Never split on newline /
+  // insertParagraph — X's Draft.js/Lexical composer then serializes only the
+  // focused active block on submit.
+  if (!insertComposeTextViaEval(wrapperSelector, text)) {
+    insertComposeTextViaClipboard(wrapperSelector, text, context);
     sleep(400);
   }
 
@@ -330,30 +317,7 @@ function typeIntoComposeTextarea(wrapperSelector, text, context) {
     sleep(400);
   }
 
-  if (!composeTextMatches(wrapperSelector, text)) {
-    focusComposeEditable(wrapperSelector, `${context} refocus`);
-    requireAb(["press", "Control+a"], `${context} select all`);
-    requireAb(["keyboard", "inserttext", text], `${context} inserttext`);
-    sleep(400);
-  }
-
-  if (!composeTextMatches(wrapperSelector, text)) {
-    for (const sel of composeEditableSelectors(wrapperSelector)) {
-      if (abCount(sel) === 0) continue;
-      requireAb(["click", sel], `${context} refocus editable`);
-      const typed = runAb(["type", sel, text]);
-      sleep(400);
-      if (typed.ok && composeTextMatches(wrapperSelector, text)) break;
-    }
-  }
-
-  if (!composeTextMatches(wrapperSelector, text)) {
-    throw {
-      message: `${context}: typed text did not commit to compose editor`,
-      errorCode: "unknown",
-    };
-  }
-
+  assertComposeReadyToSubmit(wrapperSelector, text, context);
   sleep(TYPE_SETTLE_MS);
 }
 
@@ -686,7 +650,8 @@ function validateComposeState(scope, payload) {
   }
 
   const slot0 = byIndex.get(0)?.[0];
-  if (!slot0 || !normalizeTweetText(slot0.text).includes(mainNeedle)) {
+  const mainText = slot0 ? normalizeTweetText(slot0.text) : "";
+  if (!slot0 || mainText !== normalizeTweetText(payload.text)) {
     errors.push("main tweet missing from tweetTextarea_0");
   }
 
@@ -702,7 +667,7 @@ function validateComposeState(scope, payload) {
       errors.push(`tweetTextarea_${threadIndex} is duplicated`);
     }
     const threadText = normalizeTweetText(numberedSlots[0].text);
-    if (!threadText.includes(threadNeedle)) {
+    if (threadText !== normalizeTweetText(threadTexts[i])) {
       errors.push(`thread slot ${threadIndex} text mismatch`);
     }
     if (mainNeedle && threadText.includes(mainNeedle) && threadNeedle !== mainNeedle) {
@@ -711,7 +676,6 @@ function validateComposeState(scope, payload) {
   }
 
   if (slot0 && threadTexts.length > 0) {
-    const mainText = normalizeTweetText(slot0.text);
     const firstThreadNeedle = normalizeTweetText(threadTexts[0]).slice(0, 80);
     if (firstThreadNeedle && mainText.includes(firstThreadNeedle)) {
       errors.push("main tweetTextarea_0 contains continuation text");
@@ -844,7 +808,7 @@ function abText(args) {
 }
 
 function normalizeTweetText(text) {
-  return text.replace(/\s+/g, " ").trim();
+  return normalizeComposeText(text);
 }
 
 function extractStatusIdFromHref(href) {
@@ -1192,8 +1156,13 @@ function runRepostOrQuote({ payload, kind, handle, dryRun }) {
   }
 
   const baseline = captureProfileStatusBaseline(handle);
-  waitForSelector(activeComposeScope.tweetButton, "wait for quote tweet button");
-  requireAb(["click", activeComposeScope.tweetButton], "click quote tweet button");
+    assertComposeReadyToSubmit(
+      activeComposeScope.tweetTextarea(0),
+      payload.text,
+      "pre-submit quote compose"
+    );
+    waitForSelector(activeComposeScope.tweetButton, "wait for quote tweet button");
+    requireAb(["click", activeComposeScope.tweetButton], "click quote tweet button");
   sleep(2000);
 
   const result = waitForVerifiedPost(payload.text, handle, baseline);
@@ -1270,6 +1239,11 @@ function main() {
       return;
     }
 
+    assertComposeReadyToSubmit(
+      activeComposeScope.tweetTextarea(0),
+      payload.text,
+      "pre-submit compose"
+    );
     waitForSelector(activeComposeScope.tweetButton, "wait for tweet button");
     requireAb(["click", activeComposeScope.tweetButton], "click tweet button");
     sleep(2000);

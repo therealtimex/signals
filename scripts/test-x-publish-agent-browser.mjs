@@ -51,6 +51,41 @@ function runXPublish(payload, extraEnv = {}, extraArgs = []) {
   return result;
 }
 
+const replyScriptPath = join(
+  root,
+  "..",
+  ".claude",
+  "skills",
+  "signals-publish",
+  "scripts",
+  "x-reply.cjs"
+);
+
+function runXReply(payload, extraEnv = {}, extraArgs = []) {
+  const workDir = mkdtempSync(join(tmpdir(), "x-reply-adapter-"));
+  const payloadPath = join(workDir, "payload.json");
+  const stateFile = join(workDir, "fake-ab-state.json");
+  writeFileSync(payloadPath, JSON.stringify(payload));
+  const result = spawnSync(
+    process.execPath,
+    [replyScriptPath, "--port", "9222", "--payload", payloadPath, ...extraArgs],
+    {
+      cwd: join(root, "..", ".claude", "skills", "signals-publish"),
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        AGENT_BROWSER_BIN: process.execPath,
+        AGENT_BROWSER_BIN_ARGS: fakeAb,
+        SIGNALS_PUBLISH_AB_SESSION: "fake-session",
+        FAKE_AB_STATE_FILE: stateFile,
+        ...extraEnv,
+      },
+    }
+  );
+  rmSync(workDir, { recursive: true, force: true });
+  return result;
+}
+
 function lastJson(stdout) {
   const line = stdout.trim().split("\n").filter(Boolean).pop() ?? "";
   return JSON.parse(line);
@@ -242,6 +277,69 @@ const legacyThreadField = runXPublish(
 );
 if (legacyThreadField.status === 0) {
   console.error("legacy threadText field should fail");
+  process.exit(1);
+}
+
+const multiParagraph = `Intro paragraph stays in the draft.
+
+1. First item must survive submit.
+2. Second item must survive submit.
+3. Test Codex in a separate git worktree first.`;
+
+const multiPublish = runXPublish({ text: multiParagraph }, {}, ["--dry-run"]);
+if (multiPublish.status !== 0) {
+  console.error("multi-paragraph dry-run failed:", multiPublish.stdout, multiPublish.stderr);
+  process.exit(1);
+}
+
+const truncatedPublish = runXPublish(
+  { text: multiParagraph },
+  { FAKE_AB_TRUNCATE_ACTIVE_BLOCK: "1" },
+  ["--dry-run"]
+);
+if (truncatedPublish.status === 0) {
+  console.error("truncated active-block compose should fail pre-submit");
+  process.exit(1);
+}
+const truncatedPublishJson = lastJson(truncatedPublish.stdout);
+if (
+  truncatedPublishJson.success ||
+  !String(truncatedPublishJson.error || "").includes("full drafted text")
+) {
+  console.error("unexpected truncated compose result:", truncatedPublishJson);
+  process.exit(1);
+}
+
+const replyPayload = {
+  text: multiParagraph,
+  sourcePostUrl: "https://x.com/JaeHokes/status/2097877302017130541",
+};
+const replyOk = runXReply(replyPayload, {}, ["--dry-run"]);
+if (replyOk.status !== 0) {
+  console.error("x-reply dry-run failed:", replyOk.stdout, replyOk.stderr);
+  process.exit(1);
+}
+const replyOkJson = lastJson(replyOk.stdout);
+if (!replyOkJson.success || !replyOkJson.dryRun || replyOkJson.kind !== "reply") {
+  console.error("unexpected x-reply result:", replyOkJson);
+  process.exit(1);
+}
+
+const replyTruncated = runXReply(
+  replyPayload,
+  { FAKE_AB_TRUNCATE_ACTIVE_BLOCK: "1" },
+  ["--dry-run"]
+);
+if (replyTruncated.status === 0) {
+  console.error("truncated inline reply should fail pre-submit");
+  process.exit(1);
+}
+const replyTruncatedJson = lastJson(replyTruncated.stdout);
+if (
+  replyTruncatedJson.success ||
+  !String(replyTruncatedJson.error || "").includes("full drafted reply")
+) {
+  console.error("unexpected truncated reply result:", replyTruncatedJson);
   process.exit(1);
 }
 

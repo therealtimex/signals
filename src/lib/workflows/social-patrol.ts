@@ -177,6 +177,7 @@ export function buildSocialPatrolBriefSection(input: {
     "    Iterate through keywords and scroll feeds deeply to discover fresh, qualifying pain posts where the author is stuck, comparing solutions, or seeking tool recommendations.",
     `P4. Execute a continuous hunting chain toward the shift target: ${patrol.maxComments} high-intent comment(s).`,
     "    Methodical sequence per thread: Locate qualifying pain post -> Draft technical value reply -> Publish (or batch for approval) -> Mine post author + engagers -> Salted sleep -> Advance to next candidate thread.",
+    "    X composer contract (mandatory on x.com): never type a reply line-by-line, never press Enter between paragraphs, and never call insertParagraph or iterative insertText. Inject the entire drafted reply as one insertText payload with `.claude/skills/signals-publish/scripts/x-reply.cjs` (the same single-pass helper used by `x-publish.cjs`). Before `[data-testid=\"tweetButtonInline\"]` is clicked, that script compares the full Draft.js/Lexical editor snapshot and compose text to the draft; if they diverge, abort and re-inject — do not submit a truncated payload.",
     "    Continue this chain until the comment budget is fulfilled or candidate search feeds are fully exhausted.",
     "P5. Salted sleep pacing: inject a randomized delay of 20s–45s between published replies to preserve human-like cadence and protect the acting profile against burst rate limits.",
     patrol.requireApproval
