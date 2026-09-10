@@ -22,6 +22,8 @@ Invoke body: `{ "tool": "<name>", "input": { ... } }`
 | `create_contact` | New contact (requires `name`; optional `channels[]`, `employments[]`) |
 | `update_contact` | Overwrite fields on existing contact |
 | `upsert_contact_identity` | Create or update a platform identity for a contact |
+| `attest_snowball_linkedin_identity` | Verify a LinkedIn identity in the run-bound browser; failures are quarantined automatically |
+| `list_snowball_candidates` | Read quarantined person/company proposals and gate failure reasons |
 | `enrich_contact` | Fill gaps only; needs `contactId` |
 | `archive_contact` | Archive with `reason` |
 | `find_duplicate_contacts` | Find duplicate contact groups (tiers 1-3) with a suggested primary |

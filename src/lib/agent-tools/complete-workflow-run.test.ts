@@ -16,6 +16,7 @@ import {
   acquireSessionLease,
   getSessionLeaseById,
 } from "@/lib/leases/session-lease";
+import { recordSnowballCandidateFailure } from "@/lib/workflows/snowball-candidates";
 
 const mockWorkflowCompletedEvent: workflowEvents.EmitWorkflowCompletedResult = {
   emitted: true,
@@ -229,6 +230,52 @@ describe("complete_workflow_run terminal teardown", () => {
       alreadyGone: false,
     });
     expect(getSessionLeaseById(leaseId)).toBeUndefined();
+  });
+
+  it("reports committed and quarantined Snowball candidates separately", async () => {
+    const { run } = createSnowballRunWithTarget();
+    recordSnowballCandidateFailure({
+      run,
+      candidateName: "Jane Doe",
+      candidateCompany: "Acme",
+      candidateTitle: "Founder",
+      profileUrl: "https://www.linkedin.com/in/jane-doe/",
+      reason: "profile_corroboration_missing",
+      message: "Company was not visible",
+    });
+    vi.spyOn(workflowEvents, "emitWorkflowCompletedEvent").mockResolvedValue(
+      mockWorkflowCompletedEvent,
+    );
+    vi.spyOn(workflowCompletionThread, "postWorkflowCompletionThreadMessage").mockResolvedValue({
+      posted: true,
+    });
+    vi.spyOn(resourceTeardown, "stopRunningRtxBrowserSessions").mockResolvedValue({
+      stopped: ["snowball-bound-session"],
+      failed: [],
+    });
+    vi.spyOn(resourceTeardown, "scheduleWorkflowTerminalSessionRelease").mockReturnValue({
+      scheduled: true,
+      sessionId: null,
+    });
+
+    const result = await handleCompleteWorkflowRun({
+      runId: run.id,
+      status: "completed",
+    });
+    if (!result.success) throw new Error(result.error);
+
+    expect(result.snowballCandidates).toEqual({
+      discovered: 1,
+      committed: 0,
+      awaitingVerification: 1,
+      promotedFromQuarantine: 0,
+      dismissed: 0,
+    });
+    expect(JSON.parse(getWorkflowRun(run.id)?.result ?? "{}")).toMatchObject({
+      partial: true,
+      summary: "1 discovered · 0 committed · 1 awaiting verification",
+      snowballCandidates: result.snowballCandidates,
+    });
   });
 
   it("still completes the workflow when no runtime session is stored", async () => {

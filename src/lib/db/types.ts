@@ -32,6 +32,7 @@ import {
   orgEmailPatterns,
   orgActivities,
   contactEmailCandidates,
+  snowballCandidates,
   graphEdges,
   interactions,
   identityMetrics,
@@ -71,6 +72,8 @@ export type OrgEmailPattern = InferSelectModel<typeof orgEmailPatterns>;
 export type NewOrgEmailPattern = InferInsertModel<typeof orgEmailPatterns>;
 export type ContactEmailCandidate = InferSelectModel<typeof contactEmailCandidates>;
 export type NewContactEmailCandidate = InferInsertModel<typeof contactEmailCandidates>;
+export type SnowballCandidate = InferSelectModel<typeof snowballCandidates>;
+export type NewSnowballCandidate = InferInsertModel<typeof snowballCandidates>;
 export type OrgActivity = InferSelectModel<typeof orgActivities>;
 export type NewOrgActivity = InferInsertModel<typeof orgActivities>;
 

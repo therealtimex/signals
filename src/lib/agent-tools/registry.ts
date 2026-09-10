@@ -30,6 +30,7 @@ import {
   listMailAccountsSchema,
   recordWorkflowRunContactsSchema,
   attestSnowballLinkedInIdentitySchema,
+  listSnowballCandidatesSchema,
 } from "@/lib/agent-tools/schemas";
 import {
   logInteractionSchema,
@@ -166,6 +167,7 @@ import {
   handleUpsertPersona,
   handleRecordWorkflowRunContacts,
   handleAttestSnowballLinkedInIdentity,
+  handleListSnowballCandidates,
 } from "@/lib/agent-tools/handlers";
 import { handleListMailAccounts } from "@/lib/agent-tools/mail-handlers";
 import {
@@ -243,11 +245,20 @@ export const AGENT_TOOLS: Record<string, AgentToolDefinition> = {
   attest_snowball_linkedin_identity: {
     name: "attest_snowball_linkedin_identity",
     description:
-      "Open a proposed LinkedIn /in/ profile in Signals' trusted authenticated browser session, verify visible name plus company/role evidence, and return a short-lived one-use identityEvidenceToken. The final browser URL determines the stored LinkedIn handle; caller-supplied slugs are not trusted.",
+      "Open a proposed LinkedIn /in/ profile in Signals' trusted authenticated browser session, verify visible name plus company/role evidence, and return a short-lived one-use identityEvidenceToken. The final browser URL determines the stored LinkedIn handle; caller-supplied slugs are not trusted. A failed gate automatically persists the proposed person and company in the quarantined candidate inbox without creating canonical graph records.",
     category: "platforms",
     schema: attestSnowballLinkedInIdentitySchema,
     parameters: zodToParameters(attestSnowballLinkedInIdentitySchema),
     execute: handleAttestSnowballLinkedInIdentity,
+  },
+  list_snowball_candidates: {
+    name: "list_snowball_candidates",
+    description:
+      "List quarantined Network Snowball contact/company candidates. identity_unverified rows are discovery leads that failed the server identity gate and are excluded from canonical contacts, organizations, graph edges, scoring, and outbound messaging until a later attestation and Auto-commit promotes them.",
+    category: "contacts",
+    schema: listSnowballCandidatesSchema,
+    parameters: zodToParameters(listSnowballCandidatesSchema),
+    execute: handleListSnowballCandidates,
   },
   get_contact: {
     name: "get_contact",

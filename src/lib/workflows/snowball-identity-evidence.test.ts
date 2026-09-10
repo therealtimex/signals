@@ -26,6 +26,10 @@ import {
 } from "@/lib/db/queries/platform-targets";
 import { acquireSessionLease, releaseSessionLease } from "@/lib/leases/session-lease";
 import { SNOWBALL_BROWSER_TARGET_CONFIG_KEY } from "@/lib/workflows/network-snowball-target";
+import {
+  listSnowballCandidates,
+  recordSnowballCandidateFailure,
+} from "@/lib/workflows/snowball-candidates";
 
 function createSnowballRun() {
   const template = createTemplate({
@@ -124,6 +128,15 @@ describe("Snowball LinkedIn identity evidence", () => {
 
   it("derives the persisted identity from the final browser URL before auto-commit", async () => {
     const { template, run, scopeToken, sessionName } = createSnowballRun();
+    recordSnowballCandidateFailure({
+      run,
+      candidateName: "Jane Doe",
+      candidateCompany: "Acme Inc.",
+      candidateTitle: "Founder",
+      profileUrl: "https://www.linkedin.com/in/guessed-jane/",
+      reason: "profile_corroboration_missing",
+      message: "The first pass did not show corroboration",
+    });
     const evidence = await attest(scopeToken);
 
     const created = await invokeAgentTool("create_contact", {
@@ -175,6 +188,12 @@ describe("Snowball LinkedIn identity evidence", () => {
     )).toEqual({
       errors: [],
       auditedIdentityIds: [contact.identities[0].id],
+    });
+    expect(listSnowballCandidates({ workflowRunId: run.id }).data[0]).toMatchObject({
+      status: "promoted",
+      promotedContactId: contact.id,
+      promotedIdentityId: contact.identities[0].id,
+      promotedOrgId: contact.currentEmployment?.orgId,
     });
   });
 

@@ -42,6 +42,7 @@ import {
   platformTargets,
   publishJobs,
   snowballSeedLedger,
+  snowballCandidates,
   tasks,
 } from "@/lib/db/schema";
 import { resetWritingStore } from "@/lib/writing/voice-profile-store";
@@ -53,6 +54,7 @@ export function resetCoreTables(): void {
   resetWritingStore();
   resetPersonalityStore();
   db.delete(snowballSeedLedger).run();
+  db.delete(snowballCandidates).run();
   db.delete(tasks).run();
   db.delete(contactEmailCandidates).run();
   db.delete(orgEmailPatterns).run();

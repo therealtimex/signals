@@ -140,6 +140,9 @@ describe("buildNetworkSnowballBriefSection", () => {
     expect(brief).toContain("identity_evidence_token");
     expect(brief).toContain("candidateCompany");
     expect(brief).toContain("same-name candidate with different context");
+    expect(brief).toContain("automatically saves every failed attestation");
+    expect(brief).toContain("identity_unverified");
+    expect(brief).toContain("list_snowball_candidates");
     expect(brief).toContain("Auto-commit & Graph Edge Linking");
     expect(brief).toContain("Avatar Enrichment (downstream of identity attestation)");
     expect(brief).toContain("pv-top-card-profile-picture__image");
@@ -149,6 +152,7 @@ describe("buildNetworkSnowballBriefSection", () => {
     expect(brief).toContain("leave avatar_url blank");
     expect(brief).toContain("missing imagery must never create pressure to guess an identity");
     expect(brief).toContain("avatars: N/M");
+    expect(brief).toContain("N discovered · X committed · Y awaiting verification");
     expect(brief).toContain("workflow-runs/run_snow_1/contacts.csv");
     expect(brief).toContain(
       ".claude/skills/realtimex-signals/scripts/run-signals-pp-cli.sh import contacts --file workflow-runs/run_snow_1/contacts.csv --dedupe --workflow-run-id run_snow_1 --template-id tpl_snow_1",

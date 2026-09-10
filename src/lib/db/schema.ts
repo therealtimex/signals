@@ -994,6 +994,61 @@ export const contactEmailCandidates = sqliteTable("contact_email_candidates", {
   index("idx_email_candidates_org_status").on(table.orgId, table.status),
 ]);
 
+// Failed Network Snowball identity attestations live outside the canonical
+// contact/org graph until later browser evidence promotes them.
+export const snowballCandidates = sqliteTable("snowball_candidates", {
+  id: text("id").primaryKey(),
+  workflowRunId: text("workflow_run_id")
+    .notNull()
+    .references(() => workflowRuns.id, { onDelete: "cascade" }),
+  templateId: text("template_id").references(() => workflowTemplates.id, {
+    onDelete: "set null",
+  }),
+  platform: text("platform", { enum: ["linkedin"] }).notNull(),
+  profileUrl: text("profile_url").notNull(),
+  profileKey: text("profile_key").notNull(),
+  proposedName: text("proposed_name").notNull(),
+  proposedNameKey: text("proposed_name_key").notNull(),
+  proposedCompany: text("proposed_company"),
+  proposedTitle: text("proposed_title"),
+  seedType: text("seed_type"),
+  seedValue: text("seed_value"),
+  status: text("status", {
+    enum: ["identity_unverified", "promoted", "dismissed"],
+  })
+    .notNull()
+    .default("identity_unverified"),
+  failureReason: text("failure_reason").notNull(),
+  failureMessage: text("failure_message").notNull(),
+  failureDetails: text("failure_details").notNull().default("{}"),
+  failureHistory: text("failure_history").notNull().default("[]"),
+  attemptCount: integer("attempt_count").notNull().default(1),
+  lastAttemptAt: integer("last_attempt_at").notNull(),
+  promotedContactId: text("promoted_contact_id").references(() => contacts.id, {
+    onDelete: "set null",
+  }),
+  promotedIdentityId: text("promoted_identity_id").references(() => contactIdentities.id, {
+    onDelete: "set null",
+  }),
+  promotedOrgId: text("promoted_org_id").references(() => orgs.id, {
+    onDelete: "set null",
+  }),
+  promotedAt: integer("promoted_at"),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex("idx_snowball_candidates_run_profile").on(
+    table.workflowRunId,
+    table.platform,
+    table.profileKey,
+  ),
+  index("idx_snowball_candidates_status_updated").on(table.status, table.updatedAt),
+  index("idx_snowball_candidates_profile_name").on(
+    table.platform,
+    table.profileKey,
+    table.proposedNameKey,
+  ),
+]);
+
 export const orgActivities = sqliteTable("org_activities", {
   id: text("id").primaryKey(),
   orgId: text("org_id")
