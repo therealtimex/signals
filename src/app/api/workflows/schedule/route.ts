@@ -9,6 +9,10 @@ import { getTemplate } from "@/lib/db/queries/workflow-templates";
 import { parseTemplateConfig } from "@/lib/workflows/template-config";
 import { isDedupeTemplateConfig } from "@/lib/workflows/dedupe-template";
 import { DEDUPE_MERGE_JOB_TYPE } from "@/lib/contacts/dedupe/scheduled-merge";
+import {
+  RTX_SCHEDULING_REQUIRED_CODE,
+  RTX_SCHEDULING_REQUIRED_MESSAGE,
+} from "@/lib/scheduler/schedule-policy";
 
 const createScheduleSchema = z.object({
   templateId: z.string().min(1, "templateId is required"),
@@ -45,19 +49,27 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const template = getTemplate(data.templateId);
+    if (!template) {
+      return NextResponse.json({ error: "Template not found" }, { status: 404 });
+    }
+
     // A dedupe template has no agent to dispatch, so it schedules as a maintenance sweep
     // that runs the merge engine in-process — the one job type that actually executes.
-    const template = getTemplate(data.templateId);
-    const isDedupe = template
-      ? isDedupeTemplateConfig(parseTemplateConfig(template.config))
-      : false;
-    const payload = {
-      ...(data.payload ?? {}),
-      ...(isDedupe ? { templateId: data.templateId } : {}),
-    };
+    // Anything else would only be recorded here to fail on first fire, so refuse it up front:
+    // the host app owns recurring runs (RealTimeX Agent Flow or calendar event).
+    const isDedupe = isDedupeTemplateConfig(parseTemplateConfig(template.config));
+    if (!isDedupe) {
+      return NextResponse.json(
+        { error: RTX_SCHEDULING_REQUIRED_MESSAGE, code: RTX_SCHEDULING_REQUIRED_CODE },
+        { status: 409 },
+      );
+    }
+
+    const payload = { ...(data.payload ?? {}), templateId: data.templateId };
 
     const job = createScheduledJob({
-      jobType: isDedupe ? DEDUPE_MERGE_JOB_TYPE : "workflow",
+      jobType: DEDUPE_MERGE_JOB_TYPE,
       templateId: data.templateId,
       cronExpression: data.cronExpression,
       payload: JSON.stringify(payload),

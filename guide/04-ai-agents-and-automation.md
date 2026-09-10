@@ -117,14 +117,11 @@ Toggle between **Timeline** (chronological list) and **Graph** (visual dependenc
 
 ## Workflow Scheduling
 
-Agent templates can be scheduled on a recurring cron from the Automation page. The scheduler polls every 60 seconds.
+Recurring runs are owned by the RealTimeX host app, not by Signals. Schedule a workflow as a **RealTimeX Agent Flow** or a **calendar event**; when it fires, the agent calls back into Signals and the execution shows up under **Runs** like any other.
 
-- **Cron presets** — Hourly, daily, weekly, monthly
-- **Custom cron** — Full cron expression support
-- **Next run preview** — Shows the next planned execution
-- **Config overrides** — Per-template payload overrides
+Signals no longer has a scheduling UI. The **Scheduled Workflows** table was removed — it could only show local maintenance sweeps and disabled legacy rows, never the Agent Flows and calendar events that hold your real schedules. `POST /api/workflows/schedule` now refuses agent templates with `RTX_SCHEDULING_REQUIRED`.
 
-**Migration note:** scheduled template jobs no longer execute in-process LLM loops. When orchestration is unavailable, the scheduled job is marked **failed** and **disabled**, and shows the error in **Scheduled Workflows**. Recurring jobs are **not** silently rescheduled. Local re-enable is blocked for agent templates — configure the schedule in a **RealTimeX Agent Flow** instead.
+Signals keeps an internal 60-second job tick for its own housekeeping — avatar caching, embedding backfill, persona refresh, dedupe merge, simulation retention and calibration, profile pipeline drain, and the stale-terminal watchdog. These are not user-facing schedules and need no configuration.
 
 ## Triggering Agents from RealTimeX
 

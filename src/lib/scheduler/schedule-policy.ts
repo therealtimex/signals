@@ -18,23 +18,3 @@ export function isAgentTemplateSchedule(job: SchedulePolicyJob): boolean {
 export function canReactivateScheduleLocally(job: SchedulePolicyJob): boolean {
   return !isAgentTemplateSchedule(job);
 }
-
-export function scheduledJobNextRunLabel(
-  job: SchedulePolicyJob,
-  formatRunAt: (runAt: number) => string,
-): string {
-  if (isAgentTemplateSchedule(job) && (job.status === "failed" || job.enabled !== 1)) {
-    return "Schedule in RTX Agent Flow";
-  }
-  if (job.status === "failed" || job.enabled !== 1) {
-    return "Re-enable to schedule";
-  }
-  return formatRunAt(job.runAt);
-}
-
-export function canToggleScheduleEnabled(job: SchedulePolicyJob, targetEnabled: boolean): boolean {
-  if (targetEnabled && !canReactivateScheduleLocally(job)) {
-    return false;
-  }
-  return true;
-}
