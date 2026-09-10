@@ -363,8 +363,32 @@ if (replyOk.status !== 0) {
   process.exit(1);
 }
 const replyOkJson = lastJson(replyOk.stdout);
-if (!replyOkJson.success || !replyOkJson.dryRun || replyOkJson.kind !== "reply") {
+if (
+  !replyOkJson.success ||
+  !replyOkJson.dryRun ||
+  replyOkJson.kind !== "reply" ||
+  replyOkJson.composeMode !== "inline"
+) {
   console.error("unexpected x-reply result:", replyOkJson);
+  process.exit(1);
+}
+
+const replyModalDry = runXReply(replyPayload, { FAKE_AB_REPLY_MODAL: "1" }, ["--dry-run"]);
+if (replyModalDry.status !== 0) {
+  console.error(
+    "modal x-reply dry-run failed (inline+dialog composers coexist):",
+    replyModalDry.stdout,
+    replyModalDry.stderr
+  );
+  process.exit(1);
+}
+const replyModalDryJson = lastJson(replyModalDry.stdout);
+if (
+  !replyModalDryJson.success ||
+  !replyModalDryJson.dryRun ||
+  replyModalDryJson.composeMode !== "modal"
+) {
+  console.error("unexpected modal x-reply dry-run result:", replyModalDryJson);
   process.exit(1);
 }
 
@@ -400,6 +424,35 @@ if (
   replyPublishedJson.platformUrl === replyPayload.sourcePostUrl
 ) {
   console.error("x-reply must return the new reply URL, not the source post:", replyPublishedJson);
+  process.exit(1);
+}
+
+const replyModalPublished = runXReply(replyPayload, { FAKE_AB_REPLY_MODAL: "1" });
+if (replyModalPublished.status !== 0) {
+  console.error(
+    "modal x-reply publish failed:",
+    replyModalPublished.stdout,
+    replyModalPublished.stderr
+  );
+  process.exit(1);
+}
+const replyModalPublishedJson = lastJson(replyModalPublished.stdout);
+if (
+  !replyModalPublishedJson.success ||
+  replyModalPublishedJson.kind !== "reply" ||
+  !replyModalPublishedJson.platformPostId ||
+  replyModalPublishedJson.platformUrl === replyPayload.sourcePostUrl
+) {
+  console.error("unexpected modal x-reply publish result:", replyModalPublishedJson);
+  process.exit(1);
+}
+
+const replyModalRejected = runXReply(replyPayload, {
+  FAKE_AB_REPLY_MODAL: "1",
+  FAKE_AB_REJECT_REPLY_CLICK: "1",
+});
+if (replyModalRejected.status === 0) {
+  console.error("rejected modal reply click should not succeed");
   process.exit(1);
 }
 

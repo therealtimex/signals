@@ -31,6 +31,7 @@ function defaultState() {
     currentUrl: "",
     replySubmitClicks: 0,
     replyMode: false,
+    replyLayout: "inline",
   };
 }
 
@@ -130,6 +131,9 @@ function textareaCountForSelector(selector, state) {
   }
   const isDialogScoped =
     selector.includes("role=\"dialog\"") || selector.includes('[role="dialog"]');
+  if (state.replyMode && isDialogScoped && selector.includes("tweetTextarea")) {
+    return state.replyLayout === "modal" && state.threadTextareaCount > 0 ? 1 : 0;
+  }
   if (state.composeOpen && state.composeUiMode === "page") {
     if (isDialogScoped && selector.includes("tweetTextarea")) {
       return 0;
@@ -626,23 +630,33 @@ if (cmd === "click") {
     writeState(state);
   }
   if (selector.includes('data-testid="reply"') || /\[data-testid="reply"\]/.test(selector)) {
-    openCompose(state, "inline");
+    const modal = process.env.FAKE_AB_REPLY_MODAL === "1";
+    openCompose(state, modal ? "modal" : "inline");
     state.replyMode = true;
+    state.replyLayout = modal ? "modal" : "inline";
     writeState(state);
   }
   if (
-    process.env.FAKE_AB_REJECT_REPLY_CLICK === "1" &&
-    selector.includes("tweetButtonInline")
+    state.replyLayout === "modal" &&
+    selector.includes("tweetTextarea_0") &&
+    !(selector.includes('role="dialog"') || selector.includes('[role="dialog"]'))
   ) {
+    fail(
+      'Element `[data-testid="tweetTextarea_0"]` is covered by `<div inside div#layers>` at its click point'
+    );
+  }
+  const isReplySubmit =
+    selector.includes("tweetButtonInline") ||
+    (state.replyMode &&
+      selector.includes("tweetButton") &&
+      !selector.includes("tweetButtonInline"));
+  if (process.env.FAKE_AB_REJECT_REPLY_CLICK === "1" && isReplySubmit) {
     fail("simulated reply submit rejection");
   }
-  if (
-    process.env.FAKE_AB_REPLY_NOT_ACCEPTED === "1" &&
-    selector.includes("tweetButtonInline")
-  ) {
+  if (process.env.FAKE_AB_REPLY_NOT_ACCEPTED === "1" && isReplySubmit) {
     return ok();
   }
-  if (selector.includes("tweetButtonInline")) {
+  if (isReplySubmit) {
     state.replySubmitClicks = Number(state.replySubmitClicks || 0) + 1;
     if (
       process.env.FAKE_AB_REPLY_HIDDEN_FROM_THREAD === "1" &&

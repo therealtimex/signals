@@ -1,12 +1,14 @@
 #!/usr/bin/env node
 /**
- * Deterministic X inline reply via host agent-browser CLI.
+ * Deterministic X reply via host agent-browser CLI.
  *
- * Injects the entire reply with one CDP Input.insertText
- * (`agent-browser keyboard inserttext`), re-injects once on snapshot mismatch,
- * then refuses to click Tweet unless the Draft.js/Lexical snapshot matches.
- * After click, waits for a newly created owned reply and returns its
- * platformPostId / platformUrl.
+ * After Reply, prefers the visible reply dialog composer when it exists
+ * (`[role="dialog"] [data-testid="tweetTextarea_0"]` + scoped tweetButton).
+ * Falls back to the inline composer + tweetButtonInline. Injects the entire
+ * reply with one CDP Input.insertText (`agent-browser keyboard inserttext`),
+ * re-injects once on snapshot mismatch, then refuses to click Tweet unless
+ * the Draft.js/Lexical snapshot matches. After click, waits for a newly
+ * created owned reply and returns its platformPostId / platformUrl.
  *
  * Usage:
  *   node scripts/x-reply.cjs --port <cdpPort> --payload <reply.json> [--dry-run]
@@ -37,9 +39,10 @@ const COMPOSE_REINJECT_ATTEMPTS = 2;
 const TWITTER_EPOCH_MS = 1288834974657;
 
 const REPLY_TEXTAREA = '[data-testid="tweetTextarea_0"]';
+const REPLY_TEXTAREA_MODAL = '[role="dialog"] [data-testid="tweetTextarea_0"]';
 const REPLY_BUTTON = '[data-testid="reply"]';
 const REPLY_SUBMIT = '[data-testid="tweetButtonInline"]';
-const REPLY_SUBMIT_MODAL = '[data-testid="tweetButton"]';
+const REPLY_SUBMIT_MODAL = '[role="dialog"] [data-testid="tweetButton"]';
 const PROFILE_LINK = '[data-testid="AppTabBar_Profile_Link"]';
 const DESKTOP_PROFILE_LINK = 'a[aria-label="Profile"]';
 
@@ -207,29 +210,61 @@ function detectXDisplayHandle() {
   return null;
 }
 
-function insertReplyText(text, context = "CDP inserttext") {
-  requireAb(["click", REPLY_TEXTAREA], "focus inline reply composer");
-  parseEvalJsonValue(abText(["eval", selectComposeContentsEvalJs(REPLY_TEXTAREA)]));
+function waitForReplyComposer(timeoutMs = COMPOSE_WAIT_TIMEOUT_MS) {
+  const deadline = Date.now() + timeoutMs;
+  let inlineHits = 0;
+  while (Date.now() < deadline) {
+    if (abCount(REPLY_TEXTAREA_MODAL) > 0) {
+      return {
+        mode: "modal",
+        textarea: REPLY_TEXTAREA_MODAL,
+        submit: REPLY_SUBMIT_MODAL,
+      };
+    }
+    if (abCount(REPLY_TEXTAREA) > 0) {
+      inlineHits += 1;
+      // The inline box stays in the page when Reply opens a dialog. Wait one
+      // extra tick so a just-opened modal can mount before we click the
+      // covered inline textarea.
+      if (inlineHits >= 2) {
+        return {
+          mode: "inline",
+          textarea: REPLY_TEXTAREA,
+          submit: REPLY_SUBMIT,
+        };
+      }
+    }
+    sleep(300);
+  }
+  throw {
+    message: `timed out waiting for ${REPLY_TEXTAREA_MODAL} or ${REPLY_TEXTAREA}`,
+    errorCode: "timeout",
+  };
+}
+
+function insertReplyText(surface, text, context = "CDP inserttext") {
+  requireAb(["click", surface.textarea], `focus ${surface.mode} reply composer`);
+  parseEvalJsonValue(abText(["eval", selectComposeContentsEvalJs(surface.textarea)]));
   requireAb(["keyboard", "inserttext", text], context);
 }
 
-function readReplySnapshot() {
+function readReplySnapshot(surface) {
   const raw = requireAb(
-    ["eval", readComposeSnapshotEvalJs(REPLY_TEXTAREA)],
+    ["eval", readComposeSnapshotEvalJs(surface.textarea)],
     "read compose snapshot"
   ).stdout;
   const parsed = parseEvalJsonValue(raw);
   return parsed && typeof parsed === "object" ? parsed : null;
 }
 
-function fillReplyAndAssert(text) {
+function fillReplyAndAssert(surface, text) {
   let lastMatch = { ok: false, reason: "not_attempted", expected: text, actual: "" };
   for (let attempt = 1; attempt <= COMPOSE_REINJECT_ATTEMPTS; attempt++) {
     const context =
       attempt === 1 ? "CDP inserttext" : "CDP inserttext re-inject";
-    insertReplyText(text, context);
+    insertReplyText(surface, text, context);
     sleep(TYPE_SETTLE_MS);
-    lastMatch = matchComposeSnapshot(readReplySnapshot(), text);
+    lastMatch = matchComposeSnapshot(readReplySnapshot(surface), text);
     if (lastMatch.ok) return;
   }
   throw {
@@ -238,15 +273,14 @@ function fillReplyAndAssert(text) {
   };
 }
 
-function waitForReplySubmitSelector(timeoutMs = COMPOSE_WAIT_TIMEOUT_MS) {
+function waitForReplySubmitSelector(surface, timeoutMs = COMPOSE_WAIT_TIMEOUT_MS) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (abCount(REPLY_SUBMIT) > 0) return REPLY_SUBMIT;
-    if (abCount(REPLY_SUBMIT_MODAL) > 0) return REPLY_SUBMIT_MODAL;
+    if (abCount(surface.submit) > 0) return surface.submit;
     sleep(300);
   }
   throw {
-    message: `timed out waiting for ${REPLY_SUBMIT} or ${REPLY_SUBMIT_MODAL}`,
+    message: `timed out waiting for ${surface.submit}`,
     errorCode: "timeout",
   };
 }
@@ -423,9 +457,9 @@ function main() {
     requireAb(["open", sourcePostUrl], "return to source post");
     sleep(1000);
     waitForSelector(REPLY_BUTTON, "wait for reply button");
-    requireAb(["click", REPLY_BUTTON], "open inline reply composer");
-    waitForSelector(REPLY_TEXTAREA, "wait for inline reply textarea");
-    fillReplyAndAssert(text);
+    requireAb(["click", REPLY_BUTTON], "open reply composer");
+    const surface = waitForReplyComposer();
+    fillReplyAndAssert(surface, text);
 
     if (dryRun) {
       emit({
@@ -433,13 +467,14 @@ function main() {
         dryRun: true,
         kind: "reply",
         handle,
+        composeMode: surface.mode,
         message:
-          "Inline reply filled with one CDP inserttext payload and verified; Reply was not clicked (dry-run).",
+          `${surface.mode === "modal" ? "Modal" : "Inline"} reply filled with one CDP inserttext payload and verified; Reply was not clicked (dry-run).`,
       });
       return;
     }
 
-    const submitSelector = waitForReplySubmitSelector();
+    const submitSelector = waitForReplySubmitSelector(surface);
     requireAb(["click", submitSelector], "submit reply");
     sleep(2000);
     const result = waitForVerifiedReply(text, handle, baseline);

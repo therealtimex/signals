@@ -209,6 +209,7 @@ describe("buildSocialPatrolBriefSection", () => {
     expect(section).toContain("single-pass");
     expect(section).toContain("insertParagraph");
     expect(section).toContain("tweetButtonInline");
+    expect(section).toContain('[role="dialog"]');
     expect(section).toContain("Salted sleep pacing: inject a randomized delay of 20s–45s");
     expect(section).toContain("batches of 3–5");
     expect(section).toContain("30 contact(s)");
