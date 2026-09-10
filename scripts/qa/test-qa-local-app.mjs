@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 /**
  * Tests for qa-local-app.mjs against a mock realtimex-pp-cli, a fixture RealTimeX database, and a
- * real HTTP server standing in for the QA app's /api/health. Nothing here reaches a RealTimeX host.
+ * fake QA app: a child process serving /api/health that the mock stops like RealTimeX would.
+ * Nothing here reaches a RealTimeX host. Every run sets REALTIMEX_PP_CLI to a tripwire, so a
+ * command that falls back to the default CLI fails instead of talking to a live host.
  */
 import assert from "node:assert/strict";
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
@@ -30,7 +32,6 @@ import {
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const orchestrator = join(scriptDir, "qa-local-app.mjs");
-const canonicalRepo = canonicalSignalsRepoRoot(scriptDir);
 
 // The packaged host stores the expanded home path; both spellings are canonical.
 assert.equal(isCanonicalSignalsDataDir("~/.signals"), true);
@@ -58,14 +59,25 @@ assert.deepEqual(
   [],
 );
 
+// qa-local-app.mjs reads the canonical record with the sqlite3 CLI, so without it the lifecycle
+// cannot run at all. Skip it the way test-signals-qa-local-app.mjs skips its sqlite section.
+if (spawnSync("sqlite3", ["-version"], { encoding: "utf8" }).status !== 0) {
+  console.log("qa-local-app orchestrator: SKIP lifecycle tests (sqlite3 CLI not found)");
+  process.exit(0);
+}
+
+const canonicalRepo = canonicalSignalsRepoRoot(scriptDir);
 const root = mkdtempSync(join(tmpdir(), "signals-qa-orchestrator-test-"));
 const repo = join(root, "repo");
 const worktree = join(root, "worktree");
 const statePath = join(root, "local-apps.json");
 const mockCli = join(root, "mock-realtimex-pp-cli.mjs");
+const tripwireCli = join(root, "tripwire-realtimex-pp-cli.mjs");
 const dbPath = join(root, "realtimex.db");
 const baseIssue = Number(String(Date.now()).slice(-8));
 const issues = [];
+const children = new Set();
+
 const nextIssue = () => {
   const issue = String(baseIssue + issues.length);
   issues.push(issue);
@@ -73,6 +85,64 @@ const nextIssue = () => {
 };
 const sessionPath = (issue) =>
   join(qaTemporaryRoot(), `signals-qa-local-app-issue-${issue}.session.json`);
+const lockPath = (issue) => join(qaTemporaryRoot(), `signals-qa-local-app-issue-${issue}.lock`);
+const common = (issue) => ["--issue", issue, "--cli", mockCli, "--db", dbPath];
+
+function track(child) {
+  children.add(child);
+  child.once("exit", () => children.delete(child));
+  return child;
+}
+
+function stopChild(child) {
+  return new Promise((resolveStop) => {
+    if (child.exitCode !== null || child.signalCode !== null) return resolveStop();
+    child.once("exit", () => resolveStop());
+    child.kill("SIGTERM");
+  });
+}
+
+async function deadPid() {
+  const child = track(spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"]));
+  const { pid } = child;
+  await stopChild(child);
+  return pid;
+}
+
+// The command line contains "next", like the dev server that holds .next/dev/lock.
+function fakeApp() {
+  return new Promise((resolveApp, rejectApp) => {
+    const child = track(
+      spawn(process.execPath, [
+        "-e",
+        `const server = require("node:http").createServer((request, response) => {
+           response.writeHead(request.url === "/api/health" ? 200 : 404);
+           response.end("{}");
+         });
+         server.listen(0, "127.0.0.1", () => process.stdout.write(server.address().port + "\\n"));`,
+        "next-server-fake-qa-app",
+      ]),
+    );
+    let out = "";
+    child.stdout.on("data", (chunk) => {
+      out += chunk;
+      // Plain write, not console.log: FORCE_COLOR would wrap a logged number in colour codes.
+      const port = out.includes("\n") ? Number(out.match(/\d+/)?.[0]) : NaN;
+      if (port) resolveApp({ child, pid: child.pid, port });
+    });
+    child.once("error", rejectApp);
+  });
+}
+
+function closedPort() {
+  return new Promise((resolvePort) => {
+    const server = createServer();
+    server.listen(0, "127.0.0.1", () => {
+      const { port } = server.address();
+      server.close(() => resolvePort(port));
+    });
+  });
+}
 
 function canonicalConfig(overrides = {}) {
   return {
@@ -111,16 +181,26 @@ function mockApps() {
   return JSON.parse(readFileSync(statePath, "utf8")).apps;
 }
 
+function editQaApp(issue, edit) {
+  const state = JSON.parse(readFileSync(statePath, "utf8"));
+  const app = state.apps.find((candidate) => candidate.displayName === `Signals issue-${issue} QA`);
+  edit(app);
+  writeFileSync(statePath, JSON.stringify(state));
+}
+
 function run(args, env = {}) {
   return new Promise((resolveRun) => {
-    const child = spawn(process.execPath, [orchestrator, ...args], {
-      env: {
-        ...process.env,
-        MOCK_LOCAL_APPS_STATE: statePath,
-        SIGNALS_QA_POLL_MS: "50",
-        ...env,
-      },
-    });
+    const child = track(
+      spawn(process.execPath, [orchestrator, ...args], {
+        env: {
+          ...process.env,
+          MOCK_LOCAL_APPS_STATE: statePath,
+          REALTIMEX_PP_CLI: tripwireCli,
+          SIGNALS_QA_POLL_MS: "50",
+          ...env,
+        },
+      }),
+    );
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (chunk) => (stdout += chunk));
@@ -137,30 +217,7 @@ function run(args, env = {}) {
   });
 }
 
-function healthServer() {
-  return new Promise((resolveServer) => {
-    const server = createServer((request, response) => {
-      response.writeHead(request.url === "/api/health" ? 200 : 404, {
-        "content-type": "application/json",
-      });
-      response.end('{"ok":true}');
-    });
-    server.listen(0, "127.0.0.1", () => resolveServer(server));
-  });
-}
-
-function closedPort() {
-  return new Promise((resolvePort) => {
-    const server = createServer();
-    server.listen(0, "127.0.0.1", () => {
-      const { port } = server.address();
-      server.close(() => resolvePort(port));
-    });
-  });
-}
-
-const close = (server) => new Promise((resolveClose) => server.close(resolveClose));
-const common = (issue) => ["--issue", issue, "--cli", mockCli, "--db", dbPath];
+const detail = (result) => `${result.stdout}${result.stderr}`;
 
 try {
   mkdirSync(repo, { recursive: true });
@@ -180,6 +237,15 @@ try {
     "create table local_apps (id text primary key, display_name text, name text, config text, tags text, status text);",
   ]);
   writeCanonicalRow(canonicalConfig());
+
+  writeFileSync(
+    tripwireCli,
+    `#!/usr/bin/env node
+console.error("tripwire: a command fell back to the default realtimex-pp-cli");
+process.exit(97);
+`,
+  );
+  chmodSync(tripwireCli, 0o755);
 
   writeFileSync(
     mockCli,
@@ -235,6 +301,14 @@ if (command === "list-local-apps") {
   app.persistedStatus = "stopped";
   app.runtime = { status: "stopped" };
   save();
+  // RealTimeX stops the app's process; the fake app stands in for it.
+  if (process.env.MOCK_APP_PID) {
+    try {
+      process.kill(Number(process.env.MOCK_APP_PID), "SIGTERM");
+    } catch {
+      // already gone
+    }
+  }
   results = { success: true, appId: args[1] };
 } else if (command === "delete-local-app") {
   state.apps = state.apps.filter((app) => app.id !== args[1]);
@@ -264,13 +338,16 @@ console.log(JSON.stringify({ meta: { source: "mock" }, results }));
   assert.equal(refused.status, 1);
   assert.equal(refused.json.errorCode, "LOCAL_APP_MANAGEMENT_REFUSED");
   assert.equal(existsSync(qaReceiptPath(refusedIssue)), false);
+  assert.equal(existsSync(lockPath(refusedIssue)), false);
 
   // The primary checkout is never a QA target.
   const primary = await run(["up", ...common(nextIssue()), "--worktree", repo]);
   assert.equal(primary.json.errorCode, "WORKTREE_INVALID");
 
   // A live `next dev` lock in the worktree blocks provisioning; nothing is created.
-  const holder = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)", "next-server-lock-holder"]);
+  const holder = track(
+    spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)", "next-server-lock-holder"]),
+  );
   mkdirSync(join(worktree, ".next", "dev"), { recursive: true });
   writeFileSync(
     join(worktree, ".next", "dev", "lock"),
@@ -278,14 +355,14 @@ console.log(JSON.stringify({ meta: { source: "mock" }, results }));
   );
   const lockIssue = nextIssue();
   const locked = await run(["up", ...common(lockIssue), "--worktree", worktree]);
-  holder.kill();
-  await new Promise((resolveExit) => holder.once("exit", resolveExit));
+  await stopChild(holder);
   assert.equal(locked.json.errorCode, "NEXT_DEV_ALREADY_RUNNING");
   assert.equal(locked.json.lock.pid, holder.pid);
   assert.equal(mockApps().length, 1);
   assert.equal(existsSync(qaReceiptPath(lockIssue)), false);
 
-  // An issue app with no receipt is someone else's; up refuses to stack another on it.
+  // An issue app with no receipt is someone else's; up refuses to stack another on it, and the
+  // recovery command carries the host, CLI, and database this run used.
   const strayIssue = nextIssue();
   resetMockState([
     {
@@ -297,64 +374,126 @@ console.log(JSON.stringify({ meta: { source: "mock" }, results }));
   ]);
   const stray = await run(["up", ...common(strayIssue), "--worktree", worktree]);
   assert.equal(stray.json.errorCode, "QA_APP_EXISTS");
-  assert.match(stray.json.next, /down --issue/);
+  assert.match(
+    stray.json.next,
+    /down --issue \d+ --host packaged --cli \S*mock-realtimex-pp-cli\.mjs --db /,
+  );
 
-  // Happy path: up -> reuse -> status -> down. The dead pid's lock left above must not block.
+  // Another live up or down for the issue holds its lock; up refuses and leaves the lock alone.
+  resetMockState();
+  const busyIssue = nextIssue();
+  writeFileSync(lockPath(busyIssue), JSON.stringify({ pid: process.pid, action: "up" }));
+  const busy = await run(["up", ...common(busyIssue), "--worktree", worktree]);
+  assert.equal(busy.json.errorCode, "QA_LOCKED");
+  assert.equal(busy.json.lock.pid, process.pid);
+  assert.equal(existsSync(lockPath(busyIssue)), true);
+  assert.equal(mockApps().length, 1);
+  rmSync(lockPath(busyIssue), { force: true });
+
+  // Happy path. A stale lock from a dead run is taken over, and the dead holder's Next lock left
+  // above does not block. The fake app keeps listening until cleanup stops it.
   resetMockState();
   const issue = nextIssue();
-  let server = await healthServer();
-  const port = server.address().port;
-  const first = await run(["up", ...common(issue), "--worktree", worktree, "--loop-id", "loop-test"], {
-    MOCK_PORT: String(port),
-  });
-  assert.equal(first.status, 0, first.stdout + first.stderr);
-  assert.equal(first.json.ok, true);
+  writeFileSync(lockPath(issue), JSON.stringify({ pid: await deadPid(), action: "up" }));
+  const app = await fakeApp();
+  const first = await run(
+    ["up", ...common(issue), "--worktree", worktree, "--loop-id", "loop-test"],
+    { MOCK_PORT: String(app.port) },
+  );
+  assert.equal(first.status, 0, detail(first));
   assert.equal(first.json.reused, false);
   assert.equal(first.json.host, "packaged");
-  assert.equal(first.json.port, port);
-  assert.equal(first.json.dashboardUrl, `http://127.0.0.1:${port}/dashboard`);
+  assert.equal(first.json.port, app.port);
+  assert.equal(first.json.portSource, "realtimex");
+  assert.equal(first.json.dashboardUrl, `http://127.0.0.1:${app.port}/dashboard`);
   assert.equal(first.json.dataDir, defaultQaDataDir(issue));
+  assert.match(first.json.next, /down --issue \d+ --cli \S*mock-realtimex-pp-cli\.mjs --db /);
+  assert.equal(existsSync(lockPath(issue)), false);
   const receipt = JSON.parse(readFileSync(qaReceiptPath(issue), "utf8"));
   assert.equal(receipt.baseUrl, "http://127.0.0.1:3001/cli");
   const session = JSON.parse(readFileSync(sessionPath(issue), "utf8"));
   assert.equal(session.canonicalRows[0].id, CANONICAL_SIGNALS_APP_ID);
-  assert.equal(session.port, port);
+  assert.equal(session.port, app.port);
+  assert.equal(session.cli, mockCli);
+  assert.equal(session.dbPath, dbPath);
 
-  const again = await run(["up", ...common(issue), "--worktree", worktree], { MOCK_PORT: String(port) });
-  assert.equal(again.status, 0, again.stdout + again.stderr);
+  const again = await run(["up", ...common(issue), "--worktree", worktree], {
+    MOCK_PORT: String(app.port),
+  });
+  assert.equal(again.status, 0, detail(again));
   assert.equal(again.json.reused, true);
-  assert.equal(mockApps().filter((app) => app.id !== CANONICAL_SIGNALS_APP_ID).length, 1);
+  assert.equal(mockApps().filter((candidate) => candidate.id !== CANONICAL_SIGNALS_APP_ID).length, 1);
 
   const elsewhere = await run(["up", ...common(issue), "--worktree", worktree, "--host", "dev"]);
   assert.equal(elsewhere.json.errorCode, "QA_APP_EXISTS");
 
-  const statusOut = await run(["status", ...common(issue)]);
+  // Reuse refuses an app that lost a safety tag, the same guard cleanup enforces.
+  editQaApp(issue, (qaApp) => (qaApp.tags = qaApp.tags.filter((tag) => tag !== "ephemeral")));
+  const unsafe = await run(["up", ...common(issue), "--worktree", worktree]);
+  assert.equal(unsafe.json.errorCode, "QA_APP_UNSAFE");
+  editQaApp(issue, (qaApp) => qaApp.tags.push("ephemeral"));
+
+  // Reuse refuses to recapture the canonical baseline when the session from up is gone.
+  const savedSession = readFileSync(sessionPath(issue), "utf8");
+  rmSync(sessionPath(issue));
+  const lostSession = await run(["up", ...common(issue), "--worktree", worktree]);
+  assert.equal(lostSession.json.errorCode, "QA_SESSION_MISSING");
+  assert.match(lostSession.json.next, /down --issue \d+ --cli /);
+  assert.equal(existsSync(sessionPath(issue)), false);
+  writeFileSync(sessionPath(issue), savedSession);
+
+  // status and down reuse the CLI up recorded; without it they would hit the tripwire.
+  const statusOut = await run(["status", "--issue", issue]);
+  assert.equal(statusOut.status, 0, detail(statusOut));
   assert.equal(statusOut.json.present, true);
   assert.equal(statusOut.json.healthy, true);
-  assert.equal(statusOut.json.port, port);
+  assert.equal(statusOut.json.port, app.port);
 
-  await close(server);
-  const downOut = await run(["down", ...common(issue)]);
-  assert.equal(downOut.status, 0, downOut.stdout + downOut.stderr);
+  const downOut = await run(["down", "--issue", issue], { MOCK_APP_PID: String(app.pid) });
+  assert.equal(downOut.status, 0, detail(downOut));
   assert.equal(downOut.json.hygiene, "pass");
   assert.equal(downOut.json.canonicalUnchanged, true);
   assert.equal(downOut.json.portReleased, true);
   assert.equal(downOut.json.appDeleted, true);
   assert.equal(existsSync(qaReceiptPath(issue)), false);
   assert.equal(existsSync(sessionPath(issue)), false);
+  assert.equal(existsSync(lockPath(issue)), false);
   assert.equal(mockApps().length, 1);
+
+  // A port that still answers after cleanup fails down. The session stays, so rerunning down once
+  // the listener is gone completes the teardown.
+  resetMockState();
+  const boundIssue = nextIssue();
+  const stubborn = await fakeApp();
+  const boundUp = await run(["up", ...common(boundIssue), "--worktree", worktree], {
+    MOCK_PORT: String(stubborn.port),
+  });
+  assert.equal(boundUp.status, 0, detail(boundUp));
+  const bound = await run(["down", ...common(boundIssue)], { SIGNALS_QA_PORT_RELEASE_MS: "400" });
+  assert.equal(bound.status, 1);
+  assert.equal(bound.json.errorCode, "PORT_STILL_BOUND");
+  assert.equal(bound.json.portReleased, false);
+  assert.match(bound.json.next, /rerun: .*down --issue/);
+  assert.equal(existsSync(sessionPath(boundIssue)), true);
+  await stopChild(stubborn.child);
+  const boundRerun = await run(["down", ...common(boundIssue)]);
+  assert.equal(boundRerun.status, 0, detail(boundRerun));
+  assert.equal(boundRerun.json.portReleased, true);
+  assert.equal(boundRerun.json.appDeleted, false);
+  assert.equal(existsSync(sessionPath(boundIssue)), false);
 
   // A canonical record that changes while QA runs fails down and says not to restore it here.
   resetMockState();
   const changedIssue = nextIssue();
-  server = await healthServer();
+  const changedApp = await fakeApp();
   const changedUp = await run(["up", ...common(changedIssue), "--worktree", worktree], {
-    MOCK_PORT: String(server.address().port),
+    MOCK_PORT: String(changedApp.port),
   });
-  assert.equal(changedUp.status, 0, changedUp.stdout + changedUp.stderr);
+  assert.equal(changedUp.status, 0, detail(changedUp));
   writeCanonicalRow(canonicalConfig({ env: { ...canonicalConfig().env, PORT: "3999" } }));
-  await close(server);
-  const changedDown = await run(["down", ...common(changedIssue)]);
+  const changedDown = await run(["down", ...common(changedIssue)], {
+    MOCK_APP_PID: String(changedApp.pid),
+  });
   assert.equal(changedDown.status, 1);
   assert.equal(changedDown.json.errorCode, "CANONICAL_CHANGED");
   assert.deepEqual(changedDown.json.changedFields, ["config.env.PORT"]);
@@ -362,6 +501,46 @@ console.log(JSON.stringify({ meta: { source: "mock" }, results }));
   assert.equal(existsSync(sessionPath(changedIssue)), true);
   writeCanonicalRow(canonicalConfig());
   rmSync(sessionPath(changedIssue), { force: true });
+
+  // RTX_DB_PATH selects the database when --db is absent, and down uses the one up recorded.
+  resetMockState();
+  const envDbIssue = nextIssue();
+  const envDbApp = await fakeApp();
+  const envDbUp = await run(["up", "--issue", envDbIssue, "--cli", mockCli, "--worktree", worktree], {
+    MOCK_PORT: String(envDbApp.port),
+    RTX_DB_PATH: dbPath,
+  });
+  assert.equal(envDbUp.status, 0, detail(envDbUp));
+  assert.equal(JSON.parse(readFileSync(sessionPath(envDbIssue), "utf8")).dbPath, dbPath);
+  const envDbDown = await run(["down", "--issue", envDbIssue], {
+    MOCK_APP_PID: String(envDbApp.pid),
+  });
+  assert.equal(envDbDown.status, 0, detail(envDbDown));
+  assert.equal(envDbDown.json.canonicalUnchanged, true);
+
+  // A reused app that fails to start reports its logs and the teardown command.
+  resetMockState();
+  const reuseIssue = nextIssue();
+  const reuseApp = await fakeApp();
+  const reuseUp = await run(["up", ...common(reuseIssue), "--worktree", worktree], {
+    MOCK_PORT: String(reuseApp.port),
+  });
+  assert.equal(reuseUp.status, 0, detail(reuseUp));
+  editQaApp(reuseIssue, (qaApp) => {
+    qaApp.persistedStatus = "stopped";
+    qaApp.runtime = { status: "stopped" };
+  });
+  const reuseCrash = await run(["up", ...common(reuseIssue), "--worktree", worktree], {
+    MOCK_PORT: String(reuseApp.port),
+    MOCK_STATUS: "crashed",
+  });
+  assert.equal(reuseCrash.json.errorCode, "START_FAILED");
+  assert.deepEqual(reuseCrash.json.logs, ["err boom: port in use"]);
+  assert.match(reuseCrash.json.next, /down --issue/);
+  const reuseDown = await run(["down", ...common(reuseIssue)], {
+    MOCK_APP_PID: String(reuseApp.pid),
+  });
+  assert.equal(reuseDown.status, 0, detail(reuseDown));
 
   // An app that runs but never answers /api/health times out with its logs.
   resetMockState();
@@ -374,8 +553,7 @@ console.log(JSON.stringify({ meta: { source: "mock" }, results }));
   assert.equal(silent.json.errorCode, "HEALTH_TIMEOUT");
   assert.deepEqual(silent.json.logs, ["err boom: port in use"]);
   assert.match(silent.json.next, /down --issue/);
-  const silentDown = await run(["down", ...common(silentIssue)]);
-  assert.equal(silentDown.status, 0, silentDown.stdout + silentDown.stderr);
+  assert.equal((await run(["down", ...common(silentIssue)])).status, 0);
 
   // A crash during startup is reported immediately, not after the timeout.
   resetMockState();
@@ -391,26 +569,23 @@ console.log(JSON.stringify({ meta: { source: "mock" }, results }));
   // written when the dev server binds, supplies the port, and down still checks it is released.
   resetMockState();
   const lockPortIssue = nextIssue();
-  server = await healthServer();
-  const lockPort = server.address().port;
-  const devServer = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)", "next-server-qa-app"]);
+  const devServer = await fakeApp();
   const viaLock = await run(["up", ...common(lockPortIssue), "--worktree", worktree], {
-    MOCK_PORT: String(lockPort),
+    MOCK_PORT: String(devServer.port),
     MOCK_NO_PORT: "1",
     MOCK_LOCK_PID: String(devServer.pid),
   });
-  assert.equal(viaLock.status, 0, viaLock.stdout + viaLock.stderr);
-  assert.equal(viaLock.json.port, lockPort);
+  assert.equal(viaLock.status, 0, detail(viaLock));
+  assert.equal(viaLock.json.port, devServer.port);
   assert.equal(viaLock.json.portSource, "next-lock");
   const viaLockStatus = await run(["status", ...common(lockPortIssue)]);
   assert.equal(viaLockStatus.json.healthy, true);
   assert.equal(viaLockStatus.json.portSource, "next-lock");
-  await close(server);
-  devServer.kill();
-  await new Promise((resolveExit) => devServer.once("exit", resolveExit));
-  const viaLockDown = await run(["down", ...common(lockPortIssue)]);
-  assert.equal(viaLockDown.status, 0, viaLockDown.stdout + viaLockDown.stderr);
-  assert.equal(viaLockDown.json.port, lockPort);
+  const viaLockDown = await run(["down", ...common(lockPortIssue)], {
+    MOCK_APP_PID: String(devServer.pid),
+  });
+  assert.equal(viaLockDown.status, 0, detail(viaLockDown));
+  assert.equal(viaLockDown.json.port, devServer.port);
   assert.equal(viaLockDown.json.portReleased, true);
 
   // Running with no port from either source is its own failure, not a health timeout.
@@ -425,9 +600,11 @@ console.log(JSON.stringify({ meta: { source: "mock" }, results }));
 
   console.log("qa-local-app orchestrator: OK");
 } finally {
+  await Promise.all([...children].map((child) => stopChild(child)));
   for (const issue of issues) {
     rmSync(qaReceiptPath(issue), { force: true });
     rmSync(sessionPath(issue), { force: true });
+    rmSync(lockPath(issue), { force: true });
     rmSync(defaultQaDataDir(issue), { recursive: true, force: true });
   }
   rmSync(root, { recursive: true, force: true });

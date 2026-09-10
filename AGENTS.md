@@ -283,14 +283,22 @@ Each command prints one JSON object and exits 0 only when `ok` is true. Exercise
 `port` and `dashboardUrl` that `up` prints. On failure, act on `errorCode` and run the `next` it
 prints; do not provision or clean up by hand around it.
 
-- **`up`** refuses the primary checkout, a host that will not manage Local Apps, an existing issue
-  QA app or receipt, and a `next dev` already holding the worktree's `.next/dev/lock` (Next 16 runs
-  one dev server per directory; stop yours first). It snapshots the canonical record read-only,
-  provisions through `provision-signals-qa-local-app.mjs`, and waits for `/api/health`. The
-  provisioner names the app `Signals issue-<N> QA`, pins `SIGNALS_DATA_DIR` under
-  `/private/tmp/signals-qa-*`, tags it `signals,qa,ephemeral,issue-<N>`, and writes a receipt.
-  Rerunning `up` for the same worktree reuses the app. Start and health failures include the app's
-  last log lines.
+- **`up`** refuses:
+  - the primary checkout;
+  - a host that will not manage Local Apps;
+  - an issue QA app with no receipt, or whose receipt names another worktree or host;
+  - a `next dev` already holding the worktree's `.next/dev/lock` (Next 16 runs one dev server per
+    directory; stop yours first);
+  - another `up` or `down` still running for the same issue.
+
+  It snapshots the canonical record read-only, provisions through
+  `provision-signals-qa-local-app.mjs`, and waits for `/api/health`. The provisioner names the app
+  `Signals issue-<N> QA`, pins `SIGNALS_DATA_DIR` under `/private/tmp/signals-qa-*`, tags it
+  `signals,qa,ephemeral,issue-<N>`, and writes a receipt.
+
+  Rerunning `up` for the same worktree and host reuses the app, provided it still carries its safety
+  tags and `up`'s session snapshot still exists. Otherwise it stops with `next` set to `down`.
+  Start and health failures include the app's last log lines.
 - **`down`** runs `cleanup-signals-qa-local-app.mjs` (deletes only the receipt-backed, safety-tagged
   issue app, never the canonical one), the hygiene verifier, a diff of the canonical record against
   `up`'s snapshot, and a check that the QA port was released. Run it before the terminal QA
