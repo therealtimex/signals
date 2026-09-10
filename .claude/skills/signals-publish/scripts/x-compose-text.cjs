@@ -103,6 +103,13 @@ function matchComposeSnapshot(snapshot, expected) {
   const selected = selectedParagraphs.join("\n");
   const fromBlocks = blockParagraphs.join("\n");
   const fromLeaves = leafParagraphs.join("\n");
+  // range.selectNodeContents(editable).toString() concatenates Draft blocks
+  // with no separator. Same characters as the draft, missing only breaks.
+  const selectionDroppedBlockBreaks =
+    selected !== want &&
+    fromBlocks === want &&
+    wantParagraphs.length > 1 &&
+    selected.replace(/\s+/g, "") === want.replace(/\s+/g, "");
 
   if (!selectedParagraphs.length) {
     return {
@@ -136,7 +143,7 @@ function matchComposeSnapshot(snapshot, expected) {
       actual: inner,
     };
   }
-  if (selected !== want) {
+  if (selected !== want && !selectionDroppedBlockBreaks) {
     return {
       ok: false,
       reason: "editor_selection_mismatch",
@@ -211,7 +218,7 @@ function readComposeSnapshotFnJs() {
         return null;
       }
     }
-    function editorStateFromFiber(fiber) {
+    function collectFromFiber(fiber, out) {
       let f = fiber;
       for (let i = 0; i < 40 && f; i++) {
         const props = f.memoizedProps || f.pendingProps || {};
@@ -219,22 +226,32 @@ function readComposeSnapshotFnJs() {
         const candidates = [props.editorState, state && state.editorState];
         for (let c = 0; c < candidates.length; c++) {
           const plain = plainFromEditorState(candidates[c]);
-          if (plain != null) return plain;
+          if (plain != null) out.push(plain);
         }
         f = f.return;
       }
-      return null;
     }
+    const found = [];
     let node = editable;
     for (let depth = 0; depth < 10 && node; depth++) {
       const fiber = fiberFrom(node);
-      if (fiber) {
-        const plain = editorStateFromFiber(fiber);
-        if (plain != null) return plain;
-      }
+      if (fiber) collectFromFiber(fiber, found);
       node = node.parentElement;
     }
-    return null;
+    if (!found.length) return null;
+    const innerNorm = String(editable.innerText || editable.textContent || "")
+      .replace(/\\s+/g, " ")
+      .trim();
+    // Prefer an EditorState that matches THIS editable so a sibling thread
+    // slot's fiber is not treated as this composer.
+    for (let i = 0; i < found.length; i++) {
+      if (innerNorm && found[i].replace(/\\s+/g, " ").trim() === innerNorm) {
+        return found[i];
+      }
+    }
+    // Keep the closest reading even when it disagrees with the DOM. Dropping
+    // it would fail-open on a truncated EditorState with a full leaf.
+    return found[0];
   }
   function signalsReadComposeSnapshot(editable) {
     const innerText = String(editable.innerText || editable.textContent || "");
@@ -280,28 +297,31 @@ function readComposeSnapshotFnJs() {
       }
       anchor = anchor.parentNode;
     }
-    let selectionText = innerText;
+    const fromBlocks = blocks.join("\\n");
+    let rangeText = "";
     try {
+      const selection = window.getSelection();
       const range = document.createRange();
       range.selectNodeContents(editable);
-      selectionText = String(range.toString() || selectionText);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      rangeText = String(selection.toString() || "");
     } catch {}
+    const rangeCompact = String(rangeText || "").replace(/\\s+/g, "");
+    const blocksCompact = String(fromBlocks || "").replace(/\\s+/g, "");
+    const rangeDroppedBlockBreaks =
+      Boolean(fromBlocks) &&
+      Boolean(rangeText) &&
+      rangeCompact === blocksCompact &&
+      rangeText.replace(/\\s+/g, " ").trim() !== fromBlocks.replace(/\\s+/g, " ").trim();
+    const selectionText = rangeDroppedBlockBreaks
+      ? fromBlocks
+      : rangeText || innerText;
     let editorPlainText = null;
     try {
       editorPlainText = signalsReadDraftPlainText(editable);
     } catch {
       editorPlainText = null;
-    }
-    if (typeof editorPlainText === "string") {
-      const editorNorm = editorPlainText.replace(/\\s+/g, " ").trim();
-      const leafNorm = leafBlocks.join("\\n").replace(/\\s+/g, " ").trim();
-      const innerNorm = innerText.replace(/\\s+/g, " ").trim();
-      if (
-        editorNorm &&
-        ((leafNorm && editorNorm !== leafNorm) || (!leafNorm && innerNorm && editorNorm !== innerNorm))
-      ) {
-        editorPlainText = null;
-      }
     }
     return {
       innerText,

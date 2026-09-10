@@ -2,6 +2,7 @@
 /**
  * Unit tests for x-compose-text.cjs snapshot matching.
  */
+import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -153,6 +154,27 @@ if (incidentEditor.ok || incidentEditor.reason !== "editor_state_mismatch") {
   process.exit(1);
 }
 
+const collapsedSelection = matchComposeSnapshot(
+  {
+    ok: true,
+    innerText: drafted,
+    blocks: paragraphBlocks(drafted),
+    leafBlocks: paragraphBlocks(drafted),
+    leafText: drafted,
+    editorPlainText: drafted,
+    selectionText: paragraphBlocks(drafted).join(""),
+    text: drafted,
+  },
+  drafted
+);
+if (!collapsedSelection.ok) {
+  console.error(
+    "range.toString() without Draft block breaks must still pass when blocks match",
+    collapsedSelection
+  );
+  process.exit(1);
+}
+
 if (!publishedReplyMatches(drafted, drafted)) {
   console.error("full tweet body must match the drafted reply");
   process.exit(1);
@@ -195,6 +217,36 @@ if (
 }
 if (snapshotJs.includes("execCommand") || snapshotJs.includes("selectAll")) {
   console.error("snapshot eval must not call document.execCommand or selectAll");
+  process.exit(1);
+}
+if (
+  snapshotJs.includes("editorNorm !== leafNorm") ||
+  snapshotJs.includes("editorNorm !== innerNorm")
+) {
+  console.error(
+    "snapshot eval must not drop a readable EditorState that disagrees with the DOM"
+  );
+  process.exit(1);
+}
+if (!snapshotJs.includes("Keep the closest reading")) {
+  console.error("snapshot eval must keep a desynced EditorState for fail-closed matching");
+  process.exit(1);
+}
+
+const publishSrc = readFileSync(
+  join(
+    dirname(fileURLToPath(import.meta.url)),
+    "..",
+    ".claude",
+    "skills",
+    "signals-publish",
+    "scripts",
+    "x-publish.cjs"
+  ),
+  "utf8"
+);
+if (publishSrc.includes("Control+a") || publishSrc.includes("Meta+a")) {
+  console.error("x-publish retry must range-select the editable, not Control/Meta+a");
   process.exit(1);
 }
 

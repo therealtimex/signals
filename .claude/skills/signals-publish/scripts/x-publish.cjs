@@ -321,9 +321,7 @@ function typeIntoComposeTextarea(wrapperSelector, text, context) {
   sleep(400);
 
   if (!composeTextMatches(wrapperSelector, text)) {
-    focusComposeEditable(wrapperSelector, `${context} refocus`);
-    requireAb(["press", "Control+a"], `${context} select all`);
-    requireAb(["keyboard", "inserttext", text], `${context} CDP inserttext retry`);
+    insertComposeTextViaCdp(wrapperSelector, text, `${context} retry`);
     sleep(400);
   }
 
