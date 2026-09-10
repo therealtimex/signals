@@ -2,7 +2,7 @@
 const LINKEDIN_PHOTO_ASSET_RE =
   /\/(?:dms\/image\/(?:v\d+\/)?)([^/]+)\/profile-(?:displayphoto|framedphoto)/i;
 const LINKEDIN_NAVBAR_THUMB_RE =
-  /profile-(?:displayphoto|framedphoto)-shrink_(?:50_50|100_100)/i;
+  /profile-(?:displayphoto|framedphoto)-(?:shrink|scale|crop)_(?:50_50|100_100)/i;
 const LINKEDIN_PROFILE_PHOTO_RE = /profile-(?:displayphoto|framedphoto)/i;
 
 function linkedInCdnHostname(hostname: string): boolean {
@@ -19,7 +19,7 @@ export function isLinkedInProfilePhotoUrl(url: string): boolean {
   }
 }
 
-/** Navbar "Me" thumbnails are served at 50×50 or 100×100; top-card photos are larger. */
+/** Navbar "Me" thumbs and facepile chips are 50×50 or 100×100 across shrink/scale/crop. */
 export function isLinkedInNavbarThumbnailUrl(url: string): boolean {
   try {
     const parsed = new URL(url);
@@ -52,7 +52,7 @@ export function linkedInProfilePhotosCollide(
 function photoScore(url: string): number {
   if (isLinkedInNavbarThumbnailUrl(url)) return -1;
   const lower = url.toLowerCase();
-  const dim = lower.match(/shrink_(\d+)_(\d+)/);
+  const dim = lower.match(/(?:shrink|crop|scale)_(\d+)_(\d+)/);
   const size = dim ? Number(dim[1]) : 150;
   return lower.includes("profile-framedphoto") ? size + 50 : size;
 }

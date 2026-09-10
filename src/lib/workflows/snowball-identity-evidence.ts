@@ -384,12 +384,18 @@ export function extractLinkedInProfileDomObservation(): Pick<
   const isProfilePhotoUrl = (url: string): boolean =>
     /media\.licdn\.com/i.test(url) && /profile-(?:displayphoto|framedphoto)/i.test(url);
   const isNavbarThumb = (url: string): boolean =>
-    /profile-(?:displayphoto|framedphoto)-shrink_(?:50_50|100_100)/i.test(url);
+    /profile-(?:displayphoto|framedphoto)-(?:shrink|scale|crop)_(?:50_50|100_100)/i.test(url);
   const photoScore = (url: string): number => {
     const lower = url.toLowerCase();
-    const dim = lower.match(/shrink_(\d+)_(\d+)/);
+    const dim = lower.match(/(?:shrink|crop|scale)_(\d+)_(\d+)/);
     const size = dim ? Number(dim[1]) : 150;
     return lower.includes("profile-framedphoto") ? size + 50 : size;
+  };
+  const photoAssetId = (url: string): string => {
+    const match = url.match(
+      /\/(?:dms\/image\/(?:v\d+\/)?)([^/]+)\/profile-(?:displayphoto|framedphoto)/i,
+    );
+    return match?.[1] ?? "";
   };
   const pickBestPhoto = (urls: string[], allowNavbarThumbs = false): string | null => {
     let best: string | null = null;
@@ -404,6 +410,11 @@ export function extractLinkedInProfileDomObservation(): Pick<
       }
     }
     return best;
+  };
+  const keyedTopCardIn = (root: Element | null): Element | null => {
+    if (!root) return null;
+    if (root.getAttribute("componentkey") === "topcard") return root;
+    return root.querySelector('[componentkey="topcard"]');
   };
 
   const main = document.querySelector("main");
@@ -471,23 +482,76 @@ export function extractLinkedInProfileDomObservation(): Pick<
     sessionViewerUrls.push(...imageCandidateUrls(img));
   }
   const sessionViewerAvatarUrl = pickBestPhoto(sessionViewerUrls, true);
-  const topCardRoot =
-    structuralTopCard ??
-    document.querySelector("main .pv-top-card") ??
-    document.querySelector('main [data-view-name="profile-card"]') ??
-    null;
+
+  const isInsideList = (element: Element | null): boolean => {
+    for (let node: Element | null = element; node && node !== main; node = node.parentElement) {
+      if (node.tagName === "UL" || node.tagName === "OL") return true;
+    }
+    return false;
+  };
   const topCardUrls: string[] = [];
-  if (topCardRoot) {
-    for (const img of topCardRoot.querySelectorAll<HTMLImageElement>("img")) {
+  const collectPhotoUrlsFrom = (root: Element | null): void => {
+    if (!root) return;
+    const images = root.tagName === "IMG"
+      ? [root as HTMLImageElement]
+      : Array.from(root.querySelectorAll<HTMLImageElement>("img"));
+    for (const img of images) {
       if (isInsideAuthenticatedNav(img)) continue;
       topCardUrls.push(...imageCandidateUrls(img));
     }
-  } else {
-    for (const img of document.querySelectorAll<HTMLImageElement>(
-      "main img.pv-top-card-profile-picture__image",
-    )) {
-      if (isInsideAuthenticatedNav(img)) continue;
-      topCardUrls.push(...imageCandidateUrls(img));
+  };
+  const findKeyedTopCard = (start: Element | null): Element | null => {
+    for (let node: Element | null = start; node && node !== main; node = node.parentElement) {
+      const keyed = keyedTopCardIn(node);
+      if (keyed) return keyed;
+    }
+    return null;
+  };
+
+  // Proven photo roots only. Do not scan a wide ancestor of the text card:
+  // the same SDUI section also holds mutual-connection facepile chips.
+  collectPhotoUrlsFrom(document.querySelector("main .pv-top-card"));
+  collectPhotoUrlsFrom(document.querySelector('main [data-view-name="profile-card"]'));
+  for (const img of document.querySelectorAll<HTMLImageElement>(
+    "main img.pv-top-card-profile-picture__image",
+  )) {
+    collectPhotoUrlsFrom(img);
+  }
+  collectPhotoUrlsFrom(structuralTopCard);
+  collectPhotoUrlsFrom(
+    findKeyedTopCard(structuralTopCard) ?? findKeyedTopCard(profileAnchor),
+  );
+
+  if (!pickBestPhoto(topCardUrls)) {
+    const start = structuralTopCard ?? profileAnchor;
+    let hops = 0;
+    for (
+      let node: Element | null = start;
+      node && node !== main && hops < 6;
+      node = node.parentElement, hops++
+    ) {
+      const parent = node.parentElement;
+      if (!parent) break;
+      for (const sibling of Array.from(parent.children)) {
+        if (sibling === node) continue;
+        const keyed = keyedTopCardIn(sibling);
+        if (keyed) {
+          collectPhotoUrlsFrom(keyed);
+          continue;
+        }
+        const siblingUrls: string[] = [];
+        const assets = new Set<string>();
+        for (const img of sibling.querySelectorAll<HTMLImageElement>("img")) {
+          if (isInsideAuthenticatedNav(img) || isInsideList(img)) continue;
+          for (const url of imageCandidateUrls(img)) {
+            if (!isProfilePhotoUrl(url) || isNavbarThumb(url)) continue;
+            siblingUrls.push(url);
+            const asset = photoAssetId(url);
+            if (asset) assets.add(asset);
+          }
+        }
+        if (assets.size === 1) topCardUrls.push(...siblingUrls);
+      }
     }
   }
   const avatarUrl = pickBestPhoto(topCardUrls);

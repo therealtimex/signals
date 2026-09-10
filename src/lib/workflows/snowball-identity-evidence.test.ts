@@ -568,6 +568,30 @@ describe("Snowball LinkedIn identity evidence", () => {
     expect(contact.identities[0].avatarUrl).toBeNull();
   });
 
+  it("drops a scale_100_100 caller thumb when attestation did not bind a top-card photo", async () => {
+    const viewerScale =
+      "https://media.licdn.com/dms/image/v2/C5103AQHThgCA9BePxw/profile-displayphoto-scale_100_100/0/1";
+    const { template, run, scopeToken } = createSnowballRun();
+    const evidence = await attest(scopeToken, {
+      avatarUrl: null,
+      sessionViewerAvatarUrl: null,
+    });
+
+    const created = await invokeAgentTool("create_contact", {
+      name: "Jane Doe",
+      company: "Acme Inc.",
+      title: "Founder",
+      platform: "linkedin",
+      avatarUrl: viewerScale,
+      identityEvidenceToken: evidence.identityEvidenceToken,
+      workflowRunId: run.id,
+      templateId: template.id,
+    }) as { id: string };
+
+    const contact = getContactById(created.id)!;
+    expect(contact.identities[0].avatarUrl).toBeNull();
+  });
+
   it("rejects an avatar resolver slug that differs from the attested identity", async () => {
     const { template, run, scopeToken } = createSnowballRun();
     const evidence = await attest(scopeToken);

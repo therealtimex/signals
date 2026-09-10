@@ -13,6 +13,10 @@ const VIEWER_400 =
   "https://media.licdn.com/dms/image/v2/C5103AQHThgCA9BePxw/profile-displayphoto-shrink_400_400/profile-displayphoto-shrink_400_400/0/1517533488652?e=1790812800&v=beta&t=other";
 const CONTACT_400 =
   "https://media.licdn.com/dms/image/v2/D4E03AQOtherAsset99/profile-displayphoto-shrink_400_400/0/1";
+const CONTACT_CROP_800 =
+  "https://media.licdn.com/dms/image/v2/D4E03AQOtherAsset99/profile-displayphoto-crop_800_800/0/1";
+const VIEWER_SCALE_100 =
+  "https://media.licdn.com/dms/image/v2/C5103AQHThgCA9BePxw/profile-displayphoto-scale_100_100/0/1";
 const FRAMED =
   "https://media.licdn.com/dms/image/v2/D4E03AQOtherAsset99/profile-framedphoto-shrink_800_800/0/1";
 const FRAMED_100 =
@@ -23,8 +27,10 @@ describe("LinkedIn profile photo URLs", () => {
     expect(isLinkedInProfilePhotoUrl(VIEWER_100)).toBe(true);
     expect(isLinkedInNavbarThumbnailUrl(VIEWER_100)).toBe(true);
     expect(isLinkedInNavbarThumbnailUrl(FRAMED_100)).toBe(true);
+    expect(isLinkedInNavbarThumbnailUrl(VIEWER_SCALE_100)).toBe(true);
     expect(isLinkedInNavbarThumbnailUrl(CONTACT_400)).toBe(false);
     expect(isLinkedInNavbarThumbnailUrl(FRAMED)).toBe(false);
+    expect(isLinkedInNavbarThumbnailUrl(CONTACT_CROP_800)).toBe(false);
     expect(isLinkedInNavbarThumbnailUrl("https://unavatar.io/linkedin/user:jane")).toBe(false);
   });
 
@@ -38,5 +44,7 @@ describe("LinkedIn profile photo URLs", () => {
     expect(preferLinkedInProfilePhotoUrl([VIEWER_100, CONTACT_400, FRAMED])).toBe(FRAMED);
     expect(preferLinkedInProfilePhotoUrl([VIEWER_100, CONTACT_400])).toBe(CONTACT_400);
     expect(preferLinkedInProfilePhotoUrl([FRAMED_100, CONTACT_400])).toBe(CONTACT_400);
+    expect(preferLinkedInProfilePhotoUrl([VIEWER_SCALE_100, CONTACT_CROP_800])).toBe(CONTACT_CROP_800);
+    expect(preferLinkedInProfilePhotoUrl([CONTACT_400, CONTACT_CROP_800])).toBe(CONTACT_CROP_800);
   });
 });

@@ -90,7 +90,7 @@ export const createContactSchema = z.object({
   platformHandle: z.string().optional(),
   platformUrl: z.string().optional(),
   avatarUrl: z.string().optional().describe(
-    "Optional public https URL of the contact's profile photo. For LinkedIn Snowball, prefer the avatarUrl returned by attest_snowball_linkedin_identity. Navbar thumbs (shrink_100_100 / shrink_50_50) and the authenticated session viewer's photo are rejected. Derive any resolver slug only from a server-attested identity; never synthesize a profile slug. Must be http(s); file:// URLs and local paths are rejected.",
+    "Optional public https URL of the contact's profile photo. For LinkedIn Snowball, prefer the avatarUrl returned by attest_snowball_linkedin_identity. Navbar thumbs (shrink_100_100 / scale_100_100 / shrink_50_50) and the authenticated session viewer's photo are rejected. Derive any resolver slug only from a server-attested identity; never synthesize a profile slug. Must be http(s); file:// URLs and local paths are rejected.",
   ),
   identityEvidenceToken: z.string().min(1).optional().describe(
     "One-use token returned by attest_snowball_linkedin_identity. Required before a Network Snowball run can write a LinkedIn identity.",
@@ -236,7 +236,7 @@ export const upsertContactIdentitySchema = z
     headline: z.string().optional(),
     bio: z.string().optional(),
     avatarUrl: z.string().optional().describe(
-      "Optional public https URL of the contact's profile photo. For LinkedIn Snowball, prefer the avatarUrl returned by attest_snowball_linkedin_identity. Navbar thumbs (shrink_100_100 / shrink_50_50) and the authenticated session viewer's photo are rejected. Derive any resolver slug only from a server-attested identity; never synthesize a profile slug. Must be http(s); file:// URLs and local paths are rejected.",
+      "Optional public https URL of the contact's profile photo. For LinkedIn Snowball, prefer the avatarUrl returned by attest_snowball_linkedin_identity. Navbar thumbs (shrink_100_100 / scale_100_100 / shrink_50_50) and the authenticated session viewer's photo are rejected. Derive any resolver slug only from a server-attested identity; never synthesize a profile slug. Must be http(s); file:// URLs and local paths are rejected.",
     ),
     location: z.string().optional(),
     websiteUrl: z.string().optional(),

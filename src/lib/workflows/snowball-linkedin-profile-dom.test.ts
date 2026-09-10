@@ -156,4 +156,132 @@ describe("LinkedIn Snowball profile DOM extraction", () => {
 
     browserWindow.close();
   });
+
+  it("binds an SDUI top-card photo that sits in a [componentkey=topcard] sibling of the text card", () => {
+    const viewerThumb =
+      "https://media.licdn.com/dms/image/v2/C5103AQHThgCA9BePxw/profile-displayphoto-shrink_100_100/0/1";
+    const contactPhoto =
+      "https://media.licdn.com/dms/image/v2/D5603AQGqTD9aT-xIdA/profile-displayphoto-shrink_800_800/0/1";
+    const facepileScale =
+      "https://media.licdn.com/dms/image/v2/D5603AQHRxdPA1E3azQ/profile-displayphoto-scale_100_100/0/1";
+    const facepileShrink =
+      "https://media.licdn.com/dms/image/v2/C5603AQGCA0jXW9wIGQ/profile-displayphoto-shrink_100_100/0/1";
+    const browserWindow = renderLinkedInProfile(
+      "https://www.linkedin.com/in/jane-doe/",
+      `
+        <nav class="global-nav">
+          <img src="${viewerThumb}" alt="viewer">
+        </nav>
+        <main>
+          <section>
+            <div>
+              <div>
+                <a componentkey="topcard" href="https://www.linkedin.com/in/jane-doe/">
+                  <div componentkey="topcard">
+                    <figure>
+                      <img src="${contactPhoto}" width="152" height="152" alt="Jane Doe">
+                    </figure>
+                  </div>
+                </a>
+              </div>
+              <div>
+                <a href="https://www.linkedin.com/in/jane-doe/"
+                   componentkey="ProfileVerificationTriggerRef-jane-doe">
+                  <div><h2>Jane Doe</h2></div>
+                </a>
+                <p>Founder &amp; CEO at Acme, Inc.</p>
+                <p>Acme, Inc. · Example University</p>
+              </div>
+              <div>
+                <a>
+                  <ul>
+                    <li><img src="${facepileScale}" width="24" height="24" alt="Mutual"></li>
+                    <li><img src="${facepileShrink}" width="24" height="24" alt="Other"></li>
+                  </ul>
+                </a>
+              </div>
+            </div>
+          </section>
+        </main>
+      `,
+    );
+
+    expect(extractLinkedInProfileDomObservation()).toMatchObject({
+      visibleName: "Jane Doe",
+      headline: "Founder & CEO at Acme, Inc.",
+      avatarUrl: contactPhoto,
+      sessionViewerAvatarUrl: viewerThumb,
+    });
+
+    browserWindow.close();
+  });
+
+  it("binds a cousin top-card photo when the SDUI card has no componentkey=topcard", () => {
+    const contactPhoto =
+      "https://media.licdn.com/dms/image/v2/D5603AQAlexHeathTop/profile-displayphoto-shrink_400_400/0/1";
+    const browserWindow = renderLinkedInProfile(
+      "https://www.linkedin.com/in/jane-doe/",
+      `
+        <nav><img src="https://media.licdn.com/dms/image/v2/C5103AQHThgCA9BePxw/profile-displayphoto-shrink_100_100/0/1" alt="viewer"></nav>
+        <main>
+          <section>
+            <div class="obf-photo">
+              <img src="${contactPhoto}" alt="Jane Doe">
+            </div>
+            <div>
+              <a href="https://www.linkedin.com/in/jane-doe/"
+                 componentkey="ProfileVerificationTriggerRef-jane-doe">
+                <h2>Jane Doe</h2>
+              </a>
+              <p>Founder &amp; CEO at Acme, Inc.</p>
+              <p>Acme, Inc. · Example University</p>
+            </div>
+          </section>
+        </main>
+      `,
+    );
+
+    expect(extractLinkedInProfileDomObservation()).toMatchObject({
+      visibleName: "Jane Doe",
+      avatarUrl: contactPhoto,
+    });
+
+    browserWindow.close();
+  });
+
+  it("does not bind a mutual-connections facepile when the profile has no top-card photo", () => {
+    const facepileScale =
+      "https://media.licdn.com/dms/image/v2/D5603AQHRxdPA1E3azQ/profile-displayphoto-scale_100_100/0/1";
+    const browserWindow = renderLinkedInProfile(
+      "https://www.linkedin.com/in/jane-doe/",
+      `
+        <main>
+          <section>
+            <div>
+              <div>
+                <a href="https://www.linkedin.com/in/jane-doe/"
+                   componentkey="ProfileVerificationTriggerRef-jane-doe">
+                  <h2>Jane Doe</h2>
+                </a>
+                <p>Founder &amp; CEO at Acme, Inc.</p>
+                <p>Acme, Inc. · Example University</p>
+              </div>
+              <div>
+                <ul>
+                  <li><img src="${facepileScale}" width="24" height="24" alt="Mutual"></li>
+                </ul>
+              </div>
+            </div>
+          </section>
+        </main>
+      `,
+    );
+
+    expect(extractLinkedInProfileDomObservation()).toMatchObject({
+      visibleName: "Jane Doe",
+      avatarUrl: null,
+    });
+
+    browserWindow.close();
+  });
 });
