@@ -6,7 +6,6 @@ import { Suspense } from "react";
 import { Button } from "@/components/ui/button";
 import { Loader2 } from "lucide-react";
 import { TemplateGallery } from "./template-gallery";
-import { ScheduledJobsList } from "./scheduled-jobs-list";
 import { ActionCards } from "./action-cards";
 import { WorkflowViewSwitcher } from "./workflow-view-switcher";
 import { Card } from "@/components/ui/card";
@@ -89,10 +88,11 @@ function AutomationTabsInner({ runs, totalRuns, subjectsByRunId }: AutomationTab
                 Most Agent Workflows launch a RealTimeX terminal agent on a workspace thread, where
                 the agent executes the template brief using{" "}
                 <code className="text-xs">realtimex-signals</code> and{" "}
-                <code className="text-xs">POST /api/agent-tools/invoke</code>; recurring schedules
-                for those belong in RealTimeX Agent Flows. Deduplicate &amp; Merge Contacts is the
-                exception — detection and merging are deterministic, so Run opens a review panel
-                and no model is involved.
+                <code className="text-xs">POST /api/agent-tools/invoke</code>. Recurring runs are
+                owned by the RealTimeX host app — schedule them as a RealTimeX Agent Flow or a
+                calendar event, and they appear here under Runs once they fire. Deduplicate &amp;
+                Merge Contacts is the exception — detection and merging are deterministic, so Run
+                opens a review panel and no model is involved.
               </p>
             </div>
           </Card>
@@ -116,8 +116,6 @@ function AutomationTabsInner({ runs, totalRuns, subjectsByRunId }: AutomationTab
             </div>
             <TemplateGallery />
           </section>
-
-          <ScheduledJobsList />
         </div>
       )}
 
