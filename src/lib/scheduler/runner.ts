@@ -109,12 +109,29 @@ let initialized = false;
 let intervalId: ReturnType<typeof setInterval> | null = null;
 
 /**
+ * On unless SIGNALS_SCHEDULER_ENABLED says otherwise ("1"/"true" keep it on).
+ * The standalone Local App runtime sets it to "0" (scripts/standalone-entry.mjs):
+ * RealTimeX owns scheduling there (#478, #7).
+ */
+export function isSchedulerEnabled(
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  const value = env.SIGNALS_SCHEDULER_ENABLED;
+  if (value === undefined) return true;
+  return value === "1" || value.toLowerCase() === "true";
+}
+
+/**
  * Initialize the background scheduler.
  * Guards against double-init. Checks for overdue jobs immediately on startup,
  * then polls every 60 seconds.
  */
 export function initScheduler(): void {
   if (initialized) return;
+  if (!isSchedulerEnabled()) {
+    console.log("[scheduler] Disabled by SIGNALS_SCHEDULER_ENABLED; not polling for jobs");
+    return;
+  }
   initialized = true;
 
   console.log("[scheduler] Initializing background scheduler...");

@@ -3,11 +3,14 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 describe("instrumentation entry", () => {
-  it("bootstraps RTX from the root Next.js instrumentation hook", () => {
-    const rootPath = join(process.cwd(), "instrumentation.ts");
-    const source = readFileSync(rootPath, "utf8");
+  // With the app under src/app, `next build` only detects the hook at
+  // src/instrumentation.ts. A root-level file still runs under `next dev`, but the
+  // build leaves it out of the standalone output, so the shipped runtime never
+  // ran it (#484). Keep exactly one hook, and keep it in src/.
+  it("bootstraps RTX from the single src/ instrumentation hook", () => {
+    const source = readFileSync(join(process.cwd(), "src/instrumentation.ts"), "utf8");
 
     expect(source).toContain("bootstrapRtxIfEmbedded");
-    expect(existsSync(join(process.cwd(), "src/instrumentation.ts"))).toBe(false);
+    expect(existsSync(join(process.cwd(), "instrumentation.ts"))).toBe(false);
   });
 });
