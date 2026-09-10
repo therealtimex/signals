@@ -145,7 +145,11 @@ describe("buildNetworkSnowballBriefSection", () => {
     expect(brief).toContain("list_snowball_candidates");
     expect(brief).toContain("Auto-commit & Graph Edge Linking");
     expect(brief).toContain("Avatar Enrichment (downstream of identity attestation)");
+    expect(brief).toContain("use the `avatarUrl` returned by `attest_snowball_linkedin_identity`");
     expect(brief).toContain("pv-top-card-profile-picture__image");
+    expect(brief).toContain("[componentkey^=\"topcard-\"]");
+    expect(brief).toContain("shrink_100_100");
+    expect(brief).toContain("scale_100_100");
     expect(brief).toContain("unavatar.io/linkedin/user:");
     expect(brief).toContain("Prefer the platform CDN");
     expect(brief).toContain("Resolver is optional and downstream");

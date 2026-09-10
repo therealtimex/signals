@@ -99,6 +99,7 @@ import {
   SnowballIdentityEvidenceError,
   assertSnowballAvatarMatchesEvidence,
   assertSnowballLinkedInEvidenceMatchesCandidate,
+  resolveSnowballLinkedInAvatarUrl,
   attestSnowballLinkedInIdentity,
   auditSnowballLinkedInIdentityEvidence,
   bindSnowballLinkedInEvidence,
@@ -570,6 +571,7 @@ export async function handleCreateContact(input: z.infer<typeof createContactSch
       validateIdentityAvatarUrl(rest.avatarUrl);
       if (snowballEvidence) {
         assertSnowballAvatarMatchesEvidence(snowballEvidence, rest.avatarUrl);
+        rest.avatarUrl = resolveSnowballLinkedInAvatarUrl(snowballEvidence, rest.avatarUrl);
       }
     } catch (error) {
       throw new AgentToolError(
@@ -864,6 +866,7 @@ async function upsertContactIdentityWithEvidence(
     avatarUrl = validateIdentityAvatarUrl(input.avatarUrl);
     if (snowballEvidence) {
       assertSnowballAvatarMatchesEvidence(snowballEvidence, avatarUrl);
+      avatarUrl = resolveSnowballLinkedInAvatarUrl(snowballEvidence, avatarUrl);
     }
   } catch (error) {
     throw new AgentToolError(
