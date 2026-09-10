@@ -127,4 +127,33 @@ describe("LinkedIn Snowball profile DOM extraction", () => {
 
     browserWindow.close();
   });
+
+  it("does not take an unrelated main-content profile photo when no top-card container is proven", () => {
+    const unrelatedPhoto =
+      "https://media.licdn.com/dms/image/v2/D4E03AQPeopleAlso99/profile-displayphoto-shrink_400_400/0/1";
+    const browserWindow = renderLinkedInProfile(
+      "https://www.linkedin.com/in/jane-doe/",
+      `
+        <main>
+          <section>
+            <h1 class="text-heading-xlarge">Jane Doe</h1>
+            <div class="text-body-medium break-words">Founder at Acme</div>
+            <p>Jane Doe Founder at Acme London</p>
+          </section>
+          <section>
+            <h2>People also viewed</h2>
+            <img src="${unrelatedPhoto}" alt="Other Person">
+          </section>
+        </main>
+      `,
+    );
+
+    expect(extractLinkedInProfileDomObservation()).toMatchObject({
+      visibleName: "Jane Doe",
+      headline: "Founder at Acme",
+      avatarUrl: null,
+    });
+
+    browserWindow.close();
+  });
 });

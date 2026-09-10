@@ -1,7 +1,8 @@
 /** LinkedIn CDN profile photos share an asset id across shrink_* variants. */
 const LINKEDIN_PHOTO_ASSET_RE =
   /\/(?:dms\/image\/(?:v\d+\/)?)([^/]+)\/profile-(?:displayphoto|framedphoto)/i;
-const LINKEDIN_NAVBAR_THUMB_RE = /profile-displayphoto-shrink_(?:50_50|100_100)/i;
+const LINKEDIN_NAVBAR_THUMB_RE =
+  /profile-(?:displayphoto|framedphoto)-shrink_(?:50_50|100_100)/i;
 const LINKEDIN_PROFILE_PHOTO_RE = /profile-(?:displayphoto|framedphoto)/i;
 
 function linkedInCdnHostname(hostname: string): boolean {
@@ -49,14 +50,14 @@ export function linkedInProfilePhotosCollide(
 }
 
 function photoScore(url: string): number {
+  if (isLinkedInNavbarThumbnailUrl(url)) return -1;
   const lower = url.toLowerCase();
-  if (lower.includes("profile-framedphoto")) return 900;
   const dim = lower.match(/shrink_(\d+)_(\d+)/);
-  if (!dim) return 150;
-  return Number(dim[1]);
+  const size = dim ? Number(dim[1]) : 150;
+  return lower.includes("profile-framedphoto") ? size + 50 : size;
 }
 
-/** Prefer framed / 800 / 400 CDN photos over navbar-sized thumbs. */
+/** Prefer larger CDN photos; navbar-sized thumbs (50×50 / 100×100) never win. */
 export function preferLinkedInProfilePhotoUrl(urls: readonly string[]): string | undefined {
   let best: string | undefined;
   let bestScore = -1;

@@ -500,6 +500,29 @@ describe("Snowball LinkedIn identity evidence", () => {
     expect(contact.identities[0].avatarUrl).toBe(JANE_TOP_CARD);
   });
 
+  it("drops an attested CDN photo that collides with the session viewer's asset", async () => {
+    const { template, run, scopeToken } = createSnowballRun();
+    const evidence = await attest(scopeToken, {
+      avatarUrl: VIEWER_TOP_CARD,
+      sessionViewerAvatarUrl: VIEWER_NAV_THUMB,
+    });
+    expect(evidence.avatarUrl).toBeNull();
+
+    const created = await invokeAgentTool("create_contact", {
+      name: "Jane Doe",
+      company: "Acme Inc.",
+      title: "Founder",
+      platform: "linkedin",
+      avatarUrl: VIEWER_TOP_CARD,
+      identityEvidenceToken: evidence.identityEvidenceToken,
+      workflowRunId: run.id,
+      templateId: template.id,
+    }) as { id: string };
+
+    const contact = getContactById(created.id)!;
+    expect(contact.identities[0].avatarUrl).toBeNull();
+  });
+
   it("drops a navbar thumbnail when attestation did not bind a top-card photo", async () => {
     const { template, run, scopeToken } = createSnowballRun();
     const evidence = await attest(scopeToken, {

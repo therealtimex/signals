@@ -383,17 +383,20 @@ export function extractLinkedInProfileDomObservation(): Pick<
   };
   const isProfilePhotoUrl = (url: string): boolean =>
     /media\.licdn\.com/i.test(url) && /profile-(?:displayphoto|framedphoto)/i.test(url);
+  const isNavbarThumb = (url: string): boolean =>
+    /profile-(?:displayphoto|framedphoto)-shrink_(?:50_50|100_100)/i.test(url);
   const photoScore = (url: string): number => {
     const lower = url.toLowerCase();
-    if (lower.includes("profile-framedphoto")) return 900;
     const dim = lower.match(/shrink_(\d+)_(\d+)/);
-    return dim ? Number(dim[1]) : 150;
+    const size = dim ? Number(dim[1]) : 150;
+    return lower.includes("profile-framedphoto") ? size + 50 : size;
   };
-  const pickBestPhoto = (urls: string[]): string | null => {
+  const pickBestPhoto = (urls: string[], allowNavbarThumbs = false): string | null => {
     let best: string | null = null;
     let bestScore = -1;
     for (const url of urls) {
       if (!isProfilePhotoUrl(url)) continue;
+      if (!allowNavbarThumbs && isNavbarThumb(url)) continue;
       const score = photoScore(url);
       if (score > bestScore) {
         best = url;
@@ -461,24 +464,33 @@ export function extractLinkedInProfileDomObservation(): Pick<
     "page not found",
   ].some((marker) => pageText.includes(marker));
 
-  const sessionViewerAvatarUrl = pickBestPhoto(
-    Array.from(
-      document.querySelectorAll<HTMLImageElement>(
-        "nav img, header img, .global-nav img, .global-nav__me img",
-      ),
-    ).flatMap(imageCandidateUrls),
-  );
+  const sessionViewerUrls: string[] = [];
+  for (const img of document.querySelectorAll<HTMLImageElement>(
+    "nav img, header img, .global-nav img, .global-nav__me img",
+  )) {
+    sessionViewerUrls.push(...imageCandidateUrls(img));
+  }
+  const sessionViewerAvatarUrl = pickBestPhoto(sessionViewerUrls, true);
   const topCardRoot =
     structuralTopCard ??
     document.querySelector("main .pv-top-card") ??
-    document.querySelector("main .pv-top-card-profile-picture__image")?.closest("section") ??
     document.querySelector('main [data-view-name="profile-card"]') ??
-    main;
-  const avatarUrl = pickBestPhoto(
-    Array.from(topCardRoot?.querySelectorAll<HTMLImageElement>("img") ?? [])
-      .filter((img) => !isInsideAuthenticatedNav(img))
-      .flatMap(imageCandidateUrls),
-  );
+    null;
+  const topCardUrls: string[] = [];
+  if (topCardRoot) {
+    for (const img of topCardRoot.querySelectorAll<HTMLImageElement>("img")) {
+      if (isInsideAuthenticatedNav(img)) continue;
+      topCardUrls.push(...imageCandidateUrls(img));
+    }
+  } else {
+    for (const img of document.querySelectorAll<HTMLImageElement>(
+      "main img.pv-top-card-profile-picture__image",
+    )) {
+      if (isInsideAuthenticatedNav(img)) continue;
+      topCardUrls.push(...imageCandidateUrls(img));
+    }
+  }
+  const avatarUrl = pickBestPhoto(topCardUrls);
 
   return { visibleName, headline, topCardText, unavailable, avatarUrl, sessionViewerAvatarUrl };
 }
@@ -669,7 +681,10 @@ export async function attestSnowballLinkedInIdentity(
   const evidenceId = randomBytes(12).toString("base64url");
   const identityEvidenceToken = `${run.id}.${evidenceId}.${randomBytes(24).toString("base64url")}`;
   const sessionViewerAvatarUrl = observation.sessionViewerAvatarUrl?.trim() || null;
-  const avatarUrl = sanitizeAttestedLinkedInAvatarUrl(observation.avatarUrl);
+  const avatarUrl = sanitizeAttestedLinkedInAvatarUrl(
+    observation.avatarUrl,
+    sessionViewerAvatarUrl,
+  );
   const record: SnowballIdentityEvidenceRecord = {
     id: evidenceId,
     tokenHash: sha256(identityEvidenceToken),
@@ -918,34 +933,37 @@ export function snowballEvidencePlatformData(
 
 function sanitizeAttestedLinkedInAvatarUrl(
   avatarUrl: string | null | undefined,
+  sessionViewerAvatarUrl?: string | null,
 ): string | null {
   const trimmed = avatarUrl?.trim() || null;
   if (!trimmed || isLinkedInNavbarThumbnailUrl(trimmed)) return null;
+  if (
+    sessionViewerAvatarUrl &&
+    linkedInProfilePhotosCollide(trimmed, sessionViewerAvatarUrl)
+  ) {
+    return null;
+  }
   return trimmed;
 }
 
 /**
  * Bind the avatar from browser evidence. Caller-supplied LinkedIn CDN URLs are untrusted:
  * navbar thumbs and the authenticated session viewer's photo are dropped. A server-extracted
- * top-card URL always wins when present.
+ * top-card URL wins only when it also survives the session-viewer asset blacklist.
  */
 export function resolveSnowballLinkedInAvatarUrl(
   evidence: Pick<ClaimedSnowballLinkedInEvidence, "avatarUrl" | "sessionViewerAvatarUrl">,
   candidateAvatarUrl: string | null | undefined,
 ): string | undefined {
-  const attested = sanitizeAttestedLinkedInAvatarUrl(evidence.avatarUrl ?? null);
+  const attested = sanitizeAttestedLinkedInAvatarUrl(
+    evidence.avatarUrl ?? null,
+    evidence.sessionViewerAvatarUrl,
+  );
   if (attested) return attested;
-
-  const candidate = candidateAvatarUrl?.trim() || undefined;
-  if (!candidate) return undefined;
-  if (isLinkedInNavbarThumbnailUrl(candidate)) return undefined;
-  if (
-    evidence.sessionViewerAvatarUrl &&
-    linkedInProfilePhotosCollide(candidate, evidence.sessionViewerAvatarUrl)
-  ) {
-    return undefined;
-  }
-  return candidate;
+  return sanitizeAttestedLinkedInAvatarUrl(
+    candidateAvatarUrl,
+    evidence.sessionViewerAvatarUrl,
+  ) ?? undefined;
 }
 
 export function assertSnowballAvatarMatchesEvidence(

@@ -15,12 +15,16 @@ const CONTACT_400 =
   "https://media.licdn.com/dms/image/v2/D4E03AQOtherAsset99/profile-displayphoto-shrink_400_400/0/1";
 const FRAMED =
   "https://media.licdn.com/dms/image/v2/D4E03AQOtherAsset99/profile-framedphoto-shrink_800_800/0/1";
+const FRAMED_100 =
+  "https://media.licdn.com/dms/image/v2/C5103AQHThgCA9BePxw/profile-framedphoto-shrink_100_100/0/1";
 
 describe("LinkedIn profile photo URLs", () => {
   it("recognizes CDN profile photos and navbar thumbs", () => {
     expect(isLinkedInProfilePhotoUrl(VIEWER_100)).toBe(true);
     expect(isLinkedInNavbarThumbnailUrl(VIEWER_100)).toBe(true);
+    expect(isLinkedInNavbarThumbnailUrl(FRAMED_100)).toBe(true);
     expect(isLinkedInNavbarThumbnailUrl(CONTACT_400)).toBe(false);
+    expect(isLinkedInNavbarThumbnailUrl(FRAMED)).toBe(false);
     expect(isLinkedInNavbarThumbnailUrl("https://unavatar.io/linkedin/user:jane")).toBe(false);
   });
 
@@ -33,5 +37,6 @@ describe("LinkedIn profile photo URLs", () => {
   it("prefers framed and larger shrink sizes over navbar thumbs", () => {
     expect(preferLinkedInProfilePhotoUrl([VIEWER_100, CONTACT_400, FRAMED])).toBe(FRAMED);
     expect(preferLinkedInProfilePhotoUrl([VIEWER_100, CONTACT_400])).toBe(CONTACT_400);
+    expect(preferLinkedInProfilePhotoUrl([FRAMED_100, CONTACT_400])).toBe(CONTACT_400);
   });
 });
