@@ -484,6 +484,11 @@ export function extractLinkedInProfileDomObservation(): Pick<
     const enclosed = enclosingProfilePath(element);
     return !enclosed || enclosed === currentProfilePath;
   };
+  const isKeyedTopCardPhoto = (element: Element): boolean => {
+    // Live SDUI uses topcard-logo-image-referencekey. Prefix-match only:
+    // a contains/suffix match would also hit the outer …Topcard card (banner + facepile).
+    return (element.getAttribute("componentkey") ?? "").startsWith("topcard-");
+  };
   const topCardUrls: string[] = [];
   const collectPhotoUrlsFrom = (root: Element | null): void => {
     if (!root) return;
@@ -499,8 +504,8 @@ export function extractLinkedInProfileDomObservation(): Pick<
   const findKeyedTopCard = (start: Element | null): Element | null => {
     for (let node: Element | null = start; node && node !== main; node = node.parentElement) {
       const keyedCandidates: Element[] = [];
-      if (node.getAttribute("componentkey") === "topcard") keyedCandidates.push(node);
-      keyedCandidates.push(...Array.from(node.querySelectorAll('[componentkey="topcard"]')));
+      if (isKeyedTopCardPhoto(node)) keyedCandidates.push(node);
+      keyedCandidates.push(...Array.from(node.querySelectorAll('[componentkey^="topcard-"]')));
       for (const keyed of keyedCandidates) {
         if (belongsToCurrentProfile(keyed)) return keyed;
       }

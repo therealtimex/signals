@@ -147,7 +147,7 @@ describe("buildNetworkSnowballBriefSection", () => {
     expect(brief).toContain("Avatar Enrichment (downstream of identity attestation)");
     expect(brief).toContain("use the `avatarUrl` returned by `attest_snowball_linkedin_identity`");
     expect(brief).toContain("pv-top-card-profile-picture__image");
-    expect(brief).toContain("[componentkey=\"topcard\"]");
+    expect(brief).toContain("[componentkey^=\"topcard-\"]");
     expect(brief).toContain("shrink_100_100");
     expect(brief).toContain("scale_100_100");
     expect(brief).toContain("unavatar.io/linkedin/user:");

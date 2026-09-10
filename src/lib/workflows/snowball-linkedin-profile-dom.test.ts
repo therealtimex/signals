@@ -157,7 +157,7 @@ describe("LinkedIn Snowball profile DOM extraction", () => {
     browserWindow.close();
   });
 
-  it("binds an SDUI top-card photo that sits in a [componentkey=topcard] sibling of the text card", () => {
+  it("binds an SDUI top-card photo under topcard-logo-image-referencekey", () => {
     const viewerThumb =
       "https://media.licdn.com/dms/image/v2/C5103AQHThgCA9BePxw/profile-displayphoto-shrink_100_100/0/1";
     const contactPhoto =
@@ -176,8 +176,8 @@ describe("LinkedIn Snowball profile DOM extraction", () => {
           <section>
             <div>
               <div>
-                <a componentkey="topcard" href="https://www.linkedin.com/in/jane-doe/">
-                  <div componentkey="topcard">
+                <a componentkey="topcard-logo-image-referencekey" href="https://www.linkedin.com/in/jane-doe/">
+                  <div componentkey="topcard-logo-image-referencekey">
                     <figure>
                       <img src="${contactPhoto}" width="152" height="152" alt="Jane Doe">
                     </figure>
@@ -211,6 +211,70 @@ describe("LinkedIn Snowball profile DOM extraction", () => {
       headline: "Founder & CEO at Acme, Inc.",
       avatarUrl: contactPhoto,
       sessionViewerAvatarUrl: viewerThumb,
+    });
+
+    browserWindow.close();
+  });
+
+  it("does not treat the truncated componentkey=topcard value as a photo root", () => {
+    const contactPhoto =
+      "https://media.licdn.com/dms/image/v2/D5603AQGqTD9aT-xIdA/profile-displayphoto-shrink_800_800/0/1";
+    const browserWindow = renderLinkedInProfile(
+      "https://www.linkedin.com/in/jane-doe/",
+      `
+        <main>
+          <section>
+            <a componentkey="topcard" href="https://www.linkedin.com/in/jane-doe/">
+              <img src="${contactPhoto}" alt="Jane Doe">
+            </a>
+            <div>
+              <a href="https://www.linkedin.com/in/jane-doe/"
+                 componentkey="ProfileVerificationTriggerRef-jane-doe">
+                <h2>Jane Doe</h2>
+              </a>
+              <p>Founder &amp; CEO at Acme, Inc.</p>
+              <p>Acme, Inc. · Example University</p>
+            </div>
+          </section>
+        </main>
+      `,
+    );
+
+    expect(extractLinkedInProfileDomObservation()).toMatchObject({
+      visibleName: "Jane Doe",
+      avatarUrl: null,
+    });
+
+    browserWindow.close();
+  });
+
+  it("does not scan the outer SDUI Topcard card that holds facepile chips", () => {
+    const facepileScale =
+      "https://media.licdn.com/dms/image/v2/D5603AQHRxdPA1E3azQ/profile-displayphoto-scale_100_100/0/1";
+    const browserWindow = renderLinkedInProfile(
+      "https://www.linkedin.com/in/jane-doe/",
+      `
+        <main>
+          <div componentkey="com.linkedin.sdui.profile.card.refACoAACQJHDsTopcard">
+            <div>
+              <a href="https://www.linkedin.com/in/jane-doe/"
+                 componentkey="ProfileVerificationTriggerRef-jane-doe">
+                <h2>Jane Doe</h2>
+              </a>
+              <p>Founder &amp; CEO at Acme, Inc.</p>
+              <p>Acme, Inc. · Example University</p>
+            </div>
+            <ul>
+              <li><img src="${facepileScale}" width="24" height="24" alt="Mutual"></li>
+            </ul>
+          </div>
+        </main>
+      `,
+    );
+
+    expect(extractLinkedInProfileDomObservation()).toMatchObject({
+      visibleName: "Jane Doe",
+      avatarUrl: null,
     });
 
     browserWindow.close();
@@ -281,7 +345,7 @@ describe("LinkedIn Snowball profile DOM extraction", () => {
     browserWindow.close();
   });
 
-  it("skips a different profile's [componentkey=topcard] and binds the current profile's keyed photo", () => {
+  it("skips a different profile's topcard-logo-image-referencekey and binds the current profile's keyed photo", () => {
     const otherPhoto =
       "https://media.licdn.com/dms/image/v2/D4E03AQOtherPerson99/profile-displayphoto-shrink_400_400/0/1";
     const janePhoto =
@@ -291,7 +355,7 @@ describe("LinkedIn Snowball profile DOM extraction", () => {
       `
         <main>
           <section>
-            <a componentkey="topcard" href="https://www.linkedin.com/in/other-person/">
+            <a componentkey="topcard-logo-image-referencekey" href="https://www.linkedin.com/in/other-person/">
               <img src="${otherPhoto}" alt="Other Person">
             </a>
             <div>
@@ -302,7 +366,7 @@ describe("LinkedIn Snowball profile DOM extraction", () => {
               <p>Founder &amp; CEO at Acme, Inc.</p>
               <p>Acme, Inc. · Example University</p>
             </div>
-            <a componentkey="topcard" href="https://www.linkedin.com/in/jane-doe/">
+            <a componentkey="topcard-logo-image-referencekey" href="https://www.linkedin.com/in/jane-doe/">
               <img src="${janePhoto}" alt="Jane Doe">
             </a>
           </section>
