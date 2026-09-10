@@ -3,6 +3,7 @@ import { getWorkflowRun } from "@/lib/db/queries/workflows";
 import { countContactsByCreatedWorkflowRun } from "@/lib/db/queries/contacts";
 import { countOrgsByCreatedWorkflowRun } from "@/lib/db/queries/orgs";
 import { summarizeWorkflowRunProposals } from "@/lib/writing/workflow-run-proposals";
+import { listSnowballCandidates } from "@/lib/workflows/snowball-candidates";
 
 /**
  * GET /api/workflows/[id]
@@ -24,5 +25,6 @@ export async function GET(
     contactsCreated: countContactsByCreatedWorkflowRun(id),
     orgsCreated: countOrgsByCreatedWorkflowRun(id),
     proposalSummary: summarizeWorkflowRunProposals(id),
+    snowballCandidates: listSnowballCandidates({ workflowRunId: id, pageSize: 100 }).data,
   });
 }

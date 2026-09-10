@@ -331,6 +331,41 @@
                     "type": "object",
                     "properties": {
                       "tool": {
+                        "const": "list_snowball_candidates"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "workflowRunId": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "identity_unverified",
+                              "promoted",
+                              "dismissed"
+                            ]
+                          },
+                          "page": {
+                            "type": "number"
+                          },
+                          "pageSize": {
+                            "type": "number"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
                         "const": "get_contact"
                       },
                       "input": {
@@ -4939,6 +4974,7 @@
                       "query_contacts",
                       "resolve_platform_claim",
                       "attest_snowball_linkedin_identity",
+                      "list_snowball_candidates",
                       "get_contact",
                       "get_contact_arpp",
                       "create_contact",
@@ -5174,6 +5210,6 @@
   ],
   "x-signals-agent-tools": {
     "manifestVersion": "1",
-    "toolCount": 92
+    "toolCount": 93
   }
 }

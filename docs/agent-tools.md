@@ -40,6 +40,8 @@ Then pass `Authorization: Bearer your-secret-token` on each request.
 |------|----------|-------------|
 | `query_contacts` | contacts | Search/filter **active** contacts; `email` is an exact normalized match (incl. non-primary channels), `platformUserId` an exact identity match. Results list their identities. Not a claim lookup — use `resolve_platform_claim` |
 | `resolve_platform_claim` | contacts | Is this platform account already claimed, by a contact **or an org** identity? Same resolution `upsert_contact_identity` enforces. Returns `{claimed:false}` or `{claimed:true, claimant:{kind, …, archived}}` |
+| `attest_snowball_linkedin_identity` | platforms | Verify a proposed LinkedIn identity in the run-bound authenticated browser; failed gates automatically enter candidate quarantine |
+| `list_snowball_candidates` | contacts | List failed Snowball person/company proposals without exposing them as canonical graph records |
 | `get_contact` | contacts | Full contact by ID |
 | `get_contact_arpp` | contacts | Project a contact as ARPP with internal or public visibility |
 | `create_contact` | contacts | Create a contact (`channels[]`, `employments[]` supported) |
@@ -155,6 +157,18 @@ Predicted business emails live only in `contact_email_candidates`; they are not 
 and are excluded from outreach by default. Use `update_email_candidate` with explicit evidence to
 verify one. Verification promotes it to a sendable channel; catch-all or inconclusive probes never
 do. Link people with `link_contact_to_org` rather than writing `works_at` graph edges directly.
+
+Failed Network Snowball LinkedIn attestations live only in `snowball_candidates`; they are not
+contacts, organizations, identities, employments, or graph edges. The attestation tool writes this
+quarantine record automatically for a valid run scope. Use `list_snowball_candidates` to retrieve
+the proposed person/company context and gate reason. A later successful attestation followed by the
+normal evidence-token Auto-commit path marks the matching candidate promoted.
+
+The dashboard exposes this queue at `/dashboard/quarantine`. The sidebar badge counts only
+`identity_unverified` rows. Reviewers can filter the queue, inspect attempt history and source-run
+provenance, open the associated agent thread, dismiss an unverified candidate, or reopen a
+dismissed one. Promoted candidates are immutable from quarantine because their canonical contact
+and organization lifecycle is managed by the CRM surfaces.
 
 `semantic_search` requires Signals running as a RealtimeX Local App with the `llm.embed` permission granted. Vectors are stored locally in SQLite; only embedding generation is delegated to RealtimeX.
 

@@ -281,6 +281,13 @@ export const attestSnowballLinkedInIdentitySchema = z
     message: "candidateCompany or candidateTitle is required for browser-visible corroboration",
   });
 
+export const listSnowballCandidatesSchema = z.object({
+  workflowRunId: z.string().min(1).optional(),
+  status: z.enum(["identity_unverified", "promoted", "dismissed"]).optional(),
+  page: z.number().int().positive().optional(),
+  pageSize: z.number().int().positive().max(100).optional(),
+});
+
 export const queryGoalsSchema = z.object({
   status: z.enum(["active", "achieved", "missed", "paused"]).optional(),
   goalType: z

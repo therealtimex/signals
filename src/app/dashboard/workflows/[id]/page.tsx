@@ -18,6 +18,9 @@ import { WorkflowRunLive } from "./workflow-run-live";
 import { resolveWorkflowRunSubjectsForDetail } from "@/lib/workflows/workflow-run-subjects";
 import { summarizeWorkflowRunProposals } from "@/lib/writing/workflow-run-proposals";
 import { resolveWorkflowRunAgentThread } from "@/lib/workflows/workflow-run-agent-thread";
+import { listSnowballCandidates } from "@/lib/workflows/snowball-candidates";
+import { WorkflowRunCandidates } from "./workflow-run-candidates";
+import type { WorkflowRunWithSteps } from "@/lib/db/types";
 
 const TYPE_ICONS: Record<string, typeof RefreshCw> = {
   sync: RefreshCw,
@@ -54,6 +57,30 @@ function formatTimestamp(unix: number): string {
   });
 }
 
+async function resolveWorkflowTitle(run: WorkflowRunWithSteps): Promise<string> {
+  let title = run.workflowType.charAt(0).toUpperCase() + run.workflowType.slice(1) + " Workflow";
+  try {
+    const config = JSON.parse(run.config ?? "{}");
+    if (config.importSubType && run.workflowType === "import") {
+      title = IMPORT_SUBTYPE_LABELS[config.importSubType] ?? "File Import";
+      if (config.fileName) title += ` — ${config.fileName}`;
+    } else if (config.syncSubType && SYNC_SUBTYPE_LABELS[config.syncSubType]) {
+      title = SYNC_SUBTYPE_LABELS[config.syncSubType];
+    } else if (config.templateName) {
+      title = config.templateName;
+    }
+  } catch { /* ignore */ }
+
+  if (title.endsWith(" Workflow") && run.templateId) {
+    try {
+      const { getTemplate } = await import("@/lib/db/queries/workflow-templates");
+      const template = getTemplate(run.templateId);
+      if (template?.name) title = template.name;
+    } catch { /* ignore */ }
+  }
+  return title;
+}
+
 export default async function WorkflowDetailPage({
   params,
 }: {
@@ -68,27 +95,11 @@ export default async function WorkflowDetailPage({
 
   const Icon = TYPE_ICONS[run.workflowType] ?? RefreshCw;
 
-  let title = run.workflowType.charAt(0).toUpperCase() + run.workflowType.slice(1) + " Workflow";
-  try {
-    const config = JSON.parse(run.config ?? "{}");
-    if (config.importSubType && run.workflowType === "import") {
-      title = IMPORT_SUBTYPE_LABELS[config.importSubType] ?? "File Import";
-      if (config.fileName) title += ` — ${config.fileName}`;
-    } else if (config.syncSubType && SYNC_SUBTYPE_LABELS[config.syncSubType]) {
-      title = SYNC_SUBTYPE_LABELS[config.syncSubType];
-    } else if (config.templateName) {
-      title = config.templateName;
-    }
-  } catch { /* ignore */ }
-
-  // Fallback: look up template name for older runs that don't have it in config
-  if (title.endsWith(" Workflow") && run.templateId) {
-    try {
-      const { getTemplate } = await import("@/lib/db/queries/workflow-templates");
-      const tmpl = getTemplate(run.templateId);
-      if (tmpl?.name) title = tmpl.name;
-    } catch { /* ignore */ }
-  }
+  const title = await resolveWorkflowTitle(run);
+  const snowballCandidates = listSnowballCandidates({
+    workflowRunId: id,
+    pageSize: 100,
+  }).data;
 
   return (
     <div className="space-y-6 overflow-hidden">
@@ -121,6 +132,7 @@ export default async function WorkflowDetailPage({
         orgsCreated={countOrgsByCreatedWorkflowRun(id)}
         initialProposalSummary={summarizeWorkflowRunProposals(id)}
       />
+      <WorkflowRunCandidates candidates={snowballCandidates} />
     </div>
   );
 }

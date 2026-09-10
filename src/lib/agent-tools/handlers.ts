@@ -1,4 +1,5 @@
 import { listContacts, getContactById, createContact, updateContact, recalcEnrichment } from "@/lib/db/queries/contacts";
+import { db } from "@/lib/db/client";
 import { findDuplicateOrgs } from "@/lib/orgs/dedupe/detect";
 import { mergeOrgs, MergeOrgsError } from "@/lib/orgs/dedupe/merge";
 import { createIdentity, getIdentityById, updateIdentity } from "@/lib/db/queries/identities";
@@ -64,6 +65,7 @@ import type {
   upsertPersonaSchema,
   upsertContactIdentitySchema,
   attestSnowballLinkedInIdentitySchema,
+  listSnowballCandidatesSchema,
 } from "@/lib/agent-tools/schemas";
 import type { z } from "zod";
 import type { ContactIdentity } from "@/lib/db/types";
@@ -104,9 +106,16 @@ import {
   hasRunningNetworkSnowballRun,
   isRunningLinkedInNetworkSnowballRun,
   isRunningNetworkSnowballRun,
+  resolveSnowballIdentityScope,
   snowballEvidencePlatformData,
   type ClaimedSnowballLinkedInEvidence,
 } from "@/lib/workflows/snowball-identity-evidence";
+import {
+  listSnowballCandidates,
+  markMatchingSnowballCandidatesPromoted,
+  recordSnowballCandidateFailure,
+  summarizeSnowballCandidates,
+} from "@/lib/workflows/snowball-candidates";
 import { isNetworkSnowballTemplateConfig } from "@/lib/workflows/network-snowball";
 import {
   getNetworkSnowballTargetFromRunConfig,
@@ -116,16 +125,21 @@ import { RTX_PUBLISH_SESSION_NAME } from "@/lib/publish/constants";
 
 const DEFAULT_PAGE_SIZE = 20;
 
-function snowballEvidenceToolError(error: unknown): AgentToolError {
+function snowballEvidenceToolError(
+  error: unknown,
+  extraDetails: Record<string, unknown> = {},
+): AgentToolError {
   if (error instanceof SnowballIdentityEvidenceError) {
     return new AgentToolError("VALIDATION_ERROR", error.message, {
       reason: error.reason,
       ...(error.details ?? {}),
+      ...extraDetails,
     });
   }
   return new AgentToolError(
     "EXECUTION_ERROR",
     error instanceof Error ? error.message : "LinkedIn identity attestation failed",
+    Object.keys(extraDetails).length > 0 ? extraDetails : undefined,
   );
 }
 
@@ -312,12 +326,47 @@ export async function handleResolvePlatformClaim(
 
 export async function handleAttestSnowballLinkedInIdentity(
   input: z.infer<typeof attestSnowballLinkedInIdentitySchema>,
+  dependencies: {
+    attest?: typeof attestSnowballLinkedInIdentity;
+  } = {},
 ) {
+  let run;
   try {
-    return await attestSnowballLinkedInIdentity(input);
+    run = resolveSnowballIdentityScope(input.snowballScopeToken);
   } catch (error) {
     throw snowballEvidenceToolError(error);
   }
+  try {
+    return await (dependencies.attest ?? attestSnowballLinkedInIdentity)(input);
+  } catch (error) {
+    const reason = error instanceof SnowballIdentityEvidenceError
+      ? error.reason
+      : "attestation_execution_error";
+    const message = error instanceof Error
+      ? error.message
+      : "LinkedIn identity attestation failed";
+    const candidate = recordSnowballCandidateFailure({
+      run,
+      candidateName: input.candidateName,
+      candidateCompany: input.candidateCompany,
+      candidateTitle: input.candidateTitle,
+      profileUrl: input.profileUrl,
+      reason,
+      message,
+      details: error instanceof SnowballIdentityEvidenceError ? error.details : undefined,
+    });
+    throw snowballEvidenceToolError(error, candidate ? {
+      candidateId: candidate.id,
+      candidateStatus: candidate.status,
+      quarantined: true,
+    } : {});
+  }
+}
+
+export async function handleListSnowballCandidates(
+  input: z.infer<typeof listSnowballCandidatesSchema>,
+) {
+  return listSnowballCandidates(input);
 }
 
 export async function handleGetContact(input: z.infer<typeof getContactSchema>) {
@@ -928,9 +977,21 @@ async function upsertContactIdentityWithEvidence(
     );
   }
 
+  let promotedCandidateIds: string[] = [];
   if (snowballEvidence) {
     try {
-      bindSnowballLinkedInEvidence(snowballEvidence, input.contactId, identity.id);
+      promotedCandidateIds = db.transaction(() => {
+        bindSnowballLinkedInEvidence(snowballEvidence, input.contactId, identity.id);
+        return markMatchingSnowballCandidatesPromoted({
+          profileUrl: snowballEvidence.proposedProfileUrl ?? snowballEvidence.platformUrl,
+          candidateName: snowballEvidence.candidateName,
+          candidateCompany: snowballEvidence.candidateCompany,
+          candidateTitle: snowballEvidence.candidateTitle,
+          contactId: input.contactId,
+          identityId: identity.id,
+          orgId: getContactById(input.contactId)?.currentEmployment?.orgId,
+        });
+      });
     } catch (error) {
       throw snowballEvidenceToolError(error);
     }
@@ -941,6 +1002,7 @@ async function upsertContactIdentityWithEvidence(
   return {
     ...serializeContactIdentity(identity),
     contactId: input.contactId,
+    promotedCandidateIds,
     message: "Contact identity upserted.",
   };
 }
@@ -1445,10 +1507,37 @@ export async function handleCompleteWorkflowRun(input: z.infer<typeof completeWo
       normalizedErrors = uniqueStrings([...normalizedErrors, ...audit.errors]);
     }
   }
+  const snowballCandidateSummary = isSnowball
+    ? summarizeSnowballCandidates(run.id)
+    : null;
+  const snowballCandidateOutcome = snowballCandidateSummary
+    ? {
+        discovered:
+          cohort.contactIds.length +
+          snowballCandidateSummary.awaitingVerification +
+          snowballCandidateSummary.dismissed,
+        committed: cohort.contactIds.length,
+        awaitingVerification: snowballCandidateSummary.awaitingVerification,
+        promotedFromQuarantine: snowballCandidateSummary.promoted,
+        dismissed: snowballCandidateSummary.dismissed,
+      }
+    : null;
+  if (snowballCandidateOutcome) {
+    callbackResult.snowballCandidates = snowballCandidateOutcome;
+    if (snowballCandidateOutcome.awaitingVerification > 0) {
+      callbackResult.partial = true;
+    }
+  }
+  const snowballOutcomeSummary = snowballCandidateOutcome
+    ? `${snowballCandidateOutcome.discovered} discovered · ${snowballCandidateOutcome.committed} committed · ${snowballCandidateOutcome.awaitingVerification} awaiting verification`
+    : null;
+  const completionSummary = [input.summary, snowballOutcomeSummary]
+    .filter((value): value is string => Boolean(value))
+    .join("\n") || undefined;
   const resultJson = JSON.stringify({
     ...existingResult,
     ...callbackResult,
-    ...(input.summary ? { summary: input.summary } : {}),
+    ...(completionSummary ? { summary: completionSummary } : {}),
     ...(cohort.contactIds.length > 0 ? { createdContactIds: cohort.contactIds } : {}),
   });
 
@@ -1491,12 +1580,12 @@ export async function handleCompleteWorkflowRun(input: z.infer<typeof completeWo
 
   const [eventResult, completionMessage, parallelBrowserTeardown] = await Promise.all([
     emitWorkflowCompletedEvent(input.runId, {
-      summary: input.summary,
+      summary: completionSummary,
       createdContactIds: cohort.contactIds.length > 0 ? cohort.contactIds : undefined,
     }),
     postWorkflowCompletionThreadMessage(updatedRun ?? run, {
       status: effectiveStatus,
-      summary: input.summary,
+      summary: completionSummary,
       processedItems: updatedRun?.processedItems ?? input.processedItems,
       successItems: updatedRun?.successItems ?? input.successItems,
     }),
@@ -1522,6 +1611,9 @@ export async function handleCompleteWorkflowRun(input: z.infer<typeof completeWo
     processedItems: updatedRun?.processedItems ?? input.processedItems ?? 0,
     createdContactIds: cohort.contactIds,
     cohortSources: cohort.sources,
+    ...(snowballCandidateOutcome
+      ? { snowballCandidates: snowballCandidateOutcome }
+      : {}),
     cascadeResult: eventResult.cascadeResult,
     routingRecommendation: eventResult.routingRecommendation,
     terminalSessionTeardown: terminalSessionTeardown.sessionId

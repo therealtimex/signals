@@ -13,6 +13,7 @@ import {
   Settings,
   BookOpen,
   HelpCircle,
+  ShieldAlert,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -28,6 +29,7 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarMenuBadge,
   SidebarFooter,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
@@ -38,6 +40,7 @@ const navItems = [
   { title: "Explore", href: "/dashboard/explore", icon: Telescope },
   { title: "Contacts", href: "/dashboard/contacts", icon: Users },
   { title: "Companies", href: "/dashboard/organizations", icon: Building2 },
+  { title: "Quarantine", href: "/dashboard/quarantine", icon: ShieldAlert },
   { title: "Content", href: "/dashboard/content", icon: FileText },
   { title: "Launches", href: "/dashboard/launches", icon: Rocket },
   { title: "Automation", href: "/dashboard/workflows", icon: Zap },
@@ -45,7 +48,7 @@ const navItems = [
   { title: "Goals", href: "/dashboard/goals", icon: Target },
 ];
 
-export function AppSidebar() {
+export function AppSidebar({ quarantineCount = 0 }: { quarantineCount?: number }) {
   const pathname = usePathname();
   const mascotMood = mascotMoodForPathname(pathname);
 
@@ -89,6 +92,11 @@ export function AppSidebar() {
                         <span>{item.title}</span>
                       </Link>
                     </SidebarMenuButton>
+                    {item.href === "/dashboard/quarantine" && quarantineCount > 0 ? (
+                      <SidebarMenuBadge className="bg-warning/15 text-warning">
+                        {quarantineCount > 99 ? "99+" : quarantineCount}
+                      </SidebarMenuBadge>
+                    ) : null}
                   </SidebarMenuItem>
                 );
               })}

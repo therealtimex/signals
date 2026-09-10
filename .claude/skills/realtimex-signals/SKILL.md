@@ -167,6 +167,21 @@ research supplied the value. Keep verified social profiles in `org_identities` v
 document is needed; request `visibility: "public"` for the privacy-filtered slice. Do not expose raw
 provenance tags as user-facing descriptions.
 
+### Network Snowball candidate quarantine
+
+For a Network Snowball run, always call `attest_snowball_linkedin_identity` before writing a
+LinkedIn-backed contact. A failed gate automatically stores the proposed person, company/title,
+profile URL, seed/run provenance, and failure reason in quarantine. Do not create a bare contact or
+organization as a fallback. Use `list_snowball_candidates` to retrieve `identity_unverified`
+candidates for a later enrichment or re-attestation run. They remain excluded from contact/org
+queries, graph traversal, scoring, and outbound actions until successful evidence-token
+Auto-commit promotes them.
+
+Operators can review the same queue under **Signals → Quarantine**. The page filters by review
+status, gate failure, source run, person, and company; its review modal links back to the source
+workflow and agent thread. Dismissing a candidate is reversible and does not create or remove a
+canonical CRM record. Re-attestation still requires a fresh run-bound browser scope.
+
 ## Contact avatars
 
 Signals resolves avatars in this order:

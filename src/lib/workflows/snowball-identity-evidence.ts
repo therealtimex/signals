@@ -52,6 +52,7 @@ type SnowballIdentityEvidenceRecord = {
   candidateNameKey: string;
   candidateCompany: string | null;
   candidateTitle: string | null;
+  proposedProfileUrl?: string;
   platform: "linkedin";
   platformUserId: string;
   platformHandle: string;
@@ -553,36 +554,7 @@ export async function attestSnowballLinkedInIdentity(
       { profileUrl: input.profileUrl },
     );
   }
-  const parsedScope = parseScopeToken(input.snowballScopeToken);
-  if (!parsedScope) {
-    throw new SnowballIdentityEvidenceError(
-      "scope_invalid",
-      "Snowball identity scope token is malformed.",
-    );
-  }
-  const run = getWorkflowRun(parsedScope.workflowRunId);
-  if (!run) {
-    throw new SnowballIdentityEvidenceError("run_not_found", "Snowball workflow run was not found.");
-  }
-  const config = parseJsonObject(run.config);
-  if (!isNetworkSnowballTemplateConfig(config)) {
-    throw new SnowballIdentityEvidenceError(
-      "run_not_snowball",
-      "Identity attestation scope is not bound to a Network Snowball run.",
-    );
-  }
-  if (run.status !== "running") {
-    throw new SnowballIdentityEvidenceError(
-      "run_not_active",
-      "Identity attestation is only available while the Network Snowball run is active.",
-    );
-  }
-  if (!safeEqualHash(input.snowballScopeToken, config[SNOWBALL_IDENTITY_SCOPE_TOKEN_CONFIG_KEY])) {
-    throw new SnowballIdentityEvidenceError(
-      "scope_invalid",
-      "Snowball identity scope token does not match this dispatch.",
-    );
-  }
+  const run = resolveSnowballIdentityScope(input.snowballScopeToken);
 
   const browserTarget = getNetworkSnowballTargetFromRunConfig(run.config);
   const expectedHandle = browserTarget?.verifiedHandle ?? browserTarget?.expectedHandle;
@@ -623,6 +595,7 @@ export async function attestSnowballLinkedInIdentity(
     candidateNameKey: normalizeHumanText(input.candidateName),
     candidateCompany: input.candidateCompany?.trim() || null,
     candidateTitle: input.candidateTitle?.trim() || null,
+    proposedProfileUrl: input.profileUrl,
     platform: "linkedin",
     ...identity,
     displayName: observation.visibleName.trim(),
@@ -657,6 +630,42 @@ export async function attestSnowballLinkedInIdentity(
     observedAt: record.observedAt,
     expiresAt: record.expiresAt,
   };
+}
+
+export function resolveSnowballIdentityScope(
+  snowballScopeToken: string,
+): WorkflowRunWithSteps {
+  const parsedScope = parseScopeToken(snowballScopeToken);
+  if (!parsedScope) {
+    throw new SnowballIdentityEvidenceError(
+      "scope_invalid",
+      "Snowball identity scope token is malformed.",
+    );
+  }
+  const run = getWorkflowRun(parsedScope.workflowRunId);
+  if (!run) {
+    throw new SnowballIdentityEvidenceError("run_not_found", "Snowball workflow run was not found.");
+  }
+  const config = parseJsonObject(run.config);
+  if (!isNetworkSnowballTemplateConfig(config)) {
+    throw new SnowballIdentityEvidenceError(
+      "run_not_snowball",
+      "Identity attestation scope is not bound to a Network Snowball run.",
+    );
+  }
+  if (run.status !== "running") {
+    throw new SnowballIdentityEvidenceError(
+      "run_not_active",
+      "Identity attestation is only available while the Network Snowball run is active.",
+    );
+  }
+  if (!safeEqualHash(snowballScopeToken, config[SNOWBALL_IDENTITY_SCOPE_TOKEN_CONFIG_KEY])) {
+    throw new SnowballIdentityEvidenceError(
+      "scope_invalid",
+      "Snowball identity scope token does not match this dispatch.",
+    );
+  }
+  return run;
 }
 
 export function isRunningNetworkSnowballRun(workflowRunId: string | null | undefined): boolean {
