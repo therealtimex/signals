@@ -17,8 +17,12 @@ function normalizeComposeText(text) {
 function paragraphBlocks(text) {
   return String(text ?? "")
     .split(/\n+/)
-    .map((line) => line.replace(/\s+/g, " ").trim())
+    .map((line) => line.replace(/[^\S\n]+/g, " ").trim())
     .filter(Boolean);
+}
+
+function canonicalComposeText(text) {
+  return paragraphBlocks(text).join("\n");
 }
 
 function composeSnapshotFromText(text, options = {}) {
@@ -46,7 +50,8 @@ function composeSnapshotFromText(text, options = {}) {
 }
 
 function matchComposeSnapshot(snapshot, expected) {
-  const want = normalizeComposeText(expected);
+  const wantParagraphs = paragraphBlocks(expected);
+  const want = wantParagraphs.join("\n");
   if (!want) {
     return { ok: true, reason: "empty_expected" };
   }
@@ -59,12 +64,32 @@ function matchComposeSnapshot(snapshot, expected) {
     };
   }
 
-  const inner = normalizeComposeText(snapshot.innerText ?? snapshot.text ?? "");
-  const selected = normalizeComposeText(snapshot.selectionText ?? "");
-  const fromBlocks = normalizeComposeText(
-    Array.isArray(snapshot.blocks) ? snapshot.blocks.join("\n") : ""
-  );
+  const innerParagraphs = paragraphBlocks(snapshot.innerText ?? snapshot.text ?? "");
+  const selectedParagraphs = paragraphBlocks(snapshot.selectionText ?? "");
+  const blockParagraphs = Array.isArray(snapshot.blocks)
+    ? snapshot.blocks.flatMap((block) => paragraphBlocks(block))
+    : [];
 
+  const inner = innerParagraphs.join("\n");
+  const selected = selectedParagraphs.join("\n");
+  const fromBlocks = blockParagraphs.join("\n");
+
+  if (!selectedParagraphs.length) {
+    return {
+      ok: false,
+      reason: "missing_selection",
+      expected: want,
+      actual: selected,
+    };
+  }
+  if (!blockParagraphs.length) {
+    return {
+      ok: false,
+      reason: "missing_blocks",
+      expected: want,
+      actual: fromBlocks,
+    };
+  }
   if (inner !== want) {
     return {
       ok: false,
@@ -73,8 +98,7 @@ function matchComposeSnapshot(snapshot, expected) {
       actual: inner,
     };
   }
-
-  if (selected && selected !== want) {
+  if (selected !== want) {
     return {
       ok: false,
       reason: "editor_selection_mismatch",
@@ -82,8 +106,7 @@ function matchComposeSnapshot(snapshot, expected) {
       actual: selected,
     };
   }
-
-  if (fromBlocks && fromBlocks !== want) {
+  if (fromBlocks !== want || blockParagraphs.length !== wantParagraphs.length) {
     return {
       ok: false,
       reason: "editor_blocks_mismatch",
@@ -227,6 +250,7 @@ function readComposeSnapshotEvalJs(wrapperSelector) {
 
 module.exports = {
   normalizeComposeText,
+  canonicalComposeText,
   paragraphBlocks,
   composeSnapshotFromText,
   matchComposeSnapshot,

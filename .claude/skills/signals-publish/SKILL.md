@@ -71,7 +71,8 @@ X's inline and modal composers serialize **only the focused active block** if pa
 
 - Inject the entire string as **one** `insertText` payload (`x-compose-text.cjs` / `x-publish.cjs` / `x-reply.cjs`).
 - Never type line-by-line, press Enter between paragraphs, or split the payload.
-- Before clicking Tweet / `[data-testid="tweetButtonInline"]`, assert the editor snapshot (`selectAll` selection + block texts) equals the drafted text. Abort and re-inject on mismatch.
+- Before clicking Tweet / `[data-testid="tweetButtonInline"]`, assert the editor snapshot has non-empty `selectAll` selection **and** block texts, and that paragraph structure matches the draft (newlines are not collapsed). Re-inject once on mismatch; if it still diverges, abort the command. Do not submit.
+- `x-reply.cjs` must not treat the Reply click as success. It waits for a newly created owned reply and prints `platformPostId` / `platformUrl` for that reply — never the parent post URL.
 
 4. Parse the **last stdout line** as JSON. On success call `complete_publish` with `leaseId`, `handle`, `platformPostId`, and `platformUrl`. Include `targetId` only when the job target snapshot contains it; omit `targetId` from both success and failure callbacks for legacy platform-only jobs. On failure pass `leaseId`, optional snapshotted `targetId`, and `error` + `errorCode` (`session_expired`, `captcha`, `upload_failed`, `timeout`, `wrong_account`, `unknown`).
 5. Always run `signals-pp-cli targets release --lease <leaseId>` after the completion callback, including failures.

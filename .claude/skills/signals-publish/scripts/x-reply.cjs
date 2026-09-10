@@ -2,8 +2,10 @@
 /**
  * Deterministic X inline reply via host agent-browser CLI.
  *
- * Injects the entire reply as one insertText payload, then refuses to click
- * [data-testid="tweetButtonInline"] unless the Draft.js/Lexical snapshot matches.
+ * Injects the entire reply as one insertText payload, re-injects once on
+ * snapshot mismatch, then refuses to click [data-testid="tweetButtonInline"]
+ * unless the Draft.js/Lexical snapshot matches. After click, waits for a newly
+ * created owned reply and returns its platformPostId / platformUrl.
  *
  * Usage:
  *   node scripts/x-reply.cjs --port <cdpPort> --payload <reply.json> [--dry-run]
@@ -15,10 +17,11 @@
 const { readFileSync } = require("node:fs");
 const { spawnSync } = require("node:child_process");
 
-const { parseEvalJsonValue } = require("./parse-eval-json-array.cjs");
+const { parseEvalJsonArray, parseEvalJsonValue } = require("./parse-eval-json-array.cjs");
 const {
   insertComposeTextEvalJs,
   matchComposeSnapshot,
+  normalizeComposeText,
   readComposeSnapshotEvalJs,
 } = require("./x-compose-text.cjs");
 
@@ -29,10 +32,14 @@ const AB_PREFIX = process.env.AGENT_BROWSER_BIN_ARGS
   : [];
 const COMPOSE_WAIT_TIMEOUT_MS = 15_000;
 const TYPE_SETTLE_MS = 800;
+const COMPOSE_REINJECT_ATTEMPTS = 2;
+const TWITTER_EPOCH_MS = 1288834974657;
 
 const REPLY_TEXTAREA = '[data-testid="tweetTextarea_0"]';
 const REPLY_BUTTON = '[data-testid="reply"]';
 const REPLY_SUBMIT = '[data-testid="tweetButtonInline"]';
+const PROFILE_LINK = '[data-testid="AppTabBar_Profile_Link"]';
+const DESKTOP_PROFILE_LINK = 'a[aria-label="Profile"]';
 
 let resultEmitted = false;
 
@@ -110,6 +117,10 @@ function requireAb(args, context, errorCode = "unknown") {
   return result;
 }
 
+function abText(args) {
+  return requireAb(args, args.join(" ")).stdout;
+}
+
 function abCount(selector) {
   const result = runAb(["get", "count", selector]);
   if (!result.ok) return 0;
@@ -181,6 +192,19 @@ function connectSession(port) {
   selectContentTab();
 }
 
+function detectXDisplayHandle() {
+  for (const selector of [PROFILE_LINK, DESKTOP_PROFILE_LINK]) {
+    const href = runAb(["get", "attr", selector, "href"]).stdout;
+    if (href?.startsWith("/") && !href.includes("/status/")) {
+      const segment = href.replace(/^\//, "").split("/")[0];
+      if (segment && !["home", "explore", "i"].includes(segment.toLowerCase())) {
+        return segment.startsWith("@") ? segment : `@${segment}`;
+      }
+    }
+  }
+  return null;
+}
+
 function insertReplyText(text) {
   requireAb(["click", REPLY_TEXTAREA], "focus inline reply composer");
   const raw = requireAb(
@@ -206,13 +230,160 @@ function readReplySnapshot() {
   return parsed && typeof parsed === "object" ? parsed : null;
 }
 
-function assertReplyReadyToSubmit(expected) {
-  const snapshot = readReplySnapshot() || insertReplyText(expected);
-  const match = matchComposeSnapshot(snapshot, expected);
-  if (match.ok) return snapshot;
+function fillReplyAndAssert(text) {
+  let lastMatch = { ok: false, reason: "not_attempted", expected: text, actual: "" };
+  for (let attempt = 1; attempt <= COMPOSE_REINJECT_ATTEMPTS; attempt++) {
+    insertReplyText(text);
+    sleep(TYPE_SETTLE_MS);
+    lastMatch = matchComposeSnapshot(readReplySnapshot(), text);
+    if (lastMatch.ok) return;
+  }
   throw {
-    message: `pre-submit compose editor does not contain the full drafted reply (${match.reason}; expected ${JSON.stringify(match.expected)}, actual ${JSON.stringify(match.actual)})`,
+    message: `pre-submit compose editor does not contain the full drafted reply after ${COMPOSE_REINJECT_ATTEMPTS} insert attempts (${lastMatch.reason}; expected ${JSON.stringify(lastMatch.expected)}, actual ${JSON.stringify(lastMatch.actual)})`,
     errorCode: "compose_invalid",
+  };
+}
+
+function extractStatusIdFromHref(href) {
+  if (!href) return null;
+  const match = String(href).match(/\/status\/(\d+)/);
+  return match?.[1] ?? null;
+}
+
+function isStatusOwnedByHandle(href, handle) {
+  const clean = handle.replace(/^@/, "").toLowerCase();
+  try {
+    const path = href.startsWith("http") ? new URL(href).pathname : href;
+    const match = path.match(/^\/([^/]+)\/status\/(\d+)/);
+    return match?.[1]?.toLowerCase() === clean;
+  } catch {
+    return false;
+  }
+}
+
+function maxStatusIdNumeric(statusIds) {
+  let max = 0n;
+  for (const id of statusIds) {
+    try {
+      const value = BigInt(id);
+      if (value > max) max = value;
+    } catch {
+      // ignore
+    }
+  }
+  return max;
+}
+
+function statusIdToTimestampMs(statusId) {
+  try {
+    return Number(BigInt(statusId) >> 22n) + TWITTER_EPOCH_MS;
+  } catch {
+    return null;
+  }
+}
+
+function selectNewOwnedStatus(candidates, handle, expectedText, baseline) {
+  const needle = normalizeComposeText(expectedText).slice(0, 80);
+  if (!needle) return null;
+
+  for (const candidate of candidates) {
+    if (baseline.statusIds.has(candidate.statusId)) continue;
+    let candidateId;
+    try {
+      candidateId = BigInt(candidate.statusId);
+    } catch {
+      continue;
+    }
+    if (candidateId <= baseline.maxStatusId) continue;
+    if (!isStatusOwnedByHandle(candidate.href, handle)) continue;
+    if (!normalizeComposeText(candidate.text).includes(needle)) continue;
+    const createdAt = statusIdToTimestampMs(candidate.statusId);
+    if (createdAt === null || createdAt < baseline.capturedAtMs) continue;
+    return {
+      success: true,
+      handle,
+      kind: "reply",
+      platformPostId: candidate.statusId,
+      platformUrl: candidate.href.startsWith("http")
+        ? candidate.href
+        : `https://x.com${candidate.href}`,
+    };
+  }
+  return null;
+}
+
+function readOwnedStatusCandidates(handle) {
+  const js = `(() => {
+    function normalize(text) {
+      return String(text || "").replace(/\\s+/g, " ").trim();
+    }
+    function extractStatusId(href) {
+      if (!href) return null;
+      const match = href.match(/\\/status\\/(\\d+)/);
+      return match ? match[1] : null;
+    }
+    function owned(href, handle) {
+      const clean = handle.replace(/^@/, "").toLowerCase();
+      try {
+        const path = href.startsWith("http") ? new URL(href).pathname : href;
+        const match = path.match(/^\\/([^/]+)\\/status\\/(\\d+)/);
+        return match && match[1].toLowerCase() === clean;
+      } catch {
+        return false;
+      }
+    }
+    const handle = ${JSON.stringify(handle)};
+    const articles = document.querySelectorAll("article");
+    const ownedCandidates = [];
+    for (let i = 0; i < Math.min(articles.length, 12); i++) {
+      const article = articles[i];
+      const text = normalize(article.innerText);
+      const links = article.querySelectorAll("a[href*='/status/']");
+      for (const link of links) {
+        const href = link.getAttribute("href");
+        const statusId = extractStatusId(href);
+        if (!href || !statusId) continue;
+        if (owned(href, handle)) {
+          ownedCandidates.push({ statusId, href, text });
+          break;
+        }
+      }
+    }
+    return JSON.stringify(ownedCandidates);
+  })()`;
+  return parseEvalJsonArray(abText(["eval", js]));
+}
+
+function captureStatusBaseline(handle, sourcePostUrl) {
+  const candidates = readOwnedStatusCandidates(handle);
+  const statusIds = new Set(candidates.map((c) => c.statusId));
+  const sourceId = extractStatusIdFromHref(sourcePostUrl);
+  if (sourceId) statusIds.add(sourceId);
+  return {
+    statusIds,
+    maxStatusId: maxStatusIdNumeric(statusIds),
+    capturedAtMs: Date.now(),
+  };
+}
+
+function waitForVerifiedReply(expectedText, handle, baseline) {
+  const budgetMs = Number(process.env.SIGNALS_PUBLISH_VERIFY_TIMEOUT_MS ?? 20_000);
+  const pollMs = Math.min(2000, Math.max(50, budgetMs));
+  const started = Date.now();
+  while (Date.now() - started < budgetMs) {
+    const match = selectNewOwnedStatus(
+      readOwnedStatusCandidates(handle),
+      handle,
+      expectedText,
+      baseline
+    );
+    if (match) return match;
+    sleep(pollMs);
+  }
+  return {
+    success: false,
+    error: "No newly published reply was detected after clicking Reply.",
+    errorCode: "timeout",
   };
 }
 
@@ -223,27 +394,39 @@ function main() {
     connectSession(port);
     requireAb(["open", sourcePostUrl], "open source post");
     sleep(1000);
+    const handle = detectXDisplayHandle();
+    if (!handle) {
+      throw {
+        message: "Could not detect the logged-in X handle before sending the reply.",
+        errorCode: "session_expired",
+      };
+    }
     waitForSelector(REPLY_BUTTON, "wait for reply button");
     requireAb(["click", REPLY_BUTTON], "open inline reply composer");
     waitForSelector(REPLY_TEXTAREA, "wait for inline reply textarea");
-    insertReplyText(text);
-    sleep(TYPE_SETTLE_MS);
-    assertReplyReadyToSubmit(text);
+    fillReplyAndAssert(text);
 
     if (dryRun) {
       emit({
         success: true,
         dryRun: true,
         kind: "reply",
+        handle,
         message:
           "Inline reply filled with a single-pass insertText payload and verified; Reply was not clicked (dry-run).",
       });
       return;
     }
 
+    const baseline = captureStatusBaseline(handle, sourcePostUrl);
     waitForSelector(REPLY_SUBMIT, "wait for inline reply button");
     requireAb(["click", REPLY_SUBMIT], "submit inline reply");
-    emit({ success: true, kind: "reply", sourcePostUrl });
+    const result = waitForVerifiedReply(text, handle, baseline);
+    if (!result.success) {
+      emit(result);
+      return;
+    }
+    emit({ ...result, sourcePostUrl });
   } catch (err) {
     emit({
       success: false,

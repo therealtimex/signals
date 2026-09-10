@@ -61,6 +61,39 @@ if (truncatedMatch.ok || truncatedMatch.reason !== "editor_selection_mismatch") 
   process.exit(1);
 }
 
+const missingEvidence = matchComposeSnapshot(
+  { ok: true, innerText: drafted, blocks: [], selectionText: "", text: drafted },
+  drafted
+);
+if (missingEvidence.ok || missingEvidence.reason !== "missing_selection") {
+  console.error("empty selection must fail closed even when innerText matches", missingEvidence);
+  process.exit(1);
+}
+
+const missingBlocks = matchComposeSnapshot(
+  { ok: true, innerText: drafted, blocks: [], selectionText: drafted, text: drafted },
+  drafted
+);
+if (missingBlocks.ok || missingBlocks.reason !== "missing_blocks") {
+  console.error("empty blocks must fail closed even when innerText matches", missingBlocks);
+  process.exit(1);
+}
+
+const flattened = matchComposeSnapshot(
+  {
+    ok: true,
+    innerText: drafted,
+    blocks: [normalizeComposeText(drafted)],
+    selectionText: drafted,
+    text: drafted,
+  },
+  drafted
+);
+if (flattened.ok || flattened.reason !== "editor_blocks_mismatch") {
+  console.error("flattened single block must not match multi-paragraph draft", flattened);
+  process.exit(1);
+}
+
 const insertJs = insertComposeTextEvalJs('[data-testid="tweetTextarea_0"]', drafted);
 if (!insertJs.includes("signals-compose-insert") || !insertJs.includes("insertText")) {
   console.error("insert eval must be a single-pass insertText payload");

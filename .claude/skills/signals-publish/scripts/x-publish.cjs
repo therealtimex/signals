@@ -15,6 +15,7 @@ const { spawnSync } = require("node:child_process");
 
 const { parseEvalJsonArray, parseEvalJsonValue } = require("./parse-eval-json-array.cjs");
 const {
+  canonicalComposeText,
   insertComposeTextEvalJs,
   matchComposeSnapshot,
   normalizeComposeText,
@@ -239,13 +240,20 @@ function readComposeSnapshot(wrapperSelector) {
 }
 
 function composeTextMatches(wrapperSelector, expected) {
-  const want = normalizeTweetText(expected);
-  if (!want) return true;
-  const snapshot = readComposeSnapshot(wrapperSelector);
-  if (snapshot) {
-    return matchComposeSnapshot(snapshot, expected).ok;
+  if (!canonicalComposeText(expected)) return true;
+  return matchComposeSnapshot(readComposeSnapshot(wrapperSelector), expected).ok;
+}
+
+function assertAllComposeSlotsReadyToSubmit(payload) {
+  const threadTexts = normalizeThreadTexts(payload);
+  const slots = [payload.text, ...threadTexts];
+  for (let i = 0; i < slots.length; i++) {
+    assertComposeReadyToSubmit(
+      activeComposeScope.tweetTextarea(i),
+      slots[i],
+      i === 0 ? "pre-submit compose" : `pre-submit thread slot ${i}`
+    );
   }
-  return readComposeText(wrapperSelector) === want;
 }
 
 function assertComposeReadyToSubmit(wrapperSelector, expected, context) {
@@ -1090,13 +1098,17 @@ function fillCompose(payload) {
   validateComposeState(scope, { ...payload, threadTexts });
 }
 
-function waitForVerifiedPost(expectedText, handle, baseline, timeoutMs = 20_000) {
+function waitForVerifiedPost(expectedText, handle, baseline, timeoutMs) {
+  const budgetMs = Number(
+    timeoutMs ?? process.env.SIGNALS_PUBLISH_VERIFY_TIMEOUT_MS ?? 20_000
+  );
+  const pollMs = Math.min(2000, Math.max(50, budgetMs));
   const started = Date.now();
-  while (Date.now() - started < timeoutMs) {
+  while (Date.now() - started < budgetMs) {
     const candidates = readProfileStatusCandidates(handle);
     const match = selectNewOwnedStatus(candidates, handle, expectedText, baseline);
     if (match) return match;
-    sleep(2000);
+    sleep(pollMs);
   }
   return {
     success: false,
@@ -1156,11 +1168,10 @@ function runRepostOrQuote({ payload, kind, handle, dryRun }) {
   }
 
   const baseline = captureProfileStatusBaseline(handle);
-    assertComposeReadyToSubmit(
-      activeComposeScope.tweetTextarea(0),
-      payload.text,
-      "pre-submit quote compose"
-    );
+    assertAllComposeSlotsReadyToSubmit({
+      ...payload,
+      threadTexts: normalizeThreadTexts(payload),
+    });
     waitForSelector(activeComposeScope.tweetButton, "wait for quote tweet button");
     requireAb(["click", activeComposeScope.tweetButton], "click quote tweet button");
   sleep(2000);
@@ -1227,6 +1238,7 @@ function main() {
         activeComposeScope,
         normalizedPayload
       );
+      assertAllComposeSlotsReadyToSubmit(normalizedPayload);
       emit({
         success: true,
         dryRun: true,
@@ -1239,11 +1251,7 @@ function main() {
       return;
     }
 
-    assertComposeReadyToSubmit(
-      activeComposeScope.tweetTextarea(0),
-      payload.text,
-      "pre-submit compose"
-    );
+    assertAllComposeSlotsReadyToSubmit(normalizedPayload);
     waitForSelector(activeComposeScope.tweetButton, "wait for tweet button");
     requireAb(["click", activeComposeScope.tweetButton], "click tweet button");
     sleep(2000);

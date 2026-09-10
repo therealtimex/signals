@@ -310,6 +310,30 @@ if (
   process.exit(1);
 }
 
+const staleEarlierSlot = runXPublish(
+  {
+    text: "thread tweet one",
+    threadTexts: [
+      "Continuation paragraph one.\n\nContinuation paragraph two.",
+      "Third slot stays intact.",
+    ],
+  },
+  { FAKE_AB_STALE_EARLIER_SLOT: "1" },
+  ["--dry-run"]
+);
+if (staleEarlierSlot.status === 0) {
+  console.error("stale earlier thread slot should fail final pre-submit");
+  process.exit(1);
+}
+const staleEarlierJson = lastJson(staleEarlierSlot.stdout);
+if (
+  staleEarlierJson.success ||
+  !String(staleEarlierJson.error || "").includes("pre-submit thread slot 1")
+) {
+  console.error("unexpected stale earlier-slot result:", staleEarlierJson);
+  process.exit(1);
+}
+
 const replyPayload = {
   text: multiParagraph,
   sourcePostUrl: "https://x.com/JaeHokes/status/2097877302017130541",
@@ -340,6 +364,55 @@ if (
   !String(replyTruncatedJson.error || "").includes("full drafted reply")
 ) {
   console.error("unexpected truncated reply result:", replyTruncatedJson);
+  process.exit(1);
+}
+
+const replyPublished = runXReply(replyPayload);
+if (replyPublished.status !== 0) {
+  console.error("x-reply publish failed:", replyPublished.stdout, replyPublished.stderr);
+  process.exit(1);
+}
+const replyPublishedJson = lastJson(replyPublished.stdout);
+if (
+  !replyPublishedJson.success ||
+  replyPublishedJson.kind !== "reply" ||
+  !replyPublishedJson.platformPostId ||
+  !String(replyPublishedJson.platformUrl || "").includes(`/status/${replyPublishedJson.platformPostId}`) ||
+  replyPublishedJson.platformUrl === replyPayload.sourcePostUrl
+) {
+  console.error("x-reply must return the new reply URL, not the source post:", replyPublishedJson);
+  process.exit(1);
+}
+
+const replyRejectedClick = runXReply(replyPayload, { FAKE_AB_REJECT_REPLY_CLICK: "1" });
+if (replyRejectedClick.status === 0) {
+  console.error("rejected reply click should not succeed");
+  process.exit(1);
+}
+const replyRejectedClickJson = lastJson(replyRejectedClick.stdout);
+if (
+  replyRejectedClickJson.success ||
+  !String(replyRejectedClickJson.error || "").includes("simulated reply submit rejection")
+) {
+  console.error("unexpected rejected-click reply result:", replyRejectedClickJson);
+  process.exit(1);
+}
+
+const replyNotAccepted = runXReply(replyPayload, {
+  FAKE_AB_REPLY_NOT_ACCEPTED: "1",
+  SIGNALS_PUBLISH_VERIFY_TIMEOUT_MS: "250",
+});
+if (replyNotAccepted.status === 0) {
+  console.error("unverified reply click should not succeed");
+  process.exit(1);
+}
+const replyNotAcceptedJson = lastJson(replyNotAccepted.stdout);
+if (
+  replyNotAcceptedJson.success ||
+  replyNotAcceptedJson.errorCode !== "timeout" ||
+  replyNotAcceptedJson.platformUrl === replyPayload.sourcePostUrl
+) {
+  console.error("unexpected unverified reply result:", replyNotAcceptedJson);
   process.exit(1);
 }
 

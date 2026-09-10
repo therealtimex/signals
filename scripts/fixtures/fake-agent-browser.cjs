@@ -237,6 +237,9 @@ function recordTypedText(state, selector, text) {
   const mark = sel.match(/signals-publish-thread-(\d+)/);
   const num = sel.match(/tweetTextarea_(\d+)/);
   const index = mark ? Number(mark[1]) : num ? Number(num[1]) : 0;
+  if (process.env.FAKE_AB_FAIL_THREAD_FILL === "1" && index === 1) {
+    fail("simulated thread fill failure");
+  }
   if (!state.composedTextByIndex) state.composedTextByIndex = {};
   state.composedTextByIndex[index] = text;
   if (index === 0) {
@@ -274,9 +277,14 @@ function composeSnapshotFromState(state, index = 0) {
     .map((line) => line.replace(/\s+/g, " ").trim())
     .filter(Boolean);
   const last = blocks[blocks.length - 1] || "";
-  const truncated =
+  const truncatedActive =
     process.env.FAKE_AB_TRUNCATE_ACTIVE_BLOCK === "1" && blocks.length > 1;
-  if (truncated) {
+  const staleEarlier =
+    process.env.FAKE_AB_STALE_EARLIER_SLOT === "1" &&
+    index > 0 &&
+    index < Number(state.activeTextareaIndex ?? 0) &&
+    blocks.length > 1;
+  if (truncatedActive || staleEarlier) {
     return {
       ok: true,
       innerText: text,
@@ -353,11 +361,21 @@ function handleEval(rest, state) {
     if (state.postPublished) {
       const ms = Date.now() - 1288834974657;
       const statusId = (BigInt(ms) << 22n).toString();
+      const composed = state.composedTextByIndex || {};
+      const parts = Object.keys(composed)
+        .sort((a, b) => Number(a) - Number(b))
+        .map((key) => composed[key])
+        .filter(Boolean);
+      const text = String(
+        parts.join(" ") || state.mainTweetText || "thread tweet one thread tweet two"
+      )
+        .replace(/\s+/g, " ")
+        .trim();
       const payload = [
         {
           statusId,
           href: `/${profileHandle}/status/${statusId}`,
-          text: "thread tweet one thread tweet two",
+          text,
         },
       ];
       return ok(JSON.stringify(JSON.stringify(payload)));
@@ -623,6 +641,18 @@ if (cmd === "click") {
     openCompose(state, "inline");
     state.replyMode = true;
     writeState(state);
+  }
+  if (
+    process.env.FAKE_AB_REJECT_REPLY_CLICK === "1" &&
+    selector.includes("tweetButtonInline")
+  ) {
+    fail("simulated reply submit rejection");
+  }
+  if (
+    process.env.FAKE_AB_REPLY_NOT_ACCEPTED === "1" &&
+    selector.includes("tweetButtonInline")
+  ) {
+    return ok();
   }
   if (selector.includes("tweetButton")) {
     state.postPublished = true;
