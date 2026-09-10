@@ -16,13 +16,12 @@ Package and distribute Signals through the **RealtimeX marketplace** — not pub
 Plugin id: `com.realtimex.signals`  
 Local app id: `47e45f71-3279-42f5-8e95-731de01b6eae`
 
-Version 0.2.17 makes Network Snowball identity-safe and easier to inspect. LinkedIn identities now
-require browser-backed profile evidence before completion or auto-commit, including an authoritative
-resolution of the authenticated member's own profile URL. Snowball runs own and close their
-authenticated browser sessions, while anonymous X reads use the browser instead of direct HTTP.
-Completed and in-progress workflow runs now expose a compact Agent thread link backed by the
-server-recorded RealtimeX workspace and thread reference, without inferring a destination from
-partial data. `signals-writing` stays at 1.1.0.
+Version 0.2.18 keeps multi-paragraph X replies intact: compose injects the full draft with one CDP
+`Input.insertText` pass, fails closed when EditorState disagrees with the DOM, and targets the reply
+dialog when it covers the inline box. Standalone installs ship the instrumentation hook so boot
+backfills and template seeding run. Network Snowball restores LinkedIn seed scouting, owns calendar
+dispatch, quarantines rejected candidates, and no longer binds the session viewer avatar. Scheduled
+Workflows UI is retired. Next.js is 16.3.4. `signals-writing` stays at 1.1.0.
 
 ## Build
 
