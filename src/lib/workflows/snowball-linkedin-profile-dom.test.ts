@@ -216,8 +216,8 @@ describe("LinkedIn Snowball profile DOM extraction", () => {
     browserWindow.close();
   });
 
-  it("binds a cousin top-card photo when the SDUI card has no componentkey=topcard", () => {
-    const contactPhoto =
+  it("does not bind an unassociated cousin photo when the SDUI card has no componentkey=topcard", () => {
+    const cousinPhoto =
       "https://media.licdn.com/dms/image/v2/D5603AQAlexHeathTop/profile-displayphoto-shrink_400_400/0/1";
     const browserWindow = renderLinkedInProfile(
       "https://www.linkedin.com/in/jane-doe/",
@@ -226,7 +226,7 @@ describe("LinkedIn Snowball profile DOM extraction", () => {
         <main>
           <section>
             <div class="obf-photo">
-              <img src="${contactPhoto}" alt="Jane Doe">
+              <img src="${cousinPhoto}" alt="Jane Doe">
             </div>
             <div>
               <a href="https://www.linkedin.com/in/jane-doe/"
@@ -243,7 +243,76 @@ describe("LinkedIn Snowball profile DOM extraction", () => {
 
     expect(extractLinkedInProfileDomObservation()).toMatchObject({
       visibleName: "Jane Doe",
-      avatarUrl: contactPhoto,
+      avatarUrl: null,
+    });
+
+    browserWindow.close();
+  });
+
+  it("does not bind a sibling photo enclosed by a different /in/ profile", () => {
+    const otherPhoto =
+      "https://media.licdn.com/dms/image/v2/D4E03AQOtherPerson99/profile-displayphoto-shrink_400_400/0/1";
+    const browserWindow = renderLinkedInProfile(
+      "https://www.linkedin.com/in/jane-doe/",
+      `
+        <main>
+          <section>
+            <a href="https://www.linkedin.com/in/other-person/">
+              <img src="${otherPhoto}" alt="Other Person">
+            </a>
+            <div>
+              <a href="https://www.linkedin.com/in/jane-doe/"
+                 componentkey="ProfileVerificationTriggerRef-jane-doe">
+                <h2>Jane Doe</h2>
+              </a>
+              <p>Founder &amp; CEO at Acme, Inc.</p>
+              <p>Acme, Inc. · Example University</p>
+            </div>
+          </section>
+        </main>
+      `,
+    );
+
+    expect(extractLinkedInProfileDomObservation()).toMatchObject({
+      visibleName: "Jane Doe",
+      avatarUrl: null,
+    });
+
+    browserWindow.close();
+  });
+
+  it("skips a different profile's [componentkey=topcard] and binds the current profile's keyed photo", () => {
+    const otherPhoto =
+      "https://media.licdn.com/dms/image/v2/D4E03AQOtherPerson99/profile-displayphoto-shrink_400_400/0/1";
+    const janePhoto =
+      "https://media.licdn.com/dms/image/v2/D5603AQGqTD9aT-xIdA/profile-displayphoto-shrink_800_800/0/1";
+    const browserWindow = renderLinkedInProfile(
+      "https://www.linkedin.com/in/jane-doe/",
+      `
+        <main>
+          <section>
+            <a componentkey="topcard" href="https://www.linkedin.com/in/other-person/">
+              <img src="${otherPhoto}" alt="Other Person">
+            </a>
+            <div>
+              <a href="https://www.linkedin.com/in/jane-doe/"
+                 componentkey="ProfileVerificationTriggerRef-jane-doe">
+                <h2>Jane Doe</h2>
+              </a>
+              <p>Founder &amp; CEO at Acme, Inc.</p>
+              <p>Acme, Inc. · Example University</p>
+            </div>
+            <a componentkey="topcard" href="https://www.linkedin.com/in/jane-doe/">
+              <img src="${janePhoto}" alt="Jane Doe">
+            </a>
+          </section>
+        </main>
+      `,
+    );
+
+    expect(extractLinkedInProfileDomObservation()).toMatchObject({
+      visibleName: "Jane Doe",
+      avatarUrl: janePhoto,
     });
 
     browserWindow.close();
