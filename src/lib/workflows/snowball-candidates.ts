@@ -1,4 +1,4 @@
-import { and, count, desc, eq } from "drizzle-orm";
+import { and, count, desc, eq, or, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db/client";
 import { snowballCandidates } from "@/lib/db/schema";
@@ -6,6 +6,8 @@ import type { SnowballCandidate } from "@/lib/db/types";
 import { readNetworkSnowballConfig } from "@/lib/workflows/network-snowball";
 
 export type SnowballCandidateStatus = SnowballCandidate["status"];
+
+export type SnowballCandidateStats = Record<SnowballCandidateStatus, number>;
 
 export type SnowballCandidateView = Omit<
   SnowballCandidate,
@@ -191,14 +193,28 @@ export function recordSnowballCandidateFailure(input: {
 export function listSnowballCandidates(options: {
   workflowRunId?: string;
   status?: SnowballCandidateStatus;
+  failureReason?: string;
+  search?: string;
   page?: number;
   pageSize?: number;
 } = {}): { data: SnowballCandidateView[]; total: number } {
+  const search = options.search?.trim();
   const conditions = [
     options.workflowRunId
       ? eq(snowballCandidates.workflowRunId, options.workflowRunId)
       : undefined,
     options.status ? eq(snowballCandidates.status, options.status) : undefined,
+    options.failureReason
+      ? eq(snowballCandidates.failureReason, options.failureReason)
+      : undefined,
+    search
+      ? or(
+          sql`instr(lower(${snowballCandidates.proposedName}), lower(${search})) > 0`,
+          sql`instr(lower(coalesce(${snowballCandidates.proposedCompany}, '')), lower(${search})) > 0`,
+          sql`instr(lower(coalesce(${snowballCandidates.proposedTitle}, '')), lower(${search})) > 0`,
+          sql`instr(lower(coalesce(${snowballCandidates.seedValue}, '')), lower(${search})) > 0`,
+        )
+      : undefined,
   ].filter((condition): condition is NonNullable<typeof condition> => Boolean(condition));
   const where = conditions.length > 0 ? and(...conditions) : undefined;
   const page = options.page ?? 1;
@@ -212,6 +228,63 @@ export function listSnowballCandidates(options: {
     .all()
     .map(serializeSnowballCandidate);
   return { data, total };
+}
+
+export function getSnowballCandidate(id: string): SnowballCandidateView | undefined {
+  const candidate = db.select().from(snowballCandidates)
+    .where(eq(snowballCandidates.id, id))
+    .get();
+  return candidate ? serializeSnowballCandidate(candidate) : undefined;
+}
+
+export function getSnowballCandidateStats(): SnowballCandidateStats {
+  const stats: SnowballCandidateStats = {
+    identity_unverified: 0,
+    promoted: 0,
+    dismissed: 0,
+  };
+  for (const row of db.select({
+    status: snowballCandidates.status,
+    value: count(),
+  }).from(snowballCandidates).groupBy(snowballCandidates.status).all()) {
+    stats[row.status] = row.value;
+  }
+  return stats;
+}
+
+export function listSnowballCandidateFailureReasons(): string[] {
+  return db.selectDistinct({ reason: snowballCandidates.failureReason })
+    .from(snowballCandidates)
+    .orderBy(snowballCandidates.failureReason)
+    .all()
+    .map(({ reason }) => reason);
+}
+
+export class SnowballCandidateTransitionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SnowballCandidateTransitionError";
+  }
+}
+
+export function updateSnowballCandidateReviewStatus(
+  id: string,
+  status: Extract<SnowballCandidateStatus, "identity_unverified" | "dismissed">,
+  now = Math.floor(Date.now() / 1_000),
+): SnowballCandidateView | undefined {
+  const candidate = db.select().from(snowballCandidates)
+    .where(eq(snowballCandidates.id, id))
+    .get();
+  if (!candidate) return undefined;
+  if (candidate.status === "promoted") {
+    throw new SnowballCandidateTransitionError(
+      "Promoted candidates are canonical CRM records and cannot be dismissed from quarantine.",
+    );
+  }
+  db.update(snowballCandidates).set({ status, updatedAt: now })
+    .where(eq(snowballCandidates.id, id))
+    .run();
+  return getSnowballCandidate(id);
 }
 
 export function summarizeSnowballCandidates(workflowRunId: string): {

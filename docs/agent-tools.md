@@ -164,6 +164,12 @@ quarantine record automatically for a valid run scope. Use `list_snowball_candid
 the proposed person/company context and gate reason. A later successful attestation followed by the
 normal evidence-token Auto-commit path marks the matching candidate promoted.
 
+The dashboard exposes this queue at `/dashboard/quarantine`. The sidebar badge counts only
+`identity_unverified` rows. Reviewers can filter the queue, inspect attempt history and source-run
+provenance, open the associated agent thread, dismiss an unverified candidate, or reopen a
+dismissed one. Promoted candidates are immutable from quarantine because their canonical contact
+and organization lifecycle is managed by the CRM surfaces.
+
 `semantic_search` requires Signals running as a RealtimeX Local App with the `llm.embed` permission granted. Vectors are stored locally in SQLite; only embedding generation is delegated to RealtimeX.
 
 `generate_persona` resolves the global persona mode at call time. Structured workflow requires the

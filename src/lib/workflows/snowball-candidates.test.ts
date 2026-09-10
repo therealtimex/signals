@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { AgentToolError } from "@/lib/agent-tools/types";
 import { handleAttestSnowballLinkedInIdentity } from "@/lib/agent-tools/handlers";
+import { PATCH as updateCandidateRoute } from "@/app/api/snowball-candidates/[id]/route";
 import { db } from "@/lib/db/client";
 import {
   contactEmployments,
@@ -27,10 +28,14 @@ import {
   readNetworkSnowballConfig,
 } from "@/lib/workflows/network-snowball";
 import {
+  getSnowballCandidateStats,
+  listSnowballCandidateFailureReasons,
   listSnowballCandidates,
   markMatchingSnowballCandidatesPromoted,
   recordSnowballCandidateFailure,
+  SnowballCandidateTransitionError,
   summarizeSnowballCandidates,
+  updateSnowballCandidateReviewStatus,
 } from "@/lib/workflows/snowball-candidates";
 
 function createScopedSnowballRun() {
@@ -152,6 +157,92 @@ describe("Snowball candidate quarantine", () => {
     });
   });
 
+  it("filters the global queue by search and gate failure", () => {
+    const { run } = createScopedSnowballRun();
+    recordSnowballCandidateFailure({
+      run,
+      candidateName: "Jane Doe",
+      candidateCompany: "Acme Robotics",
+      candidateTitle: "Founder",
+      profileUrl: "https://linkedin.com/in/jane-doe/",
+      reason: "profile_corroboration_missing",
+      message: "Company was not visible",
+    });
+    recordSnowballCandidateFailure({
+      run,
+      candidateName: "John Smith",
+      candidateCompany: "Beta Labs",
+      candidateTitle: "CTO",
+      profileUrl: "https://linkedin.com/in/john-smith/",
+      reason: "profile_name_mismatch",
+      message: "Name did not match",
+    });
+
+    expect(listSnowballCandidates({ search: "robotics" }).data).toMatchObject([
+      { proposedName: "Jane Doe" },
+    ]);
+    expect(listSnowballCandidates({ failureReason: "profile_name_mismatch" }).data).toMatchObject([
+      { proposedName: "John Smith" },
+    ]);
+    expect(listSnowballCandidateFailureReasons()).toEqual([
+      "profile_corroboration_missing",
+      "profile_name_mismatch",
+    ]);
+  });
+
+  it("dismisses and reopens unverified candidates without promoting them", () => {
+    const { run } = createScopedSnowballRun();
+    const candidate = recordSnowballCandidateFailure({
+      run,
+      candidateName: "Jane Doe",
+      candidateCompany: "Acme",
+      profileUrl: "https://linkedin.com/in/jane-doe/",
+      reason: "profile_corroboration_missing",
+      message: "Company was not visible",
+    })!;
+
+    expect(updateSnowballCandidateReviewStatus(candidate.id, "dismissed", 200)).toMatchObject({
+      status: "dismissed",
+      updatedAt: 200,
+    });
+    expect(getSnowballCandidateStats()).toEqual({
+      identity_unverified: 0,
+      promoted: 0,
+      dismissed: 1,
+    });
+    expect(updateSnowballCandidateReviewStatus(candidate.id, "identity_unverified", 300))
+      .toMatchObject({ status: "identity_unverified", updatedAt: 300 });
+    expect(updateSnowballCandidateReviewStatus("missing", "dismissed")).toBeUndefined();
+  });
+
+  it("exposes reversible review status through the candidate route", async () => {
+    const { run } = createScopedSnowballRun();
+    const candidate = recordSnowballCandidateFailure({
+      run,
+      candidateName: "Jane Doe",
+      candidateCompany: "Acme",
+      profileUrl: "https://linkedin.com/in/jane-doe/",
+      reason: "profile_corroboration_missing",
+      message: "Company was not visible",
+    })!;
+
+    const response = await updateCandidateRoute(new Request("http://signals.local", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "dismiss" }),
+    }), { params: Promise.resolve({ id: candidate.id }) });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ status: "dismissed" });
+
+    const missing = await updateCandidateRoute(new Request("http://signals.local", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "reopen" }),
+    }), { params: Promise.resolve({ id: "missing" }) });
+    expect(missing.status).toBe(404);
+  });
+
   it("marks the exact person/company candidate promoted after canonical evidence is bound", () => {
     const { run } = createScopedSnowballRun();
     recordSnowballCandidateFailure({
@@ -194,5 +285,7 @@ describe("Snowball candidate quarantine", () => {
       promotedOrgId: contact.currentEmployment?.orgId,
       promotedAt: 300,
     });
+    expect(() => updateSnowballCandidateReviewStatus(ids[0], "dismissed"))
+      .toThrow(SnowballCandidateTransitionError);
   });
 });

@@ -107,6 +107,10 @@ Every action the agent took, in chronological order:
 
 Each step shows its timestamp and duration. You can trace the agent's entire decision chain — why it searched for something, what it found, what it decided to do with the results.
 
+### Candidate Quarantine
+
+Network Snowball preserves LinkedIn discoveries that fail the identity-evidence gate without adding them to Contacts or Companies. Open **Quarantine** in the sidebar to review the proposed person, company and role, gate failure, attempt history, seed, source workflow run, and agent thread. You can dismiss a candidate without deleting its audit trail, or reopen it for a future verification attempt. A candidate joins the CRM only after a fresh authenticated-browser attestation succeeds.
+
 ### Timeline vs. Graph View
 
 Toggle between **Timeline** (chronological list) and **Graph** (visual dependency graph) views. The graph shows how steps connect — which searches led to which scrapes, which scrapes led to which contact updates.

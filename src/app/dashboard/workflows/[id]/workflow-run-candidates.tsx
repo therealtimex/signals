@@ -1,4 +1,6 @@
 import { CheckCircle2, ExternalLink, ShieldAlert } from "lucide-react";
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import type { SnowballCandidateView } from "@/lib/workflows/snowball-candidates";
@@ -32,9 +34,16 @@ export function WorkflowRunCandidates({
             Preserved discoveries stay outside contacts and the relationship graph until verified.
           </p>
         </div>
-        <Badge variant={awaitingVerification > 0 ? "outline" : "secondary"}>
-          {awaitingVerification} awaiting verification
-        </Badge>
+        <div className="flex items-center gap-2">
+          <Badge variant={awaitingVerification > 0 ? "outline" : "secondary"}>
+            {awaitingVerification} awaiting verification
+          </Badge>
+          <Button variant="outline" size="sm" asChild>
+            <Link href={`/dashboard/quarantine?workflowRunId=${candidates[0].workflowRunId}`}>
+              View queue
+            </Link>
+          </Button>
+        </div>
       </div>
 
       <Card className="divide-y">

@@ -45,6 +45,7 @@ describe("WorkflowRunCandidates", () => {
     expect(html).toContain("profile corroboration missing");
     expect(html).toContain("list_snowball_candidates");
     expect(html).toContain("https://www.linkedin.com/in/jane-doe/");
+    expect(html).toContain("/dashboard/quarantine?workflowRunId=run-1");
   });
 
   it("stays hidden for runs without candidates", () => {

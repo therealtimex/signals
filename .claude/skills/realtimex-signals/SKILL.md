@@ -177,6 +177,11 @@ candidates for a later enrichment or re-attestation run. They remain excluded fr
 queries, graph traversal, scoring, and outbound actions until successful evidence-token
 Auto-commit promotes them.
 
+Operators can review the same queue under **Signals → Quarantine**. The page filters by review
+status, gate failure, source run, person, and company; its review modal links back to the source
+workflow and agent thread. Dismissing a candidate is reversible and does not create or remove a
+canonical CRM record. Re-attestation still requires a fresh run-bound browser scope.
+
 ## Contact avatars
 
 Signals resolves avatars in this order:

@@ -47,6 +47,7 @@ vi.mock("@/components/ui/sidebar", () => ({
     createElement("div", null, children),
   SidebarMenu: ({ children }: { children: React.ReactNode }) => createElement("ul", null, children),
   SidebarMenuItem: ({ children }: { children: React.ReactNode }) => createElement("li", null, children),
+  SidebarMenuBadge: ({ children }: { children: React.ReactNode }) => createElement("span", null, children),
   SidebarMenuButton: ({
     children,
     asChild,
@@ -116,10 +117,18 @@ describe("AppSidebar explore entry", () => {
 
     expect(html).toContain("Explore");
     expect(html).toContain("/dashboard/explore");
+    expect(html).toContain("/dashboard/quarantine");
     expect(html).not.toContain("Navigation");
     expect(header?.classList.contains("h-14")).toBe(true);
     expect(header?.querySelector("button")?.textContent).toBe("Toggle Sidebar");
     expect(html).toContain(`Signals version ${packageMetadata.version}`);
+  });
+
+  it("shows the quarantine awaiting count when work needs review", () => {
+    const html = renderToStaticMarkup(createElement(AppSidebar, { quarantineCount: 12 }));
+
+    expect(html).toContain("Quarantine");
+    expect(html).toContain(">12<");
   });
 });
 
