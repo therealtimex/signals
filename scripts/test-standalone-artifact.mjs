@@ -13,6 +13,7 @@ import {
   rmSync,
   statSync,
 } from "node:fs";
+import { createRequire } from "node:module";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -217,6 +218,15 @@ try {
 
   const baseUrl = `http://127.0.0.1:${port}`;
   await waitForHealthyServer(child, `${baseUrl}/api/health`);
+  // Next.js runs the instrumentation hook before it serves the first request,
+  // so by now the fresh database is migrated, backfilled, and seeded (#484).
+  const seededTemplates = countWorkflowTemplates(extractDir, path.join(dataDir, "data.db"));
+  if (seededTemplates === 0) {
+    throw new Error("Boot did not run the instrumentation hook: no workflow templates were seeded");
+  }
+  if (!(await waitForLog(() => logs, "[scheduler] Disabled")) || logs.includes("[scheduler] Initializing")) {
+    throw new Error("Standalone runtime started the in-app scheduler; RealTimeX owns scheduling");
+  }
   const guideAsset = await fetch(`${baseUrl}/api/guide/assets/dashboard-overview.png`);
   if (!guideAsset.ok) {
     throw new Error(`Guide asset request failed (${guideAsset.status})`);
@@ -227,21 +237,18 @@ try {
   if (!optimizedImage.ok) {
     throw new Error(`Native image optimization failed (${optimizedImage.status})`);
   }
-  // Next.js 16.3 no longer evaluates route modules at boot, so the fresh
-  // database is migrated by the first request that reads it: the home page
-  // RealTimeX opens once /api/health answers.
+  // The home page RealTimeX opens once /api/health answers.
   const home = await fetch(`${baseUrl}/dashboard`);
   if (!home.ok) {
     throw new Error(`Home page request failed (${home.status})`);
-  }
-  if (!existsSync(path.join(dataDir, "data.db"))) {
-    throw new Error("Home page request did not create the Signals database");
   }
 
   console.log(
     `OK: ${archivePath} (${entries.length} entries, ${formatBytes(statSync(archivePath).size)})`,
   );
-  console.log("OK: extracted runtime booted, migrated a fresh database, and served guide assets");
+  console.log(
+    `OK: extracted runtime booted, ran the instrumentation hook (${seededTemplates} workflow templates seeded, scheduler off), and served the home page and guide assets`,
+  );
 } catch (error) {
   console.error(error instanceof Error ? error.message : error);
   if (logs.trim()) console.error(`Standalone runtime output:\n${logs.trim()}`);
@@ -249,6 +256,27 @@ try {
 } finally {
   await stopChild(child);
   rmSync(tempRoot, { recursive: true, force: true });
+}
+
+function countWorkflowTemplates(runtimeDir, dbPath) {
+  if (!existsSync(dbPath)) return 0;
+  // Read through the runtime's own better-sqlite3, the binding the artifact ships.
+  const Database = createRequire(path.join(runtimeDir, "server.js"))("better-sqlite3");
+  const db = new Database(dbPath, { readonly: true, fileMustExist: true });
+  try {
+    return db.prepare("SELECT count(*) AS n FROM workflow_templates").get().n;
+  } finally {
+    db.close();
+  }
+}
+
+async function waitForLog(readLogs, needle, timeoutMs = 5_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (readLogs().includes(needle)) return true;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  return readLogs().includes(needle);
 }
 
 function appendLogs(current, chunk) {

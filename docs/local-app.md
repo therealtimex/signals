@@ -57,7 +57,7 @@ Dev desktops typically use `REALTIMEX_BASE_URL=http://127.0.0.1:3101/cli`, so de
 
 ## SDK bootstrap
 
-On server start (`instrumentation.ts`), when `RTX_APP_ID` is set Signals:
+On server start (`src/instrumentation.ts`), when `RTX_APP_ID` is set Signals:
 
 1. Resolves the RTX API base from `SERVER_URL` / `REALTIMEX_BASE_URL` / `RTX_API_BASE_URL`
 2. Calls `POST /sdk/register` with permissions from [`rtx-manifest.json`](../rtx-manifest.json)

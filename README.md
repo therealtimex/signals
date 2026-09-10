@@ -150,8 +150,8 @@ SIGNALS_DATA_DIR=~/.signals
 
 ```
 bin/cli.ts                            # npx entry point
-instrumentation.ts                    # Next.js instrumentation hook (scheduler init)
 src/
+  instrumentation.ts                  # Next.js instrumentation hook (boot backfills, seeding, scheduler init)
   app/
     api/                              # API routes
       contacts/                       #   Contact CRUD

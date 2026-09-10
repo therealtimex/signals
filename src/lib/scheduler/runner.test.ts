@@ -1,10 +1,15 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db/client";
 import { scheduledJobs, workflowTemplates } from "@/lib/db/schema";
 import { getScheduledJob } from "@/lib/db/queries/scheduled-jobs";
 import { listWorkflowRuns } from "@/lib/db/queries/workflows";
-import { executeScheduledJob } from "@/lib/scheduler/runner";
+import {
+  executeScheduledJob,
+  initScheduler,
+  isSchedulerEnabled,
+  stopScheduler,
+} from "@/lib/scheduler/runner";
 import { AGENT_ORCHESTRATION_UNAVAILABLE_CODE } from "@/lib/agents/run-agent-workflow";
 import { SIMULATION_TRANSCRIPT_RETENTION_JOB_TYPE } from "@/lib/db/simulation-transcript-retention";
 import { resetCoreTables } from "@/test/db";
@@ -118,5 +123,56 @@ describe("scheduler runner", () => {
 
     const runs = listWorkflowRuns({ pageSize: 1 });
     expect(runs.data[0]?.status).toBe("failed");
+  });
+});
+
+describe("scheduler enablement", () => {
+  beforeEach(() => {
+    resetCoreTables();
+  });
+
+  afterEach(() => {
+    stopScheduler();
+    vi.unstubAllEnvs();
+  });
+
+  function insertDueRetentionJob(): string {
+    const id = nanoid();
+    db.insert(scheduledJobs)
+      .values({
+        id,
+        jobType: SIMULATION_TRANSCRIPT_RETENTION_JOB_TYPE,
+        status: "pending",
+        runAt: Math.floor(Date.now() / 1000) - 10,
+        enabled: 1,
+        payload: "{}",
+      })
+      .run();
+    return id;
+  }
+
+  it("reads SIGNALS_SCHEDULER_ENABLED like the other SIGNALS_* flags, defaulting on", () => {
+    expect(isSchedulerEnabled({})).toBe(true);
+    expect(isSchedulerEnabled({ SIGNALS_SCHEDULER_ENABLED: "1" })).toBe(true);
+    expect(isSchedulerEnabled({ SIGNALS_SCHEDULER_ENABLED: "TRUE" })).toBe(true);
+    expect(isSchedulerEnabled({ SIGNALS_SCHEDULER_ENABLED: "0" })).toBe(false);
+    expect(isSchedulerEnabled({ SIGNALS_SCHEDULER_ENABLED: "false" })).toBe(false);
+  });
+
+  it("runs due jobs on init when enabled", () => {
+    const id = insertDueRetentionJob();
+
+    initScheduler();
+
+    expect(getScheduledJob(id)?.status).toBe("completed");
+  });
+
+  it("leaves due jobs alone when the standalone runtime disables it", () => {
+    vi.stubEnv("SIGNALS_SCHEDULER_ENABLED", "0");
+    const id = insertDueRetentionJob();
+
+    initScheduler();
+
+    expect(getScheduledJob(id)?.status).toBe("pending");
   });
 });

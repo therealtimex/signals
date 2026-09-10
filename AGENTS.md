@@ -144,7 +144,7 @@ because those caches start cold. Worktrees are for attributing a failure to a ba
 | Agent-tools request auth | `src/lib/agent-tools/auth.ts:4` |
 | DB handle / native open | `src/lib/db/client.ts:48` (`db`); line 21 opens better-sqlite3 and is what throws on the wrong Node |
 | Schema | `src/lib/db/schema.ts` |
-| Scheduler boot | `instrumentation.ts:193` (`initScheduler`) |
+| Boot hook / scheduler | `src/instrumentation.ts:204` (`initScheduler`; off in the standalone runtime via `SIGNALS_SCHEDULER_ENABLED=0`) |
 | RTX host handshake | `src/lib/rtx/bootstrap.ts:56` (`bootstrapRtxIfEmbedded`) |
 | Enrichment routing | `src/lib/agents/router.ts:31` (`routeUrl`) |
 | Health probe | `src/app/api/health/route.ts:7` |
@@ -173,7 +173,8 @@ test/fixtures/      shared fixtures
 
 Config lives in `package.json`, `.nvmrc`, `tsconfig.json`, `next.config.mjs`, `vitest.config.ts`,
 `eslint.config.mjs`, `drizzle.config.ts`, `tsup.config.ts`, `postcss.config.mjs`,
-`components.json`, `instrumentation.ts`, `rtx-manifest.json`.
+`components.json`, `rtx-manifest.json`. The Next.js instrumentation hook is `src/instrumentation.ts`:
+with the app under `src/app`, `next build` only detects it there (#484).
 
 **Where new things go:** library code → `src/lib/<domain>/`; tooling → `scripts/*.mjs`; a feature
 spec → `specs/NN-name.md`; user-facing docs → `guide/`; integration docs → `docs/`; tests →
