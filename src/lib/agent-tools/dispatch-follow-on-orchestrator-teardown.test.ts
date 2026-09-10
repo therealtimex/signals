@@ -11,12 +11,14 @@ import * as runTemplateViaRtxModule from "@/lib/agents/run-template-via-rtx";
 import { resetCoreTables } from "@/test/db";
 
 describe("dispatch_follow_on_workflow orchestrator teardown", () => {
+  const orchestratorWorkspaceSlug = "f3a8c2e1-4d5b-4a7c-8e9f-0a1b2c3d4e5f";
+
   beforeEach(() => {
     resetCoreTables();
     vi.restoreAllMocks();
     vi.spyOn(rtxEnv, "isRtxEmbedded").mockReturnValue(true);
     vi.spyOn(orchestratorThread, "getOrCreateOrchestratorThread").mockResolvedValue({
-      workspaceSlug: "signals",
+      workspaceSlug: orchestratorWorkspaceSlug,
       threadSlug: "signals-orchestrator",
       threadName: "Signals Orchestrator",
       resolution: "reused",
@@ -67,6 +69,10 @@ describe("dispatch_follow_on_workflow orchestrator teardown", () => {
       sessionId: "cli-agent:orchestrator-1",
     });
     expect(result.completionThreadMessage).toEqual({ posted: true });
+    expect(runtimeSessions.resolveActiveTerminalSessionIdForThread).toHaveBeenCalledWith(
+      orchestratorWorkspaceSlug,
+      "signals-orchestrator",
+    );
     expect(resourceTeardown.finalizeChatLinkedTerminalSession).toHaveBeenCalledWith({
       terminalSessionId: "cli-agent:orchestrator-1",
       stopAllRunningBrowsers: true,

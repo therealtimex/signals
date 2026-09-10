@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   _resetOrchestratorThreadCacheForTests,
   DEFAULT_ORCHESTRATOR_THREAD_SLUG,
@@ -29,6 +29,45 @@ describe("Signals Orchestrator Thread Provisioning", () => {
     expect(result.threadSlug).toBe(DEFAULT_ORCHESTRATOR_THREAD_SLUG);
     expect(result.threadName).toBe(SIGNALS_ORCHESTRATOR_THREAD_NAME);
     expect(result.resolution).toBe("reused");
+  });
+
+  it("resolves the host workspace slug before looking up the orchestrator thread", async () => {
+    const workspaceSlug = "f3a8c2e1-4d5b-4a7c-8e9f-0a1b2c3d4e5f";
+    const mockFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/cli/get-workspace/signals") && init?.method === "GET") {
+        return new Response(JSON.stringify({ error: "Not found" }), { status: 404 });
+      }
+      if (url.endsWith("/cli/list-workspaces") && init?.method === "GET") {
+        return new Response(
+          JSON.stringify({ workspaces: [{ slug: workspaceSlug, name: "Signals" }] }),
+          { status: 200 },
+        );
+      }
+      if (
+        url.includes(`/cli/get-thread/${workspaceSlug}/`) &&
+        init?.method === "GET"
+      ) {
+        return new Response(
+          JSON.stringify({ thread: { slug: DEFAULT_ORCHESTRATOR_THREAD_SLUG } }),
+          { status: 200 },
+        );
+      }
+      return new Response(JSON.stringify({ error: "Unexpected request" }), { status: 500 });
+    }) as unknown as typeof fetch;
+
+    const result = await getOrCreateOrchestratorThread(
+      undefined,
+      { RTX_APP_ID: "app-test", RTX_API_BASE: "http://localhost:3001/api" },
+      mockFetch,
+    );
+
+    expect(result).toMatchObject({
+      workspaceSlug,
+      threadSlug: DEFAULT_ORCHESTRATOR_THREAD_SLUG,
+      resolution: "reused",
+    });
+    expect(mockFetch).toHaveBeenCalledTimes(3);
   });
 
   it("provisions a new orchestrator thread when missing in RealTimeX", async () => {

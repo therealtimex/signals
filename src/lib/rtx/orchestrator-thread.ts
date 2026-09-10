@@ -1,7 +1,7 @@
 import {
   createRtxPublishThread,
-  getSignalsRtxWorkspaceSlug,
   getRtxThreadPresence,
+  resolveSignalsRtxWorkspaceSlug,
 } from "@/lib/rtx/cli-provisioning";
 import type { EnvLike } from "@/lib/rtx/env";
 import { ORCHESTRATOR_TERMINAL_TEARDOWN_AFTER_DISPATCH } from "@/lib/rtx/teardown";
@@ -34,7 +34,9 @@ export async function getOrCreateOrchestratorThread(
   env: EnvLike = process.env,
   fetchImpl: typeof fetch = fetch
 ): Promise<ResolveOrchestratorThreadResult> {
-  const workspaceSlug = options?.workspaceSlug?.trim() || getSignalsRtxWorkspaceSlug(env);
+  const workspaceSlug =
+    options?.workspaceSlug?.trim() ||
+    (await resolveSignalsRtxWorkspaceSlug(env, fetchImpl));
   const threadName = options?.threadName?.trim() || SIGNALS_ORCHESTRATOR_THREAD_NAME;
 
   // 1. Check environment override
