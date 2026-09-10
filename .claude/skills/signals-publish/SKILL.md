@@ -69,9 +69,9 @@ For QA without sending a public post, add `--dry-run` (fills compose fields, ski
 
 X's inline and modal composers serialize **only the focused active block** if paragraphs were inserted with separate `insertParagraph` / per-line `insertText` calls. `innerText` can still show every line.
 
-- Inject the entire string as **one** `insertText` payload (`x-compose-text.cjs` / `x-publish.cjs` / `x-reply.cjs`).
+- Inject the entire string with **one** CDP `Input.insertText` (`agent-browser keyboard inserttext` in `x-publish.cjs` / `x-reply.cjs`). Do not use `document.execCommand("insertText"|"selectAll"|"delete")`.
 - Never type line-by-line, press Enter between paragraphs, or split the payload.
-- Before clicking Tweet / `[data-testid="tweetButtonInline"]`, assert the editor snapshot has non-empty `selectAll` selection **and** block texts, and that paragraph structure matches the draft (newlines are not collapsed). Re-inject once on mismatch; if it still diverges, abort the command. Do not submit.
+- Before clicking Tweet / `[data-testid="tweetButtonInline"]` (or modal `[data-testid="tweetButton"]`), assert Draft-owned leaf text (`span[data-text="true"]`) and, when readable, EditorState `getPlainText()` match the draft paragraph structure. DOM `innerText` alone is not enough. Re-inject once on mismatch; if it still diverges, abort the command. Do not submit.
 - `x-reply.cjs` must not treat the Reply click as success. It confirms the **full** drafted text on the acting profile's `/with_replies` timeline (tweet body, not article chrome) and prints that reply's `platformPostId` / `platformUrl`. If confirmation fails after the click, it returns `verify_uncertain` — do **not** click Reply again.
 
 4. Parse the **last stdout line** as JSON. On success call `complete_publish` with `leaseId`, `handle`, `platformPostId`, and `platformUrl`. Include `targetId` only when the job target snapshot contains it; omit `targetId` from both success and failure callbacks for legacy platform-only jobs. On failure pass `leaseId`, optional snapshotted `targetId`, and `error` + `errorCode` (`session_expired`, `captcha`, `upload_failed`, `timeout`, `wrong_account`, `verify_uncertain`, `unknown`).

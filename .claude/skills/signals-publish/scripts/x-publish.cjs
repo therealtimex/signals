@@ -16,10 +16,10 @@ const { spawnSync } = require("node:child_process");
 const { parseEvalJsonArray, parseEvalJsonValue } = require("./parse-eval-json-array.cjs");
 const {
   canonicalComposeText,
-  insertComposeTextEvalJs,
   matchComposeSnapshot,
   normalizeComposeText,
   readComposeSnapshotEvalJs,
+  selectComposeContentsEvalJs,
 } = require("./x-compose-text.cjs");
 
 const SESSION = process.env.SIGNALS_PUBLISH_AB_SESSION || "signals-publish";
@@ -295,11 +295,15 @@ function focusComposeEditableEvalJs(wrapperSelector) {
   })()`;
 }
 
-function insertComposeTextViaEval(wrapperSelector, text) {
-  const raw = abText(["eval", insertComposeTextEvalJs(wrapperSelector, text)]);
-  const parsed = parseEvalJsonValue(raw);
-  if (!parsed || typeof parsed !== "object") return false;
-  return matchComposeSnapshot(parsed, text).ok;
+function selectComposeContents(wrapperSelector) {
+  parseEvalJsonValue(abText(["eval", selectComposeContentsEvalJs(wrapperSelector)]));
+}
+
+function insertComposeTextViaCdp(wrapperSelector, text, context) {
+  focusComposeEditable(wrapperSelector, context);
+  parseEvalJsonValue(abText(["eval", focusComposeEditableEvalJs(wrapperSelector)]));
+  selectComposeContents(wrapperSelector);
+  requireAb(["keyboard", "inserttext", text], `${context} CDP inserttext`);
 }
 
 function insertComposeTextViaClipboard(wrapperSelector, text, context) {
@@ -309,14 +313,17 @@ function insertComposeTextViaClipboard(wrapperSelector, text, context) {
 }
 
 function typeIntoComposeTextarea(wrapperSelector, text, context) {
-  focusComposeEditable(wrapperSelector, context);
-  parseEvalJsonValue(abText(["eval", focusComposeEditableEvalJs(wrapperSelector)]));
+  // One CDP Input.insertText of the entire payload, including newlines.
+  // Never split on newline / insertParagraph, and never use
+  // document.execCommand("selectAll"|"delete"|"insertText") — those paths
+  // either wipe Draft's DOM or serialize only the focused active block.
+  insertComposeTextViaCdp(wrapperSelector, text, context);
+  sleep(400);
 
-  // Single-pass insertText of the entire payload. Never split on newline /
-  // insertParagraph — X's Draft.js/Lexical composer then serializes only the
-  // focused active block on submit.
-  if (!insertComposeTextViaEval(wrapperSelector, text)) {
-    insertComposeTextViaClipboard(wrapperSelector, text, context);
+  if (!composeTextMatches(wrapperSelector, text)) {
+    focusComposeEditable(wrapperSelector, `${context} refocus`);
+    requireAb(["press", "Control+a"], `${context} select all`);
+    requireAb(["keyboard", "inserttext", text], `${context} CDP inserttext retry`);
     sleep(400);
   }
 

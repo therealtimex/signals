@@ -58,8 +58,8 @@ Thread add: prefer `[role="dialog"]`-scoped textareas on compose/post, but add c
 
 X Draft.js / Lexical serializes only the focused active block when paragraphs are created with separate `insertParagraph` or per-line `insertText` mutations. `innerText` can still show every line.
 
-1. Inject the full string as one `insertText` payload (`scripts/x-compose-text.cjs`, used by `x-publish.cjs` and `x-reply.cjs`).
-2. Before Tweet / `[data-testid="tweetButtonInline"]`, compare `selectAll` selection **and** editor block texts to the drafted paragraph structure. Missing selection/block evidence or flattened paragraphs fail closed. `x-publish.cjs` rechecks every `threadTexts` slot immediately before submit.
+1. Inject the full string with one CDP `Input.insertText` (`agent-browser keyboard inserttext` in `x-publish.cjs` and `x-reply.cjs`). Never `document.execCommand("insertText"|"selectAll"|"delete")`.
+2. Before Tweet / `[data-testid="tweetButtonInline"]` (modal fallback: `[data-testid="tweetButton"]`), compare per-editable selection, Draft leaf texts, and EditorState `getPlainText()` when readable. Missing leaf evidence, DOM/EditorState desync, or flattened paragraphs fail closed. Snapshot must not call `selectAll` (that reads the focused slot, not the target). `x-publish.cjs` rechecks every `threadTexts` slot immediately before submit.
 3. On mismatch, re-inject once and recheck. If the snapshot still diverges, abort the command. Do not submit.
 4. After clicking Reply, `x-reply.cjs` refreshes the acting profile's `/with_replies` timeline, reads `[data-testid="tweetText"]` on owned cards, and requires the **full** canonical draft. Failure after click is `verify_uncertain` (do not retry / do not click Reply again).
 

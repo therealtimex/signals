@@ -9,12 +9,12 @@ import { fileURLToPath } from "node:url";
 const require = createRequire(import.meta.url);
 const {
   composeSnapshotFromText,
-  insertComposeTextEvalJs,
   matchComposeSnapshot,
   normalizeComposeText,
   paragraphBlocks,
   publishedReplyMatches,
   readComposeSnapshotEvalJs,
+  selectComposeContentsEvalJs,
 } = require(
   join(
     dirname(fileURLToPath(import.meta.url)),
@@ -80,11 +80,28 @@ if (missingBlocks.ok || missingBlocks.reason !== "missing_blocks") {
   process.exit(1);
 }
 
+const missingLeaves = matchComposeSnapshot(
+  {
+    ok: true,
+    innerText: drafted,
+    blocks: paragraphBlocks(drafted),
+    selectionText: drafted,
+    text: drafted,
+  },
+  drafted
+);
+if (missingLeaves.ok || missingLeaves.reason !== "missing_draft_leaves") {
+  console.error("missing Draft leaves must fail closed even when DOM matches", missingLeaves);
+  process.exit(1);
+}
+
 const flattened = matchComposeSnapshot(
   {
     ok: true,
     innerText: drafted,
     blocks: [normalizeComposeText(drafted)],
+    leafBlocks: [normalizeComposeText(drafted)],
+    leafText: normalizeComposeText(drafted),
     selectionText: drafted,
     text: drafted,
   },
@@ -92,6 +109,47 @@ const flattened = matchComposeSnapshot(
 );
 if (flattened.ok || flattened.reason !== "editor_blocks_mismatch") {
   console.error("flattened single block must not match multi-paragraph draft", flattened);
+  process.exit(1);
+}
+
+const incidentDom = matchComposeSnapshot(
+  {
+    ok: true,
+    innerText: drafted,
+    blocks: paragraphBlocks(drafted),
+    leafBlocks: [lastOnly],
+    leafText: lastOnly,
+    selectionText: drafted,
+    text: drafted,
+  },
+  drafted
+);
+if (incidentDom.ok || incidentDom.reason !== "draft_leaf_mismatch") {
+  console.error(
+    "full DOM with last-paragraph Draft leaves must fail (incident signature)",
+    incidentDom
+  );
+  process.exit(1);
+}
+
+const incidentEditor = matchComposeSnapshot(
+  {
+    ok: true,
+    innerText: drafted,
+    blocks: paragraphBlocks(drafted),
+    leafBlocks: paragraphBlocks(drafted),
+    leafText: drafted,
+    editorPlainText: lastOnly,
+    selectionText: drafted,
+    text: drafted,
+  },
+  drafted
+);
+if (incidentEditor.ok || incidentEditor.reason !== "editor_state_mismatch") {
+  console.error(
+    "full DOM/leaves with last-paragraph EditorState must fail",
+    incidentEditor
+  );
   process.exit(1);
 }
 
@@ -109,23 +167,34 @@ if (publishedReplyMatches(paragraphBlocks(drafted)[0], drafted)) {
   process.exit(1);
 }
 
-const insertJs = insertComposeTextEvalJs('[data-testid="tweetTextarea_0"]', drafted);
-if (!insertJs.includes("signals-compose-insert") || !insertJs.includes("insertText")) {
-  console.error("insert eval must be a single-pass insertText payload");
+const selectJs = selectComposeContentsEvalJs('[data-testid="tweetTextarea_0"]');
+if (
+  !selectJs.includes("signals-compose-select") ||
+  !selectJs.includes("selectNodeContents")
+) {
+  console.error("select eval must range-select the target editable only");
   process.exit(1);
 }
-if (insertJs.includes("insertParagraph") || insertJs.split("execCommand(\"insertText\"").length < 2) {
-  console.error("insert eval must not split paragraphs");
-  process.exit(1);
-}
-if (!insertJs.includes(JSON.stringify(drafted))) {
-  console.error("insert eval must carry the entire drafted string in one payload");
+if (
+  selectJs.includes("execCommand") ||
+  selectJs.includes("insertParagraph") ||
+  selectJs.includes("insertText")
+) {
+  console.error("select eval must not use execCommand insert/delete/selectAll");
   process.exit(1);
 }
 
 const snapshotJs = readComposeSnapshotEvalJs('[data-testid="tweetTextarea_0"]');
-if (!snapshotJs.includes("signals-compose-snapshot") || !snapshotJs.includes("selectAll")) {
-  console.error("snapshot eval must selectAll and read editor blocks");
+if (
+  !snapshotJs.includes("signals-compose-snapshot") ||
+  !snapshotJs.includes('data-text="true"') ||
+  !snapshotJs.includes("selectNodeContents")
+) {
+  console.error("snapshot eval must read Draft leaves via a per-editable range");
+  process.exit(1);
+}
+if (snapshotJs.includes("execCommand") || snapshotJs.includes("selectAll")) {
+  console.error("snapshot eval must not call document.execCommand or selectAll");
   process.exit(1);
 }
 

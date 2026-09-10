@@ -2,10 +2,11 @@
 /**
  * Deterministic X inline reply via host agent-browser CLI.
  *
- * Injects the entire reply as one insertText payload, re-injects once on
- * snapshot mismatch, then refuses to click [data-testid="tweetButtonInline"]
- * unless the Draft.js/Lexical snapshot matches. After click, waits for a newly
- * created owned reply and returns its platformPostId / platformUrl.
+ * Injects the entire reply with one CDP Input.insertText
+ * (`agent-browser keyboard inserttext`), re-injects once on snapshot mismatch,
+ * then refuses to click Tweet unless the Draft.js/Lexical snapshot matches.
+ * After click, waits for a newly created owned reply and returns its
+ * platformPostId / platformUrl.
  *
  * Usage:
  *   node scripts/x-reply.cjs --port <cdpPort> --payload <reply.json> [--dry-run]
@@ -19,10 +20,10 @@ const { spawnSync } = require("node:child_process");
 
 const { parseEvalJsonArray, parseEvalJsonValue } = require("./parse-eval-json-array.cjs");
 const {
-  insertComposeTextEvalJs,
   matchComposeSnapshot,
   publishedReplyMatches,
   readComposeSnapshotEvalJs,
+  selectComposeContentsEvalJs,
 } = require("./x-compose-text.cjs");
 
 const SESSION = process.env.SIGNALS_PUBLISH_AB_SESSION || "signals-publish";
@@ -38,6 +39,7 @@ const TWITTER_EPOCH_MS = 1288834974657;
 const REPLY_TEXTAREA = '[data-testid="tweetTextarea_0"]';
 const REPLY_BUTTON = '[data-testid="reply"]';
 const REPLY_SUBMIT = '[data-testid="tweetButtonInline"]';
+const REPLY_SUBMIT_MODAL = '[data-testid="tweetButton"]';
 const PROFILE_LINK = '[data-testid="AppTabBar_Profile_Link"]';
 const DESKTOP_PROFILE_LINK = 'a[aria-label="Profile"]';
 
@@ -205,20 +207,10 @@ function detectXDisplayHandle() {
   return null;
 }
 
-function insertReplyText(text) {
+function insertReplyText(text, context = "CDP inserttext") {
   requireAb(["click", REPLY_TEXTAREA], "focus inline reply composer");
-  const raw = requireAb(
-    ["eval", insertComposeTextEvalJs(REPLY_TEXTAREA, text)],
-    "single-pass insertText"
-  ).stdout;
-  const parsed = parseEvalJsonValue(raw);
-  if (!parsed || typeof parsed !== "object") {
-    throw {
-      message: "single-pass insertText did not return a compose snapshot",
-      errorCode: "compose_invalid",
-    };
-  }
-  return parsed;
+  parseEvalJsonValue(abText(["eval", selectComposeContentsEvalJs(REPLY_TEXTAREA)]));
+  requireAb(["keyboard", "inserttext", text], context);
 }
 
 function readReplySnapshot() {
@@ -233,7 +225,9 @@ function readReplySnapshot() {
 function fillReplyAndAssert(text) {
   let lastMatch = { ok: false, reason: "not_attempted", expected: text, actual: "" };
   for (let attempt = 1; attempt <= COMPOSE_REINJECT_ATTEMPTS; attempt++) {
-    insertReplyText(text);
+    const context =
+      attempt === 1 ? "CDP inserttext" : "CDP inserttext re-inject";
+    insertReplyText(text, context);
     sleep(TYPE_SETTLE_MS);
     lastMatch = matchComposeSnapshot(readReplySnapshot(), text);
     if (lastMatch.ok) return;
@@ -241,6 +235,19 @@ function fillReplyAndAssert(text) {
   throw {
     message: `pre-submit compose editor does not contain the full drafted reply after ${COMPOSE_REINJECT_ATTEMPTS} insert attempts (${lastMatch.reason}; expected ${JSON.stringify(lastMatch.expected)}, actual ${JSON.stringify(lastMatch.actual)})`,
     errorCode: "compose_invalid",
+  };
+}
+
+function waitForReplySubmitSelector(timeoutMs = COMPOSE_WAIT_TIMEOUT_MS) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (abCount(REPLY_SUBMIT) > 0) return REPLY_SUBMIT;
+    if (abCount(REPLY_SUBMIT_MODAL) > 0) return REPLY_SUBMIT_MODAL;
+    sleep(300);
+  }
+  throw {
+    message: `timed out waiting for ${REPLY_SUBMIT} or ${REPLY_SUBMIT_MODAL}`,
+    errorCode: "timeout",
   };
 }
 
@@ -427,13 +434,14 @@ function main() {
         kind: "reply",
         handle,
         message:
-          "Inline reply filled with a single-pass insertText payload and verified; Reply was not clicked (dry-run).",
+          "Inline reply filled with one CDP inserttext payload and verified; Reply was not clicked (dry-run).",
       });
       return;
     }
 
-    waitForSelector(REPLY_SUBMIT, "wait for inline reply button");
-    requireAb(["click", REPLY_SUBMIT], "submit inline reply");
+    const submitSelector = waitForReplySubmitSelector();
+    requireAb(["click", submitSelector], "submit reply");
+    sleep(2000);
     const result = waitForVerifiedReply(text, handle, baseline);
     if (!result.success) {
       emit(result);

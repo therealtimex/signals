@@ -160,19 +160,19 @@ if (!focusPayload?.ok) {
   process.exit(1);
 }
 
-// Eval insert path when keyboard type does not commit (fake simulates live Draft.js)
-const evalInsert = runXPublish(
+// Clipboard fallback when keyboard inserttext does not commit
+const clipboardInsert = runXPublish(
   { text: "thread tweet one", threadTexts: ["thread tweet two"] },
   { FAKE_AB_SKIP_KEYBOARD: "1" },
   ["--dry-run"]
 );
-if (evalInsert.status !== 0) {
-  console.error("eval insert path failed:", evalInsert.stdout, evalInsert.stderr);
+if (clipboardInsert.status !== 0) {
+  console.error("clipboard insert path failed:", clipboardInsert.stdout, clipboardInsert.stderr);
   process.exit(1);
 }
-const evalInsertJson = lastJson(evalInsert.stdout);
-if (!evalInsertJson.success || !evalInsertJson.dryRun) {
-  console.error("unexpected eval insert dry-run result:", evalInsertJson);
+const clipboardInsertJson = lastJson(clipboardInsert.stdout);
+if (!clipboardInsertJson.success || !clipboardInsertJson.dryRun) {
+  console.error("unexpected clipboard insert dry-run result:", clipboardInsertJson);
   process.exit(1);
 }
 
@@ -307,6 +307,25 @@ if (
   !String(truncatedPublishJson.error || "").includes("full drafted text")
 ) {
   console.error("unexpected truncated compose result:", truncatedPublishJson);
+  process.exit(1);
+}
+
+const leafDesyncPublish = runXPublish(
+  { text: multiParagraph },
+  { FAKE_AB_DOM_LEAF_DESYNC: "1" },
+  ["--dry-run"]
+);
+if (leafDesyncPublish.status === 0) {
+  console.error("DOM/EditorState leaf desync should fail pre-submit");
+  process.exit(1);
+}
+const leafDesyncJson = lastJson(leafDesyncPublish.stdout);
+if (
+  leafDesyncJson.success ||
+  !String(leafDesyncJson.error || "").includes("full drafted text") ||
+  !String(leafDesyncJson.error || "").includes("draft_leaf_mismatch")
+) {
+  console.error("unexpected leaf-desync compose result:", leafDesyncJson);
   process.exit(1);
 }
 

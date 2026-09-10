@@ -289,13 +289,31 @@ function composeSnapshotFromState(state, index = 0) {
     index > 0 &&
     index < Number(state.activeTextareaIndex ?? 0) &&
     blocks.length > 1;
+  const leafDesync =
+    process.env.FAKE_AB_DOM_LEAF_DESYNC === "1" && blocks.length > 1;
   if (truncatedActive || staleEarlier) {
     return {
       ok: true,
       innerText: text,
       blocks: [last],
+      leafBlocks: [last],
+      leafText: last,
+      editorPlainText: last,
       focusedBlockText: last,
       selectionText: last,
+      text: String(text).replace(/\s+/g, " ").trim(),
+    };
+  }
+  if (leafDesync) {
+    return {
+      ok: true,
+      innerText: text,
+      blocks: blocks.length ? blocks : text ? [text] : [],
+      leafBlocks: [last],
+      leafText: last,
+      editorPlainText: last,
+      focusedBlockText: last,
+      selectionText: text,
       text: String(text).replace(/\s+/g, " ").trim(),
     };
   }
@@ -303,6 +321,9 @@ function composeSnapshotFromState(state, index = 0) {
     ok: true,
     innerText: text,
     blocks: blocks.length ? blocks : text ? [text] : [],
+    leafBlocks: blocks.length ? blocks : text ? [text] : [],
+    leafText: text,
+    editorPlainText: text,
     focusedBlockText: last || text,
     selectionText: text,
     text: String(text).replace(/\s+/g, " ").trim(),
@@ -327,36 +348,6 @@ function publishedTweetBody(state) {
     .trim();
 }
 
-function parseInsertPayload(js) {
-  const marker = "const payload = ";
-  const idx = js.indexOf(marker);
-  if (idx < 0) return null;
-  const slice = js.slice(idx + marker.length).trimStart();
-  if (!slice.startsWith('"')) {
-    try {
-      return JSON.parse(slice);
-    } catch {
-      return null;
-    }
-  }
-  let i = 1;
-  while (i < slice.length) {
-    if (slice[i] === "\\") {
-      i += 2;
-      continue;
-    }
-    if (slice[i] === '"') {
-      try {
-        return JSON.parse(slice.slice(0, i + 1));
-      } catch {
-        return null;
-      }
-    }
-    i += 1;
-  }
-  return null;
-}
-
 function textareaIndexFromEvalJs(js, fallback = 0) {
   const mark = js.match(/signals-publish-thread-(\d+)/);
   if (mark) return Number(mark[1]);
@@ -367,14 +358,8 @@ function textareaIndexFromEvalJs(js, fallback = 0) {
 
 function handleEval(rest, state) {
   const js = rest[1] ?? "";
-  if (js.includes("signals-compose-insert")) {
-    const text = parseInsertPayload(js);
-    if (text == null) {
-      return ok(JSON.stringify(JSON.stringify({ ok: false, reason: "no_payload" })));
-    }
-    const index = textareaIndexFromEvalJs(js, state.activeTextareaIndex ?? 0);
-    recordTypedText(state, state.lastSelector || `tweetTextarea_${index}`, text);
-    return ok(JSON.stringify(JSON.stringify(composeSnapshotFromState(state, index))));
+  if (js.includes("signals-compose-select")) {
+    return ok(JSON.stringify(JSON.stringify({ ok: true, reason: "selected" })));
   }
   if (js.includes("signals-compose-snapshot")) {
     const index = textareaIndexFromEvalJs(js, state.activeTextareaIndex ?? 0);
@@ -518,7 +503,7 @@ function handleEval(rest, state) {
   }
   if (
     (js.includes("innerText") || js.includes("textContent")) &&
-    !js.includes("signals-compose-insert") &&
+    !js.includes("signals-compose-select") &&
     !js.includes("signals-compose-snapshot")
   ) {
     const zerosMatch = js.match(/zeros\[(\d+)\]/);
@@ -540,25 +525,7 @@ function handleEval(rest, state) {
     return ok(JSON.stringify(JSON.stringify(text)));
   }
   if (js.includes("execCommand") && js.includes("insertText")) {
-    const marker = "const payload = ";
-    const idx = js.indexOf(marker);
-    if (idx >= 0) {
-      try {
-        const slice = js.slice(idx + marker.length);
-        const end = slice.indexOf(";");
-        const text = JSON.parse(slice.slice(0, end).trim());
-        const index = state.activeTextareaIndex ?? 0;
-        recordTypedText(
-          state,
-          state.lastSelector || `tweetTextarea_${index}`,
-          text
-        );
-        const normalized = String(text).replace(/\s+/g, " ").trim();
-        return ok(JSON.stringify(JSON.stringify({ ok: true, text: normalized })));
-      } catch {
-        return ok(JSON.stringify(JSON.stringify({ ok: false, text: "" })));
-      }
-    }
+    return ok(JSON.stringify(JSON.stringify({ ok: false, reason: "eval_insert_disabled" })));
   }
   return ok("null");
 }
