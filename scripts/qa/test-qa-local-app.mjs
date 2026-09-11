@@ -20,11 +20,12 @@ import {
 } from "node:fs";
 import { createServer } from "node:http";
 import { homedir, tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   IssueLockBusyError,
   acquireIssueLock,
+  lockHolderAlive,
   processStartTime,
   releaseIssueLock,
   takeOverStaleLock,
@@ -72,6 +73,8 @@ assert.deepEqual(
 {
   const lockDir = mkdtempSync(join(tmpdir(), "signals-qa-lock-test-"));
   const path = join(lockDir, "issue.lock");
+  const busyBecause = (reason) => (error) =>
+    error instanceof IssueLockBusyError && error.reason === reason;
   const takes = (content, secondsOld = 0) => {
     writeFileSync(path, content);
     if (secondsOld) {
@@ -85,23 +88,62 @@ assert.deepEqual(
     const mine = JSON.parse(readFileSync(path, "utf8"));
     assert.equal(mine.pid, process.pid);
     assert.equal(mine.pidStart, processStartTime(process.pid));
-    assert.throws(() => acquireIssueLock(path, "down"), IssueLockBusyError);
+    assert.throws(() => acquireIssueLock(path, "down"), busyBecause("held"));
     release();
     assert.equal(existsSync(path), false);
 
-    // A dead pid is stale; so is a live pid whose start time differs (it was recycled).
-    takes(JSON.stringify({ pid: spawnSync(process.execPath, ["-e", ""]).pid, action: "up" }));
-    takes(JSON.stringify({ pid: process.pid, pidStart: "Mon Jan  1 00:00:00 2001", action: "up" }));
+    // A dead pid is stale. A live pid whose start time differs was recycled, which only ps can
+    // tell; without ps the pid decides alone and the lock counts as held.
+    const deadPid = spawnSync(process.execPath, ["-e", ""]).pid;
+    takes(JSON.stringify({ pid: deadPid, action: "up" }));
+    const recycled = { pid: process.pid, pidStart: "Mon Jan  1 00:00:00 2001", action: "up" };
+    if (processStartTime(process.pid) !== null) takes(JSON.stringify(recycled));
+    const noPs = mkdtempSync(join(tmpdir(), "signals-qa-no-ps-"));
+    writeFileSync(join(noPs, "ps"), "#!/bin/sh\nexit 1\n");
+    chmodSync(join(noPs, "ps"), 0o755);
+    const savedPath = process.env.PATH;
+    process.env.PATH = `${noPs}${delimiter}${savedPath}`;
+    try {
+      assert.equal(processStartTime(process.pid), null);
+      assert.equal(lockHolderAlive(recycled), true);
+    } finally {
+      process.env.PATH = savedPath;
+      rmSync(noPs, { recursive: true, force: true });
+    }
     writeFileSync(
       path,
       JSON.stringify({ pid: process.pid, pidStart: processStartTime(process.pid), action: "up" }),
     );
-    assert.throws(() => acquireIssueLock(path, "up"), IssueLockBusyError);
+    assert.throws(() => acquireIssueLock(path, "up"), busyBecause("held"));
 
-    // Unreadable content counts as held while fresh and as stale once old.
-    writeFileSync(path, "{");
-    assert.throws(() => acquireIssueLock(path, "up"), IssueLockBusyError);
-    takes("{", 60);
+    // Content that names no real pid, `{}` included, counts as held while fresh and as stale once
+    // old, the same as unparseable content.
+    for (const content of ["{", "{}", '{"pid":"12"}', "null"]) {
+      writeFileSync(path, content);
+      assert.throws(() => acquireIssueLock(path, "up"), busyBecause("unreadable"));
+      takes(content, 60);
+    }
+
+    // A link attempt follows the last allowed takeover, and a lock that keeps changing hands fails
+    // as contention, not as an unreadable lock.
+    const stale = JSON.stringify({ pid: deadPid, action: "up" });
+    writeFileSync(path, stale);
+    let restales = 1;
+    const settle = () => {
+      if (restales-- > 0) writeFileSync(path, stale);
+    };
+    acquireIssueLock(path, "up", { maxTakeovers: 2, afterTakeover: settle })();
+    assert.equal(existsSync(path), false);
+    writeFileSync(path, stale);
+    assert.throws(
+      () =>
+        acquireIssueLock(path, "up", {
+          maxTakeovers: 2,
+          afterTakeover: () => writeFileSync(path, stale),
+        }),
+      (error) => busyBecause("contended")(error) && !/unreadable/.test(error.message),
+    );
+    rmSync(path, { force: true });
 
     // Takeover puts back a lock that changed after it was inspected, and removes one that did not.
     writeFileSync(path, "fresh-lock");
@@ -448,6 +490,7 @@ console.log(JSON.stringify({ meta: { source: "mock" }, results }));
   const busy = await run(["up", ...common(busyIssue), "--worktree", worktree]);
   assert.equal(busy.json.errorCode, "QA_LOCKED");
   assert.equal(busy.json.lock.pid, process.pid);
+  assert.equal(busy.json.lock.reason, "held");
   assert.equal(existsSync(lockPath(busyIssue)), true);
   assert.equal(mockApps().length, 1);
   rmSync(lockPath(busyIssue), { force: true });

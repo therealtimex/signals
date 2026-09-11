@@ -139,8 +139,11 @@ function acquireIssueLock(issueId, action) {
   } catch (error) {
     if (!(error instanceof IssueLockBusyError)) throw error;
     throw new QaError("QA_LOCKED", `${error.message} One up or down runs per issue at a time.`, {
-      lock: { path, ...(error.holder ?? {}) },
-      next: "Wait for that run to finish, then rerun.",
+      lock: { path, reason: error.reason, ...(error.holder ?? {}) },
+      next:
+        error.reason === "unreadable"
+          ? `Rerun after 30 s; if it persists, inspect ${path} before removing it.`
+          : "Wait for that run to finish, then rerun.",
     });
   }
 }
