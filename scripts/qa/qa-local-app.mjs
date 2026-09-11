@@ -16,9 +16,11 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { IssueLockBusyError, acquireIssueLock as acquireLockFile, pidAlive } from "./qa-issue-lock.mjs";
 import {
   CANONICAL_SIGNALS_APP_ID,
   appsFromCliPayload,
+  assertSafeQaApp,
   assertSignalsIssueWorktree,
   canonicalSignalsRepoRoot,
   findIssueQaApps,
@@ -72,7 +74,10 @@ down    Deletes the QA app, runs the hygiene gate, diffs the canonical Signals r
 
 --host defaults to packaged (http://127.0.0.1:3001/cli). status and down follow the host up used.
 --cli <path> replaces realtimex-pp-cli, e.g. a wrapper that adds --credential-ref for the dev host.
---db <path> overrides the RealTimeX database read for the snapshot and the hygiene gate.
+        up records it, so status and down reuse it.
+--db <path> overrides the RealTimeX database read for the snapshot and the hygiene gate. Without
+        it, RTX_DB_PATH applies, then the host default. down uses the database up recorded.
+One up or down runs per issue at a time.
 
 Prints one JSON object. Exit 0 only when ok is true; failures carry errorCode and next.`;
 }
@@ -98,8 +103,46 @@ function writeSession(path, session) {
   writeFileSync(path, `${JSON.stringify(session, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
 }
 
-function downCommand(issueId) {
-  return `node ${SELF} down --issue ${issueId}`;
+function shellQuote(value) {
+  const text = String(value);
+  return /^[\w@%+=:,./-]+$/.test(text) ? text : `'${text.replace(/'/g, "'\\''")}'`;
+}
+
+// Recovery commands repeat everything that decided what the failing run touched: the host, the
+// CLI (the dev host's default CLI cannot authenticate), the database, and --keep-data, whose
+// absence on a rerun would delete the data the first run preserved.
+function followUp(action, issueId, { host, cli = "", db = "", keepData = false }) {
+  return [
+    "node",
+    shellQuote(SELF),
+    action,
+    "--issue",
+    issueId,
+    "--host",
+    host,
+    ...(cli ? ["--cli", shellQuote(cli)] : []),
+    ...(db ? ["--db", shellQuote(db)] : []),
+    ...(keepData ? ["--keep-data"] : []),
+  ].join(" ");
+}
+
+function qaIssueLockPath(issueId) {
+  return join(qaTemporaryRoot(), `signals-qa-local-app-issue-${issueId}.lock`);
+}
+
+// Two overlapping ups for one issue can both pass preflight before either receipt exists, and the
+// loser leaves an untracked app behind. up and down therefore hold a per-issue lock.
+function acquireIssueLock(issueId, action) {
+  const path = qaIssueLockPath(issueId);
+  try {
+    return acquireLockFile(path, action);
+  } catch (error) {
+    if (!(error instanceof IssueLockBusyError)) throw error;
+    throw new QaError("QA_LOCKED", `${error.message} One up or down runs per issue at a time.`, {
+      lock: { path, ...(error.holder ?? {}) },
+      next: "Wait for that run to finish, then rerun.",
+    });
+  }
 }
 
 function resolveHost(name) {
@@ -206,12 +249,7 @@ function liveNextDevLock(worktree) {
     return null;
   }
   const pid = Number(info.pid);
-  if (!Number.isInteger(pid) || pid <= 0) return null;
-  try {
-    process.kill(pid, 0);
-  } catch (error) {
-    if (error.code === "ESRCH") return null;
-  }
+  if (!pidAlive(pid)) return null;
   // A recycled pid is not a dev server. Next titles its dev process "next-server (vX)".
   const ps = spawnSync("ps", ["-o", "command=", "-p", String(pid)], { encoding: "utf8" });
   if (ps.status === 0 && !/next/i.test(ps.stdout)) return null;
@@ -249,6 +287,13 @@ function readCanonicalRows(dbPath) {
     ["-readonly", "-json", "-cmd", ".timeout 5000", dbPath, query],
     { encoding: "utf8" },
   );
+  if (result.error?.code === "ENOENT") {
+    throw new QaError(
+      "SQLITE3_MISSING",
+      "The sqlite3 CLI is not on PATH; qa-local-app needs it to snapshot the canonical record.",
+      { next: "Install sqlite3 3.33 or newer (it ships with macOS), then rerun." },
+    );
+  }
   if (result.status !== 0) {
     throw new QaError(
       "DB_UNREADABLE",
@@ -377,7 +422,7 @@ async function waitUntilServing(appId, cliOptions, host, { timeoutMs, pollMs, wo
   });
 }
 
-function upResult({ reused, issueId, host, appId, worktree, receipt, receiptPath, sessionPath, port, portSource, health }) {
+function upResult({ reused, issueId, host, appId, worktree, receipt, receiptPath, sessionPath, port, portSource, health, next }) {
   return {
     ok: true,
     action: "up",
@@ -396,15 +441,15 @@ function upResult({ reused, issueId, host, appId, worktree, receipt, receiptPath
     dataDir: receipt?.dataDir ?? null,
     receiptPath,
     sessionPath,
-    next: downCommand(issueId),
+    next,
   };
 }
 
 async function up(flags) {
   const issueId = normalizeIssueId(flags.get("issue"));
   const host = resolveHost(flags.get("host"));
-  const cliOptions = { baseUrl: host.baseUrl, cli: flags.get("cli") };
-  const dbPath = flags.get("db") || realtimexDbPath(host.storageRoot);
+  const dbPath =
+    flags.get("db") || process.env.RTX_DB_PATH?.trim() || realtimexDbPath(host.storageRoot);
   const waitOptions = {
     timeoutMs: positiveInt(flags.get("timeout-ms"), DEFAULT_TIMEOUT_MS),
     pollMs: positiveInt(process.env.SIGNALS_QA_POLL_MS, 1000),
@@ -419,135 +464,170 @@ async function up(flags) {
     });
   }
 
-  const issueApps = findIssueQaApps(appsFromCliPayload(cli(LIST_ARGS, cliOptions, host)), issueId);
-  const receiptPath = qaReceiptPath(issueId);
-  const sessionPath = qaSessionPath(issueId);
-  const receipt = readJson(receiptPath);
+  const release = acquireIssueLock(issueId, "up");
+  try {
+    const receiptPath = qaReceiptPath(issueId);
+    const sessionPath = qaSessionPath(issueId);
+    const receipt = readJson(receiptPath);
+    // A rerun on the dev host needs the credential wrapper before its first CLI call, so a
+    // session for this host lends its recorded CLI; an explicit --cli still wins.
+    const priorSession = readJson(sessionPath);
+    const cliPath =
+      flags.get("cli") || (priorSession?.baseUrl === host.baseUrl ? priorSession.cli || "" : "");
+    const cliOptions = { baseUrl: host.baseUrl, cli: cliPath };
+    const downCmd = followUp("down", issueId, { host: host.name, cli: cliPath, db: flags.get("db") });
+    const issueApps = findIssueQaApps(appsFromCliPayload(cli(LIST_ARGS, cliOptions, host)), issueId);
 
-  if (receipt) {
-    const app = issueApps.find((candidate) => candidate.id === receipt.appId);
-    const sameTarget = receipt.worktree === worktree.path && receipt.baseUrl === host.baseUrl;
-    if (!app || !sameTarget || issueApps.length !== 1) {
+    if (receipt) {
+      const app = issueApps.find((candidate) => candidate.id === receipt.appId);
+      const sameTarget = receipt.worktree === worktree.path && receipt.baseUrl === host.baseUrl;
+      if (!app || !sameTarget || issueApps.length !== 1) {
+        throw new QaError(
+          "QA_APP_EXISTS",
+          `${receiptPath} records ${receipt.worktree} on ${receipt.baseUrl}` +
+            (app ? "." : ", and that app no longer exists."),
+          { receipt, next: downCmd },
+        );
+      }
+      try {
+        assertSafeQaApp(app, issueId);
+      } catch (error) {
+        throw new QaError("QA_APP_UNSAFE", error.message, {
+          next:
+            "The receipt-backed app no longer carries its safety tags, so neither up nor down " +
+            "will touch it. Tell the user; do not delete it by hand.",
+        });
+      }
+      // The session holds the canonical baseline taken before provisioning. Recapturing it now
+      // would hide any change QA already made, so reuse requires the original session.
+      const session = priorSession;
+      if (!session || (session.appId && session.appId !== app.id)) {
+        throw new QaError(
+          "QA_SESSION_MISSING",
+          `${receiptPath} exists but ${sessionPath} ` +
+            (session ? `belongs to app ${session.appId}` : "does not") +
+            ", so the canonical baseline from before provisioning is gone.",
+          { next: `${downCmd}, then rerun up.` },
+        );
+      }
+      let served;
+      try {
+        const status = String(app.runtime?.status || app.persistedStatus || "");
+        if (status !== "running") cli(["start-local-app", app.id], cliOptions, host);
+        served = await waitUntilServing(app.id, cliOptions, host, {
+          ...waitOptions,
+          worktree: worktree.path,
+        });
+      } catch (error) {
+        if (error instanceof QaError) {
+          error.extra.next = `Read the logs above, then ${downCmd} before retrying up.`;
+        }
+        throw error;
+      }
+      writeSession(sessionPath, {
+        ...session,
+        appId: app.id,
+        port: served.port,
+        cli: cliPath || session.cli || null,
+      });
+      return upResult({
+        reused: true,
+        issueId,
+        host,
+        appId: app.id,
+        worktree,
+        receipt,
+        receiptPath,
+        sessionPath,
+        next: downCmd,
+        ...served,
+      });
+    }
+
+    if (issueApps.length) {
       throw new QaError(
         "QA_APP_EXISTS",
-        `${receiptPath} records ${receipt.worktree} on ${receipt.baseUrl}` +
-          (app ? "." : ", and that app no longer exists."),
-        { receipt, next: downCommand(issueId) },
+        `${issueApps.length} ${qaAppDisplayName(issueId)} record(s) exist without a receipt: ` +
+          `${issueApps.map((app) => app.id).join(", ")}.`,
+        { next: followUp("down", issueId, { cli: cliPath, db: flags.get("db"), host: host.name }) },
       );
     }
-    const status = String(app.runtime?.status || app.persistedStatus || "");
-    if (status !== "running") cli(["start-local-app", app.id], cliOptions, host);
-    const session = readJson(sessionPath) ?? {
+
+    const lock = liveNextDevLock(worktree.path);
+    if (lock) {
+      throw new QaError(
+        "NEXT_DEV_ALREADY_RUNNING",
+        `next dev (pid ${lock.pid}${lock.appUrl ? `, ${lock.appUrl}` : ""}) already holds ` +
+          `${lock.lockPath}. Next 16 allows one dev server per directory, so the QA app would ` +
+          "crash during startup.",
+        { lock, next: `Stop that server (kill ${lock.pid}) if you started it, then rerun up.` },
+      );
+    }
+
+    const session = {
       schemaVersion: 1,
       kind: "signals-qa-local-app-session",
       issueId,
       host: host.name,
       baseUrl: host.baseUrl,
       dbPath,
+      cli: cliPath || null,
       worktree: worktree.path,
       canonicalRows: readCanonicalRows(dbPath),
       canonicalCapturedAt: new Date().toISOString(),
-      canonicalCapturedOnReuse: true,
-      appId: app.id,
+      appId: null,
       port: null,
     };
-    const served = await waitUntilServing(app.id, cliOptions, host, {
-      ...waitOptions,
-      worktree: worktree.path,
-    });
-    writeSession(sessionPath, { ...session, appId: app.id, port: served.port });
+    writeSession(sessionPath, session);
+
+    const provision = runQaScript("provision-signals-qa-local-app.mjs", [
+      "--issue",
+      issueId,
+      "--worktree",
+      worktree.path,
+      "--base-url",
+      host.baseUrl,
+      ...passThrough(flags, ["loop-id", "workspace-slug", "cli"]),
+    ]);
+    if (!provision.ok || !provision.json?.appId) {
+      throw new QaError(
+        "PROVISION_FAILED",
+        provision.stderr.replace(/^QA Local App provision failed: /, "") ||
+          "The provisioner returned no app id.",
+        { next: `${downCmd}, then rerun up.` },
+      );
+    }
+    const appId = provision.json.appId;
+    writeSession(sessionPath, { ...session, appId });
+
+    let served;
+    try {
+      served = await waitUntilServing(appId, cliOptions, host, {
+        ...waitOptions,
+        worktree: worktree.path,
+      });
+    } catch (error) {
+      if (error instanceof QaError) {
+        error.extra.next = `Read the logs above, then ${downCmd} before retrying up.`;
+      }
+      throw error;
+    }
+    writeSession(sessionPath, { ...session, appId, port: served.port });
     return upResult({
-      reused: true,
+      reused: false,
       issueId,
       host,
-      appId: app.id,
+      appId,
       worktree,
-      receipt,
+      receipt: readJson(receiptPath),
       receiptPath,
       sessionPath,
+      next: downCmd,
       ...served,
     });
+  } finally {
+    release();
   }
-
-  if (issueApps.length) {
-    throw new QaError(
-      "QA_APP_EXISTS",
-      `${issueApps.length} ${qaAppDisplayName(issueId)} record(s) exist without a receipt: ` +
-        `${issueApps.map((app) => app.id).join(", ")}.`,
-      { next: `${downCommand(issueId)} --host ${host.name}` },
-    );
-  }
-
-  const lock = liveNextDevLock(worktree.path);
-  if (lock) {
-    throw new QaError(
-      "NEXT_DEV_ALREADY_RUNNING",
-      `next dev (pid ${lock.pid}${lock.appUrl ? `, ${lock.appUrl}` : ""}) already holds ` +
-        `${lock.lockPath}. Next 16 allows one dev server per directory, so the QA app would ` +
-        "crash during startup.",
-      { lock, next: `Stop that server (kill ${lock.pid}) if you started it, then rerun up.` },
-    );
-  }
-
-  const session = {
-    schemaVersion: 1,
-    kind: "signals-qa-local-app-session",
-    issueId,
-    host: host.name,
-    baseUrl: host.baseUrl,
-    dbPath,
-    worktree: worktree.path,
-    canonicalRows: readCanonicalRows(dbPath),
-    canonicalCapturedAt: new Date().toISOString(),
-    appId: null,
-    port: null,
-  };
-  writeSession(sessionPath, session);
-
-  const provision = runQaScript("provision-signals-qa-local-app.mjs", [
-    "--issue",
-    issueId,
-    "--worktree",
-    worktree.path,
-    "--base-url",
-    host.baseUrl,
-    ...passThrough(flags, ["loop-id", "workspace-slug", "cli"]),
-  ]);
-  if (!provision.ok || !provision.json?.appId) {
-    throw new QaError(
-      "PROVISION_FAILED",
-      provision.stderr.replace(/^QA Local App provision failed: /, "") ||
-        "The provisioner returned no app id.",
-      { next: `${downCommand(issueId)}, then rerun up.` },
-    );
-  }
-  const appId = provision.json.appId;
-  writeSession(sessionPath, { ...session, appId });
-
-  let served;
-  try {
-    served = await waitUntilServing(appId, cliOptions, host, {
-      ...waitOptions,
-      worktree: worktree.path,
-    });
-  } catch (error) {
-    if (error instanceof QaError) {
-      error.extra.next = `Read logs above, then ${downCommand(issueId)} before retrying up.`;
-    }
-    throw error;
-  }
-  writeSession(sessionPath, { ...session, appId, port: served.port });
-  return upResult({
-    reused: false,
-    issueId,
-    host,
-    appId,
-    worktree,
-    receipt: readJson(receiptPath),
-    receiptPath,
-    sessionPath,
-    ...served,
-  });
 }
 
 async function status(flags) {
@@ -557,7 +637,7 @@ async function status(flags) {
   const session = readJson(qaSessionPath(issueId));
   const host =
     hostFromBaseUrl(receipt?.baseUrl || session?.baseUrl) || resolveHost(flags.get("host"));
-  const cliOptions = { baseUrl: host.baseUrl, cli: flags.get("cli") };
+  const cliOptions = { baseUrl: host.baseUrl, cli: flags.get("cli") || session?.cli || "" };
   const issueApps = findIssueQaApps(appsFromCliPayload(cli(LIST_ARGS, cliOptions, host)), issueId);
   const app = receipt
     ? issueApps.find((candidate) => candidate.id === receipt.appId)
@@ -598,90 +678,108 @@ async function down(flags) {
   const session = readJson(sessionPath);
   const host =
     hostFromBaseUrl(receipt?.baseUrl || session?.baseUrl) || resolveHost(flags.get("host"));
-  const dbPath = flags.get("db") || session?.dbPath || realtimexDbPath(host.storageRoot);
-  const pollMs = positiveInt(process.env.SIGNALS_QA_POLL_MS, 1000);
-  // Read the port before cleanup stops the app, in case up failed before recording it.
-  const port =
-    session?.port ??
-    resolveServingPort(null, receipt?.worktree ?? session?.worktree).port ??
-    null;
-
-  const cleanup = runQaScript("cleanup-signals-qa-local-app.mjs", [
-    "--issue",
-    issueId,
-    ...(flags.has("keep-data") ? ["--keep-data"] : []),
-    ...(receipt ? [] : ["--base-url", host.baseUrl]),
-    ...passThrough(flags, ["cli"]),
-  ]);
-  if (!cleanup.ok) {
-    throw new QaError(
-      "CLEANUP_FAILED",
-      cleanup.stderr.replace(/^QA Local App cleanup failed: /, "") || "Cleanup failed.",
-      { next: "Resolve the cause above, then rerun down." },
-    );
-  }
-
-  const hygiene = runQaScript(
-    "verify-signals-local-app-hygiene.mjs",
-    ["--issue", issueId, "--db", dbPath, "--canonical-repo", canonicalSignalsRepoRoot(SCRIPT_DIR)],
-    { REALTIMEX_RUNTIME: host.runtime },
-  );
-  const hygieneProblems = hygiene.ok
-    ? []
-    : hygiene.stderr
-        .split("\n")
-        .filter((line) => line.startsWith("- "))
-        .map((line) => line.slice(2).trim());
-  if (!hygiene.ok && !hygieneProblems.length) hygieneProblems.push(hygiene.stderr);
-
-  const canonicalNow = readCanonicalRows(dbPath);
-  const canonicalUnchanged = session
-    ? JSON.stringify(canonicalNow) === JSON.stringify(session.canonicalRows)
-    : null;
-  const portReleased = port ? await waitPortReleased(port, PORT_RELEASE_MS, pollMs) : null;
-
-  const failures = [];
-  if (canonicalUnchanged === false) failures.push("CANONICAL_CHANGED");
-  if (!hygiene.ok) failures.push("HYGIENE_FAILED");
-  if (portReleased === false) failures.push("PORT_STILL_BOUND");
-
-  const result = {
-    ok: failures.length === 0,
-    action: "down",
-    issueId,
+  const cliPath = flags.get("cli") || session?.cli || "";
+  const dbPath =
+    flags.get("db") ||
+    session?.dbPath ||
+    process.env.RTX_DB_PATH?.trim() ||
+    realtimexDbPath(host.storageRoot);
+  const rerun = followUp("down", issueId, {
     host: host.name,
-    appId: cleanup.json?.appId ?? null,
-    appDeleted: cleanup.json?.appDeleted ?? null,
-    dataRemoved: cleanup.json?.dataRemoved ?? null,
-    hygiene: hygiene.ok ? "pass" : { problems: hygieneProblems },
-    canonicalUnchanged,
-    port,
-    portReleased,
-  };
-  if (canonicalUnchanged === null) {
-    result.warnings = ["No snapshot from up for this issue, so the canonical record was not diffed."];
-  }
-  if (failures.length) {
-    result.errorCode = failures[0];
-    result.failures = failures;
-    if (canonicalUnchanged === false) {
-      result.changedFields = changedCanonicalFields(session.canonicalRows, canonicalNow);
-      result.error = "The canonical Signals record changed while this QA app existed.";
-      result.next =
-        host.name === "packaged"
-          ? "Stop and tell the user. Do not run --restore-canonical against the packaged host."
-          : "Restore it with provision-signals-local-app.mjs --restore-canonical (dev host only), then rerun down.";
-    } else if (!hygiene.ok) {
-      result.error = `Hygiene gate failed: ${hygieneProblems.join("; ")}`;
-      result.next = "Resolve the listed problems, then rerun down.";
-    } else {
-      result.error = `Port ${port} still answers after the QA app was deleted.`;
-      result.next = `Find the listener with lsof -iTCP:${port} -sTCP:LISTEN before handing off.`;
+    cli: cliPath,
+    db: flags.get("db"),
+    keepData: flags.has("keep-data"),
+  });
+  const pollMs = positiveInt(process.env.SIGNALS_QA_POLL_MS, 1000);
+  const releaseWaitMs = positiveInt(process.env.SIGNALS_QA_PORT_RELEASE_MS, PORT_RELEASE_MS);
+
+  const release = acquireIssueLock(issueId, "down");
+  try {
+    // Read the port before cleanup stops the app, in case up failed before recording it.
+    const port =
+      session?.port ??
+      resolveServingPort(null, receipt?.worktree ?? session?.worktree).port ??
+      null;
+
+    const cleanup = runQaScript("cleanup-signals-qa-local-app.mjs", [
+      "--issue",
+      issueId,
+      ...(flags.has("keep-data") ? ["--keep-data"] : []),
+      ...(receipt ? [] : ["--base-url", host.baseUrl]),
+      ...(cliPath ? ["--cli", cliPath] : []),
+    ]);
+    if (!cleanup.ok) {
+      throw new QaError(
+        "CLEANUP_FAILED",
+        cleanup.stderr.replace(/^QA Local App cleanup failed: /, "") || "Cleanup failed.",
+        { next: `Resolve the cause above, then rerun: ${rerun}` },
+      );
     }
-  } else {
-    rmSync(sessionPath, { force: true });
+
+    const hygiene = runQaScript(
+      "verify-signals-local-app-hygiene.mjs",
+      ["--issue", issueId, "--db", dbPath, "--canonical-repo", canonicalSignalsRepoRoot(SCRIPT_DIR)],
+      { REALTIMEX_RUNTIME: host.runtime },
+    );
+    const hygieneProblems = hygiene.ok
+      ? []
+      : hygiene.stderr
+          .split("\n")
+          .filter((line) => line.startsWith("- "))
+          .map((line) => line.slice(2).trim());
+    if (!hygiene.ok && !hygieneProblems.length) hygieneProblems.push(hygiene.stderr);
+
+    const canonicalNow = readCanonicalRows(dbPath);
+    const canonicalUnchanged = session
+      ? JSON.stringify(canonicalNow) === JSON.stringify(session.canonicalRows)
+      : null;
+    const portReleased = port ? await waitPortReleased(port, releaseWaitMs, pollMs) : null;
+
+    const failures = [];
+    if (canonicalUnchanged === false) failures.push("CANONICAL_CHANGED");
+    if (!hygiene.ok) failures.push("HYGIENE_FAILED");
+    if (portReleased === false) failures.push("PORT_STILL_BOUND");
+
+    const result = {
+      ok: failures.length === 0,
+      action: "down",
+      issueId,
+      host: host.name,
+      appId: cleanup.json?.appId ?? null,
+      appDeleted: cleanup.json?.appDeleted ?? null,
+      dataRemoved: cleanup.json?.dataRemoved ?? null,
+      hygiene: hygiene.ok ? "pass" : { problems: hygieneProblems },
+      canonicalUnchanged,
+      port,
+      portReleased,
+    };
+    if (canonicalUnchanged === null) {
+      result.warnings = ["No snapshot from up for this issue, so the canonical record was not diffed."];
+    }
+    if (failures.length) {
+      result.errorCode = failures[0];
+      result.failures = failures;
+      if (canonicalUnchanged === false) {
+        result.changedFields = changedCanonicalFields(session.canonicalRows, canonicalNow);
+        result.error = "The canonical Signals record changed while this QA app existed.";
+        result.next =
+          host.name === "packaged"
+            ? "Stop and tell the user. Do not run --restore-canonical against the packaged host."
+            : `Restore it with provision-signals-local-app.mjs --restore-canonical (dev host only), then rerun: ${rerun}`;
+      } else if (!hygiene.ok) {
+        result.error = `Hygiene gate failed: ${hygieneProblems.join("; ")}`;
+        result.next = `Resolve the listed problems, then rerun: ${rerun}`;
+      } else {
+        result.error = `Port ${port} still answers after the QA app was deleted.`;
+        result.next = `Find the listener with lsof -iTCP:${port} -sTCP:LISTEN, stop it if QA started it, then rerun: ${rerun}`;
+      }
+    } else {
+      rmSync(sessionPath, { force: true });
+    }
+    return result;
+  } finally {
+    release();
   }
-  return result;
 }
 
 const COMMANDS = { up, status, down };

@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { basename, delimiter, dirname, join, resolve, sep } from "node:path";
+import { basename, delimiter, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const CANONICAL_SIGNALS_APP_ID = "47e45f71-3279-42f5-8e95-731de01b6eae";
@@ -286,7 +286,7 @@ export function isCanonicalSignalsDataDir(value, home = homedir()) {
   const text = String(value ?? "").trim();
   if (!text) return false;
   if (text === "~/.signals") return true;
-  return text.startsWith(sep) && resolve(text) === resolve(home, ".signals");
+  return isAbsolute(text) && resolve(text) === resolve(home, ".signals");
 }
 
 export function realtimexDbPath(storageRoot, env = process.env) {
