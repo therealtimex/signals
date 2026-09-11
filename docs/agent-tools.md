@@ -162,13 +162,16 @@ Failed Network Snowball LinkedIn attestations live only in `snowball_candidates`
 contacts, organizations, identities, employments, or graph edges. The attestation tool writes this
 quarantine record automatically for a valid run scope. Use `list_snowball_candidates` to retrieve
 the proposed person/company context and gate reason. A later successful attestation followed by the
-normal evidence-token Auto-commit path marks the matching candidate promoted.
+normal evidence-token Auto-commit path marks the matching candidate promoted. Operators can also
+promote an unverified candidate from `/dashboard/quarantine` after confirming the LinkedIn profile;
+that dashboard path does not mint an `identityEvidenceToken` and is not available as an agent tool.
 
 The dashboard exposes this queue at `/dashboard/quarantine`. The sidebar badge counts only
 `identity_unverified` rows. Reviewers can filter the queue, inspect attempt history and source-run
-provenance, open the associated agent thread, dismiss an unverified candidate, or reopen a
-dismissed one. Promoted candidates are immutable from quarantine because their canonical contact
-and organization lifecycle is managed by the CRM surfaces.
+provenance, open the associated agent thread, dismiss an unverified candidate, reopen a dismissed
+one, or promote a confirmed identity into Contacts and Companies. Promoted candidates are immutable
+from quarantine because their canonical contact and organization lifecycle is managed by the CRM
+surfaces.
 
 `semantic_search` requires Signals running as a RealtimeX Local App with the `llm.embed` permission granted. Vectors are stored locally in SQLite; only embedding generation is delegated to RealtimeX.
 

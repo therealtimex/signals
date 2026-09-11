@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -15,6 +15,7 @@ import {
 import { WorkflowRunAgentThreadButton } from "@/app/dashboard/workflows/[id]/workflow-run-agent-thread-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -23,6 +24,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { formatCandidateTimestamp } from "./quarantine-utils";
 import type { QuarantineCandidateItem } from "./types";
 
@@ -36,9 +39,19 @@ function CandidateStatusBadge({ status }: { status: QuarantineCandidateItem["sta
   return <Badge variant="warning">Needs verification</Badge>;
 }
 
-type ReviewAction = "dismiss" | "reopen";
+type ReviewStatusAction = "dismiss" | "reopen";
 
-async function requestCandidateStatusUpdate(id: string, action: ReviewAction): Promise<void> {
+type PromotePayload = {
+  name: string;
+  title: string;
+  company: string;
+  profileUrl: string;
+};
+
+async function requestCandidateStatusUpdate(
+  id: string,
+  action: ReviewStatusAction,
+): Promise<void> {
   const response = await fetch(`/api/snowball-candidates/${id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
@@ -47,6 +60,22 @@ async function requestCandidateStatusUpdate(id: string, action: ReviewAction): P
   if (!response.ok) {
     const body = (await response.json().catch(() => ({}))) as { error?: string };
     throw new Error(body.error || "Could not update candidate");
+  }
+}
+
+async function requestCandidatePromote(id: string, payload: PromotePayload): Promise<void> {
+  const response = await fetch(`/api/snowball-candidates/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      action: "promote",
+      confirmed: true,
+      ...payload,
+    }),
+  });
+  if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error || "Could not promote candidate");
   }
 }
 
@@ -129,6 +158,8 @@ function CandidateRetryPanel({ candidate }: { candidate: QuarantineCandidateItem
       <p className="mt-1 break-words text-xs text-muted-foreground">
         Re-attestation needs a fresh, run-bound browser scope. Open the source thread to coordinate
         a new Network Snowball run, then use list_snowball_candidates before retrying this profile.
+        If you already opened the LinkedIn profile, promote it below instead of retrying the same
+        gate.
       </p>
       <div className="mt-3 flex justify-start">
         <WorkflowRunAgentThreadButton
@@ -137,6 +168,94 @@ function CandidateRetryPanel({ candidate }: { candidate: QuarantineCandidateItem
           agentThread={candidate.agentThread}
         />
       </div>
+    </section>
+  );
+}
+
+export function CandidatePromoteFields({
+  name,
+  title,
+  company,
+  profileUrl,
+  confirmed,
+  disabled,
+  onNameChange,
+  onTitleChange,
+  onCompanyChange,
+  onProfileUrlChange,
+  onConfirmedChange,
+}: {
+  name: string;
+  title: string;
+  company: string;
+  profileUrl: string;
+  confirmed: boolean;
+  disabled?: boolean;
+  onNameChange: (value: string) => void;
+  onTitleChange: (value: string) => void;
+  onCompanyChange: (value: string) => void;
+  onProfileUrlChange: (value: string) => void;
+  onConfirmedChange: (value: boolean) => void;
+}) {
+  return (
+    <section className="space-y-4 rounded-lg border p-4" data-testid="quarantine-promote-fields">
+      <div>
+        <h3 className="text-sm font-medium">Promote to contacts and companies</h3>
+        <p className="mt-1 text-xs text-muted-foreground">
+          This writes canonical CRM records from your review. It does not mint LinkedIn identity
+          evidence for agents.
+        </p>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="space-y-1.5 sm:col-span-2">
+          <Label htmlFor="quarantine-promote-name">Name</Label>
+          <Input
+            id="quarantine-promote-name"
+            value={name}
+            disabled={disabled}
+            onChange={(event) => onNameChange(event.target.value)}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="quarantine-promote-title">Title</Label>
+          <Input
+            id="quarantine-promote-title"
+            value={title}
+            disabled={disabled}
+            onChange={(event) => onTitleChange(event.target.value)}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="quarantine-promote-company">Company</Label>
+          <Input
+            id="quarantine-promote-company"
+            value={company}
+            disabled={disabled}
+            onChange={(event) => onCompanyChange(event.target.value)}
+          />
+        </div>
+        <div className="space-y-1.5 sm:col-span-2">
+          <Label htmlFor="quarantine-promote-url">LinkedIn URL</Label>
+          <Input
+            id="quarantine-promote-url"
+            value={profileUrl}
+            disabled={disabled}
+            onChange={(event) => onProfileUrlChange(event.target.value)}
+          />
+        </div>
+      </div>
+      <Label htmlFor="quarantine-promote-confirm" className="items-start">
+        <Checkbox
+          id="quarantine-promote-confirm"
+          checked={confirmed}
+          disabled={disabled}
+          onCheckedChange={(checked) => onConfirmedChange(checked === true)}
+          className="mt-0.5"
+        />
+        <span className="text-sm font-normal leading-5">
+          I opened this LinkedIn profile and confirm this identity
+        </span>
+      </Label>
     </section>
   );
 }
@@ -197,11 +316,17 @@ function CandidateReviewError({ message }: { message: string | null }) {
 function CandidateReviewFooter({
   candidate,
   updating,
-  onUpdate,
+  canPromote,
+  onDismiss,
+  onReopen,
+  onPromote,
 }: {
   candidate: QuarantineCandidateItem;
   updating: boolean;
-  onUpdate: (action: ReviewAction) => void;
+  canPromote: boolean;
+  onDismiss: () => void;
+  onReopen: () => void;
+  onPromote: () => void;
 }) {
   return (
     <DialogFooter className="sm:justify-between">
@@ -210,12 +335,21 @@ function CandidateReviewFooter({
       </p>
       <div className="flex flex-col-reverse gap-2 sm:flex-row">
         {candidate.status === "identity_unverified" ? (
-          <Button variant="outline" disabled={updating} onClick={() => onUpdate("dismiss")}>
-            Dismiss candidate
-          </Button>
+          <>
+            <Button variant="outline" disabled={updating} onClick={onDismiss}>
+              Dismiss candidate
+            </Button>
+            <Button
+              data-testid="quarantine-promote-submit"
+              disabled={updating || !canPromote}
+              onClick={onPromote}
+            >
+              Promote to contact
+            </Button>
+          </>
         ) : null}
         {candidate.status === "dismissed" ? (
-          <Button disabled={updating} onClick={() => onUpdate("reopen")}>
+          <Button disabled={updating} onClick={onReopen}>
             <RotateCcw /> Reopen for verification
           </Button>
         ) : null}
@@ -236,14 +370,35 @@ export function CandidateReviewDialog({
   const router = useRouter();
   const [updating, setUpdating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [name, setName] = useState("");
+  const [title, setTitle] = useState("");
+  const [company, setCompany] = useState("");
+  const [profileUrl, setProfileUrl] = useState("");
+  const [confirmed, setConfirmed] = useState(false);
+
+  const candidateId = candidate?.id;
+  const proposedName = candidate?.proposedName ?? "";
+  const proposedTitle = candidate?.proposedTitle ?? "";
+  const proposedCompany = candidate?.proposedCompany ?? "";
+  const proposedProfileUrl = candidate?.profileUrl ?? "";
+
+  useEffect(() => {
+    if (!candidateId) return;
+    setName(proposedName);
+    setTitle(proposedTitle);
+    setCompany(proposedCompany);
+    setProfileUrl(proposedProfileUrl);
+    setConfirmed(false);
+    setError(null);
+  }, [candidateId, proposedName, proposedTitle, proposedCompany, proposedProfileUrl]);
 
   if (!candidate) return null;
 
-  async function updateStatus(id: string, action: ReviewAction) {
+  async function runUpdate(work: () => Promise<void>) {
     setUpdating(true);
     setError(null);
     try {
-      await requestCandidateStatusUpdate(id, action);
+      await work();
       onOpenChange(false);
       router.refresh();
     } catch (caught) {
@@ -253,19 +408,44 @@ export function CandidateReviewDialog({
     }
   }
 
+  const canPromote = confirmed && name.trim().length > 0 && profileUrl.trim().length > 0;
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] overflow-x-hidden overflow-y-auto sm:max-w-2xl">
         <CandidateDialogHeader candidate={candidate} />
         <CandidateIdentityContext candidate={candidate} />
         <CandidateRetryPanel candidate={candidate} />
+        {candidate.status === "identity_unverified" ? (
+          <CandidatePromoteFields
+            name={name}
+            title={title}
+            company={company}
+            profileUrl={profileUrl}
+            confirmed={confirmed}
+            disabled={updating}
+            onNameChange={setName}
+            onTitleChange={setTitle}
+            onCompanyChange={setCompany}
+            onProfileUrlChange={setProfileUrl}
+            onConfirmedChange={setConfirmed}
+          />
+        ) : null}
         <CandidateAttemptHistory candidate={candidate} />
         <CandidatePromotionPanel candidate={candidate} />
         <CandidateReviewError message={error} />
         <CandidateReviewFooter
           candidate={candidate}
           updating={updating}
-          onUpdate={(action) => void updateStatus(candidate.id, action)}
+          canPromote={canPromote}
+          onDismiss={() => void runUpdate(() => requestCandidateStatusUpdate(candidate.id, "dismiss"))}
+          onReopen={() => void runUpdate(() => requestCandidateStatusUpdate(candidate.id, "reopen"))}
+          onPromote={() => void runUpdate(() => requestCandidatePromote(candidate.id, {
+            name: name.trim(),
+            title,
+            company,
+            profileUrl: profileUrl.trim(),
+          }))}
         />
       </DialogContent>
     </Dialog>

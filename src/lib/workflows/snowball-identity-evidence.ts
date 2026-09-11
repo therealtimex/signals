@@ -29,6 +29,8 @@ export const SNOWBALL_IDENTITY_EVIDENCE_RESULT_KEY =
   "_snowballIdentityEvidence";
 export const SNOWBALL_IDENTITY_PLATFORM_DATA_KEY =
   "signalsIdentityEvidence";
+export const SNOWBALL_HUMAN_QUARANTINE_PROMOTION_KEY =
+  "signalsHumanQuarantinePromotion";
 
 const EVIDENCE_TTL_SECONDS = 15 * 60;
 const MAX_EVIDENCE_RECORDS = 100;
@@ -265,7 +267,7 @@ function corroboratingSignalMatches(signal: string, observedText: string): boole
   );
 }
 
-function canonicalLinkedInProfile(rawUrl: string): {
+export function canonicalLinkedInProfile(rawUrl: string): {
   platformUserId: string;
   platformHandle: string;
   platformUrl: string;
@@ -968,6 +970,40 @@ export function snowballEvidencePlatformData(
   };
 }
 
+export type SnowballHumanQuarantinePromotion = {
+  version: 1;
+  candidateId: string;
+  workflowRunId: string;
+  failureReason: string;
+  attemptCount: number;
+  promotedAt: number;
+  confirmedName: string;
+  profileUrl: string;
+};
+
+export function humanQuarantinePromotionPlatformData(
+  promotion: SnowballHumanQuarantinePromotion,
+  callerData?: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    ...(callerData ?? {}),
+    [SNOWBALL_HUMAN_QUARANTINE_PROMOTION_KEY]: promotion,
+  };
+}
+
+export function isHumanQuarantinePromotionForRun(
+  platformData: Record<string, unknown>,
+  workflowRunId: string,
+): boolean {
+  const marker = platformData[SNOWBALL_HUMAN_QUARANTINE_PROMOTION_KEY];
+  if (!marker || typeof marker !== "object" || Array.isArray(marker)) return false;
+  const value = marker as Record<string, unknown>;
+  return value.version === 1 &&
+    value.workflowRunId === workflowRunId &&
+    typeof value.candidateId === "string" &&
+    value.candidateId.length > 0;
+}
+
 function sanitizeAttestedLinkedInAvatarUrl(
   avatarUrl: string | null | undefined,
   sessionViewerAvatarUrl?: string | null,
@@ -1088,7 +1124,8 @@ export function auditSnowballLinkedInIdentityEvidence(
         record.platformUrl === identity.platformUrl &&
         markerObject?.workflowRunId === run.id,
       );
-      if (valid) {
+      const humanPromoted = isHumanQuarantinePromotionForRun(platformData, run.id);
+      if (valid || humanPromoted) {
         validAttestedIdentity = true;
       } else if (!requiresAttestedContact) {
         errors.push(`snowball_linkedin_identity_evidence_missing:${identity.id}`);
