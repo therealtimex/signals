@@ -4,7 +4,7 @@
  * Usage: node scripts/test-standalone-artifact.mjs [path-to-tar.gz]
  */
 import { createHash } from "node:crypto";
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -13,7 +13,6 @@ import {
   rmSync,
   statSync,
 } from "node:fs";
-import { createRequire } from "node:module";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -255,19 +254,55 @@ try {
   process.exitCode = 1;
 } finally {
   await stopChild(child);
-  rmSync(tempRoot, { recursive: true, force: true });
+  await removeTempRoot(tempRoot);
 }
 
 function countWorkflowTemplates(runtimeDir, dbPath) {
   if (!existsSync(dbPath)) return 0;
-  // Read through the runtime's own better-sqlite3, the binding the artifact ships.
-  const Database = createRequire(path.join(runtimeDir, "server.js"))("better-sqlite3");
-  const db = new Database(dbPath, { readonly: true, fileMustExist: true });
-  try {
-    return db.prepare("SELECT count(*) AS n FROM workflow_templates").get().n;
-  } finally {
-    db.close();
+  // Read through the runtime's own better-sqlite3 in a short-lived process.
+  // Loading that native addon in *this* process leaves better_sqlite3.node
+  // mapped, and Windows then fails cleanup with EPERM unlink.
+  const result = spawnSync(
+    process.execPath,
+    [
+      "-e",
+      `const Database = require("better-sqlite3");
+const db = new Database(process.argv[1], { readonly: true, fileMustExist: true });
+try {
+  process.stdout.write(String(db.prepare("SELECT count(*) AS n FROM workflow_templates").get().n));
+} finally {
+  db.close();
+}`,
+      dbPath,
+    ],
+    { cwd: runtimeDir, encoding: "utf8", windowsHide: true },
+  );
+  if (result.status !== 0) {
+    throw new Error(
+      `Failed to count seeded templates: ${(result.stderr || result.stdout || "").trim() || `exit ${result.status}`}`,
+    );
   }
+  const n = Number.parseInt(result.stdout.trim(), 10);
+  if (!Number.isFinite(n)) {
+    throw new Error(`Failed to count seeded templates: ${JSON.stringify(result.stdout)}`);
+  }
+  return n;
+}
+
+async function removeTempRoot(dir) {
+  const attempts = process.platform === "win32" ? 8 : 1;
+  let lastError;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      return;
+    } catch (error) {
+      lastError = error;
+      if (process.platform !== "win32") throw error;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+  }
+  throw lastError;
 }
 
 async function waitForLog(readLogs, needle, timeoutMs = 5_000) {
