@@ -484,13 +484,18 @@ console.log(JSON.stringify({ meta: { source: "mock" }, results }));
   );
 
   // Another live up or down for the issue holds its lock; up refuses and leaves the lock alone.
+  // Fields in the holder's record cannot overwrite the path and reason this run reports.
   resetMockState();
   const busyIssue = nextIssue();
-  writeFileSync(lockPath(busyIssue), JSON.stringify({ pid: process.pid, action: "up" }));
+  writeFileSync(
+    lockPath(busyIssue),
+    JSON.stringify({ pid: process.pid, action: "up", path: "/elsewhere", reason: "contended" }),
+  );
   const busy = await run(["up", ...common(busyIssue), "--worktree", worktree]);
   assert.equal(busy.json.errorCode, "QA_LOCKED");
   assert.equal(busy.json.lock.pid, process.pid);
   assert.equal(busy.json.lock.reason, "held");
+  assert.equal(busy.json.lock.path, lockPath(busyIssue));
   assert.equal(existsSync(lockPath(busyIssue)), true);
   assert.equal(mockApps().length, 1);
   rmSync(lockPath(busyIssue), { force: true });
