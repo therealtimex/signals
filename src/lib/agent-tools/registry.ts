@@ -254,7 +254,7 @@ export const AGENT_TOOLS: Record<string, AgentToolDefinition> = {
   list_snowball_candidates: {
     name: "list_snowball_candidates",
     description:
-      "List quarantined Network Snowball contact/company candidates. identity_unverified rows are discovery leads that failed the server identity gate and are excluded from canonical contacts, organizations, graph edges, scoring, and outbound messaging until a later attestation and Auto-commit promotes them.",
+      "List quarantined Network Snowball contact/company candidates. identity_unverified rows are discovery leads that failed the server identity gate and are excluded from canonical contacts, organizations, graph edges, scoring, and outbound messaging until a later attestation Auto-commit or a human quarantine promote writes them.",
     category: "contacts",
     schema: listSnowballCandidatesSchema,
     parameters: zodToParameters(listSnowballCandidatesSchema),

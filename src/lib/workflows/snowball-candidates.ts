@@ -287,6 +287,83 @@ export function updateSnowballCandidateReviewStatus(
   return getSnowballCandidate(id);
 }
 
+function applySnowballCandidatePromotion(
+  id: string,
+  input: {
+    contactId: string;
+    identityId: string;
+    orgId?: string | null;
+    now: number;
+  },
+): void {
+  db.update(snowballCandidates).set({
+    status: "promoted",
+    promotedContactId: input.contactId,
+    promotedIdentityId: input.identityId,
+    promotedOrgId: input.orgId ?? null,
+    promotedAt: input.now,
+    updatedAt: input.now,
+  }).where(and(
+    eq(snowballCandidates.id, id),
+    eq(snowballCandidates.status, "identity_unverified"),
+  )).run();
+}
+
+export function markSnowballCandidatePromoted(
+  id: string,
+  input: {
+    contactId: string;
+    identityId: string;
+    orgId?: string | null;
+    now?: number;
+  },
+): SnowballCandidateView | undefined {
+  const candidate = db.select().from(snowballCandidates)
+    .where(eq(snowballCandidates.id, id))
+    .get();
+  if (!candidate) return undefined;
+  if (candidate.status === "promoted") {
+    return serializeSnowballCandidate(candidate);
+  }
+  if (candidate.status !== "identity_unverified") {
+    throw new SnowballCandidateTransitionError(
+      "Only unverified candidates can be promoted from quarantine.",
+    );
+  }
+  applySnowballCandidatePromotion(id, {
+    ...input,
+    now: input.now ?? Math.floor(Date.now() / 1_000),
+  });
+  return getSnowballCandidate(id);
+}
+
+export function markUnverifiedSnowballCandidatesPromotedByProfile(input: {
+  profileUrl: string;
+  contactId: string;
+  identityId: string;
+  orgId?: string | null;
+  now?: number;
+}): string[] {
+  const profile = normalizeSnowballCandidateProfile(input.profileUrl);
+  if (!profile) return [];
+  const matches = db.select().from(snowballCandidates).where(and(
+    eq(snowballCandidates.platform, "linkedin"),
+    eq(snowballCandidates.profileKey, profile.profileKey),
+    eq(snowballCandidates.status, "identity_unverified"),
+  )).all();
+  if (matches.length === 0) return [];
+  const now = input.now ?? Math.floor(Date.now() / 1_000);
+  for (const candidate of matches) {
+    applySnowballCandidatePromotion(candidate.id, {
+      contactId: input.contactId,
+      identityId: input.identityId,
+      orgId: input.orgId,
+      now,
+    });
+  }
+  return matches.map((candidate) => candidate.id);
+}
+
 export function summarizeSnowballCandidates(workflowRunId: string): {
   total: number;
   awaitingVerification: number;

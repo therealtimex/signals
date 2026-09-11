@@ -25,6 +25,22 @@ describe("creation source filters", () => {
         createdAt: 1_700_000_000,
       }),
     ).toMatch(/^Added manually · /);
+    expect(
+      formatContactSourceLine({
+        createdSource: "manual",
+        createdSourceDetail: "manual:snowball_quarantine",
+        createdWorkflowRunId: "abcdefghijklmnop",
+        createdAt: 1_700_000_000,
+      }),
+    ).toContain("Promoted from quarantine");
+    expect(
+      formatContactSourceLine({
+        createdSource: "manual",
+        createdSourceDetail: "manual:snowball_quarantine",
+        createdWorkflowRunId: "abcdefghijklmnop",
+        createdAt: 1_700_000_000,
+      }),
+    ).toContain("run abcdefgh");
   });
 
   it("formats import source lines with run fragment", () => {

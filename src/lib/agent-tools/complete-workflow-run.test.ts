@@ -17,6 +17,7 @@ import {
   getSessionLeaseById,
 } from "@/lib/leases/session-lease";
 import { recordSnowballCandidateFailure } from "@/lib/workflows/snowball-candidates";
+import { promoteSnowballCandidate } from "@/lib/workflows/snowball-candidate-promote";
 
 const mockWorkflowCompletedEvent: workflowEvents.EmitWorkflowCompletedResult = {
   emitted: true,
@@ -634,6 +635,50 @@ describe("complete_workflow_run terminal teardown", () => {
       identityEvidenceAudit: {
         passed: false,
         auditedIdentityIds: [],
+      },
+    });
+  });
+
+  it("completes LinkedIn Snowball when the cohort contact was human-promoted from quarantine", async () => {
+    const { run } = createSnowballRunWithTarget();
+    const candidate = recordSnowballCandidateFailure({
+      run,
+      candidateName: "Jane Doe",
+      candidateCompany: "Acme",
+      candidateTitle: "Founder",
+      profileUrl: "https://www.linkedin.com/in/jane-doe/",
+      reason: "profile_name_missing",
+      message: "No visible profile name",
+    })!;
+    const promoted = promoteSnowballCandidate(candidate.id, { confirmed: true });
+
+    vi.spyOn(workflowEvents, "emitWorkflowCompletedEvent").mockResolvedValue(
+      mockWorkflowCompletedEvent,
+    );
+    vi.spyOn(workflowCompletionThread, "postWorkflowCompletionThreadMessage").mockResolvedValue({
+      posted: true,
+    });
+    vi.spyOn(resourceTeardown, "stopRunningRtxBrowserSessions").mockResolvedValue({
+      stopped: [],
+      failed: [],
+    });
+    vi.spyOn(resourceTeardown, "scheduleWorkflowTerminalSessionRelease").mockReturnValue({
+      scheduled: true,
+      sessionId: null,
+    });
+
+    const result = await handleCompleteWorkflowRun({
+      runId: run.id,
+      status: "completed",
+      createdContactIds: [promoted.promotedContactId!],
+    });
+    if (!result.success) throw new Error(result.error);
+
+    expect(result.status).toBe("completed");
+    expect(JSON.parse(getWorkflowRun(run.id)!.result ?? "{}")).toMatchObject({
+      identityEvidenceAudit: {
+        passed: true,
+        auditedIdentityIds: [promoted.promotedIdentityId],
       },
     });
   });

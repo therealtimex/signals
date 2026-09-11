@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import { invokeAgentTool } from "@/lib/agent-tools/invoke";
 import { AgentToolError } from "@/lib/agent-tools/types";
 import { handleAttestSnowballLinkedInIdentity } from "@/lib/agent-tools/handlers";
 import { PATCH as updateCandidateRoute } from "@/app/api/snowball-candidates/[id]/route";
@@ -9,8 +10,10 @@ import {
   contacts,
   orgs,
 } from "@/lib/db/schema";
-import { createContact } from "@/lib/db/queries/contacts";
+import { createContact, getContactById } from "@/lib/db/queries/contacts";
 import { createIdentity } from "@/lib/db/queries/identities";
+import { createOrgIdentity } from "@/lib/db/queries/org-identities";
+import { createOrg } from "@/lib/db/queries/orgs";
 import { createTemplate } from "@/lib/db/queries/workflow-templates";
 import {
   createWorkflowRun,
@@ -20,7 +23,9 @@ import {
 import { resetCoreTables } from "@/test/db";
 import {
   SNOWBALL_IDENTITY_SCOPE_TOKEN_CONFIG_KEY,
+  SNOWBALL_HUMAN_QUARANTINE_PROMOTION_KEY,
   SnowballIdentityEvidenceError,
+  auditSnowballLinkedInIdentityEvidence,
   mintSnowballIdentityScopeToken,
 } from "@/lib/workflows/snowball-identity-evidence";
 import {
@@ -37,6 +42,10 @@ import {
   summarizeSnowballCandidates,
   updateSnowballCandidateReviewStatus,
 } from "@/lib/workflows/snowball-candidates";
+import {
+  promoteSnowballCandidate,
+  SnowballCandidatePromoteError,
+} from "@/lib/workflows/snowball-candidate-promote";
 
 function createScopedSnowballRun() {
   const config = buildNetworkSnowballRunConfig(readNetworkSnowballConfig({
@@ -287,5 +296,174 @@ describe("Snowball candidate quarantine", () => {
     });
     expect(() => updateSnowballCandidateReviewStatus(ids[0], "dismissed"))
       .toThrow(SnowballCandidateTransitionError);
+  });
+});
+
+describe("Snowball candidate human promote", () => {
+  beforeEach(() => {
+    resetCoreTables();
+  });
+
+  it("promotes an unverified candidate into canonical contact, identity, and company records", () => {
+    const { run } = createScopedSnowballRun();
+    const candidate = recordSnowballCandidateFailure({
+      run,
+      candidateName: "Jane Doe",
+      candidateCompany: "Acme",
+      candidateTitle: "Founder",
+      profileUrl: "https://www.linkedin.com/in/jane-doe/?trk=search",
+      reason: "profile_name_missing",
+      message: "No visible profile name was found in the LinkedIn top card.",
+    })!;
+
+    const promoted = promoteSnowballCandidate(candidate.id, {
+      confirmed: true,
+      now: 400,
+    });
+
+    expect(promoted).toMatchObject({
+      status: "promoted",
+      proposedName: "Jane Doe",
+      promotedAt: 400,
+    });
+    const contact = getContactById(promoted.promotedContactId!)!;
+    expect(contact).toMatchObject({
+      name: "Jane Doe",
+      company: "Acme",
+      title: "Founder",
+      createdSource: "manual",
+      createdSourceDetail: "manual:snowball_quarantine",
+      createdWorkflowRunId: run.id,
+      createdTemplateId: run.templateId,
+    });
+    expect(contact.identities).toEqual([
+      expect.objectContaining({
+        platform: "linkedin",
+        platformUserId: "jane-doe",
+        platformUrl: "https://www.linkedin.com/in/jane-doe/",
+      }),
+    ]);
+    const platformData = JSON.parse(contact.identities[0].platformData ?? "{}");
+    expect(platformData[SNOWBALL_HUMAN_QUARANTINE_PROMOTION_KEY]).toMatchObject({
+      version: 1,
+      candidateId: candidate.id,
+      workflowRunId: run.id,
+      failureReason: "profile_name_missing",
+    });
+    expect(platformData.signalsIdentityEvidence).toBeUndefined();
+    expect(JSON.parse(getWorkflowRun(run.id)?.result ?? "{}")._snowballIdentityEvidence ?? [])
+      .toEqual([]);
+    expect(contact.currentEmployment?.orgId).toBe(promoted.promotedOrgId);
+    expect(db.select().from(orgs).all()).toHaveLength(1);
+    expect(auditSnowballLinkedInIdentityEvidence(getWorkflowRun(run.id)!, [contact.id])).toEqual({
+      errors: [],
+      auditedIdentityIds: [contact.identities[0].id],
+    });
+  });
+
+  it("reuses an existing LinkedIn contact instead of creating a duplicate", () => {
+    const { run } = createScopedSnowballRun();
+    const existing = createContact({ name: "Jane Existing" }, "manual:create_contact");
+    const identity = createIdentity({
+      contactId: existing.id,
+      platform: "linkedin",
+      platformUserId: "jane-doe",
+      platformHandle: "jane-doe",
+      platformUrl: "https://www.linkedin.com/in/jane-doe/",
+    });
+    const candidate = recordSnowballCandidateFailure({
+      run,
+      candidateName: "Jane Doe",
+      candidateCompany: "Acme",
+      profileUrl: "https://www.linkedin.com/in/jane-doe/",
+      reason: "profile_corroboration_missing",
+      message: "Company was not visible",
+    })!;
+
+    const promoted = promoteSnowballCandidate(candidate.id, { confirmed: true });
+    expect(promoted.promotedContactId).toBe(existing.id);
+    expect(promoted.promotedIdentityId).toBe(identity.id);
+    expect(db.select().from(contacts).all()).toHaveLength(1);
+  });
+
+  it("rejects dismissed rows, missing confirmation, invalid URLs, and org-held LinkedIn identities", async () => {
+    const { run } = createScopedSnowballRun();
+    const candidate = recordSnowballCandidateFailure({
+      run,
+      candidateName: "Jane Doe",
+      profileUrl: "https://www.linkedin.com/in/jane-doe/",
+      reason: "profile_name_missing",
+      message: "No visible profile name",
+    })!;
+
+    updateSnowballCandidateReviewStatus(candidate.id, "dismissed");
+    expect(() => promoteSnowballCandidate(candidate.id, { confirmed: true }))
+      .toThrow(SnowballCandidateTransitionError);
+    updateSnowballCandidateReviewStatus(candidate.id, "identity_unverified");
+
+    const unconfirmed = await updateCandidateRoute(new Request("http://signals.local", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "promote" }),
+    }), { params: Promise.resolve({ id: candidate.id }) });
+    expect(unconfirmed.status).toBe(400);
+
+    expect(() => promoteSnowballCandidate(candidate.id, {
+      confirmed: true,
+      profileUrl: "https://example.com/jane",
+    })).toThrow(SnowballCandidatePromoteError);
+
+    const org = createOrg({ name: "Acme Org" });
+    createOrgIdentity({
+      orgId: org.id,
+      platform: "linkedin",
+      platformUserId: "jane-doe",
+      platformHandle: "jane-doe",
+      platformUrl: "https://www.linkedin.com/in/jane-doe/",
+    });
+    expect(() => promoteSnowballCandidate(candidate.id, { confirmed: true }))
+      .toThrow(/organization/i);
+    expect(db.select().from(contacts).all()).toHaveLength(0);
+  });
+
+  it("keeps agent create_contact fail-closed while the dashboard promote path works", async () => {
+    const { run } = createScopedSnowballRun();
+    const candidate = recordSnowballCandidateFailure({
+      run,
+      candidateName: "Jane Doe",
+      candidateCompany: "Acme",
+      candidateTitle: "Founder",
+      profileUrl: "https://www.linkedin.com/in/jane-doe/",
+      reason: "profile_name_missing",
+      message: "No visible profile name",
+    })!;
+
+    await expect(invokeAgentTool("create_contact", {
+      name: "Jane Doe",
+      company: "Acme",
+      title: "Founder",
+      platform: "linkedin",
+      platformUserId: "jane-doe",
+      workflowRunId: run.id,
+      templateId: run.templateId,
+    })).rejects.toMatchObject({
+      details: { reason: "linkedin_identity_evidence_required" },
+    });
+
+    const response = await updateCandidateRoute(new Request("http://signals.local", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "promote",
+        confirmed: true,
+        name: "Jane Doe",
+        company: "Acme",
+        title: "Founder",
+        profileUrl: "https://www.linkedin.com/in/jane-doe/",
+      }),
+    }), { params: Promise.resolve({ id: candidate.id }) });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ status: "promoted" });
+    expect(db.select().from(contacts).all()).toHaveLength(1);
   });
 });

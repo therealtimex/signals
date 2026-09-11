@@ -10,6 +10,7 @@ export type CreatedSource = (typeof CREATED_SOURCES)[number];
 export const CREATION_TAGS = {
   "manual:create_contact": "manual",
   "manual:create_org": "manual",
+  "manual:snowball_quarantine": "manual",
   "api:create_contact": "api",
   "api:create_org": "api",
   "agent:create_contact": "agent",
@@ -28,6 +29,7 @@ export type CreationTag = keyof typeof CREATION_TAGS;
 export const CREATION_TAG_LABELS: Record<CreationTag, string> = {
   "manual:create_contact": "Added manually",
   "manual:create_org": "Added manually",
+  "manual:snowball_quarantine": "Promoted from quarantine",
   "api:create_contact": "Created via API",
   "api:create_org": "Created via API",
   "agent:create_contact": "Agent (create_contact)",
@@ -147,6 +149,9 @@ export function formatContactSourceLine(input: {
 
   switch (input.createdSource) {
     case "manual":
+      if (input.createdSourceDetail === "manual:snowball_quarantine") {
+        return `Promoted from quarantine${runFragment} · ${date}`;
+      }
       return `Added manually · ${date}`;
     case "agent": {
       if (input.createdTemplateName) {

@@ -58,6 +58,7 @@ export type ContactListFilterState = {
 /** Contact-relevant creation tags for provenance filtering (subset of CREATION_TAGS). */
 export const CONTACT_CREATION_DETAIL_TAGS: CreationTag[] = [
   "manual:create_contact",
+  "manual:snowball_quarantine",
   "api:create_contact",
   "agent:create_contact",
   "import:x_archive",

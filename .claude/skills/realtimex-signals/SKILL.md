@@ -175,12 +175,14 @@ profile URL, seed/run provenance, and failure reason in quarantine. Do not creat
 organization as a fallback. Use `list_snowball_candidates` to retrieve `identity_unverified`
 candidates for a later enrichment or re-attestation run. They remain excluded from contact/org
 queries, graph traversal, scoring, and outbound actions until successful evidence-token
-Auto-commit promotes them.
+Auto-commit or a human quarantine promote writes them.
 
 Operators can review the same queue under **Signals → Quarantine**. The page filters by review
 status, gate failure, source run, person, and company; its review modal links back to the source
 workflow and agent thread. Dismissing a candidate is reversible and does not create or remove a
-canonical CRM record. Re-attestation still requires a fresh run-bound browser scope.
+canonical CRM record. Promoting a candidate requires the operator to confirm they opened the
+LinkedIn profile; that path is dashboard-only. Re-attestation still requires a fresh run-bound
+browser scope. Do not call `create_contact` as a quarantine fallback.
 
 ## Contact avatars
 

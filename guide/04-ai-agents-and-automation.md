@@ -109,7 +109,7 @@ Each step shows its timestamp and duration. You can trace the agent's entire dec
 
 ### Candidate Quarantine
 
-Network Snowball preserves LinkedIn discoveries that fail the identity-evidence gate without adding them to Contacts or Companies. Open **Quarantine** in the sidebar to review the proposed person, company and role, gate failure, attempt history, seed, source workflow run, and agent thread. You can dismiss a candidate without deleting its audit trail, or reopen it for a future verification attempt. A candidate joins the CRM only after a fresh authenticated-browser attestation succeeds.
+Network Snowball preserves LinkedIn discoveries that fail the identity-evidence gate without adding them to Contacts or Companies. Open **Quarantine** in the sidebar to review the proposed person, company and role, gate failure, attempt history, seed, source workflow run, and agent thread. You can dismiss a candidate without deleting its audit trail, reopen it for a future verification attempt, or promote it after you open the LinkedIn profile and confirm the identity. Agents still cannot write a fallback contact; a candidate joins the CRM through a successful authenticated-browser attestation or this human promote path.
 
 ### Timeline vs. Graph View
 
