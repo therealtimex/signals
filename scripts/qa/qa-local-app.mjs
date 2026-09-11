@@ -49,6 +49,8 @@ const LIST_ARGS = ["list-local-apps", "--data-source", "live", "--no-cache"];
 const DEFAULT_TIMEOUT_MS = 240_000;
 const STOPPED_GRACE_MS = 15_000;
 const PORT_RELEASE_MS = 20_000;
+// RealTimeX holds its permission dialog open for 120 s; allow a little beyond that.
+const PERMISSION_WAIT_MS = 150_000;
 const FAILED_STATUSES = new Set(["error", "crashed", "failed"]);
 
 class QaError extends Error {
@@ -62,13 +64,17 @@ class QaError extends Error {
 function usage() {
   return `Usage:
   node scripts/qa/qa-local-app.mjs up --issue <N> [--worktree <path>] [--loop-id <id>] \\
-    [--workspace-slug signals-issue-<N>-<suffix>] [--host packaged|dev] [--timeout-ms 240000]
+    [--workspace-slug signals-issue-<N>-<suffix>] [--host packaged|dev] [--timeout-ms 240000] \\
+    [--needs llm.chat,desktop.runtime-sessions]
   node scripts/qa/qa-local-app.mjs status --issue <N>
   node scripts/qa/qa-local-app.mjs down --issue <N> [--keep-data]
 
 up      Provisions "Signals issue-<N> QA" for the worktree (default: the current directory) and
         waits until it answers /api/health. Rerunning it for the same worktree reuses the app.
-status  Reports whether the issue's QA app exists, runs, and answers.
+        It prints the app's RealTimeX permissions: granted, denied, and pending.
+        --needs waits for the user to grant the named permissions in RealTimeX's dialog and
+        fails with PERMISSIONS_MISSING if any is not granted. Agents cannot grant them.
+status  Reports whether the issue's QA app exists, runs, answers, and what it may do.
 down    Deletes the QA app, runs the hygiene gate, diffs the canonical Signals record against the
         snapshot taken by up, and checks the QA port was released.
 
@@ -111,7 +117,7 @@ function shellQuote(value) {
 // Recovery commands repeat everything that decided what the failing run touched: the host, the
 // CLI (the dev host's default CLI cannot authenticate), the database, and --keep-data, whose
 // absence on a rerun would delete the data the first run preserved.
-function followUp(action, issueId, { host, cli = "", db = "", keepData = false }) {
+function followUp(action, issueId, { host, cli = "", db = "", keepData = false, needs = [] }) {
   return [
     "node",
     shellQuote(SELF),
@@ -123,7 +129,92 @@ function followUp(action, issueId, { host, cli = "", db = "", keepData = false }
     ...(cli ? ["--cli", shellQuote(cli)] : []),
     ...(db ? ["--db", shellQuote(db)] : []),
     ...(keepData ? ["--keep-data"] : []),
+    ...(needs.length ? ["--needs", needs.join(",")] : []),
   ].join(" ");
+}
+
+// The permissions this Signals build asks RealTimeX for, from the worktree's rtx-manifest.json.
+function requestedPermissions(worktree) {
+  try {
+    const manifest = JSON.parse(readFileSync(join(worktree, "rtx-manifest.json"), "utf8"));
+    return Array.isArray(manifest.permissions) ? manifest.permissions : [];
+  } catch {
+    return [];
+  }
+}
+
+function parseNeeds(flags, worktree) {
+  const needs = [
+    ...new Set(
+      String(flags.get("needs") || "")
+        .split(",")
+        .map((permission) => permission.trim())
+        .filter(Boolean),
+    ),
+  ];
+  const requested = requestedPermissions(worktree);
+  if (needs.length && !requested.length) {
+    throw new QaError(
+      "USAGE",
+      `--needs cannot be checked: ${join(worktree, "rtx-manifest.json")} lists no permissions.`,
+      { next: "Run up without --needs; its output lists the permissions the app has." },
+    );
+  }
+  const unknown = needs.filter((permission) => !requested.includes(permission));
+  if (unknown.length) {
+    throw new QaError(
+      "USAGE",
+      `--needs names permissions this Signals build does not request: ${unknown.join(", ")}. ` +
+        `It requests: ${requested.join(", ")}.`,
+      { next: `Rerun with --needs taken from: ${requested.join(", ")}.` },
+    );
+  }
+  return needs;
+}
+
+// RealTimeX shows the user a permission dialog when a Local App registers and records the answer
+// in local_apps.metadata, as it does for edits in Settings → Local Apps. The CLI does not expose
+// those decisions, so they are read from the database, read-only.
+function appPermissions(dbPath, appId, worktree) {
+  const rows = queryRealtimexDb(
+    dbPath,
+    `select metadata from local_apps where id = '${String(appId).replace(/'/g, "''")}';`,
+  );
+  if (!rows.length) {
+    throw new QaError("APP_NOT_IN_DB", `${dbPath} has no local_apps row for app ${appId}.`, {
+      next: "Pass --db for the RealTimeX host this app runs on.",
+    });
+  }
+  let decided = {};
+  try {
+    decided = JSON.parse(rows[0].metadata || "{}")?.permissions || {};
+  } catch {
+    decided = {};
+  }
+  const granted = Array.isArray(decided.granted) ? decided.granted : [];
+  const denied = Array.isArray(decided.denied) ? decided.denied : [];
+  const pending = requestedPermissions(worktree).filter(
+    (permission) => !granted.includes(permission) && !denied.includes(permission),
+  );
+  return { granted, denied, pending, lastPromptedAt: decided.lastPromptedAt ?? null };
+}
+
+// Only the user can grant, so up waits for their decision on the dialog (RealTimeX holds it open
+// for two minutes) and stops early once a needed permission is denied.
+async function waitForNeeds(dbPath, appId, worktree, needs, pollMs) {
+  const deadline =
+    Date.now() + positiveInt(process.env.SIGNALS_QA_PERMISSION_WAIT_MS, PERMISSION_WAIT_MS);
+  for (;;) {
+    const permissions = appPermissions(dbPath, appId, worktree);
+    const denied = needs.filter((permission) => permissions.denied.includes(permission));
+    const missing = needs.filter(
+      (permission) => !permissions.granted.includes(permission) && !denied.includes(permission),
+    );
+    if ((!missing.length && !denied.length) || denied.length || Date.now() >= deadline) {
+      return { permissions, missing, denied };
+    }
+    await sleep(pollMs);
+  }
 }
 
 function qaIssueLockPath(issueId) {
@@ -152,7 +243,11 @@ function acquireIssueLock(issueId, action) {
 
 function resolveHost(name) {
   const host = HOSTS[name || "packaged"];
-  if (!host) throw new QaError("USAGE", `--host must be packaged or dev; received ${name}.`);
+  if (!host) {
+    throw new QaError("USAGE", `--host must be packaged or dev; received ${name}.`, {
+      next: "Rerun with --host packaged (the default) or --host dev.",
+    });
+  }
   return host;
 }
 
@@ -192,7 +287,9 @@ function classifyCliError(error, host) {
       },
     );
   }
-  return new QaError("HOST_ERROR", message);
+  return new QaError("HOST_ERROR", message, {
+    next: `Check that the RealTimeX host at ${host.baseUrl} is healthy, then rerun.`,
+  });
 }
 
 function cli(args, cliOptions, host) {
@@ -280,13 +377,14 @@ function resolveServingPort(runtime, worktree) {
   return { port: null, portSource: null };
 }
 
-function readCanonicalRows(dbPath) {
+// Read-only query of the RealTimeX database. Failures are named so they are never mistaken for
+// the data being absent.
+function queryRealtimexDb(dbPath, query) {
   if (!existsSync(dbPath)) {
-    throw new QaError("DB_NOT_FOUND", `RealTimeX database not found: ${dbPath}`);
+    throw new QaError("DB_NOT_FOUND", `RealTimeX database not found: ${dbPath}`, {
+      next: "Pass --db for the RealTimeX host the QA app runs on.",
+    });
   }
-  const query =
-    "select id, display_name, name, config, tags from local_apps " +
-    `where id = '${CANONICAL_SIGNALS_APP_ID}';`;
   const result = spawnSync(
     "sqlite3",
     ["-readonly", "-json", "-cmd", ".timeout 5000", dbPath, query],
@@ -295,7 +393,7 @@ function readCanonicalRows(dbPath) {
   if (result.error?.code === "ENOENT") {
     throw new QaError(
       "SQLITE3_MISSING",
-      "The sqlite3 CLI is not on PATH; qa-local-app needs it to snapshot the canonical record.",
+      "The sqlite3 CLI is not on PATH; qa-local-app needs it to read the RealTimeX database.",
       { next: "Install sqlite3 3.33 or newer (it ships with macOS), then rerun." },
     );
   }
@@ -303,10 +401,23 @@ function readCanonicalRows(dbPath) {
     throw new QaError(
       "DB_UNREADABLE",
       result.stderr?.trim() || `sqlite3 exited with ${result.status} reading ${dbPath}.`,
+      {
+        next:
+          `Check that ${dbPath} is the RealTimeX database for this host (pass --db if not). ` +
+          "If it was only locked, rerun.",
+      },
     );
   }
   const text = String(result.stdout || "").trim();
   return text ? JSON.parse(text) : [];
+}
+
+function readCanonicalRows(dbPath) {
+  return queryRealtimexDb(
+    dbPath,
+    "select id, display_name, name, config, tags from local_apps " +
+      `where id = '${CANONICAL_SIGNALS_APP_ID}';`,
+  );
 }
 
 function changedCanonicalFields(before, after) {
@@ -427,7 +538,7 @@ async function waitUntilServing(appId, cliOptions, host, { timeoutMs, pollMs, wo
   });
 }
 
-function upResult({ reused, issueId, host, appId, worktree, receipt, receiptPath, sessionPath, port, portSource, health, next }) {
+function upResult({ reused, issueId, host, appId, worktree, receipt, receiptPath, sessionPath, port, portSource, health, permissions, next }) {
   return {
     ok: true,
     action: "up",
@@ -443,6 +554,7 @@ function upResult({ reused, issueId, host, appId, worktree, receipt, receiptPath
     portSource,
     dashboardUrl: `http://127.0.0.1:${port}/dashboard`,
     healthUrl: health.url,
+    permissions,
     dataDir: receipt?.dataDir ?? null,
     receiptPath,
     sessionPath,
@@ -468,6 +580,7 @@ async function up(flags) {
       next: "Run up from a linked Signals issue worktree, or pass --worktree <path>.",
     });
   }
+  const needs = parseNeeds(flags, worktree.path);
 
   const release = acquireIssueLock(issueId, "up");
   try {
@@ -481,6 +594,46 @@ async function up(flags) {
       flags.get("cli") || (priorSession?.baseUrl === host.baseUrl ? priorSession.cli || "" : "");
     const cliOptions = { baseUrl: host.baseUrl, cli: cliPath };
     const downCmd = followUp("down", issueId, { host: host.name, cli: cliPath, db: flags.get("db") });
+    // Reports what the app may do, and holds up for the permissions the scenario needs. Leaves
+    // the app running on failure, since the user grants against that app.
+    const checkPermissions = async (appId) => {
+      if (!needs.length) return appPermissions(dbPath, appId, worktree.path);
+      const { permissions, missing, denied } = await waitForNeeds(
+        dbPath,
+        appId,
+        worktree.path,
+        needs,
+        waitOptions.pollMs,
+      );
+      if (!missing.length && !denied.length) return permissions;
+      const rerunUp = `${followUp("up", issueId, {
+        host: host.name,
+        cli: cliPath,
+        db: flags.get("db"),
+        needs,
+      })} --worktree ${shellQuote(worktree.path)}`;
+      const problems = [
+        ...(missing.length ? [`has not been granted ${missing.join(", ")}`] : []),
+        ...(denied.length ? [`was denied ${denied.join(", ")} by the user`] : []),
+      ];
+      throw new QaError(
+        "PERMISSIONS_MISSING",
+        `${qaAppDisplayName(issueId)} ${problems.join(" and ")}. ` +
+          "Agents cannot grant RealTimeX permissions.",
+        {
+          permissions,
+          missing,
+          denied,
+          next:
+            `Ask the user to grant ${[...missing, ...denied].join(", ")} to ` +
+            `"${qaAppDisplayName(issueId)}" in RealTimeX ` +
+            (denied.length
+              ? "(Settings → Local Apps, where a denied permission can be changed)"
+              : "(its permission dialog, or Settings → Local Apps)") +
+            `, then rerun: ${rerunUp}`,
+        },
+      );
+    };
     const issueApps = findIssueQaApps(appsFromCliPayload(cli(LIST_ARGS, cliOptions, host)), issueId);
 
     if (receipt) {
@@ -535,6 +688,7 @@ async function up(flags) {
         port: served.port,
         cli: cliPath || session.cli || null,
       });
+      const permissions = await checkPermissions(app.id);
       return upResult({
         reused: true,
         issueId,
@@ -544,6 +698,7 @@ async function up(flags) {
         receipt,
         receiptPath,
         sessionPath,
+        permissions,
         next: downCmd,
         ...served,
       });
@@ -618,6 +773,7 @@ async function up(flags) {
       throw error;
     }
     writeSession(sessionPath, { ...session, appId, port: served.port });
+    const permissions = await checkPermissions(appId);
     return upResult({
       reused: false,
       issueId,
@@ -627,6 +783,7 @@ async function up(flags) {
       receipt: readJson(receiptPath),
       receiptPath,
       sessionPath,
+      permissions,
       next: downCmd,
       ...served,
     });
@@ -643,20 +800,27 @@ async function status(flags) {
   const host =
     hostFromBaseUrl(receipt?.baseUrl || session?.baseUrl) || resolveHost(flags.get("host"));
   const cliOptions = { baseUrl: host.baseUrl, cli: flags.get("cli") || session?.cli || "" };
+  const dbPath =
+    flags.get("db") ||
+    session?.dbPath ||
+    process.env.RTX_DB_PATH?.trim() ||
+    realtimexDbPath(host.storageRoot);
   const issueApps = findIssueQaApps(appsFromCliPayload(cli(LIST_ARGS, cliOptions, host)), issueId);
   const app = receipt
     ? issueApps.find((candidate) => candidate.id === receipt.appId)
     : issueApps[0];
+  const worktreePath = receipt?.worktree ?? session?.worktree;
   let runtime = null;
   let health = null;
   let served = { port: null, portSource: null };
   if (app) {
     runtime = runtimeOf(cli(["get-local-app-status", app.id], cliOptions, host));
     if (runtime?.status === "running") {
-      served = resolveServingPort(runtime, receipt?.worktree ?? session?.worktree);
+      served = resolveServingPort(runtime, worktreePath);
       if (served.port) health = await probeHealth(served.port, 5000);
     }
   }
+  const permissions = app ? appPermissions(dbPath, app.id, worktreePath) : null;
   const { port, portSource } = served;
   return {
     ok: true,
@@ -669,6 +833,7 @@ async function status(flags) {
     port,
     portSource,
     healthy: Boolean(health?.ok),
+    permissions,
     dashboardUrl: port ? `http://127.0.0.1:${port}/dashboard` : null,
     worktree: receipt?.worktree ?? null,
     receiptPath: receipt ? receiptPath : null,
@@ -796,7 +961,11 @@ try {
     console.log(usage());
     process.exit(command ? 0 : 2);
   }
-  if (!COMMANDS[command]) throw new QaError("USAGE", `Unknown command ${command}.\n\n${usage()}`);
+  if (!COMMANDS[command]) {
+    throw new QaError("USAGE", `Unknown command ${command}.\n\n${usage()}`, {
+      next: "Use up, status, or down.",
+    });
+  }
   const flags = parseFlagArgs(rest);
   if (flags.has("help")) {
     console.log(usage());
@@ -809,7 +978,12 @@ try {
   }
   process.exit(result.ok ? 0 : 1);
 } catch (error) {
-  const coded = error instanceof QaError ? error : new QaError("UNEXPECTED", error?.message || String(error));
+  const coded =
+    error instanceof QaError
+      ? error
+      : new QaError("UNEXPECTED", error?.message || String(error), {
+          next: "Check the arguments against --help and rerun; report the error if it repeats.",
+        });
   const result = { ok: false, action, errorCode: coded.errorCode, error: coded.message, ...coded.extra };
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   process.stderr.write(`qa-local-app ${action}: ${coded.errorCode}: ${coded.message}\n`);

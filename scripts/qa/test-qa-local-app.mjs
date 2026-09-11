@@ -181,6 +181,8 @@ const dbPath = join(root, "realtimex.db");
 const baseIssue = Number(String(Date.now()).slice(-8));
 const issues = [];
 const children = new Set();
+// The script promises a `next` on every failure; any run that breaks that lands here.
+const failuresWithoutNext = [];
 
 const nextIssue = () => {
   const issue = String(baseIssue + issues.length);
@@ -191,6 +193,18 @@ const sessionPath = (issue) =>
   join(qaTemporaryRoot(), `signals-qa-local-app-issue-${issue}.session.json`);
 const lockPath = (issue) => join(qaTemporaryRoot(), `signals-qa-local-app-issue-${issue}.lock`);
 const common = (issue) => ["--issue", issue, "--cli", mockCli, "--db", dbPath];
+const sleep = (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
+// What the fixture worktree's rtx-manifest.json requests, as Signals' does.
+const requested = [
+  "credentials.list",
+  "credentials.use",
+  "webhook.trigger",
+  "llm.embed",
+  "llm.chat",
+  "desktop.browser",
+  "desktop.runtime-sessions",
+  "workspace.personality.write",
+];
 
 function track(child) {
   children.add(child);
@@ -260,16 +274,39 @@ function canonicalConfig(overrides = {}) {
   };
 }
 
+const sql = (value) => `'${String(value).replace(/'/g, "''")}'`;
+
 function writeCanonicalRow(config) {
-  const sql = (value) => `'${String(value).replace(/'/g, "''")}'`;
   execFileSync("sqlite3", [
     dbPath,
-    `delete from local_apps; insert into local_apps values (${sql(CANONICAL_SIGNALS_APP_ID)}, ` +
-      `'Signals', 'signals', ${sql(JSON.stringify(config))}, NULL, 'running');`,
+    `delete from local_apps where id = ${sql(CANONICAL_SIGNALS_APP_ID)}; ` +
+      "insert into local_apps (id, display_name, name, config, tags, status) values " +
+      `(${sql(CANONICAL_SIGNALS_APP_ID)}, 'Signals', 'signals', ${sql(JSON.stringify(config))}, NULL, 'running');`,
   ]);
 }
 
+// Stands in for the user answering RealTimeX's dialog: RealTimeX records the decision in the QA
+// app's row. Retries until the mock has created that row.
+async function decidePermissions(issue, decision, { afterMs = 0 } = {}) {
+  await sleep(afterMs);
+  const metadata = sql(JSON.stringify({ permissions: decision }));
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    const changed = execFileSync(
+      "sqlite3",
+      [
+        dbPath,
+        `update local_apps set metadata = ${metadata} where display_name = 'Signals issue-${issue} QA'; select changes();`,
+      ],
+      { encoding: "utf8" },
+    ).trim();
+    if (changed !== "0") return;
+    await sleep(100);
+  }
+  throw new Error(`No QA app row for issue ${issue} to record permissions on.`);
+}
+
 function resetMockState(extraApps = []) {
+  execFileSync("sqlite3", [dbPath, `delete from local_apps where id != ${sql(CANONICAL_SIGNALS_APP_ID)};`]);
   writeFileSync(
     statePath,
     JSON.stringify({
@@ -299,6 +336,7 @@ function run(args, env = {}) {
         env: {
           ...process.env,
           MOCK_LOCAL_APPS_STATE: statePath,
+          MOCK_DB: dbPath,
           REALTIMEX_PP_CLI: tripwireCli,
           SIGNALS_QA_POLL_MS: "50",
           ...env,
@@ -316,6 +354,9 @@ function run(args, env = {}) {
       } catch {
         json = null;
       }
+      if (json?.ok === false && !String(json.next || "").trim()) {
+        failuresWithoutNext.push(`${args[0]} -> ${json.errorCode}`);
+      }
       resolveRun({ status, stdout, stderr, json });
     });
   });
@@ -329,7 +370,8 @@ try {
   execFileSync("git", ["config", "user.email", "qa-test@example.invalid"], { cwd: repo });
   execFileSync("git", ["config", "user.name", "Signals QA Test"], { cwd: repo });
   writeFileSync(join(repo, "package.json"), '{ "name": "@realtimex/signals", "private": true }\n');
-  execFileSync("git", ["add", "package.json"], { cwd: repo });
+  writeFileSync(join(repo, "rtx-manifest.json"), `${JSON.stringify({ permissions: requested })}\n`);
+  execFileSync("git", ["add", "package.json", "rtx-manifest.json"], { cwd: repo });
   execFileSync("git", ["commit", "-m", "fixture"], { cwd: repo, stdio: "ignore" });
   execFileSync("git", ["worktree", "add", "-b", `issue-${baseIssue}`, worktree], {
     cwd: repo,
@@ -338,7 +380,7 @@ try {
 
   execFileSync("sqlite3", [
     dbPath,
-    "create table local_apps (id text primary key, display_name text, name text, config text, tags text, status text);",
+    "create table local_apps (id text primary key, display_name text, name text, config text, tags text, status text, metadata text);",
   ]);
   writeCanonicalRow(canonicalConfig());
 
@@ -354,8 +396,12 @@ process.exit(97);
   writeFileSync(
     mockCli,
     `#!/usr/bin/env node
+import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 const statePath = process.env.MOCK_LOCAL_APPS_STATE;
+// RealTimeX keeps a row per Local App; the orchestrator reads its permission decisions there.
+const sqlite = (statement) => execFileSync("sqlite3", [process.env.MOCK_DB, statement]);
+const quote = (text) => "'" + String(text).replace(/'/g, "''") + "'";
 const state = JSON.parse(readFileSync(statePath, "utf8"));
 const args = process.argv.slice(2);
 const command = args[0];
@@ -380,6 +426,7 @@ if (command === "list-local-apps") {
   };
   state.apps.push(app);
   save();
+  sqlite("insert into local_apps (id, display_name, name, tags, status, metadata) values (" + [app.id, app.displayName, "qa", JSON.stringify(app.tags), "stopped", "{}"].map(quote).join(", ") + ");");
   results = { app };
 } else if (command === "start-local-app") {
   const app = find(args[1]);
@@ -417,6 +464,7 @@ if (command === "list-local-apps") {
 } else if (command === "delete-local-app") {
   state.apps = state.apps.filter((app) => app.id !== args[1]);
   save();
+  sqlite("delete from local_apps where id = " + quote(args[1]) + ";");
   results = { success: true, appId: args[1] };
 } else {
   console.error("Unexpected mock command: " + command);
@@ -530,6 +578,104 @@ console.log(JSON.stringify({ meta: { source: "mock" }, results }));
   assert.equal(session.cli, mockCli);
   assert.equal(session.dbPath, dbPath);
 
+  // A new app has no decisions yet, so everything the manifest requests is pending.
+  assert.deepEqual(first.json.permissions, {
+    granted: [],
+    denied: [],
+    pending: requested,
+    lastPromptedAt: null,
+  });
+
+  // --needs only names permissions this build requests.
+  const bogus = await run([
+    "up",
+    ...common(issue),
+    "--worktree",
+    worktree,
+    "--needs",
+    "llm.chat,bogus.permission",
+  ]);
+  assert.equal(bogus.status, 2);
+  assert.equal(bogus.json.errorCode, "USAGE");
+  assert.match(bogus.json.error, /bogus\.permission/);
+
+  // Without a manifest there is nothing to check --needs against, so it is refused, not waited on.
+  const manifestPath = join(worktree, "rtx-manifest.json");
+  const manifestText = readFileSync(manifestPath, "utf8");
+  rmSync(manifestPath);
+  const noManifest = await run(["up", ...common(issue), "--worktree", worktree, "--needs", "llm.chat"]);
+  writeFileSync(manifestPath, manifestText);
+  assert.equal(noManifest.status, 2);
+  assert.equal(noManifest.json.errorCode, "USAGE");
+  assert.match(noManifest.json.error, /lists no permissions/);
+
+  // Nobody answers the dialog: up names what is missing, keeps the app for the user to grant
+  // against, and gives the rerun command.
+  const unanswered = await run(
+    ["up", ...common(issue), "--worktree", worktree, "--needs", "desktop.runtime-sessions,llm.chat"],
+    { MOCK_PORT: String(app.port), SIGNALS_QA_PERMISSION_WAIT_MS: "300" },
+  );
+  assert.equal(unanswered.status, 1);
+  assert.equal(unanswered.json.errorCode, "PERMISSIONS_MISSING");
+  assert.deepEqual(unanswered.json.missing, ["desktop.runtime-sessions", "llm.chat"]);
+  assert.deepEqual(unanswered.json.denied, []);
+  assert.match(unanswered.json.next, /Settings → Local Apps/);
+  assert.match(
+    unanswered.json.next,
+    /up --issue \d+ --host packaged --cli \S+ --db \S+ --needs desktop\.runtime-sessions,llm\.chat --worktree \S+$/,
+  );
+  assert.equal(mockApps().filter((candidate) => candidate.id !== CANONICAL_SIGNALS_APP_ID).length, 1);
+
+  // The user grants while up waits, and up returns as soon as the needs are met.
+  const [grantedUp] = await Promise.all([
+    run(["up", ...common(issue), "--worktree", worktree, "--needs", "llm.chat"], {
+      MOCK_PORT: String(app.port),
+      SIGNALS_QA_PERMISSION_WAIT_MS: "8000",
+    }),
+    decidePermissions(
+      issue,
+      { granted: ["llm.chat", "llm.embed"], denied: ["desktop.browser"] },
+      { afterMs: 600 },
+    ),
+  ]);
+  assert.equal(grantedUp.status, 0, detail(grantedUp));
+  assert.equal(grantedUp.json.reused, true);
+  assert.deepEqual(grantedUp.json.permissions.granted, ["llm.chat", "llm.embed"]);
+  assert.deepEqual(grantedUp.json.permissions.denied, ["desktop.browser"]);
+  assert.equal(grantedUp.json.permissions.pending.includes("llm.chat"), false);
+
+  // A needed permission the user denied fails at once instead of waiting out the dialog.
+  const deniedStart = Date.now();
+  const deniedUp = await run(
+    ["up", ...common(issue), "--worktree", worktree, "--needs", "desktop.browser"],
+    { MOCK_PORT: String(app.port), SIGNALS_QA_PERMISSION_WAIT_MS: "20000" },
+  );
+  assert.equal(deniedUp.json.errorCode, "PERMISSIONS_MISSING");
+  assert.deepEqual(deniedUp.json.denied, ["desktop.browser"]);
+  assert.deepEqual(deniedUp.json.missing, []);
+  assert.match(deniedUp.json.error, /was denied desktop\.browser by the user/);
+  assert.doesNotMatch(deniedUp.json.error, /has not been granted/);
+  assert.ok(Date.now() - deniedStart < 10_000, "a denied permission must not wait out the dialog");
+
+  // A database that cannot be read is reported as such at once, never as a missing grant after
+  // the full wait.
+  const missingDbStart = Date.now();
+  const missingDb = await run(
+    ["up", ...common(issue), "--worktree", worktree, "--needs", "llm.chat", "--db", join(root, "absent.db")],
+    { MOCK_PORT: String(app.port) },
+  );
+  assert.equal(missingDb.json.errorCode, "DB_NOT_FOUND");
+  assert.ok(Date.now() - missingDbStart < 10_000, "a missing database must not wait out the dialog");
+  const garbageDb = join(root, "garbage.db");
+  writeFileSync(garbageDb, "not a database at all, just text long enough to fill a header page\n".repeat(20));
+  const unreadable = await run(["status", "--issue", issue, "--db", garbageDb]);
+  assert.equal(unreadable.json.errorCode, "DB_UNREADABLE");
+  const otherHostDb = join(root, "other-host.db");
+  execFileSync("sqlite3", [otherHostDb, "create table local_apps (id text primary key, metadata text);"]);
+  const wrongHost = await run(["status", "--issue", issue, "--db", otherHostDb]);
+  assert.equal(wrongHost.json.errorCode, "APP_NOT_IN_DB");
+  assert.match(wrongHost.json.next, /--db/);
+
   const again = await run(["up", ...common(issue), "--worktree", worktree], {
     MOCK_PORT: String(app.port),
   });
@@ -561,6 +707,7 @@ console.log(JSON.stringify({ meta: { source: "mock" }, results }));
   assert.equal(statusOut.json.present, true);
   assert.equal(statusOut.json.healthy, true);
   assert.equal(statusOut.json.port, app.port);
+  assert.deepEqual(statusOut.json.permissions.granted, ["llm.chat", "llm.embed"]);
 
   const downOut = await run(["down", "--issue", issue], { MOCK_APP_PID: String(app.pid) });
   assert.equal(downOut.status, 0, detail(downOut));
@@ -638,6 +785,25 @@ console.log(JSON.stringify({ meta: { source: "mock" }, results }));
   assert.equal(envDbDown.status, 0, detail(envDbDown));
   assert.equal(envDbDown.json.canonicalUnchanged, true);
 
+  // On a new app, up waits through provisioning for the user's decision too.
+  resetMockState();
+  const freshNeedsIssue = nextIssue();
+  const freshNeedsApp = await fakeApp();
+  const [freshNeeds] = await Promise.all([
+    run(["up", ...common(freshNeedsIssue), "--worktree", worktree, "--needs", "llm.embed"], {
+      MOCK_PORT: String(freshNeedsApp.port),
+      SIGNALS_QA_PERMISSION_WAIT_MS: "8000",
+    }),
+    decidePermissions(freshNeedsIssue, { granted: ["llm.embed"], denied: [] }, { afterMs: 300 }),
+  ]);
+  assert.equal(freshNeeds.status, 0, detail(freshNeeds));
+  assert.equal(freshNeeds.json.reused, false);
+  assert.deepEqual(freshNeeds.json.permissions.granted, ["llm.embed"]);
+  const freshNeedsDown = await run(["down", ...common(freshNeedsIssue)], {
+    MOCK_APP_PID: String(freshNeedsApp.pid),
+  });
+  assert.equal(freshNeedsDown.status, 0, detail(freshNeedsDown));
+
   // A dev-host rerun without --cli uses the CLI up recorded; the default CLI (the tripwire here)
   // cannot authenticate there.
   resetMockState();
@@ -664,7 +830,8 @@ console.log(JSON.stringify({ meta: { source: "mock" }, results }));
   const orphanIssue = nextIssue();
   execFileSync("sqlite3", [
     dbPath,
-    `insert into local_apps values ('orphan-qa-row', 'Signals issue-${orphanIssue} QA', 'orphan', '{}', NULL, 'stopped');`,
+    "insert into local_apps (id, display_name, name, config, tags, status) values " +
+      `('orphan-qa-row', 'Signals issue-${orphanIssue} QA', 'orphan', '{}', NULL, 'stopped');`,
   ]);
   const orphanDown = await run(["down", ...common(orphanIssue), "--host", "dev"]);
   execFileSync("sqlite3", [dbPath, "delete from local_apps where id = 'orphan-qa-row';"]);
@@ -750,6 +917,9 @@ console.log(JSON.stringify({ meta: { source: "mock" }, results }));
   );
   assert.equal(noPort.json.errorCode, "PORT_UNKNOWN");
   assert.equal((await run(["down", ...common(noPortIssue)])).status, 0);
+
+  assert.deepEqual(failuresWithoutNext, [], "every failure must carry a next");
+  assert.match(unreadable.json.next, /--db/);
 
   console.log("qa-local-app orchestrator: OK");
 } finally {
