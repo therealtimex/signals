@@ -6,15 +6,20 @@ import { linkSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } f
 // whole, so unreadable content means corruption, not a writer caught mid-write.
 const UNREADABLE_GRACE_MS = 30_000;
 
+const BUSY_MESSAGES = {
+  held: (path, holder) => `qa-local-app ${holder.action || "run"} (pid ${holder.pid}) holds ${path}.`,
+  unreadable: (path) =>
+    `${path} has no valid holder record and is under ${UNREADABLE_GRACE_MS / 1000} s old, so it counts as held.`,
+  contended: (path) =>
+    `${path} kept changing hands while this run tried to take it; another qa-local-app run is contending for it.`,
+};
+
 export class IssueLockBusyError extends Error {
-  constructor(path, holder) {
-    super(
-      holder
-        ? `qa-local-app ${holder.action || "run"} (pid ${holder.pid}) holds ${path}.`
-        : `${path} is held but unreadable.`,
-    );
+  constructor(path, holder, reason) {
+    super(BUSY_MESSAGES[reason](path, holder));
     this.path = path;
     this.holder = holder;
+    this.reason = reason;
   }
 }
 
@@ -53,9 +58,12 @@ function readLock(path) {
     if (error.code === "ENOENT") return null;
     throw error;
   }
+  // Only a record naming a real pid is a holder. Anything else, `{}` included, is treated like
+  // unreadable content and gets the grace period rather than an immediate takeover.
   let holder = null;
   try {
-    holder = JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    if (parsed && Number.isInteger(parsed.pid) && parsed.pid > 0) holder = parsed;
   } catch {
     holder = null;
   }
@@ -101,8 +109,8 @@ export function releaseIssueLock(path, nonce) {
 // Publishes {pid, pidStart, action, nonce} at path and returns its release function. The lock is
 // written to a private file and hard-linked into place: link() fails when the path exists, and a
 // visible lock is always complete. A live holder raises IssueLockBusyError; a stale one is taken
-// over.
-export function acquireIssueLock(path, action) {
+// over. afterTakeover lets tests stand in for a contender.
+export function acquireIssueLock(path, action, { maxTakeovers = 5, afterTakeover } = {}) {
   const nonce = randomUUID();
   const draft = `${path}.${nonce}.draft`;
   writeFileSync(
@@ -117,22 +125,28 @@ export function acquireIssueLock(path, action) {
     { encoding: "utf8", mode: 0o600 },
   );
   try {
-    for (let attempt = 0; attempt < 5; attempt += 1) {
+    // A link attempt follows every takeover, the last one included, so only a lock that keeps
+    // changing hands exhausts the rounds.
+    for (let round = 0; ; round += 1) {
       try {
         linkSync(draft, path);
         return () => releaseIssueLock(path, nonce);
       } catch (error) {
         if (error.code !== "EEXIST") throw error;
       }
+      if (round === maxTakeovers) throw new IssueLockBusyError(path, null, "contended");
       const observed = readLock(path);
       if (!observed) continue;
-      const held = observed.holder
-        ? lockHolderAlive(observed.holder)
-        : observed.ageMs < UNREADABLE_GRACE_MS;
-      if (held) throw new IssueLockBusyError(path, observed.holder);
+      if (observed.holder ? lockHolderAlive(observed.holder) : observed.ageMs < UNREADABLE_GRACE_MS) {
+        throw new IssueLockBusyError(
+          path,
+          observed.holder,
+          observed.holder ? "held" : "unreadable",
+        );
+      }
       takeOverStaleLock(path, observed.raw);
+      afterTakeover?.();
     }
-    throw new IssueLockBusyError(path, null);
   } finally {
     rmSync(draft, { force: true });
   }
