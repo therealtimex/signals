@@ -410,16 +410,41 @@ export function extractLinkedInProfileDomObservation(): Pick<
 
   const main = document.querySelector("main");
   const currentProfilePath = linkedInProfilePath(window.location.href);
+  const headingSelector = "h1,h2,h3,[role='heading']";
+  const rejectedNamePattern =
+    /reposted|commented|followers|connections|contact info|view profile|message|connect|follow\b|about|experience|notifications|messaging/i;
+  const plausibleVisibleName = (value: string): string => {
+    const normalized = value.replace(/\s+/g, " ").trim();
+    if (!normalized || normalized.length > 80) return "";
+    if (rejectedNamePattern.test(normalized)) return "";
+    if (/^[·•]?\s*\d+(st|nd|rd|th)\s*$/i.test(normalized)) return "";
+    if (normalized.split(" ").length > 6) return "";
+    if (!/\p{L}/u.test(normalized)) return "";
+    return normalized;
+  };
+  const headingText = (element: Element | null): string => {
+    if (!element) return "";
+    return plausibleVisibleName(text(element.querySelector(headingSelector)));
+  };
+  const enclosingHeading = (element: Element | null): Element | null => {
+    for (let node: Element | null = element; node && node !== main; node = node.parentElement) {
+      if (node.matches(headingSelector)) return node;
+    }
+    return null;
+  };
   const matchingProfileAnchors = main && currentProfilePath
     ? Array.from(main.querySelectorAll<HTMLAnchorElement>("a[href]")).filter(
         (anchor) => linkedInProfilePath(anchor.href) === currentProfilePath,
       )
     : [];
-  const profileAnchor = matchingProfileAnchors.find(
-    (anchor) =>
-      anchor.getAttribute("componentkey")?.startsWith("ProfileVerificationTriggerRef-") &&
-      text(anchor.querySelector("h1,h2,h3")),
-  ) ?? matchingProfileAnchors.find((anchor) => text(anchor.querySelector("h1,h2,h3"))) ?? null;
+  const isVerificationTrigger = (anchor: HTMLAnchorElement): boolean =>
+    (anchor.getAttribute("componentkey") ?? "").startsWith("ProfileVerificationTriggerRef-");
+  const profileAnchor = matchingProfileAnchors.find((anchor) =>
+    isVerificationTrigger(anchor) && (headingText(anchor) || plausibleVisibleName(text(anchor))),
+  ) ?? matchingProfileAnchors.find((anchor) => headingText(anchor))
+    ?? matchingProfileAnchors.find((anchor) => enclosingHeading(anchor))
+    ?? matchingProfileAnchors.find((anchor) => plausibleVisibleName(text(anchor)))
+    ?? null;
 
   let structuralTopCard: Element | null = null;
   let structuralParagraphs: Element[] = [];
@@ -442,12 +467,39 @@ export function extractLinkedInProfileDomObservation(): Pick<
   }
 
   const visibleName =
-    text(profileAnchor?.querySelector("h1,h2,h3") ?? profileAnchor) ||
-    firstText([
+    headingText(profileAnchor) ||
+    plausibleVisibleName(text(enclosingHeading(profileAnchor))) ||
+    plausibleVisibleName(text(profileAnchor)) ||
+    plausibleVisibleName(firstText([
+      "main [data-view-name='profile-card'] h1",
+      "main [data-view-name='profile-card'] [role='heading']",
+      "main [data-field='name']",
       "main h1",
       "h1.text-heading-xlarge",
       '[data-anonymize="person-name"]',
-    ]);
+    ]));
+  if (!structuralTopCard && profileAnchor) {
+    const nameRoot = enclosingHeading(profileAnchor) ?? profileAnchor;
+    for (
+      let candidate: Element | null = nameRoot.parentElement;
+      candidate && candidate !== main;
+      candidate = candidate.parentElement
+    ) {
+      const blob = text(candidate);
+      if (candidate.tagName === "SECTION" || (candidate.getAttribute("data-view-name") ?? "").includes("profile")) {
+        structuralTopCard = candidate;
+        break;
+      }
+      if (
+        visibleName &&
+        blob.length >= visibleName.length + 12 &&
+        blob.length <= 800
+      ) {
+        structuralTopCard = candidate;
+        break;
+      }
+    }
+  }
   const headline = text(structuralParagraphs[0] ?? null) || firstText([
     "main .text-body-medium.break-words",
     ".pv-text-details__left-panel .text-body-medium",
@@ -570,7 +622,22 @@ async function observeLinkedInProfile(
       waitUntil: "domcontentloaded",
       timeout: 30_000,
     });
-    await page.waitForTimeout(500);
+    await page.waitForFunction(() => {
+      const main = document.querySelector("main");
+      if (!main) return false;
+      if (main.querySelector("h1, h2, [role='heading'], [data-anonymize='person-name'], [data-field='name']")) {
+        return true;
+      }
+      const path = window.location.pathname.match(/^\/in\/([^/]+)/i);
+      if (!path) return false;
+      const slug = decodeURIComponent(path[1]).toLocaleLowerCase("en-US");
+      return Array.from(main.querySelectorAll("a[href]")).some((anchor) => {
+        const href = (anchor as HTMLAnchorElement).href.toLocaleLowerCase("en-US");
+        const label = (anchor.textContent ?? "").replace(/\s+/g, " ").trim();
+        return href.includes(`/in/${slug}`) && label.length > 1 && label.length <= 80;
+      });
+    }, { timeout: 8_000 }).catch(() => undefined);
+    await page.waitForTimeout(250);
     const extracted = await page.evaluate(extractLinkedInProfileDomObservation);
     return {
       finalUrl: page.url(),
