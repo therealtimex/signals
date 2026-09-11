@@ -417,4 +417,102 @@ describe("LinkedIn Snowball profile DOM extraction", () => {
 
     browserWindow.close();
   });
+
+  it("reads the name when the heading wraps the current /in/ link", () => {
+    const browserWindow = renderLinkedInProfile(
+      "https://www.linkedin.com/in/jane-doe/",
+      `
+        <main>
+          <section>
+            <h1>
+              <a href="https://www.linkedin.com/in/jane-doe/">
+                <span aria-hidden="true">Jane Doe</span>
+              </a>
+            </h1>
+            <p>Founder &amp; CEO at Acme, Inc.</p>
+            <p>Acme, Inc. · Example University</p>
+          </section>
+        </main>
+      `,
+    );
+
+    expect(extractLinkedInProfileDomObservation()).toMatchObject({
+      visibleName: "Jane Doe",
+      headline: "Founder & CEO at Acme, Inc.",
+      unavailable: false,
+    });
+
+    browserWindow.close();
+  });
+
+  it("reads a span name from the verification trigger when no heading is present", () => {
+    const browserWindow = renderLinkedInProfile(
+      "https://www.linkedin.com/in/surendranath-eruvuru/",
+      `
+        <main>
+          <div>
+            <a href="https://www.linkedin.com/in/surendranath-eruvuru/"
+               componentkey="ProfileVerificationTriggerRef-surendranath">
+              <span>Surendranath Eruvuru</span>
+            </a>
+            <p>Director at Micron Technology</p>
+            <p>Micron Technology</p>
+          </div>
+        </main>
+      `,
+    );
+
+    expect(extractLinkedInProfileDomObservation()).toMatchObject({
+      visibleName: "Surendranath Eruvuru",
+      headline: "Director at Micron Technology",
+    });
+
+    browserWindow.close();
+  });
+
+  it("reads a role=heading name associated with the current profile", () => {
+    const browserWindow = renderLinkedInProfile(
+      "https://www.linkedin.com/in/jane-doe/",
+      `
+        <main>
+          <div data-view-name="profile-card">
+            <a href="/in/jane-doe/">
+              <div role="heading" aria-level="1">Jane Doe</div>
+            </a>
+            <p>Founder at Acme</p>
+            <p>Acme</p>
+          </div>
+        </main>
+      `,
+    );
+
+    expect(extractLinkedInProfileDomObservation()).toMatchObject({
+      visibleName: "Jane Doe",
+      headline: "Founder at Acme",
+    });
+
+    browserWindow.close();
+  });
+
+  it("does not treat Contact info or activity chrome as the profile name", () => {
+    const browserWindow = renderLinkedInProfile(
+      "https://www.linkedin.com/in/jane-doe/",
+      `
+        <main>
+          <section>
+            <a href="https://www.linkedin.com/in/jane-doe/overlay/contact-info/">Contact info</a>
+            <a href="https://www.linkedin.com/in/jane-doe/">Jane Doe reposted this</a>
+            <h2>Activity</h2>
+          </section>
+        </main>
+      `,
+    );
+
+    expect(extractLinkedInProfileDomObservation()).toMatchObject({
+      visibleName: "",
+      unavailable: false,
+    });
+
+    browserWindow.close();
+  });
 });
