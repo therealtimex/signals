@@ -315,7 +315,26 @@ prints; do not provision or clean up by hand around it.
   Signals workspace. If QA left `signals-publish` open (harness attestations reopen it after a run
   closes it), stop it with `realtimex-pp-cli stop-browser-session signals-publish`, which keeps the
   profile. The session list can show `stale` while its CDP port still answers, so check the port.
-- If RealTimeX prompts for permissions, grant only those the test needs.
+- **RealTimeX permissions are the user's to grant; agents cannot grant them.** Each new QA app
+  registers with RealTimeX, and RealTimeX shows the user a dialog asking for Signals' permissions.
+  It waits 2 minutes; if nobody answers, the app runs with none of them. Every `up` of a new app
+  asks again. Never work around the dialog: do not drive the desktop UI for it, and do not edit the
+  database. `up` and `status` print `permissions` (`granted`, `denied`, `pending`).
+
+  When the scenario needs any, pass them to `up` with `--needs`. `up` waits for the user's decision
+  and fails with `PERMISSIONS_MISSING` if one is not granted, naming it. Ask the user to grant it to
+  `Signals issue-<N> QA` (in the dialog, or in Settings → Local Apps), then rerun `up`. A
+  `PERMISSION_REQUIRED` error from Signals during QA means a missing grant, not a product bug.
+
+  | Scenario | `--needs` |
+  |---|---|
+  | Semantic search, embeddings | `llm.embed` |
+  | Persona generation, other LLM synthesis | `llm.chat` |
+  | Agent workflow runs, publishing | `desktop.runtime-sessions` |
+  | Browser automation | `desktop.browser` |
+  | Credential and OAuth sync | `credentials.list,credentials.use` |
+  | RealTimeX flows triggering Signals | `webhook.trigger` |
+  | Committing Personality proposals | `workspace.personality.write` |
 
 ### Dev host (only when the change needs it)
 
