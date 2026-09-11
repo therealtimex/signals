@@ -82,6 +82,11 @@ export interface SnowballSeedScoutDeploymentState extends SnowballSeedScoutConfi
   deployedAt: string | null;
   templateId: string | null;
   heartbeatTaskName: string;
+  /**
+   * RealTimeX Local App id of the Signals that deployed the scout, so the scout
+   * can start Signals when a RealTimeX restart left it stopped. Null outside RTX.
+   */
+  signalsLocalAppId: string | null;
 }
 
 export function isSnowballSeedScoutTemplateConfig(
@@ -213,6 +218,7 @@ export function toDeploymentState(
   options: {
     deployedAt?: string | null;
     templateId?: string | null;
+    signalsLocalAppId?: string | null;
   } = {},
 ): SnowballSeedScoutDeploymentState {
   return {
@@ -220,6 +226,7 @@ export function toDeploymentState(
     deployedAt: options.deployedAt ?? null,
     templateId: options.templateId ?? null,
     heartbeatTaskName: SNOWBALL_SEED_SCOUT_HEARTBEAT_TASK_NAME,
+    signalsLocalAppId: options.signalsLocalAppId ?? null,
     ...config,
   };
 }

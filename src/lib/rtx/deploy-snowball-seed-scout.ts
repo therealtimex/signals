@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { EnvLike } from "@/lib/rtx/env";
+import { getRtxAppId, type EnvLike } from "@/lib/rtx/env";
 import { ensureRtxWorkspace, getSignalsRtxWorkspaceSlug, resolveSignalsRtxWorkspaceSlug } from "@/lib/rtx/cli-provisioning";
 import {
   defaultHeartbeatSkeleton,
@@ -201,6 +201,7 @@ export async function deploySnowballSeedScout(
       ? null
       : (input.preserveDeployedAt ?? new Date().toISOString()),
     templateId: input.templateId,
+    signalsLocalAppId: getRtxAppId(env),
   });
 
   const scoutConfigWrite = await writeRtxWorkspaceBriefFile(
@@ -299,6 +300,10 @@ export async function readSnowballSeedScoutDeployment(
           typeof parsed.deployedAt === "string" ? parsed.deployedAt : null,
         templateId:
           typeof parsed.templateId === "string" ? parsed.templateId : null,
+        signalsLocalAppId:
+          typeof parsed.signalsLocalAppId === "string"
+            ? parsed.signalsLocalAppId
+            : null,
       }),
     };
   } catch (error) {

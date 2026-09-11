@@ -113,6 +113,46 @@ tasks: [{ name: morning-brief, agent: claude, prompt: keep-me, interval: 24h }]
   });
 });
 
+describe("deploySnowballSeedScout Local App id", () => {
+  async function deployWith(env: Record<string, string>) {
+    const scoutConfig = readSnowballSeedScoutConfig(
+      buildSnowballSeedScoutTemplateConfig(),
+    );
+    const result = await deploySnowballSeedScout(
+      { templateId: "tpl-1", config: buildSnowballSeedScoutDeployConfig(scoutConfig) },
+      env,
+    );
+    expect(result.success).toBe(true);
+    const written = JSON.parse(
+      await readFile(
+        join(env.STORAGE_DIR, "working-data", "signals", scoutConfigRelativePath()),
+        "utf8",
+      ),
+    ) as Record<string, unknown>;
+    return written;
+  }
+
+  it("records the Local App id the scout needs to start Signals", async () => {
+    const env = await seedWorkspace(true);
+
+    const written = await deployWith({ ...env, RTX_APP_ID: "47e45f71-local-app" });
+
+    expect(written.signalsLocalAppId).toBe("47e45f71-local-app");
+    const readBack = await readSnowballSeedScoutDeployment(env);
+    expect(readBack.success && readBack.deployment?.signalsLocalAppId).toBe(
+      "47e45f71-local-app",
+    );
+  });
+
+  it("records no Local App id outside RealTimeX", async () => {
+    const env = await seedWorkspace(true);
+
+    const written = await deployWith(env);
+
+    expect(written.signalsLocalAppId).toBeNull();
+  });
+});
+
 describe("saveSnowballSeedScoutSettings", () => {
   it("saves settings for a paused-but-deployed scout", async () => {
     const env = await seedWorkspace(false);
