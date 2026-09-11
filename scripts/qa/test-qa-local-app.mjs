@@ -594,6 +594,16 @@ console.log(JSON.stringify({ meta: { source: "mock" }, results }));
   assert.equal(bogus.json.errorCode, "USAGE");
   assert.match(bogus.json.error, /bogus\.permission/);
 
+  // Without a manifest there is nothing to check --needs against, so it is refused, not waited on.
+  const manifestPath = join(worktree, "rtx-manifest.json");
+  const manifestText = readFileSync(manifestPath, "utf8");
+  rmSync(manifestPath);
+  const noManifest = await run(["up", ...common(issue), "--worktree", worktree, "--needs", "llm.chat"]);
+  writeFileSync(manifestPath, manifestText);
+  assert.equal(noManifest.status, 2);
+  assert.equal(noManifest.json.errorCode, "USAGE");
+  assert.match(noManifest.json.error, /lists no permissions/);
+
   // Nobody answers the dialog: up names what is missing, keeps the app for the user to grant
   // against, and gives the rerun command.
   const unanswered = await run(
@@ -637,7 +647,29 @@ console.log(JSON.stringify({ meta: { source: "mock" }, results }));
   );
   assert.equal(deniedUp.json.errorCode, "PERMISSIONS_MISSING");
   assert.deepEqual(deniedUp.json.denied, ["desktop.browser"]);
+  assert.deepEqual(deniedUp.json.missing, []);
+  assert.match(deniedUp.json.error, /was denied desktop\.browser by the user/);
+  assert.doesNotMatch(deniedUp.json.error, /has not been granted/);
   assert.ok(Date.now() - deniedStart < 10_000, "a denied permission must not wait out the dialog");
+
+  // A database that cannot be read is reported as such at once, never as a missing grant after
+  // the full wait.
+  const missingDbStart = Date.now();
+  const missingDb = await run(
+    ["up", ...common(issue), "--worktree", worktree, "--needs", "llm.chat", "--db", join(root, "absent.db")],
+    { MOCK_PORT: String(app.port) },
+  );
+  assert.equal(missingDb.json.errorCode, "DB_NOT_FOUND");
+  assert.ok(Date.now() - missingDbStart < 10_000, "a missing database must not wait out the dialog");
+  const garbageDb = join(root, "garbage.db");
+  writeFileSync(garbageDb, "not a database at all, just text long enough to fill a header page\n".repeat(20));
+  const unreadable = await run(["status", "--issue", issue, "--db", garbageDb]);
+  assert.equal(unreadable.json.errorCode, "DB_UNREADABLE");
+  const otherHostDb = join(root, "other-host.db");
+  execFileSync("sqlite3", [otherHostDb, "create table local_apps (id text primary key, metadata text);"]);
+  const wrongHost = await run(["status", "--issue", issue, "--db", otherHostDb]);
+  assert.equal(wrongHost.json.errorCode, "APP_NOT_IN_DB");
+  assert.match(wrongHost.json.next, /--db/);
 
   const again = await run(["up", ...common(issue), "--worktree", worktree], {
     MOCK_PORT: String(app.port),

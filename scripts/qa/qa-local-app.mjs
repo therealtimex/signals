@@ -153,7 +153,13 @@ function parseNeeds(flags, worktree) {
     ),
   ];
   const requested = requestedPermissions(worktree);
-  const unknown = requested.length ? needs.filter((permission) => !requested.includes(permission)) : [];
+  if (needs.length && !requested.length) {
+    throw new QaError(
+      "USAGE",
+      `--needs cannot be checked: ${join(worktree, "rtx-manifest.json")} lists no permissions.`,
+    );
+  }
+  const unknown = needs.filter((permission) => !requested.includes(permission));
   if (unknown.length) {
     throw new QaError(
       "USAGE",
@@ -168,15 +174,18 @@ function parseNeeds(flags, worktree) {
 // in local_apps.metadata, as it does for edits in Settings → Local Apps. The CLI does not expose
 // those decisions, so they are read from the database, read-only.
 function appPermissions(dbPath, appId, worktree) {
-  const query = `select metadata from local_apps where id = '${String(appId).replace(/'/g, "''")}';`;
-  const result = spawnSync("sqlite3", ["-readonly", "-json", "-cmd", ".timeout 5000", dbPath, query], {
-    encoding: "utf8",
-  });
-  if (result.status !== 0) return null;
+  const rows = queryRealtimexDb(
+    dbPath,
+    `select metadata from local_apps where id = '${String(appId).replace(/'/g, "''")}';`,
+  );
+  if (!rows.length) {
+    throw new QaError("APP_NOT_IN_DB", `${dbPath} has no local_apps row for app ${appId}.`, {
+      next: "Pass --db for the RealTimeX host this app runs on.",
+    });
+  }
   let decided = {};
   try {
-    const rows = JSON.parse(String(result.stdout || "").trim() || "[]");
-    decided = JSON.parse(rows[0]?.metadata || "{}")?.permissions || {};
+    decided = JSON.parse(rows[0].metadata || "{}")?.permissions || {};
   } catch {
     decided = {};
   }
@@ -195,9 +204,11 @@ async function waitForNeeds(dbPath, appId, worktree, needs, pollMs) {
     Date.now() + positiveInt(process.env.SIGNALS_QA_PERMISSION_WAIT_MS, PERMISSION_WAIT_MS);
   for (;;) {
     const permissions = appPermissions(dbPath, appId, worktree);
-    const missing = needs.filter((permission) => !permissions?.granted.includes(permission));
-    const denied = needs.filter((permission) => permissions?.denied.includes(permission));
-    if (!missing.length || denied.length || Date.now() >= deadline) {
+    const denied = needs.filter((permission) => permissions.denied.includes(permission));
+    const missing = needs.filter(
+      (permission) => !permissions.granted.includes(permission) && !denied.includes(permission),
+    );
+    if ((!missing.length && !denied.length) || denied.length || Date.now() >= deadline) {
       return { permissions, missing, denied };
     }
     await sleep(pollMs);
@@ -358,13 +369,14 @@ function resolveServingPort(runtime, worktree) {
   return { port: null, portSource: null };
 }
 
-function readCanonicalRows(dbPath) {
+// Read-only query of the RealTimeX database. Failures are named so they are never mistaken for
+// the data being absent.
+function queryRealtimexDb(dbPath, query) {
   if (!existsSync(dbPath)) {
-    throw new QaError("DB_NOT_FOUND", `RealTimeX database not found: ${dbPath}`);
+    throw new QaError("DB_NOT_FOUND", `RealTimeX database not found: ${dbPath}`, {
+      next: "Pass --db for the RealTimeX host the QA app runs on.",
+    });
   }
-  const query =
-    "select id, display_name, name, config, tags from local_apps " +
-    `where id = '${CANONICAL_SIGNALS_APP_ID}';`;
   const result = spawnSync(
     "sqlite3",
     ["-readonly", "-json", "-cmd", ".timeout 5000", dbPath, query],
@@ -373,7 +385,7 @@ function readCanonicalRows(dbPath) {
   if (result.error?.code === "ENOENT") {
     throw new QaError(
       "SQLITE3_MISSING",
-      "The sqlite3 CLI is not on PATH; qa-local-app needs it to snapshot the canonical record.",
+      "The sqlite3 CLI is not on PATH; qa-local-app needs it to read the RealTimeX database.",
       { next: "Install sqlite3 3.33 or newer (it ships with macOS), then rerun." },
     );
   }
@@ -385,6 +397,14 @@ function readCanonicalRows(dbPath) {
   }
   const text = String(result.stdout || "").trim();
   return text ? JSON.parse(text) : [];
+}
+
+function readCanonicalRows(dbPath) {
+  return queryRealtimexDb(
+    dbPath,
+    "select id, display_name, name, config, tags from local_apps " +
+      `where id = '${CANONICAL_SIGNALS_APP_ID}';`,
+  );
 }
 
 function changedCanonicalFields(before, after) {
@@ -572,25 +592,32 @@ async function up(flags) {
         needs,
         waitOptions.pollMs,
       );
-      if (!missing.length) return permissions;
+      if (!missing.length && !denied.length) return permissions;
       const rerunUp = `${followUp("up", issueId, {
         host: host.name,
         cli: cliPath,
         db: flags.get("db"),
         needs,
       })} --worktree ${shellQuote(worktree.path)}`;
+      const problems = [
+        ...(missing.length ? [`has not been granted ${missing.join(", ")}`] : []),
+        ...(denied.length ? [`was denied ${denied.join(", ")} by the user`] : []),
+      ];
       throw new QaError(
         "PERMISSIONS_MISSING",
-        `${qaAppDisplayName(issueId)} lacks ${missing.join(", ")}` +
-          (denied.length ? `, and the user denied ${denied.join(", ")}` : "") +
-          ". Agents cannot grant RealTimeX permissions.",
+        `${qaAppDisplayName(issueId)} ${problems.join(" and ")}. ` +
+          "Agents cannot grant RealTimeX permissions.",
         {
           permissions,
           missing,
           denied,
           next:
-            `Ask the user to grant ${missing.join(", ")} to "${qaAppDisplayName(issueId)}" in ` +
-            `RealTimeX (its permission dialog, or Settings → Local Apps), then rerun: ${rerunUp}`,
+            `Ask the user to grant ${[...missing, ...denied].join(", ")} to ` +
+            `"${qaAppDisplayName(issueId)}" in RealTimeX ` +
+            (denied.length
+              ? "(Settings → Local Apps, where a denied permission can be changed)"
+              : "(its permission dialog, or Settings → Local Apps)") +
+            `, then rerun: ${rerunUp}`,
         },
       );
     };
