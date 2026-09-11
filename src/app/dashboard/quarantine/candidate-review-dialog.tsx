@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -367,32 +367,35 @@ export function CandidateReviewDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  if (!candidate) return null;
+  return (
+    <CandidateReviewDialogBody
+      candidate={candidate}
+      open={open}
+      onOpenChange={onOpenChange}
+    />
+  );
+}
+
+function CandidateReviewDialogBody({
+  candidate,
+  open,
+  onOpenChange,
+}: {
+  candidate: QuarantineCandidateItem;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
   const router = useRouter();
   const [updating, setUpdating] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [name, setName] = useState("");
-  const [title, setTitle] = useState("");
-  const [company, setCompany] = useState("");
-  const [profileUrl, setProfileUrl] = useState("");
-  const [confirmed, setConfirmed] = useState(false);
-
-  const candidateId = candidate?.id;
-  const proposedName = candidate?.proposedName ?? "";
-  const proposedTitle = candidate?.proposedTitle ?? "";
-  const proposedCompany = candidate?.proposedCompany ?? "";
-  const proposedProfileUrl = candidate?.profileUrl ?? "";
-
-  useEffect(() => {
-    if (!candidateId) return;
-    setName(proposedName);
-    setTitle(proposedTitle);
-    setCompany(proposedCompany);
-    setProfileUrl(proposedProfileUrl);
-    setConfirmed(false);
-    setError(null);
-  }, [candidateId, proposedName, proposedTitle, proposedCompany, proposedProfileUrl]);
-
-  if (!candidate) return null;
+  const [form, setForm] = useState({
+    name: candidate.proposedName,
+    title: candidate.proposedTitle ?? "",
+    company: candidate.proposedCompany ?? "",
+    profileUrl: candidate.profileUrl,
+    confirmed: false,
+  });
 
   async function runUpdate(work: () => Promise<void>) {
     setUpdating(true);
@@ -408,7 +411,7 @@ export function CandidateReviewDialog({
     }
   }
 
-  const canPromote = confirmed && name.trim().length > 0 && profileUrl.trim().length > 0;
+  const canPromote = form.confirmed && form.name.trim().length > 0 && form.profileUrl.trim().length > 0;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -418,17 +421,17 @@ export function CandidateReviewDialog({
         <CandidateRetryPanel candidate={candidate} />
         {candidate.status === "identity_unverified" ? (
           <CandidatePromoteFields
-            name={name}
-            title={title}
-            company={company}
-            profileUrl={profileUrl}
-            confirmed={confirmed}
+            name={form.name}
+            title={form.title}
+            company={form.company}
+            profileUrl={form.profileUrl}
+            confirmed={form.confirmed}
             disabled={updating}
-            onNameChange={setName}
-            onTitleChange={setTitle}
-            onCompanyChange={setCompany}
-            onProfileUrlChange={setProfileUrl}
-            onConfirmedChange={setConfirmed}
+            onNameChange={(name) => setForm((current) => ({ ...current, name }))}
+            onTitleChange={(title) => setForm((current) => ({ ...current, title }))}
+            onCompanyChange={(company) => setForm((current) => ({ ...current, company }))}
+            onProfileUrlChange={(profileUrl) => setForm((current) => ({ ...current, profileUrl }))}
+            onConfirmedChange={(confirmed) => setForm((current) => ({ ...current, confirmed }))}
           />
         ) : null}
         <CandidateAttemptHistory candidate={candidate} />
@@ -441,10 +444,10 @@ export function CandidateReviewDialog({
           onDismiss={() => void runUpdate(() => requestCandidateStatusUpdate(candidate.id, "dismiss"))}
           onReopen={() => void runUpdate(() => requestCandidateStatusUpdate(candidate.id, "reopen"))}
           onPromote={() => void runUpdate(() => requestCandidatePromote(candidate.id, {
-            name: name.trim(),
-            title,
-            company,
-            profileUrl: profileUrl.trim(),
+            name: form.name.trim(),
+            title: form.title,
+            company: form.company,
+            profileUrl: form.profileUrl.trim(),
           }))}
         />
       </DialogContent>
