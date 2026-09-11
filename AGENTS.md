@@ -296,9 +296,10 @@ prints; do not provision or clean up by hand around it.
   `Signals issue-<N> QA`, pins `SIGNALS_DATA_DIR` under `/private/tmp/signals-qa-*`, tags it
   `signals,qa,ephemeral,issue-<N>`, and writes a receipt.
 
-  Rerunning `up` for the same worktree and host reuses the app, provided it still carries its safety
-  tags and `up`'s session snapshot still exists. Otherwise it stops with `next` set to `down`.
-  Start and health failures include the app's last log lines.
+  Rerunning `up` for the same worktree and host reuses the app. If `up`'s session snapshot is gone,
+  it stops with `QA_SESSION_MISSING` and `next` set to `down`. If the app lost its safety tags, it
+  stops with `QA_APP_UNSAFE`; neither `up` nor `down` will touch that app, so tell the user rather
+  than running `down`. Start and health failures include the app's last log lines.
 - **`down`** runs `cleanup-signals-qa-local-app.mjs` (deletes only the receipt-backed, safety-tagged
   issue app, never the canonical one), the hygiene verifier, a diff of the canonical record against
   `up`'s snapshot, and a check that the QA port was released. Run it before the terminal QA

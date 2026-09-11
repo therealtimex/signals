@@ -16,6 +16,7 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { IssueLockBusyError, acquireIssueLock as acquireLockFile, pidAlive } from "./qa-issue-lock.mjs";
 import {
   CANONICAL_SIGNALS_APP_ID,
   appsFromCliPayload,
@@ -107,30 +108,22 @@ function shellQuote(value) {
   return /^[\w@%+=:,./-]+$/.test(text) ? text : `'${text.replace(/'/g, "'\\''")}'`;
 }
 
-// Recovery commands carry the CLI and database the failing run used. On the dev host the default
-// CLI cannot authenticate, so a `next` without the --cli wrapper could not clean up.
-function followUp(action, issueId, { cli = "", db = "", host = "" } = {}) {
+// Recovery commands repeat everything that decided what the failing run touched: the host, the
+// CLI (the dev host's default CLI cannot authenticate), the database, and --keep-data, whose
+// absence on a rerun would delete the data the first run preserved.
+function followUp(action, issueId, { host, cli = "", db = "", keepData = false }) {
   return [
     "node",
     shellQuote(SELF),
     action,
     "--issue",
     issueId,
-    ...(host ? ["--host", host] : []),
+    "--host",
+    host,
     ...(cli ? ["--cli", shellQuote(cli)] : []),
     ...(db ? ["--db", shellQuote(db)] : []),
+    ...(keepData ? ["--keep-data"] : []),
   ].join(" ");
-}
-
-function pidAlive(pid) {
-  const value = Number(pid);
-  if (!Number.isInteger(value) || value <= 0) return false;
-  try {
-    process.kill(value, 0);
-    return true;
-  } catch (error) {
-    return error.code === "EPERM";
-  }
 }
 
 function qaIssueLockPath(issueId) {
@@ -138,34 +131,18 @@ function qaIssueLockPath(issueId) {
 }
 
 // Two overlapping ups for one issue can both pass preflight before either receipt exists, and the
-// loser leaves an untracked app behind. up and down therefore hold a per-issue lock that records
-// the owning pid; a lock whose pid is gone is stale and taken over.
+// loser leaves an untracked app behind. up and down therefore hold a per-issue lock.
 function acquireIssueLock(issueId, action) {
   const path = qaIssueLockPath(issueId);
-  const body = JSON.stringify({ pid: process.pid, action, startedAt: Date.now() });
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    try {
-      writeFileSync(path, body, { encoding: "utf8", flag: "wx", mode: 0o600 });
-      return () => rmSync(path, { force: true });
-    } catch (error) {
-      if (error.code !== "EEXIST") throw error;
-      let holder = {};
-      try {
-        holder = JSON.parse(readFileSync(path, "utf8"));
-      } catch {
-        holder = {};
-      }
-      if (pidAlive(holder.pid)) {
-        throw new QaError(
-          "QA_LOCKED",
-          `qa-local-app ${holder.action || "run"} (pid ${holder.pid}) is already working on issue ${issueId}.`,
-          { lock: { path, ...holder }, next: "Wait for that run to finish, then rerun." },
-        );
-      }
-      rmSync(path, { force: true });
-    }
+  try {
+    return acquireLockFile(path, action);
+  } catch (error) {
+    if (!(error instanceof IssueLockBusyError)) throw error;
+    throw new QaError("QA_LOCKED", `${error.message} One up or down runs per issue at a time.`, {
+      lock: { path, ...(error.holder ?? {}) },
+      next: "Wait for that run to finish, then rerun.",
+    });
   }
-  throw new QaError("QA_LOCKED", `Could not take ${path}.`, { next: "Rerun." });
 }
 
 function resolveHost(name) {
@@ -471,11 +448,8 @@ function upResult({ reused, issueId, host, appId, worktree, receipt, receiptPath
 async function up(flags) {
   const issueId = normalizeIssueId(flags.get("issue"));
   const host = resolveHost(flags.get("host"));
-  const cliPath = flags.get("cli");
-  const cliOptions = { baseUrl: host.baseUrl, cli: cliPath };
   const dbPath =
     flags.get("db") || process.env.RTX_DB_PATH?.trim() || realtimexDbPath(host.storageRoot);
-  const downCmd = followUp("down", issueId, { cli: cliPath, db: flags.get("db") });
   const waitOptions = {
     timeoutMs: positiveInt(flags.get("timeout-ms"), DEFAULT_TIMEOUT_MS),
     pollMs: positiveInt(process.env.SIGNALS_QA_POLL_MS, 1000),
@@ -492,10 +466,17 @@ async function up(flags) {
 
   const release = acquireIssueLock(issueId, "up");
   try {
-    const issueApps = findIssueQaApps(appsFromCliPayload(cli(LIST_ARGS, cliOptions, host)), issueId);
     const receiptPath = qaReceiptPath(issueId);
     const sessionPath = qaSessionPath(issueId);
     const receipt = readJson(receiptPath);
+    // A rerun on the dev host needs the credential wrapper before its first CLI call, so a
+    // session for this host lends its recorded CLI; an explicit --cli still wins.
+    const priorSession = readJson(sessionPath);
+    const cliPath =
+      flags.get("cli") || (priorSession?.baseUrl === host.baseUrl ? priorSession.cli || "" : "");
+    const cliOptions = { baseUrl: host.baseUrl, cli: cliPath };
+    const downCmd = followUp("down", issueId, { host: host.name, cli: cliPath, db: flags.get("db") });
+    const issueApps = findIssueQaApps(appsFromCliPayload(cli(LIST_ARGS, cliOptions, host)), issueId);
 
     if (receipt) {
       const app = issueApps.find((candidate) => candidate.id === receipt.appId);
@@ -519,7 +500,7 @@ async function up(flags) {
       }
       // The session holds the canonical baseline taken before provisioning. Recapturing it now
       // would hide any change QA already made, so reuse requires the original session.
-      const session = readJson(sessionPath);
+      const session = priorSession;
       if (!session || (session.appId && session.appId !== app.id)) {
         throw new QaError(
           "QA_SESSION_MISSING",
@@ -703,7 +684,12 @@ async function down(flags) {
     session?.dbPath ||
     process.env.RTX_DB_PATH?.trim() ||
     realtimexDbPath(host.storageRoot);
-  const rerun = followUp("down", issueId, { cli: cliPath, db: flags.get("db") });
+  const rerun = followUp("down", issueId, {
+    host: host.name,
+    cli: cliPath,
+    db: flags.get("db"),
+    keepData: flags.has("keep-data"),
+  });
   const pollMs = positiveInt(process.env.SIGNALS_QA_POLL_MS, 1000);
   const releaseWaitMs = positiveInt(process.env.SIGNALS_QA_PORT_RELEASE_MS, PORT_RELEASE_MS);
 

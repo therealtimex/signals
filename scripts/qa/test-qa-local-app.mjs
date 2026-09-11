@@ -12,14 +12,23 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { createServer } from "node:http";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  IssueLockBusyError,
+  acquireIssueLock,
+  processStartTime,
+  releaseIssueLock,
+  takeOverStaleLock,
+} from "./qa-issue-lock.mjs";
 import {
   CANONICAL_SIGNALS_APP_ID,
   canonicalConfigProblems,
@@ -58,6 +67,59 @@ assert.deepEqual(
   ),
   [],
 );
+
+// Issue lock: whole-file publish, stale and recycled-pid takeover, nonce-checked release.
+{
+  const lockDir = mkdtempSync(join(tmpdir(), "signals-qa-lock-test-"));
+  const path = join(lockDir, "issue.lock");
+  const takes = (content, secondsOld = 0) => {
+    writeFileSync(path, content);
+    if (secondsOld) {
+      const then = Date.now() / 1000 - secondsOld;
+      utimesSync(path, then, then);
+    }
+    acquireIssueLock(path, "up")();
+  };
+  try {
+    const release = acquireIssueLock(path, "up");
+    const mine = JSON.parse(readFileSync(path, "utf8"));
+    assert.equal(mine.pid, process.pid);
+    assert.equal(mine.pidStart, processStartTime(process.pid));
+    assert.throws(() => acquireIssueLock(path, "down"), IssueLockBusyError);
+    release();
+    assert.equal(existsSync(path), false);
+
+    // A dead pid is stale; so is a live pid whose start time differs (it was recycled).
+    takes(JSON.stringify({ pid: spawnSync(process.execPath, ["-e", ""]).pid, action: "up" }));
+    takes(JSON.stringify({ pid: process.pid, pidStart: "Mon Jan  1 00:00:00 2001", action: "up" }));
+    writeFileSync(
+      path,
+      JSON.stringify({ pid: process.pid, pidStart: processStartTime(process.pid), action: "up" }),
+    );
+    assert.throws(() => acquireIssueLock(path, "up"), IssueLockBusyError);
+
+    // Unreadable content counts as held while fresh and as stale once old.
+    writeFileSync(path, "{");
+    assert.throws(() => acquireIssueLock(path, "up"), IssueLockBusyError);
+    takes("{", 60);
+
+    // Takeover puts back a lock that changed after it was inspected, and removes one that did not.
+    writeFileSync(path, "fresh-lock");
+    takeOverStaleLock(path, "stale-lock-that-was-inspected");
+    assert.equal(readFileSync(path, "utf8"), "fresh-lock");
+    takeOverStaleLock(path, "fresh-lock");
+    assert.equal(existsSync(path), false);
+
+    // Release leaves a lock that belongs to someone else.
+    writeFileSync(path, JSON.stringify({ pid: process.pid, nonce: "someone-else" }));
+    releaseIssueLock(path, "mine");
+    assert.equal(existsSync(path), true);
+    rmSync(path);
+    assert.deepEqual(readdirSync(lockDir), []);
+  } finally {
+    rmSync(lockDir, { recursive: true, force: true });
+  }
+}
 
 // qa-local-app.mjs reads the canonical record with the sqlite3 CLI, so without it the lifecycle
 // cannot run at all. Skip it the way test-signals-qa-local-app.mjs skips its sqlite section.
@@ -407,7 +469,10 @@ console.log(JSON.stringify({ meta: { source: "mock" }, results }));
   assert.equal(first.json.portSource, "realtimex");
   assert.equal(first.json.dashboardUrl, `http://127.0.0.1:${app.port}/dashboard`);
   assert.equal(first.json.dataDir, defaultQaDataDir(issue));
-  assert.match(first.json.next, /down --issue \d+ --cli \S*mock-realtimex-pp-cli\.mjs --db /);
+  assert.match(
+    first.json.next,
+    /down --issue \d+ --host packaged --cli \S*mock-realtimex-pp-cli\.mjs --db /,
+  );
   assert.equal(existsSync(lockPath(issue)), false);
   const receipt = JSON.parse(readFileSync(qaReceiptPath(issue), "utf8"));
   assert.equal(receipt.baseUrl, "http://127.0.0.1:3001/cli");
@@ -438,7 +503,7 @@ console.log(JSON.stringify({ meta: { source: "mock" }, results }));
   rmSync(sessionPath(issue));
   const lostSession = await run(["up", ...common(issue), "--worktree", worktree]);
   assert.equal(lostSession.json.errorCode, "QA_SESSION_MISSING");
-  assert.match(lostSession.json.next, /down --issue \d+ --cli /);
+  assert.match(lostSession.json.next, /down --issue \d+ --host packaged --cli /);
   assert.equal(existsSync(sessionPath(issue)), false);
   writeFileSync(sessionPath(issue), savedSession);
 
@@ -461,7 +526,8 @@ console.log(JSON.stringify({ meta: { source: "mock" }, results }));
   assert.equal(mockApps().length, 1);
 
   // A port that still answers after cleanup fails down. The session stays, so rerunning down once
-  // the listener is gone completes the teardown.
+  // the listener is gone completes the teardown. The rerun command keeps --keep-data, so following
+  // it cannot delete the data the first down preserved.
   resetMockState();
   const boundIssue = nextIssue();
   const stubborn = await fakeApp();
@@ -469,18 +535,24 @@ console.log(JSON.stringify({ meta: { source: "mock" }, results }));
     MOCK_PORT: String(stubborn.port),
   });
   assert.equal(boundUp.status, 0, detail(boundUp));
-  const bound = await run(["down", ...common(boundIssue)], { SIGNALS_QA_PORT_RELEASE_MS: "400" });
+  const keptFile = join(defaultQaDataDir(boundIssue), "evidence.txt");
+  mkdirSync(defaultQaDataDir(boundIssue), { recursive: true });
+  writeFileSync(keptFile, "qa evidence\n");
+  const bound = await run(["down", ...common(boundIssue), "--keep-data"], {
+    SIGNALS_QA_PORT_RELEASE_MS: "400",
+  });
   assert.equal(bound.status, 1);
   assert.equal(bound.json.errorCode, "PORT_STILL_BOUND");
   assert.equal(bound.json.portReleased, false);
-  assert.match(bound.json.next, /rerun: .*down --issue/);
+  assert.match(bound.json.next, /rerun: .*down --issue \d+ --host packaged --cli .* --keep-data$/);
   assert.equal(existsSync(sessionPath(boundIssue)), true);
   await stopChild(stubborn.child);
-  const boundRerun = await run(["down", ...common(boundIssue)]);
+  const boundRerun = await run(["down", ...common(boundIssue), "--keep-data"]);
   assert.equal(boundRerun.status, 0, detail(boundRerun));
   assert.equal(boundRerun.json.portReleased, true);
   assert.equal(boundRerun.json.appDeleted, false);
   assert.equal(existsSync(sessionPath(boundIssue)), false);
+  assert.equal(existsSync(keptFile), true);
 
   // A canonical record that changes while QA runs fails down and says not to restore it here.
   resetMockState();
@@ -517,6 +589,39 @@ console.log(JSON.stringify({ meta: { source: "mock" }, results }));
   });
   assert.equal(envDbDown.status, 0, detail(envDbDown));
   assert.equal(envDbDown.json.canonicalUnchanged, true);
+
+  // A dev-host rerun without --cli uses the CLI up recorded; the default CLI (the tripwire here)
+  // cannot authenticate there.
+  resetMockState();
+  const devIssue = nextIssue();
+  const devApp = await fakeApp();
+  const devUp = await run(["up", ...common(devIssue), "--host", "dev", "--worktree", worktree], {
+    MOCK_PORT: String(devApp.port),
+  });
+  assert.equal(devUp.status, 0, detail(devUp));
+  assert.equal(devUp.json.host, "dev");
+  assert.match(devUp.json.next, /down --issue \d+ --host dev --cli /);
+  const devAgain = await run(
+    ["up", "--issue", devIssue, "--host", "dev", "--db", dbPath, "--worktree", worktree],
+    { MOCK_PORT: String(devApp.port) },
+  );
+  assert.equal(devAgain.status, 0, detail(devAgain));
+  assert.equal(devAgain.json.reused, true);
+  const devDown = await run(["down", "--issue", devIssue], { MOCK_APP_PID: String(devApp.pid) });
+  assert.equal(devDown.status, 0, detail(devDown));
+  assert.equal(devDown.json.host, "dev");
+
+  // A down on the dev host with neither receipt nor session keeps --host dev in its rerun command.
+  resetMockState();
+  const orphanIssue = nextIssue();
+  execFileSync("sqlite3", [
+    dbPath,
+    `insert into local_apps values ('orphan-qa-row', 'Signals issue-${orphanIssue} QA', 'orphan', '{}', NULL, 'stopped');`,
+  ]);
+  const orphanDown = await run(["down", ...common(orphanIssue), "--host", "dev"]);
+  execFileSync("sqlite3", [dbPath, "delete from local_apps where id = 'orphan-qa-row';"]);
+  assert.equal(orphanDown.json.errorCode, "HYGIENE_FAILED");
+  assert.match(orphanDown.json.next, /rerun: .*down --issue \d+ --host dev /);
 
   // A reused app that fails to start reports its logs and the teardown command.
   resetMockState();
