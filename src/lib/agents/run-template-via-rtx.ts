@@ -37,6 +37,14 @@ import {
   dispatchTerminalAgentViaSendMessage,
   openRtxRuntimeLauncher,
 } from "@/lib/rtx/runtime-sessions";
+import {
+  beginWorkflowTerminalDispatch,
+  readWorkflowTerminalLifecycle,
+  settleWorkflowTerminalDispatch,
+  stripWorkflowTerminalLifecycle,
+  writeWorkflowTerminalLifecycle,
+} from "@/lib/rtx/workflow-terminal-lifecycle";
+import { requestWorkflowTerminalCleanup } from "@/lib/rtx/workflow-terminal-reconciler";
 import { stopRunningRtxBrowserSessions } from "@/lib/rtx/resource-teardown";
 import {
   buildWorkflowRunBriefRoutingMessage,
@@ -254,7 +262,9 @@ export async function runTemplateViaRtx(
   const storedTemplateConfig = mergeRunConfig(template);
   const isContactNurture = isContactNurtureTemplateConfig(storedTemplateConfig);
   const isNetworkSnowball = isNetworkSnowballTemplateConfig(storedTemplateConfig);
-  let mergedConfig = mergeRunConfig(template, input.config);
+  let mergedConfig = stripWorkflowTerminalLifecycle(
+    mergeRunConfig(template, input.config),
+  );
   // The approval gate is capability-derived and server-owned. A caller may select a target and
   // request approval, but it cannot submit a gate that widens the surface policy. Workflow kind
   // and writing composition are structural template declarations too: determine them from the
@@ -681,16 +691,34 @@ export async function runTemplateViaRtx(
       throw new Error(briefWrite.error);
     }
 
+    const routingMessage = buildWorkflowRunBriefRoutingMessage({
+      templateName: template.name,
+      runId: run.id,
+      runNumber: template.totalRuns + 1,
+      absolutePath: briefWrite.absolutePath,
+    });
+    const dispatchLifecycle = beginWorkflowTerminalDispatch(
+      getWorkflowRun(run.id)?.config,
+      {
+        runId: run.id,
+        workspaceSlug,
+        threadSlug,
+        briefPath: briefWrite.absolutePath,
+        message: routingMessage,
+      },
+    );
+    updateWorkflowRun(run.id, {
+      config: writeWorkflowTerminalLifecycle(
+        getWorkflowRun(run.id)?.config,
+        dispatchLifecycle,
+      ),
+    });
+
     const launch = await dispatchTerminalAgentViaSendMessage(
       {
         workspaceSlug,
         threadSlug,
-        message: buildWorkflowRunBriefRoutingMessage({
-          templateName: template.name,
-          runId: run.id,
-          runNumber: template.totalRuns + 1,
-          absolutePath: briefWrite.absolutePath,
-        }),
+        message: routingMessage,
         reason: `Run agent workflow template ${template.name} (${template.id})`,
       },
       env,
@@ -706,12 +734,33 @@ export async function runTemplateViaRtx(
       }
       errorMessage += revokeWritingScopeIfUnaccepted();
       errorMessage += revokeSnowballIdentityScopeIfUnaccepted();
+      const settledLifecycle = settleWorkflowTerminalDispatch(
+        readWorkflowTerminalLifecycle(getWorkflowRun(run.id)?.config) ??
+          dispatchLifecycle,
+        {
+          state:
+            launch.dispatchState === "uncertain" ? "uncertain" : "failed",
+          error: errorMessage,
+        },
+      );
       updateWorkflowRun(run.id, {
         status: "failed",
         completedAt: now,
         errors: JSON.stringify([errorMessage]),
         errorItems: 1,
+        config: writeWorkflowTerminalLifecycle(
+          getWorkflowRun(run.id)?.config,
+          settledLifecycle,
+        ),
       });
+      if (launch.dispatchState === "uncertain") {
+        requestWorkflowTerminalCleanup(
+          run.id,
+          "workflow_dispatch_uncertain_resumable",
+          env,
+          fetchImpl,
+        );
+      }
       createWorkflowStep({
         workflowRunId: run.id,
         stepIndex: nextStepIndex(run.id),
@@ -753,12 +802,20 @@ export async function runTemplateViaRtx(
       rtxThreadSlug: resolvedThread,
     });
 
+    const acceptedLifecycle = settleWorkflowTerminalDispatch(
+      readWorkflowTerminalLifecycle(getWorkflowRun(run.id)?.config) ??
+        dispatchLifecycle,
+      { state: "accepted", descriptor: launch.descriptor },
+    );
     const updatedRun = updateWorkflowRun(run.id, {
-      config: buildStoredRunConfig(template, runtimeConfig, {
-        workspaceSlug: resolvedWorkspace,
-        threadSlug: resolvedThread,
-        runtimeSessionId: launch.descriptor.id,
-      }),
+      config: writeWorkflowTerminalLifecycle(
+        buildStoredRunConfig(template, runtimeConfig, {
+          workspaceSlug: resolvedWorkspace,
+          threadSlug: resolvedThread,
+          runtimeSessionId: launch.descriptor.id,
+        }),
+        acceptedLifecycle,
+      ),
     });
 
     createWorkflowStep({
@@ -820,6 +877,14 @@ export async function runTemplateViaRtx(
       errors: JSON.stringify([message]),
       errorItems: 1,
     });
+    if (dispatchAccepted) {
+      requestWorkflowTerminalCleanup(
+        run.id,
+        "workflow_launch_bookkeeping_failed_resumable",
+        env,
+        fetchImpl,
+      );
+    }
     createWorkflowStep({
       workflowRunId: run.id,
       stepIndex: nextStepIndex(run.id),

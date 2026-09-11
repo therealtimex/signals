@@ -18,6 +18,7 @@ import {
 } from "@/lib/leases/session-lease";
 import { recordSnowballCandidateFailure } from "@/lib/workflows/snowball-candidates";
 import { promoteSnowballCandidate } from "@/lib/workflows/snowball-candidate-promote";
+import { readWorkflowTerminalLifecycle } from "@/lib/rtx/workflow-terminal-lifecycle";
 
 const mockWorkflowCompletedEvent: workflowEvents.EmitWorkflowCompletedResult = {
   emitted: true,
@@ -148,6 +149,8 @@ describe("complete_workflow_run terminal teardown", () => {
       trigger: "template",
       config: JSON.stringify({
         rtxRuntimeSessionId: "cli-agent:session-abc",
+        rtxWorkspaceSlug: "signals",
+        rtxThreadSlug: "snowball-thread",
       }),
     });
 
@@ -162,13 +165,6 @@ describe("complete_workflow_run terminal teardown", () => {
       stopped: ["network-snowball"],
       failed: [],
     });
-    const scheduleSpy = vi
-      .spyOn(resourceTeardown, "scheduleWorkflowTerminalSessionRelease")
-      .mockReturnValue({
-        scheduled: true,
-        sessionId: "cli-agent:session-abc",
-      });
-
     const result = await handleCompleteWorkflowRun({
       runId: run.id,
       status: "completed",
@@ -178,11 +174,13 @@ describe("complete_workflow_run terminal teardown", () => {
     expect(result.success).toBe(true);
     if (!result.success) throw new Error(result.error);
     expect(browserSpy).toHaveBeenCalledWith({ stopAllRunning: true });
-    expect(scheduleSpy).toHaveBeenCalledWith("cli-agent:session-abc");
     expect(result.terminalSessionTeardown).toEqual({
       scheduled: true,
       sessionId: "cli-agent:session-abc",
     });
+    expect(
+      readWorkflowTerminalLifecycle(getWorkflowRun(run.id)?.config)?.cleanup,
+    ).toMatchObject({ requested: true, state: "pending", attempt: 0 });
     expect(result.browserSessionTeardown).toEqual({
       stopped: ["network-snowball"],
       failed: [],
@@ -306,8 +304,6 @@ describe("complete_workflow_run terminal teardown", () => {
       stopped: [],
       failed: [],
     });
-    const scheduleSpy = vi.spyOn(resourceTeardown, "scheduleWorkflowTerminalSessionRelease");
-
     const result = await handleCompleteWorkflowRun({
       runId: run.id,
       status: "completed",
@@ -316,7 +312,6 @@ describe("complete_workflow_run terminal teardown", () => {
 
     expect(result.success).toBe(true);
     if (!result.success) throw new Error(result.error);
-    expect(scheduleSpy).toHaveBeenCalledWith(null);
     expect(result.terminalSessionTeardown).toEqual({ scheduled: false });
   });
 

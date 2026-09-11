@@ -148,7 +148,9 @@ export function resolveTemplateThreadName(
  */
 function stripInternalConfigKeys(config: Record<string, unknown>): Record<string, unknown> {
   const visible = Object.fromEntries(
-    Object.entries(config).filter(([key]) => !key.startsWith("_"))
+    Object.entries(config).filter(
+      ([key]) => !key.startsWith("_") && key !== "rtxTerminalLifecycle",
+    )
   );
   return isSocialPatrolTemplateConfig(visible)
     ? stripRetiredSocialPatrolConfigKeys(visible) ?? visible

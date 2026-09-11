@@ -24,7 +24,7 @@ import { MergeContactsError, mergeContacts } from "@/lib/contacts/dedupe/merge";
 import { personNameKey, orgNameKey } from "@/lib/contacts/dedupe/normalize";
 import { dispatchWorkflowCascade } from "@/lib/workflows/chaining";
 import { emitWorkflowCompletedEvent } from "@/lib/webhooks/workflow-events";
-import { runTemplateViaRtx, getRtxRuntimeSessionIdFromRunConfig } from "@/lib/agents/run-template-via-rtx";
+import { runTemplateViaRtx } from "@/lib/agents/run-template-via-rtx";
 import { isRtxEmbedded } from "@/lib/rtx/env";
 import { getOrCreateOrchestratorThread } from "@/lib/rtx/orchestrator-thread";
 import { resolveActiveTerminalSessionIdForThread } from "@/lib/rtx/runtime-sessions";
@@ -33,9 +33,9 @@ import { postWorkflowCompletionThreadMessage } from "@/lib/rtx/workflow-completi
 import {
   finalizeChatLinkedTerminalSession,
   formatDeferredTerminalTeardownNote,
-  scheduleWorkflowTerminalSessionRelease,
   stopRunningRtxBrowserSessions,
 } from "@/lib/rtx/resource-teardown";
+import { requestWorkflowTerminalCleanup } from "@/lib/rtx/workflow-terminal-reconciler";
 import type { WorkflowType } from "@/lib/workflows/types";
 import type {
   archiveContactSchema,
@@ -1599,8 +1599,7 @@ export async function handleCompleteWorkflowRun(input: z.infer<typeof completeWo
   browserSessionTeardown ??= parallelBrowserTeardown;
   browserSessionTeardown ??= { stopped: [], failed: [] };
 
-  const runtimeSessionId = getRtxRuntimeSessionIdFromRunConfig(run.config);
-  const terminalSessionTeardown = scheduleWorkflowTerminalSessionRelease(runtimeSessionId);
+  const terminalSessionTeardown = requestWorkflowTerminalCleanup(input.runId);
   const teardownNote = formatDeferredTerminalTeardownNote({
     terminal: terminalSessionTeardown,
     browser: browserSessionTeardown,

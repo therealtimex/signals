@@ -161,10 +161,39 @@ export function listRunningTerminalAgentWorkflowRuns(): WorkflowRun[] {
         eq(workflowRuns.status, "running"),
         sql`${workflowRuns.workflowType} != 'persona'`,
         sql`json_valid(${workflowRuns.config})`,
-        sql`json_extract(${workflowRuns.config}, '$.rtxRuntimeSessionId') IS NOT NULL`,
-        sql`trim(json_extract(${workflowRuns.config}, '$.rtxRuntimeSessionId')) != ''`,
+        sql`(
+          (json_extract(${workflowRuns.config}, '$.rtxRuntimeSessionId') IS NOT NULL
+            AND trim(json_extract(${workflowRuns.config}, '$.rtxRuntimeSessionId')) != '')
+          OR
+          (json_extract(${workflowRuns.config}, '$.rtxTerminalLifecycle.version') = 1
+            AND json_extract(${workflowRuns.config}, '$.rtxTerminalLifecycle.dispatch.state') IN ('dispatching', 'uncertain'))
+        )`,
       ),
     )
+    .all();
+}
+
+/** Terminal workflow runs whose durable RTX cleanup intent is ready to reconcile. */
+export function listWorkflowRunsPendingTerminalCleanup(
+  nowMs = Date.now(),
+  limit = 25,
+): WorkflowRun[] {
+  return db
+    .select()
+    .from(workflowRuns)
+    .where(
+      and(
+        sql`${workflowRuns.status} IN ('completed', 'failed', 'cancelled')`,
+        sql`json_valid(${workflowRuns.config})`,
+        sql`json_extract(${workflowRuns.config}, '$.rtxTerminalLifecycle.version') = 1`,
+        sql`json_extract(${workflowRuns.config}, '$.rtxTerminalLifecycle.cleanup.requested') = 1`,
+        sql`json_extract(${workflowRuns.config}, '$.rtxTerminalLifecycle.cleanup.state') != 'released'`,
+        sql`coalesce(json_extract(${workflowRuns.config}, '$.rtxTerminalLifecycle.cleanup.nextAttemptAt'), 0) <= ${nowMs}`,
+        sql`coalesce(json_extract(${workflowRuns.config}, '$.rtxTerminalLifecycle.cleanup.leaseUntil'), 0) <= ${nowMs}`,
+      ),
+    )
+    .orderBy(asc(workflowRuns.updatedAt))
+    .limit(Math.max(1, Math.min(limit, 25)))
     .all();
 }
 

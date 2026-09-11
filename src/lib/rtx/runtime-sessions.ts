@@ -7,6 +7,7 @@ import type { PublishLaunchErrorCode } from "@/lib/publish/types";
 
 export type RuntimeSessionDescriptor = {
   id: string;
+  aliases?: string[];
   linkage?: {
     workspaceSlug?: string;
     threadSlug?: string;
@@ -43,7 +44,13 @@ export type LaunchTerminalAgentInput = {
 
 export type LaunchTerminalAgentResult =
   | { success: true; descriptor: RuntimeSessionDescriptor }
-  | { success: false; error: string; errorCode: PublishLaunchErrorCode; httpStatus?: number };
+  | {
+      success: false;
+      error: string;
+      errorCode: PublishLaunchErrorCode;
+      httpStatus?: number;
+      dispatchState?: "not_accepted" | "uncertain";
+    };
 
 function buildAppHeaders(appId: string): HeadersInit {
   return {
@@ -106,12 +113,13 @@ function mapLaunchHttpError(
       httpStatus: status,
     };
   }
-  if (status === 503 || code === "DESKTOP_RUNTIME_SESSION_RELAY_ERROR") {
+  if (status >= 500 || code === "DESKTOP_RUNTIME_SESSION_RELAY_ERROR") {
     return {
       success: false,
       error: error || "RealTimeX desktop isn't running",
       errorCode: "rtx_unavailable",
       httpStatus: status,
+      dispatchState: "uncertain",
     };
   }
   if (code === "TERMINAL_DISPATCH_REQUIRED") {
@@ -206,6 +214,7 @@ function parseCliSessionDescriptor(
 
   return {
     id,
+    aliases: collectRuntimeSessionAliases(session),
     linkage: {
       workspaceSlug:
         typeof session.workspaceSlug === "string"
@@ -215,6 +224,26 @@ function parseCliSessionDescriptor(
         typeof session.threadSlug === "string" ? session.threadSlug : input.threadSlug,
     },
   };
+}
+
+function collectRuntimeSessionAliases(session: Record<string, unknown>): string[] {
+  const candidates = [
+    session.id,
+    session.sessionId,
+    session.latestSessionId,
+    session.activityCardId,
+    session.lineageKey,
+    session.controlSessionId,
+    session.ptySessionId,
+    ...(Array.isArray(session.aliases) ? session.aliases : []),
+  ];
+  const aliases: string[] = [];
+  for (const value of candidates) {
+    if (typeof value !== "string") continue;
+    const alias = value.trim();
+    if (alias) aliases.push(alias);
+  }
+  return [...new Set(aliases)];
 }
 
 async function launchTerminalCliAgentViaCli(
@@ -242,6 +271,7 @@ async function launchTerminalCliAgentViaCli(
       error: "Launch succeeded but no session descriptor was returned",
       errorCode: "launch_failed",
       httpStatus: response.status,
+      dispatchState: "uncertain",
     };
   }
 
@@ -371,6 +401,7 @@ export async function dispatchTerminalAgentViaSendMessage(
         error: "Dispatch succeeded but no session descriptor was returned",
         errorCode: "launch_failed",
         httpStatus: response.status,
+        dispatchState: "uncertain",
       };
     }
 
@@ -383,6 +414,9 @@ export async function dispatchTerminalAgentViaSendMessage(
       success: true,
       descriptor: {
         id: descriptorId,
+        aliases: collectRuntimeSessionAliases(
+          descriptor as unknown as Record<string, unknown>,
+        ),
         linkage: {
           workspaceSlug: resolvedWorkspace,
           threadSlug: resolvedThread,
@@ -396,6 +430,7 @@ export async function dispatchTerminalAgentViaSendMessage(
       success: false,
       error: error instanceof Error ? error.message : "Dispatch request failed",
       errorCode: "rtx_unavailable",
+      dispatchState: "uncertain",
     };
   }
 }
@@ -450,6 +485,7 @@ export async function launchTerminalCliAgent(
         error: "Launch succeeded but no session descriptor was returned",
         errorCode: "launch_failed",
         httpStatus: response.status,
+        dispatchState: "uncertain",
       };
     }
 
@@ -475,7 +511,7 @@ export async function launchTerminalCliAgent(
 
 export type TerminateTerminalSessionResult =
   | { success: true; terminated: boolean }
-  | { success: false; error: string };
+  | { success: false; error: string; code?: string; httpStatus?: number };
 
 const BUSY_CHAT_LINKED_TURN_STATES = new Set([
   "queued",
@@ -488,25 +524,46 @@ const ACTIVE_TERMINAL_SESSION_STATUSES = new Set(["running", "active", "started"
 
 export type TerminalRuntimeSessionSnapshot = {
   id: string;
+  aliases?: string[];
   status?: string;
+  workspaceSlug?: string;
+  threadSlug?: string;
+  sourcePrompt?: string;
   chatLinkedTurnStateKnown?: boolean;
   chatLinkedPendingTurn?: { id?: string; state?: string } | null;
   chatLinkedBackgroundActivity?: { status?: string };
 };
 
+export type TerminalRuntimeSessionInspection = {
+  available: boolean;
+  sessions: TerminalRuntimeSessionSnapshot[];
+  guardedTerminationVersion: number | null;
+  error?: string;
+};
+
 function flattenTerminalRuntimeSessions(body: Record<string, unknown>): TerminalRuntimeSessionSnapshot[] {
   const sessions: TerminalRuntimeSessionSnapshot[] = [];
-  const seen = new Set<string>();
+  const sessionsById = new Map<string, TerminalRuntimeSessionSnapshot>();
 
-  const pushSession = (raw: unknown) => {
+  const pushSession = (
+    raw: unknown,
+    scope: { workspaceSlug?: string; threadSlug?: string } = {},
+  ) => {
     if (!raw || typeof raw !== "object") return;
     const session = raw as Record<string, unknown>;
     const id =
       (typeof session.id === "string" && session.id.trim()) ||
       (typeof session.sessionId === "string" && session.sessionId.trim()) ||
       "";
-    if (!id || seen.has(id)) return;
-    seen.add(id);
+    if (!id) return;
+    const aliases = collectRuntimeSessionAliases(session);
+    const existing = sessionsById.get(id);
+    if (existing) {
+      existing.aliases = [...new Set([...(existing.aliases ?? []), ...aliases])];
+      existing.workspaceSlug ??= scope.workspaceSlug;
+      existing.threadSlug ??= scope.threadSlug;
+      return;
+    }
 
     const pendingTurn =
       session.chatLinkedPendingTurn && typeof session.chatLinkedPendingTurn === "object"
@@ -520,7 +577,16 @@ function flattenTerminalRuntimeSessions(body: Record<string, unknown>): Terminal
 
     sessions.push({
       id,
+      aliases,
       status: typeof session.status === "string" ? session.status : undefined,
+      workspaceSlug:
+        typeof session.workspaceSlug === "string"
+          ? session.workspaceSlug
+          : scope.workspaceSlug,
+      threadSlug:
+        typeof session.threadSlug === "string" ? session.threadSlug : scope.threadSlug,
+      sourcePrompt:
+        typeof session.sourcePrompt === "string" ? session.sourcePrompt : undefined,
       chatLinkedTurnStateKnown:
         typeof session.chatLinkedTurnStateKnown === "boolean"
           ? session.chatLinkedTurnStateKnown
@@ -528,19 +594,36 @@ function flattenTerminalRuntimeSessions(body: Record<string, unknown>): Terminal
       chatLinkedPendingTurn: pendingTurn,
       chatLinkedBackgroundActivity: backgroundActivity,
     });
+    sessionsById.set(id, sessions.at(-1)!);
   };
 
   const pushWorkspaceGroups = (workspaces: unknown) => {
     if (!Array.isArray(workspaces)) return;
     for (const workspace of workspaces) {
       if (!workspace || typeof workspace !== "object") continue;
-      const threads = (workspace as Record<string, unknown>).threads;
+      const workspaceRecord = workspace as Record<string, unknown>;
+      const workspaceSlug =
+        typeof workspaceRecord.workspaceSlug === "string"
+          ? workspaceRecord.workspaceSlug
+          : typeof workspaceRecord.slug === "string"
+            ? workspaceRecord.slug
+            : undefined;
+      const threads = workspaceRecord.threads;
       if (!Array.isArray(threads)) continue;
       for (const thread of threads) {
         if (!thread || typeof thread !== "object") continue;
-        const threadSessions = (thread as Record<string, unknown>).sessions;
+        const threadRecord = thread as Record<string, unknown>;
+        const threadSlug =
+          typeof threadRecord.threadSlug === "string"
+            ? threadRecord.threadSlug
+            : typeof threadRecord.slug === "string"
+              ? threadRecord.slug
+              : undefined;
+        const threadSessions = threadRecord.sessions;
         if (!Array.isArray(threadSessions)) continue;
-        for (const session of threadSessions) pushSession(session);
+        for (const session of threadSessions) {
+          pushSession(session, { workspaceSlug, threadSlug });
+        }
       }
     }
   };
@@ -575,9 +658,29 @@ export async function listTerminalRuntimeSessions(
   env: EnvLike = process.env,
   fetchImpl: typeof fetch = fetch
 ): Promise<TerminalRuntimeSessionSnapshot[]> {
+  const inspection = await inspectTerminalRuntimeSessions(input, env, fetchImpl);
+  return inspection.sessions;
+}
+
+export async function inspectTerminalRuntimeSessions(
+  input: {
+    workspaceSlug?: string;
+    threadSlug?: string;
+    includeClosed?: boolean;
+  } = {},
+  env: EnvLike = process.env,
+  fetchImpl: typeof fetch = fetch,
+): Promise<TerminalRuntimeSessionInspection> {
   const appId = getRtxAppId(env);
   const apiBase = resolveRtxApiBase(env);
-  if (!appId || !apiBase) return [];
+  if (!appId || !apiBase) {
+    return {
+      available: false,
+      sessions: [],
+      guardedTerminationVersion: null,
+      error: "RealTimeX API is not configured",
+    };
+  }
 
   const params = new URLSearchParams();
   if (input.workspaceSlug?.trim()) params.set("workspaceSlug", input.workspaceSlug.trim());
@@ -586,16 +689,46 @@ export async function listTerminalRuntimeSessions(
   if (input.workspaceSlug?.trim() && input.threadSlug?.trim()) params.set("limit", "0");
 
   const query = params.toString();
-  const response = await fetchImpl(
-    `${apiBase}/cli/list-terminal-sessions${query ? `?${query}` : ""}`,
-    {
-      method: "GET",
-      headers: buildAppHeaders(appId),
+  try {
+    const response = await fetchImpl(
+      `${apiBase}/cli/list-terminal-sessions${query ? `?${query}` : ""}`,
+      {
+        method: "GET",
+        headers: buildAppHeaders(appId),
+      },
+    );
+    const body = await readRtxJsonBody(response);
+    if (!response.ok || body.success === false || body.runtimeRelayError) {
+      return {
+        available: false,
+        sessions: [],
+        guardedTerminationVersion: null,
+        error:
+          typeof body.error === "string"
+            ? body.error
+            : `Failed to list terminal sessions (${response.status})`,
+      };
     }
-  );
-  const body = await readRtxJsonBody(response);
-  if (!response.ok || body.success === false) return [];
-  return flattenTerminalRuntimeSessions(body);
+    const capabilities =
+      body.capabilities && typeof body.capabilities === "object"
+        ? (body.capabilities as Record<string, unknown>)
+        : {};
+    return {
+      available: true,
+      sessions: flattenTerminalRuntimeSessions(body),
+      guardedTerminationVersion:
+        typeof capabilities.guardedTermination === "number"
+          ? capabilities.guardedTermination
+          : null,
+    };
+  } catch (error) {
+    return {
+      available: false,
+      sessions: [],
+      guardedTerminationVersion: null,
+      error: error instanceof Error ? error.message : "Failed to list terminal sessions",
+    };
+  }
 }
 
 export function isTerminalRuntimeSessionBusy(
@@ -628,7 +761,13 @@ export async function findTerminalRuntimeSessionById(
   if (!id) return null;
 
   const sessions = await listTerminalRuntimeSessions({ includeClosed: true }, env, fetchImpl);
-  return sessions.find((session) => session.id === id) ?? null;
+  const sessionsByAlias = new Map<string, TerminalRuntimeSessionSnapshot>();
+  for (const session of sessions) {
+    for (const alias of session.aliases ?? [session.id]) {
+      if (!sessionsByAlias.has(alias)) sessionsByAlias.set(alias, session);
+    }
+  }
+  return sessionsByAlias.get(id) ?? null;
 }
 
 export const DEFAULT_TERMINAL_SESSION_IDLE_WAIT_DELAYS_MS = [
@@ -692,6 +831,13 @@ export async function resolveActiveTerminalSessionIdForThread(
 export type TerminateTerminalRuntimeSessionOptions = {
   /** RTX close reason; use idle_timeout_resumable for workflow teardown. */
   reason?: string;
+  guard?: {
+    version: 1;
+    workspaceSlug: string;
+    threadSlug: string;
+    expectedAliases: string[];
+    expectedTurn: { known: true; id: string | null; state: string | null };
+  };
 };
 
 export async function terminateTerminalRuntimeSession(
@@ -712,7 +858,10 @@ export async function terminateTerminalRuntimeSession(
   }
 
   const reason = options.reason?.trim();
-  const requestBody = reason ? { reason } : {};
+  const requestBody = {
+    ...(reason ? { reason } : {}),
+    ...(options.guard ? { guard: options.guard } : {}),
+  };
 
   try {
     const response = await fetchImpl(
@@ -732,6 +881,8 @@ export async function terminateTerminalRuntimeSession(
           typeof body.error === "string"
             ? body.error
             : `Failed to terminate terminal session (${response.status})`,
+        code: typeof body.code === "string" ? body.code : undefined,
+        httpStatus: response.status,
       };
     }
 
