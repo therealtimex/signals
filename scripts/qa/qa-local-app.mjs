@@ -157,6 +157,7 @@ function parseNeeds(flags, worktree) {
     throw new QaError(
       "USAGE",
       `--needs cannot be checked: ${join(worktree, "rtx-manifest.json")} lists no permissions.`,
+      { next: "Run up without --needs; its output lists the permissions the app has." },
     );
   }
   const unknown = needs.filter((permission) => !requested.includes(permission));
@@ -165,6 +166,7 @@ function parseNeeds(flags, worktree) {
       "USAGE",
       `--needs names permissions this Signals build does not request: ${unknown.join(", ")}. ` +
         `It requests: ${requested.join(", ")}.`,
+      { next: `Rerun with --needs taken from: ${requested.join(", ")}.` },
     );
   }
   return needs;
@@ -241,7 +243,11 @@ function acquireIssueLock(issueId, action) {
 
 function resolveHost(name) {
   const host = HOSTS[name || "packaged"];
-  if (!host) throw new QaError("USAGE", `--host must be packaged or dev; received ${name}.`);
+  if (!host) {
+    throw new QaError("USAGE", `--host must be packaged or dev; received ${name}.`, {
+      next: "Rerun with --host packaged (the default) or --host dev.",
+    });
+  }
   return host;
 }
 
@@ -281,7 +287,9 @@ function classifyCliError(error, host) {
       },
     );
   }
-  return new QaError("HOST_ERROR", message);
+  return new QaError("HOST_ERROR", message, {
+    next: `Check that the RealTimeX host at ${host.baseUrl} is healthy, then rerun.`,
+  });
 }
 
 function cli(args, cliOptions, host) {
@@ -393,6 +401,11 @@ function queryRealtimexDb(dbPath, query) {
     throw new QaError(
       "DB_UNREADABLE",
       result.stderr?.trim() || `sqlite3 exited with ${result.status} reading ${dbPath}.`,
+      {
+        next:
+          `Check that ${dbPath} is the RealTimeX database for this host (pass --db if not). ` +
+          "If it was only locked, rerun.",
+      },
     );
   }
   const text = String(result.stdout || "").trim();
@@ -948,7 +961,11 @@ try {
     console.log(usage());
     process.exit(command ? 0 : 2);
   }
-  if (!COMMANDS[command]) throw new QaError("USAGE", `Unknown command ${command}.\n\n${usage()}`);
+  if (!COMMANDS[command]) {
+    throw new QaError("USAGE", `Unknown command ${command}.\n\n${usage()}`, {
+      next: "Use up, status, or down.",
+    });
+  }
   const flags = parseFlagArgs(rest);
   if (flags.has("help")) {
     console.log(usage());
@@ -961,7 +978,12 @@ try {
   }
   process.exit(result.ok ? 0 : 1);
 } catch (error) {
-  const coded = error instanceof QaError ? error : new QaError("UNEXPECTED", error?.message || String(error));
+  const coded =
+    error instanceof QaError
+      ? error
+      : new QaError("UNEXPECTED", error?.message || String(error), {
+          next: "Check the arguments against --help and rerun; report the error if it repeats.",
+        });
   const result = { ok: false, action, errorCode: coded.errorCode, error: coded.message, ...coded.extra };
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   process.stderr.write(`qa-local-app ${action}: ${coded.errorCode}: ${coded.message}\n`);

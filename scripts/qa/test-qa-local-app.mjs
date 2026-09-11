@@ -181,6 +181,8 @@ const dbPath = join(root, "realtimex.db");
 const baseIssue = Number(String(Date.now()).slice(-8));
 const issues = [];
 const children = new Set();
+// The script promises a `next` on every failure; any run that breaks that lands here.
+const failuresWithoutNext = [];
 
 const nextIssue = () => {
   const issue = String(baseIssue + issues.length);
@@ -351,6 +353,9 @@ function run(args, env = {}) {
         json = JSON.parse(stdout);
       } catch {
         json = null;
+      }
+      if (json?.ok === false && !String(json.next || "").trim()) {
+        failuresWithoutNext.push(`${args[0]} -> ${json.errorCode}`);
       }
       resolveRun({ status, stdout, stderr, json });
     });
@@ -912,6 +917,9 @@ console.log(JSON.stringify({ meta: { source: "mock" }, results }));
   );
   assert.equal(noPort.json.errorCode, "PORT_UNKNOWN");
   assert.equal((await run(["down", ...common(noPortIssue)])).status, 0);
+
+  assert.deepEqual(failuresWithoutNext, [], "every failure must carry a next");
+  assert.match(unreadable.json.next, /--db/);
 
   console.log("qa-local-app orchestrator: OK");
 } finally {
