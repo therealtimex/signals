@@ -35,7 +35,6 @@ import {
   runScheduledDedupeMerge,
 } from "@/lib/contacts/dedupe/scheduled-merge";
 import { releaseStaleWorkflowTerminalRuns } from "@/lib/rtx/workflow-run-terminal-watchdog";
-import { reconcileWorkflowTerminalCleanups } from "@/lib/rtx/workflow-terminal-reconciler";
 import { runPipelineTemplate } from "@/lib/workflows/pipeline/run-pipeline-template";
 import type { WorkflowType } from "@/lib/workflows/types";
 
@@ -176,9 +175,6 @@ function shouldRunWorkflowTerminalSweep(): boolean {
 function checkDueJobs(): void {
   try {
     if (shouldRunWorkflowTerminalSweep()) {
-      void reconcileWorkflowTerminalCleanups().catch((err) => {
-        console.warn("[scheduler] Workflow terminal cleanup reconciliation failed:", err);
-      });
       void releaseStaleWorkflowTerminalRuns().catch((err) => {
         console.warn("[scheduler] Stale workflow terminal release sweep failed:", err);
       });

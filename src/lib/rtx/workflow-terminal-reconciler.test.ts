@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createWorkflowRun,
   getWorkflowRun,
@@ -12,6 +12,11 @@ import {
   writeWorkflowTerminalLifecycle,
 } from "@/lib/rtx/workflow-terminal-lifecycle";
 import { reconcileWorkflowTerminalCleanups } from "@/lib/rtx/workflow-terminal-reconciler";
+import {
+  initWorkflowTerminalCleanupReconciler,
+  stopWorkflowTerminalCleanupReconciler,
+  WORKFLOW_TERMINAL_CLEANUP_INTERVAL_MS,
+} from "@/lib/rtx/workflow-terminal-reconciler-runner";
 import { resetCoreTables } from "@/test/db";
 
 const env = {
@@ -80,7 +85,15 @@ function listResponse(
 
 describe("workflow terminal cleanup reconciler", () => {
   beforeEach(() => {
+    stopWorkflowTerminalCleanupReconciler();
     resetCoreTables();
+    vi.useRealTimers();
+  });
+
+  afterEach(() => {
+    stopWorkflowTerminalCleanupReconciler();
+    vi.useRealTimers();
+    vi.unstubAllEnvs();
   });
 
   it("rejects malformed versioned lifecycle state without touching the host", async () => {
@@ -168,6 +181,73 @@ describe("workflow terminal cleanup reconciler", () => {
       nextAttemptAt: 15_000,
       lastError: "terminal_session_busy",
     });
+  });
+
+  it("replays persisted cleanup and retries it when workflow scheduling is disabled", async () => {
+    vi.stubEnv("SIGNALS_SCHEDULER_ENABLED", "0");
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    const run = createCleanupRun();
+    let listCalls = 0;
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        return new Response(JSON.stringify({ success: true }), { status: 200 });
+      }
+
+      listCalls += 1;
+      if (listCalls === 1) {
+        return listResponse([
+          {
+            id: "cli-agent:workflow",
+            activityCardId: "terminal-card:workflow",
+            workspaceSlug: "signals",
+            threadSlug: "workflow-thread",
+            status: "running",
+            chatLinkedTurnStateKnown: true,
+            chatLinkedPendingTurn: { id: "turn-1", state: "capturing" },
+          },
+        ]);
+      }
+      if (listCalls === 2) {
+        return listResponse([
+          {
+            id: "cli-agent:workflow",
+            activityCardId: "terminal-card:workflow",
+            workspaceSlug: "signals",
+            threadSlug: "workflow-thread",
+            status: "running",
+            chatLinkedTurnStateKnown: true,
+            chatLinkedPendingTurn: null,
+          },
+        ]);
+      }
+      return listResponse([]);
+    });
+    const fetchImpl = fetchMock as unknown as typeof fetch;
+
+    await initWorkflowTerminalCleanupReconciler({
+      reconcile: () =>
+        reconcileWorkflowTerminalCleanups({ env, fetchImpl }),
+    });
+
+    expect(process.env.SIGNALS_SCHEDULER_ENABLED).toBe("0");
+    expect(readWorkflowTerminalLifecycle(getWorkflowRun(run.id)?.config)?.cleanup).toMatchObject({
+      state: "retry",
+      nextAttemptAt: 15_000,
+      lastError: "terminal_session_busy",
+    });
+
+    await vi.advanceTimersByTimeAsync(WORKFLOW_TERMINAL_CLEANUP_INTERVAL_MS);
+
+    expect(readWorkflowTerminalLifecycle(getWorkflowRun(run.id)?.config)?.cleanup).toMatchObject({
+      state: "released",
+      attempt: 2,
+      releasedAt: 70_000,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(
+      fetchMock.mock.calls.some(([, request]) => request?.method === "POST"),
+    ).toBe(true);
   });
 
   it("retains cleanup intent without destructive calls when the host lacks guards", async () => {
