@@ -7,6 +7,13 @@ import { getVariantById } from "@/lib/db/queries/variants";
 import { db } from "@/lib/db/client";
 import { graphEdges, orgs } from "@/lib/db/schema";
 import { resetCoreTables } from "@/test/db";
+import { createTemplate } from "@/lib/db/queries/workflow-templates";
+import { createWorkflowRun, getWorkflowRun } from "@/lib/db/queries/workflows";
+import {
+  buildNetworkSnowballRunConfig,
+  readNetworkSnowballConfig,
+} from "@/lib/workflows/network-snowball";
+import { parseTemplateConfig } from "@/lib/workflows/template-config";
 
 describe("graph agent tools", () => {
   beforeEach(() => {
@@ -407,5 +414,73 @@ describe("graph agent tools", () => {
       code: "EXECUTION_ERROR",
       message: expect.stringContaining("Reassign, don't duplicate"),
     });
+  });
+
+  it("stamps a Hop 0 org onto a Network Snowball run from create_org", async () => {
+    const config = buildNetworkSnowballRunConfig(readNetworkSnowballConfig({
+      seedType: "event_url",
+      seedValue: "https://x.com/kepler/status/1",
+    }));
+    const template = createTemplate({
+      name: "Network Snowball",
+      templateType: "prospecting",
+      status: "active",
+      config: JSON.stringify(config),
+    });
+    const run = createWorkflowRun({
+      templateId: template.id,
+      workflowType: "search",
+      status: "running",
+      trigger: "template",
+      config: JSON.stringify(config),
+    });
+
+    const created = await invokeAgentTool("create_org", {
+      name: "Kepler Computing",
+      domain: "kepler.example",
+      industry: "Semiconductors",
+      workflowRunId: run.id,
+      templateId: template.id,
+    }) as { id: string };
+
+    expect(parseTemplateConfig(getWorkflowRun(run.id)?.config).orgId).toBe(created.id);
+  });
+
+  it("stamps the existing orgId when Hop 0 create_org hits a domain conflict", async () => {
+    const existing = await invokeAgentTool("create_org", {
+      name: "Kepler Computing",
+      domain: "kepler.example",
+    }) as { id: string };
+    const config = buildNetworkSnowballRunConfig(readNetworkSnowballConfig({
+      seedType: "event_url",
+      seedValue: "https://x.com/kepler/status/1",
+    }));
+    const template = createTemplate({
+      name: "Network Snowball",
+      templateType: "prospecting",
+      status: "active",
+      config: JSON.stringify(config),
+    });
+    const run = createWorkflowRun({
+      templateId: template.id,
+      workflowType: "search",
+      status: "running",
+      trigger: "template",
+      config: JSON.stringify(config),
+    });
+
+    await expect(
+      invokeAgentTool("create_org", {
+        name: "Kepler Computing Inc",
+        domain: "kepler.example",
+        workflowRunId: run.id,
+        templateId: template.id,
+      }),
+    ).rejects.toMatchObject({
+      code: "CONFLICT",
+      details: { orgId: existing.id, domain: "kepler.example" },
+    });
+
+    expect(parseTemplateConfig(getWorkflowRun(run.id)?.config).orgId).toBe(existing.id);
   });
 });

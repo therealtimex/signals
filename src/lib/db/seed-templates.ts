@@ -28,7 +28,7 @@ import { buildWritingTemplateConfig } from "@/lib/workflows/signals-writing";
 import { buildContactWebResearchTemplateConfig } from "@/lib/workflows/contact-web-research";
 
 /** Bump this when seed template prompts change to trigger updates on existing installs. */
-const SEED_VERSION = 39;
+const SEED_VERSION = 40;
 
 export const CONTACT_PROFILE_PIPELINE_TEMPLATE_NAME = "Contact profile pipeline";
 export const DEDUPE_MERGE_ORGS_TEMPLATE_NAME = "Deduplicate & Merge Companies";
@@ -679,33 +679,35 @@ Use Deploy to provision scripts/snowball-seed-scout/scout.json and a HEARTBEAT.m
   {
     name: NETWORK_SNOWBALL_TEMPLATE_NAME,
     description:
-      "Expand your network from a high-signal event or announcement (funding round, product launch, executive hire). Traverses causal edges to discover connected investors, angels, co-founders, and technical advocates.",
+      "Expand your network from a high-signal event or announcement (funding round, product launch, executive hire). Ingests the seed organization and qualifying author as Hop 0, then traverses causal edges to discover connected investors, angels, co-founders, and technical advocates.",
     templateType: "prospecting",
     targetPersona:
-      "Second-degree connected decision makers: lead VCs, angel investors, co-founders, founding engineers, and high-signal product advocates tied to a seed announcement",
+      "The seed organization and author plus first- and second-degree decision makers: lead VCs, angel investors, co-founders, founding engineers, and high-signal product advocates tied to a seed announcement",
     estimatedCost: 0.35,
     systemPrompt: `You are an ecosystem snowball agent expanding relationship graphs from high-signal trigger events.
 
 ## Objective
-Start from a seed post URL, founder profile, or organization announcement (such as a funding round or launch). Traverse the causal relationship edges to discover and map connected high-value nodes — lead partners, angel investors, co-founders, and technical advocates — into Signals CRM.
+Start from a seed post URL, founder profile, or organization announcement (such as a funding round or launch). Ingest that seed organization and qualifying author/founder as Hop 0 graph anchors, then traverse the causal relationship edges to discover and map connected high-value nodes — lead partners, angel investors, co-founders, and technical advocates — into Signals CRM.
 
 ## Execution lane
 Follow the numbered "Network Snowball execution contract" below.
 
 ## Process
 1. Inspect the seed event via RealTimeX Browser / agent-browser. Parse the primary company, founders, and event context (e.g. "$4M Seed led by VC X with Angels Y, Z").
-2. Discover 1st-degree connected entities based on the configured focus:
+2. Hop 0 Seed Ingestion: query_orgs / get_org / create_org for the featured company (pass workflowRunId and templateId). Ingest the post author or featured founder as a Hop 0 contact when they are a real human decision-maker. If the author is an automated news aggregator (PR Newswire, *bot, *daily, *digest), skip that contact and still ingest the announced organization.
+3. Discover 1st-degree connected entities based on the configured focus:
    - Investors & Backers: Extract tagged partner handles, mentioned VC firms, and celebrating angels in the replies.
    - Founding Team: Extract co-founders, CTO, and core engineers linked in bios and announcements.
    - Advocates: Extract high-profile developers quote-posting with technical praise or benchmark results.
-3. Apply the Anti-Hallucination & Bot Gate:
+4. Apply the Anti-Hallucination & Bot Gate:
    - Anti-Hallucination: Never guess or synthesize vanity profile URLs (e.g. guessing https://linkedin.com/in/<name> from a person's name). Only attach a profile URL/handle if verified from the page links/DOM or search. If unverified, leave profile_url blank.
-   - Bot Gate: Skip automated bots (*bot, *_agent, *digest), scraper clones, and news feeds.
-4. For every LinkedIn candidate, use the server-attested identity gate in the execution contract before write-back. Extract avatarUrl only after identity attestation, from the platform DOM/CDN when available.
-5. Ingest contacts via signals-pp-cli import contacts --file workflow-runs/<runId>/contacts.csv --dedupe --workflow-run-id <runId> --template-id <templateId>.
-6. In the notes column, clearly record the causal anchor (e.g. "role: Lead Investor in Acme Seed round").
-7. Report the mapped ecosystem cluster with links in this thread.
-8. Teardown & Resource Release: Call complete_workflow_run when finished (Signals stops running browser sessions and releases the terminal session automatically), and do not continue in this thread.
+   - Bot Gate: Skip automated bots (*bot, *_agent, *digest), scraper clones, and news feeds — including as Hop 0 authors.
+5. For every LinkedIn candidate, use the server-attested identity gate in the execution contract before write-back. Extract avatarUrl only after identity attestation, from the platform DOM/CDN when available.
+6. Ingest contacts via signals-pp-cli import contacts --file workflow-runs/<runId>/contacts.csv --dedupe --workflow-run-id <runId> --template-id <templateId>. Include the Hop 0 author in that CSV when they were ingested.
+7. Link Hop 1/Hop 2 people to the Hop 0 organization with link_contact_to_org (employment) or upsert_edge (investor_in, advisor_of, board_member). Do not write works_at through upsert_edge.
+8. In the notes column, clearly record the causal anchor (e.g. "role: Lead Investor in Acme Seed round" or "role: Founder of Acme (Hop 0 seed)").
+9. Report the mapped ecosystem cluster with links in this thread, including Hop 0 org id and author outcome.
+10. Teardown & Resource Release: Call complete_workflow_run when finished (Signals stops running browser sessions and releases the terminal session automatically), and do not continue in this thread.
 
 ## Rules
 - Focus on real human decision-makers. Apply the 'Engage for visibility, skip for contacts' bot rule.

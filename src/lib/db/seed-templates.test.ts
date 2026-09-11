@@ -58,7 +58,7 @@ describe("Platform-native writing seed", () => {
     expect(migrated.id).toBe(legacy.id);
     expect(getSystemTemplateByName("Thought Leadership Posts")).toBeUndefined();
     const config = JSON.parse(migrated.config ?? "{}") as Record<string, unknown>;
-    expect(config).toMatchObject({ _seedVersion: 39, topics: ["keep"] });
+    expect(config).toMatchObject({ _seedVersion: 40, topics: ["keep"] });
     expect(isSignalsWritingTemplateConfig(config)).toBe(true);
   });
 });
@@ -76,7 +76,7 @@ describe("Contact profile pipeline seed", () => {
       pipeline?: { version?: number; steps?: Array<{ id: string; handler: string }> };
     };
 
-    expect(config._seedVersion).toBe(39);
+    expect(config._seedVersion).toBe(40);
     expect(config.pipeline?.version).toBe(2);
     expect(config.pipeline?.steps).toEqual([
       { id: "hydrate", executor: "code", handler: "hydrate_x_profiles" },
@@ -120,7 +120,7 @@ describe("Contact profile pipeline seed", () => {
       };
     };
     expect(config).toMatchObject({
-      _seedVersion: 39,
+      _seedVersion: 40,
       customTopLevel: true,
       pipeline: {
         version: 2,
@@ -260,7 +260,7 @@ describe("Contact Web Research seed", () => {
     expect(template.templateType).toBe("enrichment");
     expect(template.estimatedCost).toBe(0.2);
     expect(config).toMatchObject({
-      _seedVersion: 39,
+      _seedVersion: 40,
       contactWebResearch: { version: 2 },
       acceptsContactId: true,
     });
@@ -372,7 +372,7 @@ describe("Social Intent Patrol seed", () => {
 
     expect(config).not.toHaveProperty("maxPosts");
     expect(config).not.toHaveProperty("durationMinutes");
-    expect(config._seedVersion).toBe(39);
+    expect(config._seedVersion).toBe(40);
     expect(config.maxComments).toBe(8);
     // The card copy is structural — an existing install must not keep describing a shift that
     // still posts to your own timeline.
@@ -496,7 +496,7 @@ describe("Contact Relationship Nurture seed", () => {
     const migrated = JSON.parse(
       getSystemTemplateByName("Contact Relationship Nurture")!.config ?? "{}",
     ) as Record<string, unknown>;
-    expect(migrated).toMatchObject({ _seedVersion: 39, requireApproval: true, maxTargets: 42 });
+    expect(migrated).toMatchObject({ _seedVersion: 40, requireApproval: true, maxTargets: 42 });
     expect(info).toHaveBeenCalledTimes(1);
 
     seedTemplates();
@@ -522,7 +522,7 @@ describe("Snowball Seed Scout seed", () => {
       snowballSeedScout?: { version?: number; executionKind?: string };
       maxLinksPerRun?: number;
     };
-    expect(config._seedVersion).toBe(39);
+    expect(config._seedVersion).toBe(40);
     expect(config.snowballSeedScout?.executionKind).toBe("heartbeat_shell");
     expect(config.maxLinksPerRun).toBe(5);
   });
@@ -541,6 +541,9 @@ describe("Network Snowball seed", () => {
     expect(template.templateType).toBe("prospecting");
     expect(template.platform).toBeNull();
     expect(template.systemPrompt).toContain("lead partners, angel investors, co-founders");
+    expect(template.systemPrompt).toContain("Hop 0 Seed Ingestion");
+    expect(template.systemPrompt).toContain("query_orgs / get_org / create_org");
+    expect(template.systemPrompt).toContain("link_contact_to_org");
     expect(template.systemPrompt).toContain("Anti-Hallucination & Bot Gate");
     expect(template.systemPrompt).toContain("Never guess vanity profile links");
     expect(template.systemPrompt).toContain("server-attested identity gate");
@@ -553,7 +556,7 @@ describe("Network Snowball seed", () => {
       maxContacts?: number;
       maxHops?: number;
     };
-    expect(config._seedVersion).toBe(39);
+    expect(config._seedVersion).toBe(40);
     expect(config.networkSnowball?.version).toBe(1);
     expect(config.focus).toBe("investors_and_angels");
     expect(config.maxContacts).toBe(10);
@@ -577,6 +580,6 @@ describe("Network Snowball seed", () => {
 
     expect(updated.systemPrompt).toContain("--workflow-run-id <runId>");
     expect(updated.systemPrompt).toContain("--template-id <templateId>");
-    expect(updatedConfig._seedVersion).toBe(39);
+    expect(updatedConfig._seedVersion).toBe(40);
   });
 });

@@ -1,5 +1,5 @@
 import { getContactsByIds } from "@/lib/db/queries/contacts";
-import { getOrgById } from "@/lib/db/queries/orgs";
+import { getOrgById, listOrgIdsByCreatedWorkflowRun } from "@/lib/db/queries/orgs";
 import { parseTemplateConfig } from "@/lib/workflows/template-config";
 import type { WorkflowRun, WorkflowStep } from "@/lib/db/types";
 import type { WorkflowRunSubject } from "@/lib/workflows/workflow-run-subjects-shared";
@@ -45,6 +45,7 @@ export function extractWorkflowRunSubjectIds(
     orgIds: uniqueStrings([
       typeof config.orgId === "string" ? config.orgId : null,
       typeof config.organizationId === "string" ? config.organizationId : null,
+      ...listOrgIdsByCreatedWorkflowRun(run.id),
     ]),
   };
 }

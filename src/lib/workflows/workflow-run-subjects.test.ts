@@ -100,4 +100,33 @@ describe("workflow-run-subjects", () => {
       },
     ]);
   });
+
+  it("includes companies created during the run as subjects", () => {
+    resetCoreTables();
+    const org = createOrg({
+      name: "Hop Zero Co",
+      provenance: { tag: "agent:create_org", workflowRunId: "pending" },
+    });
+    const run = createWorkflowRun({
+      workflowType: "search",
+      status: "running",
+      config: JSON.stringify({ networkSnowball: { version: 1 } }),
+      trigger: "template",
+    });
+    createOrg({
+      name: "Seed Anchor Inc",
+      provenance: { tag: "agent:create_org", workflowRunId: run.id },
+    });
+
+    const ids = extractWorkflowRunSubjectIds(run);
+    expect(ids.orgIds).toHaveLength(1);
+    expect(ids.orgIds[0]).not.toBe(org.id);
+    const subjects = resolveWorkflowRunSubjects([run])[run.id];
+    expect(subjects).toEqual([
+      expect.objectContaining({
+        kind: "organization",
+        label: "Seed Anchor Inc",
+      }),
+    ]);
+  });
 });
