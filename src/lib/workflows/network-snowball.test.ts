@@ -129,7 +129,13 @@ describe("buildNetworkSnowballBriefSection", () => {
 
     expect(brief).toContain("Network Snowball execution contract:");
     expect(brief).toContain("https://x.com/acme/status/987");
-    expect(brief).toContain("12 connected contact(s)");
+    expect(brief).toContain("Hop 0 graph anchors");
+    expect(brief).toContain("Hop 0 Seed Ingestion");
+    expect(brief).toContain("create_org");
+    expect(brief).toContain("hop0OrgId");
+    expect(brief).toContain("PR Newswire");
+    expect(brief).toContain("12 connected Hop 1/Hop 2 contact(s)");
+    expect(brief).toContain("does not count against maxContacts");
     expect(brief).toContain("Lead VCs, participating funds, and angel investors");
     expect(brief).toContain("Anti-Hallucination & Bot Filter Gate");
     expect(brief).toContain("Engage for visibility, skip for contacts");
@@ -144,6 +150,12 @@ describe("buildNetworkSnowballBriefSection", () => {
     expect(brief).toContain("identity_unverified");
     expect(brief).toContain("list_snowball_candidates");
     expect(brief).toContain("Auto-commit & Graph Edge Linking");
+    expect(brief).toContain("link_contact_to_org");
+    expect(brief).toContain("investor_in");
+    expect(brief).toContain("advisor_of");
+    expect(brief).toContain("board_member");
+    expect(brief).toContain("Do not write `works_at` through `upsert_edge`");
+    expect(brief).toContain("org-only, author skipped as aggregator");
     expect(brief).toContain("Avatar Enrichment (downstream of identity attestation)");
     expect(brief).toContain("use the `avatarUrl` returned by `attest_snowball_linkedin_identity`");
     expect(brief).toContain("pv-top-card-profile-picture__image");
@@ -170,6 +182,28 @@ describe("buildNetworkSnowballBriefSection", () => {
     expect(brief).toContain(
       "schedules release of this workflow's linked terminal session after the chat-linked turn finishes"
     );
+  });
+
+  it("reuses a company-page orgId as hop0OrgId and skips graph writes when auto-link is off", () => {
+    const brief = buildNetworkSnowballBriefSection({
+      workflowRunId: "run_org_seed",
+      templateId: "tpl_snow_1",
+      config: {
+        networkSnowball: { version: 1 },
+        seedType: "org_id",
+        seedValue: "Kepler Computing",
+        orgId: "org_kepler",
+        autoLinkGraphEdges: false,
+        maxContacts: 8,
+        maxHops: 1,
+      },
+      snowballIdentityScopeToken: "run_org_seed.scope-secret",
+      browserTarget,
+    });
+
+    expect(brief).toContain("reuse config.orgId `org_kepler` as hop0OrgId");
+    expect(brief).toContain("autoLinkGraphEdges is false");
+    expect(brief).not.toContain("investor_in");
   });
 
   it("keeps LinkedIn identities out of scope for an X-only bound session", () => {

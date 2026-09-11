@@ -451,6 +451,15 @@ export function countOrgsByCreatedWorkflowRun(runId: string): number {
   );
 }
 
+export function listOrgIdsByCreatedWorkflowRun(runId: string): string[] {
+  return db
+    .select({ id: orgs.id })
+    .from(orgs)
+    .where(eq(orgs.createdWorkflowRunId, runId))
+    .all()
+    .map((row) => row.id);
+}
+
 /**
  * A company page stored as a contact links to its own org, so "Clearbit · Clearbit" would read as
  * if the company employed itself. The count still includes it; only the name list drops it.

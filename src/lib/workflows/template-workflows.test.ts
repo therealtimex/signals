@@ -184,11 +184,22 @@ describe("template-brief", () => {
 
     expect(brief).toContain("Network Snowball execution contract:");
     expect(brief).toContain("https://x.com/seed/status/456");
+    expect(brief).toContain("Hop 0 Seed Ingestion");
+    expect(brief).toContain("create_org");
+    expect(brief).toContain("link_contact_to_org");
     expect(brief).toContain("Lead VCs, participating funds, and angel investors");
     expect(brief).toContain("Anti-Hallucination & Bot Filter Gate");
     expect(brief).toContain("attest_snowball_linkedin_identity");
     expect(brief).toContain('snowballScopeToken: "run_snow_2.scope-secret"');
     expect(brief).not.toContain("Social Intent Patrol execution contract");
+    expect(getTemplateToolsHint("prospecting", {
+      networkSnowball: { version: 1 },
+    })).toEqual(expect.arrayContaining([
+      "create_org",
+      "link_contact_to_org",
+      "upsert_edge",
+      "attest_snowball_linkedin_identity",
+    ]));
   });
 
   it("appends the contact web research contract and focused tool hints", () => {

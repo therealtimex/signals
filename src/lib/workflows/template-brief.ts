@@ -15,6 +15,7 @@ import {
   type ContactNurtureTargetInfo,
 } from "@/lib/workflows/contact-relationship-nurture";
 import {
+  NETWORK_SNOWBALL_TOOLS,
   buildNetworkSnowballBriefSection,
   isNetworkSnowballTemplateConfig,
 } from "@/lib/workflows/network-snowball";
@@ -100,6 +101,9 @@ export function getTemplateToolsHint(
 ): string[] {
   if (config && isContactWebResearchTemplateConfig(config)) {
     return [...CONTACT_WEB_RESEARCH_TOOLS];
+  }
+  if (config && isNetworkSnowballTemplateConfig(config)) {
+    return [...NETWORK_SNOWBALL_TOOLS];
   }
   const base = TOOLS_BY_TYPE[templateType] ?? ["query_contacts", "create_task"];
   if (!config || !readWritingIntentComposition(config)) return base;

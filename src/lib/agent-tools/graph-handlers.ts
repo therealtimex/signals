@@ -91,6 +91,7 @@ import { serializeSimulationRun } from "@/lib/serializers/gtm";
 import { AgentToolError } from "@/lib/agent-tools/types";
 import { OrgDomainConflictError, OrgValidationError } from "@/lib/orgs/errors";
 import { validateWorkflowRunAndTemplateIds } from "@/lib/db/creation-provenance-input";
+import { attachNetworkSnowballHop0Org } from "@/lib/workflows/network-snowball-hop0";
 import type { z } from "zod";
 
 export async function handleQueryOrgs(input: z.infer<typeof queryOrgsSchema>) {
@@ -379,12 +380,14 @@ export async function handleCreateOrg(input: z.infer<typeof createOrgSchema>) {
         templateId: resolvedIds.templateId,
       },
     });
+    attachNetworkSnowballHop0Org(resolvedIds.workflowRunId ?? undefined, org.id);
     return getOrgDTO(org.id)!;
   } catch (error) {
     if (error instanceof OrgValidationError) {
       throw new AgentToolError("VALIDATION_ERROR", error.message, error.details);
     }
     if (error instanceof OrgDomainConflictError) {
+      attachNetworkSnowballHop0Org(input.workflowRunId, error.orgId);
       throw new AgentToolError("CONFLICT", error.message, {
         domain: error.domain,
         orgId: error.orgId,
