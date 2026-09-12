@@ -102,6 +102,31 @@ describe("runTemplateViaRtx health preflight", () => {
     rmSync(storageDir, { recursive: true, force: true });
   });
 
+  it("rejects unsafe source links before health checks or dispatch", async () => {
+    const template = createTemplate({
+      name: "Network Snowball",
+      templateType: "prospecting",
+      status: "active",
+      config: JSON.stringify({
+        ...buildNetworkSnowballTemplateConfig(),
+        seedValue: "http://169.254.169.254/latest/meta-data",
+      }),
+      isSystem: 1,
+    });
+    const fetchImpl = vi.fn();
+    const result = await runTemplateViaRtx(
+      { templateId: template.id, signalsBaseUrl: "http://127.0.0.1:3099" },
+      { ...process.env, RTX_APP_ID: "test-app-id", STORAGE_DIR: storageDir },
+      fetchImpl as unknown as typeof fetch,
+    );
+    expect(result).toMatchObject({
+      success: false,
+      errorCode: "invalid_source_url",
+      httpStatus: 422,
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it("refuses dispatch when Signals health check fails", async () => {
     const template = createTemplate({
       name: "Health Gate",
@@ -485,9 +510,9 @@ describe("runTemplateViaRtx health preflight", () => {
     );
     expect(listWorkflowSteps(result.workflowRunId)).toContainEqual(
       expect.objectContaining({
-        tool: "event_source_ingest",
+        tool: "snowball_source_ingest",
         status: "completed",
-        output: expect.stringContaining('"registration_required"'),
+        output: expect.stringContaining('"provider":"luma"'),
       }),
     );
   });
@@ -554,7 +579,7 @@ describe("runTemplateViaRtx health preflight", () => {
       result.workflowRunId,
       "brief.md",
     ), "utf8");
-    expect(brief).toContain("Public-only source access is in force");
+    expect(brief).toContain("resolved this link server-side as x/post");
     expect(brief).toContain("Do not attach agent-browser");
     expect(brief).toContain("Server-Enforced LinkedIn Gate");
     expect(brief).toContain("S5. Auto-commit & Graph Edge Linking");
@@ -627,8 +652,13 @@ describe("runTemplateViaRtx health preflight", () => {
     expect(JSON.parse(storedRun?.errors ?? "[]")).toEqual([]);
     expect(JSON.parse(storedRun?.result ?? "{}")).toMatchObject({
       partial: true,
-      browserFallback: {
-        code: "UNSUPPORTED_SOURCE",
+      source: {
+        resolvedSource: { provider: "generic", kind: "unknown" },
+        accessPlan: {
+          mode: "public_only",
+          signedInRequested: true,
+          signedInSupported: false,
+        },
       },
     });
     const brief = readFileSync(join(
@@ -637,8 +667,8 @@ describe("runTemplateViaRtx health preflight", () => {
       result.workflowRunId,
       "brief.md",
     ), "utf8");
-    expect(brief).toContain("Public-only source access is in force");
-    expect(brief).toContain("cannot be verified safely for this source");
+    expect(brief).toContain("resolved this link server-side as generic/unknown");
+    expect(brief).toContain("This source supports public-only source reading");
     expect(brief).toContain("Do not attach agent-browser");
     expect(brief).not.toContain("personal-browser");
     expect(brief).toContain("Server-Enforced LinkedIn Gate");
@@ -648,12 +678,12 @@ describe("runTemplateViaRtx health preflight", () => {
       expect.objectContaining({
         tool: "snowball_source_access_preflight",
         status: "completed",
-        output: expect.stringContaining("UNSUPPORTED_SOURCE"),
+        output: expect.stringContaining('"signedInSupported":false'),
       }),
     );
   });
 
-  it("releases the Snowball lease without stopping a borrowed event session after rejected dispatch", async () => {
+  it("does not treat unsupported source access as authority to retain the identity session", async () => {
     const templateConfig = buildNetworkSnowballTemplateConfig();
     templateConfig.seedType = "topic_search";
     templateConfig.seedValue = "database infrastructure founders";
@@ -713,7 +743,11 @@ describe("runTemplateViaRtx health preflight", () => {
     expect(snowballTargetMocks.releaseNetworkSnowballTarget).toHaveBeenCalledWith(
       "lease-snowball",
     );
-    expect(stopSpy).not.toHaveBeenCalled();
+    expect(stopSpy).toHaveBeenCalledWith(
+      { sessionNames: [preparedSnowballTarget.sessionName] },
+      expect.anything(),
+      fetchImpl,
+    );
     if (result.success || !result.workflowRunId) throw new Error("expected rejected dispatch");
     expect(JSON.parse(getWorkflowRun(result.workflowRunId)?.config ?? "{}"))
       .not.toHaveProperty(SNOWBALL_IDENTITY_SCOPE_TOKEN_CONFIG_KEY);

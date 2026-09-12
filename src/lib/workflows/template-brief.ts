@@ -39,6 +39,7 @@ import {
 } from "@/lib/workflows/contact-web-research";
 import type { NetworkSnowballPreparedTarget } from "@/lib/workflows/network-snowball-target";
 import type { PublicEventSourceResult } from "@/lib/workflows/event-sources/service";
+import type { SnowballSourcePreparation } from "@/lib/workflows/snowball-sources/types";
 
 const CATEGORY_LABELS: Record<string, string> = {
   prospecting: "Search",
@@ -211,6 +212,8 @@ export function buildAgentWorkflowBrief(input: {
   snowballBrowserFallback?: NetworkSnowballBrowserFallback | null;
   /** Public-only event context computed and persisted by Signals before dispatch. */
   publicEventSource?: PublicEventSourceResult | null;
+  /** Server-resolved source descriptor, access outcome, and bounded public evidence. */
+  sourcePreparation?: SnowballSourcePreparation | null;
 }): string {
   const category = CATEGORY_LABELS[input.template.templateType] ?? input.template.templateType;
   const instructions = input.systemPromptOverride?.trim() || input.template.systemPrompt?.trim();
@@ -251,6 +254,7 @@ export function buildAgentWorkflowBrief(input: {
         browserTarget: input.snowballBrowserTarget,
         browserFallback: input.snowballBrowserFallback,
         publicEventSource: input.publicEventSource,
+        sourcePreparation: input.sourcePreparation,
       })}\n`
     : null;
   const writingContract = isSignalsWritingTemplateConfig(input.config)

@@ -11,6 +11,7 @@ import {
   createLumaPublicEvidence,
   extractLumaCalendarFromHtml,
   extractLumaEventFromHtml,
+  hasLumaCalendarPageMetadata,
 } from "@/lib/workflows/event-sources/providers/luma";
 import { upsertPublicEventSource } from "@/lib/workflows/event-sources/repository";
 import { attachNetworkSnowballHop0Org } from "@/lib/workflows/network-snowball-hop0";
@@ -216,6 +217,8 @@ export async function ingestNetworkSnowballEventSource(input: {
   fetchImpl?: typeof fetch;
   sleepImpl?: (ms: number) => Promise<void>;
   env?: EnvLike;
+  /** Allows the provider-aware source resolver to start from a calendar root. */
+  rootKind?: "event" | "calendar";
 }): Promise<EventSourceIngestionResult | null> {
   const canonicalSeedUrl = canonicalizeLumaUrl(input.seedUrl);
   let rootEventKey = lumaEventKey(input.seedUrl);
@@ -224,7 +227,8 @@ export async function ingestNetworkSnowballEventSource(input: {
   const fetchImpl = input.fetchImpl ?? fetch;
   const sleepImpl = input.sleepImpl ?? wait;
   const startedAt = Date.now();
-  const eventsPerCalendar = input.traversal.eventsPerCalendar;
+  const traversal = input.traversal;
+  const eventsPerCalendar = traversal.eventsPerCalendar;
   const storedResult = parseObject(getWorkflowRun(input.runId)?.result);
   const candidatePrevious = storedResult[EVENT_SOURCE_RESULT_KEY];
   const previous = candidatePrevious && typeof candidatePrevious === "object" && !Array.isArray(candidatePrevious)
@@ -252,7 +256,7 @@ export async function ingestNetworkSnowballEventSource(input: {
     listedOnCalendar?: string;
   };
   const queue: QueueItem[] = events.length === 0
-    ? [{ kind: "event", url: canonicalSeedUrl, depth: 0 }]
+    ? [{ kind: input.rootKind ?? "event", url: canonicalSeedUrl, depth: 0 }]
     : [
         ...(previousRoot?.relatedEventUrls ?? []).map(
           (url): QueueItem => ({ kind: "event", url, depth: 1 }),
@@ -269,7 +273,7 @@ export async function ingestNetworkSnowballEventSource(input: {
   );
   let lastRequestAt = 0;
   const consumeProviderRequest = async (): Promise<boolean> => {
-    if (requestCount >= input.traversal.maxProviderRequests) return false;
+    if (requestCount >= traversal.maxProviderRequests) return false;
     const sinceLast = Date.now() - lastRequestAt;
     if (lastRequestAt && sinceLast < EVENT_PROVIDER_RUNTIME_POLICY.minRequestIntervalMs) {
       await sleepImpl(EVENT_PROVIDER_RUNTIME_POLICY.minRequestIntervalMs - sinceLast);
@@ -286,14 +290,14 @@ export async function ingestNetworkSnowballEventSource(input: {
 
   while (
     queue.length > 0 &&
-    events.length < input.traversal.maxEvents &&
-    requestCount < input.traversal.maxProviderRequests &&
+    events.length < traversal.maxEvents &&
+    requestCount < traversal.maxProviderRequests &&
     Date.now() - startedAt < EVENT_PROVIDER_RUNTIME_POLICY.maxPhaseMs
   ) {
     const next = queue.shift()!;
     const visitedForKind = next.kind === "calendar" ? visitedCalendarPages : visited;
     if (visitedForKind.has(next.url)) continue;
-    if (next.kind === "calendar" && visitedCalendarPages.size >= input.traversal.maxCalendarPages) {
+    if (next.kind === "calendar" && visitedCalendarPages.size >= traversal.maxCalendarPages) {
       calendarTruncated = true;
       continue;
     }
@@ -305,8 +309,15 @@ export async function ingestNetworkSnowballEventSource(input: {
         sleepImpl,
         beforeRequest: consumeProviderRequest,
       });
-      if (next.kind === "calendar") {
-        const calendar = extractLumaCalendarFromHtml({ url: fetched.finalUrl, html: fetched.html });
+      const { finalUrl, html } = fetched;
+      const isCalendarPage = next.kind === "calendar" || (
+        next.depth === 0 && hasLumaCalendarPageMetadata({
+          url: finalUrl,
+          html,
+        })
+      );
+      if (isCalendarPage) {
+        const calendar = extractLumaCalendarFromHtml({ url: finalUrl, html });
         if (calendar.eventUrls.length > eventsPerCalendar) {
           calendarTruncated = true;
         }
@@ -337,14 +348,44 @@ export async function ingestNetworkSnowballEventSource(input: {
             listedOnCalendar: calendar.canonicalUrl,
           });
         }
-        if (calendar.nextPageUrl && visitedCalendarPages.size < input.traversal.maxCalendarPages) {
+        if (calendar.nextPageUrl && visitedCalendarPages.size < traversal.maxCalendarPages) {
           queue.push({ kind: "calendar", url: calendar.nextPageUrl, depth: next.depth });
         } else if (calendar.nextPageUrl) {
           calendarTruncated = true;
         }
         continue;
       }
-      const event = extractLumaEventFromHtml({ url: fetched.finalUrl, html: fetched.html });
+      let event: EventSource;
+      try {
+        event = extractLumaEventFromHtml({ url: fetched.finalUrl, html: fetched.html });
+      } catch (eventError) {
+        // Luma calendar slugs share the same URL shape as event slugs. Classify the fetched root
+        // from provider metadata without issuing a second request, then continue through the
+        // existing bounded calendar traversal.
+        if (next.depth !== 0) throw eventError;
+        let calendar;
+        try {
+          calendar = extractLumaCalendarFromHtml({ url: fetched.finalUrl, html: fetched.html });
+        } catch {
+          throw eventError;
+        }
+        visitedCalendarPages.add(calendar.canonicalUrl);
+        if (calendar.eventUrls.length > eventsPerCalendar) calendarTruncated = true;
+        for (const eventUrl of calendar.eventUrls.slice(0, eventsPerCalendar)) {
+          queue.push({
+            kind: "event",
+            url: eventUrl,
+            depth: 1,
+            listedOnCalendar: calendar.canonicalUrl,
+          });
+        }
+        if (calendar.nextPageUrl && visitedCalendarPages.size < traversal.maxCalendarPages) {
+          queue.push({ kind: "calendar", url: calendar.nextPageUrl, depth: 0 });
+        } else if (calendar.nextPageUrl) {
+          calendarTruncated = true;
+        }
+        continue;
+      }
       if (next.listedOnCalendar) {
         event.evidence.push(createLumaPublicEvidence(
           next.listedOnCalendar,
@@ -358,7 +399,7 @@ export async function ingestNetworkSnowballEventSource(input: {
       if (next.depth === 0) rootEventKey = event.key;
       events.push(event);
       contentItemIds.push(upsertPublicEventSource(event, { writeGraphEdges: input.writeGraphEdges }));
-      if (next.depth < input.traversal.adjacentEventDepth) {
+      if (next.depth < traversal.adjacentEventDepth) {
         for (const relatedUrl of event.relatedEventUrls.slice(0, eventsPerCalendar)) {
           if (!visited.has(relatedUrl)) {
             queue.push({ kind: "event", url: relatedUrl, depth: next.depth + 1 });
@@ -396,7 +437,7 @@ export async function ingestNetworkSnowballEventSource(input: {
   };
   let eventReportCapability: EventSourceIngestionResult["eventReportCapability"];
 
-  if (input.participantAccess.enabled && input.participantAccess.browserSessionName) {
+  if (root && input.participantAccess.enabled && input.participantAccess.browserSessionName) {
     const material = mintEventAccessMaterial();
     try {
       const authorized = await observeAuthorizedLumaParticipants({
@@ -405,9 +446,9 @@ export async function ingestNetworkSnowballEventSource(input: {
         grantId: material.grantId,
         sessionName: input.participantAccess.browserSessionName,
         url: canonicalSeedUrl,
-        maxParticipants: input.traversal.maxParticipantObservations,
-        maxGuestPages: input.traversal.maxGuestPages,
-        maxProfileVisits: input.traversal.maxProfileVisits,
+        maxParticipants: traversal.maxParticipantObservations,
+        maxGuestPages: traversal.maxGuestPages,
+        maxProfileVisits: traversal.maxProfileVisits,
         beforeProviderRequest: consumeProviderRequest,
         env: input.env,
         fetchImpl,
@@ -463,9 +504,9 @@ export async function ingestNetworkSnowballEventSource(input: {
     ? "time_budget"
     : errors.includes("request_budget") ||
         guestBoundary.reason === "rate_limited" ||
-        (requestCount >= input.traversal.maxProviderRequests && queue.length > 0)
+        (requestCount >= traversal.maxProviderRequests && queue.length > 0)
       ? "request_budget"
-      : events.length >= input.traversal.maxEvents && queue.length > 0
+      : events.length >= traversal.maxEvents && queue.length > 0
         ? "max_events"
         : calendarTruncated
           ? "calendar_limit"
@@ -482,7 +523,7 @@ export async function ingestNetworkSnowballEventSource(input: {
       errors.length > 0 ||
       events.length === 0 ||
       stopReason !== "complete" ||
-      (input.participantAccess.enabled && guestBoundary.state !== "authorized"),
+      (input.participantAccess.enabled && Boolean(root) && guestBoundary.state !== "authorized"),
     errors: [...new Set(errors)],
     traversal: {
       requestsUsed: requestCount,

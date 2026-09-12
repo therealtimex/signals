@@ -211,7 +211,7 @@ export async function enqueueSnowballCalendarSeeds(
       dispatchKind: "workflow.run",
       workflowTemplate: templateName,
       workflowRunConfig: {
-        seedType: "event_url",
+        seedType: "source_url",
         seedValue: url,
         focus: scoutConfig.snowballFocus,
       },

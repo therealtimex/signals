@@ -28,6 +28,12 @@ import type {
 import { sanitizeExternalUrl } from "@/lib/workflows/event-sources/urls";
 import type { PublicEventSourceResult } from "@/lib/workflows/event-sources/service";
 import { describeGuestBoundary } from "@/lib/workflows/event-sources/boundary";
+import type {
+  PublicSnowballSourceEnvelope,
+  ResolvedSnowballSource,
+  SnowballSourcePreparation,
+} from "@/lib/workflows/snowball-sources/types";
+import { resolveSnowballSourceUrl } from "@/lib/workflows/snowball-sources/url";
 
 export const NETWORK_SNOWBALL_TEMPLATE_NAME = "Network Snowball";
 
@@ -50,7 +56,8 @@ export const NETWORK_SNOWBALL_TOOLS = [
   "complete_workflow_run",
 ] as const;
 
-export type SnowballSeedType = "event_url" | "contact_id" | "org_id" | "topic_search";
+/** event_url remains a read-only compatibility alias; all new configs persist source_url. */
+export type SnowballSeedType = "source_url" | "event_url" | "contact_id" | "org_id" | "topic_search";
 export type SnowballFocusType =
   | "investors_and_angels"
   | "founding_team"
@@ -58,6 +65,7 @@ export type SnowballFocusType =
   | "all_connected";
 
 export const SNOWBALL_SEED_TYPES: readonly SnowballSeedType[] = [
+  "source_url",
   "event_url",
   "contact_id",
   "org_id",
@@ -117,14 +125,27 @@ export function sanitizeNetworkSnowballConfigRecord(
   config: Record<string, unknown>,
 ): Record<string, unknown> {
   const next = { ...config };
+  if (next.seedType === "event_url") next.seedType = "source_url";
   if (typeof next.seedValue === "string") {
-    next.seedValue = sanitizeExternalUrl(next.seedValue);
+    const resolved = next.seedType === "source_url"
+      ? resolveSnowballSourceUrl(next.seedValue)
+      : null;
+    next.seedValue = next.seedType === "source_url"
+      ? resolved?.canonicalUrl ?? ""
+      : sanitizeExternalUrl(next.seedValue);
   }
   next.eventTraversal = readEventTraversalPolicy(next.eventTraversal);
   next.participantAccess = readParticipantAccess(next.participantAccess);
   for (const key of ["tk", "token", "inviteToken", "accessToken", "authorization", "cookie"]) {
     delete next[key];
   }
+  // Classification and access authority are always recomputed by the server.
+  for (const key of [
+    "resolvedSource",
+    "sourceAccessPlan",
+    "_resolvedSnowballSource",
+    "_snowballSourceAccess",
+  ]) delete next[key];
   return next;
 }
 
@@ -155,10 +176,11 @@ export function clampNetworkSnowballSlider(
 export function readNetworkSnowballConfig(
   config: Record<string, unknown>,
 ): NetworkSnowballConfig {
-  const seedType = typeof config.seedType === "string" &&
+  const selectedSeedType = typeof config.seedType === "string" &&
     (SNOWBALL_SEED_TYPES as readonly string[]).includes(config.seedType)
       ? (config.seedType as SnowballSeedType)
-      : "event_url";
+      : "source_url";
+  const seedType = selectedSeedType === "event_url" ? "source_url" : selectedSeedType;
 
   const focus = typeof config.focus === "string" &&
     (SNOWBALL_FOCUS_TYPES as readonly string[]).includes(config.focus)
@@ -216,7 +238,7 @@ export function buildNetworkSnowballRunConfig(
 export function buildNetworkSnowballTemplateConfig(): Record<string, unknown> {
   return {
     [NETWORK_SNOWBALL_CONFIG_KEY]: { version: NETWORK_SNOWBALL_CONFIG_VERSION },
-    seedType: "event_url",
+    seedType: "source_url",
     seedValue: "",
     focus: "investors_and_angels",
     maxContacts: 10,
@@ -245,6 +267,9 @@ export function buildNetworkSnowballBriefSection(input: {
   browserTarget?: NetworkSnowballPreparedTarget;
   browserFallback?: NetworkSnowballBrowserFallback | null;
   publicEventSource?: PublicEventSourceResult | null;
+  resolvedSource?: ResolvedSnowballSource | null;
+  publicSource?: PublicSnowballSourceEnvelope | null;
+  sourcePreparation?: SnowballSourcePreparation | null;
 }): string {
   const snowball = readNetworkSnowballConfig(input.config);
   const seedDescriptor = snowball.seedValue
@@ -300,9 +325,31 @@ export function buildNetworkSnowballBriefSection(input: {
         })
         .join("\n")
     : "    - No server-extracted public Luma event record is available.";
-  const seedInspectionInstruction = input.publicEventSource
+  const source = input.sourcePreparation?.resolvedSource ?? input.resolvedSource;
+  const publicSource = input.sourcePreparation?.publicSource ?? input.publicSource;
+  const publicSourceContext = publicSource
+    ? [
+        `    - ${publicSource.title} (${publicSource.canonicalUrl})`,
+        `    - provider=${publicSource.provider}; kind=${publicSource.kind}; observed=${publicSource.observedAt}; scope=public`,
+        ...publicSource.facts.map((fact) => `    - ${fact.label}: ${fact.value}`),
+        ...publicSource.links.map((link) => `    - public link: ${link.label} [${link.url}]`),
+      ].join("\n")
+    : `    - No bounded public evidence envelope is available for this ${source?.provider ?? "unknown"} ${source?.kind ?? "source"}.`;
+  const kindInstruction: Record<NonNullable<typeof source>["kind"], string> = {
+    organization: "Center Hop 0 on the organization. Prioritize explicitly named leadership, team, advisors, partners, and funders.",
+    article: "Center Hop 0 on the article's organization or subject. Prioritize the explicit author and named subjects.",
+    post: "Center Hop 0 on the post author and explicitly discussed people or organizations.",
+    profile: "Center Hop 0 on the person or organization represented by the profile.",
+    event: "Center Hop 0 on the event, its organizer, hosts, sponsors, venue, and explicitly named participants.",
+    calendar: "Center Hop 0 on the calendar owner and its explicitly listed events and organizers.",
+    page: "Use only explicit public facts and links from the page; do not infer a hidden organization or author.",
+    unknown: "Use only explicit public facts and links; do not infer the source kind.",
+  };
+  const seedInspectionInstruction = input.sourcePreparation
+    ? `S1. Inspect Seed Signal: Signals resolved this link server-side as ${source!.provider}/${source!.kind} and persisted a bounded public evidence envelope before dispatch. Treat this context as authoritative and do not replace it in complete_workflow_run.result:\n${publicSourceContext}\n    ${kindInstruction[source!.kind]} Do not attach agent-browser or navigate an authenticated identity session to the source link; source access is server-owned.${input.sourcePreparation.accessPlan.reason ? ` ${input.sourcePreparation.accessPlan.reason}` : ""}${input.sourcePreparation.errors.length ? ` Source read limitation: ${input.sourcePreparation.errors.join(" ")}` : ""}`
+    : input.publicEventSource
     ? `S1. Inspect Seed Signal: Signals already fetched and persisted the public Luma event source before dispatch. Treat this server-computed public context as authoritative; do not replace it in complete_workflow_run.result:\n${publicEventContext}\n    Registered-only guest observations, when enabled, are stored behind an owner-bound report capability and are never available to this terminal agent. Continue profile expansion only from public named hosts, organizers, sponsors, venues, calendars, and related events.`
-    : snowball.seedType === "event_url"
+    : snowball.seedType === "source_url"
         ? "S1. Inspect Seed Signal: Public-only source access is in force. Do not attach agent-browser or navigate any authenticated browser session to the event URL. Use only anonymous/public research tools and already-persisted server evidence. If the source cannot be read publicly, record the limitation and complete the run as partial without inventing people or event details."
         : browserTarget
           ? `S1. Inspect Seed Signal: Attach agent-browser over CDP to the already-running server-bound session named \`${browserTarget.sessionName}\` only. It was authenticated as ${browserTarget.platform} identity \`${verifiedBrowserIdentity}\` before dispatch. Do not create, start, stop, delete, or substitute a browser session. Navigate in that session to the seed post URL, profile, or organization and parse the core event context (e.g. funding round amount, launch specs, executive hire, or partnership announcement).`
@@ -338,7 +385,7 @@ export function buildNetworkSnowballBriefSection(input: {
     browserFallbackInstruction,
     "    - Browser privacy boundary: Never read document.cookie, localStorage, sessionStorage, browser profile files, authorization headers, or other credential material. Use visible page content and links only.",
     "    - Workflow boundary: This is a data-plane run. Never inspect or edit the Signals source tree, package files, tests, or runtime implementation. If a workflow tool or identity gate fails, record the failure and finalize the run as partial/failed; do not patch around the gate.",
-    "    - Hop 0 Seed Ingestion (required before Hop 1): The seed is a graph anchor, not only a traversal entrypoint. After parsing the event, ingest the featured company and, when they are a real human decision-maker, the post author or featured founder.",
+    "    - Hop 0 Seed Ingestion (required before Hop 1): The seed is a graph anchor, not only a traversal entrypoint. After reading the resolved source, ingest the featured company and, when they are a real human decision-maker, the explicit author or featured founder.",
     `      - Primary Organization: Extract the featured company name plus website/domain and industry when visible. query_orgs by name and get_org by domain when a domain is visible. If none exists, create_org with name/domain/website/industry and this brief's workflowRunId + templateId. For a server-extracted Luma organizer only, also pass observedRole=organized_by; never use that role for a sponsor, venue, calendar, or merely related organization. On CONFLICT, reuse the returned orgId. ${hop0OrgReuse} Record that id as hop0OrgId for later linking.`,
     "      - Primary Contact: If the post author or featured subject is a real human decision-maker (founder, executive, or key ecosystem voice), ingest them as the Hop 0 root contact through the same attestation + contacts.csv path as later hops, with notes like 'role: Founder of Acme (Hop 0 seed)'. If seedType is contact_id, get_contact that id and reuse it as Hop 0. Skip Hop 0 contact creation when the author is an automated news aggregator (PR Newswire, *bot, *daily, *digest, newswire, press-release feeds); still ingest the announced organization.",
     `S2. Discover Connected Nodes: Traverse 1st-degree relational edges from the Hop 0 seed entity:`,

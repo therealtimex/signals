@@ -72,17 +72,19 @@ import {
   sanitizeNetworkSnowballConfigRecord,
   type NetworkSnowballBrowserFallback,
 } from "@/lib/workflows/network-snowball";
+import type { SnowballSourcePreparation } from "@/lib/workflows/snowball-sources/types";
 import {
-  ingestNetworkSnowballEventSource,
-  type EventSourceIngestionResult,
-} from "@/lib/workflows/event-sources/service";
+  prepareNetworkSnowballSource,
+  SNOWBALL_RESOLVED_SOURCE_CONFIG_KEY,
+  SNOWBALL_SOURCE_ACCESS_CONFIG_KEY,
+} from "@/lib/workflows/snowball-sources/service";
+import type { PublicSourceTransport } from "@/lib/workflows/snowball-sources/public-fetch";
 import {
   SNOWBALL_BROWSER_TARGET_CONFIG_KEY,
   prepareNetworkSnowballTarget,
   releaseNetworkSnowballTarget,
   type NetworkSnowballPreparedTarget,
 } from "@/lib/workflows/network-snowball-target";
-import { canonicalizeLumaUrl } from "@/lib/workflows/event-sources/urls";
 import {
   SNOWBALL_IDENTITY_SCOPE_TOKEN_CONFIG_KEY,
   mintSnowballIdentityScopeToken,
@@ -119,7 +121,7 @@ export type RunTemplateViaRtxResult =
       threadPath: string;
       threadResolution: TemplateThreadResolution;
       workflowRun: WorkflowRun;
-      eventReportCapability?: EventSourceIngestionResult["eventReportCapability"];
+      eventReportCapability?: NonNullable<SnowballSourcePreparation["eventReportCapability"]>;
     }
   | {
       success: false;
@@ -128,7 +130,7 @@ export type RunTemplateViaRtxResult =
       httpStatus: number;
       workflowRunId?: string;
       details?: Record<string, unknown>;
-      eventReportCapability?: EventSourceIngestionResult["eventReportCapability"];
+      eventReportCapability?: NonNullable<SnowballSourcePreparation["eventReportCapability"]>;
     };
 
 function buildStoredRunConfig(
@@ -239,7 +241,8 @@ async function verifySignalsHealth(
 export async function runTemplateViaRtx(
   input: RunTemplateViaRtxInput,
   env: NodeJS.ProcessEnv = process.env,
-  fetchImpl: typeof fetch = fetch
+  fetchImpl: typeof fetch = fetch,
+  sourceTransport?: PublicSourceTransport,
 ): Promise<RunTemplateViaRtxResult> {
   if (!isRtxEmbedded(env)) {
     return {
@@ -282,6 +285,15 @@ export async function runTemplateViaRtx(
       [NETWORK_SNOWBALL_CONFIG_KEY]: storedTemplateConfig[NETWORK_SNOWBALL_CONFIG_KEY],
     };
     mergedConfig = sanitizeNetworkSnowballConfigRecord(mergedConfig);
+    const snowball = readNetworkSnowballConfig(mergedConfig);
+    if (snowball.seedType === "source_url" && !snowball.seedValue) {
+      return {
+        success: false,
+        error: "Network Snowball requires a public HTTPS source link without credentials or a custom port.",
+        errorCode: "invalid_source_url",
+        httpStatus: 422,
+      };
+    }
   }
   const actingTarget = typeof mergedConfig.targetId === "string" && mergedConfig.targetId.trim()
     ? getPlatformTargetById(mergedConfig.targetId.trim())
@@ -311,12 +323,9 @@ export async function runTemplateViaRtx(
       targetHandle: actingTarget.handle,
     };
   }
-  const snowballParticipantAccess = isNetworkSnowball
-    ? readNetworkSnowballConfig(mergedConfig).participantAccess
-    : null;
-  const borrowedEventSessionName = snowballParticipantAccess?.enabled
-    ? snowballParticipantAccess.browserSessionName.trim() || null
-    : null;
+  // Set only after the server resolves a source that actually supports signed-in reading. A
+  // caller cannot keep an identity browser alive by merely requesting access on an unsupported URL.
+  let borrowedEventSessionName: string | null = null;
   const workflowType = TEMPLATE_TO_WORKFLOW_TYPE[template.templateType] ?? "agent";
   const now = Math.floor(Date.now() / 1000);
 
@@ -396,7 +405,7 @@ export async function runTemplateViaRtx(
   let dispatchAccepted = false;
   let writingScopeMinted = false;
   let snowballIdentityScopeMinted = false;
-  let eventIngestion: EventSourceIngestionResult | null = null;
+  let sourcePreparation: SnowballSourcePreparation | null = null;
 
   /**
    * Drop the composed dispatch's capability when the dispatch never happened.
@@ -488,19 +497,8 @@ export async function runTemplateViaRtx(
     });
     let snowballTarget: NetworkSnowballPreparedTarget | undefined;
     let snowballBrowserFallback: NetworkSnowballBrowserFallback | null = null;
-    let redactUnsupportedSourceSession = false;
     if (isNetworkSnowballTemplateConfig(runtimeConfig)) {
       const snowball = readNetworkSnowballConfig(runtimeConfig);
-      const genericEventSource =
-        snowball.seedType === "event_url" && !canonicalizeLumaUrl(snowball.seedValue);
-      const unsupportedSourceFallback = genericEventSource && snowball.participantAccess.enabled
-        ? {
-            code: "UNSUPPORTED_SOURCE",
-            message:
-              "Signed-in browser access cannot be verified safely for this source. Continuing with public-only extraction.",
-            details: {},
-          }
-        : null;
       const prepared = await prepareNetworkSnowballTarget(
         { config: runtimeConfig, workflowRunId: run.id },
         env,
@@ -547,27 +545,8 @@ export async function runTemplateViaRtx(
           }),
         });
       }
-      if (unsupportedSourceFallback) {
-        redactUnsupportedSourceSession = true;
-        createWorkflowStep({
-          workflowRunId: run.id,
-          stepIndex: nextStepIndex(run.id),
-          stepType: "tool_call",
-          status: "completed",
-          tool: "snowball_source_access_preflight",
-          output: JSON.stringify({
-            code: unsupportedSourceFallback.code,
-            mode: "public_only",
-            message: unsupportedSourceFallback.message,
-          }),
-          durationMs: 0,
-        });
-      }
-      const fallbackMessages = [
-        targetFailure?.message,
-        unsupportedSourceFallback?.message,
-      ].filter((message): message is string => Boolean(message));
-      const fallbackCode = unsupportedSourceFallback?.code ?? targetFailure?.code;
+      const fallbackMessages = [targetFailure?.message].filter((message): message is string => Boolean(message));
+      const fallbackCode = targetFailure?.code;
       if (fallbackMessages.length > 0 && fallbackCode) {
         snowballBrowserFallback = {
           code: fallbackCode,
@@ -584,9 +563,9 @@ export async function runTemplateViaRtx(
     }
     if (isNetworkSnowballTemplateConfig(runtimeConfig)) {
       const snowball = readNetworkSnowballConfig(runtimeConfig);
-      if (snowball.seedType === "event_url") {
+      if (snowball.seedType === "source_url") {
         try {
-          eventIngestion = await ingestNetworkSnowballEventSource({
+          sourcePreparation = await prepareNetworkSnowballSource({
             runId: run.id,
             ownerWorkspace: workspaceSlug,
             seedUrl: snowball.seedValue,
@@ -594,29 +573,58 @@ export async function runTemplateViaRtx(
             participantAccess: snowball.participantAccess,
             writeGraphEdges: snowball.autoLinkGraphEdges && !snowball.requireApproval,
             fetchImpl,
+            transport: sourceTransport,
             env,
           });
-          if (eventIngestion) {
+          if (sourcePreparation) {
+            borrowedEventSessionName = sourcePreparation.accessPlan.mode === "public_and_signed_in"
+              ? snowball.participantAccess.browserSessionName.trim() || null
+              : null;
+            runtimeConfig = {
+              ...runtimeConfig,
+              [SNOWBALL_RESOLVED_SOURCE_CONFIG_KEY]: sourcePreparation.resolvedSource,
+              [SNOWBALL_SOURCE_ACCESS_CONFIG_KEY]: sourcePreparation.accessPlan,
+              participantAccess: sourcePreparation.accessPlan.signedInSupported
+                ? snowball.participantAccess
+                : { enabled: false },
+            };
+            updateWorkflowRun(run.id, {
+              config: buildStoredRunConfig(template, runtimeConfig, { workspaceSlug, threadSlug }),
+              ...(sourcePreparation.partial
+                ? {
+                    result: JSON.stringify({
+                      ...parseObject(getWorkflowRun(run.id)?.result),
+                      partial: true,
+                    }),
+                  }
+                : {}),
+            });
             createWorkflowStep({
               workflowRunId: run.id,
               stepIndex: nextStepIndex(run.id),
               stepType: "tool_call",
-              status:
-                eventIngestion.publicResult.events.length === 0
-                || eventIngestion.publicResult.errors.length > 0
-                  ? "failed"
-                  : "completed",
-              tool: "event_source_ingest",
+              status: sourcePreparation.errors.length > 0 ? "failed" : "completed",
+              tool: "snowball_source_ingest",
               output: JSON.stringify({
-                provider: "luma",
-                eventCount: eventIngestion.publicResult.events.length,
-                contentItemIds: eventIngestion.publicResult.contentItemIds,
-                guestBoundary: eventIngestion.publicResult.guestBoundary,
-                partial: eventIngestion.publicResult.partial,
-                errors: eventIngestion.publicResult.errors,
+                resolvedSource: sourcePreparation.resolvedSource,
+                accessPlan: sourcePreparation.accessPlan,
+                contentItemIds: sourcePreparation.contentItemIds,
+                partial: sourcePreparation.partial,
+                errors: sourcePreparation.errors,
               }),
               durationMs: 0,
             });
+            if (sourcePreparation.accessPlan.reason) {
+              createWorkflowStep({
+                workflowRunId: run.id,
+                stepIndex: nextStepIndex(run.id),
+                stepType: "tool_call",
+                status: "completed",
+                tool: "snowball_source_access_preflight",
+                output: JSON.stringify(sourcePreparation.accessPlan),
+                durationMs: 0,
+              });
+            }
           }
         } catch {
           createWorkflowStep({
@@ -624,8 +632,8 @@ export async function runTemplateViaRtx(
             stepIndex: nextStepIndex(run.id),
             stepType: "error",
             status: "failed",
-            tool: "event_source_ingest",
-            error: "Event source extraction failed",
+            tool: "snowball_source_ingest",
+            error: "Source extraction failed",
             durationMs: 0,
           });
         }
@@ -760,12 +768,7 @@ export async function runTemplateViaRtx(
       throw new Error("Contact research context is unavailable");
     }
 
-    const dispatchConfig = redactUnsupportedSourceSession
-      ? {
-          ...runtimeConfig,
-          participantAccess: { enabled: false },
-        }
-      : runtimeConfig;
+    const dispatchConfig = runtimeConfig;
     const brief = buildAgentWorkflowBrief({
       template,
       workflowRunId: run.id,
@@ -777,7 +780,7 @@ export async function runTemplateViaRtx(
       snowballIdentityScopeToken: snowballIdentityScope?.token,
       snowballBrowserTarget: snowballTarget,
       snowballBrowserFallback,
-      publicEventSource: eventIngestion?.publicResult,
+      sourcePreparation,
       platformTarget: actingTarget
         ? {
             id: actingTarget.id,
@@ -857,8 +860,8 @@ export async function runTemplateViaRtx(
         errorCode: launch.errorCode,
         httpStatus,
         workflowRunId: run.id,
-        ...(eventIngestion?.eventReportCapability
-          ? { eventReportCapability: eventIngestion.eventReportCapability }
+        ...(sourcePreparation?.eventReportCapability
+          ? { eventReportCapability: sourcePreparation.eventReportCapability }
           : {}),
       };
     }
@@ -923,8 +926,8 @@ export async function runTemplateViaRtx(
       threadPath: `/workspace/${resolvedWorkspace}/t/${resolvedThread}`,
       threadResolution,
       workflowRun: updatedRun ?? run,
-      ...(eventIngestion?.eventReportCapability
-        ? { eventReportCapability: eventIngestion.eventReportCapability }
+      ...(sourcePreparation?.eventReportCapability
+        ? { eventReportCapability: sourcePreparation.eventReportCapability }
         : {}),
     };
   } catch (error) {
@@ -959,8 +962,8 @@ export async function runTemplateViaRtx(
       errorCode: "launch_failed",
       httpStatus: 502,
       workflowRunId: run.id,
-      ...(eventIngestion?.eventReportCapability
-        ? { eventReportCapability: eventIngestion.eventReportCapability }
+      ...(sourcePreparation?.eventReportCapability
+        ? { eventReportCapability: sourcePreparation.eventReportCapability }
         : {}),
     };
   }

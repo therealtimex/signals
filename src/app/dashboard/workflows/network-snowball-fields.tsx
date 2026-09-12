@@ -90,6 +90,10 @@ export function NetworkSnowballFields({
               onChange({
                 ...value,
                 seedType: next as SnowballSeedType,
+                participantAccess: {
+                  ...value.participantAccess,
+                  enabled: false,
+                },
               })
             }
             disabled={disabled}
@@ -98,7 +102,7 @@ export function NetworkSnowballFields({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="event_url">Post / Event URL</SelectItem>
+              <SelectItem value="source_url">Source link</SelectItem>
               <SelectItem value="contact_id">Contact Handle / ID</SelectItem>
               <SelectItem value="org_id">Organization Name</SelectItem>
               <SelectItem value="topic_search">Topic / Round Query</SelectItem>
@@ -108,8 +112,8 @@ export function NetworkSnowballFields({
 
         <div className="space-y-2 md:col-span-2">
           <Label htmlFor="snowball-seed-value">
-            {value.seedType === "event_url"
-              ? "Announcement or event URL"
+            {value.seedType === "source_url" || value.seedType === "event_url"
+              ? "Source link"
               : value.seedType === "contact_id"
                 ? "Founder / Contact handle or ID"
                 : value.seedType === "org_id"
@@ -119,8 +123,8 @@ export function NetworkSnowballFields({
           <Input
             id="snowball-seed-value"
             placeholder={
-              value.seedType === "event_url"
-                ? "https://luma.com/event or https://x.com/..."
+              value.seedType === "source_url" || value.seedType === "event_url"
+                ? "https://example.com/event, organization, article, post, or profile"
                 : value.seedType === "contact_id"
                   ? "@founder_handle or contact ID"
                   : value.seedType === "org_id"
@@ -128,13 +132,20 @@ export function NetworkSnowballFields({
                     : "e.g. Series A AI agents"
             }
             value={value.seedValue}
-            onChange={(e) => onChange({ ...value, seedValue: e.target.value })}
+            onChange={(e) => onChange({
+              ...value,
+              seedValue: e.target.value,
+              participantAccess: {
+                ...value.participantAccess,
+                enabled: false,
+              },
+            })}
             disabled={disabled}
           />
         </div>
       </div>
 
-      {value.seedType === "event_url" && (
+      {(value.seedType === "source_url" || value.seedType === "event_url") && (
         <NetworkSnowballEventFields value={value} onChange={onChange} disabled={disabled} />
       )}
 

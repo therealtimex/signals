@@ -511,6 +511,23 @@ export type LumaCalendarPage = {
   nextPageUrl: string | null;
 };
 
+/** Classify a Luma calendar root independently of whether it currently lists any events. */
+export function hasLumaCalendarPageMetadata(input: { url: string; html: string }): boolean {
+  const canonicalUrl = canonicalizeLumaUrl(input.url);
+  if (!canonicalUrl) return false;
+  const $ = cheerio.load(input.html);
+  const nextPageData = readLumaNextPageData($);
+  const calendar = asRecord(nextPageData?.calendar);
+  const apiId = stringValue(calendar?.api_id);
+  const providerCalendar = Boolean(
+    calendar
+    && (apiId?.startsWith("cal-") || embeddedCalendarUrl(nextPageData, canonicalUrl) === canonicalUrl),
+  );
+  return providerCalendar || Boolean($(
+    '[data-calendar-page], [data-testid*="calendar" i], [data-event-list], [class*="calendar-page" i]',
+  ).first().length);
+}
+
 /** Extract only explicitly marked calendar event cards; a hostname match is not proof. */
 export function extractLumaCalendarFromHtml(input: {
   url: string;

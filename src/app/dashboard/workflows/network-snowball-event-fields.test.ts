@@ -2,12 +2,8 @@
 
 import { act, createElement, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NetworkSnowballEventFields } from "@/app/dashboard/workflows/network-snowball-event-fields";
-import {
-  networkSnowballSignedInAccessDescription,
-  networkSnowballSourceHostname,
-} from "@/lib/workflows/network-snowball-signed-in-access";
 import {
   buildNetworkSnowballTemplateConfig,
   readNetworkSnowballConfig,
@@ -45,35 +41,12 @@ describe("NetworkSnowballEventFields", () => {
     container.remove();
     document.body.replaceChildren();
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = false;
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
   });
 
-  it("uses provider-aware copy without making the consent control provider-specific", () => {
-    expect(networkSnowballSourceHostname("luma.com/build-night")).toBe("luma.com");
-    expect(networkSnowballSignedInAccessDescription("https://luma.com/build-night")).toBe(
-      "When available, include visible guests, attendees, and organizers on luma.com.",
-    );
-    expect(networkSnowballSignedInAccessDescription("luma.com/build-night")).toBe(
-      "Signed-in access for luma.com is not supported yet. Public extraction still runs.",
-    );
-    expect(networkSnowballSignedInAccessDescription("http://luma.com/build-night")).toBe(
-      "Signed-in access for luma.com is not supported yet. Public extraction still runs.",
-    );
-    expect(networkSnowballSignedInAccessDescription("https://example.com/community/post")).toBe(
-      "Signed-in access for example.com is not supported yet. Public extraction still runs.",
-    );
-    expect(networkSnowballSignedInAccessDescription("https://meetup.com/groups/events/1")).toBe(
-      "Signed-in access for meetup.com is not supported yet. Public extraction still runs.",
-    );
-    expect(networkSnowballSignedInAccessDescription("https://linkedin.com/events/1")).toBe(
-      "Signed-in access for linkedin.com is not supported yet. Public extraction still runs.",
-    );
-    expect(networkSnowballSignedInAccessDescription("not a URL")).toBe(
-      "Signed-in access for this source is not supported yet. Public extraction still runs.",
-    );
-  });
-
-  it("keeps consent off while showing the Signals Publish session that will be used", async () => {
-    let latest = initialConfig("https://example.com/event");
+  it("keeps consent explicit and reveals the exact session only after opt-in", async () => {
+    let latest = initialConfig("https://luma.com/build-night");
 
     function Harness() {
       const [value, setValue] = useState(latest);
@@ -86,12 +59,10 @@ describe("NetworkSnowballEventFields", () => {
     const checkbox = container.querySelector("#snowball-participant-access") as HTMLButtonElement;
     expect(checkbox.getAttribute("aria-checked")).toBe("false");
     expect(checkbox.className).toContain("dark:data-[state=checked]:bg-primary");
-    expect(container.textContent).toContain("Use signed-in browser access");
-    expect(container.textContent).toContain("example.com");
-    expect(container.textContent).toContain("Signals Publish");
-    expect(container.textContent).toContain("signals-publish");
-    expect(container.textContent).toContain("visible identity");
-    expect(container.textContent).toContain("re-checks them during traversal");
+    expect(container.textContent).toContain("Use registered guest access");
+    expect(container.textContent).toContain("Luma");
+    expect(container.textContent).not.toContain("Signals Publish");
+    expect(container.textContent).not.toContain("signals-publish");
 
     await act(async () => checkbox.click());
 
@@ -99,6 +70,48 @@ describe("NetworkSnowballEventFields", () => {
       enabled: true,
       browserSessionName: "signals-publish",
     });
+    expect(container.textContent).toContain("Signals Publish");
+    expect(container.textContent).toContain("identity and source access at launch");
+  });
+
+  it("makes generic organization links public-only and hides event controls", async () => {
+    const value = initialConfig("https://metr.org/about");
+    await act(async () => root.render(createElement(NetworkSnowballEventFields, {
+      value,
+      onChange: () => undefined,
+    })));
+    expect(container.textContent).toContain("Generic");
+    expect(container.textContent).toContain("Public-only source");
+    expect(container.querySelector("#snowball-participant-access")).toBeNull();
+    expect(container.querySelector("#snowball-event-depth")).toBeNull();
+    expect(container.querySelector("#snowball-max-events")).toBeNull();
+  });
+
+  it("debounces previews and cancels stale source requests", async () => {
+    vi.useFakeTimers();
+    const signals: AbortSignal[] = [];
+    vi.stubGlobal("fetch", vi.fn((_url: string, init?: RequestInit) => {
+      signals.push(init?.signal as AbortSignal);
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
+      });
+    }));
+    const first = initialConfig("https://x.com/acme/status/1");
+    await act(async () => root.render(createElement(NetworkSnowballEventFields, {
+      value: first,
+      onChange: () => undefined,
+    })));
+    await act(async () => vi.advanceTimersByTime(451));
+    expect(signals).toHaveLength(1);
+
+    const second = { ...first, seedValue: "https://linkedin.com/company/acme" };
+    await act(async () => root.render(createElement(NetworkSnowballEventFields, {
+      value: second,
+      onChange: () => undefined,
+    })));
+    expect(signals[0]?.aborted).toBe(true);
+    await act(async () => vi.advanceTimersByTime(451));
+    expect(signals).toHaveLength(2);
   });
 
   it("makes custom session selection deliberate and offers a one-click reset", async () => {
@@ -111,6 +124,8 @@ describe("NetworkSnowballEventFields", () => {
     }
 
     await act(async () => root.render(createElement(Harness)));
+    const checkbox = container.querySelector("#snowball-participant-access") as HTMLButtonElement;
+    await act(async () => checkbox.click());
     await act(async () => findButton("Change", container).click());
 
     const input = container.querySelector("#snowball-event-session") as HTMLInputElement;
@@ -132,6 +147,7 @@ describe("NetworkSnowballEventFields", () => {
 
   it("disables both authorization and session editing with the parent form", async () => {
     const value = initialConfig();
+    value.participantAccess.enabled = true;
     await act(async () =>
       root.render(
         createElement(NetworkSnowballEventFields, {

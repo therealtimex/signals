@@ -45,7 +45,7 @@ describe("clampNetworkSnowballSlider", () => {
 describe("readNetworkSnowballConfig", () => {
   it("fills defaults for an empty config", () => {
     expect(readNetworkSnowballConfig({})).toEqual({
-      seedType: "event_url",
+      seedType: "source_url",
       seedValue: "",
       focus: "investors_and_angels",
       maxContacts: 10,
@@ -127,7 +127,7 @@ describe("buildNetworkSnowballTemplateConfig & buildNetworkSnowballRunConfig", (
 
   it("round trips through run config", () => {
     const draft = readNetworkSnowballConfig({
-      seedType: "event_url",
+      seedType: "source_url",
       seedValue: "https://x.com/founder/status/123",
       focus: "ecosystem_advocates",
       maxContacts: 15,
@@ -150,6 +150,31 @@ describe("buildNetworkSnowballTemplateConfig & buildNetworkSnowballRunConfig", (
     expect(sanitized.seedValue).toBe("https://luma.com/EventCase");
     expect(sanitized).not.toHaveProperty("inviteToken");
     expect(JSON.stringify(sanitized)).not.toContain("secret");
+  });
+
+  it("normalizes the legacy event alias and removes caller-owned source authority", () => {
+    const sanitized = sanitizeNetworkSnowballConfigRecord({
+      networkSnowball: { version: 1 },
+      seedType: "event_url",
+      seedValue: "https://www.linkedin.com/company/acme?tracking=secret-value",
+      resolvedSource: { provider: "luma", capabilities: { signedInRead: true } },
+      sourceAccessPlan: { mode: "public_and_signed_in" },
+      _resolvedSnowballSource: { provider: "luma" },
+    });
+    expect(sanitized).toMatchObject({
+      seedType: "source_url",
+      seedValue: "https://linkedin.com/company/acme",
+    });
+    expect(sanitized).not.toHaveProperty("resolvedSource");
+    expect(sanitized).not.toHaveProperty("sourceAccessPlan");
+    expect(sanitized).not.toHaveProperty("_resolvedSnowballSource");
+  });
+
+  it("drops unsafe source URLs instead of exposing them to the agent brief", () => {
+    expect(sanitizeNetworkSnowballConfigRecord({
+      seedType: "source_url",
+      seedValue: "http://169.254.169.254/latest/meta-data",
+    }).seedValue).toBe("");
   });
 });
 
