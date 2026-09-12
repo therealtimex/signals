@@ -1,3 +1,5 @@
+import type { EventSource } from "@/lib/workflows/event-sources/types";
+
 export type SnowballSourceProvider =
   | "luma"
   | "x"
@@ -71,6 +73,16 @@ export type SnowballSourcePreparation = {
   contentItemIds: string[];
   errors: string[];
   partial: boolean;
+  /** Full bounded public Luma context; protected participant observations are never included. */
+  lumaContext?: {
+    canonicalSeedUrl: string;
+    resolvedRoot: {
+      canonicalUrl: string;
+      kind: "event" | "calendar";
+      title: string;
+    };
+    events: EventSource[];
+  };
   eventReportCapability?: {
     token: string;
     expiresAt: number;

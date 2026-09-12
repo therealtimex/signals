@@ -1,11 +1,16 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { RTX_PUBLISH_SESSION_NAME } from "@/lib/publish/constants";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import type { NetworkSnowballConfig } from "@/lib/workflows/network-snowball";
 import type { SnowballSourcePreview } from "@/lib/workflows/snowball-sources/types";
 import { resolveSnowballSourceUrl, sourceAccessPlan } from "@/lib/workflows/snowball-sources/url";
@@ -15,6 +20,33 @@ type PreviewState =
   | { status: "loading"; preview: SnowballSourcePreview }
   | { status: "ready"; preview: SnowballSourcePreview }
   | { status: "error"; preview: null; message: string };
+
+type SourceSession = {
+  sessionName: string;
+  running: true;
+  sourceIdentity: null;
+  identityVerification: "checked_at_launch";
+};
+
+type CrmTargetDisclosure = {
+  platform: "x" | "linkedin";
+  sessionName: string;
+  identity: string;
+  verification: "previously_verified" | "unverified";
+  lastVerifiedAt: number | null;
+};
+
+type LaunchContextState =
+  | { status: "idle"; sessions: SourceSession[]; crmTarget: null }
+  | { status: "loading"; sessions: SourceSession[]; crmTarget: null }
+  | { status: "ready"; sessions: SourceSession[]; crmTarget: CrmTargetDisclosure | null }
+  | { status: "error"; sessions: SourceSession[]; crmTarget: null; message: string };
+
+export type SnowballSourceLaunchReadiness = {
+  ready: boolean;
+  reason: "ready" | "source_required" | "preview_pending" | "invalid_source" | "sessions_pending" | "session_required" | "session_missing";
+  sourceValue: string;
+};
 
 function provisionalPreview(seedValue: string, signedInRequested: boolean): SnowballSourcePreview | null {
   const resolvedSource = resolveSnowballSourceUrl(seedValue);
@@ -37,21 +69,22 @@ export function NetworkSnowballEventFields({
   value,
   onChange,
   disabled,
+  onLaunchReadinessChange,
 }: {
   value: NetworkSnowballConfig;
   onChange: (next: NetworkSnowballConfig) => void;
   disabled?: boolean;
+  onLaunchReadinessChange?: (readiness: SnowballSourceLaunchReadiness) => void;
 }) {
-  const [editingSession, setEditingSession] = useState(false);
   const [previewState, setPreviewState] = useState<PreviewState>({ status: "idle", preview: null });
-  const sessionInputRef = useRef<HTMLInputElement>(null);
-  const changeButtonRef = useRef<HTMLButtonElement>(null);
-  const returnFocusToChangeRef = useRef(false);
+  const [launchContext, setLaunchContext] = useState<LaunchContextState>({
+    status: "idle",
+    sessions: [],
+    crmTarget: null,
+  });
   const latestValueRef = useRef(value);
   const onChangeRef = useRef(onChange);
-  const browserSessionName =
-    value.participantAccess.browserSessionName.trim() || RTX_PUBLISH_SESSION_NAME;
-  const usesSignalsPublish = browserSessionName === RTX_PUBLISH_SESSION_NAME;
+  const browserSessionName = value.participantAccess.browserSessionName.trim();
   const provisional = useMemo(
     () => provisionalPreview(value.seedValue, value.participantAccess.enabled),
     [value.seedValue, value.participantAccess.enabled],
@@ -68,15 +101,7 @@ export function NetworkSnowballEventFields({
   }, [onChange, value]);
 
   useEffect(() => {
-    if (editingSession) sessionInputRef.current?.focus();
-    else if (returnFocusToChangeRef.current) {
-      returnFocusToChangeRef.current = false;
-      changeButtonRef.current?.focus();
-    }
-  }, [editingSession]);
-
-  useEffect(() => {
-    const provisionalResult = provisionalPreview(value.seedValue, value.participantAccess.enabled);
+    const provisionalResult = provisionalPreview(value.seedValue, false);
     if (!value.seedValue.trim()) {
       setPreviewState({ status: "idle", preview: null });
       return;
@@ -97,7 +122,7 @@ export function NetworkSnowballEventFields({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           sourceUrl: provisionalResult.resolvedSource.canonicalUrl,
-          signedInRequested: value.participantAccess.enabled,
+          signedInRequested: false,
         }),
         signal: controller.signal,
       })
@@ -128,7 +153,81 @@ export function NetworkSnowballEventFields({
       window.clearTimeout(timeout);
       controller.abort();
     };
-  }, [value.seedValue, value.participantAccess.enabled]);
+  }, [value.seedValue]);
+
+  useEffect(() => {
+    if (!signedInSupported || !value.participantAccess.enabled) {
+      setLaunchContext({ status: "idle", sessions: [], crmTarget: null });
+      return;
+    }
+    const controller = new AbortController();
+    setLaunchContext({ status: "loading", sessions: [], crmTarget: null });
+    fetch(
+      `/api/workflows/network-snowball/source-sessions?targetPlatform=${encodeURIComponent(value.targetPlatform)}`,
+      { signal: controller.signal },
+    )
+      .then(async (response) => {
+        const body = await response.json() as {
+          sessions?: SourceSession[];
+          crmTarget?: CrmTargetDisclosure | null;
+          error?: string;
+        };
+        if (!response.ok || !Array.isArray(body.sessions)) {
+          throw new Error(body.error || "Browser sessions are unavailable");
+        }
+        return body;
+      })
+      .then((body) => setLaunchContext({
+        status: "ready",
+        sessions: body.sessions ?? [],
+        crmTarget: body.crmTarget ?? null,
+      }))
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        setLaunchContext({
+          status: "error",
+          sessions: [],
+          crmTarget: null,
+          message: error instanceof Error ? error.message : "Browser sessions are unavailable",
+        });
+      });
+    return () => controller.abort();
+  }, [signedInSupported, value.participantAccess.enabled, value.targetPlatform]);
+
+  useEffect(() => {
+    let readiness: SnowballSourceLaunchReadiness;
+    const sourceValue = value.seedValue.trim();
+    if (!sourceValue) readiness = { ready: false, reason: "source_required", sourceValue };
+    else if (previewState.status === "loading" || previewState.status === "idle") {
+      readiness = { ready: false, reason: "preview_pending", sourceValue };
+    } else if (previewState.status === "error") {
+      readiness = { ready: false, reason: "invalid_source", sourceValue };
+    } else if (signedInSupported && value.participantAccess.enabled) {
+      if (launchContext.status === "idle" || launchContext.status === "loading") {
+        readiness = { ready: false, reason: "sessions_pending", sourceValue };
+      } else if (!browserSessionName) {
+        readiness = { ready: false, reason: "session_required", sourceValue };
+      } else if (
+        launchContext.status === "error"
+        || !launchContext.sessions.some((session) => session.sessionName === browserSessionName)
+      ) {
+        readiness = { ready: false, reason: "session_missing", sourceValue };
+      } else {
+        readiness = { ready: true, reason: "ready", sourceValue };
+      }
+    } else {
+      readiness = { ready: true, reason: "ready", sourceValue };
+    }
+    onLaunchReadinessChange?.(readiness);
+  }, [
+    browserSessionName,
+    launchContext,
+    onLaunchReadinessChange,
+    previewState.status,
+    signedInSupported,
+    value.participantAccess.enabled,
+    value.seedValue,
+  ]);
 
   return (
     <div className="space-y-4 rounded-lg border p-4">
@@ -247,73 +346,76 @@ export function NetworkSnowballEventFields({
 
         {signedInSupported && value.participantAccess.enabled && (
           <div className="ml-7 space-y-2 rounded-md border bg-muted/20 p-3">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <p className="text-xs text-muted-foreground">Browser session used for source access</p>
-                <p className="break-words text-sm font-medium">
-                  {usesSignalsPublish ? "Signals Publish" : "Selected session"}{" — "}
-                  <code className="break-all text-xs font-normal text-muted-foreground">
-                    {browserSessionName}
-                  </code>
+            <Label htmlFor="snowball-event-session">Existing browser session</Label>
+            <Select
+              value={launchContext.sessions.some((session) => session.sessionName === browserSessionName)
+                ? browserSessionName
+                : ""}
+              onValueChange={(sessionName) => onChange({
+                ...value,
+                participantAccess: {
+                  ...value.participantAccess,
+                  browserSessionName: sessionName,
+                },
+              })}
+              disabled={disabled || launchContext.status !== "ready"}
+            >
+              <SelectTrigger id="snowball-event-session">
+                <SelectValue placeholder={
+                  launchContext.status === "loading"
+                    ? "Loading running sessions…"
+                    : "Select a running session"
+                } />
+              </SelectTrigger>
+              <SelectContent>
+                {launchContext.sessions.map((session) => (
+                  <SelectItem key={session.sessionName} value={session.sessionName}>
+                    {session.sessionName}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {launchContext.status === "error" && (
+              <p className="text-xs text-destructive" role="alert">{launchContext.message}</p>
+            )}
+            {launchContext.status === "ready" && launchContext.sessions.length === 0 && (
+              <p className="text-xs text-destructive">No running browser sessions are available.</p>
+            )}
+            {launchContext.status === "ready"
+              && browserSessionName
+              && !launchContext.sessions.some((session) => session.sessionName === browserSessionName) && (
+                <p className="text-xs text-destructive">
+                  The previously selected session is no longer running. Select an existing session.
                 </p>
-              </div>
-              {!editingSession && (
-                <Button
-                  ref={changeButtonRef}
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 px-2 text-xs"
-                  onClick={() => setEditingSession(true)}
-                  disabled={disabled}
-                >
-                  Change
-                </Button>
+              )}
+            <div className="space-y-1 border-t pt-2 text-xs">
+              <p className="font-medium">Source identity verification</p>
+              <p className="text-muted-foreground">
+                Not checked yet. Signals will visibly verify the Luma identity and access in this
+                exact session at launch.
+              </p>
+            </div>
+            <div className="space-y-1 border-t pt-2 text-xs">
+              <p className="font-medium">CRM write identity (separate)</p>
+              {launchContext.status === "ready" && launchContext.crmTarget ? (
+                <p className="text-muted-foreground">
+                  {label(launchContext.crmTarget.platform)} identity{" "}
+                  <span className="font-medium text-foreground">{launchContext.crmTarget.identity}</span>
+                  {" · session "}<code>{launchContext.crmTarget.sessionName}</code>
+                  {" · "}{launchContext.crmTarget.verification === "previously_verified"
+                    ? "previously verified; checked again at launch"
+                    : "not yet verified; checked at launch"}
+                </p>
+              ) : (
+                <p className="text-muted-foreground">
+                  No active {value.targetPlatform === "x" ? "X" : "LinkedIn"} CRM identity is configured;
+                  source access does not authorize profile writes.
+                </p>
               )}
             </div>
-            {editingSession && (
-              <div className="space-y-2">
-                <Label htmlFor="snowball-event-session" className="text-xs">Browser session name</Label>
-                <div className="flex flex-col gap-2 sm:flex-row">
-                  <Input
-                    ref={sessionInputRef}
-                    id="snowball-event-session"
-                    placeholder={RTX_PUBLISH_SESSION_NAME}
-                    value={value.participantAccess.browserSessionName}
-                    onChange={(event) => onChange({
-                      ...value,
-                      participantAccess: {
-                        ...value.participantAccess,
-                        browserSessionName: event.target.value,
-                      },
-                    })}
-                    disabled={disabled}
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      returnFocusToChangeRef.current = true;
-                      onChange({
-                        ...value,
-                        participantAccess: {
-                          ...value.participantAccess,
-                          browserSessionName: RTX_PUBLISH_SESSION_NAME,
-                        },
-                      });
-                      setEditingSession(false);
-                    }}
-                    disabled={disabled}
-                  >
-                    Use Signals Publish
-                  </Button>
-                </div>
-              </div>
-            )}
             <p className="text-xs text-muted-foreground">
-              This exact session will be used. Signals verifies its visible identity and source
-              access at launch; this does not change the separate identity used for CRM writes.
+              Only the selected existing session can be used for this run. A missing or changed
+              session blocks launch until you select another running session.
             </p>
             <p className="text-xs text-muted-foreground">
               Signals won&apos;t register, RSVP, join a waitlist, follow, message, or change anything.

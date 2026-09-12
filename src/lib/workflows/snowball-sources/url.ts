@@ -24,8 +24,8 @@ function providerForHost(hostname: string): SnowballSourceProvider {
   return "generic";
 }
 
-function kindFromPath(provider: SnowballSourceProvider, pathname: string): SnowballSourceKind {
-  const segments = pathname.split("/").filter(Boolean).map((segment) => segment.toLowerCase());
+function kindFromUrl(provider: SnowballSourceProvider, url: URL): SnowballSourceKind {
+  const segments = url.pathname.split("/").filter(Boolean).map((segment) => segment.toLowerCase());
   if (provider === "luma") {
     return segments[0] === "calendar" || segments.includes("calendar") ? "calendar" : "event";
   }
@@ -42,12 +42,28 @@ function kindFromPath(provider: SnowballSourceProvider, pathname: string): Snowb
   }
   if (provider === "facebook") {
     if (segments[0] === "events") return "event";
-    if (segments.includes("posts") || segments.includes("permalink") || segments.includes("story.php")) {
+    if (
+      segments.includes("posts")
+      || segments.includes("permalink")
+      || (segments[0] === "story.php" && url.searchParams.has("story_fbid"))
+    ) {
       return "post";
     }
     return segments.length ? "page" : "page";
   }
   return "unknown";
+}
+
+function retainFunctionalQuery(url: URL, provider: SnowballSourceProvider): void {
+  const retained = new URLSearchParams();
+  if (provider === "facebook" && url.pathname.toLowerCase() === "/story.php") {
+    for (const key of ["id", "story_fbid"] as const) {
+      const value = url.searchParams.get(key)?.trim();
+      if (value && /^\d{1,30}$/.test(value)) retained.set(key, value);
+    }
+  }
+  retained.sort();
+  url.search = retained.toString();
 }
 
 function capabilities(provider: SnowballSourceProvider, kind: SnowballSourceKind) {
@@ -60,8 +76,8 @@ function capabilities(provider: SnowballSourceProvider, kind: SnowballSourceKind
 }
 
 /**
- * Canonicalize an untrusted source link. Source identity never includes query or fragment data;
- * that prevents invite/access tokens from reaching config, logs, storage, or an agent brief.
+ * Canonicalize an untrusted source link. Only documented, non-secret identifiers that are
+ * necessary to preserve source identity survive; credential-like and unknown query data does not.
  */
 export function resolveSnowballSourceUrl(value: string): ResolvedSnowballSource | null {
   let url: URL;
@@ -77,15 +93,14 @@ export function resolveSnowballSourceUrl(value: string): ResolvedSnowballSource 
     || url.port
     || !url.hostname
   ) return null;
-  for (const key of url.searchParams.keys()) {
-    if (SECRET_QUERY_KEY.test(key)) url.searchParams.delete(key);
-  }
-  // Canonical source identity deliberately excludes every query, including unknown values.
-  url.search = "";
   url.hash = "";
   url.hostname = normalizedHost(url);
   const provider = providerForHost(url.hostname);
-  const kind = kindFromPath(provider, url.pathname);
+  for (const key of [...url.searchParams.keys()]) {
+    if (SECRET_QUERY_KEY.test(key)) url.searchParams.delete(key);
+  }
+  retainFunctionalQuery(url, provider);
+  const kind = kindFromUrl(provider, url);
   return {
     version: 1,
     canonicalUrl: url.toString().replace(/\/$/, url.pathname === "/" ? "/" : ""),

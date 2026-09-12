@@ -163,6 +163,7 @@ describe("Luma public extraction", () => {
       </section>`,
     })).toEqual({
       canonicalUrl: "https://luma.com/ai-calendar",
+      title: "luma.com",
       eventUrls: ["https://luma.com/event-a", "https://luma.com/event-b"],
       nextPageUrl: "https://luma.com/ai-calendar/page-2",
     });
@@ -185,6 +186,7 @@ describe("Luma public extraction", () => {
       html,
     })).toEqual({
       canonicalUrl: "https://luma.com/ai_beavers",
+      title: "AI BEAVERS",
       eventUrls: [
         "https://luma.com/build-fridays-hamburg",
         "https://luma.com/build-fridays-berlin",

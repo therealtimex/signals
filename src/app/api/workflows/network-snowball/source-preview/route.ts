@@ -13,6 +13,7 @@ export async function POST(request: NextRequest) {
     const preview = await previewSnowballSource({
       seedUrl: input.sourceUrl,
       signedInRequested: input.signedInRequested,
+      signal: request.signal,
     });
     return NextResponse.json({ success: true, preview });
   } catch (error) {

@@ -31,6 +31,11 @@ export type PublicEventSourceResult = {
   provider: "luma";
   canonicalSeedUrl: string;
   rootEventKey: string;
+  resolvedRoot?: {
+    canonicalUrl: string;
+    kind: "event" | "calendar";
+    title: string;
+  };
   events: EventSource[];
   contentItemIds: string[];
   guestBoundary: GuestBoundary;
@@ -120,13 +125,13 @@ async function fetchPublicHtml(input: {
   url: string;
   fetchImpl: typeof fetch;
   sleepImpl: (ms: number) => Promise<void>;
-  beforeRequest: () => Promise<boolean>;
+  beforeRequest: (url: string) => Promise<boolean>;
 }): Promise<{ html: string; finalUrl: string }> {
   let currentUrl = input.url;
   let redirectCount = 0;
   let transientAttempt = 0;
   while (true) {
-    if (!(await input.beforeRequest())) throw new Error("request_budget_exhausted");
+    if (!(await input.beforeRequest(currentUrl))) throw new Error("request_budget_exhausted");
     let response: Response;
     try {
       response = await input.fetchImpl(currentUrl, {
@@ -219,6 +224,8 @@ export async function ingestNetworkSnowballEventSource(input: {
   env?: EnvLike;
   /** Allows the provider-aware source resolver to start from a calendar root. */
   rootKind?: "event" | "calendar";
+  /** Optional outer budget shared with a provider-agnostic redirect that entered Luma. */
+  beforeProviderRequest?: (url: string) => boolean | Promise<boolean>;
 }): Promise<EventSourceIngestionResult | null> {
   const canonicalSeedUrl = canonicalizeLumaUrl(input.seedUrl);
   let rootEventKey = lumaEventKey(input.seedUrl);
@@ -249,6 +256,11 @@ export async function ingestNetworkSnowballEventSource(input: {
   const visited = new Set(events.map((event) => event.canonicalUrl));
   const previousRoot = events.find((event) => event.key === previous?.rootEventKey)
     ?? events.find((event) => event.canonicalUrl === canonicalSeedUrl);
+  let resolvedRoot = previous?.resolvedRoot ?? {
+    canonicalUrl: previousRoot?.canonicalUrl ?? canonicalSeedUrl,
+    kind: input.rootKind ?? "event" as const,
+    title: previousRoot?.title ?? new URL(canonicalSeedUrl).hostname,
+  };
   type QueueItem = {
     kind: "event" | "calendar";
     url: string;
@@ -272,8 +284,9 @@ export async function ingestNetworkSnowballEventSource(input: {
     typeof checkpoint?.requestsUsed === "number" ? checkpoint.requestsUsed : 0,
   );
   let lastRequestAt = 0;
-  const consumeProviderRequest = async (): Promise<boolean> => {
+  const consumeProviderRequest = async (requestUrl = canonicalSeedUrl): Promise<boolean> => {
     if (requestCount >= traversal.maxProviderRequests) return false;
+    if (input.beforeProviderRequest && !(await input.beforeProviderRequest(requestUrl))) return false;
     const sinceLast = Date.now() - lastRequestAt;
     if (lastRequestAt && sinceLast < EVENT_PROVIDER_RUNTIME_POLICY.minRequestIntervalMs) {
       await sleepImpl(EVENT_PROVIDER_RUNTIME_POLICY.minRequestIntervalMs - sinceLast);
@@ -317,7 +330,21 @@ export async function ingestNetworkSnowballEventSource(input: {
         })
       );
       if (isCalendarPage) {
+        if (next.depth === 0) {
+          resolvedRoot = {
+            canonicalUrl: canonicalizeLumaUrl(finalUrl) ?? canonicalSeedUrl,
+            kind: "calendar",
+            title: new URL(finalUrl).hostname,
+          };
+        }
         const calendar = extractLumaCalendarFromHtml({ url: finalUrl, html });
+        if (next.depth === 0) {
+          resolvedRoot = {
+            canonicalUrl: calendar.canonicalUrl,
+            kind: "calendar",
+            title: calendar.title,
+          };
+        }
         if (calendar.eventUrls.length > eventsPerCalendar) {
           calendarTruncated = true;
         }
@@ -370,6 +397,11 @@ export async function ingestNetworkSnowballEventSource(input: {
           throw eventError;
         }
         visitedCalendarPages.add(calendar.canonicalUrl);
+        resolvedRoot = {
+          canonicalUrl: calendar.canonicalUrl,
+          kind: "calendar",
+          title: calendar.title,
+        };
         if (calendar.eventUrls.length > eventsPerCalendar) calendarTruncated = true;
         for (const eventUrl of calendar.eventUrls.slice(0, eventsPerCalendar)) {
           queue.push({
@@ -396,7 +428,14 @@ export async function ingestNetworkSnowballEventSource(input: {
           event.key,
         ));
       }
-      if (next.depth === 0) rootEventKey = event.key;
+      if (next.depth === 0) {
+        rootEventKey = event.key;
+        resolvedRoot = {
+          canonicalUrl: event.canonicalUrl,
+          kind: "event",
+          title: event.title,
+        };
+      }
       events.push(event);
       contentItemIds.push(upsertPublicEventSource(event, { writeGraphEdges: input.writeGraphEdges }));
       if (next.depth < traversal.adjacentEventDepth) {
@@ -516,6 +555,7 @@ export async function ingestNetworkSnowballEventSource(input: {
     provider: "luma",
     canonicalSeedUrl,
     rootEventKey,
+    resolvedRoot,
     events,
     contentItemIds,
     guestBoundary,

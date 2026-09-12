@@ -6,7 +6,10 @@ import {
   extractLumaEventFromHtml,
   hasLumaCalendarPageMetadata,
 } from "@/lib/workflows/event-sources/providers/luma";
-import { ingestNetworkSnowballEventSource } from "@/lib/workflows/event-sources/service";
+import {
+  ingestNetworkSnowballEventSource,
+  type PublicEventSourceResult,
+} from "@/lib/workflows/event-sources/service";
 import type {
   EventParticipantAccessConfig,
   EventSource,
@@ -30,6 +33,7 @@ import {
 } from "@/lib/workflows/snowball-sources/url";
 
 export const SNOWBALL_SOURCE_RESULT_KEY = "source";
+export const SNOWBALL_SOURCE_RUNTIME_RESULT_KEY = "sourceRuntime";
 export const SNOWBALL_RESOLVED_SOURCE_CONFIG_KEY = "_resolvedSnowballSource";
 export const SNOWBALL_SOURCE_ACCESS_CONFIG_KEY = "_snowballSourceAccess";
 
@@ -45,12 +49,17 @@ function parseObject(value: string | null | undefined): Record<string, unknown> 
 }
 
 function lumaEnvelope(
-  canonicalUrl: string,
+  resolvedRoot: NonNullable<PublicEventSourceResult["resolvedRoot"]>,
   events: EventSource[],
 ): PublicSnowballSourceEnvelope {
-  const root = events.find((event) => event.canonicalUrl === canonicalUrl) ?? events[0];
-  const title = root?.title ?? new URL(canonicalUrl).hostname;
+  const root = resolvedRoot.kind === "event"
+    ? events.find((event) => event.canonicalUrl === resolvedRoot.canonicalUrl) ?? events[0]
+    : undefined;
+  const title = resolvedRoot.title || root?.title || new URL(resolvedRoot.canonicalUrl).hostname;
   const facts: PublicSnowballSourceEnvelope["facts"] = [];
+  if (resolvedRoot.kind === "calendar") {
+    facts.push({ label: "listed events", value: String(events.length) });
+  }
   if (root?.startsAt) facts.push({ label: "starts", value: root.startsAt });
   if (root?.location) facts.push({ label: "location", value: root.location });
   if (root) facts.push({ label: "guest access", value: describeGuestBoundary(root.guestBoundary) });
@@ -59,16 +68,21 @@ function lumaEnvelope(
     facts.push({ label: party.role.replaceAll("_", " "), value: party.name });
   }
   const links = [...new Map(
-    (root?.parties ?? []).flatMap((party) => [party.url, ...(party.identityUrls ?? [])]
-      .filter((url): url is string => Boolean(url))
-      .map((url) => [url, { label: party.name, url }] as const)),
+    [
+      ...(resolvedRoot.kind === "calendar"
+        ? events.map((event) => ({ label: event.title, url: event.canonicalUrl }))
+        : []),
+      ...(root?.parties ?? []).flatMap((party) => [party.url, ...(party.identityUrls ?? [])]
+        .filter((url): url is string => Boolean(url))
+        .map((url) => ({ label: party.name, url }))),
+    ].map((link) => [link.url, link] as const),
   ).values()].slice(0, 20);
   return {
     version: 1,
-    canonicalUrl,
+    canonicalUrl: resolvedRoot.canonicalUrl,
     title,
     provider: "luma",
-    kind: "event",
+    kind: resolvedRoot.kind,
     observedAt: root?.observedAt ?? Math.floor(Date.now() / 1000),
     extractor: "signals:luma-event-source:v1",
     scope: "public",
@@ -92,8 +106,48 @@ function persistPreparation(runId: string, preparation: SnowballSourcePreparatio
   });
 }
 
+function sourceRequestCount(runId: string, canonicalSeedUrl: string): number {
+  const stored = parseObject(getWorkflowRun(runId)?.result);
+  const checkpoint = stored[SNOWBALL_SOURCE_RUNTIME_RESULT_KEY];
+  if (!checkpoint || typeof checkpoint !== "object" || Array.isArray(checkpoint)) return 0;
+  const record = checkpoint as Record<string, unknown>;
+  return record.canonicalSeedUrl === canonicalSeedUrl && typeof record.requestsUsed === "number"
+    ? Math.max(0, Math.floor(record.requestsUsed))
+    : 0;
+}
+
+function createDurableSourceRequestBudget(input: {
+  runId: string;
+  canonicalSeedUrl: string;
+  maxRequests: number;
+}) {
+  let requestsUsed = sourceRequestCount(input.runId, input.canonicalSeedUrl);
+  const consume = (requestUrl: string): boolean => {
+    if (requestsUsed >= input.maxRequests) return false;
+    requestsUsed += 1;
+    const run = getWorkflowRun(input.runId);
+    if (run) {
+      updateWorkflowRun(input.runId, {
+        result: JSON.stringify({
+          ...parseObject(run.result),
+          [SNOWBALL_SOURCE_RUNTIME_RESULT_KEY]: {
+            version: 1,
+            canonicalSeedUrl: input.canonicalSeedUrl,
+            requestsUsed,
+            lastRequestUrl: resolveSnowballSourceUrl(requestUrl)?.canonicalUrl
+              ?? input.canonicalSeedUrl,
+          },
+        }),
+      });
+    }
+    return true;
+  };
+  return { consume };
+}
+
 export function removeServerOwnedSnowballSourceResult(result: Record<string, unknown>): void {
   delete result[SNOWBALL_SOURCE_RESULT_KEY];
+  delete result[SNOWBALL_SOURCE_RUNTIME_RESULT_KEY];
 }
 
 export function removeCallerOwnedSnowballSourceDescriptors(config: Record<string, unknown>): void {
@@ -107,6 +161,7 @@ export async function previewSnowballSource(input: {
   seedUrl: string;
   signedInRequested?: boolean;
   transport?: PublicSourceTransport;
+  signal?: AbortSignal;
 }): Promise<SnowballSourcePreview> {
   const source = resolveSnowballSourceUrl(input.seedUrl);
   if (!source) throw new Error("Enter a public HTTPS source link without credentials or a custom port.");
@@ -116,19 +171,21 @@ export async function previewSnowballSource(input: {
       maxRedirects: 2,
       maxBytes: 512 * 1024,
       timeoutMs: 10_000,
+      signal: input.signal,
     });
-    let classifiedSource = source;
-    if (source.provider === "luma") {
+    const finalSource = resolveSnowballSourceUrl(response.url) ?? source;
+    let classifiedSource = finalSource;
+    if (finalSource.provider === "luma") {
       if (hasLumaCalendarPageMetadata({ url: response.url, html: response.body })) {
-        classifiedSource = refineSnowballSource(source, "calendar", "metadata", "high");
+        classifiedSource = refineSnowballSource(finalSource, "calendar", "metadata", "high");
       } else {
         try {
           extractLumaEventFromHtml({ url: response.url, html: response.body });
-          classifiedSource = refineSnowballSource(source, "event", "metadata", "high");
+          classifiedSource = refineSnowballSource(finalSource, "event", "metadata", "high");
         } catch {
           try {
             extractLumaCalendarFromHtml({ url: response.url, html: response.body });
-            classifiedSource = refineSnowballSource(source, "calendar", "metadata", "high");
+            classifiedSource = refineSnowballSource(finalSource, "calendar", "metadata", "high");
           } catch {
             // Keep the conservative URL classification; launch retries with the full adapter.
           }
@@ -146,7 +203,8 @@ export async function previewSnowballSource(input: {
       publicSource: extracted.envelope,
       errors: [],
     };
-  } catch {
+  } catch (error) {
+    if (input.signal?.aborted) throw error;
     // Classification still gives the operator an actionable public-only preview. The launch path
     // records the bounded read failure separately instead of making UI preview availability a gate.
     return {
@@ -172,59 +230,117 @@ export async function prepareNetworkSnowballSource(input: {
 }): Promise<SnowballSourcePreparation | null> {
   const initialSource = resolveSnowballSourceUrl(input.seedUrl);
   if (!initialSource) return null;
-  let preparation: SnowballSourcePreparation;
-  if (initialSource.provider === "luma") {
+  const prepareLuma = async (
+    source: NonNullable<ReturnType<typeof resolveSnowballSourceUrl>>,
+    options: {
+      allowSignedIn: boolean;
+      traversal: EventTraversalPolicy;
+      beforeProviderRequest?: (url: string) => boolean | Promise<boolean>;
+    },
+  ): Promise<SnowballSourcePreparation | null> => {
     const ingestion = await ingestNetworkSnowballEventSource({
       runId: input.runId,
       ownerWorkspace: input.ownerWorkspace,
-      seedUrl: initialSource.canonicalUrl,
-      traversal: input.traversal,
-      participantAccess: initialSource.capabilities.signedInRead
+      seedUrl: source.canonicalUrl,
+      traversal: options.traversal,
+      participantAccess: options.allowSignedIn && source.capabilities.signedInRead
         ? input.participantAccess
         : { enabled: false, browserSessionName: input.participantAccess.browserSessionName },
       writeGraphEdges: input.writeGraphEdges,
       fetchImpl: input.fetchImpl,
       sleepImpl: input.sleepImpl,
       env: input.env,
-      rootKind: initialSource.kind === "calendar" ? "calendar" : "event",
+      rootKind: source.kind === "calendar" ? "calendar" : "event",
+      beforeProviderRequest: options.beforeProviderRequest,
     });
     if (!ingestion) return null;
-    const isCalendar = !ingestion.publicResult.events.some(
-      (event) => event.canonicalUrl === ingestion.publicResult.canonicalSeedUrl,
+    const rootEvent = ingestion.publicResult.events.find(
+      (event) => event.key === ingestion.publicResult.rootEventKey,
     );
-    const resolvedSource = isCalendar
-      ? refineSnowballSource(initialSource, "calendar", "metadata", "high")
-      : initialSource;
-    const publicSource = lumaEnvelope(initialSource.canonicalUrl, ingestion.publicResult.events);
-    publicSource.kind = resolvedSource.kind;
-    preparation = {
+    const resolvedRoot = ingestion.publicResult.resolvedRoot ?? {
+      canonicalUrl: rootEvent?.canonicalUrl ?? source.canonicalUrl,
+      kind: source.kind === "calendar" ? "calendar" as const : "event" as const,
+      title: rootEvent?.title ?? new URL(source.canonicalUrl).hostname,
+    };
+    const rootSource = resolveSnowballSourceUrl(resolvedRoot.canonicalUrl) ?? source;
+    const resolvedSource = refineSnowballSource(
+      rootSource,
+      resolvedRoot.kind,
+      "metadata",
+      "high",
+    );
+    let accessPlan = sourceAccessPlan(
       resolvedSource,
-      accessPlan: sourceAccessPlan(resolvedSource, input.participantAccess.enabled),
-      publicSource,
+      options.allowSignedIn && input.participantAccess.enabled,
+    );
+    if (
+      input.participantAccess.enabled
+      && !options.allowSignedIn
+      && resolvedSource.capabilities.signedInRead
+    ) {
+      accessPlan = {
+        ...accessPlan,
+        signedInRequested: true,
+        reason: "The source redirected to a signed-in capable provider. Renew consent for the resolved link to use registered access.",
+      };
+    }
+    return {
+      resolvedSource,
+      accessPlan,
+      publicSource: lumaEnvelope(resolvedRoot, ingestion.publicResult.events),
       contentItemIds: ingestion.publicResult.contentItemIds,
       errors: ingestion.publicResult.errors,
       partial: ingestion.publicResult.partial,
+      lumaContext: {
+        canonicalSeedUrl: ingestion.publicResult.canonicalSeedUrl,
+        resolvedRoot,
+        events: ingestion.publicResult.events,
+      },
       ...(ingestion.eventReportCapability
         ? { eventReportCapability: ingestion.eventReportCapability }
         : {}),
     };
+  };
+
+  let preparation: SnowballSourcePreparation | null;
+  if (initialSource.provider === "luma") {
+    preparation = await prepareLuma(initialSource, {
+      allowSignedIn: initialSource.kind === "event",
+      traversal: input.traversal,
+    });
   } else {
     const transport = input.transport ?? fetchPublicSnowballSource;
+    const budget = createDurableSourceRequestBudget({
+      runId: input.runId,
+      canonicalSeedUrl: initialSource.canonicalUrl,
+      maxRequests: input.traversal.maxProviderRequests,
+    });
     try {
-      const response = await transport(initialSource.canonicalUrl);
-      const extracted = extractPublicSnowballSource({
-        source: initialSource,
-        finalUrl: response.url,
-        html: response.body,
+      const response = await transport(initialSource.canonicalUrl, {
+        beforeRequest: budget.consume,
       });
-      preparation = {
-        resolvedSource: extracted.resolvedSource,
-        accessPlan: sourceAccessPlan(extracted.resolvedSource, input.participantAccess.enabled),
-        publicSource: extracted.envelope,
-        contentItemIds: [upsertPublicSnowballSource(extracted.envelope)],
-        errors: [],
-        partial: false,
-      };
+      const finalSource = resolveSnowballSourceUrl(response.url) ?? initialSource;
+      if (finalSource.provider === "luma") {
+        preparation = await prepareLuma(finalSource, {
+          allowSignedIn: false,
+          traversal: input.traversal,
+          beforeProviderRequest: budget.consume,
+        });
+      } else {
+        const extracted = extractPublicSnowballSource({
+          source: finalSource,
+          finalUrl: response.url,
+          html: response.body,
+        });
+        preparation = {
+          resolvedSource: extracted.resolvedSource,
+          accessPlan: sourceAccessPlan(extracted.resolvedSource, input.participantAccess.enabled),
+          publicSource: extracted.envelope,
+          contentItemIds: [upsertPublicSnowballSource(extracted.envelope)],
+          errors: [],
+          partial: false,
+        };
+      }
     } catch {
       preparation = {
         resolvedSource: initialSource,
@@ -236,6 +352,7 @@ export async function prepareNetworkSnowballSource(input: {
       };
     }
   }
+  if (!preparation) return null;
   persistPreparation(input.runId, preparation);
   return preparation;
 }

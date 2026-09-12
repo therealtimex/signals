@@ -27,6 +27,18 @@ describe("resolveSnowballSourceUrl", () => {
       });
   });
 
+  it("retains only documented non-secret Facebook story identifiers", () => {
+    expect(resolveSnowballSourceUrl(
+      "https://www.facebook.com/story.php?story_fbid=456&id=123&utm_source=feed&token=secret",
+    )).toMatchObject({
+      provider: "facebook",
+      kind: "post",
+      canonicalUrl: "https://facebook.com/story.php?id=123&story_fbid=456",
+    });
+    expect(resolveSnowballSourceUrl("https://facebook.com/story.php?utm_source=feed"))
+      .toMatchObject({ kind: "page", canonicalUrl: "https://facebook.com/story.php" });
+  });
+
   it.each([
     "http://metr.org/about",
     "https://user:password@metr.org/about",

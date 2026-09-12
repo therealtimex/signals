@@ -8,6 +8,7 @@ import {
   prepareNetworkSnowballSource,
   previewSnowballSource,
   removeServerOwnedSnowballSourceResult,
+  SNOWBALL_SOURCE_RUNTIME_RESULT_KEY,
 } from "@/lib/workflows/snowball-sources/service";
 
 describe("Network Snowball generic source preparation", () => {
@@ -63,7 +64,7 @@ describe("Network Snowball generic source preparation", () => {
     const fetchImpl = vi.fn(async (url: string | URL | Request) => {
       if (String(url) === "https://luma.com/ai_builders") {
         return new Response(`<script id="__NEXT_DATA__" type="application/json">{"props":{"pageProps":{"initialData":{"data":{
-          "calendar":{"api_id":"cal-1","name":"AI Builders"},
+          "calendar":{"api_id":"cal-1","name":"AI Builders","slug":"ai_builders"},
           "events":[{"api_id":"evt-1","url":"build-night"}]
         }}}}}</script>`, { status: 200 });
       }
@@ -87,7 +88,159 @@ describe("Network Snowball generic source preparation", () => {
         signedInRequested: true,
         signedInSupported: false,
       },
+      lumaContext: {
+        resolvedRoot: { kind: "calendar", title: "AI Builders" },
+        events: [{ title: "Build Night" }],
+      },
     });
+  });
+
+  it("uses the explicit resolved event root for same-provider Luma aliases", async () => {
+    const run = createWorkflowRun({ workflowType: "search", status: "running", trigger: "template" });
+    const fetchImpl = vi.fn(async (url: string | URL | Request) => {
+      if (String(url) === "https://luma.com/alias") {
+        return new Response(null, {
+          status: 302,
+          headers: { location: "https://lu.ma/ResolvedCase" },
+        });
+      }
+      return new Response('<script type="application/ld+json">{"@type":"Event","name":"Resolved Event"}</script>', { status: 200 });
+    }) as unknown as typeof fetch;
+    const result = await prepareNetworkSnowballSource({
+      runId: run.id,
+      ownerWorkspace: "signals",
+      seedUrl: "https://luma.com/alias",
+      traversal: readEventTraversalPolicy({}),
+      participantAccess: { enabled: false, browserSessionName: "" },
+      fetchImpl,
+      sleepImpl: async () => undefined,
+    });
+    expect(result).toMatchObject({
+      resolvedSource: {
+        provider: "luma",
+        kind: "event",
+        canonicalUrl: "https://lu.ma/ResolvedCase",
+        capabilities: { signedInRead: true },
+      },
+      lumaContext: {
+        resolvedRoot: { canonicalUrl: "https://lu.ma/ResolvedCase", kind: "event" },
+      },
+    });
+  });
+
+  it("routes generic-to-Luma redirects through the Luma adapter without upgrading consent", async () => {
+    const run = createWorkflowRun({ workflowType: "search", status: "running", trigger: "template" });
+    const transport = vi.fn(async (_url, limits) => {
+      await limits?.beforeRequest?.("https://redirect.example/luma");
+      return {
+        url: "https://luma.com/resolved-event",
+        status: 200,
+        contentType: "text/html",
+        body: "redirect body is not used as generic evidence",
+      };
+    });
+    const fetchImpl = vi.fn(async () => new Response(
+      '<script type="application/ld+json">{"@type":"Event","name":"Resolved Event"}</script>',
+      { status: 200 },
+    )) as unknown as typeof fetch;
+    const result = await prepareNetworkSnowballSource({
+      runId: run.id,
+      ownerWorkspace: "signals",
+      seedUrl: "https://redirect.example/luma",
+      traversal: readEventTraversalPolicy({ maxProviderRequests: 3 }),
+      participantAccess: { enabled: true, browserSessionName: "personal-browser" },
+      transport,
+      fetchImpl,
+      sleepImpl: async () => undefined,
+    });
+    expect(result).toMatchObject({
+      resolvedSource: { provider: "luma", kind: "event" },
+      accessPlan: {
+        mode: "public_only",
+        signedInRequested: true,
+        signedInSupported: true,
+        reason: expect.stringContaining("Renew consent"),
+      },
+      lumaContext: { events: [{ title: "Resolved Event" }] },
+    });
+    expect(result).not.toHaveProperty("eventReportCapability");
+  });
+
+  it("persists generic redirect charges across resume attempts", async () => {
+    const run = createWorkflowRun({ workflowType: "search", status: "running", trigger: "template" });
+    const transport = vi.fn(async (_url, limits) => {
+      if (await limits?.beforeRequest?.("https://example.com/start") === false) throw new Error("budget");
+      if (await limits?.beforeRequest?.("https://example.com/redirect") === false) throw new Error("budget");
+      throw new Error("unavailable");
+    });
+    const input = {
+      runId: run.id,
+      ownerWorkspace: "signals",
+      seedUrl: "https://example.com/start",
+      traversal: readEventTraversalPolicy({ maxProviderRequests: 3 }),
+      participantAccess: { enabled: false, browserSessionName: "" },
+      transport,
+    };
+    await prepareNetworkSnowballSource(input);
+    await prepareNetworkSnowballSource(input);
+    const stored = JSON.parse(getWorkflowRun(run.id)?.result ?? "{}") as Record<string, unknown>;
+    expect(stored[SNOWBALL_SOURCE_RUNTIME_RESULT_KEY]).toMatchObject({ requestsUsed: 3 });
+    expect(transport).toHaveBeenCalledTimes(2);
+  });
+
+  it("shares one durable cap across a generic redirect and Luma adapter resumes", async () => {
+    const run = createWorkflowRun({ workflowType: "search", status: "running", trigger: "template" });
+    const transport = vi.fn(async (_url, limits) => {
+      if (await limits?.beforeRequest?.("https://redirect.example/start") === false) {
+        throw new Error("budget");
+      }
+      return {
+        url: "https://luma.com/resolved-event",
+        status: 200,
+        contentType: "text/html",
+        body: "redirect body",
+      };
+    });
+    const fetchImpl = vi.fn(async () => new Response(
+      '<script type="application/ld+json">{"@type":"Event","name":"Resolved Event"}</script>',
+      { status: 200 },
+    )) as unknown as typeof fetch;
+    const input = {
+      runId: run.id,
+      ownerWorkspace: "signals",
+      seedUrl: "https://redirect.example/start",
+      traversal: readEventTraversalPolicy({ maxProviderRequests: 2 }),
+      participantAccess: { enabled: false, browserSessionName: "" },
+      transport,
+      fetchImpl,
+      sleepImpl: async () => undefined,
+    };
+
+    await prepareNetworkSnowballSource(input);
+    await prepareNetworkSnowballSource(input);
+
+    const stored = JSON.parse(getWorkflowRun(run.id)?.result ?? "{}") as Record<string, unknown>;
+    expect(stored[SNOWBALL_SOURCE_RUNTIME_RESULT_KEY]).toMatchObject({ requestsUsed: 2 });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(transport).toHaveBeenCalledTimes(2);
+  });
+
+  it("propagates cancelled preview signals to the server transport", async () => {
+    const controller = new AbortController();
+    let observedSignal: AbortSignal | undefined;
+    const pending = previewSnowballSource({
+      seedUrl: "https://example.com/about",
+      signal: controller.signal,
+      transport: async (_url, limits) => {
+        observedSignal = limits?.signal;
+        return new Promise((_resolve, reject) => {
+          limits?.signal?.addEventListener("abort", () => reject(new Error("cancelled")));
+        });
+      },
+    });
+    controller.abort();
+    await expect(pending).rejects.toThrow("cancelled");
+    expect(observedSignal).toBe(controller.signal);
   });
 
   it("refines ambiguous Luma calendar metadata during preview", async () => {
@@ -110,7 +263,11 @@ describe("Network Snowball generic source preparation", () => {
   });
 
   it("protects the server-owned source result from completion callbacks", () => {
-    const callback = { source: { resolvedSource: { provider: "luma" } }, message: "done" };
+    const callback = {
+      source: { resolvedSource: { provider: "luma" } },
+      sourceRuntime: { requestsUsed: 40 },
+      message: "done",
+    };
     removeServerOwnedSnowballSourceResult(callback);
     expect(callback).toEqual({ message: "done" });
   });

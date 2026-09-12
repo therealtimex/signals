@@ -25,18 +25,23 @@ import {
   FOLLOW_ON_ACTION_OPTIONS,
   type FollowOnActionType,
 } from "@/lib/workflows/cascade-types";
-import { NetworkSnowballEventFields } from "@/app/dashboard/workflows/network-snowball-event-fields";
+import {
+  NetworkSnowballEventFields,
+  type SnowballSourceLaunchReadiness,
+} from "@/app/dashboard/workflows/network-snowball-event-fields";
 
 interface NetworkSnowballFieldsProps {
   value: NetworkSnowballConfig;
   onChange: (next: NetworkSnowballConfig) => void;
   disabled?: boolean;
+  onSourceLaunchReadinessChange?: (readiness: SnowballSourceLaunchReadiness) => void;
 }
 
 export function NetworkSnowballFields({
   value,
   onChange,
   disabled,
+  onSourceLaunchReadinessChange,
 }: NetworkSnowballFieldsProps) {
   const setSlider = useCallback(
     (key: NetworkSnowballSliderKey, next: number) => {
@@ -146,7 +151,12 @@ export function NetworkSnowballFields({
       </div>
 
       {(value.seedType === "source_url" || value.seedType === "event_url") && (
-        <NetworkSnowballEventFields value={value} onChange={onChange} disabled={disabled} />
+        <NetworkSnowballEventFields
+          value={value}
+          onChange={onChange}
+          disabled={disabled}
+          onLaunchReadinessChange={onSourceLaunchReadinessChange}
+        />
       )}
 
       {/* Target Platform */}

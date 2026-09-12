@@ -1,6 +1,6 @@
 "use client";
 
-import { useReducer, useEffect, useRef } from "react";
+import { useCallback, useReducer, useEffect, useRef, useState } from "react";
 import {
   Dialog,
   DialogClose,
@@ -39,6 +39,7 @@ import { SocialPatrolFields } from "@/app/dashboard/workflows/social-patrol-fiel
 import { ProfilePublishFields } from "@/app/dashboard/workflows/profile-publish-fields";
 import { ContactNurtureFields } from "@/app/dashboard/workflows/contact-nurture-fields";
 import { NetworkSnowballFields } from "@/app/dashboard/workflows/network-snowball-fields";
+import type { SnowballSourceLaunchReadiness } from "@/app/dashboard/workflows/network-snowball-event-fields";
 import {
   buildSocialPatrolRunConfig,
   isSocialPatrolTemplateConfig,
@@ -141,6 +142,12 @@ function initDialogState(template: Template): DialogState {
     readContactNurtureConfig(config),
     resolveNurtureApprovalGate(null),
   );
+  const storedSnowball = readNetworkSnowballConfig(config);
+  const snowball = {
+    ...storedSnowball,
+    // Interactive launch consent is per-run. A saved/legacy opt-in is never carried forward.
+    participantAccess: { ...storedSnowball.participantAccess, enabled: false },
+  };
   return {
     running: false,
     error: null,
@@ -155,7 +162,7 @@ function initDialogState(template: Template): DialogState {
     patrol: readSocialPatrolConfig(config),
     profilePublish: readProfilePublishConfig(config),
     contactNurture,
-    snowball: readNetworkSnowballConfig(config),
+    snowball,
     limits: readRunLimitFromTemplateConfig(config),
   };
 }
@@ -338,6 +345,7 @@ function ActivateDialogFormFields({
   isContactNurture,
   isNetworkSnowball,
   isOrgDedupe,
+  onSnowballSourceReadinessChange,
   dispatch,
 }: {
   template: Template;
@@ -354,6 +362,7 @@ function ActivateDialogFormFields({
   isProfilePublish: boolean;
   isContactNurture: boolean;
   isNetworkSnowball: boolean;
+  onSnowballSourceReadinessChange: (readiness: SnowballSourceLaunchReadiness) => void;
   dispatch: React.Dispatch<DialogAction>;
 }) {
   return (
@@ -556,6 +565,7 @@ function ActivateDialogFormFields({
             dispatch({ type: "SET_NETWORK_SNOWBALL", snowball: next })
           }
           disabled={running}
+          onSourceLaunchReadinessChange={onSnowballSourceReadinessChange}
         />
       )}
 
@@ -632,6 +642,15 @@ function ActivateDialogContent({
   onClose: () => void;
 }) {
   const [state, dispatch] = useReducer(dialogReducer, template, initDialogState);
+  const [snowballSourceReadiness, setSnowballSourceReadiness] = useState<SnowballSourceLaunchReadiness>({
+    ready: false,
+    reason: "preview_pending",
+    sourceValue: "",
+  });
+  const handleSnowballSourceReadiness = useCallback(
+    (readiness: SnowballSourceLaunchReadiness) => setSnowballSourceReadiness(readiness),
+    [],
+  );
   const pipelineBatchSizeTouched = useRef(false);
 
   const templateConfig = parseTemplateConfig(template.config);
@@ -816,8 +835,21 @@ function ActivateDialogContent({
   const networkSnowballRunDisabled =
     isNetworkSnowball &&
     (!snowball.seedValue.trim() ||
+      ((snowball.seedType === "source_url" || snowball.seedType === "event_url")
+        && (!snowballSourceReadiness.ready
+          || snowballSourceReadiness.sourceValue !== snowball.seedValue.trim())) ||
       (snowball.participantAccess.enabled &&
         !snowball.participantAccess.browserSessionName.trim()));
+  const networkSnowballDisabledLabel = !snowball.seedValue.trim()
+    ? "Add a seed"
+    : snowballSourceReadiness.reason === "preview_pending"
+        || snowballSourceReadiness.sourceValue !== snowball.seedValue.trim()
+      ? "Checking source…"
+      : snowballSourceReadiness.reason === "invalid_source"
+        ? "Fix source link"
+        : snowballSourceReadiness.reason === "sessions_pending"
+          ? "Checking sessions…"
+          : "Select running session";
   const pipelineBatchMax = backlog
     ? Math.min(PROFILE_PIPELINE_MAX_BATCH, Math.max(1, backlog.backlogTotal))
     : PROFILE_PIPELINE_MAX_BATCH;
@@ -910,6 +942,7 @@ function ActivateDialogContent({
             isContactNurture={isContactNurture}
             isNetworkSnowball={isNetworkSnowball}
             isOrgDedupe={isOrgDedupe}
+            onSnowballSourceReadinessChange={handleSnowballSourceReadiness}
             dispatch={dispatch}
           />
         )}
@@ -954,9 +987,7 @@ function ActivateDialogContent({
                 : patrolRunDisabled || profilePublishRunDisabled
                   ? "Select an acting profile"
                   : networkSnowballRunDisabled
-                    ? snowball.seedValue.trim()
-                      ? "Select browser session"
-                      : "Add a seed"
+                    ? networkSnowballDisabledLabel
                   : isPipeline
                     ? "Run"
                     : isPatrol

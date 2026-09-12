@@ -507,6 +507,7 @@ export function extractLumaEventFromHtml(input: {
 
 export type LumaCalendarPage = {
   canonicalUrl: string;
+  title: string;
   eventUrls: string[];
   nextPageUrl: string | null;
 };
@@ -545,6 +546,13 @@ export function extractLumaCalendarFromHtml(input: {
   if (!calendarRoot.length && !isEmbeddedCalendarPage) {
     throw new Error("calendar_metadata_missing");
   }
+  const calendar = asRecord(nextPageData?.calendar);
+  const title = (
+    stringValue(calendar?.name)
+      ?? stringValue($('meta[property="og:title"]').attr("content"))
+      ?? stringValue($("title").first().text())
+      ?? new URL(canonicalUrl).hostname
+  ).replace(/\s+/g, " ").trim().slice(0, 200);
 
   const eventUrls = new Set<string>();
   collectEmbeddedEventUrls(nextPageData, canonicalUrl, eventUrls);
@@ -579,5 +587,5 @@ export function extractLumaCalendarFromHtml(input: {
       nextPageUrl = null;
     }
   }
-  return { canonicalUrl, eventUrls: [...eventUrls], nextPageUrl };
+  return { canonicalUrl, title, eventUrls: [...eventUrls], nextPageUrl };
 }

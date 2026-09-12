@@ -17,12 +17,20 @@ function initialConfig(seedValue = "https://luma.com/build-night"): NetworkSnowb
   });
 }
 
-function findButton(label: string, root: ParentNode = document.body): HTMLButtonElement {
-  const button = Array.from(root.querySelectorAll("button")).find((candidate) =>
-    candidate.textContent?.includes(label),
-  );
-  expect(button).toBeTruthy();
-  return button!;
+function sessionResponse() {
+  return new Response(JSON.stringify({
+    sessions: [
+      { sessionName: "personal-browser", running: true, sourceIdentity: null, identityVerification: "checked_at_launch" },
+      { sessionName: "signals-publish", running: true, sourceIdentity: null, identityVerification: "checked_at_launch" },
+    ],
+    crmTarget: {
+      platform: "linkedin",
+      sessionName: "crm-linkedin",
+      identity: "/in/operator",
+      verification: "previously_verified",
+      lastVerifiedAt: 1_700_000_000,
+    },
+  }), { status: 200, headers: { "content-type": "application/json" } });
 }
 
 describe("NetworkSnowballEventFields", () => {
@@ -34,6 +42,30 @@ describe("NetworkSnowballEventFields", () => {
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
+    vi.stubGlobal("fetch", vi.fn(async (url: string | URL | Request) => {
+      if (String(url).includes("source-sessions")) return sessionResponse();
+      if (String(url).includes("source-preview")) return new Response(JSON.stringify({
+        preview: {
+          resolvedSource: {
+            version: 1,
+            canonicalUrl: "https://luma.com/build-night",
+            provider: "luma",
+            kind: "event",
+            classification: { basis: "metadata", confidence: "high" },
+            capabilities: { publicRead: true, signedInRead: true, participantExpansion: true },
+          },
+          accessPlan: {
+            mode: "public_and_signed_in",
+            signedInRequested: true,
+            signedInSupported: true,
+            reason: null,
+          },
+          publicSource: null,
+          errors: [],
+        },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+      throw new Error(`Unexpected fetch: ${String(url)}`);
+    }));
   });
 
   afterEach(() => {
@@ -65,13 +97,17 @@ describe("NetworkSnowballEventFields", () => {
     expect(container.textContent).not.toContain("signals-publish");
 
     await act(async () => checkbox.click());
+    await act(async () => Promise.resolve());
 
     expect(latest.participantAccess).toEqual({
       enabled: true,
       browserSessionName: "signals-publish",
     });
-    expect(container.textContent).toContain("Signals Publish");
-    expect(container.textContent).toContain("identity and source access at launch");
+    expect(container.textContent).toContain("signals-publish");
+    expect(container.textContent).toContain("Source identity verification");
+    expect(container.textContent).toContain("Not checked yet");
+    expect(container.textContent).toContain("CRM write identity (separate)");
+    expect(container.textContent).toContain("/in/operator");
   });
 
   it("makes generic organization links public-only and hides event controls", async () => {
@@ -114,35 +150,36 @@ describe("NetworkSnowballEventFields", () => {
     expect(signals).toHaveLength(2);
   });
 
-  it("makes custom session selection deliberate and offers a one-click reset", async () => {
+  it("selects an existing running session and rejects a missing saved session", async () => {
+    vi.useFakeTimers();
     let latest = initialConfig();
+    latest.participantAccess = { enabled: true, browserSessionName: "missing-session" };
+    let readiness: { ready: boolean; reason: string } | undefined;
 
     function Harness() {
       const [value, setValue] = useState(latest);
       latest = value;
-      return createElement(NetworkSnowballEventFields, { value, onChange: setValue });
+      return createElement(NetworkSnowballEventFields, {
+        value,
+        onChange: setValue,
+        onLaunchReadinessChange: (next) => { readiness = next; },
+      });
     }
 
     await act(async () => root.render(createElement(Harness)));
-    const checkbox = container.querySelector("#snowball-participant-access") as HTMLButtonElement;
-    await act(async () => checkbox.click());
-    await act(async () => findButton("Change", container).click());
+    await act(async () => vi.advanceTimersByTimeAsync(451));
+    expect(container.textContent).toContain("previously selected session is no longer running");
+    expect(readiness).toMatchObject({ ready: false, reason: "session_missing" });
 
-    const input = container.querySelector("#snowball-event-session") as HTMLInputElement;
-    expect(input).toBeTruthy();
-    expect(document.activeElement).toBe(input);
-    await act(async () => {
-      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
-      setter?.call(input, "personal-browser");
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-    });
+    const trigger = container.querySelector("#snowball-event-session") as HTMLButtonElement;
+    await act(async () => trigger.click());
+    const option = Array.from(document.body.querySelectorAll('[role="option"]')).find(
+      (candidate) => candidate.textContent?.includes("personal-browser"),
+    ) as HTMLElement | undefined;
+    expect(option).toBeTruthy();
+    await act(async () => option!.click());
     expect(latest.participantAccess.browserSessionName).toBe("personal-browser");
-
-    await act(async () => findButton("Use Signals Publish", container).click());
-    expect(latest.participantAccess.browserSessionName).toBe("signals-publish");
-    expect(container.querySelector("#snowball-event-session")).toBeNull();
-    expect(document.activeElement).toBe(findButton("Change", container));
-    expect(container.querySelector("code")?.className).toContain("break-all");
+    expect(readiness).toMatchObject({ ready: true, reason: "ready" });
   });
 
   it("disables both authorization and session editing with the parent form", async () => {
@@ -160,6 +197,7 @@ describe("NetworkSnowballEventFields", () => {
 
     const checkbox = container.querySelector("#snowball-participant-access") as HTMLButtonElement;
     expect(checkbox.disabled).toBe(true);
-    expect(findButton("Change", container).disabled).toBe(true);
+    await act(async () => Promise.resolve());
+    expect((container.querySelector("#snowball-event-session") as HTMLButtonElement).disabled).toBe(true);
   });
 });
