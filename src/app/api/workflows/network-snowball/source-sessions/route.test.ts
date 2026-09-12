@@ -41,9 +41,27 @@ describe("GET Network Snowball source sessions", () => {
     mocks.getBrowserConnectionById.mockReturnValue({ sessionName: "crm-linkedin" });
   });
 
-  it("returns only registered running source sessions and a separate CRM target", async () => {
+  it("returns the CRM target without enumerating source sessions by default", async () => {
     const response = await GET(new Request(
       "http://localhost/api/workflows/network-snowball/source-sessions?targetPlatform=linkedin",
+    ));
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      sessions: [],
+      crmTarget: {
+        platform: "linkedin",
+        sessionName: "crm-linkedin",
+        identity: "/in/crm-writer",
+        verification: "previously_verified",
+      },
+    });
+    expect(mocks.listRtxBrowserSessions).not.toHaveBeenCalled();
+    expect(mocks.listBrowserConnections).not.toHaveBeenCalled();
+  });
+
+  it("returns registered running source sessions only after explicit inclusion", async () => {
+    const response = await GET(new Request(
+      "http://localhost/api/workflows/network-snowball/source-sessions?targetPlatform=linkedin&includeSourceSessions=true",
     ));
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
@@ -60,5 +78,7 @@ describe("GET Network Snowball source sessions", () => {
         verification: "previously_verified",
       },
     });
+    expect(mocks.listRtxBrowserSessions).toHaveBeenCalledOnce();
+    expect(mocks.listBrowserConnections).toHaveBeenCalledOnce();
   });
 });

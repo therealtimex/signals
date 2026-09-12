@@ -847,6 +847,10 @@ function ActivateDialogContent({
       ? "Checking source…"
       : snowballSourceReadiness.reason === "invalid_source"
         ? "Fix source link"
+        : snowballSourceReadiness.reason === "crm_target_pending"
+          ? "Checking write identity…"
+          : snowballSourceReadiness.reason === "crm_target_unavailable"
+            ? "Write identity unavailable"
         : snowballSourceReadiness.reason === "sessions_pending"
           ? "Checking sessions…"
           : "Select running session";

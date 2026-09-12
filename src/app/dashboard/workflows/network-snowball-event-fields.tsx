@@ -16,10 +16,10 @@ import type { SnowballSourcePreview } from "@/lib/workflows/snowball-sources/typ
 import { resolveSnowballSourceUrl, sourceAccessPlan } from "@/lib/workflows/snowball-sources/url";
 
 type PreviewState =
-  | { status: "idle"; preview: null }
-  | { status: "loading"; preview: SnowballSourcePreview }
-  | { status: "ready"; preview: SnowballSourcePreview }
-  | { status: "error"; preview: null; message: string };
+  | { status: "idle"; canonicalUrl: null; inputValue: string; generation: number; preview: null }
+  | { status: "loading"; canonicalUrl: string; inputValue: string; generation: number; preview: SnowballSourcePreview }
+  | { status: "ready"; canonicalUrl: string; inputValue: string; generation: number; preview: SnowballSourcePreview }
+  | { status: "error"; canonicalUrl: null; inputValue: string; generation: number; preview: null; message: string };
 
 type SourceSession = {
   sessionName: string;
@@ -36,15 +36,21 @@ type CrmTargetDisclosure = {
   lastVerifiedAt: number | null;
 };
 
-type LaunchContextState =
-  | { status: "idle"; sessions: SourceSession[]; crmTarget: null }
-  | { status: "loading"; sessions: SourceSession[]; crmTarget: null }
-  | { status: "ready"; sessions: SourceSession[]; crmTarget: CrmTargetDisclosure | null }
-  | { status: "error"; sessions: SourceSession[]; crmTarget: null; message: string };
+type SourceSessionState =
+  | { status: "idle"; requestKey: null; sessions: SourceSession[] }
+  | { status: "loading"; requestKey: string; sessions: SourceSession[] }
+  | { status: "ready"; requestKey: string; sessions: SourceSession[] }
+  | { status: "error"; requestKey: string; sessions: SourceSession[]; message: string };
+
+type CrmTargetState =
+  | { status: "idle"; targetPlatform: null; crmTarget: null }
+  | { status: "loading"; targetPlatform: NetworkSnowballConfig["targetPlatform"]; crmTarget: null }
+  | { status: "ready"; targetPlatform: NetworkSnowballConfig["targetPlatform"]; crmTarget: CrmTargetDisclosure | null }
+  | { status: "error"; targetPlatform: NetworkSnowballConfig["targetPlatform"]; crmTarget: null; message: string };
 
 export type SnowballSourceLaunchReadiness = {
   ready: boolean;
-  reason: "ready" | "source_required" | "preview_pending" | "invalid_source" | "sessions_pending" | "session_required" | "session_missing";
+  reason: "ready" | "source_required" | "preview_pending" | "invalid_source" | "crm_target_pending" | "crm_target_unavailable" | "sessions_pending" | "session_required" | "session_missing";
   sourceValue: string;
 };
 
@@ -76,24 +82,75 @@ export function NetworkSnowballEventFields({
   disabled?: boolean;
   onLaunchReadinessChange?: (readiness: SnowballSourceLaunchReadiness) => void;
 }) {
-  const [previewState, setPreviewState] = useState<PreviewState>({ status: "idle", preview: null });
-  const [launchContext, setLaunchContext] = useState<LaunchContextState>({
+  const [previewState, setPreviewState] = useState<PreviewState>({
     status: "idle",
+    canonicalUrl: null,
+    inputValue: "",
+    generation: 0,
+    preview: null,
+  });
+  const [sourceSessionState, setSourceSessionState] = useState<SourceSessionState>({
+    status: "idle",
+    requestKey: null,
     sessions: [],
+  });
+  const [crmTargetState, setCrmTargetState] = useState<CrmTargetState>({
+    status: "idle",
+    targetPlatform: null,
     crmTarget: null,
   });
+  const previewGenerationRef = useRef(0);
   const latestValueRef = useRef(value);
   const onChangeRef = useRef(onChange);
+  const sourceValue = value.seedValue.trim();
   const browserSessionName = value.participantAccess.browserSessionName.trim();
   const provisional = useMemo(
     () => provisionalPreview(value.seedValue, value.participantAccess.enabled),
     [value.seedValue, value.participantAccess.enabled],
   );
-  const preview = previewState.preview ?? provisional;
+  const canonicalSourceUrl = provisional?.resolvedSource.canonicalUrl ?? null;
+  const previewStateMatchesSource = previewState.inputValue === sourceValue
+    && previewState.canonicalUrl === canonicalSourceUrl;
+  const currentPreviewState: PreviewState = previewStateMatchesSource
+    ? previewState
+    : !sourceValue
+      ? { status: "idle", canonicalUrl: null, inputValue: sourceValue, generation: 0, preview: null }
+      : provisional && canonicalSourceUrl
+        ? {
+            status: "loading",
+            canonicalUrl: canonicalSourceUrl,
+            inputValue: sourceValue,
+            generation: 0,
+            preview: provisional,
+          }
+        : {
+            status: "error",
+            canonicalUrl: null,
+            inputValue: sourceValue,
+            generation: 0,
+            preview: null,
+            message: "Enter a public HTTPS link without credentials or a custom port.",
+          };
+  const preview = currentPreviewState.preview ?? provisional;
   const source = preview?.resolvedSource;
   const eventControls = source?.provider === "luma"
     && (source.kind === "event" || source.kind === "calendar");
   const signedInSupported = source?.capabilities.signedInRead === true;
+  const sourceSessionRequestKey = signedInSupported && value.participantAccess.enabled
+    ? `${canonicalSourceUrl ?? "unknown"}\n${value.targetPlatform}\n${browserSessionName}`
+    : null;
+  const currentSourceSessionState = useMemo<SourceSessionState>(() => sourceSessionRequestKey
+    && sourceSessionState.requestKey === sourceSessionRequestKey
+      ? sourceSessionState
+      : sourceSessionRequestKey
+        ? { status: "loading", requestKey: sourceSessionRequestKey, sessions: [] }
+        : { status: "idle", requestKey: null, sessions: [] }, [sourceSessionRequestKey, sourceSessionState]);
+  const currentCrmTargetState = useMemo<CrmTargetState>(
+    () => crmTargetState.targetPlatform === value.targetPlatform
+      ? crmTargetState
+      : { status: "loading", targetPlatform: value.targetPlatform, crmTarget: null },
+    [crmTargetState, value.targetPlatform],
+  );
 
   useEffect(() => {
     latestValueRef.current = value;
@@ -102,20 +159,33 @@ export function NetworkSnowballEventFields({
 
   useEffect(() => {
     const provisionalResult = provisionalPreview(value.seedValue, false);
-    if (!value.seedValue.trim()) {
-      setPreviewState({ status: "idle", preview: null });
+    const inputValue = value.seedValue.trim();
+    const generation = previewGenerationRef.current + 1;
+    previewGenerationRef.current = generation;
+    if (!inputValue) {
+      setPreviewState({ status: "idle", canonicalUrl: null, inputValue, generation, preview: null });
       return;
     }
     if (!provisionalResult) {
       setPreviewState({
         status: "error",
+        canonicalUrl: null,
+        inputValue,
+        generation,
         preview: null,
         message: "Enter a public HTTPS link without credentials or a custom port.",
       });
       return;
     }
+    const canonicalUrl = provisionalResult.resolvedSource.canonicalUrl;
     const controller = new AbortController();
-    setPreviewState({ status: "loading", preview: provisionalResult });
+    setPreviewState({
+      status: "loading",
+      canonicalUrl,
+      inputValue,
+      generation,
+      preview: provisionalResult,
+    });
     const timeout = window.setTimeout(() => {
       fetch("/api/workflows/network-snowball/source-preview", {
         method: "POST",
@@ -135,9 +205,20 @@ export function NetworkSnowballEventFields({
           return body.preview;
         })
         .then((nextPreview) => {
-          setPreviewState({ status: "ready", preview: nextPreview });
+          if (controller.signal.aborted || previewGenerationRef.current !== generation) return;
+          setPreviewState((current) => current.generation === generation
+            && current.canonicalUrl === canonicalUrl
+            && current.inputValue === inputValue
+              ? { status: "ready", canonicalUrl, inputValue, generation, preview: nextPreview }
+              : current);
           const latest = latestValueRef.current;
-          if (latest.participantAccess.enabled && !nextPreview.resolvedSource.capabilities.signedInRead) {
+          const latestCanonicalUrl = resolveSnowballSourceUrl(latest.seedValue)?.canonicalUrl;
+          if (
+            latestCanonicalUrl === canonicalUrl
+            && latest.seedValue.trim() === inputValue
+            && latest.participantAccess.enabled
+            && !nextPreview.resolvedSource.capabilities.signedInRead
+          ) {
             onChangeRef.current({
               ...latest,
               participantAccess: { ...latest.participantAccess, enabled: false },
@@ -146,7 +227,12 @@ export function NetworkSnowballEventFields({
         })
         .catch((error: unknown) => {
           if (error instanceof DOMException && error.name === "AbortError") return;
-          setPreviewState({ status: "ready", preview: provisionalResult });
+          if (controller.signal.aborted || previewGenerationRef.current !== generation) return;
+          setPreviewState((current) => current.generation === generation
+            && current.canonicalUrl === canonicalUrl
+            && current.inputValue === inputValue
+              ? { status: "ready", canonicalUrl, inputValue, generation, preview: provisionalResult }
+              : current);
         });
     }, 450);
     return () => {
@@ -156,20 +242,52 @@ export function NetworkSnowballEventFields({
   }, [value.seedValue]);
 
   useEffect(() => {
-    if (!signedInSupported || !value.participantAccess.enabled) {
-      setLaunchContext({ status: "idle", sessions: [], crmTarget: null });
+    const targetPlatform = value.targetPlatform;
+    const controller = new AbortController();
+    setCrmTargetState({ status: "loading", targetPlatform, crmTarget: null });
+    fetch(
+      `/api/workflows/network-snowball/source-sessions?targetPlatform=${encodeURIComponent(targetPlatform)}`,
+      { signal: controller.signal },
+    )
+      .then(async (response) => {
+        const body = await response.json() as {
+          crmTarget?: CrmTargetDisclosure | null;
+          error?: string;
+        };
+        if (!response.ok) throw new Error(body.error || "CRM write identity is unavailable");
+        return body;
+      })
+      .then((body) => setCrmTargetState((current) => current.targetPlatform === targetPlatform
+        ? { status: "ready", targetPlatform, crmTarget: body.crmTarget ?? null }
+        : current))
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        setCrmTargetState((current) => current.targetPlatform === targetPlatform
+          ? {
+              status: "error",
+              targetPlatform,
+              crmTarget: null,
+              message: error instanceof Error ? error.message : "CRM write identity is unavailable",
+            }
+          : current);
+      });
+    return () => controller.abort();
+  }, [value.targetPlatform]);
+
+  useEffect(() => {
+    if (!sourceSessionRequestKey) {
+      setSourceSessionState({ status: "idle", requestKey: null, sessions: [] });
       return;
     }
     const controller = new AbortController();
-    setLaunchContext({ status: "loading", sessions: [], crmTarget: null });
+    setSourceSessionState({ status: "loading", requestKey: sourceSessionRequestKey, sessions: [] });
     fetch(
-      `/api/workflows/network-snowball/source-sessions?targetPlatform=${encodeURIComponent(value.targetPlatform)}`,
+      `/api/workflows/network-snowball/source-sessions?targetPlatform=${encodeURIComponent(value.targetPlatform)}&includeSourceSessions=true`,
       { signal: controller.signal },
     )
       .then(async (response) => {
         const body = await response.json() as {
           sessions?: SourceSession[];
-          crmTarget?: CrmTargetDisclosure | null;
           error?: string;
         };
         if (!response.ok || !Array.isArray(body.sessions)) {
@@ -177,39 +295,42 @@ export function NetworkSnowballEventFields({
         }
         return body;
       })
-      .then((body) => setLaunchContext({
-        status: "ready",
-        sessions: body.sessions ?? [],
-        crmTarget: body.crmTarget ?? null,
-      }))
+      .then((body) => setSourceSessionState((current) => current.requestKey === sourceSessionRequestKey
+        ? { status: "ready", requestKey: sourceSessionRequestKey, sessions: body.sessions ?? [] }
+        : current))
       .catch((error: unknown) => {
         if (error instanceof DOMException && error.name === "AbortError") return;
-        setLaunchContext({
-          status: "error",
-          sessions: [],
-          crmTarget: null,
-          message: error instanceof Error ? error.message : "Browser sessions are unavailable",
-        });
+        setSourceSessionState((current) => current.requestKey === sourceSessionRequestKey
+          ? {
+              status: "error",
+              requestKey: sourceSessionRequestKey,
+              sessions: [],
+              message: error instanceof Error ? error.message : "Browser sessions are unavailable",
+            }
+          : current);
       });
     return () => controller.abort();
-  }, [signedInSupported, value.participantAccess.enabled, value.targetPlatform]);
+  }, [sourceSessionRequestKey, value.targetPlatform]);
 
   useEffect(() => {
     let readiness: SnowballSourceLaunchReadiness;
-    const sourceValue = value.seedValue.trim();
     if (!sourceValue) readiness = { ready: false, reason: "source_required", sourceValue };
-    else if (previewState.status === "loading" || previewState.status === "idle") {
+    else if (currentPreviewState.status === "loading" || currentPreviewState.status === "idle") {
       readiness = { ready: false, reason: "preview_pending", sourceValue };
-    } else if (previewState.status === "error") {
+    } else if (currentPreviewState.status === "error") {
       readiness = { ready: false, reason: "invalid_source", sourceValue };
+    } else if (currentCrmTargetState.status === "idle" || currentCrmTargetState.status === "loading") {
+      readiness = { ready: false, reason: "crm_target_pending", sourceValue };
+    } else if (currentCrmTargetState.status === "error") {
+      readiness = { ready: false, reason: "crm_target_unavailable", sourceValue };
     } else if (signedInSupported && value.participantAccess.enabled) {
-      if (launchContext.status === "idle" || launchContext.status === "loading") {
+      if (currentSourceSessionState.status === "idle" || currentSourceSessionState.status === "loading") {
         readiness = { ready: false, reason: "sessions_pending", sourceValue };
       } else if (!browserSessionName) {
         readiness = { ready: false, reason: "session_required", sourceValue };
       } else if (
-        launchContext.status === "error"
-        || !launchContext.sessions.some((session) => session.sessionName === browserSessionName)
+        currentSourceSessionState.status === "error"
+        || !currentSourceSessionState.sessions.some((session) => session.sessionName === browserSessionName)
       ) {
         readiness = { ready: false, reason: "session_missing", sourceValue };
       } else {
@@ -221,12 +342,13 @@ export function NetworkSnowballEventFields({
     onLaunchReadinessChange?.(readiness);
   }, [
     browserSessionName,
-    launchContext,
+    currentCrmTargetState,
+    currentPreviewState.status,
+    currentSourceSessionState,
     onLaunchReadinessChange,
-    previewState.status,
     signedInSupported,
+    sourceValue,
     value.participantAccess.enabled,
-    value.seedValue,
   ]);
 
   return (
@@ -239,8 +361,8 @@ export function NetworkSnowballEventFields({
         </p>
       </div>
 
-      {previewState.status === "error" ? (
-        <p className="text-xs text-destructive" role="alert">{previewState.message}</p>
+      {currentPreviewState.status === "error" ? (
+        <p className="text-xs text-destructive" role="alert">{currentPreviewState.message}</p>
       ) : source ? (
         <div className="rounded-md border bg-muted/20 p-3" aria-live="polite">
           <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -251,7 +373,7 @@ export function NetworkSnowballEventFields({
               {label(source.kind)}
             </span>
             <span className="text-xs text-muted-foreground">
-              {previewState.status === "loading"
+              {currentPreviewState.status === "loading"
                 ? "Checking public evidence…"
                 : preview?.publicSource
                   ? "Public evidence ready"
@@ -348,42 +470,42 @@ export function NetworkSnowballEventFields({
           <div className="ml-7 space-y-2 rounded-md border bg-muted/20 p-3">
             <Label htmlFor="snowball-event-session">Existing browser session</Label>
             <Select
-              value={launchContext.sessions.some((session) => session.sessionName === browserSessionName)
+              value={currentSourceSessionState.sessions.some((session) => session.sessionName === browserSessionName)
                 ? browserSessionName
                 : ""}
               onValueChange={(sessionName) => onChange({
                 ...value,
                 participantAccess: {
-                  ...value.participantAccess,
+                  enabled: false,
                   browserSessionName: sessionName,
                 },
               })}
-              disabled={disabled || launchContext.status !== "ready"}
+              disabled={disabled || currentSourceSessionState.status !== "ready"}
             >
               <SelectTrigger id="snowball-event-session">
                 <SelectValue placeholder={
-                  launchContext.status === "loading"
+                  currentSourceSessionState.status === "loading"
                     ? "Loading running sessions…"
                     : "Select a running session"
                 } />
               </SelectTrigger>
               <SelectContent>
-                {launchContext.sessions.map((session) => (
+                {currentSourceSessionState.sessions.map((session) => (
                   <SelectItem key={session.sessionName} value={session.sessionName}>
                     {session.sessionName}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
-            {launchContext.status === "error" && (
-              <p className="text-xs text-destructive" role="alert">{launchContext.message}</p>
+            {currentSourceSessionState.status === "error" && (
+              <p className="text-xs text-destructive" role="alert">{currentSourceSessionState.message}</p>
             )}
-            {launchContext.status === "ready" && launchContext.sessions.length === 0 && (
+            {currentSourceSessionState.status === "ready" && currentSourceSessionState.sessions.length === 0 && (
               <p className="text-xs text-destructive">No running browser sessions are available.</p>
             )}
-            {launchContext.status === "ready"
+            {currentSourceSessionState.status === "ready"
               && browserSessionName
-              && !launchContext.sessions.some((session) => session.sessionName === browserSessionName) && (
+              && !currentSourceSessionState.sessions.some((session) => session.sessionName === browserSessionName) && (
                 <p className="text-xs text-destructive">
                   The previously selected session is no longer running. Select an existing session.
                 </p>
@@ -395,24 +517,6 @@ export function NetworkSnowballEventFields({
                 exact session at launch.
               </p>
             </div>
-            <div className="space-y-1 border-t pt-2 text-xs">
-              <p className="font-medium">CRM write identity (separate)</p>
-              {launchContext.status === "ready" && launchContext.crmTarget ? (
-                <p className="text-muted-foreground">
-                  {label(launchContext.crmTarget.platform)} identity{" "}
-                  <span className="font-medium text-foreground">{launchContext.crmTarget.identity}</span>
-                  {" · session "}<code>{launchContext.crmTarget.sessionName}</code>
-                  {" · "}{launchContext.crmTarget.verification === "previously_verified"
-                    ? "previously verified; checked again at launch"
-                    : "not yet verified; checked at launch"}
-                </p>
-              ) : (
-                <p className="text-muted-foreground">
-                  No active {value.targetPlatform === "x" ? "X" : "LinkedIn"} CRM identity is configured;
-                  source access does not authorize profile writes.
-                </p>
-              )}
-            </div>
             <p className="text-xs text-muted-foreground">
               Only the selected existing session can be used for this run. A missing or changed
               session blocks launch until you select another running session.
@@ -422,6 +526,31 @@ export function NetworkSnowballEventFields({
             </p>
           </div>
         )}
+
+        <div className="space-y-1 rounded-md border bg-muted/20 p-3 text-xs">
+          <p className="font-medium">CRM write identity (separate)</p>
+          {currentCrmTargetState.status === "idle" || currentCrmTargetState.status === "loading" ? (
+            <p className="text-muted-foreground">Checking configured write identity…</p>
+          ) : currentCrmTargetState.status === "error" ? (
+            <p className="text-destructive" role="alert">{currentCrmTargetState.message}</p>
+          ) : currentCrmTargetState.crmTarget ? (
+            <p className="text-muted-foreground">
+              {label(currentCrmTargetState.crmTarget.platform)} identity{" "}
+              <span className="font-medium text-foreground">{currentCrmTargetState.crmTarget.identity}</span>
+              {" · session "}<code>{currentCrmTargetState.crmTarget.sessionName}</code>
+              {" · "}{currentCrmTargetState.crmTarget.verification === "previously_verified"
+                ? "previously verified; checked again at launch"
+                : "not yet verified; checked at launch"}
+            </p>
+          ) : (
+            <p className="text-muted-foreground">
+              No active {value.targetPlatform === "x" ? "X" : "LinkedIn"} CRM identity is configured.
+            </p>
+          )}
+          <p className="text-muted-foreground">
+            Source access does not authorize profile writes.
+          </p>
+        </div>
       </div>
     </div>
   );

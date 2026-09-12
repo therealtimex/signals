@@ -10,22 +10,32 @@ import {
 } from "@/lib/rtx/browser-sessions";
 
 export async function GET(request: Request) {
-  const requestedPlatform = new URL(request.url).searchParams.get("targetPlatform");
+  const searchParams = new URL(request.url).searchParams;
+  const requestedPlatform = searchParams.get("targetPlatform");
+  const includeSourceSessions = searchParams.get("includeSourceSessions") === "true";
   const targetPlatform = requestedPlatform === "x" ? "x" : "linkedin";
   try {
-    const runtimeSessions = await listRtxBrowserSessions();
-    const runningNames = new Set(runtimeSessions
-      .filter((entry) => entry.running !== false && resolveRtxDebugPort(entry) !== null)
-      .map((entry) => entry.sessionName));
-    const sessions = listBrowserConnections()
-      .filter((connection) => runningNames.has(connection.sessionName))
-      .map((connection) => ({
-        sessionName: connection.sessionName,
-        running: true as const,
-        sourceIdentity: null,
-        identityVerification: "checked_at_launch" as const,
-      }))
-      .sort((a, b) => a.sessionName.localeCompare(b.sessionName));
+    const sessions = includeSourceSessions
+      ? await listRtxBrowserSessions().then((runtimeSessions) => {
+          const runningNames = new Set<string>();
+          for (const entry of runtimeSessions) {
+            if (entry.running !== false && resolveRtxDebugPort(entry) !== null) {
+              runningNames.add(entry.sessionName);
+            }
+          }
+          const runningConnections = [];
+          for (const connection of listBrowserConnections()) {
+            if (!runningNames.has(connection.sessionName)) continue;
+            runningConnections.push({
+              sessionName: connection.sessionName,
+              running: true as const,
+              sourceIdentity: null,
+              identityVerification: "checked_at_launch" as const,
+            });
+          }
+          return runningConnections.sort((a, b) => a.sessionName.localeCompare(b.sessionName));
+        })
+      : [];
 
     const target = resolveDefaultTarget(targetPlatform);
     const connection = target ? getBrowserConnectionById(target.connectionId) : undefined;

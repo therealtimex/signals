@@ -90,7 +90,21 @@ describe("ActivateDialog Network Snowball launch contract", () => {
   });
 
   it("allows a safe public-only source only after its server preview is displayed", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => previewResponse("generic")));
+    vi.stubGlobal("fetch", vi.fn(async (url: string | URL | Request) => {
+      if (String(url).includes("source-sessions")) {
+        return new Response(JSON.stringify({
+          sessions: [],
+          crmTarget: {
+            platform: "linkedin",
+            sessionName: "crm-linkedin",
+            identity: "/in/crm-writer",
+            verification: "previously_verified",
+            lastVerifiedAt: 1_700_000_000,
+          },
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return previewResponse("generic");
+    }));
     await act(async () => root.render(createElement(ActivateDialog, {
       template: template({ seedValue: "https://metr.org/about" }),
       open: true,
@@ -99,6 +113,9 @@ describe("ActivateDialog Network Snowball launch contract", () => {
     await act(async () => vi.advanceTimersByTimeAsync(451));
     expect(document.body.textContent).toContain("Generic");
     expect(document.body.textContent).toContain("Public-only source");
+    expect(document.body.textContent).toContain("CRM write identity (separate)");
+    expect(document.body.textContent).toContain("/in/crm-writer");
+    expect(document.body.textContent).toContain("crm-linkedin");
     const runButton = Array.from(document.body.querySelectorAll("button")).find(
       (button) => button.textContent?.includes("Run Agent"),
     );
