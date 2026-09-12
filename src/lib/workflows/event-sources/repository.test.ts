@@ -97,4 +97,36 @@ describe("public event repository", () => {
       }),
     ]);
   });
+
+  it("resolves organization hosts through their website instead of a social-network domain", () => {
+    const intendedOrg = createOrg({ name: "Sentry", domain: "sentry.io" });
+    createOrg({ name: "LinkedIn", domain: "linkedin.com" });
+    const event = extractLumaEventFromHtml({
+      url: "https://luma.com/org-host",
+      html: `<script type="application/ld+json">{
+        "@context":"https://schema.org","@type":"Event","name":"Organization Host",
+        "organizer":{"@type":"Person","name":"Sentry","url":"https://luma.com/user/getsentry"}
+      }</script><script id="__NEXT_DATA__" type="application/json">{"props":{"pageProps":{"initialData":{"data":{
+        "hosts":[{"api_id":"usr-sentry","name":"Sentry","username":"getsentry","linkedin_handle":"/company/sentry","website":"https://sentry.io/welcome/"}]
+      }}}}}</script>`,
+      observedAt: 1_789_171_200,
+    });
+
+    expect(event.parties).toContainEqual(expect.objectContaining({
+      name: "Sentry",
+      entityType: "organization",
+      url: "https://sentry.io/welcome/",
+    }));
+    const sentryParty = event.parties.find((party) => party.name === "Sentry");
+    expect(sentryParty).toBeDefined();
+    sentryParty!.url = "https://uk.linkedin.com/company/sentry";
+    const id = upsertPublicEventSource(event, { writeGraphEdges: true });
+    expect(db.select().from(graphEdges).all()).toEqual([
+      expect.objectContaining({
+        srcId: id,
+        dstId: intendedOrg.id,
+        edgeType: "hosted_by",
+      }),
+    ]);
+  });
 });

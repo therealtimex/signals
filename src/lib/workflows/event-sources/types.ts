@@ -55,6 +55,7 @@ export type EventParty = {
   name: string;
   url?: string;
   identityUrls?: string[];
+  providerId?: string;
   entityType: "person" | "organization" | "place" | "unknown";
   role: EventRelationshipRole;
   evidence: EventSourceEvidence;

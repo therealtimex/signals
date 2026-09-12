@@ -16,6 +16,39 @@ export function eventContentItemId(event: Pick<EventSource, "provider" | "key">)
   return `event_${event.provider}_${digest}`;
 }
 
+const NON_ORGANIZATION_IDENTITY_HOSTS = new Set([
+  "facebook.com",
+  "instagram.com",
+  "linkedin.com",
+  "lu.ma",
+  "luma.com",
+  "twitter.com",
+  "x.com",
+  "youtu.be",
+  "youtube.com",
+]);
+
+function isNonOrganizationIdentityHost(hostname: string): boolean {
+  return [...NON_ORGANIZATION_IDENTITY_HOSTS].some(
+    (identityHost) => hostname === identityHost || hostname.endsWith(`.${identityHost}`),
+  );
+}
+
+function organizationResolutionDomains(party: EventSource["parties"][number]): string[] {
+  const domains = new Set<string>();
+  for (const value of [party.url, ...(party.identityUrls ?? [])]) {
+    if (!value) continue;
+    try {
+      const hostname = new URL(value).hostname.toLowerCase().replace(/^www\./, "");
+      if (!hostname || isNonOrganizationIdentityHost(hostname)) continue;
+      domains.add(hostname);
+    } catch {
+      // Ignore malformed identity URLs.
+    }
+  }
+  return [...domains];
+}
+
 /** Transactional, idempotent projection of public event evidence into Content. */
 export function upsertPublicEventSource(
   event: EventSource,
@@ -73,18 +106,13 @@ export function upsertPublicEventSource(
       .run();
     if (options.writeGraphEdges) {
       for (const party of event.parties) {
-        if (!party.url) continue;
         if (
           party.entityType !== "organization" &&
           !(party.role === "venue_provided_by" && party.entityType === "place")
         ) continue;
-        let hostname = "";
-        try {
-          hostname = new URL(party.url).hostname.replace(/^www\./, "");
-        } catch {
-          continue;
-        }
-        const org = getOrgByDomain(hostname);
+        const org = organizationResolutionDomains(party)
+          .map((domain) => getOrgByDomain(domain))
+          .find((candidate) => Boolean(candidate));
         if (!org) continue;
         tx.insert(graphEdges)
           .values({
