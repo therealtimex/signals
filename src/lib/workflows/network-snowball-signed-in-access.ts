@@ -1,7 +1,4 @@
-const EVENT_PROVIDER_HOSTS = new Set([
-  "luma.com",
-  "lu.ma",
-]);
+import { isSupportedLumaUrl } from "@/lib/workflows/event-sources/urls";
 
 export function networkSnowballSourceHostname(seedValue: string): string | null {
   const raw = seedValue.trim();
@@ -23,7 +20,7 @@ export function networkSnowballSignedInAccessDescription(seedValue: string): str
   if (!hostname) {
     return "Signed-in access for this source is not supported yet. Public extraction still runs.";
   }
-  if (EVENT_PROVIDER_HOSTS.has(hostname)) {
+  if (isSupportedLumaUrl(seedValue)) {
     return `When available, include visible guests, attendees, and organizers on ${hostname}.`;
   }
   return `Signed-in access for ${hostname} is not supported yet. Public extraction still runs.`;

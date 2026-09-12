@@ -488,6 +488,7 @@ export async function runTemplateViaRtx(
     });
     let snowballTarget: NetworkSnowballPreparedTarget | undefined;
     let snowballBrowserFallback: NetworkSnowballBrowserFallback | null = null;
+    let redactUnsupportedSourceSession = false;
     if (isNetworkSnowballTemplateConfig(runtimeConfig)) {
       const snowball = readNetworkSnowballConfig(runtimeConfig);
       const genericEventSource =
@@ -500,31 +501,22 @@ export async function runTemplateViaRtx(
             details: {},
           }
         : null;
-      const prepared = genericEventSource
-        ? null
-        : await prepareNetworkSnowballTarget(
-            { config: runtimeConfig, workflowRunId: run.id },
-            env,
-            fetchImpl,
-          );
-      const preflightFailure = unsupportedSourceFallback ?? (
-        prepared && !prepared.ok
-          ? { code: prepared.error.code, message: prepared.error.message, details: prepared.error.details }
-          : null
+      const prepared = await prepareNetworkSnowballTarget(
+        { config: runtimeConfig, workflowRunId: run.id },
+        env,
+        fetchImpl,
       );
-      if (preflightFailure) {
-        snowballBrowserFallback = {
-          code: preflightFailure.code,
-          message: preflightFailure.message,
-        };
+      const targetFailure = !prepared.ok
+        ? {
+            code: prepared.error.code,
+            message: prepared.error.message,
+            details: prepared.error.details,
+          }
+        : null;
+      if (targetFailure) {
         updateWorkflowRun(run.id, {
-          errors: JSON.stringify([preflightFailure.message]),
+          errors: JSON.stringify([targetFailure.message]),
           errorItems: 1,
-          result: JSON.stringify({
-            ...parseObject(getWorkflowRun(run.id)?.result),
-            partial: true,
-            browserFallback: snowballBrowserFallback,
-          }),
         });
         createWorkflowStep({
           workflowRunId: run.id,
@@ -532,14 +524,14 @@ export async function runTemplateViaRtx(
           stepType: "error",
           status: "failed",
           tool: "snowball_browser_target_preflight",
-          error: preflightFailure.message,
+          error: targetFailure.message,
           output: JSON.stringify({
-            code: preflightFailure.code,
-            ...(preflightFailure.details ?? {}),
+            code: targetFailure.code,
+            ...(targetFailure.details ?? {}),
           }),
           durationMs: 0,
         });
-      } else if (prepared?.ok) {
+      } else if (prepared.ok) {
         snowballTarget = prepared.target;
         preparedLeaseId = snowballTarget.leaseId;
         preparedSessionName = snowballTarget.sessionName;
@@ -552,6 +544,40 @@ export async function runTemplateViaRtx(
           config: buildStoredRunConfig(template, runtimeConfig, {
             workspaceSlug,
             threadSlug,
+          }),
+        });
+      }
+      if (unsupportedSourceFallback) {
+        redactUnsupportedSourceSession = true;
+        createWorkflowStep({
+          workflowRunId: run.id,
+          stepIndex: nextStepIndex(run.id),
+          stepType: "tool_call",
+          status: "completed",
+          tool: "snowball_source_access_preflight",
+          output: JSON.stringify({
+            code: unsupportedSourceFallback.code,
+            mode: "public_only",
+            message: unsupportedSourceFallback.message,
+          }),
+          durationMs: 0,
+        });
+      }
+      const fallbackMessages = [
+        targetFailure?.message,
+        unsupportedSourceFallback?.message,
+      ].filter((message): message is string => Boolean(message));
+      const fallbackCode = unsupportedSourceFallback?.code ?? targetFailure?.code;
+      if (fallbackMessages.length > 0 && fallbackCode) {
+        snowballBrowserFallback = {
+          code: fallbackCode,
+          message: fallbackMessages.join(" "),
+        };
+        updateWorkflowRun(run.id, {
+          result: JSON.stringify({
+            ...parseObject(getWorkflowRun(run.id)?.result),
+            partial: true,
+            browserFallback: snowballBrowserFallback,
           }),
         });
       }
@@ -575,13 +601,19 @@ export async function runTemplateViaRtx(
               workflowRunId: run.id,
               stepIndex: nextStepIndex(run.id),
               stepType: "tool_call",
-              status: eventIngestion.publicResult.partial ? "failed" : "completed",
+              status:
+                eventIngestion.publicResult.events.length === 0
+                || eventIngestion.publicResult.errors.length > 0
+                  ? "failed"
+                  : "completed",
               tool: "event_source_ingest",
               output: JSON.stringify({
                 provider: "luma",
                 eventCount: eventIngestion.publicResult.events.length,
                 contentItemIds: eventIngestion.publicResult.contentItemIds,
                 guestBoundary: eventIngestion.publicResult.guestBoundary,
+                partial: eventIngestion.publicResult.partial,
+                errors: eventIngestion.publicResult.errors,
               }),
               durationMs: 0,
             });
@@ -728,7 +760,7 @@ export async function runTemplateViaRtx(
       throw new Error("Contact research context is unavailable");
     }
 
-    const dispatchConfig = snowballBrowserFallback?.code === "UNSUPPORTED_SOURCE"
+    const dispatchConfig = redactUnsupportedSourceSession
       ? {
           ...runtimeConfig,
           participantAccess: { enabled: false },

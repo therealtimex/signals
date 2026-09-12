@@ -117,6 +117,8 @@ describe("registered Luma guest boundary", () => {
   it.each([
     ["anonymous", '<section data-guest-list-access="authorized"><a data-participant-name="Alice"></a></section>', "permission_missing"],
     ["login", "<p>Sign in to view</p>", "login_required"],
+    ["generic sign in", "<button>Sign In</button><p>Waitlist enabled</p>", "login_required"],
+    ["anonymous waitlist metadata", "<p>Waitlist enabled</p>", "permission_missing"],
     ["waitlist", '<button data-testid="user-menu" aria-label="Account: Operator"></button><p>You are waitlisted</p>', "waitlisted"],
     ["hidden payload", '<script>{"guest":"Alice"}</script>', "permission_missing"],
     ["hidden guest container", '<button data-testid="user-menu" aria-label="Account: Operator"></button><section style="display:none" data-guest-list-access="authorized"><a data-participant-name="Alice"></a></section>', "permission_missing"],

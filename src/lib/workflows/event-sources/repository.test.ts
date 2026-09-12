@@ -74,7 +74,10 @@ describe("public event repository", () => {
   it("links a related event only after both typed content anchors exist", () => {
     const root = extractLumaEventFromHtml({
       url: "https://luma.com/root",
-      html: HTML.replace("</script>", "</script><a href=\"/related\">Related</a>"),
+      html: HTML.replace(
+        "</script>",
+        "</script><a data-event-url href=\"/related\">Related</a>",
+      ),
     });
     const related = extractLumaEventFromHtml({
       url: "https://luma.com/related",

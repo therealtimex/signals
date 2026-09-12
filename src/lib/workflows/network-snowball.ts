@@ -27,6 +27,7 @@ import type {
 } from "@/lib/workflows/event-sources/types";
 import { sanitizeExternalUrl } from "@/lib/workflows/event-sources/urls";
 import type { PublicEventSourceResult } from "@/lib/workflows/event-sources/service";
+import { describeGuestBoundary } from "@/lib/workflows/event-sources/boundary";
 
 export const NETWORK_SNOWBALL_TEMPLATE_NAME = "Network Snowball";
 
@@ -287,8 +288,15 @@ export function buildNetworkSnowballBriefSection(input: {
   const publicEventContext = input.publicEventSource?.events.length
     ? input.publicEventSource.events
         .map((event) => {
-          const roles = event.parties.map((party) => `${party.role}:${party.name}`).join(", ") || "none";
-          return `    - ${event.title} (${event.canonicalUrl}); starts=${event.startsAt ?? "unknown"}; location=${event.location ?? "unknown"}; going=${event.audience.goingCount ?? "unknown"}; roles=${roles}`;
+          const roles = event.parties.map((party) => {
+            const identities = party.identityUrls?.length
+              ? ` [${party.identityUrls.join(", ")}]`
+              : party.url
+                ? ` [${party.url}]`
+                : "";
+            return `${party.role}:${party.name}${identities}`;
+          }).join(", ") || "none";
+          return `    - ${event.title} (${event.canonicalUrl}); starts=${event.startsAt ?? "unknown"}; location=${event.location ?? "unknown"}; going=${event.audience.goingCount ?? "unknown"}; guestAccess=${describeGuestBoundary(event.guestBoundary)}; roles=${roles}`;
         })
         .join("\n")
     : "    - No server-extracted public Luma event record is available.";

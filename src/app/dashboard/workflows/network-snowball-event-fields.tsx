@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -19,9 +19,21 @@ export function NetworkSnowballEventFields({
   disabled?: boolean;
 }) {
   const [editingSession, setEditingSession] = useState(false);
+  const sessionInputRef = useRef<HTMLInputElement>(null);
+  const changeButtonRef = useRef<HTMLButtonElement>(null);
+  const returnFocusToChangeRef = useRef(false);
   const browserSessionName =
     value.participantAccess.browserSessionName.trim() || RTX_PUBLISH_SESSION_NAME;
   const usesSignalsPublish = browserSessionName === RTX_PUBLISH_SESSION_NAME;
+
+  useEffect(() => {
+    if (editingSession) {
+      sessionInputRef.current?.focus();
+    } else if (returnFocusToChangeRef.current) {
+      returnFocusToChangeRef.current = false;
+      changeButtonRef.current?.focus();
+    }
+  }, [editingSession]);
 
   return (
     <div className="space-y-4 rounded-lg border p-4">
@@ -110,15 +122,16 @@ export function NetworkSnowballEventFields({
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <p className="text-xs text-muted-foreground">Browser session</p>
-              <p className="truncate text-sm font-medium">
+              <p className="break-words text-sm font-medium">
                 {usesSignalsPublish ? "Signals Publish" : "Selected session"}{" — "}
-                <code className="text-xs font-normal text-muted-foreground">
+                <code className="break-all text-xs font-normal text-muted-foreground">
                   {browserSessionName}
                 </code>
               </p>
             </div>
             {!editingSession && (
               <Button
+                ref={changeButtonRef}
                 type="button"
                 variant="ghost"
                 size="sm"
@@ -138,6 +151,7 @@ export function NetworkSnowballEventFields({
               </Label>
               <div className="flex flex-col gap-2 sm:flex-row">
                 <Input
+                  ref={sessionInputRef}
                   id="snowball-event-session"
                   placeholder={RTX_PUBLISH_SESSION_NAME}
                   value={value.participantAccess.browserSessionName}
@@ -157,6 +171,7 @@ export function NetworkSnowballEventFields({
                   variant="outline"
                   size="sm"
                   onClick={() => {
+                    returnFocusToChangeRef.current = true;
                     onChange({
                       ...value,
                       participantAccess: {

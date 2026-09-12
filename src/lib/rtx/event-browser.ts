@@ -165,11 +165,8 @@ function visibleSelection($: cheerio.CheerioAPI, selector: string) {
 export function inspectVisibleLumaViewerIdentity(html: string): string {
   const $ = cheerio.load(html);
   const bodyText = normalizedText($("body").text());
-  if (/log\s*in|sign\s*in to (?:continue|view)/i.test(bodyText)) {
+  if (/log\s*in|sign\s*in(?:\s+to\s+(?:continue|view))?/i.test(bodyText)) {
     throw new EventBrowserError("login_required", "The selected browser session is not signed in to Luma.");
-  }
-  if (/waitlist|you are waitlisted/i.test(bodyText)) {
-    throw new EventBrowserError("waitlisted", "The selected viewer is waitlisted and cannot access the guest list.");
   }
   if (/register to view guest list|registered guests? only/i.test(bodyText)) {
     throw new EventBrowserError("registration_required", "The guest list requires event registration.");
@@ -187,6 +184,9 @@ export function inspectVisibleLumaViewerIdentity(html: string): string {
   );
   if (!viewerIdentity) {
     throw new EventBrowserError("permission_missing", "A visible signed-in Luma viewer identity could not be verified.");
+  }
+  if (/you are waitlisted|on the waitlist|waitlist status/i.test(bodyText)) {
+    throw new EventBrowserError("waitlisted", "The selected viewer is waitlisted and cannot access the guest list.");
   }
   return viewerIdentity;
 }

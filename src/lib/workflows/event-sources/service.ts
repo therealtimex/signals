@@ -436,8 +436,6 @@ export async function ingestNetworkSnowballEventSource(input: {
         reason,
       };
     }
-  } else if (root?.guestBoundary.state === "gated") {
-    guestBoundary = { state: "not_requested", reason: "public_only" };
   }
 
   if (root) {

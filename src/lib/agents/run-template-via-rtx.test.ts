@@ -417,7 +417,7 @@ describe("runTemplateViaRtx health preflight", () => {
       if (url === "https://luma.com/build-night") {
         return new Response(`<script type="application/ld+json">{
           "@context":"https://schema.org","@type":"Event","name":"Build Night"
-        }</script>`, { status: 200 });
+        }</script><p>Register to View Guest List</p>`, { status: 200 });
       }
       if (url.endsWith("/cli/send-message/signals-resolved/network-snowball")) {
         return new Response(JSON.stringify({
@@ -473,6 +473,7 @@ describe("runTemplateViaRtx health preflight", () => {
       "brief.md",
     ), "utf8");
     expect(brief).toContain("Build Night");
+    expect(brief).toContain("Guest list gated: event registration is required");
     expect(brief).toContain("Continue in public-only mode");
     expect(brief).toContain("Public-Only Identity Gate");
     expect(brief).not.toContain("snowballScopeToken");
@@ -482,9 +483,16 @@ describe("runTemplateViaRtx health preflight", () => {
         status: "failed",
       }),
     );
+    expect(listWorkflowSteps(result.workflowRunId)).toContainEqual(
+      expect.objectContaining({
+        tool: "event_source_ingest",
+        status: "completed",
+        output: expect.stringContaining('"registration_required"'),
+      }),
+    );
   });
 
-  it("dispatches a generic event URL without any authenticated browser when consent is off", async () => {
+  it("keeps the LinkedIn identity gate for a public-only X post seed", async () => {
     const template = createTemplate({
       name: "Network Snowball",
       templateType: "prospecting",
@@ -492,7 +500,7 @@ describe("runTemplateViaRtx health preflight", () => {
       config: JSON.stringify({
         ...buildNetworkSnowballTemplateConfig(),
         seedType: "event_url",
-        seedValue: "https://events.example.test/public-night",
+        seedValue: "https://x.com/acme_ai/status/123456789",
       }),
       isSystem: 1,
     });
@@ -538,7 +546,7 @@ describe("runTemplateViaRtx health preflight", () => {
 
     expect(result.success).toBe(true);
     if (!result.success) throw new Error(result.error);
-    expect(snowballTargetMocks.prepareNetworkSnowballTarget).not.toHaveBeenCalled();
+    expect(snowballTargetMocks.prepareNetworkSnowballTarget).toHaveBeenCalledOnce();
     expect(requested.some((url) => url.includes("list-browser-sessions"))).toBe(false);
     const brief = readFileSync(join(
       storageDir,
@@ -548,10 +556,11 @@ describe("runTemplateViaRtx health preflight", () => {
     ), "utf8");
     expect(brief).toContain("Public-only source access is in force");
     expect(brief).toContain("Do not attach agent-browser");
-    expect(brief).not.toContain("session named `signals-publish`");
-    expect(brief).not.toContain("snowballScopeToken");
+    expect(brief).toContain("Server-Enforced LinkedIn Gate");
+    expect(brief).toContain("S5. Auto-commit & Graph Edge Linking");
+    expect(brief).toContain("snowballScopeToken");
     expect(JSON.parse(getWorkflowRun(result.workflowRunId)?.config ?? "{}"))
-      .not.toHaveProperty(SNOWBALL_BROWSER_TARGET_CONFIG_KEY);
+      .toHaveProperty(SNOWBALL_BROWSER_TARGET_CONFIG_KEY);
   });
 
   it("falls back publicly when a generic source has no safe signed-in adapter", async () => {
@@ -610,10 +619,13 @@ describe("runTemplateViaRtx health preflight", () => {
 
     expect(result.success).toBe(true);
     if (!result.success) throw new Error(result.error);
-    expect(snowballTargetMocks.prepareNetworkSnowballTarget).not.toHaveBeenCalled();
+    expect(snowballTargetMocks.prepareNetworkSnowballTarget).toHaveBeenCalledOnce();
     const storedConfig = JSON.parse(getWorkflowRun(result.workflowRunId)?.config ?? "{}");
-    expect(storedConfig).not.toHaveProperty(SNOWBALL_BROWSER_TARGET_CONFIG_KEY);
-    expect(JSON.parse(getWorkflowRun(result.workflowRunId)?.result ?? "{}")).toMatchObject({
+    expect(storedConfig).toHaveProperty(SNOWBALL_BROWSER_TARGET_CONFIG_KEY);
+    const storedRun = getWorkflowRun(result.workflowRunId);
+    expect(storedRun).toMatchObject({ errorItems: 0 });
+    expect(JSON.parse(storedRun?.errors ?? "[]")).toEqual([]);
+    expect(JSON.parse(storedRun?.result ?? "{}")).toMatchObject({
       partial: true,
       browserFallback: {
         code: "UNSUPPORTED_SOURCE",
@@ -629,11 +641,13 @@ describe("runTemplateViaRtx health preflight", () => {
     expect(brief).toContain("cannot be verified safely for this source");
     expect(brief).toContain("Do not attach agent-browser");
     expect(brief).not.toContain("personal-browser");
-    expect(brief).not.toContain("snowballScopeToken");
+    expect(brief).toContain("Server-Enforced LinkedIn Gate");
+    expect(brief).toContain("S5. Auto-commit & Graph Edge Linking");
+    expect(brief).toContain("snowballScopeToken");
     expect(listWorkflowSteps(result.workflowRunId)).toContainEqual(
       expect.objectContaining({
-        tool: "snowball_browser_target_preflight",
-        status: "failed",
+        tool: "snowball_source_access_preflight",
+        status: "completed",
         output: expect.stringContaining("UNSUPPORTED_SOURCE"),
       }),
     );
