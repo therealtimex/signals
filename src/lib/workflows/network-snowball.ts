@@ -19,6 +19,7 @@ import {
   type FollowOnActionType,
 } from "@/lib/workflows/cascade-types";
 import type { NetworkSnowballPreparedTarget } from "@/lib/workflows/network-snowball-target";
+import { RTX_PUBLISH_SESSION_NAME } from "@/lib/publish/constants";
 import { readEventTraversalPolicy } from "@/lib/workflows/event-sources/policy";
 import type {
   EventParticipantAccessConfig,
@@ -99,9 +100,9 @@ function readParticipantAccess(value: unknown): EventParticipantAccessConfig {
   return {
     enabled: record.enabled === true,
     browserSessionName:
-      typeof record.browserSessionName === "string"
+      typeof record.browserSessionName === "string" && record.browserSessionName.trim()
         ? record.browserSessionName.trim().slice(0, 120)
-        : "",
+        : RTX_PUBLISH_SESSION_NAME,
   };
 }
 
@@ -218,7 +219,10 @@ export function buildNetworkSnowballTemplateConfig(): Record<string, unknown> {
     autoLinkGraphEdges: true,
     requireApproval: false,
     eventTraversal: readEventTraversalPolicy({}),
-    participantAccess: { enabled: false, browserSessionName: "" },
+    participantAccess: {
+      enabled: false,
+      browserSessionName: RTX_PUBLISH_SESSION_NAME,
+    },
     [CASCADE_CONFIG_KEY]: buildWorkflowCascadeConfig({
       followOnActions: [],
       cascadePolicy: "immediate",

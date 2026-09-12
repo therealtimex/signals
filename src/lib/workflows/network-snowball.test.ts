@@ -63,7 +63,7 @@ describe("readNetworkSnowballConfig", () => {
         maxProfileVisits: 20,
         maxProviderRequests: 40,
       },
-      participantAccess: { enabled: false, browserSessionName: "" },
+      participantAccess: { enabled: false, browserSessionName: "signals-publish" },
       followOnActions: [],
       followOnAction: undefined,
       cascadePolicy: "immediate",
@@ -102,11 +102,19 @@ describe("readNetworkSnowballConfig", () => {
         maxProfileVisits: 20,
         maxProviderRequests: 40,
       },
-      participantAccess: { enabled: false, browserSessionName: "" },
+      participantAccess: { enabled: false, browserSessionName: "signals-publish" },
       followOnActions: ["profile_pipeline", "contact_nurture"],
       followOnAction: "profile_pipeline",
       cascadePolicy: "immediate",
     });
+  });
+
+  it("resolves an enabled empty session to Signals Publish", () => {
+    expect(
+      readNetworkSnowballConfig({
+        participantAccess: { enabled: true, browserSessionName: "   " },
+      }).participantAccess,
+    ).toEqual({ enabled: true, browserSessionName: "signals-publish" });
   });
 });
 

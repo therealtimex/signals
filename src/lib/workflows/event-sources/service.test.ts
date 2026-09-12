@@ -55,6 +55,33 @@ describe("Network Snowball event source ingestion", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps public extraction when the selected signed-in session is missing", async () => {
+    const run = createWorkflowRun({ workflowType: "search", status: "running", trigger: "template" });
+    const fetchImpl = vi.fn(async () => new Response(eventHtml(), { status: 200 })) as unknown as typeof fetch;
+
+    const result = await ingestNetworkSnowballEventSource({
+      runId: run.id,
+      ownerWorkspace: "signals",
+      seedUrl: "https://luma.com/demo",
+      traversal: readEventTraversalPolicy({ maxEvents: 1 }),
+      participantAccess: {
+        enabled: true,
+        browserSessionName: "missing-browser-session",
+      },
+      writeGraphEdges: false,
+      fetchImpl,
+      sleepImpl: async () => undefined,
+    });
+
+    expect(result?.publicResult).toMatchObject({
+      events: [{ title: "Build Friday" }],
+      guestBoundary: { state: "gated", reason: "permission_missing" },
+      partial: true,
+    });
+    expect(db.select().from(contentItems).all()).toHaveLength(1);
+    expect(result?.eventReportCapability).toBeUndefined();
+  });
+
   it("writes explicit public role edges only when automatic graph linking is allowed", async () => {
     createOrg({ name: "Acme", domain: "acme.test" });
     const fetchImpl = vi.fn(async () => new Response(eventHtml(), { status: 200 })) as unknown as typeof fetch;
