@@ -63,6 +63,8 @@ export const createOrgSchema = z.object({
   accountStage: accountStageSchema.nullable().optional(),
   workflowRunId: z.string().min(1).optional(),
   templateId: z.string().min(1).optional(),
+  /** Explicit public event evidence required to bind a Luma organizer as Snowball Hop 0. */
+  observedRole: z.literal("organized_by").optional(),
 });
 
 export const updateOrgSchema = orgUpdateFieldsSchema.extend({

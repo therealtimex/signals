@@ -233,6 +233,45 @@ describe("complete_workflow_run terminal teardown", () => {
     expect(getSessionLeaseById(leaseId)).toBeUndefined();
   });
 
+  it("releases the Snowball lease without stopping a user-selected borrowed event session", async () => {
+    const { run, leaseId } = createSnowballRunWithTarget();
+    const config = JSON.parse(run.config ?? "{}") as Record<string, unknown>;
+    updateWorkflowRun(run.id, {
+      config: JSON.stringify({
+        ...config,
+        participantAccess: {
+          enabled: true,
+          browserSessionName: "snowball-bound-session",
+        },
+      }),
+    });
+    vi.spyOn(workflowEvents, "emitWorkflowCompletedEvent").mockResolvedValue(
+      mockWorkflowCompletedEvent,
+    );
+    vi.spyOn(workflowCompletionThread, "postWorkflowCompletionThreadMessage").mockResolvedValue({
+      posted: true,
+    });
+    const browserSpy = vi.spyOn(
+      resourceTeardown,
+      "stopRunningRtxBrowserSessions",
+    ).mockResolvedValue({ stopped: [], failed: [] });
+    vi.spyOn(resourceTeardown, "scheduleWorkflowTerminalSessionRelease").mockReturnValue({
+      scheduled: true,
+      sessionId: null,
+    });
+
+    const result = await handleCompleteWorkflowRun({
+      runId: run.id,
+      status: "completed",
+    });
+    if (!result.success) throw new Error(result.error);
+
+    expect(browserSpy).not.toHaveBeenCalled();
+    expect(result.browserSessionTeardown).toEqual({ stopped: [], failed: [] });
+    expect(result.leaseRelease).toEqual({ leaseId, released: true, alreadyGone: false });
+    expect(getSessionLeaseById(leaseId)).toBeUndefined();
+  });
+
   it("reports committed and quarantined Snowball candidates separately", async () => {
     const { run } = createSnowballRunWithTarget();
     recordSnowballCandidateFailure({
@@ -453,6 +492,48 @@ describe("complete_workflow_run terminal teardown", () => {
       experiencesUpserted: 2,
       partial: true,
     });
+  });
+
+  it("preserves the server-owned public event result against completion callbacks", async () => {
+    const serverEventResult = {
+      version: 1,
+      provider: "luma",
+      canonicalSeedUrl: "https://luma.com/demo",
+      events: [{ title: "Server Event" }],
+    };
+    const run = createWorkflowRun({
+      workflowType: "search",
+      status: "running",
+      trigger: "template",
+      result: JSON.stringify({ eventSource: serverEventResult }),
+    });
+    vi.spyOn(workflowEvents, "emitWorkflowCompletedEvent").mockResolvedValue(
+      mockWorkflowCompletedEvent,
+    );
+    vi.spyOn(resourceTeardown, "stopRunningRtxBrowserSessions").mockResolvedValue({
+      stopped: [],
+      failed: [],
+    });
+    vi.spyOn(resourceTeardown, "scheduleWorkflowTerminalSessionRelease").mockReturnValue({
+      scheduled: true,
+      sessionId: null,
+    });
+
+    await handleCompleteWorkflowRun({
+      runId: run.id,
+      status: "completed",
+      result: {
+        eventSource: { events: [{ title: "Fabricated Event" }] },
+        eventSourceRuntime: { requestsUsed: 0 },
+        safe: true,
+      },
+    });
+
+    expect(JSON.parse(getWorkflowRun(run.id)?.result ?? "{}")).toMatchObject({
+      eventSource: serverEventResult,
+      safe: true,
+    });
+    expect(JSON.parse(getWorkflowRun(run.id)?.result ?? "{}")).not.toHaveProperty("eventSourceRuntime");
   });
 
   it("fails a research run on target-platform auth loss and releases its lease", async () => {

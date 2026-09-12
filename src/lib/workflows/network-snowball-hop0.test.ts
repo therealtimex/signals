@@ -70,4 +70,15 @@ describe("attachNetworkSnowballHop0Org", () => {
 
     expect(parseTemplateConfig(getWorkflowRun(run.id)?.config).orgId).toBeUndefined();
   });
+
+  it("does not infer a Luma organizer from a generic create_org call", () => {
+    const run = createSnowballRun({ seedValue: "https://luma.com/demo?tk=secret" });
+    const org = createOrg({ name: "Venue, not organizer" });
+
+    attachNetworkSnowballHop0Org(run.id, org.id);
+    expect(parseTemplateConfig(getWorkflowRun(run.id)?.config).orgId).toBeUndefined();
+
+    attachNetworkSnowballHop0Org(run.id, org.id, "organized_by");
+    expect(parseTemplateConfig(getWorkflowRun(run.id)?.config).orgId).toBe(org.id);
+  });
 });

@@ -59,4 +59,14 @@ describe("filterSnowballEnqueueUrls", () => {
     expect(accepted).toEqual([]);
     expect(rejected).toHaveLength(2);
   });
+
+  it("accepts canonical Luma events without carrying registration tokens onward", () => {
+    const { accepted, rejected } = filterSnowballEnqueueUrls([
+      "https://luma.com/EventCase?tk=secret&utm_source=scout#guests",
+      "https://luma.com.evil.test/EventCase?tk=secret",
+    ]);
+    expect(accepted).toEqual(["https://luma.com/EventCase"]);
+    expect(rejected).toEqual(["https://luma.com.evil.test/EventCase"]);
+    expect(JSON.stringify({ accepted, rejected })).not.toContain("secret");
+  });
 });

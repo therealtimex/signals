@@ -94,6 +94,7 @@ export async function POST(
           error: result.error,
           errorCode: result.errorCode,
           workflowRunId: result.workflowRunId,
+          eventReportCapability: result.eventReportCapability,
         },
         { status: result.httpStatus },
       );
@@ -107,6 +108,7 @@ export async function POST(
         threadSlug: result.threadSlug,
         threadPath: result.threadPath,
         threadResolution: result.threadResolution,
+        eventReportCapability: result.eventReportCapability,
       },
       { status: 201 },
     );

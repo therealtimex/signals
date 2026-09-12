@@ -36,7 +36,7 @@ import { getLaunchById, upsertLaunch } from "@/lib/db/queries/launches";
 import { buildWritingTemplateConfig } from "@/lib/workflows/signals-writing";
 import { buildContactNurtureTemplateConfig } from "@/lib/workflows/contact-relationship-nurture";
 import { db } from "@/lib/db/client";
-import { launches, workflowRuns } from "@/lib/db/schema";
+import { contentItems, launches, workflowRuns } from "@/lib/db/schema";
 import { invokeAgentTool } from "@/lib/agent-tools/invoke";
 import { resolveComposedRunAuthorityByToken } from "@/lib/writing/writing-intent-authority";
 import { sha256 } from "@/lib/writing/hash";
@@ -45,6 +45,7 @@ import { buildContactWebResearchTemplateConfig } from "@/lib/workflows/contact-w
 import { buildNetworkSnowballTemplateConfig } from "@/lib/workflows/network-snowball";
 import { SNOWBALL_IDENTITY_SCOPE_TOKEN_CONFIG_KEY } from "@/lib/workflows/snowball-identity-evidence";
 import { SNOWBALL_BROWSER_TARGET_CONFIG_KEY } from "@/lib/workflows/network-snowball-target";
+import * as resourceTeardown from "@/lib/rtx/resource-teardown";
 import { resetCoreTables } from "@/test/db";
 
 const preparedResearchTarget = {
@@ -370,14 +371,106 @@ describe("runTemplateViaRtx health preflight", () => {
     expect(snowballTargetMocks.releaseNetworkSnowballTarget).not.toHaveBeenCalled();
   });
 
-  it("releases the Snowball browser lease when terminal dispatch is rejected", async () => {
+  it("persists a sanitized public Luma event before a social-target preflight failure", async () => {
+    const templateConfig = {
+      ...buildNetworkSnowballTemplateConfig(),
+      seedType: "event_url",
+      seedValue: "https://luma.com/build-night?tk=must-not-persist#guests",
+    };
     const template = createTemplate({
       name: "Network Snowball",
       templateType: "prospecting",
       status: "active",
-      config: JSON.stringify(buildNetworkSnowballTemplateConfig()),
+      config: JSON.stringify(templateConfig),
       isSystem: 1,
     });
+    snowballTargetMocks.prepareNetworkSnowballTarget.mockResolvedValueOnce({
+      ok: false,
+      error: { code: "LOGIN_REQUIRED", message: "LinkedIn is signed out" },
+    });
+    const requested: string[] = [];
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url =
+        typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      requested.push(url);
+      if (url.endsWith("/api/health")) {
+        return new Response(JSON.stringify({ app: "signals", status: "ok" }), { status: 200 });
+      }
+      if (url.endsWith("/cli/get-workspace/signals")) {
+        return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
+      }
+      if (url.endsWith("/cli/list-workspaces")) {
+        return new Response(JSON.stringify({
+          workspaces: [{ slug: "signals-resolved", name: "Signals" }],
+        }), { status: 200 });
+      }
+      if (url.endsWith("/cli/create-thread/signals-resolved")) {
+        return new Response(JSON.stringify({ thread: { slug: "network-snowball" } }), {
+          status: 200,
+        });
+      }
+      if (url === "https://luma.com/build-night") {
+        return new Response(`<script type="application/ld+json">{
+          "@context":"https://schema.org","@type":"Event","name":"Build Night"
+        }</script>`, { status: 200 });
+      }
+      return new Response(JSON.stringify({ error: `Unexpected request: ${url}` }), { status: 500 });
+    }) as unknown as typeof fetch;
+
+    const result = await runTemplateViaRtx(
+      { templateId: template.id, signalsBaseUrl: "http://127.0.0.1:3099" },
+      {
+        ...process.env,
+        RTX_APP_ID: "test-app-id",
+        RTX_API_BASE_URL: "http://127.0.0.1:3001",
+        STORAGE_DIR: storageDir,
+      },
+      fetchImpl,
+    );
+
+    expect(result).toMatchObject({
+      success: false,
+      errorCode: "snowball_browser_target_unavailable",
+      workflowRunId: expect.any(String),
+    });
+    if (result.success || !result.workflowRunId) throw new Error("expected failed target preflight");
+    expect(requested).toContain("https://luma.com/build-night");
+    expect(requested.join("\n")).not.toContain("must-not-persist");
+    expect(JSON.stringify({
+      run: getWorkflowRun(result.workflowRunId),
+      content: db.select().from(contentItems).all(),
+      steps: listWorkflowSteps(result.workflowRunId),
+    })).not.toContain("must-not-persist");
+    expect(JSON.parse(getWorkflowRun(result.workflowRunId)?.result ?? "{}")).toMatchObject({
+      eventSource: {
+        canonicalSeedUrl: "https://luma.com/build-night",
+        events: [{ title: "Build Night" }],
+      },
+      partial: true,
+      blocked: "LOGIN_REQUIRED",
+    });
+    expect(db.select().from(contentItems).all()).toEqual([
+      expect.objectContaining({ title: "Build Night", origin: "imported", aiGenerated: false }),
+    ]);
+  });
+
+  it("releases the Snowball lease without stopping a borrowed event session after rejected dispatch", async () => {
+    const templateConfig = buildNetworkSnowballTemplateConfig();
+    templateConfig.participantAccess = {
+      enabled: true,
+      browserSessionName: preparedSnowballTarget.sessionName,
+    };
+    const template = createTemplate({
+      name: "Network Snowball",
+      templateType: "prospecting",
+      status: "active",
+      config: JSON.stringify(templateConfig),
+      isSystem: 1,
+    });
+    const stopSpy = vi.spyOn(
+      resourceTeardown,
+      "stopRunningRtxBrowserSessions",
+    ).mockResolvedValue({ stopped: [], failed: [] });
     const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
       const url =
         typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
@@ -419,6 +512,7 @@ describe("runTemplateViaRtx health preflight", () => {
     expect(snowballTargetMocks.releaseNetworkSnowballTarget).toHaveBeenCalledWith(
       "lease-snowball",
     );
+    expect(stopSpy).not.toHaveBeenCalled();
     if (result.success || !result.workflowRunId) throw new Error("expected rejected dispatch");
     expect(JSON.parse(getWorkflowRun(result.workflowRunId)?.config ?? "{}"))
       .not.toHaveProperty(SNOWBALL_IDENTITY_SCOPE_TOKEN_CONFIG_KEY);

@@ -9,7 +9,10 @@ import {
 import { resolveRtxApiBase, type EnvLike } from "@/lib/rtx/env";
 import { scheduleWorkflowTerminalSessionRelease } from "@/lib/rtx/resource-teardown";
 import { resolveActiveTerminalSessionIdForThread } from "@/lib/rtx/runtime-sessions";
-import { NETWORK_SNOWBALL_TEMPLATE_NAME } from "@/lib/workflows/network-snowball";
+import {
+  NETWORK_SNOWBALL_TEMPLATE_NAME,
+  sanitizeNetworkSnowballConfigRecord,
+} from "@/lib/workflows/network-snowball";
 
 export const SNOWBALL_CALENDAR_DISPATCH_CONFIG_KEY = "_snowballCalendarDispatch";
 
@@ -46,7 +49,7 @@ function reserveCalendarWorkflowRun(
   if (existing) return { run: existing, duplicate: true };
 
   const config = {
-    ...context.workflowRunConfig,
+    ...sanitizeNetworkSnowballConfigRecord(context.workflowRunConfig),
     [SNOWBALL_CALENDAR_DISPATCH_CONFIG_KEY]: {
       version: 1,
       taskUuid: context.taskUuid,
@@ -190,7 +193,7 @@ export async function dispatchSnowballCalendarTask(
       const launch = await runTemplateViaRtx({
         templateId: template.id,
         config: {
-          ...context.workflowRunConfig,
+          ...sanitizeNetworkSnowballConfigRecord(context.workflowRunConfig),
           [SNOWBALL_CALENDAR_DISPATCH_CONFIG_KEY]: {
             version: 1,
             taskUuid: context.taskUuid,

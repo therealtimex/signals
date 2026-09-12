@@ -483,4 +483,41 @@ describe("graph agent tools", () => {
 
     expect(parseTemplateConfig(getWorkflowRun(run.id)?.config).orgId).toBe(existing.id);
   });
+
+  it("binds a Luma Hop 0 only when create_org carries explicit organizer evidence", async () => {
+    const config = buildNetworkSnowballRunConfig(readNetworkSnowballConfig({
+      seedType: "event_url",
+      seedValue: "https://luma.com/build-friday",
+    }));
+    const template = createTemplate({
+      name: "Network Snowball",
+      templateType: "prospecting",
+      status: "active",
+      config: JSON.stringify(config),
+    });
+    const run = createWorkflowRun({
+      templateId: template.id,
+      workflowType: "search",
+      status: "running",
+      trigger: "template",
+      config: JSON.stringify(config),
+    });
+
+    await invokeAgentTool("create_org", {
+      name: "Event Sponsor",
+      domain: "sponsor.example",
+      workflowRunId: run.id,
+      templateId: template.id,
+    });
+    expect(parseTemplateConfig(getWorkflowRun(run.id)?.config).orgId).toBeUndefined();
+
+    const organizer = await invokeAgentTool("create_org", {
+      name: "Event Organizer",
+      domain: "organizer.example",
+      workflowRunId: run.id,
+      templateId: template.id,
+      observedRole: "organized_by",
+    }) as { id: string };
+    expect(parseTemplateConfig(getWorkflowRun(run.id)?.config).orgId).toBe(organizer.id);
+  });
 });

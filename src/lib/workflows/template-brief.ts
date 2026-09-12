@@ -36,6 +36,7 @@ import {
   type ContactWebResearchBriefContext,
 } from "@/lib/workflows/contact-web-research";
 import type { NetworkSnowballPreparedTarget } from "@/lib/workflows/network-snowball-target";
+import type { PublicEventSourceResult } from "@/lib/workflows/event-sources/service";
 
 const CATEGORY_LABELS: Record<string, string> = {
   prospecting: "Search",
@@ -198,6 +199,8 @@ export function buildAgentWorkflowBrief(input: {
   snowballIdentityScopeToken?: string;
   /** Server-prepared browser target whose session and lease are bound to this Snowball run. */
   snowballBrowserTarget?: NetworkSnowballPreparedTarget;
+  /** Public-only event context computed and persisted by Signals before dispatch. */
+  publicEventSource?: PublicEventSourceResult | null;
 }): string {
   const category = CATEGORY_LABELS[input.template.templateType] ?? input.template.templateType;
   const instructions = input.systemPromptOverride?.trim() || input.template.systemPrompt?.trim();
@@ -233,6 +236,7 @@ export function buildAgentWorkflowBrief(input: {
         signalsBaseUrl: input.signalsBaseUrl,
         snowballIdentityScopeToken: input.snowballIdentityScopeToken,
         browserTarget: input.snowballBrowserTarget,
+        publicEventSource: input.publicEventSource,
       })}\n`
     : null;
   const writingContract = isSignalsWritingTemplateConfig(input.config)
