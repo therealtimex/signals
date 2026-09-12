@@ -162,15 +162,40 @@ function visibleSelection($: cheerio.CheerioAPI, selector: string) {
   return $(selector).filter((_, element) => isVisiblyIncluded($, element));
 }
 
+function removeNonVisibleTextSources($: cheerio.CheerioAPI): void {
+  $("script, style, noscript").remove();
+  $("*").each((_, element) => {
+    if (!isVisiblyIncluded($, element)) $(element).remove();
+  });
+}
+
+function hasVisibleSignInControl($: cheerio.CheerioAPI): boolean {
+  return visibleSelection(
+    $,
+    'a[href], button, [role="button"], input[type="button"], input[type="submit"]',
+  ).toArray().some((element) => {
+    const control = $(element);
+    const label = normalizedText([
+      control.attr("aria-label"),
+      control.attr("title"),
+      control.attr("value"),
+      control.text(),
+    ].filter(Boolean).join(" "));
+    if (/\b(?:sign|log)\s+in\b/i.test(label)) return true;
+    const href = control.attr("href");
+    if (!href) return false;
+    try {
+      return /\/(?:sign|log)[-_]?in(?:\/|$)/i.test(new URL(href, "https://luma.com").pathname);
+    } catch {
+      return false;
+    }
+  });
+}
+
 export function inspectVisibleLumaViewerIdentity(html: string): string {
   const $ = cheerio.load(html);
+  removeNonVisibleTextSources($);
   const bodyText = normalizedText($("body").text());
-  if (/log\s*in|sign\s*in(?:\s+to\s+(?:continue|view))?/i.test(bodyText)) {
-    throw new EventBrowserError("login_required", "The selected browser session is not signed in to Luma.");
-  }
-  if (/register to view guest list|registered guests? only/i.test(bodyText)) {
-    throw new EventBrowserError("registration_required", "The guest list requires event registration.");
-  }
   const viewer = visibleSelection(
     $,
     '[data-testid="user-menu"], [data-testid="account-menu"], [data-viewer-identity], button[aria-label*="account" i], button[aria-label*="profile" i], header button img[alt], nav button img[alt]',
@@ -183,7 +208,13 @@ export function inspectVisibleLumaViewerIdentity(html: string): string {
       ?? viewer.text(),
   );
   if (!viewerIdentity) {
+    if (hasVisibleSignInControl($)) {
+      throw new EventBrowserError("login_required", "The selected browser session is not signed in to Luma.");
+    }
     throw new EventBrowserError("permission_missing", "A visible signed-in Luma viewer identity could not be verified.");
+  }
+  if (/\bregister\s+to\s+view\s+guest\s+list\b|\bregistered\s+guests?\s+only\b/i.test(bodyText)) {
+    throw new EventBrowserError("registration_required", "The guest list requires event registration.");
   }
   if (/you are waitlisted|on the waitlist|waitlist status/i.test(bodyText)) {
     throw new EventBrowserError("waitlisted", "The selected viewer is waitlisted and cannot access the guest list.");

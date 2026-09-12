@@ -9,6 +9,7 @@ import {
   acquireAuthorizedEventBrowserLease,
   EventBrowserError,
   inspectAuthorizedLumaHtml,
+  inspectVisibleLumaViewerIdentity,
   recheckAuthorizedLumaBoundary,
   renewAuthorizedEventBrowserLease,
   verifyAuthorizedLumaParticipantProfiles,
@@ -115,8 +116,32 @@ describe("registered Luma guest boundary", () => {
   });
 
   it.each([
+    ["neutral copy", "Welcome to the event"],
+    ["designing", "Designing agent workflows for teams"],
+    ["assigning", "We will be assigning mentors"],
+    ["blog in", "Read our blog in English"],
+    ["hidden sign-in dialog", '<div style="display:none"><button>Sign in with Google</button></div>'],
+    ["script sign-in route", '<script>window.route = "/signin"</script>'],
+  ])("accepts a visible signed-in viewer with %s", (_name, pageContent) => {
+    expect(inspectVisibleLumaViewerIdentity(`<body>
+      <button data-testid="user-menu" data-viewer-identity="QA Viewer"></button>
+      ${pageContent}
+    </body>`)).toBe("QA Viewer");
+  });
+
+  it("requires login for an anonymous page with a visible sign-in control", () => {
+    try {
+      inspectVisibleLumaViewerIdentity('<body><a href="/signin">Sign In</a></body>');
+      throw new Error("expected inspection to fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(EventBrowserError);
+      expect((error as EventBrowserError).reason).toBe("login_required");
+    }
+  });
+
+  it.each([
     ["anonymous", '<section data-guest-list-access="authorized"><a data-participant-name="Alice"></a></section>', "permission_missing"],
-    ["login", "<p>Sign in to view</p>", "login_required"],
+    ["login", "<button>Sign in to view</button>", "login_required"],
     ["generic sign in", "<button>Sign In</button><p>Waitlist enabled</p>", "login_required"],
     ["anonymous waitlist metadata", "<p>Waitlist enabled</p>", "permission_missing"],
     ["waitlist", '<button data-testid="user-menu" aria-label="Account: Operator"></button><p>You are waitlisted</p>', "waitlisted"],
