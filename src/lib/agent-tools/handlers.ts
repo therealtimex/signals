@@ -126,10 +126,6 @@ import {
   getNetworkSnowballTargetFromRunConfig,
   releaseNetworkSnowballTargetFromRunConfig,
 } from "@/lib/workflows/network-snowball-target";
-import {
-  getNetworkSnowballSourceTargetFromRunConfig,
-  releaseNetworkSnowballSourceTargetFromRunConfig,
-} from "@/lib/workflows/network-snowball-source-target";
 
 const DEFAULT_PAGE_SIZE = 20;
 
@@ -1463,7 +1459,6 @@ export async function handleCompleteWorkflowRun(input: z.infer<typeof completeWo
     : null;
   const preparedTarget = getContactWebResearchTargetFromRunConfig(run.config);
   const snowballBrowserTarget = getNetworkSnowballTargetFromRunConfig(run.config);
-  const snowballSourceBrowserTarget = getNetworkSnowballSourceTargetFromRunConfig(run.config);
   const callbackResult: Record<string, unknown> = { ...(input.result ?? {}) };
   delete callbackResult[SNOWBALL_IDENTITY_EVIDENCE_RESULT_KEY];
   removeServerOwnedEventResult(callbackResult);
@@ -1587,10 +1582,7 @@ export async function handleCompleteWorkflowRun(input: z.infer<typeof completeWo
       leaseRelease = releaseContactWebResearchTargetFromRunConfig(run.config);
     }
   } else if (isSnowball) {
-    if (snowballSourceBrowserTarget) {
-      browserSessionTeardown = { stopped: [], failed: [] };
-      leaseRelease = releaseNetworkSnowballSourceTargetFromRunConfig(run.config);
-    } else if (snowballBrowserTarget) {
+    if (snowballBrowserTarget) {
       try {
         browserSessionTeardown = snowballBrowserTarget.sessionName === borrowedEventSessionName
           ? { stopped: [], failed: [] }

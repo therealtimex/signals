@@ -175,9 +175,9 @@ export function NetworkSnowballEventFields({
           )}
 
           <p className="text-xs text-muted-foreground">
-            Signals uses only this exact running session. Provider-specific identity and access
-            checks run when available; otherwise the site&apos;s current signed-in state is used.
-            Public-only extraction continues if the session is unavailable.
+            For supported sources, Signals verifies this exact session&apos;s visible identity and
+            source access at launch and re-checks them during traversal. Public-only extraction
+            continues when verification is unavailable or fails.
           </p>
           <p className="text-xs text-muted-foreground">
             Read-only. Signals won&apos;t register, RSVP, join a waitlist, follow, message, or

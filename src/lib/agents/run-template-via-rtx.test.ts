@@ -30,7 +30,6 @@ vi.mock("@/lib/workflows/network-snowball-target", async (importOriginal) => {
 import { runTemplateViaRtx } from "@/lib/agents/run-template-via-rtx";
 import { createTemplate } from "@/lib/db/queries/workflow-templates";
 import * as workflowTemplates from "@/lib/db/queries/workflow-templates";
-import { ensureBrowserConnection } from "@/lib/db/queries/platform-targets";
 import { getWorkflowRun, listWorkflowSteps } from "@/lib/db/queries/workflows";
 import { createContact } from "@/lib/db/queries/contacts";
 import { getLaunchById, upsertLaunch } from "@/lib/db/queries/launches";
@@ -46,7 +45,6 @@ import { buildContactWebResearchTemplateConfig } from "@/lib/workflows/contact-w
 import { buildNetworkSnowballTemplateConfig } from "@/lib/workflows/network-snowball";
 import { SNOWBALL_IDENTITY_SCOPE_TOKEN_CONFIG_KEY } from "@/lib/workflows/snowball-identity-evidence";
 import { SNOWBALL_BROWSER_TARGET_CONFIG_KEY } from "@/lib/workflows/network-snowball-target";
-import { SNOWBALL_SOURCE_BROWSER_TARGET_CONFIG_KEY } from "@/lib/workflows/network-snowball-source-target";
 import * as resourceTeardown from "@/lib/rtx/resource-teardown";
 import { resetCoreTables } from "@/test/db";
 
@@ -553,15 +551,10 @@ describe("runTemplateViaRtx health preflight", () => {
     expect(brief).not.toContain("session named `signals-publish`");
     expect(brief).not.toContain("snowballScopeToken");
     expect(JSON.parse(getWorkflowRun(result.workflowRunId)?.config ?? "{}"))
-      .not.toHaveProperty(SNOWBALL_SOURCE_BROWSER_TARGET_CONFIG_KEY);
+      .not.toHaveProperty(SNOWBALL_BROWSER_TARGET_CONFIG_KEY);
   });
 
-  it("dispatches generic signed-in source access through the exact custom session", async () => {
-    ensureBrowserConnection({
-      sessionName: "personal-browser",
-      kind: "dedicated",
-      source: "test",
-    });
+  it("falls back publicly when a generic source has no safe signed-in adapter", async () => {
     const template = createTemplate({
       name: "Network Snowball",
       templateType: "prospecting",
@@ -591,16 +584,6 @@ describe("runTemplateViaRtx health preflight", () => {
           status: 200,
         });
       }
-      if (url.includes("/cli/list-browser-sessions?")) {
-        return new Response(JSON.stringify({
-          success: true,
-          sessions: [{
-            sessionName: "personal-browser",
-            running: true,
-            remoteDebugPort: 9222,
-          }],
-        }), { status: 200 });
-      }
       if (url.endsWith("/cli/send-message/signals/network-snowball")) {
         return new Response(JSON.stringify({
           success: true,
@@ -629,22 +612,31 @@ describe("runTemplateViaRtx health preflight", () => {
     if (!result.success) throw new Error(result.error);
     expect(snowballTargetMocks.prepareNetworkSnowballTarget).not.toHaveBeenCalled();
     const storedConfig = JSON.parse(getWorkflowRun(result.workflowRunId)?.config ?? "{}");
-    expect(storedConfig[SNOWBALL_SOURCE_BROWSER_TARGET_CONFIG_KEY]).toMatchObject({
-      source: "participant_access",
-      sessionName: "personal-browser",
-      startUrl: "https://events.example.test/member-night",
-    });
     expect(storedConfig).not.toHaveProperty(SNOWBALL_BROWSER_TARGET_CONFIG_KEY);
+    expect(JSON.parse(getWorkflowRun(result.workflowRunId)?.result ?? "{}")).toMatchObject({
+      partial: true,
+      browserFallback: {
+        code: "UNSUPPORTED_SOURCE",
+      },
+    });
     const brief = readFileSync(join(
       storageDir,
       "working-data/signals/workflow-runs",
       result.workflowRunId,
       "brief.md",
     ), "utf8");
-    expect(brief).toContain("user-selected session named `personal-browser` only");
-    expect(brief).toContain("navigate it to `https://events.example.test/member-night`");
-    expect(brief).not.toContain("session named `signals-publish`");
+    expect(brief).toContain("Public-only source access is in force");
+    expect(brief).toContain("cannot be verified safely for this source");
+    expect(brief).toContain("Do not attach agent-browser");
+    expect(brief).not.toContain("personal-browser");
     expect(brief).not.toContain("snowballScopeToken");
+    expect(listWorkflowSteps(result.workflowRunId)).toContainEqual(
+      expect.objectContaining({
+        tool: "snowball_browser_target_preflight",
+        status: "failed",
+        output: expect.stringContaining("UNSUPPORTED_SOURCE"),
+      }),
+    );
   });
 
   it("releases the Snowball lease without stopping a borrowed event session after rejected dispatch", async () => {

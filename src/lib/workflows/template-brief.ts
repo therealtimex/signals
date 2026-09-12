@@ -38,7 +38,6 @@ import {
   type ContactWebResearchBriefContext,
 } from "@/lib/workflows/contact-web-research";
 import type { NetworkSnowballPreparedTarget } from "@/lib/workflows/network-snowball-target";
-import type { NetworkSnowballPreparedSourceTarget } from "@/lib/workflows/network-snowball-source-target";
 import type { PublicEventSourceResult } from "@/lib/workflows/event-sources/service";
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -208,8 +207,6 @@ export function buildAgentWorkflowBrief(input: {
   snowballIdentityScopeToken?: string;
   /** Server-prepared browser target whose session and lease are bound to this Snowball run. */
   snowballBrowserTarget?: NetworkSnowballPreparedTarget;
-  /** Exact user-selected source session, bound only after explicit signed-in access consent. */
-  snowballSourceBrowserTarget?: NetworkSnowballPreparedSourceTarget;
   /** Non-blocking browser preflight failure that forced a public-only run. */
   snowballBrowserFallback?: NetworkSnowballBrowserFallback | null;
   /** Public-only event context computed and persisted by Signals before dispatch. */
@@ -252,7 +249,6 @@ export function buildAgentWorkflowBrief(input: {
         signalsBaseUrl: input.signalsBaseUrl,
         snowballIdentityScopeToken: input.snowballIdentityScopeToken,
         browserTarget: input.snowballBrowserTarget,
-        sourceBrowserTarget: input.snowballSourceBrowserTarget,
         browserFallback: input.snowballBrowserFallback,
         publicEventSource: input.publicEventSource,
       })}\n`

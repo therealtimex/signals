@@ -19,7 +19,6 @@ import {
   type FollowOnActionType,
 } from "@/lib/workflows/cascade-types";
 import type { NetworkSnowballPreparedTarget } from "@/lib/workflows/network-snowball-target";
-import type { NetworkSnowballPreparedSourceTarget } from "@/lib/workflows/network-snowball-source-target";
 import { RTX_PUBLISH_SESSION_NAME } from "@/lib/publish/constants";
 import { readEventTraversalPolicy } from "@/lib/workflows/event-sources/policy";
 import type {
@@ -243,7 +242,6 @@ export function buildNetworkSnowballBriefSection(input: {
   signalsBaseUrl?: string;
   snowballIdentityScopeToken?: string;
   browserTarget?: NetworkSnowballPreparedTarget;
-  sourceBrowserTarget?: NetworkSnowballPreparedSourceTarget;
   browserFallback?: NetworkSnowballBrowserFallback | null;
   publicEventSource?: PublicEventSourceResult | null;
 }): string {
@@ -260,7 +258,6 @@ export function buildNetworkSnowballBriefSection(input: {
   };
   const attributionFlags = ` --workflow-run-id ${input.workflowRunId}${input.templateId ? ` --template-id ${input.templateId}` : ""}`;
   const browserTarget = input.browserTarget;
-  const sourceBrowserTarget = input.sourceBrowserTarget;
   const hasIdentityTarget = Boolean(browserTarget && input.snowballIdentityScopeToken);
   const browserSessionName = browserTarget?.sessionName;
   const verifiedBrowserIdentity = browserTarget?.verifiedHandle ?? browserTarget?.expectedHandle;
@@ -276,14 +273,17 @@ export function buildNetworkSnowballBriefSection(input: {
   const graphLinkingInstruction = snowball.autoLinkGraphEdges
     ? "    After contacts.csv import, link Hop 1 (and Hop 2) people to hop0OrgId. Use `link_contact_to_org` for employment (founders, executives, operators). Do not write `works_at` through `upsert_edge`. Use `upsert_edge` for non-employment causal edges (`investor_in`, `advisor_of`, `board_member`) with srcType=contact, dstType=org, dstId=hop0OrgId, and source=\"agent:network_snowball\"."
     : "    autoLinkGraphEdges is false: ingest Hop 0 and later-hop contacts/orgs but do not write graph edges or employment links.";
-  const browserTeardownInstruction = sourceBrowserTarget
-    ? `    - Server-Owned Browser Teardown: Do not close the browser yourself. Call complete_workflow_run (step 10) exactly once when finished. Signals releases this run's lease but leaves the user-selected borrowed session \`${sourceBrowserTarget.sessionName}\` running.`
-    : browserTarget && snowball.participantAccess.enabled &&
-        snowball.participantAccess.browserSessionName.trim() === browserTarget.sessionName
-      ? `    - Server-Owned Browser Teardown: Call complete_workflow_run (step 10) exactly once when finished. Signals releases this run's lease but leaves the user-selected borrowed session \`${browserTarget.sessionName}\` running.`
-      : browserTarget
-        ? `    - Server-Owned Browser Teardown: Do not close the browser yourself. Call complete_workflow_run (step 10) exactly once when finished. Before that call returns, Signals stops the exact bound session \`${browserTarget.sessionName}\` and releases this run's lease, freeing Chromium RAM and CPU without touching unrelated sessions.`
-        : "    - Browser Teardown: No browser session or lease was acquired for this run. Do not create, start, stop, delete, or substitute a browser session. Call complete_workflow_run (step 10) exactly once when finished.";
+  const borrowedParticipantSessionName =
+    browserTarget
+    && snowball.participantAccess.enabled
+    && snowball.participantAccess.browserSessionName.trim() === browserTarget.sessionName
+      ? browserTarget.sessionName
+      : null;
+  const browserTeardownInstruction = borrowedParticipantSessionName
+    ? `    - Server-Owned Browser Teardown: Call complete_workflow_run (step 10) exactly once when finished. Signals releases this run's lease but leaves the user-selected borrowed session \`${borrowedParticipantSessionName}\` running.`
+    : browserTarget
+      ? `    - Server-Owned Browser Teardown: Do not close the browser yourself. Call complete_workflow_run (step 10) exactly once when finished. Before that call returns, Signals stops the exact bound session \`${browserTarget.sessionName}\` and releases this run's lease, freeing Chromium RAM and CPU without touching unrelated sessions.`
+      : "    - Browser Teardown: No browser session or lease was acquired for this run. Do not create, start, stop, delete, or substitute a browser session. Call complete_workflow_run (step 10) exactly once when finished.";
   const publicEventContext = input.publicEventSource?.events.length
     ? input.publicEventSource.events
         .map((event) => {
@@ -294,9 +294,7 @@ export function buildNetworkSnowballBriefSection(input: {
     : "    - No server-extracted public Luma event record is available.";
   const seedInspectionInstruction = input.publicEventSource
     ? `S1. Inspect Seed Signal: Signals already fetched and persisted the public Luma event source before dispatch. Treat this server-computed public context as authoritative; do not replace it in complete_workflow_run.result:\n${publicEventContext}\n    Registered-only guest observations, when enabled, are stored behind an owner-bound report capability and are never available to this terminal agent. Continue profile expansion only from public named hosts, organizers, sponsors, venues, calendars, and related events.`
-    : sourceBrowserTarget
-      ? `S1. Inspect Seed Signal: Explicit signed-in source access is enabled. Attach agent-browser over CDP to the already-running user-selected session named \`${sourceBrowserTarget.sessionName}\` only and navigate it to \`${sourceBrowserTarget.startUrl}\`. Use only content visibly available in that exact session. Do not create, start, stop, delete, or substitute a browser session, and do not claim that Signals verified a provider identity where no provider-specific adapter exists.`
-      : snowball.seedType === "event_url"
+    : snowball.seedType === "event_url"
         ? "S1. Inspect Seed Signal: Public-only source access is in force. Do not attach agent-browser or navigate any authenticated browser session to the event URL. Use only anonymous/public research tools and already-persisted server evidence. If the source cannot be read publicly, record the limitation and complete the run as partial without inventing people or event details."
         : browserTarget
           ? `S1. Inspect Seed Signal: Attach agent-browser over CDP to the already-running server-bound session named \`${browserTarget.sessionName}\` only. It was authenticated as ${browserTarget.platform} identity \`${verifiedBrowserIdentity}\` before dispatch. Do not create, start, stop, delete, or substitute a browser session. Navigate in that session to the seed post URL, profile, or organization and parse the core event context (e.g. funding round amount, launch specs, executive hire, or partnership announcement).`

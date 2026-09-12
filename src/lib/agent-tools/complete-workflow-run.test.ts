@@ -18,7 +18,6 @@ import {
 } from "@/lib/leases/session-lease";
 import { recordSnowballCandidateFailure } from "@/lib/workflows/snowball-candidates";
 import { promoteSnowballCandidate } from "@/lib/workflows/snowball-candidate-promote";
-import { SNOWBALL_SOURCE_BROWSER_TARGET_CONFIG_KEY } from "@/lib/workflows/network-snowball-source-target";
 
 const mockWorkflowCompletedEvent: workflowEvents.EmitWorkflowCompletedResult = {
   emitted: true,
@@ -120,49 +119,6 @@ function createSnowballRunWithTarget() {
         startUrl: "https://www.linkedin.com/in/operator",
         expectedHandle: "/in/operator",
         verifiedHandle: "/in/operator",
-        leaseId: lease.leaseId,
-        leaseExpiresAt: lease.expiresAt,
-        preparedAt: Math.floor(Date.now() / 1_000),
-      },
-    }),
-  });
-  return { run: getWorkflowRun(run.id)!, leaseId: lease.leaseId };
-}
-
-function createSnowballRunWithBorrowedSourceTarget() {
-  const template = createTemplate({
-    name: "Network Snowball",
-    templateType: "prospecting",
-    status: "active",
-    config: JSON.stringify({ networkSnowball: { version: 1 } }),
-  });
-  const run = createWorkflowRun({
-    templateId: template.id,
-    workflowType: "search",
-    status: "running",
-    trigger: "template",
-    config: JSON.stringify({ networkSnowball: { version: 1 } }),
-  });
-  const connection = ensureBrowserConnection({ sessionName: "personal-browser" });
-  const lease = acquireSessionLease(connection.id, {
-    holder: `network-snowball-source:${run.id}`,
-    targetId: null,
-    intent: "browse",
-    ttlSeconds: 1_800,
-  });
-  updateWorkflowRun(run.id, {
-    config: JSON.stringify({
-      networkSnowball: { version: 1 },
-      seedType: "event_url",
-      seedValue: "https://events.example.test/member-night",
-      participantAccess: {
-        enabled: true,
-        browserSessionName: connection.sessionName,
-      },
-      [SNOWBALL_SOURCE_BROWSER_TARGET_CONFIG_KEY]: {
-        source: "participant_access",
-        sessionName: connection.sessionName,
-        startUrl: "https://events.example.test/member-night",
         leaseId: lease.leaseId,
         leaseExpiresAt: lease.expiresAt,
         preparedAt: Math.floor(Date.now() / 1_000),
@@ -289,35 +245,6 @@ describe("complete_workflow_run terminal teardown", () => {
         },
       }),
     });
-    vi.spyOn(workflowEvents, "emitWorkflowCompletedEvent").mockResolvedValue(
-      mockWorkflowCompletedEvent,
-    );
-    vi.spyOn(workflowCompletionThread, "postWorkflowCompletionThreadMessage").mockResolvedValue({
-      posted: true,
-    });
-    const browserSpy = vi.spyOn(
-      resourceTeardown,
-      "stopRunningRtxBrowserSessions",
-    ).mockResolvedValue({ stopped: [], failed: [] });
-    vi.spyOn(resourceTeardown, "scheduleWorkflowTerminalSessionRelease").mockReturnValue({
-      scheduled: true,
-      sessionId: null,
-    });
-
-    const result = await handleCompleteWorkflowRun({
-      runId: run.id,
-      status: "completed",
-    });
-    if (!result.success) throw new Error(result.error);
-
-    expect(browserSpy).not.toHaveBeenCalled();
-    expect(result.browserSessionTeardown).toEqual({ stopped: [], failed: [] });
-    expect(result.leaseRelease).toEqual({ leaseId, released: true, alreadyGone: false });
-    expect(getSessionLeaseById(leaseId)).toBeUndefined();
-  });
-
-  it("releases a generic source lease without stopping the exact borrowed session", async () => {
-    const { run, leaseId } = createSnowballRunWithBorrowedSourceTarget();
     vi.spyOn(workflowEvents, "emitWorkflowCompletedEvent").mockResolvedValue(
       mockWorkflowCompletedEvent,
     );

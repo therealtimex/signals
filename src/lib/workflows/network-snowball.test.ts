@@ -273,7 +273,7 @@ describe("buildNetworkSnowballBriefSection", () => {
     expect(brief).toContain("Do not discover or write LinkedIn identities");
   });
 
-  it("binds generic signed-in source navigation to the exact selected session", () => {
+  it("keeps unsupported generic signed-in sources in public-only mode", () => {
     const brief = buildNetworkSnowballBriefSection({
       workflowRunId: "run_generic_source",
       config: {
@@ -282,19 +282,15 @@ describe("buildNetworkSnowballBriefSection", () => {
         seedValue: "https://events.example.test/founder-night",
         participantAccess: { enabled: true, browserSessionName: "personal-browser" },
       },
-      sourceBrowserTarget: {
-        source: "participant_access",
-        sessionName: "personal-browser",
-        startUrl: "https://events.example.test/founder-night",
-        leaseId: "lease-source",
-        leaseExpiresAt: 1_800_000_000,
-        preparedAt: 1_799_999_400,
+      browserFallback: {
+        code: "UNSUPPORTED_SOURCE",
+        message: "Signed-in access is unsupported for this source.",
       },
     });
 
-    expect(brief).toContain("Explicit signed-in source access is enabled");
-    expect(brief).toContain("user-selected session named `personal-browser` only");
-    expect(brief).toContain("navigate it to `https://events.example.test/founder-night`");
+    expect(brief).toContain("Public-only source access is in force");
+    expect(brief).toContain("Signed-in access is unsupported for this source");
+    expect(brief).toContain("Do not attach agent-browser");
     expect(brief).toContain("Public-Only Identity Gate");
     expect(brief).not.toContain("signals-publish");
     expect(brief).not.toContain("<missing-");

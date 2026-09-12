@@ -2,7 +2,6 @@ const EVENT_PROVIDER_HOSTS = new Set([
   "luma.com",
   "lu.ma",
 ]);
-const PROFESSIONAL_NETWORK_HOSTS = new Set(["linkedin.com"]);
 
 export function networkSnowballSourceHostname(seedValue: string): string | null {
   const raw = seedValue.trim();
@@ -22,13 +21,10 @@ export function networkSnowballSourceHostname(seedValue: string): string | null 
 export function networkSnowballSignedInAccessDescription(seedValue: string): string {
   const hostname = networkSnowballSourceHostname(seedValue);
   if (!hostname) {
-    return "Use this session's current signed-in state to read additional visible people and details on the source site.";
+    return "Signed-in access for this source is not supported yet. Public extraction still runs.";
   }
   if (EVENT_PROVIDER_HOSTS.has(hostname)) {
     return `When available, include visible guests, attendees, and organizers on ${hostname}.`;
   }
-  if (PROFESSIONAL_NETWORK_HOSTS.has(hostname)) {
-    return `When available, include visible people and organizations on ${hostname}.`;
-  }
-  return `Use this session's current signed-in state to read additional visible people and details on ${hostname}.`;
+  return `Signed-in access for ${hostname} is not supported yet. Public extraction still runs.`;
 }

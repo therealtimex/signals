@@ -1,13 +1,67 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ensureBrowserConnection } from "@/lib/db/queries/platform-targets";
 import {
+  acquireSessionLease,
+  getSessionLeaseById,
+  releaseSessionLease,
+} from "@/lib/leases/session-lease";
+import {
+  acquireAuthorizedEventBrowserLease,
   EventBrowserError,
   inspectAuthorizedLumaHtml,
+  recheckAuthorizedLumaBoundary,
+  renewAuthorizedEventBrowserLease,
   verifyAuthorizedLumaParticipantProfiles,
 } from "@/lib/rtx/event-browser";
+import { resetCoreTables } from "@/test/db";
 
 const scope = { kind: "authorized" as const, ownerWorkspace: "signals", runId: "run-1", grantId: "grant-1" };
 
 describe("registered Luma guest boundary", () => {
+  beforeEach(() => {
+    resetCoreTables();
+    vi.useRealTimers();
+  });
+
+  it("reuses and preserves an existing run-owned lease on the selected connection", () => {
+    const connection = ensureBrowserConnection({ sessionName: "signals-publish" });
+    const existing = acquireSessionLease(connection.id, {
+      holder: "network-snowball:run-shared",
+      intent: "publish",
+      ttlSeconds: 300,
+    });
+
+    const resolved = acquireAuthorizedEventBrowserLease({
+      connectionId: connection.id,
+      runId: "run-shared",
+    });
+
+    expect(resolved).toMatchObject({ leaseId: existing.leaseId, reused: true });
+    expect(getSessionLeaseById(existing.leaseId)).toMatchObject({
+      holder: "network-snowball:run-shared",
+      intent: "publish",
+    });
+    releaseSessionLease(existing.leaseId);
+  });
+
+  it("rejects an expired run lease before further authorized traversal", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-12T08:00:00.000Z"));
+    const connection = ensureBrowserConnection({ sessionName: "signals-publish" });
+    const lease = acquireSessionLease(connection.id, {
+      holder: "network-snowball:run-expired",
+      intent: "browse",
+      ttlSeconds: 30,
+    });
+    vi.advanceTimersByTime(31_000);
+
+    expect(() => renewAuthorizedEventBrowserLease({
+      connectionId: connection.id,
+      leaseId: lease.leaseId,
+      runId: "run-expired",
+    })).toThrowError(EventBrowserError);
+  });
+
   it("requires a visible viewer and accessible guest-list container", () => {
     expect(() => inspectAuthorizedLumaHtml({
       html: '<body><button data-testid="user-menu" aria-label="Account: Operator"></button><p>Register to View Guest List</p></body>',
@@ -82,6 +136,29 @@ describe("registered Luma guest boundary", () => {
     }
   });
 
+  it("rejects source-access loss when the authorized boundary is rechecked", () => {
+    expect(() => recheckAuthorizedLumaBoundary({
+      html: '<button data-testid="user-menu" data-viewer-identity="operator@example.com"></button><p>Register to View Guest List</p>',
+      canonicalUrl: "https://luma.com/demo",
+      scope,
+      expectedViewerIdentity: "operator@example.com",
+      maxParticipants: 30,
+    })).toThrowError(EventBrowserError);
+  });
+
+  it("rejects a visible viewer identity change when the guest boundary is rechecked", () => {
+    expect(() => recheckAuthorizedLumaBoundary({
+      html: `<button data-testid="user-menu" data-viewer-identity="changed@example.com"></button>
+        <section data-guest-list-access="authorized">
+          <a href="/user/alice" data-participant-name="Alice Builder"></a>
+        </section>`,
+      canonicalUrl: "https://luma.com/demo",
+      scope,
+      expectedViewerIdentity: "operator@example.com",
+      maxParticipants: 30,
+    })).toThrowError(EventBrowserError);
+  });
+
   it("visits only the bounded visible profile set and stops when viewer identity changes", async () => {
     const visited: string[] = [];
     await expect(verifyAuthorizedLumaParticipantProfiles({
@@ -130,12 +207,51 @@ describe("registered Luma guest boundary", () => {
         const viewer = visited.length === 1 ? "operator@example.com" : "changed@example.com";
         return `<button data-testid="user-menu" data-viewer-identity="${viewer}"></button>`;
       },
-      isLeaseCurrent: () => true,
+      renewLease: () => undefined,
       sleep: async () => undefined,
     })).rejects.toMatchObject({ reason: "session_changed" });
     expect(visited).toEqual([
       "https://luma.com/user/alice",
       "https://luma.com/user/bob",
     ]);
+  });
+
+  it("stops profile traversal immediately when the lease is lost between pages", async () => {
+    const visited: string[] = [];
+    let renewals = 0;
+    await expect(verifyAuthorizedLumaParticipantProfiles({
+      participants: ["alice", "bob"].map((slug) => ({
+        subjectKey: slug,
+        displayName: slug,
+        profileUrl: `https://luma.com/user/${slug}`,
+        rsvp: "registered" as const,
+        attendance: "unknown" as const,
+        evidence: {
+          eventKey: "https://luma.com/demo",
+          sourceUrl: "https://luma.com/demo",
+          observedAt: 1,
+          observedRole: "participant" as const,
+          confidence: "high" as const,
+          scope,
+          provider: "luma" as const,
+          extractorVersion: 1,
+          observationId: slug,
+        },
+      })),
+      expectedViewerIdentity: "operator@example.com",
+      maxProfileVisits: 2,
+      navigate: async (url) => {
+        visited.push(url);
+        return '<button data-testid="user-menu" data-viewer-identity="operator@example.com"></button>';
+      },
+      renewLease: () => {
+        renewals += 1;
+        if (renewals === 3) {
+          throw new EventBrowserError("lease_lost", "lease changed");
+        }
+      },
+      sleep: async () => undefined,
+    })).rejects.toMatchObject({ reason: "lease_lost" });
+    expect(visited).toEqual(["https://luma.com/user/alice"]);
   });
 });
