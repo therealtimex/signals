@@ -68,7 +68,13 @@ import {
 import {
   NETWORK_SNOWBALL_CONFIG_KEY,
   isNetworkSnowballTemplateConfig,
+  readNetworkSnowballConfig,
+  sanitizeNetworkSnowballConfigRecord,
 } from "@/lib/workflows/network-snowball";
+import {
+  ingestNetworkSnowballEventSource,
+  type EventSourceIngestionResult,
+} from "@/lib/workflows/event-sources/service";
 import {
   SNOWBALL_BROWSER_SETTINGS_PATH,
   SNOWBALL_BROWSER_TARGET_CONFIG_KEY,
@@ -112,6 +118,7 @@ export type RunTemplateViaRtxResult =
       threadPath: string;
       threadResolution: TemplateThreadResolution;
       workflowRun: WorkflowRun;
+      eventReportCapability?: EventSourceIngestionResult["eventReportCapability"];
     }
   | {
       success: false;
@@ -120,6 +127,7 @@ export type RunTemplateViaRtxResult =
       httpStatus: number;
       workflowRunId?: string;
       details?: Record<string, unknown>;
+      eventReportCapability?: EventSourceIngestionResult["eventReportCapability"];
     };
 
 function buildStoredRunConfig(
@@ -272,6 +280,7 @@ export async function runTemplateViaRtx(
       ...mergedConfig,
       [NETWORK_SNOWBALL_CONFIG_KEY]: storedTemplateConfig[NETWORK_SNOWBALL_CONFIG_KEY],
     };
+    mergedConfig = sanitizeNetworkSnowballConfigRecord(mergedConfig);
   }
   const actingTarget = typeof mergedConfig.targetId === "string" && mergedConfig.targetId.trim()
     ? getPlatformTargetById(mergedConfig.targetId.trim())
@@ -301,6 +310,12 @@ export async function runTemplateViaRtx(
       targetHandle: actingTarget.handle,
     };
   }
+  const snowballParticipantAccess = isNetworkSnowball
+    ? readNetworkSnowballConfig(mergedConfig).participantAccess
+    : null;
+  const borrowedEventSessionName = snowballParticipantAccess?.enabled
+    ? snowballParticipantAccess.browserSessionName.trim() || null
+    : null;
   const workflowType = TEMPLATE_TO_WORKFLOW_TYPE[template.templateType] ?? "agent";
   const now = Math.floor(Date.now() / 1000);
 
@@ -380,6 +395,7 @@ export async function runTemplateViaRtx(
   let dispatchAccepted = false;
   let writingScopeMinted = false;
   let snowballIdentityScopeMinted = false;
+  let eventIngestion: EventSourceIngestionResult | null = null;
 
   /**
    * Drop the composed dispatch's capability when the dispatch never happened.
@@ -418,7 +434,7 @@ export async function runTemplateViaRtx(
     preparedSessionName = null;
     let browserError: unknown;
     try {
-      if (sessionName) {
+      if (sessionName && sessionName !== borrowedEventSessionName) {
         await stopRunningRtxBrowserSessions({ sessionNames: [sessionName] }, env, fetchImpl);
       }
     } catch (error) {
@@ -459,6 +475,59 @@ export async function runTemplateViaRtx(
     const { threadSlug, resolution: threadResolution } = thread;
 
     let runtimeConfig = { ...mergedConfig };
+    // Persist the server-resolved owner before event ingestion. RealTimeX may reuse an
+    // existing workspace under a slug other than the configured preference, and the
+    // protected event report must remain bound to that authoritative owner even when a
+    // later platform-target preflight or terminal dispatch fails.
+    updateWorkflowRun(run.id, {
+      config: buildStoredRunConfig(template, runtimeConfig, {
+        workspaceSlug,
+        threadSlug,
+      }),
+    });
+    if (isNetworkSnowballTemplateConfig(runtimeConfig)) {
+      const snowball = readNetworkSnowballConfig(runtimeConfig);
+      if (snowball.seedType === "event_url") {
+        try {
+          eventIngestion = await ingestNetworkSnowballEventSource({
+            runId: run.id,
+            ownerWorkspace: workspaceSlug,
+            seedUrl: snowball.seedValue,
+            traversal: snowball.eventTraversal,
+            participantAccess: snowball.participantAccess,
+            writeGraphEdges: snowball.autoLinkGraphEdges && !snowball.requireApproval,
+            fetchImpl,
+            env,
+          });
+          if (eventIngestion) {
+            createWorkflowStep({
+              workflowRunId: run.id,
+              stepIndex: nextStepIndex(run.id),
+              stepType: "tool_call",
+              status: eventIngestion.publicResult.partial ? "failed" : "completed",
+              tool: "event_source_ingest",
+              output: JSON.stringify({
+                provider: "luma",
+                eventCount: eventIngestion.publicResult.events.length,
+                contentItemIds: eventIngestion.publicResult.contentItemIds,
+                guestBoundary: eventIngestion.publicResult.guestBoundary,
+              }),
+              durationMs: 0,
+            });
+          }
+        } catch {
+          createWorkflowStep({
+            workflowRunId: run.id,
+            stepIndex: nextStepIndex(run.id),
+            stepType: "error",
+            status: "failed",
+            tool: "event_source_ingest",
+            error: "Event source extraction failed",
+            durationMs: 0,
+          });
+        }
+      }
+    }
     // Mint the composed dispatch's capability here, where the server still owns the whole context.
     // Only the hash is persisted (under a `_` key, so `stripInternalConfigKeys` keeps it out of the
     // brief's config block); the plaintext goes to this run's brief and nowhere else.
@@ -507,6 +576,7 @@ export async function runTemplateViaRtx(
           errors: JSON.stringify([prepared.error.message]),
           errorItems: 1,
           result: JSON.stringify({
+            ...parseObject(getWorkflowRun(run.id)?.result),
             message: prepared.error.message,
             partial: true,
             blocked: prepared.error.code,
@@ -567,6 +637,7 @@ export async function runTemplateViaRtx(
           errors: JSON.stringify([prepared.error.message]),
           errorItems: 1,
           result: JSON.stringify({
+            ...parseObject(getWorkflowRun(run.id)?.result),
             message: prepared.error.message,
             partial: true,
             blocked: prepared.error.code,
@@ -597,6 +668,9 @@ export async function runTemplateViaRtx(
             settingsPath: SNOWBALL_BROWSER_SETTINGS_PATH,
             settingsTab: "Platform connections",
           },
+          ...(eventIngestion?.eventReportCapability
+            ? { eventReportCapability: eventIngestion.eventReportCapability }
+            : {}),
         };
       }
       snowballTarget = prepared.target;
@@ -660,6 +734,7 @@ export async function runTemplateViaRtx(
       writingScopeToken: writingScope?.token,
       snowballIdentityScopeToken: snowballIdentityScope?.token,
       snowballBrowserTarget: snowballTarget,
+      publicEventSource: eventIngestion?.publicResult,
       platformTarget: actingTarget
         ? {
             id: actingTarget.id,
@@ -739,6 +814,9 @@ export async function runTemplateViaRtx(
         errorCode: launch.errorCode,
         httpStatus,
         workflowRunId: run.id,
+        ...(eventIngestion?.eventReportCapability
+          ? { eventReportCapability: eventIngestion.eventReportCapability }
+          : {}),
       };
     }
     dispatchAccepted = true;
@@ -802,6 +880,9 @@ export async function runTemplateViaRtx(
       threadPath: `/workspace/${resolvedWorkspace}/t/${resolvedThread}`,
       threadResolution,
       workflowRun: updatedRun ?? run,
+      ...(eventIngestion?.eventReportCapability
+        ? { eventReportCapability: eventIngestion.eventReportCapability }
+        : {}),
     };
   } catch (error) {
     let message = error instanceof Error ? error.message : "Launch failed";
@@ -835,6 +916,9 @@ export async function runTemplateViaRtx(
       errorCode: "launch_failed",
       httpStatus: 502,
       workflowRunId: run.id,
+      ...(eventIngestion?.eventReportCapability
+        ? { eventReportCapability: eventIngestion.eventReportCapability }
+        : {}),
     };
   }
 }

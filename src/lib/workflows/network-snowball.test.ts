@@ -7,6 +7,7 @@ import {
   clampNetworkSnowballSlider,
   isNetworkSnowballTemplateConfig,
   readNetworkSnowballConfig,
+  sanitizeNetworkSnowballConfigRecord,
 } from "@/lib/workflows/network-snowball";
 
 const browserTarget = {
@@ -52,6 +53,17 @@ describe("readNetworkSnowballConfig", () => {
       targetPlatform: "all",
       autoLinkGraphEdges: true,
       requireApproval: false,
+      eventTraversal: {
+        adjacentEventDepth: 1,
+        eventsPerCalendar: 3,
+        maxEvents: 6,
+        maxCalendarPages: 2,
+        maxGuestPages: 2,
+        maxParticipantObservations: 30,
+        maxProfileVisits: 20,
+        maxProviderRequests: 40,
+      },
+      participantAccess: { enabled: false, browserSessionName: "" },
       followOnActions: [],
       followOnAction: undefined,
       cascadePolicy: "immediate",
@@ -80,6 +92,17 @@ describe("readNetworkSnowballConfig", () => {
       targetPlatform: "x",
       autoLinkGraphEdges: false,
       requireApproval: true,
+      eventTraversal: {
+        adjacentEventDepth: 1,
+        eventsPerCalendar: 3,
+        maxEvents: 6,
+        maxCalendarPages: 2,
+        maxGuestPages: 2,
+        maxParticipantObservations: 30,
+        maxProfileVisits: 20,
+        maxProviderRequests: 40,
+      },
+      participantAccess: { enabled: false, browserSessionName: "" },
       followOnActions: ["profile_pipeline", "contact_nurture"],
       followOnAction: "profile_pipeline",
       cascadePolicy: "immediate",
@@ -107,6 +130,18 @@ describe("buildNetworkSnowballTemplateConfig & buildNetworkSnowballRunConfig", (
     });
     const runConfig = buildNetworkSnowballRunConfig(draft);
     expect(readNetworkSnowballConfig(runConfig)).toEqual(draft);
+  });
+
+  it("sanitizes event tokens before config persistence", () => {
+    const sanitized = sanitizeNetworkSnowballConfigRecord({
+      networkSnowball: { version: 1 },
+      seedType: "event_url",
+      seedValue: "https://luma.com/EventCase?tk=secret&utm_source=test#guests",
+      inviteToken: "also-secret",
+    });
+    expect(sanitized.seedValue).toBe("https://luma.com/EventCase");
+    expect(sanitized).not.toHaveProperty("inviteToken");
+    expect(JSON.stringify(sanitized)).not.toContain("secret");
   });
 });
 

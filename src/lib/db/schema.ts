@@ -648,6 +648,72 @@ export const workflowRuns = sqliteTable("workflow_runs", {
   index("idx_workflow_runs_type").on(table.workflowType),
 ]);
 
+// Registered-only event observations are intentionally isolated from contacts,
+// content, graph nodes, and the generic workflow result. A short-lived owner-bound
+// capability is the only read path for these rows.
+export const snowballEventAccessGrants = sqliteTable(
+  "snowball_event_access_grants",
+  {
+    id: text("id").primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => workflowRuns.id, { onDelete: "cascade" }),
+    ownerWorkspace: text("owner_workspace").notNull(),
+    connectionId: text("connection_id")
+      .notNull()
+      .references(() => browserConnections.id, { onDelete: "cascade" }),
+    sessionName: text("session_name").notNull(),
+    viewerIdentityHash: text("viewer_identity_hash").notNull(),
+    capabilityHash: text("capability_hash").notNull(),
+    status: text("status", { enum: ["active", "revoked", "expired"] })
+      .notNull()
+      .default("active"),
+    issuedAt: integer("issued_at").notNull(),
+    expiresAt: integer("expires_at").notNull(),
+    revokedAt: integer("revoked_at"),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("idx_snowball_event_grants_capability").on(table.capabilityHash),
+    index("idx_snowball_event_grants_run_owner").on(table.runId, table.ownerWorkspace),
+  ],
+);
+
+export const snowballEventObservations = sqliteTable(
+  "snowball_event_observations",
+  {
+    id: text("id").primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => workflowRuns.id, { onDelete: "cascade" }),
+    ownerWorkspace: text("owner_workspace").notNull(),
+    grantId: text("grant_id")
+      .notNull()
+      .references(() => snowballEventAccessGrants.id, { onDelete: "cascade" }),
+    eventKey: text("event_key").notNull(),
+    subjectKey: text("subject_key").notNull(),
+    observationKind: text("observation_kind", { enum: ["participant"] }).notNull(),
+    scope: text("scope", { enum: ["authorized"] }).notNull().default("authorized"),
+    payloadJson: text("payload_json").notNull(),
+    observedAt: integer("observed_at").notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("idx_snowball_event_observation_identity").on(
+      table.runId,
+      table.grantId,
+      table.eventKey,
+      table.subjectKey,
+      table.observationKind,
+    ),
+    index("idx_snowball_event_observations_owner").on(
+      table.runId,
+      table.ownerWorkspace,
+      table.grantId,
+    ),
+  ],
+);
+
 // --- Persona jobs (terminal-agent synthesis lane) ---
 
 export const personaJobs = sqliteTable(

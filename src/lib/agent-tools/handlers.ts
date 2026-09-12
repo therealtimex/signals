@@ -117,7 +117,11 @@ import {
   recordSnowballCandidateFailure,
   summarizeSnowballCandidates,
 } from "@/lib/workflows/snowball-candidates";
-import { isNetworkSnowballTemplateConfig } from "@/lib/workflows/network-snowball";
+import {
+  isNetworkSnowballTemplateConfig,
+  readNetworkSnowballConfig,
+} from "@/lib/workflows/network-snowball";
+import { removeServerOwnedEventResult } from "@/lib/workflows/event-sources/service";
 import {
   getNetworkSnowballTargetFromRunConfig,
   releaseNetworkSnowballTargetFromRunConfig,
@@ -1448,10 +1452,17 @@ export async function handleCompleteWorkflowRun(input: z.infer<typeof completeWo
   const runConfig = parseJsonObject(run.config);
   const isContactResearch = isContactWebResearchTemplateConfig(runConfig);
   const isSnowball = isNetworkSnowballTemplateConfig(runConfig);
+  const snowballParticipantAccess = isSnowball
+    ? readNetworkSnowballConfig(runConfig).participantAccess
+    : null;
+  const borrowedEventSessionName = snowballParticipantAccess?.enabled
+    ? snowballParticipantAccess.browserSessionName.trim() || null
+    : null;
   const preparedTarget = getContactWebResearchTargetFromRunConfig(run.config);
   const snowballBrowserTarget = getNetworkSnowballTargetFromRunConfig(run.config);
   const callbackResult: Record<string, unknown> = { ...(input.result ?? {}) };
   delete callbackResult[SNOWBALL_IDENTITY_EVIDENCE_RESULT_KEY];
+  removeServerOwnedEventResult(callbackResult);
   let effectiveStatus = input.status;
   let normalizedErrors = uniqueStrings([
     ...parseSerializedStrings(run.errors),
@@ -1573,9 +1584,10 @@ export async function handleCompleteWorkflowRun(input: z.infer<typeof completeWo
     }
   } else if (isSnowball) {
     try {
-      browserSessionTeardown = await stopRunningRtxBrowserSessions({
-        sessionNames: [snowballBrowserTarget?.sessionName ?? RTX_PUBLISH_SESSION_NAME],
-      });
+      const targetSessionName = snowballBrowserTarget?.sessionName ?? RTX_PUBLISH_SESSION_NAME;
+      browserSessionTeardown = targetSessionName === borrowedEventSessionName
+        ? { stopped: [], failed: [] }
+        : await stopRunningRtxBrowserSessions({ sessionNames: [targetSessionName] });
     } finally {
       leaseRelease = releaseNetworkSnowballTargetFromRunConfig(run.config);
     }

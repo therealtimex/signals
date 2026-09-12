@@ -1,3 +1,8 @@
+import {
+  canonicalizeLumaUrl,
+  sanitizeExternalUrl,
+} from "@/lib/workflows/event-sources/urls";
+
 export interface SnowballSeedUrlFilterResult {
   accepted: string[];
   rejected: string[];
@@ -105,6 +110,7 @@ function inferPlatformFromUrl(url: string): SnowballPlatform | null {
 
 /** Navigation/search/home URLs that must never become Snowball calendar seeds. */
 export function isGlobalNonPostUrl(url: string): boolean {
+  if (canonicalizeLumaUrl(url)) return false;
   const lowered = url.trim().toLowerCase();
   if (!lowered.startsWith("http")) {
     return true;
@@ -127,6 +133,7 @@ function isEnqueueableSeed(url: string, platform: SnowballPlatform): boolean {
 }
 
 function isEnqueueableSeedAny(url: string): boolean {
+  if (canonicalizeLumaUrl(url)) return true;
   if (isGlobalNonPostUrl(url)) {
     return false;
   }
@@ -152,7 +159,7 @@ export function filterSnowballEnqueueUrls(
   const seen = new Set<string>();
 
   for (const raw of urls) {
-    const candidate = String(raw).trim();
+    const candidate = sanitizeExternalUrl(String(raw)).trim();
     if (!candidate || seen.has(candidate)) {
       continue;
     }

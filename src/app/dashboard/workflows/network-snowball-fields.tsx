@@ -25,6 +25,7 @@ import {
   FOLLOW_ON_ACTION_OPTIONS,
   type FollowOnActionType,
 } from "@/lib/workflows/cascade-types";
+import { NetworkSnowballEventFields } from "@/app/dashboard/workflows/network-snowball-event-fields";
 
 interface NetworkSnowballFieldsProps {
   value: NetworkSnowballConfig;
@@ -108,7 +109,7 @@ export function NetworkSnowballFields({
         <div className="space-y-2 md:col-span-2">
           <Label htmlFor="snowball-seed-value">
             {value.seedType === "event_url"
-              ? "Announcement URL"
+              ? "Announcement or event URL"
               : value.seedType === "contact_id"
                 ? "Founder / Contact handle or ID"
                 : value.seedType === "org_id"
@@ -119,7 +120,7 @@ export function NetworkSnowballFields({
             id="snowball-seed-value"
             placeholder={
               value.seedType === "event_url"
-                ? "https://x.com/founder/status/..."
+                ? "https://luma.com/event or https://x.com/..."
                 : value.seedType === "contact_id"
                   ? "@founder_handle or contact ID"
                   : value.seedType === "org_id"
@@ -132,6 +133,10 @@ export function NetworkSnowballFields({
           />
         </div>
       </div>
+
+      {value.seedType === "event_url" && (
+        <NetworkSnowballEventFields value={value} onChange={onChange} disabled={disabled} />
+      )}
 
       {/* Target Platform */}
       <div className="space-y-2">

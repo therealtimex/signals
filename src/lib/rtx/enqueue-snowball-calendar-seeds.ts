@@ -13,7 +13,10 @@ import {
 } from "@/lib/db/queries/snowball-seed-ledger";
 import { getRtxAppId, resolveRtxApiBase, type EnvLike } from "@/lib/rtx/env";
 import { resolveSignalsBaseUrlFromEnv } from "@/lib/rtx/resolve-signals-base-url";
-import { NETWORK_SNOWBALL_TEMPLATE_NAME } from "@/lib/workflows/network-snowball";
+import {
+  NETWORK_SNOWBALL_TEMPLATE_NAME,
+  sanitizeNetworkSnowballConfigRecord,
+} from "@/lib/workflows/network-snowball";
 import type { SnowballSeedScoutConfig } from "@/lib/workflows/snowball-seed-scout";
 
 export interface EnqueueSnowballSeedInput {
@@ -153,7 +156,9 @@ export async function enqueueSnowballCalendarSeeds(
   pruneSnowballSeedLedger();
 
   const processSeed = async (seed: EnqueueSnowballSeedInput): Promise<void> => {
-    const url = String(seed.url || "").trim();
+    const url = String(
+      sanitizeNetworkSnowballConfigRecord({ seedValue: String(seed.url || "") }).seedValue ?? "",
+    ).trim();
     if (!url) {
       skipped.push(url);
       return;

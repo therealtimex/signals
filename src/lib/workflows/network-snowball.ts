@@ -19,6 +19,13 @@ import {
   type FollowOnActionType,
 } from "@/lib/workflows/cascade-types";
 import type { NetworkSnowballPreparedTarget } from "@/lib/workflows/network-snowball-target";
+import { readEventTraversalPolicy } from "@/lib/workflows/event-sources/policy";
+import type {
+  EventParticipantAccessConfig,
+  EventTraversalPolicy,
+} from "@/lib/workflows/event-sources/types";
+import { sanitizeExternalUrl } from "@/lib/workflows/event-sources/urls";
+import type { PublicEventSourceResult } from "@/lib/workflows/event-sources/service";
 
 export const NETWORK_SNOWBALL_TEMPLATE_NAME = "Network Snowball";
 
@@ -78,9 +85,53 @@ export interface NetworkSnowballConfig {
   targetPlatform: "x" | "linkedin" | "all";
   autoLinkGraphEdges: boolean;
   requireApproval: boolean;
+  eventTraversal: EventTraversalPolicy;
+  participantAccess: EventParticipantAccessConfig;
   followOnActions?: FollowOnActionType[];
   followOnAction?: FollowOnActionType;
   cascadePolicy?: "immediate" | "supervised";
+}
+
+function readParticipantAccess(value: unknown): EventParticipantAccessConfig {
+  const record = value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+  return {
+    enabled: record.enabled === true,
+    browserSessionName:
+      typeof record.browserSessionName === "string"
+        ? record.browserSessionName.trim().slice(0, 120)
+        : "",
+  };
+}
+
+/** Sanitize untrusted launch/template config before it can be persisted or logged. */
+export function sanitizeNetworkSnowballConfigRecord(
+  config: Record<string, unknown>,
+): Record<string, unknown> {
+  const next = { ...config };
+  if (typeof next.seedValue === "string") {
+    next.seedValue = sanitizeExternalUrl(next.seedValue);
+  }
+  next.eventTraversal = readEventTraversalPolicy(next.eventTraversal);
+  next.participantAccess = readParticipantAccess(next.participantAccess);
+  for (const key of ["tk", "token", "inviteToken", "accessToken", "authorization", "cookie"]) {
+    delete next[key];
+  }
+  return next;
+}
+
+export function sanitizeNetworkSnowballSerializedConfig(config: string): string {
+  try {
+    const parsed = JSON.parse(config);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return config;
+    const record = parsed as Record<string, unknown>;
+    return isNetworkSnowballTemplateConfig(record)
+      ? JSON.stringify(sanitizeNetworkSnowballConfigRecord(record))
+      : config;
+  } catch {
+    return config;
+  }
 }
 
 export function isNetworkSnowballTemplateConfig(config: Record<string, unknown>): boolean {
@@ -114,15 +165,18 @@ export function readNetworkSnowballConfig(
 
   const cascade = readWorkflowCascadeConfig(config);
 
+  const sanitized = sanitizeNetworkSnowballConfigRecord(config);
   return {
     seedType,
-    seedValue: typeof config.seedValue === "string" ? config.seedValue.trim() : "",
+    seedValue: typeof sanitized.seedValue === "string" ? sanitized.seedValue.trim() : "",
     focus,
     maxContacts: clampNetworkSnowballSlider("maxContacts", config.maxContacts),
     maxHops: clampNetworkSnowballSlider("maxHops", config.maxHops),
     targetPlatform,
     autoLinkGraphEdges: typeof config.autoLinkGraphEdges === "boolean" ? config.autoLinkGraphEdges : true,
     requireApproval: typeof config.requireApproval === "boolean" ? config.requireApproval : false,
+    eventTraversal: readEventTraversalPolicy(sanitized.eventTraversal),
+    participantAccess: readParticipantAccess(sanitized.participantAccess),
     followOnActions: cascade.followOnActions,
     followOnAction: cascade.followOnActions[0],
     cascadePolicy: cascade.cascadePolicy,
@@ -133,7 +187,7 @@ export function buildNetworkSnowballRunConfig(
   config: NetworkSnowballConfig,
 ): Record<string, unknown> {
   const followOnActions = config.followOnActions ?? (config.followOnAction ? [config.followOnAction] : []);
-  return {
+  return sanitizeNetworkSnowballConfigRecord({
     [NETWORK_SNOWBALL_CONFIG_KEY]: { version: NETWORK_SNOWBALL_CONFIG_VERSION },
     seedType: config.seedType,
     seedValue: config.seedValue,
@@ -143,11 +197,13 @@ export function buildNetworkSnowballRunConfig(
     targetPlatform: config.targetPlatform,
     autoLinkGraphEdges: config.autoLinkGraphEdges,
     requireApproval: config.requireApproval,
+    eventTraversal: readEventTraversalPolicy(config.eventTraversal),
+    participantAccess: readParticipantAccess(config.participantAccess),
     [CASCADE_CONFIG_KEY]: buildWorkflowCascadeConfig({
       followOnActions,
       cascadePolicy: config.cascadePolicy ?? "immediate",
     }),
-  };
+  });
 }
 
 export function buildNetworkSnowballTemplateConfig(): Record<string, unknown> {
@@ -161,6 +217,8 @@ export function buildNetworkSnowballTemplateConfig(): Record<string, unknown> {
     targetPlatform: "all",
     autoLinkGraphEdges: true,
     requireApproval: false,
+    eventTraversal: readEventTraversalPolicy({}),
+    participantAccess: { enabled: false, browserSessionName: "" },
     [CASCADE_CONFIG_KEY]: buildWorkflowCascadeConfig({
       followOnActions: [],
       cascadePolicy: "immediate",
@@ -175,6 +233,7 @@ export function buildNetworkSnowballBriefSection(input: {
   signalsBaseUrl?: string;
   snowballIdentityScopeToken?: string;
   browserTarget?: NetworkSnowballPreparedTarget;
+  publicEventSource?: PublicEventSourceResult | null;
 }): string {
   const snowball = readNetworkSnowballConfig(input.config);
   const seedDescriptor = snowball.seedValue
@@ -203,15 +262,31 @@ export function buildNetworkSnowballBriefSection(input: {
   const graphLinkingInstruction = snowball.autoLinkGraphEdges
     ? "    After contacts.csv import, link Hop 1 (and Hop 2) people to hop0OrgId. Use `link_contact_to_org` for employment (founders, executives, operators). Do not write `works_at` through `upsert_edge`. Use `upsert_edge` for non-employment causal edges (`investor_in`, `advisor_of`, `board_member`) with srcType=contact, dstType=org, dstId=hop0OrgId, and source=\"agent:network_snowball\"."
     : "    autoLinkGraphEdges is false: ingest Hop 0 and later-hop contacts/orgs but do not write graph edges or employment links.";
+  const browserTeardownInstruction =
+    snowball.participantAccess.enabled &&
+    snowball.participantAccess.browserSessionName.trim() === browserTarget?.sessionName
+      ? `    - Server-Owned Browser Teardown: Call complete_workflow_run (step 10) exactly once when finished. Signals releases this run's lease but leaves the user-selected borrowed session \`${browserSessionName}\` running.`
+      : `    - Server-Owned Browser Teardown: Do not close the browser yourself. Call complete_workflow_run (step 10) exactly once when finished. Before that call returns, Signals stops the exact bound session \`${browserSessionName}\` and releases this run's lease, freeing Chromium RAM and CPU without touching unrelated sessions.`;
+  const publicEventContext = input.publicEventSource?.events.length
+    ? input.publicEventSource.events
+        .map((event) => {
+          const roles = event.parties.map((party) => `${party.role}:${party.name}`).join(", ") || "none";
+          return `    - ${event.title} (${event.canonicalUrl}); starts=${event.startsAt ?? "unknown"}; location=${event.location ?? "unknown"}; going=${event.audience.goingCount ?? "unknown"}; roles=${roles}`;
+        })
+        .join("\n")
+    : "    - No server-extracted public Luma event record is available.";
+  const seedInspectionInstruction = input.publicEventSource
+    ? `S1. Inspect Seed Signal: Signals already fetched and persisted the public Luma event source before dispatch. Treat this server-computed public context as authoritative; do not replace it in complete_workflow_run.result:\n${publicEventContext}\n    Registered-only guest observations, when enabled, are stored behind an owner-bound report capability and are never available to this terminal agent. Continue profile expansion only from public named hosts, organizers, sponsors, venues, calendars, and related events.`
+    : `S1. Inspect Seed Signal: Attach agent-browser over CDP to the already-running server-bound session named \`${browserSessionName}\` only. It was authenticated as ${browserTarget?.platform ?? "<missing-platform>"} identity \`${verifiedBrowserIdentity}\` before dispatch. Do not create, start, stop, delete, or substitute a browser session. Navigate in that session to the seed post URL, profile, or organization and parse the core event context (e.g. funding round amount, launch specs, executive hire, or partnership announcement).`;
 
   const lines = [
     "Network Snowball execution contract:",
     `S0. Objective: Ingest Hop 0 graph anchors (primary organization and qualifying author/founder) from seed signal ${seedDescriptor}, then roll outward to discover and map up to ${snowball.maxContacts} connected Hop 1/Hop 2 contact(s) focusing on ${focusDescriptions[snowball.focus]} (max outward depth: ${snowball.maxHops} hop(s); Hop 0 is always ingested and does not count against maxContacts).`,
-    `S1. Inspect Seed Signal: Attach agent-browser over CDP to the already-running server-bound session named \`${browserSessionName}\` only. It was authenticated as ${browserTarget?.platform ?? "<missing-platform>"} identity \`${verifiedBrowserIdentity}\` before dispatch. Do not create, start, stop, delete, or substitute a browser session. Navigate in that session to the seed post URL, profile, or organization and parse the core event context (e.g. funding round amount, launch specs, executive hire, or partnership announcement).`,
+    seedInspectionInstruction,
     "    - Browser privacy boundary: Never read document.cookie, localStorage, sessionStorage, browser profile files, authorization headers, or other credential material. Use visible page content and links only.",
     "    - Workflow boundary: This is a data-plane run. Never inspect or edit the Signals source tree, package files, tests, or runtime implementation. If a workflow tool or identity gate fails, record the failure and finalize the run as partial/failed; do not patch around the gate.",
     "    - Hop 0 Seed Ingestion (required before Hop 1): The seed is a graph anchor, not only a traversal entrypoint. After parsing the event, ingest the featured company and, when they are a real human decision-maker, the post author or featured founder.",
-    `      - Primary Organization: Extract the featured company name plus website/domain and industry when visible. query_orgs by name and get_org by domain when a domain is visible. If none exists, create_org with name/domain/website/industry and this brief's workflowRunId + templateId. On CONFLICT, reuse the returned orgId. ${hop0OrgReuse} Record that id as hop0OrgId for later linking.`,
+    `      - Primary Organization: Extract the featured company name plus website/domain and industry when visible. query_orgs by name and get_org by domain when a domain is visible. If none exists, create_org with name/domain/website/industry and this brief's workflowRunId + templateId. For a server-extracted Luma organizer only, also pass observedRole=organized_by; never use that role for a sponsor, venue, calendar, or merely related organization. On CONFLICT, reuse the returned orgId. ${hop0OrgReuse} Record that id as hop0OrgId for later linking.`,
     "      - Primary Contact: If the post author or featured subject is a real human decision-maker (founder, executive, or key ecosystem voice), ingest them as the Hop 0 root contact through the same attestation + contacts.csv path as later hops, with notes like 'role: Founder of Acme (Hop 0 seed)'. If seedType is contact_id, get_contact that id and reuse it as Hop 0. Skip Hop 0 contact creation when the author is an automated news aggregator (PR Newswire, *bot, *daily, *digest, newswire, press-release feeds); still ingest the announced organization.",
     `S2. Discover Connected Nodes: Traverse 1st-degree relational edges from the Hop 0 seed entity:`,
     `    - Backers / Investors: Extract tagged partner handles, mentioned VC funds, and congratulatory angels in replies.`,
@@ -230,7 +305,7 @@ export function buildNetworkSnowballBriefSection(input: {
       : `S5. Auto-commit & Graph Edge Linking: Keep Auto-commit enabled. For each accepted candidate, attest first, then stage workflow-runs/${input.workflowRunId}/contacts.csv (header: name,company,title,email,platform,platform_user_id,platform_handle,profile_url,avatar_url,identity_evidence_token,notes) and commit with:\n    .claude/skills/realtimex-signals/scripts/run-signals-pp-cli.sh import contacts --file workflow-runs/${input.workflowRunId}/contacts.csv --dedupe${attributionFlags}\n    For a LinkedIn-backed run, every row must contain the LinkedIn identity and its valid evidence token; omitting platform/profile fields does not create a bare-contact fallback. The server rejects an unattested candidate before persistence and rejects completion when any accepted cohort contact lacks run-bound evidence. In the notes field, explicitly record the causal relationship (e.g., 'role: Lead Investor in Acme Seed round' or 'role: Co-Founder & CTO'). Include the Hop 0 author in the same CSV when they were ingested.\n${graphLinkingInstruction}`,
     "S6. Report Progress: Provide a concise summary table in this thread listing Hop 0 (org id plus author or 'org-only, author skipped as aggregator') and every discovered Hop 1/Hop 2 contact, their proposed company/role, identity attestation outcome, avatar URLs when available, and platform links. Include quarantined failures instead of burying them in prose. End with `N discovered · X committed · Y awaiting verification` and state avatar coverage as `avatars: N/M`, but treat missing avatars as enrichment gaps rather than identity evidence failures.",
     "S7. Teardown & Resource Release:",
-    `    - Server-Owned Browser Teardown: Do not close the browser yourself. Call complete_workflow_run (step 10) exactly once when finished. Before that call returns, Signals stops the exact bound session \`${browserSessionName}\` and releases this run's lease, freeing Chromium RAM and CPU without touching unrelated sessions.`,
+    browserTeardownInstruction,
     "    - Terminate Agent Session: Completion also schedules release of this workflow's linked terminal session after the chat-linked turn finishes — do not send further messages in this thread after completion.",
   ];
 

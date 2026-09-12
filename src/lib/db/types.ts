@@ -33,6 +33,8 @@ import {
   orgActivities,
   contactEmailCandidates,
   snowballCandidates,
+  snowballEventAccessGrants,
+  snowballEventObservations,
   graphEdges,
   interactions,
   identityMetrics,
@@ -74,6 +76,10 @@ export type ContactEmailCandidate = InferSelectModel<typeof contactEmailCandidat
 export type NewContactEmailCandidate = InferInsertModel<typeof contactEmailCandidates>;
 export type SnowballCandidate = InferSelectModel<typeof snowballCandidates>;
 export type NewSnowballCandidate = InferInsertModel<typeof snowballCandidates>;
+export type SnowballEventAccessGrant = InferSelectModel<typeof snowballEventAccessGrants>;
+export type NewSnowballEventAccessGrant = InferInsertModel<typeof snowballEventAccessGrants>;
+export type SnowballEventObservation = InferSelectModel<typeof snowballEventObservations>;
+export type NewSnowballEventObservation = InferInsertModel<typeof snowballEventObservations>;
 export type OrgActivity = InferSelectModel<typeof orgActivities>;
 export type NewOrgActivity = InferInsertModel<typeof orgActivities>;
 

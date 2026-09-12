@@ -380,14 +380,18 @@ export async function handleCreateOrg(input: z.infer<typeof createOrgSchema>) {
         templateId: resolvedIds.templateId,
       },
     });
-    attachNetworkSnowballHop0Org(resolvedIds.workflowRunId ?? undefined, org.id);
+    attachNetworkSnowballHop0Org(
+      resolvedIds.workflowRunId ?? undefined,
+      org.id,
+      input.observedRole,
+    );
     return getOrgDTO(org.id)!;
   } catch (error) {
     if (error instanceof OrgValidationError) {
       throw new AgentToolError("VALIDATION_ERROR", error.message, error.details);
     }
     if (error instanceof OrgDomainConflictError) {
-      attachNetworkSnowballHop0Org(input.workflowRunId, error.orgId);
+      attachNetworkSnowballHop0Org(input.workflowRunId, error.orgId, input.observedRole);
       throw new AgentToolError("CONFLICT", error.message, {
         domain: error.domain,
         orgId: error.orgId,

@@ -17,6 +17,7 @@ import type {
   NewWorkflowEnrollment,
   PaginatedResult,
 } from "@/lib/db/types";
+import { sanitizeNetworkSnowballSerializedConfig } from "@/lib/workflows/network-snowball";
 
 // ── Templates ──────────────────────────────────
 
@@ -24,7 +25,10 @@ export function createTemplate(
   data: Omit<NewWorkflowTemplate, "id">
 ): WorkflowTemplate {
   const id = nanoid();
-  db.insert(workflowTemplates).values({ ...data, id }).run();
+  const config = typeof data.config === "string"
+    ? sanitizeNetworkSnowballSerializedConfig(data.config)
+    : data.config;
+  db.insert(workflowTemplates).values({ ...data, config, id }).run();
   return db
     .select()
     .from(workflowTemplates)
@@ -50,8 +54,12 @@ export function updateTemplate(
     .get();
   if (!existing) return undefined;
 
+  const sanitizedData = typeof data.config === "string"
+    ? { ...data, config: sanitizeNetworkSnowballSerializedConfig(data.config) }
+    : data;
+
   db.update(workflowTemplates)
-    .set({ ...data, updatedAt: Math.floor(Date.now() / 1000) })
+    .set({ ...sanitizedData, updatedAt: Math.floor(Date.now() / 1000) })
     .where(eq(workflowTemplates.id, id))
     .run();
 

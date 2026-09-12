@@ -63,6 +63,7 @@ import {
   isNetworkSnowballTemplateConfig,
   readNetworkSnowballConfig,
 } from "@/lib/workflows/network-snowball";
+import { EventParticipantReport } from "@/components/event-participant-report";
 
 interface Template {
   id: string;
@@ -102,6 +103,7 @@ interface DialogState {
   error: string | null;
   threadPath: string | null;
   workflowRunId: string | null;
+  eventReportCapability: string | null;
   backlog: PipelineBacklogPreview | null;
   backlogLoading: boolean;
   pipelineBatchSize: number;
@@ -116,8 +118,8 @@ interface DialogState {
 
 type DialogAction =
   | { type: "START_RUN" }
-  | { type: "RUN_SUCCESS"; workflowRunId?: string; threadPath?: string }
-  | { type: "RUN_ERROR"; error: string }
+  | { type: "RUN_SUCCESS"; workflowRunId?: string; threadPath?: string; eventReportCapability?: string }
+  | { type: "RUN_ERROR"; error: string; workflowRunId?: string; eventReportCapability?: string }
   | { type: "SET_BACKLOG_LOADING"; loading: boolean }
   | { type: "SET_BACKLOG"; backlog: PipelineBacklogPreview | null; batchSize?: number }
   | { type: "SET_PIPELINE_BATCH_SIZE"; batchSize: number }
@@ -144,6 +146,7 @@ function initDialogState(template: Template): DialogState {
     error: null,
     threadPath: null,
     workflowRunId: null,
+    eventReportCapability: null,
     backlog: null,
     backlogLoading: false,
     pipelineBatchSize: PROFILE_PIPELINE_DEFAULT_BATCH,
@@ -160,7 +163,7 @@ function initDialogState(template: Template): DialogState {
 function dialogReducer(state: DialogState, action: DialogAction): DialogState {
   switch (action.type) {
     case "START_RUN":
-      return { ...state, running: true, error: null, threadPath: null, workflowRunId: null };
+      return { ...state, running: true, error: null, threadPath: null, workflowRunId: null, eventReportCapability: null };
     case "RUN_SUCCESS":
       return {
         ...state,
@@ -168,6 +171,7 @@ function dialogReducer(state: DialogState, action: DialogAction): DialogState {
         error: null,
         workflowRunId: action.workflowRunId ?? null,
         threadPath: action.threadPath ?? null,
+        eventReportCapability: action.eventReportCapability ?? null,
       };
     case "RUN_ERROR":
       return {
@@ -175,7 +179,8 @@ function dialogReducer(state: DialogState, action: DialogAction): DialogState {
         running: false,
         error: action.error,
         threadPath: null,
-        workflowRunId: null,
+        workflowRunId: action.workflowRunId ?? null,
+        eventReportCapability: action.eventReportCapability ?? null,
       };
     case "SET_BACKLOG_LOADING":
       return { ...state, backlogLoading: action.loading };
@@ -285,10 +290,12 @@ function ActivateDialogRunStatus({
   isPipeline,
   workflowRunId,
   threadPath,
+  eventReportCapability,
 }: {
   isPipeline: boolean;
   workflowRunId: string | null;
   threadPath: string | null;
+  eventReportCapability: string | null;
 }) {
   return (
     <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-100 space-y-2">
@@ -306,6 +313,12 @@ function ActivateDialogRunStatus({
         </Link>
       )}
       {threadPath && <p className="font-mono text-xs">{threadPath}</p>}
+      {workflowRunId && eventReportCapability && (
+        <EventParticipantReport
+          workflowRunId={workflowRunId}
+          capability={eventReportCapability}
+        />
+      )}
     </div>
   );
 }
@@ -635,6 +648,7 @@ function ActivateDialogContent({
     error,
     threadPath,
     workflowRunId,
+    eventReportCapability,
     backlog,
     backlogLoading,
     pipelineBatchSize,
@@ -747,15 +761,25 @@ function ActivateDialogContent({
 
       if (!res.ok) {
         let errorMsg = "Failed to start agent";
+        let failedRunId: string | undefined;
+        let failedEventReportCapability: string | undefined;
         try {
-          const data = (await res.json()) as { error?: unknown };
+          const data = (await res.json()) as {
+            error?: unknown;
+            workflowRunId?: string;
+            eventReportCapability?: { token?: string };
+          };
           if (typeof data.error === "string") errorMsg = data.error;
+          failedRunId = data.workflowRunId;
+          failedEventReportCapability = data.eventReportCapability?.token;
         } catch {
           // ignore json parse error on non-ok status
         }
         dispatch({
           type: "RUN_ERROR",
           error: errorMsg,
+          workflowRunId: failedRunId,
+          eventReportCapability: failedEventReportCapability,
         });
         return;
       }
@@ -763,12 +787,14 @@ function ActivateDialogContent({
       const data = (await res.json().catch(() => ({}))) as {
         threadPath?: string;
         workflowRunId?: string;
+        eventReportCapability?: { token?: string };
       };
 
       dispatch({
         type: "RUN_SUCCESS",
         workflowRunId: data.workflowRunId,
         threadPath: data.threadPath,
+        eventReportCapability: data.eventReportCapability?.token,
       });
     } catch {
       dispatch({
@@ -778,7 +804,7 @@ function ActivateDialogContent({
     }
   }
 
-  const runLaunched = Boolean(threadPath || workflowRunId);
+  const runLaunched = !error && Boolean(threadPath || workflowRunId);
   const pipelineRunDisabled =
     isPipeline &&
     (backlogLoading || backlog == null || backlog.backlogTotal === 0);
@@ -787,6 +813,11 @@ function ActivateDialogContent({
   // Publishing needs at least one profile to publish to.
   const profilePublishRunDisabled =
     isProfilePublish && profilePublish.targetIds.length === 0;
+  const networkSnowballRunDisabled =
+    isNetworkSnowball &&
+    (!snowball.seedValue.trim() ||
+      (snowball.participantAccess.enabled &&
+        !snowball.participantAccess.browserSessionName.trim()));
   const pipelineBatchMax = backlog
     ? Math.min(PROFILE_PIPELINE_MAX_BATCH, Math.max(1, backlog.backlogTotal))
     : PROFILE_PIPELINE_MAX_BATCH;
@@ -859,6 +890,7 @@ function ActivateDialogContent({
             isPipeline={isPipeline}
             workflowRunId={workflowRunId}
             threadPath={threadPath}
+            eventReportCapability={eventReportCapability}
           />
         )}
 
@@ -883,8 +915,14 @@ function ActivateDialogContent({
         )}
 
         {error && (
-          <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200">
-            {error}
+          <div className="space-y-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200">
+            <p>{error}</p>
+            {workflowRunId && eventReportCapability && (
+              <EventParticipantReport
+                workflowRunId={workflowRunId}
+                capability={eventReportCapability}
+              />
+            )}
           </div>
         )}
       </div>
@@ -900,7 +938,8 @@ function ActivateDialogContent({
               running ||
               pipelineRunDisabled ||
               patrolRunDisabled ||
-              profilePublishRunDisabled
+              profilePublishRunDisabled ||
+              networkSnowballRunDisabled
             }
           >
             {running ? (
@@ -914,6 +953,10 @@ function ActivateDialogContent({
                 ? "All contacts are up to date"
                 : patrolRunDisabled || profilePublishRunDisabled
                   ? "Select an acting profile"
+                  : networkSnowballRunDisabled
+                    ? snowball.seedValue.trim()
+                      ? "Select browser session"
+                      : "Add a seed"
                   : isPipeline
                     ? "Run"
                     : isPatrol
