@@ -14,6 +14,12 @@ import {
   evaluateAgenticRouting,
 } from "@/lib/webhooks/workflow-events";
 import { PIPELINE_STEP_HANDLERS } from "@/lib/workflows/pipeline/handlers";
+import * as orchestratorThread from "@/lib/rtx/orchestrator-thread";
+import * as runtimeSessions from "@/lib/rtx/runtime-sessions";
+import {
+  readWorkflowTerminalLifecycle,
+  RTX_ORCHESTRATOR_TERMINAL_LIFECYCLE_CONFIG_KEY,
+} from "@/lib/rtx/workflow-terminal-lifecycle";
 
 describe("Workflow Events & Agentic Router", () => {
   beforeEach(() => {
@@ -246,6 +252,72 @@ describe("Workflow Events & Agentic Router", () => {
     expect(result.emitted).toBe(true);
     expect(result.routingRecommendation?.suggestedAction).toBe("nurture");
     expect(result.cascadeResult?.followOnAction).toBe("agentic_router");
+  });
+
+  it("persists orchestrator runtime identity without requesting cleanup before its callback", async () => {
+    vi.spyOn(orchestratorThread, "getOrCreateOrchestratorThread").mockResolvedValue({
+      workspaceSlug: "signals",
+      threadSlug: "signals-orchestrator",
+      threadName: "Signals Orchestrator",
+      resolution: "reused",
+    });
+    vi.spyOn(runtimeSessions, "dispatchTerminalAgentViaSendMessage").mockResolvedValue({
+      success: true,
+      descriptor: {
+        id: "cli-agent:orchestrator",
+        aliases: ["terminal-card:orchestrator", "pty:orchestrator"],
+        linkage: {
+          workspaceSlug: "signals",
+          threadSlug: "signals-orchestrator",
+        },
+      },
+    });
+    const template = createTemplate({
+      name: "Network Snowball",
+      templateType: "prospecting",
+      status: "active",
+    });
+    const parentRun = createWorkflowRun({
+      templateId: template.id,
+      workflowType: "search",
+      status: "completed",
+      trigger: "template",
+      config: JSON.stringify({
+        cascadeConfig: buildWorkflowCascadeConfig({
+          followOnActions: ["agentic_router"],
+        }),
+      }),
+    });
+
+    await emitWorkflowCompletedEvent(parentRun.id, {
+      webhookUrl: "",
+      fetchImpl: vi.fn() as unknown as typeof fetch,
+    });
+
+    const lifecycle = readWorkflowTerminalLifecycle(
+      getWorkflowRun(parentRun.id)?.config,
+      RTX_ORCHESTRATOR_TERMINAL_LIFECYCLE_CONFIG_KEY,
+    );
+    expect(lifecycle?.dispatch).toMatchObject({
+      state: "accepted",
+      routing: {
+        runId: parentRun.id,
+        workspaceSlug: "signals",
+        threadSlug: "signals-orchestrator",
+      },
+      session: {
+        id: "cli-agent:orchestrator",
+        aliases: [
+          "cli-agent:orchestrator",
+          "terminal-card:orchestrator",
+          "pty:orchestrator",
+        ],
+      },
+    });
+    expect(lifecycle?.cleanup).toMatchObject({
+      requested: false,
+      state: "not_requested",
+    });
   });
 
   it("dispatches outbound HTTP POST to configured webhook destination", async () => {

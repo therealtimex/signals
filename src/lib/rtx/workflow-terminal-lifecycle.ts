@@ -1,7 +1,13 @@
 import type { RuntimeSessionDescriptor } from "@/lib/rtx/runtime-sessions";
 
 export const RTX_TERMINAL_LIFECYCLE_CONFIG_KEY = "rtxTerminalLifecycle";
+export const RTX_ORCHESTRATOR_TERMINAL_LIFECYCLE_CONFIG_KEY =
+  "rtxOrchestratorTerminalLifecycle";
 export const RTX_TERMINAL_LIFECYCLE_VERSION = 1;
+
+export type WorkflowTerminalLifecycleConfigKey =
+  | typeof RTX_TERMINAL_LIFECYCLE_CONFIG_KEY
+  | typeof RTX_ORCHESTRATOR_TERMINAL_LIFECYCLE_CONFIG_KEY;
 
 export type WorkflowTerminalDispatchState =
   | "dispatching"
@@ -65,8 +71,9 @@ export function parseWorkflowRunConfig(value: unknown): Record<string, unknown> 
 
 export function readWorkflowTerminalLifecycle(
   config: unknown,
+  key: WorkflowTerminalLifecycleConfigKey = RTX_TERMINAL_LIFECYCLE_CONFIG_KEY,
 ): WorkflowTerminalLifecycle | null {
-  const raw = parseWorkflowRunConfig(config)[RTX_TERMINAL_LIFECYCLE_CONFIG_KEY];
+  const raw = parseWorkflowRunConfig(config)[key];
   if (
     !raw ||
     typeof raw !== "object" ||
@@ -158,17 +165,22 @@ export function readWorkflowTerminalLifecycle(
 export function writeWorkflowTerminalLifecycle(
   config: unknown,
   lifecycle: WorkflowTerminalLifecycle,
+  key: WorkflowTerminalLifecycleConfigKey = RTX_TERMINAL_LIFECYCLE_CONFIG_KEY,
 ): string {
   return JSON.stringify({
     ...parseWorkflowRunConfig(config),
-    [RTX_TERMINAL_LIFECYCLE_CONFIG_KEY]: lifecycle,
+    [key]: lifecycle,
   });
 }
 
 export function stripWorkflowTerminalLifecycle(
   config: Record<string, unknown>,
 ): Record<string, unknown> {
-  const { [RTX_TERMINAL_LIFECYCLE_CONFIG_KEY]: _internal, ...visible } = config;
+  const {
+    [RTX_TERMINAL_LIFECYCLE_CONFIG_KEY]: _internal,
+    [RTX_ORCHESTRATOR_TERMINAL_LIFECYCLE_CONFIG_KEY]: _orchestratorInternal,
+    ...visible
+  } = config;
   return visible;
 }
 
@@ -185,8 +197,13 @@ export function beginWorkflowTerminalDispatch(
   config: unknown,
   routing: WorkflowTerminalLifecycle["dispatch"]["routing"],
   now = Date.now(),
+  options: {
+    key?: WorkflowTerminalLifecycleConfigKey;
+    cleanupRequested?: boolean;
+  } = {},
 ): WorkflowTerminalLifecycle {
-  const previous = readWorkflowTerminalLifecycle(config);
+  const previous = readWorkflowTerminalLifecycle(config, options.key);
+  const cleanupRequested = options.cleanupRequested ?? true;
   return {
     version: RTX_TERMINAL_LIFECYCLE_VERSION,
     dispatch: {
@@ -197,12 +214,11 @@ export function beginWorkflowTerminalDispatch(
       routing,
     },
     cleanup: {
-      requested: true,
-      state: "pending",
+      requested: cleanupRequested,
+      state: cleanupRequested ? "pending" : "not_requested",
       reason: "workflow_completed_resumable",
       attempt: 0,
-      requestedAt: now,
-      nextAttemptAt: now,
+      ...(cleanupRequested ? { requestedAt: now, nextAttemptAt: now } : {}),
     },
   };
 }
@@ -214,7 +230,9 @@ export function settleWorkflowTerminalDispatch(
     | { state: "uncertain" | "failed"; error: string },
   now = Date.now(),
 ): WorkflowTerminalLifecycle {
-  const cleanupRequired = result.state !== "failed";
+  const cleanupRequired =
+    result.state === "uncertain" ||
+    (result.state === "accepted" && lifecycle.cleanup.requested);
   return {
     ...lifecycle,
     dispatch: {

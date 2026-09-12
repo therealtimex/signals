@@ -27,15 +27,16 @@ import { emitWorkflowCompletedEvent } from "@/lib/webhooks/workflow-events";
 import { runTemplateViaRtx } from "@/lib/agents/run-template-via-rtx";
 import { isRtxEmbedded } from "@/lib/rtx/env";
 import { getOrCreateOrchestratorThread } from "@/lib/rtx/orchestrator-thread";
-import { resolveActiveTerminalSessionIdForThread } from "@/lib/rtx/runtime-sessions";
 import { postOrchestratorDispatchThreadMessage } from "@/lib/rtx/orchestrator-completion-thread";
 import { postWorkflowCompletionThreadMessage } from "@/lib/rtx/workflow-completion-thread";
 import {
-  finalizeChatLinkedTerminalSession,
   formatDeferredTerminalTeardownNote,
   stopRunningRtxBrowserSessions,
 } from "@/lib/rtx/resource-teardown";
-import { requestWorkflowTerminalCleanup } from "@/lib/rtx/workflow-terminal-reconciler";
+import {
+  requestWorkflowOrchestratorTerminalCleanup,
+  requestWorkflowTerminalCleanup,
+} from "@/lib/rtx/workflow-terminal-reconciler";
 import type { WorkflowType } from "@/lib/workflows/types";
 import type {
   archiveContactSchema,
@@ -1210,8 +1211,8 @@ export async function handleDispatchFollowOnWorkflow(
     reason: string | undefined;
     terminalSessionTeardown?: { scheduled: true; sessionId: string } | { scheduled: false };
     browserSessionTeardown?: Awaited<
-      ReturnType<typeof finalizeChatLinkedTerminalSession>
-    >["browserSessionTeardown"];
+      ReturnType<typeof stopRunningRtxBrowserSessions>
+    >;
     completionThreadMessage?: { posted: boolean; error?: string };
     message?: string;
   } = {
@@ -1243,15 +1244,11 @@ export async function handleDispatchFollowOnWorkflow(
 
     try {
       const orchestratorThread = await getOrCreateOrchestratorThread();
-      const orchestratorSessionId = await resolveActiveTerminalSessionIdForThread(
-        orchestratorThread.workspaceSlug,
-        orchestratorThread.threadSlug
+      const terminalSessionTeardown = requestWorkflowOrchestratorTerminalCleanup(
+        input.parentWorkflowRunId,
       );
-      const [resourceTeardown, completionThreadMessage] = await Promise.all([
-        finalizeChatLinkedTerminalSession({
-          terminalSessionId: orchestratorSessionId,
-          stopAllRunningBrowsers: true,
-        }),
+      const [browserSessionTeardown, completionThreadMessage] = await Promise.all([
+        stopRunningRtxBrowserSessions({ stopAllRunning: true }),
         postOrchestratorDispatchThreadMessage({
           workspaceSlug: orchestratorThread.workspaceSlug,
           threadSlug: orchestratorThread.threadSlug,
@@ -1262,16 +1259,16 @@ export async function handleDispatchFollowOnWorkflow(
         }),
       ]);
       const teardownNote = formatDeferredTerminalTeardownNote({
-        terminal: resourceTeardown.terminalSessionTeardown,
-        browser: resourceTeardown.browserSessionTeardown,
+        terminal: terminalSessionTeardown,
+        browser: browserSessionTeardown,
       });
-      response.terminalSessionTeardown = resourceTeardown.terminalSessionTeardown.sessionId
+      response.terminalSessionTeardown = terminalSessionTeardown.sessionId
         ? {
             scheduled: true,
-            sessionId: resourceTeardown.terminalSessionTeardown.sessionId,
+            sessionId: terminalSessionTeardown.sessionId,
           }
         : { scheduled: false };
-      response.browserSessionTeardown = resourceTeardown.browserSessionTeardown;
+      response.browserSessionTeardown = browserSessionTeardown;
       if (completionThreadMessage.posted) {
         response.completionThreadMessage = completionThreadMessage;
       }

@@ -364,7 +364,14 @@ describe("dispatchTerminalAgentViaSendMessage", () => {
           JSON.stringify({
             success: true,
             terminalDispatchAccepted: true,
-            descriptor: { id: "cli-agent:dispatch-1" },
+            descriptor: {
+              id: "cli-agent:dispatch-1",
+              metadata: {
+                activityCardId: "terminal-card:dispatch-1",
+                controlSessionId: "control:dispatch-1",
+                ptySessionId: "pty:dispatch-1",
+              },
+            },
             workspaceSlug: "signals",
             threadSlug: "thread-1",
           }),
@@ -393,8 +400,18 @@ describe("dispatchTerminalAgentViaSendMessage", () => {
       success: true,
       descriptor: {
         id: "cli-agent:dispatch-1",
-        aliases: ["cli-agent:dispatch-1"],
+        aliases: [
+          "cli-agent:dispatch-1",
+          "terminal-card:dispatch-1",
+          "control:dispatch-1",
+          "pty:dispatch-1",
+        ],
         linkage: { workspaceSlug: "signals", threadSlug: "thread-1" },
+        metadata: {
+          activityCardId: "terminal-card:dispatch-1",
+          controlSessionId: "control:dispatch-1",
+          ptySessionId: "pty:dispatch-1",
+        },
       },
     });
     expect(fetchImpl).toHaveBeenCalledTimes(1);

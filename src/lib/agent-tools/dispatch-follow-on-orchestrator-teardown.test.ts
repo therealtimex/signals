@@ -1,13 +1,23 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createWorkflowRun } from "@/lib/db/queries/workflows";
+import {
+  createWorkflowRun,
+  getWorkflowRun,
+  updateWorkflowRun,
+} from "@/lib/db/queries/workflows";
 import { createTemplate } from "@/lib/db/queries/workflow-templates";
 import { handleDispatchFollowOnWorkflow } from "@/lib/agent-tools/handlers";
 import * as resourceTeardown from "@/lib/rtx/resource-teardown";
 import * as orchestratorCompletionThread from "@/lib/rtx/orchestrator-completion-thread";
 import * as rtxEnv from "@/lib/rtx/env";
 import * as orchestratorThread from "@/lib/rtx/orchestrator-thread";
-import * as runtimeSessions from "@/lib/rtx/runtime-sessions";
 import * as runTemplateViaRtxModule from "@/lib/agents/run-template-via-rtx";
+import {
+  beginWorkflowTerminalDispatch,
+  readWorkflowTerminalLifecycle,
+  RTX_ORCHESTRATOR_TERMINAL_LIFECYCLE_CONFIG_KEY,
+  settleWorkflowTerminalDispatch,
+  writeWorkflowTerminalLifecycle,
+} from "@/lib/rtx/workflow-terminal-lifecycle";
 import { resetCoreTables } from "@/test/db";
 
 describe("dispatch_follow_on_workflow orchestrator teardown", () => {
@@ -23,9 +33,6 @@ describe("dispatch_follow_on_workflow orchestrator teardown", () => {
       threadName: "Signals Orchestrator",
       resolution: "reused",
     });
-    vi.spyOn(runtimeSessions, "resolveActiveTerminalSessionIdForThread").mockResolvedValue(
-      "cli-agent:orchestrator-1",
-    );
     vi.spyOn(runTemplateViaRtxModule, "runTemplateViaRtx").mockResolvedValue({
       success: true,
       workflowRunId: "child-run-1",
@@ -35,16 +42,16 @@ describe("dispatch_follow_on_workflow orchestrator teardown", () => {
       threadResolution: "created",
       workflowRun: {} as never,
     });
-    vi.spyOn(resourceTeardown, "finalizeChatLinkedTerminalSession").mockResolvedValue({
-      browserSessionTeardown: { stopped: ["network-snowball"], failed: [] },
-      terminalSessionTeardown: { scheduled: true, sessionId: "cli-agent:orchestrator-1" },
+    vi.spyOn(resourceTeardown, "stopRunningRtxBrowserSessions").mockResolvedValue({
+      stopped: ["network-snowball"],
+      failed: [],
     });
     vi.spyOn(orchestratorCompletionThread, "postOrchestratorDispatchThreadMessage").mockResolvedValue({
       posted: true,
     });
   });
 
-  it("stops browsers, posts a Done summary, and schedules orchestrator terminal release", async () => {
+  it("stops browsers, posts a Done summary, and persists orchestrator terminal cleanup", async () => {
     const template = createTemplate({
       name: "Contact profile pipeline",
       templateType: "enrichment",
@@ -55,6 +62,35 @@ describe("dispatch_follow_on_workflow orchestrator teardown", () => {
       workflowType: "search",
       status: "completed",
       trigger: "template",
+    });
+    const dispatched = settleWorkflowTerminalDispatch(
+      beginWorkflowTerminalDispatch(
+        parentRun.config,
+        {
+          runId: parentRun.id,
+          workspaceSlug: orchestratorWorkspaceSlug,
+          threadSlug: "signals-orchestrator",
+          briefPath: `/orchestrator-events/${parentRun.id}/brief.md`,
+          message: `Route ${parentRun.id}`,
+        },
+        1_000,
+        {
+          key: RTX_ORCHESTRATOR_TERMINAL_LIFECYCLE_CONFIG_KEY,
+          cleanupRequested: false,
+        },
+      ),
+      {
+        state: "accepted",
+        descriptor: { id: "cli-agent:orchestrator-1" },
+      },
+      2_000,
+    );
+    updateWorkflowRun(parentRun.id, {
+      config: writeWorkflowTerminalLifecycle(
+        parentRun.config,
+        dispatched,
+        RTX_ORCHESTRATOR_TERMINAL_LIFECYCLE_CONFIG_KEY,
+      ),
     });
 
     const result = await handleDispatchFollowOnWorkflow({
@@ -69,13 +105,18 @@ describe("dispatch_follow_on_workflow orchestrator teardown", () => {
       sessionId: "cli-agent:orchestrator-1",
     });
     expect(result.completionThreadMessage).toEqual({ posted: true });
-    expect(runtimeSessions.resolveActiveTerminalSessionIdForThread).toHaveBeenCalledWith(
-      orchestratorWorkspaceSlug,
-      "signals-orchestrator",
-    );
-    expect(resourceTeardown.finalizeChatLinkedTerminalSession).toHaveBeenCalledWith({
-      terminalSessionId: "cli-agent:orchestrator-1",
-      stopAllRunningBrowsers: true,
+    expect(resourceTeardown.stopRunningRtxBrowserSessions).toHaveBeenCalledWith({
+      stopAllRunning: true,
+    });
+    expect(
+      readWorkflowTerminalLifecycle(
+        getWorkflowRun(parentRun.id)?.config,
+        RTX_ORCHESTRATOR_TERMINAL_LIFECYCLE_CONFIG_KEY,
+      )?.cleanup,
+    ).toMatchObject({
+      requested: true,
+      state: "pending",
+      reason: "workflow_completed_resumable",
     });
     expect(orchestratorCompletionThread.postOrchestratorDispatchThreadMessage).toHaveBeenCalled();
   });

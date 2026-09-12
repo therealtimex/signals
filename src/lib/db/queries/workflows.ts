@@ -185,15 +185,49 @@ export function listWorkflowRunsPendingTerminalCleanup(
       and(
         sql`${workflowRuns.status} IN ('completed', 'failed', 'cancelled')`,
         sql`json_valid(${workflowRuns.config})`,
-        sql`json_extract(${workflowRuns.config}, '$.rtxTerminalLifecycle.version') = 1`,
-        sql`json_extract(${workflowRuns.config}, '$.rtxTerminalLifecycle.cleanup.requested') = 1`,
-        sql`json_extract(${workflowRuns.config}, '$.rtxTerminalLifecycle.cleanup.state') != 'released'`,
-        sql`coalesce(json_extract(${workflowRuns.config}, '$.rtxTerminalLifecycle.cleanup.nextAttemptAt'), 0) <= ${nowMs}`,
-        sql`coalesce(json_extract(${workflowRuns.config}, '$.rtxTerminalLifecycle.cleanup.leaseUntil'), 0) <= ${nowMs}`,
+        sql`(
+          (
+            json_extract(${workflowRuns.config}, '$.rtxTerminalLifecycle.version') = 1
+            AND json_extract(${workflowRuns.config}, '$.rtxTerminalLifecycle.cleanup.requested') = 1
+            AND json_extract(${workflowRuns.config}, '$.rtxTerminalLifecycle.cleanup.state') != 'released'
+            AND coalesce(json_extract(${workflowRuns.config}, '$.rtxTerminalLifecycle.cleanup.nextAttemptAt'), 0) <= ${nowMs}
+            AND coalesce(json_extract(${workflowRuns.config}, '$.rtxTerminalLifecycle.cleanup.leaseUntil'), 0) <= ${nowMs}
+          )
+          OR
+          (
+            json_extract(${workflowRuns.config}, '$.rtxOrchestratorTerminalLifecycle.version') = 1
+            AND json_extract(${workflowRuns.config}, '$.rtxOrchestratorTerminalLifecycle.cleanup.requested') = 1
+            AND json_extract(${workflowRuns.config}, '$.rtxOrchestratorTerminalLifecycle.cleanup.state') != 'released'
+            AND coalesce(json_extract(${workflowRuns.config}, '$.rtxOrchestratorTerminalLifecycle.cleanup.nextAttemptAt'), 0) <= ${nowMs}
+            AND coalesce(json_extract(${workflowRuns.config}, '$.rtxOrchestratorTerminalLifecycle.cleanup.leaseUntil'), 0) <= ${nowMs}
+          )
+        )`,
       ),
     )
     .orderBy(asc(workflowRuns.updatedAt))
     .limit(Math.max(1, Math.min(limit, 25)))
+    .all();
+}
+
+/** Nonterminal runs that may still own a terminal runtime in a shared thread. */
+export function listNonTerminalWorkflowRunsWithTerminalLifecycle(): WorkflowRun[] {
+  return db
+    .select()
+    .from(workflowRuns)
+    .where(
+      and(
+        sql`${workflowRuns.status} IN ('pending', 'running', 'paused')`,
+        sql`json_valid(${workflowRuns.config})`,
+        sql`(
+          json_extract(${workflowRuns.config}, '$.rtxTerminalLifecycle.version') = 1
+          OR json_extract(${workflowRuns.config}, '$.rtxOrchestratorTerminalLifecycle.version') = 1
+          OR (
+            trim(coalesce(json_extract(${workflowRuns.config}, '$.rtxWorkspaceSlug'), '')) != ''
+            AND trim(coalesce(json_extract(${workflowRuns.config}, '$.rtxThreadSlug'), '')) != ''
+          )
+        )`,
+      ),
+    )
     .all();
 }
 

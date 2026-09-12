@@ -14,11 +14,19 @@ export type RuntimeSessionDescriptor = {
   };
   metadata?: {
     canonicalAgent?: string;
+    activityCardId?: string;
+    controlSessionId?: string;
+    ptySessionId?: string;
+    sessionId?: string;
+    latestSessionId?: string;
+    lineageKey?: string;
+    aliases?: string[];
     resumeContract?: {
       modelSelection?: {
         modelId?: string;
       };
     };
+    [key: string]: unknown;
   };
   resumeContract?: {
     modelSelection?: {
@@ -227,6 +235,16 @@ function parseCliSessionDescriptor(
 }
 
 function collectRuntimeSessionAliases(session: Record<string, unknown>): string[] {
+  const metadata =
+    session.metadata && typeof session.metadata === "object" && !Array.isArray(session.metadata)
+      ? (session.metadata as Record<string, unknown>)
+      : {};
+  const connection =
+    session.connection &&
+    typeof session.connection === "object" &&
+    !Array.isArray(session.connection)
+      ? (session.connection as Record<string, unknown>)
+      : {};
   const candidates = [
     session.id,
     session.sessionId,
@@ -236,6 +254,18 @@ function collectRuntimeSessionAliases(session: Record<string, unknown>): string[
     session.controlSessionId,
     session.ptySessionId,
     ...(Array.isArray(session.aliases) ? session.aliases : []),
+    metadata.id,
+    metadata.sessionId,
+    metadata.latestSessionId,
+    metadata.activityCardId,
+    metadata.lineageKey,
+    metadata.controlSessionId,
+    metadata.ptySessionId,
+    ...(Array.isArray(metadata.aliases) ? metadata.aliases : []),
+    connection.sessionId,
+    connection.controlSessionId,
+    connection.ptySessionId,
+    ...(Array.isArray(connection.aliases) ? connection.aliases : []),
   ];
   const aliases: string[] = [];
   for (const value of candidates) {
@@ -244,6 +274,34 @@ function collectRuntimeSessionAliases(session: Record<string, unknown>): string[
     if (alias) aliases.push(alias);
   }
   return [...new Set(aliases)];
+}
+
+const terminalThreadAdmissions = new Map<string, Promise<void>>();
+
+/** Serialize dispatch and guarded cleanup admission for one exact RTX thread. */
+export async function withTerminalThreadAdmission<T>(
+  workspaceSlug: string,
+  threadSlug: string,
+  action: () => Promise<T>,
+): Promise<T> {
+  const key = `${workspaceSlug.trim()}\u0000${threadSlug.trim()}`;
+  const previous = terminalThreadAdmissions.get(key) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const tail = previous.then(() => current);
+  terminalThreadAdmissions.set(key, tail);
+
+  await previous;
+  try {
+    return await action();
+  } finally {
+    release();
+    if (terminalThreadAdmissions.get(key) === tail) {
+      terminalThreadAdmissions.delete(key);
+    }
+  }
 }
 
 async function launchTerminalCliAgentViaCli(
@@ -370,69 +428,71 @@ export async function dispatchTerminalAgentViaSendMessage(
   const workspaceSlug = input.workspaceSlug.trim();
   const threadSlug = input.threadSlug.trim();
 
-  try {
-    const response = await fetchImpl(
-      `${apiBase}/cli/send-message/${encodeURIComponent(workspaceSlug)}/${encodeURIComponent(threadSlug)}`,
-      {
-        method: "POST",
-        headers: buildAppHeaders(appId),
-        body: JSON.stringify({
-          message: input.message,
-          requireTerminalDispatch: true,
-          ...(input.channelTurnId?.trim()
-            ? { channelTurnId: input.channelTurnId.trim() }
-            : {}),
-        }),
+  return withTerminalThreadAdmission(workspaceSlug, threadSlug, async () => {
+    try {
+      const response = await fetchImpl(
+        `${apiBase}/cli/send-message/${encodeURIComponent(workspaceSlug)}/${encodeURIComponent(threadSlug)}`,
+        {
+          method: "POST",
+          headers: buildAppHeaders(appId),
+          body: JSON.stringify({
+            message: input.message,
+            requireTerminalDispatch: true,
+            ...(input.channelTurnId?.trim()
+              ? { channelTurnId: input.channelTurnId.trim() }
+              : {}),
+          }),
+        }
+      );
+
+      const body = await readRtxJsonBody(response);
+      const terminalDispatchAccepted = body.terminalDispatchAccepted === true;
+
+      if (!response.ok || body.success === false || !terminalDispatchAccepted) {
+        return mapLaunchHttpError(response.status, body);
       }
-    );
 
-    const body = await readRtxJsonBody(response);
-    const terminalDispatchAccepted = body.terminalDispatchAccepted === true;
+      const descriptor = body.descriptor as RuntimeSessionDescriptor | undefined;
+      const descriptorId = typeof descriptor?.id === "string" ? descriptor.id : null;
+      if (!descriptorId) {
+        return {
+          success: false,
+          error: "Dispatch succeeded but no session descriptor was returned",
+          errorCode: "launch_failed",
+          httpStatus: response.status,
+          dispatchState: "uncertain",
+        };
+      }
 
-    if (!response.ok || body.success === false || !terminalDispatchAccepted) {
-      return mapLaunchHttpError(response.status, body);
-    }
+      const resolvedWorkspace =
+        typeof body.workspaceSlug === "string" ? body.workspaceSlug : workspaceSlug;
+      const resolvedThread =
+        typeof body.threadSlug === "string" ? body.threadSlug : threadSlug;
 
-    const descriptor = body.descriptor as RuntimeSessionDescriptor | undefined;
-    const descriptorId = typeof descriptor?.id === "string" ? descriptor.id : null;
-    if (!descriptorId) {
+      return {
+        success: true,
+        descriptor: {
+          id: descriptorId,
+          aliases: collectRuntimeSessionAliases(
+            descriptor as unknown as Record<string, unknown>,
+          ),
+          linkage: {
+            workspaceSlug: resolvedWorkspace,
+            threadSlug: resolvedThread,
+          },
+          ...(descriptor?.metadata ? { metadata: descriptor.metadata } : {}),
+          ...(descriptor?.resumeContract ? { resumeContract: descriptor.resumeContract } : {}),
+        },
+      };
+    } catch (error) {
       return {
         success: false,
-        error: "Dispatch succeeded but no session descriptor was returned",
-        errorCode: "launch_failed",
-        httpStatus: response.status,
+        error: error instanceof Error ? error.message : "Dispatch request failed",
+        errorCode: "rtx_unavailable",
         dispatchState: "uncertain",
       };
     }
-
-    const resolvedWorkspace =
-      typeof body.workspaceSlug === "string" ? body.workspaceSlug : workspaceSlug;
-    const resolvedThread =
-      typeof body.threadSlug === "string" ? body.threadSlug : threadSlug;
-
-    return {
-      success: true,
-      descriptor: {
-        id: descriptorId,
-        aliases: collectRuntimeSessionAliases(
-          descriptor as unknown as Record<string, unknown>,
-        ),
-        linkage: {
-          workspaceSlug: resolvedWorkspace,
-          threadSlug: resolvedThread,
-        },
-        ...(descriptor?.metadata ? { metadata: descriptor.metadata } : {}),
-        ...(descriptor?.resumeContract ? { resumeContract: descriptor.resumeContract } : {}),
-      },
-    };
-  } catch (error) {
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : "Dispatch request failed",
-      errorCode: "rtx_unavailable",
-      dispatchState: "uncertain",
-    };
-  }
+  });
 }
 
 export async function launchTerminalCliAgent(

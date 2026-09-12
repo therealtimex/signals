@@ -8,6 +8,7 @@ import {
   beginWorkflowTerminalDispatch,
   readWorkflowTerminalLifecycle,
   requestWorkflowTerminalCleanupState,
+  RTX_ORCHESTRATOR_TERMINAL_LIFECYCLE_CONFIG_KEY,
   settleWorkflowTerminalDispatch,
   writeWorkflowTerminalLifecycle,
 } from "@/lib/rtx/workflow-terminal-lifecycle";
@@ -150,6 +151,7 @@ describe("workflow terminal cleanup reconciler", () => {
 
   it("persists a bounded retry while the exact session turn remains busy", async () => {
     const run = createCleanupRun();
+    const updatedAt = run.updatedAt;
     const fetchImpl = vi.fn(async () =>
       listResponse([
         {
@@ -181,6 +183,265 @@ describe("workflow terminal cleanup reconciler", () => {
       nextAttemptAt: 15_000,
       lastError: "terminal_session_busy",
     });
+    expect(getWorkflowRun(run.id)?.updatedAt).toBe(updatedAt);
+  });
+
+  it("persists an uncertain launch match so idle listings can reconcile after sourcePrompt disappears", async () => {
+    const run = createWorkflowRun({
+      workflowType: "agent",
+      status: "failed",
+      trigger: "template",
+      config: "{}",
+    });
+    const routing = {
+      runId: run.id,
+      workspaceSlug: "signals",
+      threadSlug: "workflow-thread",
+      briefPath: `/workspace/.signals/workflow-runs/${run.id}/brief.md`,
+      message: `Run ${run.id}`,
+    };
+    const lifecycle = settleWorkflowTerminalDispatch(
+      beginWorkflowTerminalDispatch(run.config, routing, 1_000),
+      { state: "uncertain", error: "relay timeout" },
+      2_000,
+    );
+    updateWorkflowRun(run.id, {
+      config: writeWorkflowTerminalLifecycle(run.config, lifecycle),
+    });
+
+    let listCalls = 0;
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        return new Response(JSON.stringify({ success: true, closed: true }), {
+          status: 200,
+        });
+      }
+      listCalls += 1;
+      if (listCalls === 1) {
+        return listResponse([
+          {
+            id: "cli-agent:uncertain",
+            activityCardId: "terminal-card:uncertain",
+            workspaceSlug: "signals",
+            threadSlug: "workflow-thread",
+            sourcePrompt: `${routing.message} from ${routing.briefPath}`,
+            status: "running",
+            chatLinkedTurnStateKnown: true,
+            chatLinkedPendingTurn: { id: "turn-1", state: "capturing" },
+          },
+        ]);
+      }
+      if (listCalls === 2) {
+        return listResponse([
+          {
+            id: "pty:uncertain",
+            activityCardId: "terminal-card:uncertain",
+            workspaceSlug: "signals",
+            threadSlug: "workflow-thread",
+            status: "running",
+            chatLinkedTurnStateKnown: true,
+            chatLinkedPendingTurn: null,
+          },
+        ]);
+      }
+      return listResponse([]);
+    });
+    const fetchImpl = fetchMock as unknown as typeof fetch;
+
+    const busy = await reconcileWorkflowTerminalCleanups({
+      runIds: [run.id],
+      now: 10_000,
+      env,
+      fetchImpl,
+    });
+    expect(busy.outcomes[0]?.reason).toBe("terminal_session_busy");
+    expect(
+      readWorkflowTerminalLifecycle(getWorkflowRun(run.id)?.config)?.dispatch.session,
+    ).toEqual({
+      id: "cli-agent:uncertain",
+      aliases: ["cli-agent:uncertain", "terminal-card:uncertain"],
+    });
+
+    const settled = await reconcileWorkflowTerminalCleanups({
+      runIds: [run.id],
+      now: 20_000,
+      env,
+      fetchImpl,
+    });
+
+    expect(settled.outcomes).toEqual([
+      { runId: run.id, released: true, reason: "released" },
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    const terminateCall = fetchMock.mock.calls.find(([, request]) => request?.method === "POST");
+    expect(String(terminateCall?.[0])).toContain("pty%3Auncertain");
+    expect(
+      readWorkflowTerminalLifecycle(getWorkflowRun(run.id)?.config)?.dispatch.session
+        ?.aliases,
+    ).toEqual([
+      "cli-agent:uncertain",
+      "terminal-card:uncertain",
+      "pty:uncertain",
+    ]);
+  });
+
+  it("keeps an unobserved uncertain launch pending when an authoritative list is empty", async () => {
+    const run = createWorkflowRun({
+      workflowType: "agent",
+      status: "failed",
+      trigger: "template",
+      config: "{}",
+    });
+    const lifecycle = settleWorkflowTerminalDispatch(
+      beginWorkflowTerminalDispatch(
+        run.config,
+        {
+          runId: run.id,
+          workspaceSlug: "signals",
+          threadSlug: "workflow-thread",
+          briefPath: `/workspace/${run.id}/brief.md`,
+          message: `Run ${run.id}`,
+        },
+        1_000,
+      ),
+      { state: "uncertain", error: "relay timeout" },
+      2_000,
+    );
+    updateWorkflowRun(run.id, {
+      config: writeWorkflowTerminalLifecycle(run.config, lifecycle),
+    });
+    const fetchImpl = vi.fn(async () => listResponse([])) as unknown as typeof fetch;
+
+    const result = await reconcileWorkflowTerminalCleanups({
+      runIds: [run.id],
+      now: 10_000,
+      env,
+      fetchImpl,
+    });
+
+    expect(result.outcomes[0]).toMatchObject({
+      released: false,
+      reason: "runtime_session_unobserved",
+    });
+    expect(readWorkflowTerminalLifecycle(getWorkflowRun(run.id)?.config)?.cleanup.state).toBe(
+      "retry",
+    );
+  });
+
+  it("reconciles a due orchestrator lifecycle stored on a terminal parent run", async () => {
+    const run = createWorkflowRun({
+      workflowType: "search",
+      status: "completed",
+      trigger: "template",
+      config: "{}",
+    });
+    const orchestratorLifecycle = requestWorkflowTerminalCleanupState(
+      settleWorkflowTerminalDispatch(
+        beginWorkflowTerminalDispatch(
+          run.config,
+          {
+            runId: run.id,
+            workspaceSlug: "signals",
+            threadSlug: "signals-orchestrator",
+            briefPath: `/workspace/orchestrator-events/${run.id}/brief.md`,
+            message: `Route ${run.id}`,
+          },
+          1_000,
+          {
+            key: RTX_ORCHESTRATOR_TERMINAL_LIFECYCLE_CONFIG_KEY,
+            cleanupRequested: false,
+          },
+        ),
+        {
+          state: "accepted",
+          descriptor: { id: "cli-agent:orchestrator" },
+        },
+        2_000,
+      ),
+      "workflow_completed_resumable",
+      3_000,
+    );
+    updateWorkflowRun(run.id, {
+      config: writeWorkflowTerminalLifecycle(
+        run.config,
+        orchestratorLifecycle,
+        RTX_ORCHESTRATOR_TERMINAL_LIFECYCLE_CONFIG_KEY,
+      ),
+    });
+    let listCalls = 0;
+    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        return new Response(JSON.stringify({ success: true, closed: true }), {
+          status: 200,
+        });
+      }
+      listCalls += 1;
+      return listResponse(
+        listCalls === 1
+          ? [
+              {
+                id: "cli-agent:orchestrator",
+                workspaceSlug: "signals",
+                threadSlug: "signals-orchestrator",
+                status: "running",
+                chatLinkedTurnStateKnown: true,
+                chatLinkedPendingTurn: null,
+              },
+            ]
+          : [],
+      );
+    }) as unknown as typeof fetch;
+
+    const result = await reconcileWorkflowTerminalCleanups({
+      now: 10_000,
+      env,
+      fetchImpl,
+    });
+
+    expect(result).toMatchObject({
+      scanned: 1,
+      outcomes: [{ runId: run.id, released: true, reason: "released" }],
+    });
+    expect(
+      readWorkflowTerminalLifecycle(
+        getWorkflowRun(run.id)?.config,
+        RTX_ORCHESTRATOR_TERMINAL_LIFECYCLE_CONFIG_KEY,
+      )?.cleanup.state,
+    ).toBe("released");
+  });
+
+  it("defers cleanup while another nonterminal workflow owns the same thread", async () => {
+    const completed = createCleanupRun();
+    createCleanupRun("running");
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        throw new Error("must not terminate a session owned by a running workflow");
+      }
+      return listResponse([
+        {
+          id: "cli-agent:workflow",
+          activityCardId: "terminal-card:workflow",
+          workspaceSlug: "signals",
+          threadSlug: "workflow-thread",
+          status: "running",
+          chatLinkedTurnStateKnown: true,
+          chatLinkedPendingTurn: null,
+        },
+      ]);
+    });
+
+    const result = await reconcileWorkflowTerminalCleanups({
+      runIds: [completed.id],
+      now: 10_000,
+      env,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    });
+
+    expect(result.outcomes[0]).toMatchObject({
+      released: false,
+      reason: "runtime_owned_by_nonterminal_workflow",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("replays persisted cleanup and retries it when workflow scheduling is disabled", async () => {
