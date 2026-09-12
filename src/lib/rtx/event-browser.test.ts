@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { chromium } from "playwright";
 import { ensureBrowserConnection } from "@/lib/db/queries/platform-targets";
 import {
   acquireSessionLease,
@@ -10,11 +11,16 @@ import {
   EventBrowserError,
   inspectAuthorizedLumaHtml,
   inspectVisibleLumaViewerIdentity,
+  observeAuthorizedLumaParticipants,
   recheckAuthorizedLumaBoundary,
   renewAuthorizedEventBrowserLease,
   verifyAuthorizedLumaParticipantProfiles,
 } from "@/lib/rtx/event-browser";
 import { resetCoreTables } from "@/test/db";
+
+vi.mock("playwright", () => ({
+  chromium: { connectOverCDP: vi.fn() },
+}));
 
 const scope = { kind: "authorized" as const, ownerWorkspace: "signals", runId: "run-1", grantId: "grant-1" };
 
@@ -22,6 +28,7 @@ describe("registered Luma guest boundary", () => {
   beforeEach(() => {
     resetCoreTables();
     vi.useRealTimers();
+    vi.mocked(chromium.connectOverCDP).mockReset();
   });
 
   it("reuses and preserves an existing run-owned lease on the selected connection", () => {
@@ -137,6 +144,90 @@ describe("registered Luma guest boundary", () => {
       expect(error).toBeInstanceOf(EventBrowserError);
       expect((error as EventBrowserError).reason).toBe("login_required");
     }
+  });
+
+  it("recognizes registration gate copy split across adjacent visible elements", () => {
+    try {
+      inspectVisibleLumaViewerIdentity(`<body>
+        <button data-testid="user-menu" data-viewer-identity="QA Viewer">QA Viewer</button>
+        <p>Register to View Guest List</p><p>The full guest list is only accessible to registered guests.</p>
+      </body>`);
+      throw new Error("expected inspection to fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(EventBrowserError);
+      expect((error as EventBrowserError).reason).toBe("registration_required");
+    }
+  });
+
+  it("opens a click-to-view guest list when page JSON contains waitlist metadata", async () => {
+    const sessionName = "signals-publish";
+    ensureBrowserConnection({ sessionName });
+    let guestListOpen = false;
+    let guestTriggerClicks = 0;
+    const html = () => `<html><body>
+      <button data-testid="user-menu" data-viewer-identity="QA Viewer">QA Viewer</button>
+      <button>3 going</button>
+      ${guestListOpen ? `<section data-guest-list-access="authorized">
+        <a href="/user/alice" data-participant-name="Alice"></a>
+        <a href="/user/bob" data-participant-name="Bob"></a>
+        <a href="/user/cara" data-participant-name="Cara"></a>
+      </section>` : ""}
+      <script id="__NEXT_DATA__" type="application/json">
+        {"waitlist_enabled":true,"waitlist_status":"active","waitlist_active":false}
+      </script>
+    </body></html>`;
+    const page = {
+      url: () => "https://luma.com/demo",
+      goto: vi.fn(async () => {
+        guestListOpen = false;
+      }),
+      evaluate: vi.fn(async () => html()),
+      getByText: vi.fn((matcher: RegExp) => ({
+        first: () => ({
+          isVisible: async () => matcher.test("3 going"),
+          click: async () => {
+            guestTriggerClicks += 1;
+            guestListOpen = true;
+          },
+        }),
+      })),
+      getByRole: vi.fn(() => ({
+        first: () => ({ isVisible: async () => false }),
+      })),
+      waitForTimeout: vi.fn(async () => undefined),
+    };
+    const browser = {
+      contexts: () => [{ pages: () => [page], newPage: async () => page }],
+      close: async () => undefined,
+    };
+    vi.mocked(chromium.connectOverCDP).mockResolvedValue(
+      browser as unknown as Awaited<ReturnType<typeof chromium.connectOverCDP>>,
+    );
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
+      success: true,
+      sessions: [{ sessionName, running: true, remoteDebugPort: 9222 }],
+    }), { status: 200 })) as unknown as typeof fetch;
+
+    const result = await observeAuthorizedLumaParticipants({
+      runId: "run-modal-json",
+      ownerWorkspace: "signals",
+      grantId: "grant-modal-json",
+      sessionName,
+      url: "https://luma.com/demo?tk=private",
+      maxParticipants: 3,
+      maxGuestPages: 1,
+      maxProfileVisits: 0,
+      env: { RTX_APP_ID: "signals-app", RTX_API_BASE_URL: "http://127.0.0.1:3001" },
+      fetchImpl,
+    });
+
+    expect(result.viewerIdentity).toBe("QA Viewer");
+    expect(result.participants.map((participant) => participant.displayName)).toEqual([
+      "Alice",
+      "Bob",
+      "Cara",
+    ]);
+    expect(guestTriggerClicks).toBe(2);
   });
 
   it.each([

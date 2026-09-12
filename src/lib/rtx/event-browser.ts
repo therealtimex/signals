@@ -169,6 +169,16 @@ function removeNonVisibleTextSources($: cheerio.CheerioAPI): void {
   });
 }
 
+function visibleBodyText($: cheerio.CheerioAPI): string {
+  const fragments = $("body")
+    .find("*")
+    .addBack()
+    .contents()
+    .toArray()
+    .flatMap((node) => node.type === "text" ? [$(node).text()] : []);
+  return normalizedText(fragments.join(" "));
+}
+
 function hasVisibleSignInControl($: cheerio.CheerioAPI): boolean {
   return visibleSelection(
     $,
@@ -192,10 +202,14 @@ function hasVisibleSignInControl($: cheerio.CheerioAPI): boolean {
   });
 }
 
-export function inspectVisibleLumaViewerIdentity(html: string): string {
+function readVisibleLumaPageState(html: string): {
+  bodyText: string;
+  hasSignInControl: boolean;
+  viewerIdentity: string;
+} {
   const $ = cheerio.load(html);
   removeNonVisibleTextSources($);
-  const bodyText = normalizedText($("body").text());
+  const bodyText = visibleBodyText($);
   const viewer = visibleSelection(
     $,
     '[data-testid="user-menu"], [data-testid="account-menu"], [data-viewer-identity], button[aria-label*="account" i], button[aria-label*="profile" i], header button img[alt], nav button img[alt]',
@@ -207,19 +221,31 @@ export function inspectVisibleLumaViewerIdentity(html: string): string {
       ?? viewer.find("img[alt]").first().attr("alt")
       ?? viewer.text(),
   );
-  if (!viewerIdentity) {
-    if (hasVisibleSignInControl($)) {
+  return { bodyText, hasSignInControl: hasVisibleSignInControl($), viewerIdentity };
+}
+
+function throwForVisibleLumaGate(state: ReturnType<typeof readVisibleLumaPageState>): void {
+  if (!state.viewerIdentity) {
+    if (state.hasSignInControl) {
       throw new EventBrowserError("login_required", "The selected browser session is not signed in to Luma.");
     }
-    throw new EventBrowserError("permission_missing", "A visible signed-in Luma viewer identity could not be verified.");
+    return;
   }
-  if (/\bregister\s+to\s+view\s+guest\s+list\b|\bregistered\s+guests?\s+only\b/i.test(bodyText)) {
+  if (/\bregister\s+to\s+view\s+guest\s+list\b|\bregistered\s+guests?\s+only\b/i.test(state.bodyText)) {
     throw new EventBrowserError("registration_required", "The guest list requires event registration.");
   }
-  if (/you are waitlisted|on the waitlist|waitlist status/i.test(bodyText)) {
+  if (/you are waitlisted|on the waitlist|waitlist status/i.test(state.bodyText)) {
     throw new EventBrowserError("waitlisted", "The selected viewer is waitlisted and cannot access the guest list.");
   }
-  return viewerIdentity;
+}
+
+export function inspectVisibleLumaViewerIdentity(html: string): string {
+  const state = readVisibleLumaPageState(html);
+  throwForVisibleLumaGate(state);
+  if (!state.viewerIdentity) {
+    throw new EventBrowserError("permission_missing", "A visible signed-in Luma viewer identity could not be verified.");
+  }
+  return state.viewerIdentity;
 }
 
 export function inspectAuthorizedLumaHtml(input: {
@@ -416,17 +442,16 @@ export async function observeAuthorizedLumaParticipants(input: {
     });
     renewLease();
     const initialHtml = await visibleDomSnapshot(page);
-    if (!/register to view guest list|registered guests? only|waitlist|you are waitlisted|sign\s*in to (?:continue|view)/i.test(initialHtml)) {
-      const guestTrigger = page.getByText(/^\s*(?:guest list|[\d,]+\s+(?:people\s+)?going)\s*$/i).first();
-      if (await guestTrigger.isVisible().catch(() => false)) {
-        if (input.beforeProviderRequest && !(await input.beforeProviderRequest())) {
-          throw new EventBrowserError("rate_limited", "The event provider request budget is exhausted.");
-        }
-        renewLease();
-        await guestTrigger.click({ timeout: 5_000 }).catch(() => undefined);
-        await page.waitForTimeout(300);
-        renewLease();
+    throwForVisibleLumaGate(readVisibleLumaPageState(initialHtml));
+    const guestTrigger = page.getByText(/^\s*(?:guest list|[\d,]+\s+(?:people\s+)?going)\s*$/i).first();
+    if (await guestTrigger.isVisible().catch(() => false)) {
+      if (input.beforeProviderRequest && !(await input.beforeProviderRequest())) {
+        throw new EventBrowserError("rate_limited", "The event provider request budget is exhausted.");
       }
+      renewLease();
+      await guestTrigger.click({ timeout: 5_000 }).catch(() => undefined);
+      await page.waitForTimeout(300);
+      renewLease();
     }
     const participants: AuthorizedEventParticipant[] = [];
     const seenParticipants = new Set<string>();
