@@ -30,6 +30,38 @@ CONFIG_JSON="$(cat "${CONFIG_PATH}")"
 # ports dynamically and this shell is workspace-scoped, so it cannot inherit one.
 SIGNALS_BASE_URL="$(python3 "${ROOT_DIR}/lib/resolve.py" signals-base-url "${CONFIG_JSON}" "${SIGNALS_BASE_URL:-}")"
 export SIGNALS_BASE_URL
+
+# Signals receives the seeds. A RealTimeX restart leaves the Local App stopped,
+# and the heartbeat shows this shell as completed whatever it prints, so check
+# before browsing: start Signals if it is down, or skip with a plain reason.
+if [[ "${DRY_RUN}" -eq 0 ]]; then
+  ENSURE_JSON="$(python3 "${ROOT_DIR}/lib/resolve.py" ensure-signals "${CONFIG_JSON}" "${SIGNALS_BASE_URL}")"
+  ensure_field() {
+    printf '%s' "${ENSURE_JSON}" | python3 -c '
+import json, sys
+value = json.load(sys.stdin).get(sys.argv[1])
+print(str(value).lower() if isinstance(value, bool) else ("" if value is None else value))
+' "$1"
+  }
+  if [[ "$(ensure_field ok)" != "true" ]]; then
+    echo "snowball-seed-scout: $(ensure_field message)" >&2
+    printf '%s' "${ENSURE_JSON}" | python3 -c '
+import json, sys
+ensure = json.load(sys.stdin)
+print(json.dumps({"queued": 0, "platform": None, "dryRun": False, "candidates": [],
+                  "skipped": True, "reason": ensure.get("reason"), "message": ensure.get("message")}))
+'
+    # A disabled Signals is the operator's choice, not a failure to retry.
+    if [[ "$(ensure_field skip)" == "true" ]]; then
+      exit 0
+    fi
+    exit 1
+  fi
+  if [[ "$(ensure_field started)" == "true" ]]; then
+    echo "snowball-seed-scout: Signals was not running at ${SIGNALS_BASE_URL}; started it through RealTimeX" >&2
+  fi
+fi
+
 PRODUCER_RUN_ID="scout-$(date -u +%Y%m%dT%H%M%SZ)-$$"
 
 PLATFORM="$(scout_pick_platform "${CONFIG_JSON}")"

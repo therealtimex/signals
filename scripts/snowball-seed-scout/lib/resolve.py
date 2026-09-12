@@ -5,8 +5,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import shutil
+import subprocess
 import sys
+import time
 import unittest
 import urllib.error
 import urllib.request
@@ -137,6 +141,146 @@ def resolve_signals_base_url(config: dict, env_override: str = "") -> str:
     if recorded:
         return recorded.rstrip("/")
     return FALLBACK_SIGNALS_BASE_URL
+
+
+# How long to wait for Signals to answer after asking RealTimeX to start it. A
+# dev-mode Local App is usually up within seconds; this bounds a cold start.
+SIGNALS_START_TIMEOUT_SECONDS = 120.0
+SIGNALS_HEALTH_POLL_SECONDS = 2.0
+START_SIGNALS_HINT = "Start it from RealTimeX (Local Apps)."
+
+
+def signals_healthy(base_url: str, timeout: float = 5.0) -> bool:
+    try:
+        with urllib.request.urlopen(
+            f"{base_url.rstrip('/')}/api/health", timeout=timeout
+        ) as response:
+            return 200 <= response.status < 300
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+        return False
+
+
+def run_pp_cli(args: list[str]) -> dict | None:
+    """Call realtimex-pp-cli the way lib/browser.sh does; None if it is missing or fails."""
+    binary = shutil.which("realtimex-pp-cli")
+    if not binary:
+        return None
+    try:
+        proc = subprocess.run(
+            [binary, *args, "--agent", "--data-source", "live", "--no-cache", "--json"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if proc.returncode != 0:
+        return None
+    try:
+        parsed = json.loads(proc.stdout or "null")
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def local_app_from_response(response: dict | None) -> dict | None:
+    results = (response or {}).get("results")
+    app = results.get("app") if isinstance(results, dict) else None
+    return app if isinstance(app, dict) else None
+
+
+def local_app_is_running(app: dict) -> bool:
+    runtime = app.get("runtime") if isinstance(app.get("runtime"), dict) else {}
+    status = runtime.get("status") or app.get("persistedStatus") or ""
+    return str(status).lower() == "running"
+
+
+def ensure_signals(
+    config: dict,
+    base_url: str,
+    *,
+    cli=run_pp_cli,
+    healthy=signals_healthy,
+    sleep=time.sleep,
+    clock=time.monotonic,
+    timeout: float = SIGNALS_START_TIMEOUT_SECONDS,
+    poll: float = SIGNALS_HEALTH_POLL_SECONDS,
+) -> dict:
+    """Make sure Signals answers before the scout harvests anything.
+
+    A RealTimeX restart leaves the Local App stopped, and the heartbeat reports
+    the shell as completed whatever it prints, so a scout that only found out at
+    enqueue time dropped its links without anyone noticing. Start Signals
+    through RealTimeX unless the operator disabled it, and otherwise say plainly
+    why the run was skipped.
+    """
+    base = base_url.rstrip("/")
+    result = {
+        "ok": True,
+        "started": False,
+        "skip": False,
+        "baseUrl": base,
+        "reason": None,
+        "message": None,
+    }
+    if healthy(base):
+        return result
+
+    def fail(reason: str, message: str, *, skip: bool = False) -> dict:
+        return {**result, "ok": False, "skip": skip, "reason": reason, "message": message}
+
+    app_id = str((config or {}).get("signalsLocalAppId") or "").strip()
+    if not app_id:
+        return fail(
+            "no_local_app_id",
+            f"Signals isn't running at {base}, and this scout was deployed without "
+            f"its Local App id, so it can't start Signals. {START_SIGNALS_HINT} "
+            "Redeploy the scout from Signals so it can start Signals itself.",
+        )
+
+    app = local_app_from_response(cli(["get-local-app", app_id]))
+    if app is None:
+        return fail(
+            "lookup_failed",
+            f"Signals isn't running at {base}, and RealTimeX did not return its "
+            f"Local App ({app_id}). {START_SIGNALS_HINT}",
+        )
+    if app.get("enabled") is False:
+        return fail(
+            "disabled",
+            "The Signals Local App is disabled in RealTimeX, so this scout run was "
+            "skipped. Enable it to resume scouting.",
+            skip=True,
+        )
+
+    started = False
+    if not local_app_is_running(app):
+        if cli(["start-local-app", app_id]) is None:
+            return fail(
+                "start_failed",
+                f"Signals isn't running at {base}, and RealTimeX could not start it. "
+                f"{START_SIGNALS_HINT}",
+            )
+        started = True
+
+    deadline = clock() + timeout
+    while clock() < deadline:
+        sleep(poll)
+        if healthy(base):
+            return {**result, "started": started}
+
+    if started:
+        return fail(
+            "start_timeout",
+            f"The scout started Signals, but it did not answer at {base} within "
+            f"{int(timeout)}s. {START_SIGNALS_HINT}",
+        )
+    return fail(
+        "unhealthy",
+        f"RealTimeX reports Signals running, but it is not answering at {base}. "
+        "Restart it from RealTimeX (Local Apps).",
+    )
 
 
 def should_stop_browser_session(
@@ -1060,6 +1204,19 @@ def main() -> int:
         print(resolve_signals_base_url(config, env_override))
         return 0
 
+    if command == "ensure-signals":
+        config = json.loads(sys.argv[2]) if len(sys.argv) > 2 else {}
+        base_url = sys.argv[3] if len(sys.argv) > 3 else resolve_signals_base_url(config)
+        timeout = float(
+            os.environ.get("SCOUT_SIGNALS_START_TIMEOUT_SECONDS")
+            or SIGNALS_START_TIMEOUT_SECONDS
+        )
+        poll = float(
+            os.environ.get("SCOUT_SIGNALS_POLL_SECONDS") or SIGNALS_HEALTH_POLL_SECONDS
+        )
+        print(json.dumps(ensure_signals(config, base_url, timeout=timeout, poll=poll)))
+        return 0
+
     if command == "should-stop":
         started_by_scout = len(sys.argv) > 3 and sys.argv[3] == "1"
         print(
@@ -1594,6 +1751,116 @@ class ResolveTests(unittest.TestCase):
         )
         self.assertEqual(accepted, [])
         self.assertEqual(len(rejected), 2)
+
+
+class FakeRealtimex:
+    """Stands in for realtimex-pp-cli and the Signals health endpoint."""
+
+    def __init__(
+        self,
+        *,
+        app: dict | None,
+        up: bool = False,
+        start_fails: bool = False,
+        up_after_start: bool = True,
+        up_after_polls: int | None = None,
+    ) -> None:
+        self.app = app
+        self.up = up
+        self.start_fails = start_fails
+        self.up_after_start = up_after_start
+        self.up_after_polls = up_after_polls
+        self.calls: list[str] = []
+        self.polls = 0
+        self.now = 0.0
+
+    def cli(self, args: list[str]) -> dict | None:
+        self.calls.append(args[0])
+        if args[0] == "get-local-app":
+            return None if self.app is None else {"results": {"app": self.app}}
+        if args[0] == "start-local-app":
+            if self.start_fails:
+                return None
+            if self.up_after_start:
+                self.up = True
+            return {"results": {"success": True}}
+        return None
+
+    def sleep(self, seconds: float) -> None:
+        self.now += seconds
+        self.polls += 1
+        if self.up_after_polls is not None and self.polls >= self.up_after_polls:
+            self.up = True
+
+    def ensure(self, config: dict) -> dict:
+        return ensure_signals(
+            config,
+            "http://127.0.0.1:3010/",
+            cli=self.cli,
+            healthy=lambda _base: self.up,
+            sleep=self.sleep,
+            clock=lambda: self.now,
+            timeout=10,
+            poll=2,
+        )
+
+
+class EnsureSignalsTests(unittest.TestCase):
+    CONFIG = {"signalsLocalAppId": "app-1"}
+    STOPPED = {"enabled": True, "persistedStatus": "stopped", "runtime": {"status": "stopped"}}
+
+    def test_leaves_a_healthy_signals_alone(self) -> None:
+        fake = FakeRealtimex(app=self.STOPPED, up=True)
+        result = fake.ensure(self.CONFIG)
+        self.assertEqual((result["ok"], result["started"]), (True, False))
+        self.assertEqual(result["baseUrl"], "http://127.0.0.1:3010")
+        self.assertEqual(fake.calls, [])
+
+    def test_starts_a_stopped_enabled_app_and_waits_for_it(self) -> None:
+        fake = FakeRealtimex(app=self.STOPPED)
+        result = fake.ensure(self.CONFIG)
+        self.assertEqual((result["ok"], result["started"]), (True, True))
+        self.assertEqual(fake.calls, ["get-local-app", "start-local-app"])
+
+    def test_respects_a_disabled_app(self) -> None:
+        fake = FakeRealtimex(app={**self.STOPPED, "enabled": False})
+        result = fake.ensure(self.CONFIG)
+        self.assertEqual(
+            (result["ok"], result["skip"], result["reason"]), (False, True, "disabled")
+        )
+        self.assertNotIn("start-local-app", fake.calls)
+
+    def test_needs_the_recorded_local_app_id(self) -> None:
+        fake = FakeRealtimex(app=self.STOPPED)
+        result = fake.ensure({})
+        self.assertEqual((result["ok"], result["reason"]), (False, "no_local_app_id"))
+        self.assertIn("http://127.0.0.1:3010", result["message"])
+        self.assertEqual(fake.calls, [])
+
+    def test_reports_an_app_realtimex_cannot_find(self) -> None:
+        fake = FakeRealtimex(app=None)
+        result = fake.ensure(self.CONFIG)
+        self.assertEqual((result["ok"], result["reason"]), (False, "lookup_failed"))
+
+    def test_reports_a_start_realtimex_refuses(self) -> None:
+        fake = FakeRealtimex(app=self.STOPPED, start_fails=True)
+        result = fake.ensure(self.CONFIG)
+        self.assertEqual((result["ok"], result["reason"]), (False, "start_failed"))
+
+    def test_reports_a_start_that_never_answers(self) -> None:
+        fake = FakeRealtimex(app=self.STOPPED, up_after_start=False)
+        result = fake.ensure(self.CONFIG)
+        self.assertEqual(
+            (result["ok"], result["skip"], result["reason"]), (False, False, "start_timeout")
+        )
+
+    def test_waits_for_an_app_that_is_already_starting(self) -> None:
+        fake = FakeRealtimex(
+            app={"enabled": True, "runtime": {"status": "running"}}, up_after_polls=2
+        )
+        result = fake.ensure(self.CONFIG)
+        self.assertEqual((result["ok"], result["started"]), (True, False))
+        self.assertEqual(fake.calls, ["get-local-app"])
 
 
 if __name__ == "__main__":
