@@ -70,18 +70,25 @@ import {
   isNetworkSnowballTemplateConfig,
   readNetworkSnowballConfig,
   sanitizeNetworkSnowballConfigRecord,
+  type NetworkSnowballBrowserFallback,
 } from "@/lib/workflows/network-snowball";
 import {
   ingestNetworkSnowballEventSource,
   type EventSourceIngestionResult,
 } from "@/lib/workflows/event-sources/service";
 import {
-  SNOWBALL_BROWSER_SETTINGS_PATH,
   SNOWBALL_BROWSER_TARGET_CONFIG_KEY,
   prepareNetworkSnowballTarget,
   releaseNetworkSnowballTarget,
   type NetworkSnowballPreparedTarget,
 } from "@/lib/workflows/network-snowball-target";
+import {
+  SNOWBALL_SOURCE_BROWSER_TARGET_CONFIG_KEY,
+  prepareNetworkSnowballSourceTarget,
+  releaseNetworkSnowballSourceTarget,
+  type NetworkSnowballPreparedSourceTarget,
+} from "@/lib/workflows/network-snowball-source-target";
+import { canonicalizeLumaUrl } from "@/lib/workflows/event-sources/urls";
 import {
   SNOWBALL_IDENTITY_SCOPE_TOKEN_CONFIG_KEY,
   mintSnowballIdentityScopeToken,
@@ -391,7 +398,11 @@ export async function runTemplateViaRtx(
 
   let preparedLeaseId: string | null = null;
   let preparedSessionName: string | null = null;
-  let preparedLeaseOwner: "contact_research" | "network_snowball" | null = null;
+  let preparedLeaseOwner:
+    | "contact_research"
+    | "network_snowball"
+    | "network_snowball_source"
+    | null = null;
   let dispatchAccepted = false;
   let writingScopeMinted = false;
   let snowballIdentityScopeMinted = false;
@@ -450,7 +461,9 @@ export async function runTemplateViaRtx(
     preparedLeaseOwner = null;
     const released = owner === "network_snowball"
       ? releaseNetworkSnowballTarget(leaseId)
-      : releaseContactWebResearchTarget(leaseId);
+      : owner === "network_snowball_source"
+        ? releaseNetworkSnowballSourceTarget(leaseId)
+        : releaseContactWebResearchTarget(leaseId);
     if (browserError) throw browserError;
     return released;
   };
@@ -623,24 +636,41 @@ export async function runTemplateViaRtx(
     }
 
     let snowballTarget: NetworkSnowballPreparedTarget | undefined;
+    let snowballSourceTarget: NetworkSnowballPreparedSourceTarget | undefined;
+    let snowballBrowserFallback: NetworkSnowballBrowserFallback | null = null;
     if (isNetworkSnowballTemplateConfig(runtimeConfig)) {
-      const prepared = await prepareNetworkSnowballTarget(
-        { config: runtimeConfig, workflowRunId: run.id },
-        env,
-        fetchImpl,
-      );
-      if (!prepared.ok) {
-        const completedAt = Math.floor(Date.now() / 1_000);
+      const snowball = readNetworkSnowballConfig(runtimeConfig);
+      const genericEventSource =
+        snowball.seedType === "event_url" && !canonicalizeLumaUrl(snowball.seedValue);
+      const prepared = genericEventSource && snowball.participantAccess.enabled
+        ? await prepareNetworkSnowballSourceTarget(
+            {
+              workflowRunId: run.id,
+              sessionName: snowball.participantAccess.browserSessionName,
+              startUrl: snowball.seedValue,
+            },
+            env,
+            fetchImpl,
+          )
+        : genericEventSource
+          ? null
+          : await prepareNetworkSnowballTarget(
+              { config: runtimeConfig, workflowRunId: run.id },
+              env,
+              fetchImpl,
+            );
+      if (prepared && !prepared.ok) {
+        snowballBrowserFallback = {
+          code: prepared.error.code,
+          message: prepared.error.message,
+        };
         updateWorkflowRun(run.id, {
-          status: "failed",
-          completedAt,
           errors: JSON.stringify([prepared.error.message]),
           errorItems: 1,
           result: JSON.stringify({
             ...parseObject(getWorkflowRun(run.id)?.result),
-            message: prepared.error.message,
             partial: true,
-            blocked: prepared.error.code,
+            browserFallback: snowballBrowserFallback,
           }),
         });
         createWorkflowStep({
@@ -656,37 +686,33 @@ export async function runTemplateViaRtx(
           }),
           durationMs: 0,
         });
-        return {
-          success: false,
-          error: prepared.error.message,
-          errorCode: "snowball_browser_target_unavailable",
-          httpStatus: 409,
-          workflowRunId: run.id,
-          details: {
-            reason: prepared.error.code,
-            ...(prepared.error.details ?? {}),
-            settingsPath: SNOWBALL_BROWSER_SETTINGS_PATH,
-            settingsTab: "Platform connections",
-          },
-          ...(eventIngestion?.eventReportCapability
-            ? { eventReportCapability: eventIngestion.eventReportCapability }
-            : {}),
+      } else if (prepared?.ok && genericEventSource) {
+        snowballSourceTarget = prepared.target as NetworkSnowballPreparedSourceTarget;
+        preparedLeaseId = snowballSourceTarget.leaseId;
+        preparedSessionName = snowballSourceTarget.sessionName;
+        preparedLeaseOwner = "network_snowball_source";
+        runtimeConfig = {
+          ...runtimeConfig,
+          [SNOWBALL_SOURCE_BROWSER_TARGET_CONFIG_KEY]: snowballSourceTarget,
+        };
+      } else if (prepared?.ok) {
+        snowballTarget = prepared.target as NetworkSnowballPreparedTarget;
+        preparedLeaseId = snowballTarget.leaseId;
+        preparedSessionName = snowballTarget.sessionName;
+        preparedLeaseOwner = "network_snowball";
+        runtimeConfig = {
+          ...runtimeConfig,
+          [SNOWBALL_BROWSER_TARGET_CONFIG_KEY]: snowballTarget,
         };
       }
-      snowballTarget = prepared.target;
-      preparedLeaseId = snowballTarget.leaseId;
-      preparedSessionName = snowballTarget.sessionName;
-      preparedLeaseOwner = "network_snowball";
-      runtimeConfig = {
-        ...runtimeConfig,
-        [SNOWBALL_BROWSER_TARGET_CONFIG_KEY]: snowballTarget,
-      };
-      updateWorkflowRun(run.id, {
-        config: buildStoredRunConfig(template, runtimeConfig, {
-          workspaceSlug,
-          threadSlug,
-        }),
-      });
+      if (prepared?.ok) {
+        updateWorkflowRun(run.id, {
+          config: buildStoredRunConfig(template, runtimeConfig, {
+            workspaceSlug,
+            threadSlug,
+          }),
+        });
+      }
     }
 
     const snowballIdentityScope = snowballTarget
@@ -734,6 +760,8 @@ export async function runTemplateViaRtx(
       writingScopeToken: writingScope?.token,
       snowballIdentityScopeToken: snowballIdentityScope?.token,
       snowballBrowserTarget: snowballTarget,
+      snowballSourceBrowserTarget: snowballSourceTarget,
+      snowballBrowserFallback,
       publicEventSource: eventIngestion?.publicResult,
       platformTarget: actingTarget
         ? {

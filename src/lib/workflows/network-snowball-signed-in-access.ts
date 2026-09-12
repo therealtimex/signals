@@ -1,8 +1,6 @@
 const EVENT_PROVIDER_HOSTS = new Set([
   "luma.com",
   "lu.ma",
-  "meetup.com",
-  "eventbrite.com",
 ]);
 const PROFESSIONAL_NETWORK_HOSTS = new Set(["linkedin.com"]);
 
@@ -24,7 +22,7 @@ export function networkSnowballSourceHostname(seedValue: string): string | null 
 export function networkSnowballSignedInAccessDescription(seedValue: string): string {
   const hostname = networkSnowballSourceHostname(seedValue);
   if (!hostname) {
-    return "When available, include additional people and details visible to you on the source site.";
+    return "Use this session's current signed-in state to read additional visible people and details on the source site.";
   }
   if (EVENT_PROVIDER_HOSTS.has(hostname)) {
     return `When available, include visible guests, attendees, and organizers on ${hostname}.`;
@@ -32,5 +30,5 @@ export function networkSnowballSignedInAccessDescription(seedValue: string): str
   if (PROFESSIONAL_NETWORK_HOSTS.has(hostname)) {
     return `When available, include visible people and organizations on ${hostname}.`;
   }
-  return `When available, include additional people and details visible to you on ${hostname}.`;
+  return `Use this session's current signed-in state to read additional visible people and details on ${hostname}.`;
 }

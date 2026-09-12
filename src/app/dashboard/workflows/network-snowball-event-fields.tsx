@@ -28,8 +28,9 @@ export function NetworkSnowballEventFields({
       <div>
         <Label>Event source expansion</Label>
         <p className="mt-0.5 text-xs text-muted-foreground">
-          Recognized event links are canonicalized and their public event, organizer, host,
-          sponsor, venue, calendar, and related-event evidence is saved before profile discovery.
+          Any event link can seed public research. Supported providers are canonicalized and their
+          public event, organizer, host, sponsor, venue, calendar, and related-event evidence is
+          saved before profile discovery.
         </p>
       </div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -174,8 +175,9 @@ export function NetworkSnowballEventFields({
           )}
 
           <p className="text-xs text-muted-foreground">
-            Sign-in, visible identity, and access will be verified at launch. Public extraction
-            continues if signed-in enrichment is unavailable.
+            Signals uses only this exact running session. Provider-specific identity and access
+            checks run when available; otherwise the site&apos;s current signed-in state is used.
+            Public-only extraction continues if the session is unavailable.
           </p>
           <p className="text-xs text-muted-foreground">
             Read-only. Signals won&apos;t register, RSVP, join a waitlist, follow, message, or

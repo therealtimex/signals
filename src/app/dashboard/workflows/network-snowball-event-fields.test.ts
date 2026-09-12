@@ -53,10 +53,13 @@ describe("NetworkSnowballEventFields", () => {
       "When available, include visible guests, attendees, and organizers on luma.com.",
     );
     expect(networkSnowballSignedInAccessDescription("https://example.com/community/post")).toBe(
-      "When available, include additional people and details visible to you on example.com.",
+      "Use this session's current signed-in state to read additional visible people and details on example.com.",
+    );
+    expect(networkSnowballSignedInAccessDescription("https://meetup.com/groups/events/1")).toBe(
+      "Use this session's current signed-in state to read additional visible people and details on meetup.com.",
     );
     expect(networkSnowballSignedInAccessDescription("not a URL")).toBe(
-      "When available, include additional people and details visible to you on the source site.",
+      "Use this session's current signed-in state to read additional visible people and details on the source site.",
     );
   });
 
@@ -77,7 +80,8 @@ describe("NetworkSnowballEventFields", () => {
     expect(container.textContent).toContain("example.com");
     expect(container.textContent).toContain("Signals Publish");
     expect(container.textContent).toContain("signals-publish");
-    expect(container.textContent).toContain("verified at launch");
+    expect(container.textContent).toContain("only this exact running session");
+    expect(container.textContent).toContain("current signed-in state is used");
 
     await act(async () => checkbox.click());
 

@@ -18,6 +18,8 @@ import {
   NETWORK_SNOWBALL_TOOLS,
   buildNetworkSnowballBriefSection,
   isNetworkSnowballTemplateConfig,
+  readNetworkSnowballConfig,
+  type NetworkSnowballBrowserFallback,
 } from "@/lib/workflows/network-snowball";
 import { WORKFLOW_TERMINAL_TEARDOWN_AFTER_COMPLETE } from "@/lib/rtx/teardown";
 import {
@@ -36,6 +38,7 @@ import {
   type ContactWebResearchBriefContext,
 } from "@/lib/workflows/contact-web-research";
 import type { NetworkSnowballPreparedTarget } from "@/lib/workflows/network-snowball-target";
+import type { NetworkSnowballPreparedSourceTarget } from "@/lib/workflows/network-snowball-source-target";
 import type { PublicEventSourceResult } from "@/lib/workflows/event-sources/service";
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -151,6 +154,12 @@ function stripInternalConfigKeys(config: Record<string, unknown>): Record<string
   const visible = Object.fromEntries(
     Object.entries(config).filter(([key]) => !key.startsWith("_"))
   );
+  if (isNetworkSnowballTemplateConfig(visible)) {
+    const participantAccess = readNetworkSnowballConfig(visible).participantAccess;
+    if (!participantAccess.enabled) {
+      visible.participantAccess = { enabled: false };
+    }
+  }
   return isSocialPatrolTemplateConfig(visible)
     ? stripRetiredSocialPatrolConfigKeys(visible) ?? visible
     : visible;
@@ -199,6 +208,10 @@ export function buildAgentWorkflowBrief(input: {
   snowballIdentityScopeToken?: string;
   /** Server-prepared browser target whose session and lease are bound to this Snowball run. */
   snowballBrowserTarget?: NetworkSnowballPreparedTarget;
+  /** Exact user-selected source session, bound only after explicit signed-in access consent. */
+  snowballSourceBrowserTarget?: NetworkSnowballPreparedSourceTarget;
+  /** Non-blocking browser preflight failure that forced a public-only run. */
+  snowballBrowserFallback?: NetworkSnowballBrowserFallback | null;
   /** Public-only event context computed and persisted by Signals before dispatch. */
   publicEventSource?: PublicEventSourceResult | null;
 }): string {
@@ -206,6 +219,9 @@ export function buildAgentWorkflowBrief(input: {
   const instructions = input.systemPromptOverride?.trim() || input.template.systemPrompt?.trim();
   const tools = getTemplateToolsHint(input.template.templateType, input.config).join(", ");
   const configJson = JSON.stringify(stripInternalConfigKeys(input.config), null, 2);
+  const teardownContract = isNetworkSnowballTemplateConfig(input.config)
+    ? "Call complete_workflow_run when finished. Signals releases this run's browser lease, stops only a launcher-owned browser session, leaves an explicitly selected borrowed source session running, and schedules release of the linked terminal session after the chat-linked turn finishes — do not continue working in this thread after completion."
+    : WORKFLOW_TERMINAL_TEARDOWN_AFTER_COMPLETE;
   const patrolContract = isSocialPatrolTemplateConfig(input.config)
     ? `${buildSocialPatrolBriefSection({
         workflowRunId: input.workflowRunId,
@@ -236,6 +252,8 @@ export function buildAgentWorkflowBrief(input: {
         signalsBaseUrl: input.signalsBaseUrl,
         snowballIdentityScopeToken: input.snowballIdentityScopeToken,
         browserTarget: input.snowballBrowserTarget,
+        sourceBrowserTarget: input.snowballSourceBrowserTarget,
+        browserFallback: input.snowballBrowserFallback,
         publicEventSource: input.publicEventSource,
       })}\n`
     : null;
@@ -315,7 +333,7 @@ export function buildAgentWorkflowBrief(input: {
     `8. For single-record edits, invoke tools (${tools}) via POST ${input.signalsBaseUrl}/api/agent-tools/invoke with JSON { \"tool\": \"...\", \"input\": { ... } }.`,
     "9. Perform web search and browser work in RealTimeX (not via agent-tools).",
     `10. FINALIZATION: When finished, call complete_workflow_run via POST ${input.signalsBaseUrl}/api/agent-tools/invoke with { "tool": "complete_workflow_run", "input": { "runId": "${input.workflowRunId}", "status": "completed", "summary": "..." } } to trigger automated follow-on cascades and webhook dispatch.`,
-    `11. TEARDOWN & RESOURCE RELEASE: ${WORKFLOW_TERMINAL_TEARDOWN_AFTER_COMPLETE}`,
+    `11. TEARDOWN & RESOURCE RELEASE: ${teardownContract}`,
     "",
     patrolContract,
     publishContract,
