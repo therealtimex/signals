@@ -63,7 +63,7 @@ describe("readNetworkSnowballConfig", () => {
         maxProfileVisits: 20,
         maxProviderRequests: 40,
       },
-      participantAccess: { enabled: false, browserSessionName: "" },
+      participantAccess: { enabled: false, browserSessionName: "signals-publish" },
       followOnActions: [],
       followOnAction: undefined,
       cascadePolicy: "immediate",
@@ -102,11 +102,19 @@ describe("readNetworkSnowballConfig", () => {
         maxProfileVisits: 20,
         maxProviderRequests: 40,
       },
-      participantAccess: { enabled: false, browserSessionName: "" },
+      participantAccess: { enabled: false, browserSessionName: "signals-publish" },
       followOnActions: ["profile_pipeline", "contact_nurture"],
       followOnAction: "profile_pipeline",
       cascadePolicy: "immediate",
     });
+  });
+
+  it("resolves an enabled empty session to Signals Publish", () => {
+    expect(
+      readNetworkSnowballConfig({
+        participantAccess: { enabled: true, browserSessionName: "   " },
+      }).participantAccess,
+    ).toEqual({ enabled: true, browserSessionName: "signals-publish" });
   });
 });
 
@@ -208,7 +216,9 @@ describe("buildNetworkSnowballBriefSection", () => {
     expect(brief).toContain(
       ".claude/skills/realtimex-signals/scripts/run-signals-pp-cli.sh import contacts --file workflow-runs/run_snow_1/contacts.csv --dedupe --workflow-run-id run_snow_1 --template-id tpl_snow_1",
     );
-    expect(brief).toContain("server-bound session named `signals-publish` only");
+    expect(brief).toContain("Public-only source access is in force");
+    expect(brief).toContain("Do not attach agent-browser");
+    expect(brief).not.toContain("Navigate in that session to the seed post URL");
     expect(brief).toContain("Never read document.cookie");
     expect(brief).toContain("Never inspect or edit the Signals source tree");
     expect(brief).toContain("Server-Owned Browser Teardown");
@@ -261,5 +271,51 @@ describe("buildNetworkSnowballBriefSection", () => {
 
     expect(brief).toContain("This is an X-only run with no bound LinkedIn target");
     expect(brief).toContain("Do not discover or write LinkedIn identities");
+  });
+
+  it("keeps unsupported generic signed-in sources in public-only mode", () => {
+    const brief = buildNetworkSnowballBriefSection({
+      workflowRunId: "run_generic_source",
+      config: {
+        networkSnowball: { version: 1 },
+        seedType: "event_url",
+        seedValue: "https://events.example.test/founder-night",
+        participantAccess: { enabled: true, browserSessionName: "personal-browser" },
+      },
+      browserFallback: {
+        code: "UNSUPPORTED_SOURCE",
+        message: "Signed-in access is unsupported for this source.",
+      },
+    });
+
+    expect(brief).toContain("Public-only source access is in force");
+    expect(brief).toContain("Signed-in access is unsupported for this source");
+    expect(brief).toContain("Do not attach agent-browser");
+    expect(brief).toContain("Public-Only Identity Gate");
+    expect(brief).not.toContain("signals-publish");
+    expect(brief).not.toContain("<missing-");
+  });
+
+  it("produces a targetless public-only brief without placeholder capabilities", () => {
+    const brief = buildNetworkSnowballBriefSection({
+      workflowRunId: "run_public_only",
+      config: {
+        networkSnowball: { version: 1 },
+        seedType: "event_url",
+        seedValue: "https://events.example.test/public-night",
+        participantAccess: { enabled: false, browserSessionName: "signals-publish" },
+      },
+      browserFallback: {
+        code: "CONNECTION_UNAVAILABLE",
+        message: "The browser session is unavailable.",
+      },
+    });
+
+    expect(brief).toContain("Public-only source access is in force");
+    expect(brief).toContain("Continue in public-only mode");
+    expect(brief).toContain("No browser session or lease was acquired");
+    expect(brief).toContain("Public-Only Write Back");
+    expect(brief).not.toContain("snowballScopeToken");
+    expect(brief).not.toContain("<missing-");
   });
 });

@@ -5,9 +5,12 @@ import type { Page } from "playwright";
 import { getBrowserConnectionBySessionName } from "@/lib/db/queries/platform-targets";
 import {
   acquireSessionLease,
-  isSessionLeaseCurrent,
+  getSessionLease,
+  getSessionLeaseById,
   releaseSessionLease,
+  renewSessionLease,
 } from "@/lib/leases/session-lease";
+import { PlatformTargetError } from "@/lib/platforms/target-errors";
 import {
   findRtxBrowserSession,
   listRtxBrowserSessions,
@@ -30,6 +33,84 @@ export class EventBrowserError extends Error {
   ) {
     super(message);
     this.name = "EventBrowserError";
+  }
+}
+
+const EVENT_BROWSER_LEASE_TTL_SECONDS = 30 * 60;
+const SNOWBALL_RUN_LEASE_HOLDER_PREFIX = "network-snowball:";
+
+export type AuthorizedEventBrowserLease = {
+  leaseId: string;
+  expiresAt: number;
+  reused: boolean;
+};
+
+/**
+ * Acquire the selected source session, or reuse the current run's lease when its publishing
+ * target is bound to the same browser connection. Reuse preserves the target binding and leaves
+ * final release to the run owner.
+ */
+export function acquireAuthorizedEventBrowserLease(input: {
+  connectionId: string;
+  runId: string;
+}): AuthorizedEventBrowserLease {
+  const holder = `${SNOWBALL_RUN_LEASE_HOLDER_PREFIX}${input.runId}`;
+  const now = Math.floor(Date.now() / 1_000);
+  const current = getSessionLease(input.connectionId);
+  if (current && current.expiresAt >= now && current.holder === holder) {
+    const renewed = renewSessionLease(current.leaseId, EVENT_BROWSER_LEASE_TTL_SECONDS);
+    return { leaseId: renewed.leaseId, expiresAt: renewed.expiresAt, reused: true };
+  }
+
+  try {
+    const acquired = acquireSessionLease(input.connectionId, {
+      holder,
+      targetId: null,
+      intent: "browse",
+      ttlSeconds: EVENT_BROWSER_LEASE_TTL_SECONDS,
+    });
+    return { leaseId: acquired.leaseId, expiresAt: acquired.expiresAt, reused: false };
+  } catch (error) {
+    if (error instanceof PlatformTargetError && error.code === "SESSION_LEASE_HELD") {
+      throw new EventBrowserError(
+        "permission_missing",
+        "The selected browser session is currently in use by another workflow.",
+      );
+    }
+    throw error;
+  }
+}
+
+/** Renew only the exact lease still owned by this Snowball run and connection. */
+export function renewAuthorizedEventBrowserLease(input: {
+  connectionId: string;
+  leaseId: string;
+  runId: string;
+}): AuthorizedEventBrowserLease {
+  const current = getSessionLeaseById(input.leaseId);
+  const now = Math.floor(Date.now() / 1_000);
+  if (
+    !current ||
+    current.connectionId !== input.connectionId ||
+    current.holder !== `${SNOWBALL_RUN_LEASE_HOLDER_PREFIX}${input.runId}` ||
+    current.expiresAt < now
+  ) {
+    throw new EventBrowserError(
+      "lease_lost",
+      "The browser lease expired or changed during authorized source traversal.",
+    );
+  }
+  try {
+    const renewed = renewSessionLease(input.leaseId, EVENT_BROWSER_LEASE_TTL_SECONDS);
+    return { leaseId: renewed.leaseId, expiresAt: renewed.expiresAt, reused: true };
+  } catch (error) {
+    if (error instanceof PlatformTargetError && error.code === "LEASE_LOST") {
+      throw new EventBrowserError(
+        "lease_lost",
+        "The browser lease expired or changed during authorized source traversal.",
+      );
+    }
+    throw error;
   }
 }
 
@@ -81,18 +162,68 @@ function visibleSelection($: cheerio.CheerioAPI, selector: string) {
   return $(selector).filter((_, element) => isVisiblyIncluded($, element));
 }
 
-export function inspectVisibleLumaViewerIdentity(html: string): string {
+function removeNonVisibleTextSources($: cheerio.CheerioAPI): void {
+  $("script, style, noscript").remove();
+  $("*").each((_, element) => {
+    if (!isVisiblyIncluded($, element)) $(element).remove();
+  });
+}
+
+type TextTreeNode = {
+  type: string;
+  data?: string;
+  children?: TextTreeNode[];
+};
+
+function collectTextNodesInOrder(node: TextTreeNode, fragments: string[]): void {
+  if (node.type === "text" && typeof node.data === "string") {
+    fragments.push(node.data);
+    return;
+  }
+  if (node.children) {
+    for (const child of node.children) collectTextNodesInOrder(child, fragments);
+  }
+}
+
+function visibleBodyText($: cheerio.CheerioAPI): string {
+  const fragments: string[] = [];
+  for (const node of $("body").contents().toArray()) {
+    collectTextNodesInOrder(node, fragments);
+  }
+  return normalizedText(fragments.join(" "));
+}
+
+function hasVisibleSignInControl($: cheerio.CheerioAPI): boolean {
+  return visibleSelection(
+    $,
+    'a[href], button, [role="button"], input[type="button"], input[type="submit"]',
+  ).toArray().some((element) => {
+    const control = $(element);
+    const label = normalizedText([
+      control.attr("aria-label"),
+      control.attr("title"),
+      control.attr("value"),
+      control.text(),
+    ].filter(Boolean).join(" "));
+    if (/\b(?:sign|log)\s+in\b/i.test(label)) return true;
+    const href = control.attr("href");
+    if (!href) return false;
+    try {
+      return /\/(?:sign|log)[-_]?in(?:\/|$)/i.test(new URL(href, "https://luma.com").pathname);
+    } catch {
+      return false;
+    }
+  });
+}
+
+function readVisibleLumaPageState(html: string): {
+  bodyText: string;
+  hasSignInControl: boolean;
+  viewerIdentity: string;
+} {
   const $ = cheerio.load(html);
-  const bodyText = normalizedText($("body").text());
-  if (/log\s*in|sign\s*in to (?:continue|view)/i.test(bodyText)) {
-    throw new EventBrowserError("login_required", "The selected browser session is not signed in to Luma.");
-  }
-  if (/waitlist|you are waitlisted/i.test(bodyText)) {
-    throw new EventBrowserError("waitlisted", "The selected viewer is waitlisted and cannot access the guest list.");
-  }
-  if (/register to view guest list|registered guests? only/i.test(bodyText)) {
-    throw new EventBrowserError("registration_required", "The guest list requires event registration.");
-  }
+  removeNonVisibleTextSources($);
+  const bodyText = visibleBodyText($);
   const viewer = visibleSelection(
     $,
     '[data-testid="user-menu"], [data-testid="account-menu"], [data-viewer-identity], button[aria-label*="account" i], button[aria-label*="profile" i], header button img[alt], nav button img[alt]',
@@ -104,10 +235,31 @@ export function inspectVisibleLumaViewerIdentity(html: string): string {
       ?? viewer.find("img[alt]").first().attr("alt")
       ?? viewer.text(),
   );
-  if (!viewerIdentity) {
+  return { bodyText, hasSignInControl: hasVisibleSignInControl($), viewerIdentity };
+}
+
+function throwForVisibleLumaGate(state: ReturnType<typeof readVisibleLumaPageState>): void {
+  if (!state.viewerIdentity) {
+    if (state.hasSignInControl) {
+      throw new EventBrowserError("login_required", "The selected browser session is not signed in to Luma.");
+    }
+    return;
+  }
+  if (/\bregister\s+to\s+view\s+guest\s+list\b|\bregistered\s+guests?\s+only\b/i.test(state.bodyText)) {
+    throw new EventBrowserError("registration_required", "The guest list requires event registration.");
+  }
+  if (/you are waitlisted|on the waitlist|waitlist status/i.test(state.bodyText)) {
+    throw new EventBrowserError("waitlisted", "The selected viewer is waitlisted and cannot access the guest list.");
+  }
+}
+
+export function inspectVisibleLumaViewerIdentity(html: string): string {
+  const state = readVisibleLumaPageState(html);
+  throwForVisibleLumaGate(state);
+  if (!state.viewerIdentity) {
     throw new EventBrowserError("permission_missing", "A visible signed-in Luma viewer identity could not be verified.");
   }
-  return viewerIdentity;
+  return state.viewerIdentity;
 }
 
 export function inspectAuthorizedLumaHtml(input: {
@@ -195,12 +347,32 @@ export function inspectAuthorizedLumaHtml(input: {
   return { viewerIdentity, participants };
 }
 
+export function recheckAuthorizedLumaBoundary(input: {
+  html: string;
+  canonicalUrl: string;
+  scope: Extract<EventSourceAccessScope, { kind: "authorized" }>;
+  expectedViewerIdentity: string | null;
+  maxParticipants: number;
+}): { viewerIdentity: string; participants: AuthorizedEventParticipant[] } {
+  const inspected = inspectAuthorizedLumaHtml(input);
+  if (
+    input.expectedViewerIdentity !== null &&
+    inspected.viewerIdentity !== input.expectedViewerIdentity
+  ) {
+    throw new EventBrowserError(
+      "session_changed",
+      "The visible Luma viewer identity changed during observation.",
+    );
+  }
+  return inspected;
+}
+
 export async function verifyAuthorizedLumaParticipantProfiles(input: {
   participants: AuthorizedEventParticipant[];
   expectedViewerIdentity: string;
   maxProfileVisits: number;
   navigate: (url: string) => Promise<string>;
-  isLeaseCurrent: () => boolean;
+  renewLease: () => void;
   sleep: (ms: number) => Promise<void>;
   beforeProviderRequest?: () => Promise<boolean>;
 }): Promise<number> {
@@ -209,14 +381,13 @@ export async function verifyAuthorizedLumaParticipantProfiles(input: {
   ))].slice(0, input.maxProfileVisits);
   let visits = 0;
   for (const profileUrl of profileUrls) {
-    if (!input.isLeaseCurrent()) {
-      throw new EventBrowserError("lease_lost", "The browser lease expired during participant profile observation.");
-    }
+    input.renewLease();
     if (visits > 0) await input.sleep(EVENT_PROVIDER_RUNTIME_POLICY.minRequestIntervalMs);
     if (input.beforeProviderRequest && !(await input.beforeProviderRequest())) {
       throw new EventBrowserError("rate_limited", "The event provider request budget is exhausted.");
     }
     const viewerIdentity = inspectVisibleLumaViewerIdentity(await input.navigate(profileUrl));
+    input.renewLease();
     if (viewerIdentity !== input.expectedViewerIdentity) {
       throw new EventBrowserError("session_changed", "The visible Luma viewer identity changed during profile observation.");
     }
@@ -256,14 +427,20 @@ export async function observeAuthorizedLumaParticipants(input: {
     throw new EventBrowserError("permission_missing", "The selected RealTimeX browser session is not running.");
   }
 
-  const lease = acquireSessionLease(connection.id, {
-    holder: `network-snowball-event:${input.runId}`,
-    targetId: null,
-    intent: "browse",
-    ttlSeconds: 300,
+  const lease = acquireAuthorizedEventBrowserLease({
+    connectionId: connection.id,
+    runId: input.runId,
   });
+  const renewLease = () => {
+    renewAuthorizedEventBrowserLease({
+      connectionId: connection.id,
+      leaseId: lease.leaseId,
+      runId: input.runId,
+    });
+  };
   let browser: Awaited<ReturnType<typeof chromium.connectOverCDP>> | null = null;
   try {
+    renewLease();
     browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
     const context = browser.contexts()[0];
     if (!context) throw new EventBrowserError("session_changed", "The selected browser context disappeared.");
@@ -272,37 +449,36 @@ export async function observeAuthorizedLumaParticipants(input: {
     if (input.beforeProviderRequest && !(await input.beforeProviderRequest())) {
       throw new EventBrowserError("rate_limited", "The event provider request budget is exhausted.");
     }
+    renewLease();
     await page.goto(canonicalUrl, {
       waitUntil: "domcontentloaded",
       timeout: EVENT_PROVIDER_RUNTIME_POLICY.navigationTimeoutMs,
     });
+    renewLease();
     const initialHtml = await visibleDomSnapshot(page);
-    if (!/register to view guest list|registered guests? only|waitlist|you are waitlisted|sign\s*in to (?:continue|view)/i.test(initialHtml)) {
-      const guestTrigger = page.getByText(/^\s*(?:guest list|[\d,]+\s+(?:people\s+)?going)\s*$/i).first();
-      if (await guestTrigger.isVisible().catch(() => false)) {
-        if (input.beforeProviderRequest && !(await input.beforeProviderRequest())) {
-          throw new EventBrowserError("rate_limited", "The event provider request budget is exhausted.");
-        }
-        await guestTrigger.click({ timeout: 5_000 }).catch(() => undefined);
-        await page.waitForTimeout(300);
+    throwForVisibleLumaGate(readVisibleLumaPageState(initialHtml));
+    const guestTrigger = page.getByText(/^\s*(?:guest list|[\d,]+\s+(?:people\s+)?going)\s*$/i).first();
+    if (await guestTrigger.isVisible().catch(() => false)) {
+      if (input.beforeProviderRequest && !(await input.beforeProviderRequest())) {
+        throw new EventBrowserError("rate_limited", "The event provider request budget is exhausted.");
       }
+      renewLease();
+      await guestTrigger.click({ timeout: 5_000 }).catch(() => undefined);
+      await page.waitForTimeout(300);
+      renewLease();
     }
     const participants: AuthorizedEventParticipant[] = [];
     const seenParticipants = new Set<string>();
     let viewerIdentity: string | null = null;
     for (let guestPage = 0; guestPage < input.maxGuestPages; guestPage += 1) {
-      if (!isSessionLeaseCurrent(lease.leaseId)) {
-        throw new EventBrowserError("lease_lost", "The browser lease expired during guest-list observation.");
-      }
-      const inspected = inspectAuthorizedLumaHtml({
+      renewLease();
+      const inspected = recheckAuthorizedLumaBoundary({
         html: await visibleDomSnapshot(page),
         canonicalUrl,
         scope: { kind: "authorized", ownerWorkspace: input.ownerWorkspace, runId: input.runId, grantId: input.grantId },
+        expectedViewerIdentity: viewerIdentity,
         maxParticipants: input.maxParticipants,
       });
-      if (viewerIdentity !== null && inspected.viewerIdentity !== viewerIdentity) {
-        throw new EventBrowserError("session_changed", "The visible Luma viewer identity changed during observation.");
-      }
       viewerIdentity = inspected.viewerIdentity;
       for (const participant of inspected.participants) {
         if (participants.length >= input.maxParticipants) break;
@@ -316,8 +492,10 @@ export async function observeAuthorizedLumaParticipants(input: {
       if (input.beforeProviderRequest && !(await input.beforeProviderRequest())) {
         throw new EventBrowserError("rate_limited", "The event provider request budget is exhausted.");
       }
+      renewLease();
       await nextGuests.click({ timeout: 5_000 });
       await page.waitForTimeout(EVENT_PROVIDER_RUNTIME_POLICY.minRequestIntervalMs);
+      renewLease();
     }
     if (!viewerIdentity || participants.length === 0) {
       throw new EventBrowserError("parse_failed", "The authorized guest observation was empty.");
@@ -332,15 +510,50 @@ export async function observeAuthorizedLumaParticipants(input: {
       expectedViewerIdentity: viewerIdentity,
       maxProfileVisits: input.maxProfileVisits,
       navigate: async (profileUrl) => {
+        renewLease();
         await page.goto(profileUrl, {
           waitUntil: "domcontentloaded",
           timeout: EVENT_PROVIDER_RUNTIME_POLICY.navigationTimeoutMs,
         });
+        renewLease();
         return visibleDomSnapshot(page);
       },
-      isLeaseCurrent: () => isSessionLeaseCurrent(lease.leaseId),
+      renewLease,
       sleep: (ms) => page.waitForTimeout(ms),
       beforeProviderRequest: input.beforeProviderRequest,
+    });
+    if (input.beforeProviderRequest && !(await input.beforeProviderRequest())) {
+      throw new EventBrowserError("rate_limited", "The event provider request budget is exhausted.");
+    }
+    renewLease();
+    await page.goto(canonicalUrl, {
+      waitUntil: "domcontentloaded",
+      timeout: EVENT_PROVIDER_RUNTIME_POLICY.navigationTimeoutMs,
+    });
+    renewLease();
+    const finalGuestTrigger = page.getByText(
+      /^\s*(?:guest list|[\d,]+\s+(?:people\s+)?going)\s*$/i,
+    ).first();
+    if (await finalGuestTrigger.isVisible().catch(() => false)) {
+      if (input.beforeProviderRequest && !(await input.beforeProviderRequest())) {
+        throw new EventBrowserError("rate_limited", "The event provider request budget is exhausted.");
+      }
+      renewLease();
+      await finalGuestTrigger.click({ timeout: 5_000 }).catch(() => undefined);
+      await page.waitForTimeout(300);
+      renewLease();
+    }
+    recheckAuthorizedLumaBoundary({
+      html: await visibleDomSnapshot(page),
+      canonicalUrl,
+      scope: {
+        kind: "authorized",
+        ownerWorkspace: input.ownerWorkspace,
+        runId: input.runId,
+        grantId: input.grantId,
+      },
+      expectedViewerIdentity: viewerIdentity,
+      maxParticipants: input.maxParticipants,
     });
     return {
       connectionId: connection.id,
@@ -350,10 +563,12 @@ export async function observeAuthorizedLumaParticipants(input: {
     };
   } finally {
     await browser?.close().catch(() => undefined);
-    try {
-      releaseSessionLease(lease.leaseId);
-    } catch {
-      // The lease may already have expired; never stop the borrowed session.
+    if (!lease.reused) {
+      try {
+        releaseSessionLease(lease.leaseId);
+      } catch {
+        // The lease may already have expired; never stop the borrowed session.
+      }
     }
   }
 }

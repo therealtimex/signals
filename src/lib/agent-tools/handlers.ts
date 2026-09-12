@@ -126,7 +126,6 @@ import {
   getNetworkSnowballTargetFromRunConfig,
   releaseNetworkSnowballTargetFromRunConfig,
 } from "@/lib/workflows/network-snowball-target";
-import { RTX_PUBLISH_SESSION_NAME } from "@/lib/publish/constants";
 
 const DEFAULT_PAGE_SIZE = 20;
 
@@ -1583,13 +1582,18 @@ export async function handleCompleteWorkflowRun(input: z.infer<typeof completeWo
       leaseRelease = releaseContactWebResearchTargetFromRunConfig(run.config);
     }
   } else if (isSnowball) {
-    try {
-      const targetSessionName = snowballBrowserTarget?.sessionName ?? RTX_PUBLISH_SESSION_NAME;
-      browserSessionTeardown = targetSessionName === borrowedEventSessionName
-        ? { stopped: [], failed: [] }
-        : await stopRunningRtxBrowserSessions({ sessionNames: [targetSessionName] });
-    } finally {
-      leaseRelease = releaseNetworkSnowballTargetFromRunConfig(run.config);
+    if (snowballBrowserTarget) {
+      try {
+        browserSessionTeardown = snowballBrowserTarget.sessionName === borrowedEventSessionName
+          ? { stopped: [], failed: [] }
+          : await stopRunningRtxBrowserSessions({
+              sessionNames: [snowballBrowserTarget.sessionName],
+            });
+      } finally {
+        leaseRelease = releaseNetworkSnowballTargetFromRunConfig(run.config);
+      }
+    } else {
+      browserSessionTeardown = { stopped: [], failed: [] };
     }
   }
 

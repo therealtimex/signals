@@ -180,6 +180,18 @@ describe("template-brief", () => {
       },
       signalsBaseUrl: "http://localhost:3000",
       snowballIdentityScopeToken: "run_snow_2.scope-secret",
+      snowballBrowserTarget: {
+        targetId: "target-linkedin",
+        platform: "linkedin",
+        source: "session",
+        sessionName: "signals-publish",
+        startUrl: "https://www.linkedin.com/in/operator",
+        expectedHandle: "/in/operator",
+        verifiedHandle: "/in/operator",
+        leaseId: "lease-snowball",
+        leaseExpiresAt: 1_800_000_000,
+        preparedAt: 1_799_999_400,
+      },
     });
 
     expect(brief).toContain("Network Snowball execution contract:");

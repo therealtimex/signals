@@ -17,7 +17,7 @@ function eventHtml(title = "Build Friday", links: string[] = []) {
     "@context":"https://schema.org","@type":"Event","name":"${title}",
     "organizer":{"@type":"Organization","name":"Acme","url":"https://acme.test"}
   }</script></head><body><p>42 Going</p><p>Register to View Guest List</p>
-  ${links.map((link) => `<a href="${link}">Related</a>`).join("")}</body></html>`;
+  ${links.map((link) => `<a data-event-url href="${link}">Related</a>`).join("")}</body></html>`;
 }
 
 describe("Network Snowball event source ingestion", () => {
@@ -49,10 +49,37 @@ describe("Network Snowball event source ingestion", () => {
     expect(getWorkflowRun(run.id)?.result).not.toContain("must-not-persist");
     expect(JSON.parse(getWorkflowRun(run.id)!.result!)[EVENT_SOURCE_RESULT_KEY]).toMatchObject({
       canonicalSeedUrl: "https://luma.com/demo",
-      guestBoundary: { state: "not_requested", reason: "public_only" },
+      guestBoundary: { state: "gated", reason: "registration_required" },
     });
     expect(JSON.parse(getWorkflowRun(run.id)!.result!)[EVENT_SOURCE_RUNTIME_RESULT_KEY]).toBeUndefined();
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps public extraction when the selected signed-in session is missing", async () => {
+    const run = createWorkflowRun({ workflowType: "search", status: "running", trigger: "template" });
+    const fetchImpl = vi.fn(async () => new Response(eventHtml(), { status: 200 })) as unknown as typeof fetch;
+
+    const result = await ingestNetworkSnowballEventSource({
+      runId: run.id,
+      ownerWorkspace: "signals",
+      seedUrl: "https://luma.com/demo",
+      traversal: readEventTraversalPolicy({ maxEvents: 1 }),
+      participantAccess: {
+        enabled: true,
+        browserSessionName: "missing-browser-session",
+      },
+      writeGraphEdges: false,
+      fetchImpl,
+      sleepImpl: async () => undefined,
+    });
+
+    expect(result?.publicResult).toMatchObject({
+      events: [{ title: "Build Friday" }],
+      guestBoundary: { state: "gated", reason: "permission_missing" },
+      partial: true,
+    });
+    expect(db.select().from(contentItems).all()).toHaveLength(1);
+    expect(result?.eventReportCapability).toBeUndefined();
   });
 
   it("writes explicit public role edges only when automatic graph linking is allowed", async () => {
@@ -198,9 +225,9 @@ describe("Network Snowball event source ingestion", () => {
       '<a data-calendar-url href="/calendar?tk=secret">View Calendar</a></body>',
     );
     const calendar = `<section data-calendar-page>
-      <article><a href="/a">A</a></article>
-      <article><a href="/b">B</a></article>
-      <article><a href="/c">C</a></article>
+      <article data-event-card><a href="/a">A</a></article>
+      <article data-event-card><a href="/b">B</a></article>
+      <article data-event-card><a href="/c">C</a></article>
       <a data-calendar-next href="/calendar/page-2">Next</a>
     </section>`;
     const pages = new Map([

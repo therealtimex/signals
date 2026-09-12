@@ -285,11 +285,16 @@ describe("runTemplateViaRtx health preflight", () => {
   });
 
   it("mints and persists the Snowball identity scope before dispatch", async () => {
+    const templateConfig = {
+      ...buildNetworkSnowballTemplateConfig(),
+      seedType: "topic_search",
+      seedValue: "database infrastructure founders",
+    };
     const template = createTemplate({
       name: "Network Snowball",
       templateType: "prospecting",
       status: "active",
-      config: JSON.stringify(buildNetworkSnowballTemplateConfig()),
+      config: JSON.stringify(templateConfig),
       isSystem: 1,
     });
     let hashAtDispatch: unknown;
@@ -371,7 +376,7 @@ describe("runTemplateViaRtx health preflight", () => {
     expect(snowballTargetMocks.releaseNetworkSnowballTarget).not.toHaveBeenCalled();
   });
 
-  it("persists a sanitized public Luma event before a social-target preflight failure", async () => {
+  it("dispatches a sanitized public Luma run after a social-target preflight failure", async () => {
     const templateConfig = {
       ...buildNetworkSnowballTemplateConfig(),
       seedType: "event_url",
@@ -412,7 +417,17 @@ describe("runTemplateViaRtx health preflight", () => {
       if (url === "https://luma.com/build-night") {
         return new Response(`<script type="application/ld+json">{
           "@context":"https://schema.org","@type":"Event","name":"Build Night"
-        }</script>`, { status: 200 });
+        }</script><p>Register to View Guest List</p>`, { status: 200 });
+      }
+      if (url.endsWith("/cli/send-message/signals-resolved/network-snowball")) {
+        return new Response(JSON.stringify({
+          success: true,
+          terminalDispatchAccepted: true,
+          descriptor: { id: "runtime-snowball-public" },
+        }), { status: 200 });
+      }
+      if (url.endsWith("/sdk/desktop/runtime-sessions/open-launcher")) {
+        return new Response(JSON.stringify({ success: true }), { status: 200 });
       }
       return new Response(JSON.stringify({ error: `Unexpected request: ${url}` }), { status: 500 });
     }) as unknown as typeof fetch;
@@ -428,12 +443,8 @@ describe("runTemplateViaRtx health preflight", () => {
       fetchImpl,
     );
 
-    expect(result).toMatchObject({
-      success: false,
-      errorCode: "snowball_browser_target_unavailable",
-      workflowRunId: expect.any(String),
-    });
-    if (result.success || !result.workflowRunId) throw new Error("expected failed target preflight");
+    expect(result).toMatchObject({ success: true, workflowRunId: expect.any(String) });
+    if (!result.success) throw new Error(result.error);
     expect(requested).toContain("https://luma.com/build-night");
     expect(requested.join("\n")).not.toContain("must-not-persist");
     expect(JSON.stringify({
@@ -447,15 +458,205 @@ describe("runTemplateViaRtx health preflight", () => {
         events: [{ title: "Build Night" }],
       },
       partial: true,
-      blocked: "LOGIN_REQUIRED",
+      browserFallback: {
+        code: "LOGIN_REQUIRED",
+        message: "LinkedIn is signed out",
+      },
     });
     expect(db.select().from(contentItems).all()).toEqual([
       expect.objectContaining({ title: "Build Night", origin: "imported", aiGenerated: false }),
     ]);
+    const brief = readFileSync(join(
+      storageDir,
+      "working-data/signals-resolved/workflow-runs",
+      result.workflowRunId,
+      "brief.md",
+    ), "utf8");
+    expect(brief).toContain("Build Night");
+    expect(brief).toContain("Guest list gated: event registration is required");
+    expect(brief).toContain("Continue in public-only mode");
+    expect(brief).toContain("Public-Only Identity Gate");
+    expect(brief).not.toContain("snowballScopeToken");
+    expect(listWorkflowSteps(result.workflowRunId)).toContainEqual(
+      expect.objectContaining({
+        tool: "snowball_browser_target_preflight",
+        status: "failed",
+      }),
+    );
+    expect(listWorkflowSteps(result.workflowRunId)).toContainEqual(
+      expect.objectContaining({
+        tool: "event_source_ingest",
+        status: "completed",
+        output: expect.stringContaining('"registration_required"'),
+      }),
+    );
+  });
+
+  it("keeps the LinkedIn identity gate for a public-only X post seed", async () => {
+    const template = createTemplate({
+      name: "Network Snowball",
+      templateType: "prospecting",
+      status: "active",
+      config: JSON.stringify({
+        ...buildNetworkSnowballTemplateConfig(),
+        seedType: "event_url",
+        seedValue: "https://x.com/acme_ai/status/123456789",
+      }),
+      isSystem: 1,
+    });
+    const requested: string[] = [];
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url =
+        typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      requested.push(url);
+      if (url.endsWith("/api/health")) {
+        return new Response(JSON.stringify({ app: "signals", status: "ok" }), { status: 200 });
+      }
+      if (url.endsWith("/cli/get-workspace/signals")) {
+        return new Response(JSON.stringify({ workspace: { slug: "signals" } }), { status: 200 });
+      }
+      if (url.endsWith("/cli/create-thread/signals")) {
+        return new Response(JSON.stringify({ thread: { slug: "network-snowball" } }), {
+          status: 200,
+        });
+      }
+      if (url.endsWith("/cli/send-message/signals/network-snowball")) {
+        return new Response(JSON.stringify({
+          success: true,
+          terminalDispatchAccepted: true,
+          descriptor: { id: "runtime-generic-public" },
+        }), { status: 200 });
+      }
+      if (url.endsWith("/sdk/desktop/runtime-sessions/open-launcher")) {
+        return new Response(JSON.stringify({ success: true }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ error: `Unexpected request: ${url}` }), { status: 500 });
+    }) as unknown as typeof fetch;
+
+    const result = await runTemplateViaRtx(
+      { templateId: template.id, signalsBaseUrl: "http://127.0.0.1:3099" },
+      {
+        ...process.env,
+        RTX_APP_ID: "test-app-id",
+        RTX_API_BASE_URL: "http://127.0.0.1:3001",
+        STORAGE_DIR: storageDir,
+      },
+      fetchImpl,
+    );
+
+    expect(result.success).toBe(true);
+    if (!result.success) throw new Error(result.error);
+    expect(snowballTargetMocks.prepareNetworkSnowballTarget).toHaveBeenCalledOnce();
+    expect(requested.some((url) => url.includes("list-browser-sessions"))).toBe(false);
+    const brief = readFileSync(join(
+      storageDir,
+      "working-data/signals/workflow-runs",
+      result.workflowRunId,
+      "brief.md",
+    ), "utf8");
+    expect(brief).toContain("Public-only source access is in force");
+    expect(brief).toContain("Do not attach agent-browser");
+    expect(brief).toContain("Server-Enforced LinkedIn Gate");
+    expect(brief).toContain("S5. Auto-commit & Graph Edge Linking");
+    expect(brief).toContain("snowballScopeToken");
+    expect(JSON.parse(getWorkflowRun(result.workflowRunId)?.config ?? "{}"))
+      .toHaveProperty(SNOWBALL_BROWSER_TARGET_CONFIG_KEY);
+  });
+
+  it("falls back publicly when a generic source has no safe signed-in adapter", async () => {
+    const template = createTemplate({
+      name: "Network Snowball",
+      templateType: "prospecting",
+      status: "active",
+      config: JSON.stringify({
+        ...buildNetworkSnowballTemplateConfig(),
+        seedType: "event_url",
+        seedValue: "https://events.example.test/member-night",
+        participantAccess: {
+          enabled: true,
+          browserSessionName: "personal-browser",
+        },
+      }),
+      isSystem: 1,
+    });
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url =
+        typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.endsWith("/api/health")) {
+        return new Response(JSON.stringify({ app: "signals", status: "ok" }), { status: 200 });
+      }
+      if (url.endsWith("/cli/get-workspace/signals")) {
+        return new Response(JSON.stringify({ workspace: { slug: "signals" } }), { status: 200 });
+      }
+      if (url.endsWith("/cli/create-thread/signals")) {
+        return new Response(JSON.stringify({ thread: { slug: "network-snowball" } }), {
+          status: 200,
+        });
+      }
+      if (url.endsWith("/cli/send-message/signals/network-snowball")) {
+        return new Response(JSON.stringify({
+          success: true,
+          terminalDispatchAccepted: true,
+          descriptor: { id: "runtime-generic-signed-in" },
+        }), { status: 200 });
+      }
+      if (url.endsWith("/sdk/desktop/runtime-sessions/open-launcher")) {
+        return new Response(JSON.stringify({ success: true }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ error: `Unexpected request: ${url}` }), { status: 500 });
+    }) as unknown as typeof fetch;
+
+    const result = await runTemplateViaRtx(
+      { templateId: template.id, signalsBaseUrl: "http://127.0.0.1:3099" },
+      {
+        ...process.env,
+        RTX_APP_ID: "test-app-id",
+        RTX_API_BASE_URL: "http://127.0.0.1:3001",
+        STORAGE_DIR: storageDir,
+      },
+      fetchImpl,
+    );
+
+    expect(result.success).toBe(true);
+    if (!result.success) throw new Error(result.error);
+    expect(snowballTargetMocks.prepareNetworkSnowballTarget).toHaveBeenCalledOnce();
+    const storedConfig = JSON.parse(getWorkflowRun(result.workflowRunId)?.config ?? "{}");
+    expect(storedConfig).toHaveProperty(SNOWBALL_BROWSER_TARGET_CONFIG_KEY);
+    const storedRun = getWorkflowRun(result.workflowRunId);
+    expect(storedRun).toMatchObject({ errorItems: 0 });
+    expect(JSON.parse(storedRun?.errors ?? "[]")).toEqual([]);
+    expect(JSON.parse(storedRun?.result ?? "{}")).toMatchObject({
+      partial: true,
+      browserFallback: {
+        code: "UNSUPPORTED_SOURCE",
+      },
+    });
+    const brief = readFileSync(join(
+      storageDir,
+      "working-data/signals/workflow-runs",
+      result.workflowRunId,
+      "brief.md",
+    ), "utf8");
+    expect(brief).toContain("Public-only source access is in force");
+    expect(brief).toContain("cannot be verified safely for this source");
+    expect(brief).toContain("Do not attach agent-browser");
+    expect(brief).not.toContain("personal-browser");
+    expect(brief).toContain("Server-Enforced LinkedIn Gate");
+    expect(brief).toContain("S5. Auto-commit & Graph Edge Linking");
+    expect(brief).toContain("snowballScopeToken");
+    expect(listWorkflowSteps(result.workflowRunId)).toContainEqual(
+      expect.objectContaining({
+        tool: "snowball_source_access_preflight",
+        status: "completed",
+        output: expect.stringContaining("UNSUPPORTED_SOURCE"),
+      }),
+    );
   });
 
   it("releases the Snowball lease without stopping a borrowed event session after rejected dispatch", async () => {
     const templateConfig = buildNetworkSnowballTemplateConfig();
+    templateConfig.seedType = "topic_search";
+    templateConfig.seedValue = "database infrastructure founders";
     templateConfig.participantAccess = {
       enabled: true,
       browserSessionName: preparedSnowballTarget.sessionName,

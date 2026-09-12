@@ -3,12 +3,38 @@
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import type { WorkflowRunSubject } from "@/lib/workflows/workflow-run-subjects-shared";
+import { describeGuestBoundary } from "@/lib/workflows/event-sources/boundary";
+import type { GuestBoundary } from "@/lib/workflows/event-sources/types";
 
 /** Fields rendered as markdown when their value is a string longer than 40 chars */
 const MARKDOWN_FIELDS = new Set(["text", "message"]);
 
 function isMarkdownCandidate(key: string, value: unknown): value is string {
   return MARKDOWN_FIELDS.has(key) && typeof value === "string" && value.length > 40;
+}
+
+function parseGuestBoundary(value: unknown): GuestBoundary | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const states = new Set(["not_requested", "public", "gated", "authorized", "unavailable"]);
+  const reasons = new Set([
+    "public_only",
+    "login_required",
+    "registration_required",
+    "waitlisted",
+    "permission_missing",
+    "session_changed",
+    "lease_lost",
+    "parse_failed",
+    "rate_limited",
+  ]);
+  if (typeof record.state !== "string" || !states.has(record.state)) return null;
+  return {
+    state: record.state as GuestBoundary["state"],
+    reason: typeof record.reason === "string" && reasons.has(record.reason)
+      ? record.reason as GuestBoundary["reason"]
+      : null,
+  };
 }
 
 export function StepOutputRenderer({
@@ -35,6 +61,10 @@ export function StepOutputRenderer({
   if (markdownEntries.length === 0 && structuredEntries.length === 0) return null;
 
   function renderStructuredValue(key: string, value: unknown) {
+    if (key === "guestBoundary") {
+      const boundary = parseGuestBoundary(value);
+      if (boundary) return describeGuestBoundary(boundary);
+    }
     if (key === "contactId" && typeof value === "string") {
       const subject = subjectById[value];
       if (subject) {
@@ -76,6 +106,7 @@ export function StepOutputRenderer({
       }
     }
 
+    if (typeof value === "object") return JSON.stringify(value);
     return String(value);
   }
 

@@ -1,9 +1,13 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
+import { RTX_PUBLISH_SESSION_NAME } from "@/lib/publish/constants";
 import type { NetworkSnowballConfig } from "@/lib/workflows/network-snowball";
+import { networkSnowballSignedInAccessDescription } from "@/lib/workflows/network-snowball-signed-in-access";
 
 export function NetworkSnowballEventFields({
   value,
@@ -14,13 +18,31 @@ export function NetworkSnowballEventFields({
   onChange: (next: NetworkSnowballConfig) => void;
   disabled?: boolean;
 }) {
+  const [editingSession, setEditingSession] = useState(false);
+  const sessionInputRef = useRef<HTMLInputElement>(null);
+  const changeButtonRef = useRef<HTMLButtonElement>(null);
+  const returnFocusToChangeRef = useRef(false);
+  const browserSessionName =
+    value.participantAccess.browserSessionName.trim() || RTX_PUBLISH_SESSION_NAME;
+  const usesSignalsPublish = browserSessionName === RTX_PUBLISH_SESSION_NAME;
+
+  useEffect(() => {
+    if (editingSession) {
+      sessionInputRef.current?.focus();
+    } else if (returnFocusToChangeRef.current) {
+      returnFocusToChangeRef.current = false;
+      changeButtonRef.current?.focus();
+    }
+  }, [editingSession]);
+
   return (
     <div className="space-y-4 rounded-lg border p-4">
       <div>
         <Label>Event source expansion</Label>
         <p className="mt-0.5 text-xs text-muted-foreground">
-          Luma links are canonicalized and their public event, organizer, host, sponsor,
-          venue, calendar, and related-event evidence is saved before profile discovery.
+          Any event link can seed public research. Supported providers are canonicalized and their
+          public event, organizer, host, sponsor, venue, calendar, and related-event evidence is
+          saved before profile discovery.
         </p>
       </div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -65,50 +87,119 @@ export function NetworkSnowballEventFields({
           />
         </div>
       </div>
-      <div className="flex items-start justify-between gap-4 border-t pt-4">
-        <div className="space-y-0.5">
-          <Label htmlFor="snowball-participant-access">Use registered guest access</Label>
-          <p className="text-xs text-muted-foreground">
-            Read only visibly accessible guests from one named, already-running RealTimeX
-            session. Signals never registers, joins a waitlist, or bypasses a gate.
-          </p>
-        </div>
-        <Switch
-          id="snowball-participant-access"
-          checked={value.participantAccess.enabled}
-          onCheckedChange={(enabled) =>
-            onChange({
-              ...value,
-              participantAccess: { ...value.participantAccess, enabled },
-            })
-          }
-          disabled={disabled}
-        />
-      </div>
-      {value.participantAccess.enabled && (
-        <div className="space-y-2">
-          <Label htmlFor="snowball-event-session">Existing browser session name</Label>
-          <Input
-            id="snowball-event-session"
-            placeholder="e.g. personal-browser"
-            value={value.participantAccess.browserSessionName}
-            onChange={(event) =>
+      <div className="space-y-3 border-t pt-4">
+        <div className="flex items-start gap-3">
+          <Checkbox
+            id="snowball-participant-access"
+            className="mt-0.5"
+            checked={value.participantAccess.enabled}
+            onCheckedChange={(checked) =>
               onChange({
                 ...value,
                 participantAccess: {
-                  ...value.participantAccess,
-                  browserSessionName: event.target.value,
+                  enabled: checked === true,
+                  browserSessionName,
                 },
               })
             }
+            aria-describedby="snowball-participant-access-description"
             disabled={disabled}
           />
+          <div className="space-y-0.5">
+            <Label htmlFor="snowball-participant-access" className="cursor-pointer">
+              Use signed-in browser access
+            </Label>
+            <p
+              id="snowball-participant-access-description"
+              className="text-xs text-muted-foreground"
+            >
+              {networkSnowballSignedInAccessDescription(value.seedValue)}
+            </p>
+          </div>
+        </div>
+
+        <div className="ml-7 space-y-2 rounded-md border bg-muted/20 p-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-xs text-muted-foreground">Browser session</p>
+              <p className="break-words text-sm font-medium">
+                {usesSignalsPublish ? "Signals Publish" : "Selected session"}{" — "}
+                <code className="break-all text-xs font-normal text-muted-foreground">
+                  {browserSessionName}
+                </code>
+              </p>
+            </div>
+            {!editingSession && (
+              <Button
+                ref={changeButtonRef}
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                onClick={() => setEditingSession(true)}
+                disabled={disabled}
+              >
+                Change
+              </Button>
+            )}
+          </div>
+
+          {editingSession && (
+            <div className="space-y-2">
+              <Label htmlFor="snowball-event-session" className="text-xs">
+                Browser session name
+              </Label>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Input
+                  ref={sessionInputRef}
+                  id="snowball-event-session"
+                  placeholder={RTX_PUBLISH_SESSION_NAME}
+                  value={value.participantAccess.browserSessionName}
+                  onChange={(event) =>
+                    onChange({
+                      ...value,
+                      participantAccess: {
+                        ...value.participantAccess,
+                        browserSessionName: event.target.value,
+                      },
+                    })
+                  }
+                  disabled={disabled}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    returnFocusToChangeRef.current = true;
+                    onChange({
+                      ...value,
+                      participantAccess: {
+                        ...value.participantAccess,
+                        browserSessionName: RTX_PUBLISH_SESSION_NAME,
+                      },
+                    });
+                    setEditingSession(false);
+                  }}
+                  disabled={disabled}
+                >
+                  Use Signals Publish
+                </Button>
+              </div>
+            </div>
+          )}
+
           <p className="text-xs text-muted-foreground">
-            Registration tokens in event URLs are discarded; access is derived from this
-            session&apos;s visible signed-in identity and guest-list permission.
+            For supported sources, Signals verifies this exact session&apos;s visible identity and
+            source access at launch and re-checks them during traversal. Public-only extraction
+            continues when verification is unavailable or fails.
+          </p>
+          <p className="text-xs text-muted-foreground">
+            Read-only. Signals won&apos;t register, RSVP, join a waitlist, follow, message, or
+            change anything on the source site.
           </p>
         </div>
-      )}
+      </div>
     </div>
   );
 }

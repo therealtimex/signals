@@ -12,7 +12,7 @@ import type {
   EventSourceEvidence,
 } from "@/lib/workflows/event-sources/types";
 
-export const LUMA_EXTRACTOR_VERSION = 1;
+export const LUMA_EXTRACTOR_VERSION = 2;
 
 function stableObservationId(parts: string[]): string {
   return `obs_${createHash("sha256").update(parts.join("\u0000")).digest("hex").slice(0, 24)}`;
@@ -44,10 +44,6 @@ function stringValue(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
-function normalizedText(value: string): string {
-  return value.replace(/\s+/g, " ").trim();
-}
-
 function safePublicUrl(value: unknown): string | undefined {
   const raw = stringValue(value);
   if (!raw) return undefined;
@@ -72,7 +68,9 @@ function schemaEntityType(value: unknown): EventParty["entityType"] {
   return "unknown";
 }
 
-function personOrOrgName(value: unknown): Array<Pick<EventParty, "name" | "url" | "entityType">> {
+function personOrOrgName(
+  value: unknown,
+): Array<Pick<EventParty, "name" | "url" | "identityUrls" | "entityType">> {
   const values = Array.isArray(value) ? value : value ? [value] : [];
   return values.flatMap((entry) => {
     if (typeof entry === "string" && entry.trim()) {
@@ -85,6 +83,7 @@ function personOrOrgName(value: unknown): Array<Pick<EventParty, "name" | "url" 
     return [{
       name,
       ...(url ? { url } : {}),
+      ...(url ? { identityUrls: [url] } : {}),
       entityType: schemaEntityType(record?.["@type"]),
     }];
   });
@@ -103,6 +102,181 @@ function eventStatus(value: unknown, endsAt: string | null, observedAt: number):
   if (raw.includes("cancel")) return "cancelled";
   if (endsAt && Date.parse(endsAt) < observedAt * 1000) return "ended";
   return raw || endsAt ? "scheduled" : "unknown";
+}
+
+function readLumaNextPageData($: cheerio.CheerioAPI): Record<string, unknown> | null {
+  const raw = $("script#__NEXT_DATA__").first().text();
+  if (!raw.trim()) return null;
+  try {
+    const root = asRecord(JSON.parse(raw));
+    const props = asRecord(root?.props);
+    const pageProps = asRecord(props?.pageProps);
+    const initialData = asRecord(pageProps?.initialData);
+    return asRecord(initialData?.data);
+  } catch {
+    return null;
+  }
+}
+
+function socialHandleUrl(
+  platform: "instagram" | "linkedin" | "x" | "youtube",
+  value: unknown,
+): string | undefined {
+  const raw = stringValue(value);
+  if (!raw) return undefined;
+  if (/^https?:\/\//i.test(raw)) return safePublicUrl(raw);
+  if (platform === "linkedin") {
+    const path = raw.startsWith("/") ? raw : `/${raw}`;
+    if (!/^\/(?:in|company)\/[a-z0-9._%-]+\/?$/i.test(path)) return undefined;
+    return safePublicUrl(`https://www.linkedin.com${path}`);
+  }
+  const handle = raw.replace(/^@/, "");
+  if (!/^[a-z0-9._-]{1,100}$/i.test(handle)) return undefined;
+  if (platform === "x") return safePublicUrl(`https://x.com/${handle}`);
+  if (platform === "instagram") return safePublicUrl(`https://www.instagram.com/${handle}`);
+  return safePublicUrl(`https://www.youtube.com/@${handle}`);
+}
+
+function lumaRecordIdentityUrl(
+  record: Record<string, unknown>,
+  canonicalUrl: string,
+): string | undefined {
+  const apiId = stringValue(record.api_id);
+  const username = stringValue(record.username);
+  const slug = stringValue(record.slug);
+  const safeUsername = username && /^[a-z0-9_-]{1,160}$/i.test(username) ? username : null;
+  const safeSlug = slug && /^[a-z0-9_-]{1,160}$/i.test(slug) ? slug : null;
+  const path = apiId?.startsWith("cal-") && safeSlug
+    ? `/${safeSlug}`
+    : apiId?.startsWith("usr-")
+      ? `/user/${safeUsername ?? apiId}`
+      : null;
+  return path ? canonicalizeLumaUrl(new URL(path, canonicalUrl).toString()) ?? undefined : undefined;
+}
+
+function publicIdentityUrls(
+  record: Record<string, unknown>,
+  canonicalUrl: string,
+): string[] {
+  return [...new Set([
+    lumaRecordIdentityUrl(record, canonicalUrl),
+    safePublicUrl(record.url),
+    safePublicUrl(record.website),
+    socialHandleUrl("linkedin", record.linkedin_handle),
+    socialHandleUrl("x", record.twitter_handle),
+    socialHandleUrl("instagram", record.instagram_handle),
+    socialHandleUrl("youtube", record.youtube_handle),
+  ].filter((url): url is string => Boolean(url)))];
+}
+
+function embeddedCalendarUrl(
+  data: Record<string, unknown> | null,
+  canonicalUrl: string,
+): string | null {
+  const calendar = asRecord(data?.calendar);
+  const slug = stringValue(calendar?.slug);
+  if (!slug || !/^[a-z0-9_-]{1,160}$/i.test(slug)) return null;
+  return canonicalizeLumaUrl(new URL(`/${slug}`, canonicalUrl).toString());
+}
+
+function addUniqueParty(parties: EventParty[], party: EventParty): void {
+  const partyIdentityUrls = new Set([
+    party.url,
+    ...(party.identityUrls ?? []),
+  ].filter((url): url is string => Boolean(url)));
+  const match = parties.find(
+    (candidate) =>
+      candidate.role === party.role
+      && (
+        Boolean(candidate.providerId && party.providerId && candidate.providerId === party.providerId)
+        || [candidate.url, ...(candidate.identityUrls ?? [])]
+          .some((url) => Boolean(url && partyIdentityUrls.has(url)))
+      ),
+  );
+  if (!match) {
+    parties.push(party);
+    return;
+  }
+  const identityUrls = [...new Set([
+    ...(match.identityUrls ?? []),
+    ...(party.identityUrls ?? []),
+  ])];
+  if (!match.url && party.url) match.url = party.url;
+  if (identityUrls.length > 0) match.identityUrls = identityUrls;
+  if (!match.providerId && party.providerId) match.providerId = party.providerId;
+  if (match.entityType === "unknown" && party.entityType !== "unknown") {
+    match.entityType = party.entityType;
+  }
+}
+
+function partyFromPublicRecord(input: {
+  record: Record<string, unknown>;
+  role: EventRelationshipRole;
+  canonicalUrl: string;
+  observedAt: number;
+  preferWebsite?: boolean;
+}): EventParty | null {
+  const name = stringValue(input.record.name);
+  if (!name) return null;
+  const identityUrls = publicIdentityUrls(input.record, input.canonicalUrl);
+  const linkedIn = socialHandleUrl("linkedin", input.record.linkedin_handle);
+  const website = safePublicUrl(input.record.website);
+  const providerId = stringValue(input.record.api_id) ?? undefined;
+  const entityType = linkedIn?.includes("/company/") || input.preferWebsite
+    ? "organization"
+    : "person";
+  const url = entityType === "organization"
+    ? website ?? linkedIn ?? identityUrls[0]
+    : linkedIn ?? website ?? identityUrls[0];
+  return {
+    name,
+    ...(url ? { url } : {}),
+    ...(identityUrls.length > 0 ? { identityUrls } : {}),
+    ...(providerId ? { providerId } : {}),
+    entityType,
+    role: input.role,
+    evidence: createLumaPublicEvidence(
+      input.canonicalUrl,
+      input.observedAt,
+      input.role,
+      `${providerId ?? ""}:${name}:${identityUrls.join(",")}`,
+    ),
+  };
+}
+
+function collectEmbeddedEventUrls(
+  value: unknown,
+  canonicalUrl: string,
+  output: Set<string>,
+  depth = 0,
+): void {
+  if (depth > 10 || output.size >= 100) return;
+  if (Array.isArray(value)) {
+    for (const entry of value) collectEmbeddedEventUrls(entry, canonicalUrl, output, depth + 1);
+    return;
+  }
+  const record = asRecord(value);
+  if (!record) return;
+  const apiId = stringValue(record.api_id);
+  if (apiId?.startsWith("evt-")) {
+    const rawUrl = stringValue(record.url)
+      ?? stringValue(record.event_url)
+      ?? stringValue(record.slug);
+    if (rawUrl) {
+      try {
+        const absolute = /^https?:\/\//i.test(rawUrl)
+          ? rawUrl
+          : new URL(`/${rawUrl.replace(/^\/+/, "")}`, canonicalUrl).toString();
+        const eventUrl = canonicalizeLumaUrl(absolute);
+        if (eventUrl && eventUrl !== canonicalUrl) output.add(eventUrl);
+      } catch {
+        // Ignore malformed embedded event records.
+      }
+    }
+  }
+  for (const nested of Object.values(record)) {
+    collectEmbeddedEventUrls(nested, canonicalUrl, output, depth + 1);
+  }
 }
 
 export function createLumaPublicEvidence(
@@ -142,6 +316,7 @@ export function extractLumaEventFromHtml(input: {
   if (!canonicalUrl || !key) throw new Error("unsupported_event_url");
   const observedAt = input.observedAt ?? Math.floor(Date.now() / 1000);
   const $ = cheerio.load(input.html);
+  const nextPageData = readLumaNextPageData($);
   let jsonLd: Record<string, unknown> | null = null;
   $('script[type="application/ld+json"]').each((_, element) => {
     if (jsonLd) return;
@@ -176,10 +351,10 @@ export function extractLumaEventFromHtml(input: {
     if (topic) topics.push(topic);
     if (topics.length === 20) break;
   }
-  const parties: EventParty[] = [];
+  let parties: EventParty[] = [];
   const addParties = (value: unknown, role: EventRelationshipRole) => {
     for (const party of personOrOrgName(value)) {
-      parties.push({
+      addUniqueParty(parties, {
         ...party,
         role,
         evidence: createLumaPublicEvidence(
@@ -197,9 +372,68 @@ export function extractLumaEventFromHtml(input: {
   addParties(eventData.sponsor, "sponsored_by");
   addParties(eventData.location, "venue_provided_by");
 
+  const calendarRecord = asRecord(nextPageData?.calendar);
+  const hostRecords = Array.isArray(nextPageData?.hosts)
+    ? nextPageData.hosts
+        .map((host) => asRecord(host))
+        .filter((host): host is Record<string, unknown> => host !== null)
+    : [];
+  if (calendarRecord || hostRecords.length > 0) {
+    const organizerParty = calendarRecord
+      ? partyFromPublicRecord({
+          record: calendarRecord,
+          role: "organized_by",
+          canonicalUrl,
+          observedAt,
+          preferWebsite: true,
+        })
+      : null;
+    const observedProviderParties = [organizerParty].filter(
+      (party): party is EventParty => party !== null,
+    );
+    const providerParties = [...observedProviderParties];
+    for (const hostRecord of hostRecords) {
+      const hostParty = partyFromPublicRecord({
+        record: hostRecord,
+        role: "hosted_by",
+        canonicalUrl,
+        observedAt,
+      });
+      if (!hostParty) continue;
+      observedProviderParties.push(hostParty);
+      const hostIdentityUrls = new Set([
+        hostParty.url,
+        ...(hostParty.identityUrls ?? []),
+      ].filter((url): url is string => Boolean(url)));
+      const duplicatesOrganizer = organizerParty
+        ? [organizerParty.url, ...(organizerParty.identityUrls ?? [])]
+          .filter((url): url is string => Boolean(url))
+          .some((url) => hostIdentityUrls.has(url))
+        : false;
+      if (!duplicatesOrganizer) providerParties.push(hostParty);
+    }
+    const providerIds = new Set(observedProviderParties.flatMap((party) => party.providerId ?? []));
+    const providerIdentityUrls = new Set(observedProviderParties.flatMap(
+      (party) => [party.url, ...(party.identityUrls ?? [])]
+        .filter((url): url is string => Boolean(url)),
+    ));
+    parties = parties.filter((party) => {
+      if (party.providerId && providerIds.has(party.providerId)) return false;
+      return ![party.url, ...(party.identityUrls ?? [])]
+        .some((url) => Boolean(url && providerIdentityUrls.has(url)));
+    });
+    for (const providerParty of providerParties) {
+      addUniqueParty(parties, providerParty);
+    }
+  }
+
   const calendarUrls = new Set<string>();
   const relatedEventUrls = new Set<string>();
-  $("a[href]").each((_, element) => {
+  const calendarUrl = embeddedCalendarUrl(nextPageData, canonicalUrl);
+  if (calendarUrl && calendarUrl !== canonicalUrl) calendarUrls.add(calendarUrl);
+  $(
+    'a[data-calendar-url][href], a[data-event-url][href], a[data-testid*="calendar" i][href], [data-testid*="event-card" i] a[href], article[data-event-card] a[href]',
+  ).each((_, element) => {
     const href = $(element).attr("href");
     if (!href) return;
     try {
@@ -209,8 +443,7 @@ export function extractLumaEventFromHtml(input: {
       const anchor = $(element);
       const isCalendarLink =
         anchor.is("[data-calendar-url]") ||
-        /calendar/i.test(anchor.attr("data-testid") ?? "") ||
-        /^\s*(?:view\s+)?calendar\s*$/i.test(normalizedText(anchor.text()));
+        /calendar/i.test(anchor.attr("data-testid") ?? "");
       if (isCalendarLink) calendarUrls.add(related);
       else relatedEventUrls.add(related);
     } catch {
@@ -251,10 +484,24 @@ export function extractLumaEventFromHtml(input: {
       ...[...relatedEventUrls].map((url) =>
         createLumaPublicEvidence(canonicalUrl, observedAt, "related_event", url, url)),
     ],
-    guestBoundary: {
-      state: /register to view guest list/i.test(bodyText) ? "gated" : "public",
-      reason: /register to view guest list/i.test(bodyText) ? "registration_required" : null,
-    },
+    guestBoundary: (() => {
+      const explicitRegistrationGate = /register to view guest list/i.test(bodyText);
+      const nextEvent = asRecord(nextPageData?.event);
+      const guestData = asRecord(nextPageData?.guest_data);
+      const featuredGuestCount = Array.isArray(nextPageData?.featured_guests)
+        ? nextPageData.featured_guests.length
+        : 0;
+      const guestCount = typeof nextPageData?.guest_count === "number"
+        ? nextPageData.guest_count
+        : 0;
+      const truncatedAnonymousGuestList =
+        nextEvent?.show_guest_list === true
+        && !stringValue(guestData?.ticket_key)
+        && guestCount > featuredGuestCount;
+      return explicitRegistrationGate || truncatedAnonymousGuestList
+        ? { state: "gated", reason: "registration_required" }
+        : { state: "public", reason: null };
+    })(),
   };
 }
 
@@ -272,14 +519,21 @@ export function extractLumaCalendarFromHtml(input: {
   const canonicalUrl = canonicalizeLumaUrl(input.url);
   if (!canonicalUrl) throw new Error("unsupported_event_url");
   const $ = cheerio.load(input.html);
+  const nextPageData = readLumaNextPageData($);
+  const nextCalendarUrl = embeddedCalendarUrl(nextPageData, canonicalUrl);
   const calendarRoot = $(
     '[data-calendar-page], [data-testid*="calendar" i], [data-event-list], [class*="calendar-page" i]',
   ).first();
-  if (!calendarRoot.length) throw new Error("calendar_metadata_missing");
+  const isEmbeddedCalendarPage = nextCalendarUrl === canonicalUrl;
+  if (!calendarRoot.length && !isEmbeddedCalendarPage) {
+    throw new Error("calendar_metadata_missing");
+  }
 
   const eventUrls = new Set<string>();
-  calendarRoot
-    .find('[data-event-url], [data-testid*="event-card" i] a[href], article a[href]')
+  collectEmbeddedEventUrls(nextPageData, canonicalUrl, eventUrls);
+  const eventRoot = calendarRoot.length ? calendarRoot : $("body");
+  eventRoot
+    .find('[data-event-url], [data-testid*="event-card" i] a[href], article[data-event-card] a[href]')
     .each((_, element) => {
       const raw = $(element).attr("data-event-url") ?? $(element).attr("href");
       if (!raw) return;
@@ -292,7 +546,7 @@ export function extractLumaCalendarFromHtml(input: {
     });
   if (eventUrls.size === 0) throw new Error("calendar_metadata_missing");
 
-  const nextLink = calendarRoot
+  const nextLink = eventRoot
     .find('a[rel="next"][href], a[data-calendar-next][href]')
     .filter((_, element) =>
       /^\s*(?:next|more)?\s*$/i.test($(element).text()) || $(element).is("[data-calendar-next]"),

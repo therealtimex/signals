@@ -8,8 +8,18 @@ Before the terminal agent starts, Signals imports public event facts into a dete
 `content_items` record. The versioned `platformData.eventSource` payload keeps event facts,
 explicit organizer/host/sponsor/venue/calendar roles, evidence, aggregate going counts, and
 bounded related-event links separate. Aggregate counts and teaser avatars never become contacts.
-Explicit calendar pages share the provider-request budget, and only typed event cards can add
-the bounded events listed by that calendar.
+The Luma adapter reads public JSON-LD and provider-owned `__NEXT_DATA__` fields to resolve the
+organizer calendar, distinguish people from organizations, and retain public website and social
+identity URLs. Explicit calendar pages share the provider-request budget, and only provider-owned
+embedded event records or typed event cards can add the bounded events listed by that calendar.
+Parties are deduplicated only when provider IDs or exact canonical identity URLs overlap; a shared
+display name is never treated as identity proof. Organization graph links prefer the provider's
+public organization website and exclude Luma and social-network domains from CRM-domain matching.
+
+Any HTTPS event link can still seed the public research phase. Signed-in source access remains
+provider-specific: unsupported sources stay public-only even when the opt-in is enabled. That
+source-access decision is independent of the server-enforced LinkedIn identity/write gate, which
+remains active for every Network Snowball seed that has a valid prepared target.
 
 ## Registered guest access
 
