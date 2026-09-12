@@ -169,13 +169,27 @@ function removeNonVisibleTextSources($: cheerio.CheerioAPI): void {
   });
 }
 
+type TextTreeNode = {
+  type: string;
+  data?: string;
+  children?: TextTreeNode[];
+};
+
+function collectTextNodesInOrder(node: TextTreeNode, fragments: string[]): void {
+  if (node.type === "text" && typeof node.data === "string") {
+    fragments.push(node.data);
+    return;
+  }
+  if (node.children) {
+    for (const child of node.children) collectTextNodesInOrder(child, fragments);
+  }
+}
+
 function visibleBodyText($: cheerio.CheerioAPI): string {
-  const fragments = $("body")
-    .find("*")
-    .addBack()
-    .contents()
-    .toArray()
-    .flatMap((node) => node.type === "text" ? [$(node).text()] : []);
+  const fragments: string[] = [];
+  for (const node of $("body").contents().toArray()) {
+    collectTextNodesInOrder(node, fragments);
+  }
   return normalizedText(fragments.join(" "));
 }
 

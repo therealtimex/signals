@@ -159,6 +159,19 @@ describe("registered Luma guest boundary", () => {
     }
   });
 
+  it("recognizes registration gate copy split by mixed inline markup", () => {
+    try {
+      inspectVisibleLumaViewerIdentity(`<body>
+        <button data-testid="user-menu" data-viewer-identity="QA Viewer">QA Viewer</button>
+        <p>Register to <strong>View Guest</strong> List</p>
+      </body>`);
+      throw new Error("expected inspection to fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(EventBrowserError);
+      expect((error as EventBrowserError).reason).toBe("registration_required");
+    }
+  });
+
   it("opens a click-to-view guest list when page JSON contains waitlist metadata", async () => {
     const sessionName = "signals-publish";
     ensureBrowserConnection({ sessionName });
@@ -236,6 +249,7 @@ describe("registered Luma guest boundary", () => {
     ["generic sign in", "<button>Sign In</button><p>Waitlist enabled</p>", "login_required"],
     ["anonymous waitlist metadata", "<p>Waitlist enabled</p>", "permission_missing"],
     ["waitlist", '<button data-testid="user-menu" aria-label="Account: Operator"></button><p>You are waitlisted</p>', "waitlisted"],
+    ["mixed-markup waitlist", '<button data-testid="user-menu" aria-label="Account: Operator"></button><p>You are <strong>waitlisted</strong>.</p><section data-guest-list-access="authorized"><a data-participant-name="Alice"></a></section>', "waitlisted"],
     ["hidden payload", '<script>{"guest":"Alice"}</script>', "permission_missing"],
     ["hidden guest container", '<button data-testid="user-menu" aria-label="Account: Operator"></button><section style="display:none" data-guest-list-access="authorized"><a data-participant-name="Alice"></a></section>', "permission_missing"],
     ["computed-hidden guest container", '<button data-testid="user-menu" aria-label="Account: Operator"></button><section data-signals-computed-hidden="true" data-guest-list-access="authorized"><a data-participant-name="Alice"></a></section>', "permission_missing"],
