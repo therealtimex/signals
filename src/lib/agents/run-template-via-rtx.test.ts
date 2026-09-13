@@ -47,6 +47,7 @@ import { SNOWBALL_IDENTITY_SCOPE_TOKEN_CONFIG_KEY } from "@/lib/workflows/snowba
 import { SNOWBALL_BROWSER_TARGET_CONFIG_KEY } from "@/lib/workflows/network-snowball-target";
 import * as resourceTeardown from "@/lib/rtx/resource-teardown";
 import { resetCoreTables } from "@/test/db";
+import { readWorkflowTerminalLifecycle } from "@/lib/rtx/workflow-terminal-lifecycle";
 
 const preparedResearchTarget = {
   targetId: "target-linkedin",
@@ -345,6 +346,13 @@ describe("runTemplateViaRtx health preflight", () => {
     );
     expect(result.success).toBe(true);
     if (!result.success) throw new Error(result.error);
+
+    expect(
+      readWorkflowTerminalLifecycle(getWorkflowRun(result.workflowRunId)?.config),
+    ).toMatchObject({
+      dispatch: { state: "accepted" },
+      cleanup: { requested: true, state: "pending" },
+    });
 
     const brief = readFileSync(join(
       storageDir,
@@ -715,8 +723,87 @@ describe("runTemplateViaRtx health preflight", () => {
     );
     expect(stopSpy).not.toHaveBeenCalled();
     if (result.success || !result.workflowRunId) throw new Error("expected rejected dispatch");
-    expect(JSON.parse(getWorkflowRun(result.workflowRunId)?.config ?? "{}"))
+    const rejectedRun = getWorkflowRun(result.workflowRunId);
+    expect(JSON.parse(rejectedRun?.config ?? "{}"))
       .not.toHaveProperty(SNOWBALL_IDENTITY_SCOPE_TOKEN_CONFIG_KEY);
+    expect(readWorkflowTerminalLifecycle(rejectedRun?.config)).toMatchObject({
+      dispatch: { state: "failed" },
+      cleanup: { requested: false, state: "not_requested" },
+    });
+  });
+
+  it("retains exact routing evidence and cleanup intent when dispatch is ambiguous", async () => {
+    const template = createTemplate({
+      name: "Ambiguous Dispatch",
+      templateType: "prospecting",
+      status: "active",
+      config: "{}",
+      isSystem: 1,
+    });
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/api/health")) {
+        return new Response(JSON.stringify({ app: "signals", status: "ok" }), {
+          status: 200,
+        });
+      }
+      if (url.endsWith("/cli/get-workspace/signals")) {
+        return new Response(JSON.stringify({ workspace: { slug: "signals" } }), {
+          status: 200,
+        });
+      }
+      if (url.endsWith("/cli/create-thread/signals")) {
+        return new Response(JSON.stringify({ thread: { slug: "ambiguous-dispatch" } }), {
+          status: 200,
+        });
+      }
+      if (url.endsWith("/cli/send-message/signals/ambiguous-dispatch")) {
+        throw new Error("desktop relay timed out after launch");
+      }
+      if (url.includes("/cli/list-browser-sessions")) {
+        return new Response(JSON.stringify({ success: true, sessions: [] }), {
+          status: 200,
+        });
+      }
+      return new Response(JSON.stringify({ error: `Unexpected request: ${url}` }), {
+        status: 500,
+      });
+    }) as unknown as typeof fetch;
+
+    const result = await runTemplateViaRtx(
+      { templateId: template.id, signalsBaseUrl: "http://127.0.0.1:3099" },
+      {
+        ...process.env,
+        RTX_APP_ID: "test-app-id",
+        RTX_API_BASE_URL: "http://127.0.0.1:3001",
+        STORAGE_DIR: storageDir,
+      },
+      fetchImpl,
+    );
+
+    expect(result).toMatchObject({ success: false, errorCode: "rtx_unavailable" });
+    if (result.success || !result.workflowRunId) throw new Error("expected uncertain dispatch");
+    const lifecycle = readWorkflowTerminalLifecycle(
+      getWorkflowRun(result.workflowRunId)?.config,
+    );
+    expect(lifecycle).toMatchObject({
+      dispatch: {
+        state: "uncertain",
+        routing: {
+          runId: result.workflowRunId,
+          workspaceSlug: "signals",
+          threadSlug: "ambiguous-dispatch",
+        },
+      },
+      cleanup: { requested: true, state: "pending" },
+    });
+    expect(lifecycle?.dispatch.routing.briefPath).toContain(
+      `workflow-runs/${result.workflowRunId}/brief.md`,
+    );
+    expect(lifecycle?.dispatch.routing.message).toContain(result.workflowRunId);
+    expect(lifecycle?.dispatch.routing.message).toContain(
+      lifecycle?.dispatch.routing.briefPath,
+    );
   });
 
   it("persists the writing scope hash before the brief or dispatch leaves the server", async () => {

@@ -123,6 +123,7 @@ describe("launchTerminalCliAgent", () => {
       success: true,
       descriptor: {
         id: "cli-agent:test",
+        aliases: ["cli-agent:test"],
         linkage: { workspaceSlug: "signals", threadSlug: "thread-1" },
       },
     });
@@ -363,7 +364,14 @@ describe("dispatchTerminalAgentViaSendMessage", () => {
           JSON.stringify({
             success: true,
             terminalDispatchAccepted: true,
-            descriptor: { id: "cli-agent:dispatch-1" },
+            descriptor: {
+              id: "cli-agent:dispatch-1",
+              metadata: {
+                activityCardId: "terminal-card:dispatch-1",
+                controlSessionId: "control:dispatch-1",
+                ptySessionId: "pty:dispatch-1",
+              },
+            },
             workspaceSlug: "signals",
             threadSlug: "thread-1",
           }),
@@ -392,7 +400,18 @@ describe("dispatchTerminalAgentViaSendMessage", () => {
       success: true,
       descriptor: {
         id: "cli-agent:dispatch-1",
+        aliases: [
+          "cli-agent:dispatch-1",
+          "terminal-card:dispatch-1",
+          "control:dispatch-1",
+          "pty:dispatch-1",
+        ],
         linkage: { workspaceSlug: "signals", threadSlug: "thread-1" },
+        metadata: {
+          activityCardId: "terminal-card:dispatch-1",
+          controlSessionId: "control:dispatch-1",
+          ptySessionId: "pty:dispatch-1",
+        },
       },
     });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
@@ -429,6 +448,39 @@ describe("dispatchTerminalAgentViaSendMessage", () => {
       error: "No terminal agent configured",
       errorCode: "terminal_dispatch_required",
       httpStatus: 409,
+    });
+  });
+
+  it("treats an accepted dispatch without a descriptor as uncertain", async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          success: true,
+          terminalDispatchAccepted: true,
+        }),
+        { status: 200 },
+      ),
+    );
+
+    const result = await dispatchTerminalAgentViaSendMessage(
+      {
+        workspaceSlug: "signals",
+        threadSlug: "thread-1",
+        message: "Run brief",
+      },
+      {
+        RTX_APP_ID: "app-1",
+        RTX_API_BASE_URL: "http://127.0.0.1:3001",
+      },
+      fetchImpl,
+    );
+
+    expect(result).toEqual({
+      success: false,
+      error: "Dispatch succeeded but no session descriptor was returned",
+      errorCode: "launch_failed",
+      httpStatus: 200,
+      dispatchState: "uncertain",
     });
   });
 });

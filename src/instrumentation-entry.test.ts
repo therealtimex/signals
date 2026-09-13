@@ -11,6 +11,10 @@ describe("instrumentation entry", () => {
     const source = readFileSync(join(process.cwd(), "src/instrumentation.ts"), "utf8");
 
     expect(source).toContain("bootstrapRtxIfEmbedded");
+    expect(source).toContain("initWorkflowTerminalCleanupReconciler");
+    expect(source.indexOf("initWorkflowTerminalCleanupReconciler")).toBeLessThan(
+      source.indexOf("initScheduler"),
+    );
     expect(existsSync(join(process.cwd(), "instrumentation.ts"))).toBe(false);
   });
 });

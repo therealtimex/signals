@@ -23,6 +23,14 @@ import {
 } from "@/lib/rtx/workspace-brief-files";
 import { getSignalsRtxWorkspaceSlug } from "@/lib/rtx/cli-provisioning";
 import { dispatchTerminalAgentViaSendMessage } from "@/lib/rtx/runtime-sessions";
+import {
+  beginWorkflowTerminalDispatch,
+  readWorkflowTerminalLifecycle,
+  RTX_ORCHESTRATOR_TERMINAL_LIFECYCLE_CONFIG_KEY,
+  settleWorkflowTerminalDispatch,
+  writeWorkflowTerminalLifecycle,
+} from "@/lib/rtx/workflow-terminal-lifecycle";
+import { requestWorkflowOrchestratorTerminalCleanup } from "@/lib/rtx/workflow-terminal-reconciler";
 import { runTemplateViaRtx, getRtxRefsFromRunConfig } from "@/lib/agents/run-template-via-rtx";
 import { isRtxEmbedded } from "@/lib/rtx/env";
 import { getWorkflowRun, updateWorkflowRun } from "@/lib/db/queries/workflows";
@@ -404,7 +412,34 @@ export async function emitWorkflowCompletedEvent(
         absolutePath,
       });
 
-      await dispatchTerminalAgentViaSendMessage(
+      const lifecycleConfig = getWorkflowRun(runId)?.config;
+      const dispatchLifecycle = beginWorkflowTerminalDispatch(
+        lifecycleConfig,
+        {
+          runId,
+          workspaceSlug: orchestratorThread.workspaceSlug,
+          threadSlug: orchestratorThread.threadSlug,
+          briefPath: absolutePath ?? orchestratorEventBriefRelativePath(runId),
+          message: routingMessage,
+        },
+        Date.now(),
+        {
+          key: RTX_ORCHESTRATOR_TERMINAL_LIFECYCLE_CONFIG_KEY,
+          cleanupRequested: false,
+        },
+      );
+      const preparedRun = updateWorkflowRun(runId, {
+        config: writeWorkflowTerminalLifecycle(
+          lifecycleConfig,
+          dispatchLifecycle,
+          RTX_ORCHESTRATOR_TERMINAL_LIFECYCLE_CONFIG_KEY,
+        ),
+      });
+      if (!preparedRun) {
+        throw new Error("Could not persist orchestrator terminal lifecycle");
+      }
+
+      const launch = await dispatchTerminalAgentViaSendMessage(
         {
           workspaceSlug: orchestratorThread.workspaceSlug,
           threadSlug: orchestratorThread.threadSlug,
@@ -414,6 +449,36 @@ export async function emitWorkflowCompletedEvent(
         process.env,
         options?.fetchImpl ?? fetch
       );
+      const currentConfig = getWorkflowRun(runId)?.config;
+      const currentLifecycle =
+        readWorkflowTerminalLifecycle(
+          currentConfig,
+          RTX_ORCHESTRATOR_TERMINAL_LIFECYCLE_CONFIG_KEY,
+        ) ?? dispatchLifecycle;
+      const settledLifecycle = settleWorkflowTerminalDispatch(
+        currentLifecycle,
+        launch.success
+          ? { state: "accepted", descriptor: launch.descriptor }
+          : {
+              state: launch.dispatchState === "uncertain" ? "uncertain" : "failed",
+              error: launch.error,
+            },
+      );
+      updateWorkflowRun(runId, {
+        config: writeWorkflowTerminalLifecycle(
+          currentConfig,
+          settledLifecycle,
+          RTX_ORCHESTRATOR_TERMINAL_LIFECYCLE_CONFIG_KEY,
+        ),
+      });
+      if (!launch.success && launch.dispatchState === "uncertain") {
+        requestWorkflowOrchestratorTerminalCleanup(
+          runId,
+          "workflow_dispatch_uncertain_resumable",
+          process.env,
+          options?.fetchImpl ?? fetch,
+        );
+      }
     } catch {
       // Non-blocking thread dispatch
     }

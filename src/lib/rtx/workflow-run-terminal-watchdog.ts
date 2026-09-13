@@ -9,9 +9,11 @@ import {
 import type { WorkflowRun } from "@/lib/db/types";
 import type { EnvLike } from "@/lib/rtx/env";
 import {
-  finalizeChatLinkedTerminalSession,
   formatDeferredTerminalTeardownNote,
+  stopRunningRtxBrowserSessions,
 } from "@/lib/rtx/resource-teardown";
+import { requestWorkflowTerminalCleanup } from "@/lib/rtx/workflow-terminal-reconciler";
+import { readWorkflowTerminalLifecycle } from "@/lib/rtx/workflow-terminal-lifecycle";
 import { postWorkflowCompletionThreadMessage } from "@/lib/rtx/workflow-completion-thread";
 import { releaseContactWebResearchTargetFromRunConfig } from "@/lib/workflows/contact-web-research-target";
 
@@ -55,7 +57,8 @@ export async function releaseTimedOutWorkflowTerminalRun(
   }
 
   const runtimeSessionId = getRtxRuntimeSessionIdFromRunConfig(run.config)?.trim() || null;
-  if (!runtimeSessionId) {
+  const terminalLifecycle = readWorkflowTerminalLifecycle(run.config);
+  if (!runtimeSessionId && !terminalLifecycle) {
     return { released: false, runId, reason: "no_terminal_session" };
   }
 
@@ -75,15 +78,14 @@ export async function releaseTimedOutWorkflowTerminalRun(
     return { released: false, runId, reason: "update_failed" };
   }
 
-  const [resourceTeardown, completionThreadMessage] = await Promise.all([
-    finalizeChatLinkedTerminalSession(
-      {
-        terminalSessionId: runtimeSessionId,
-        stopAllRunningBrowsers: true,
-      },
-      env,
-      fetchImpl,
-    ),
+  const terminalSessionTeardown = requestWorkflowTerminalCleanup(
+    updated.id,
+    "workflow_timed_out_resumable",
+    env,
+    fetchImpl,
+  );
+  const [browserSessionTeardown, completionThreadMessage] = await Promise.all([
+    stopRunningRtxBrowserSessions({ stopAllRunning: true }, env, fetchImpl),
     postWorkflowCompletionThreadMessage(updated, {
       status: "failed",
       summary: TIMEOUT_SUMMARY,
@@ -92,8 +94,8 @@ export async function releaseTimedOutWorkflowTerminalRun(
   releaseContactWebResearchTargetFromRunConfig(run.config);
 
   const teardownNote = formatDeferredTerminalTeardownNote({
-    terminal: resourceTeardown.terminalSessionTeardown,
-    browser: resourceTeardown.browserSessionTeardown,
+    terminal: terminalSessionTeardown,
+    browser: browserSessionTeardown,
   });
 
   return {

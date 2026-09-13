@@ -200,6 +200,11 @@ export async function register() {
       console.warn("[instrumentation] RTX bootstrap skipped:", (e as Error).message);
     }
 
+    const { initWorkflowTerminalCleanupReconciler } = await import(
+      "@/lib/rtx/workflow-terminal-reconciler-runner"
+    );
+    void initWorkflowTerminalCleanupReconciler();
+
     const { initScheduler } = await import("@/lib/scheduler/runner");
     initScheduler();
   }
