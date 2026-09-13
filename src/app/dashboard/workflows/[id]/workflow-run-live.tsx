@@ -28,6 +28,59 @@ import type { WorkflowRunProposalSummary } from "@/lib/writing/workflow-run-prop
 import { WorkflowRunProposalsPanel } from "./workflow-run-proposals";
 import { WorkflowRunAgentThreadButton } from "./workflow-run-agent-thread-button";
 import type { WorkflowRunAgentThread } from "@/lib/workflows/workflow-run-agent-thread";
+import { getWorkflowOutcomeMetrics } from "@/lib/workflows/snowball-outcome";
+
+function parseSerializedIssueList(value: string | null): string[] {
+  try {
+    const parsed = JSON.parse(value ?? "[]");
+    return Array.isArray(parsed)
+      ? [...new Set(parsed.filter((item): item is string => typeof item === "string"))]
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function parseSnowballAuditViolations(result: string | null): string[] {
+  try {
+    const parsed = JSON.parse(result ?? "{}");
+    const violations = parsed?.identityEvidenceAudit?.violations;
+    return Array.isArray(violations)
+      ? [...new Set(violations.filter((item): item is string => typeof item === "string"))]
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function WorkflowIssueSection({
+  title,
+  issues,
+}: {
+  title: string;
+  issues: string[];
+}) {
+  if (issues.length === 0) return null;
+
+  return (
+    <section className="space-y-3">
+      <h2 className="text-sm font-medium text-destructive">{title}</h2>
+      <Card className="p-4 space-y-2">
+        {issues.map((issue) => {
+          const friendly = formatWorkflowError(issue);
+          return (
+            <div key={issue} className="space-y-0.5" title={issue}>
+              <p className="text-xs text-destructive font-medium">{friendly.title}</p>
+              {friendly.detail && (
+                <p className="text-xs text-muted-foreground">{friendly.detail}</p>
+              )}
+            </div>
+          );
+        })}
+      </Card>
+    </section>
+  );
+}
 
 type PipelineRunContext = {
   backlogTotal: number;
@@ -141,6 +194,14 @@ export function WorkflowRunLive({
   const isAgent = run.workflowType === "agent";
   const totalTokens = run.inputTokens + run.outputTokens;
   const pipelineCtx = parsePipelineRunContext(run);
+  const outcome = getWorkflowOutcomeMetrics(run);
+  const auditViolations = outcome.isSnowball
+    ? parseSnowballAuditViolations(run.result)
+    : [];
+  const auditViolationSet = new Set(auditViolations);
+  const workflowErrors = parseSerializedIssueList(run.errors).filter(
+    (error) => !auditViolationSet.has(error),
+  );
   const polledProposalSummary = data?.proposalSummary;
   useEffect(() => {
     if (polledProposalSummary !== undefined) setProposalSummary(polledProposalSummary);
@@ -207,9 +268,9 @@ export function WorkflowRunLive({
       {/* Summary cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <StatCard label="Processed" value={run.processedItems} total={run.totalItems} />
-        <StatCard label="Success" value={run.successItems} color="text-green-500" />
+        <StatCard label={outcome.successLabel} value={outcome.successValue} color="text-green-500" />
         <StatCard label="Skipped" value={run.skippedItems} color="text-muted-foreground" />
-        <StatCard label="Errors" value={run.errorItems} color="text-destructive" />
+        <StatCard label={outcome.errorLabel} value={outcome.errorValue} color="text-destructive" />
       </div>
 
       {/* Agent-specific cards */}
@@ -314,33 +375,8 @@ export function WorkflowRunLive({
         agentThread={agentThread}
       />
 
-      {/* Errors (if any) */}
-      {run.errorItems > 0 && (
-        <section className="space-y-3">
-          <h2 className="text-sm font-medium text-destructive">Errors</h2>
-          <Card className="p-4 space-y-2">
-            {(() => {
-              try {
-                const errorsJson = typeof run.errors === "string" ? run.errors : "[]";
-                const errors: string[] = JSON.parse(errorsJson);
-                return errors.map((err, i) => {
-                  const friendly = formatWorkflowError(err);
-                  return (
-                    <div key={i} className="space-y-0.5" title={err}>
-                      <p className="text-xs text-destructive font-medium">{friendly.title}</p>
-                      {friendly.detail && (
-                        <p className="text-xs text-muted-foreground">{friendly.detail}</p>
-                      )}
-                    </div>
-                  );
-                });
-              } catch {
-                return <p className="text-xs text-muted-foreground">Unable to parse errors</p>;
-              }
-            })()}
-          </Card>
-        </section>
-      )}
+      <WorkflowIssueSection title="Audit violations" issues={auditViolations} />
+      <WorkflowIssueSection title="Errors" issues={workflowErrors} />
     </>
   );
 }

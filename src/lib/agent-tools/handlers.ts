@@ -17,7 +17,7 @@ import {
   AGENT_ORCHESTRATION_MESSAGE,
   startAgentWorkflow,
 } from "@/lib/agents/run-agent-workflow";
-import { enrichContact } from "@/lib/agents/tools/enrich-contact";
+import { enrichContact, enrichContactSync } from "@/lib/agents/tools/enrich-contact";
 import { archiveContactTool } from "@/lib/agents/tools/archive-contact";
 import { findDuplicateContacts } from "@/lib/contacts/dedupe/detect";
 import { MergeContactsError, mergeContacts } from "@/lib/contacts/dedupe/merge";
@@ -105,6 +105,7 @@ import {
   auditSnowballLinkedInIdentityEvidence,
   bindSnowballLinkedInEvidence,
   claimSnowballLinkedInEvidence,
+  getSnowballLinkedInEvidenceBinding,
   hasRunningNetworkSnowballRun,
   isRunningLinkedInNetworkSnowballRun,
   isRunningNetworkSnowballRun,
@@ -519,21 +520,27 @@ export async function handleCreateContact(input: z.infer<typeof createContactSch
     );
   }
 
-  let snowballEvidence: ClaimedSnowballLinkedInEvidence | undefined;
   if (input.identityEvidenceToken) {
     try {
-      snowballEvidence = claimSnowballLinkedInEvidence({
-        identityEvidenceToken: input.identityEvidenceToken,
-        candidateName: input.name,
-        candidateCompany: input.company,
-        candidateTitle: input.title,
-        workflowRunId: suppliedIds.workflowRunId,
-        templateId: suppliedIds.templateId,
+      return db.transaction(() => {
+        const snowballEvidence = claimSnowballLinkedInEvidence({
+          identityEvidenceToken: input.identityEvidenceToken!,
+          candidateName: input.name,
+          candidateCompany: input.company,
+          candidateTitle: input.title,
+          workflowRunId: suppliedIds.workflowRunId,
+          templateId: suppliedIds.templateId,
+        });
+        return createContactWithResolvedEvidence(input, suppliedIds, snowballEvidence);
       });
     } catch (error) {
-      throw snowballEvidenceToolError(error);
+      if (error instanceof SnowballIdentityEvidenceError) {
+        throw snowballEvidenceToolError(error);
+      }
+      throw error;
     }
-  } else if (
+  }
+  if (
     isRunningLinkedInNetworkSnowballRun(suppliedIds.workflowRunId) ||
     (input.platform === "linkedin" &&
       (isRunningNetworkSnowballRun(suppliedIds.workflowRunId) ||
@@ -543,6 +550,14 @@ export async function handleCreateContact(input: z.infer<typeof createContactSch
     throw snowballEvidenceRequiredError();
   }
 
+  return createContactWithResolvedEvidence(input, suppliedIds);
+}
+
+function createContactWithResolvedEvidence(
+  input: z.infer<typeof createContactSchema>,
+  suppliedIds: { workflowRunId: string | null; templateId: string | null },
+  snowballEvidence?: ClaimedSnowballLinkedInEvidence,
+) {
   const effectiveInput: z.infer<typeof createContactSchema> = snowballEvidence
     ? {
         ...input,
@@ -596,21 +611,36 @@ export async function handleCreateContact(input: z.infer<typeof createContactSch
   // Auto-deduplication check: enrich existing contact if found
   const existing = findMatchingExistingContact(effectiveInput);
   if (existing) {
-    if (snowballEvidence) {
-      try {
-        assertSnowballLinkedInEvidenceMatchesCandidate(
-          snowballEvidence,
-          {
-            candidateName: existing.name,
-            candidateCompany: existing.company ?? existing.currentEmployment?.orgName,
-            candidateTitle: existing.title ?? existing.currentEmployment?.title,
-          },
-          { allowMissingCorroboratedFields: true },
-        );
-      } catch (error) {
-        throw snowballEvidenceToolError(error);
-      }
+    let identityResult: ReturnType<typeof upsertContactIdentityWithEvidence> | undefined;
+    if (rest.platform && (rest.platformUserId || rest.platformHandle)) {
+      identityResult = upsertContactIdentityWithEvidence({
+        contactId: existing.id,
+        platform: rest.platform,
+        platformUserId: rest.platformUserId ?? rest.platformHandle,
+        platformHandle: rest.platformHandle,
+        platformUrl: rest.platformUrl,
+        avatarUrl: rest.avatarUrl,
+        workflowRunId: resolvedIds.workflowRunId ?? undefined,
+        templateId: resolvedIds.templateId ?? undefined,
+      }, snowballEvidence);
     }
+
+    if (identityResult?.identityEvidenceReplay) {
+      const replayed = getContactById(existing.id) ?? existing;
+      return {
+        id: replayed.id,
+        name: replayed.name,
+        email: replayed.email,
+        company: replayed.company,
+        currentEmployment: replayed.currentEmployment,
+        enrichmentScore: replayed.enrichmentScore,
+        isExisting: true,
+        identityEvidenceReplay: true,
+        message: `Contact "${replayed.name}" already accepted this LinkedIn identity evidence.`,
+        ...serializeContactBirthFields(replayed),
+      };
+    }
+
     const enrichData: Record<string, unknown> = {};
     if (rest.company && !existing.company) enrichData.company = rest.company;
     if (rest.title && !existing.title) enrichData.title = rest.title;
@@ -620,7 +650,7 @@ export async function handleCreateContact(input: z.infer<typeof createContactSch
     if (rest.website && !existing.website) enrichData.website = rest.website;
     if (rest.notes) enrichData.metadata = { notes: rest.notes };
     if (Object.keys(enrichData).length > 0) {
-      enrichContact(existing.id, enrichData);
+      enrichContactSync(existing.id, enrichData);
     }
 
     if (existing.identities && existing.identities.length > 0 && (rest.headline || rest.bio || rest.location || rest.website || rest.avatarUrl)) {
@@ -638,19 +668,6 @@ export async function handleCreateContact(input: z.infer<typeof createContactSch
       }
     }
 
-    if (rest.platform && (rest.platformUserId || rest.platformHandle)) {
-      await upsertContactIdentityWithEvidence({
-        contactId: existing.id,
-        platform: rest.platform,
-        platformUserId: rest.platformUserId ?? rest.platformHandle,
-        platformHandle: rest.platformHandle,
-        platformUrl: rest.platformUrl,
-        avatarUrl: rest.avatarUrl,
-        workflowRunId: resolvedIds.workflowRunId ?? undefined,
-        templateId: resolvedIds.templateId ?? undefined,
-      }, snowballEvidence);
-    }
-
     recalcEnrichment(existing.id);
     const updated = getContactById(existing.id) ?? existing;
 
@@ -662,6 +679,7 @@ export async function handleCreateContact(input: z.infer<typeof createContactSch
       currentEmployment: updated.currentEmployment,
       enrichmentScore: updated.enrichmentScore,
       isExisting: true,
+      ...(snowballEvidence ? { identityEvidenceReplay: false } : {}),
       message: `Contact "${updated.name}" already exists (${updated.id}); enriched existing record.`,
       ...serializeContactBirthFields(updated),
     };
@@ -699,7 +717,7 @@ export async function handleCreateContact(input: z.infer<typeof createContactSch
   });
 
   if (rest.platform && (rest.platformUserId || rest.platformHandle)) {
-    await upsertContactIdentityWithEvidence({
+    upsertContactIdentityWithEvidence({
       contactId: contact.id,
       platform: rest.platform,
       platformUserId: rest.platformUserId ?? rest.platformHandle,
@@ -712,7 +730,7 @@ export async function handleCreateContact(input: z.infer<typeof createContactSch
   }
 
   if (rest.notes) {
-    enrichContact(contact.id, { metadata: { notes: rest.notes } });
+    enrichContactSync(contact.id, { metadata: { notes: rest.notes } });
   }
 
   recalcEnrichment(contact.id);
@@ -728,6 +746,7 @@ export async function handleCreateContact(input: z.infer<typeof createContactSch
     relationshipGoal: result.relationshipGoal,
     relationshipGoalStatus: result.relationshipGoalStatus,
     isExisting: false,
+    ...(snowballEvidence ? { identityEvidenceReplay: false } : {}),
     message: `Contact "${result.name}" created successfully.`,
     ...serializeContactBirthFields(result),
   };
@@ -778,7 +797,47 @@ export async function handleEnrichContact(input: z.infer<typeof enrichContactSch
   return enrichContact(contactId, data);
 }
 
-async function upsertContactIdentityWithEvidence(
+function resolveSnowballEvidenceReplayIdentity(
+  evidence: ClaimedSnowballLinkedInEvidence,
+  input: z.infer<typeof upsertContactIdentitySchema>,
+): ContactIdentity | null {
+  const binding = getSnowballLinkedInEvidenceBinding(evidence);
+  if (!binding) return null;
+
+  const identity = getIdentityById(binding.identityId);
+  const suppliedPlatformUserId = input.platformUserId?.trim().replace(/^@/, "");
+  const suppliedPlatformHandle = input.platformHandle?.trim().replace(/^@/, "");
+  const bindingMatches = binding.contactId === input.contactId &&
+    identity?.contactId === input.contactId &&
+    identity.platform === "linkedin" &&
+    identity.platformUserId.toLocaleLowerCase("en-US") ===
+      evidence.platformUserId.toLocaleLowerCase("en-US") &&
+    (identity.platformHandle ?? identity.platformUserId).toLocaleLowerCase("en-US") ===
+      evidence.platformHandle.toLocaleLowerCase("en-US") &&
+    identity.platformUrl === evidence.platformUrl &&
+    (!input.id || input.id === identity.id) &&
+    (!input.platform || input.platform === "linkedin") &&
+    (!suppliedPlatformUserId || suppliedPlatformUserId.toLocaleLowerCase("en-US") ===
+      evidence.platformUserId.toLocaleLowerCase("en-US")) &&
+    (!suppliedPlatformHandle || suppliedPlatformHandle.toLocaleLowerCase("en-US") ===
+      evidence.platformHandle.toLocaleLowerCase("en-US")) &&
+    (!input.platformUrl || input.platformUrl.trim() === evidence.platformUrl);
+
+  if (!bindingMatches || !identity) {
+    throw new SnowballIdentityEvidenceError(
+      "evidence_replayed",
+      "LinkedIn identity evidence is already bound to a different or changed identity.",
+      {
+        evidenceId: evidence.id,
+        contactId: binding.contactId,
+        identityId: binding.identityId,
+      },
+    );
+  }
+  return identity;
+}
+
+function upsertContactIdentityWithEvidence(
   input: z.infer<typeof upsertContactIdentitySchema>,
   preclaimedEvidence?: ClaimedSnowballLinkedInEvidence,
 ) {
@@ -825,6 +884,10 @@ async function upsertContactIdentityWithEvidence(
           candidateName: contact.name,
           candidateCompany: input.candidateCompany ?? contact.company ?? contact.currentEmployment?.orgName,
           candidateTitle: input.candidateTitle ?? contact.title ?? contact.currentEmployment?.title,
+          boundReplayCandidateContext: {
+            candidateCompany: input.candidateCompany,
+            candidateTitle: input.candidateTitle,
+          },
           workflowRunId: resolvedIds.workflowRunId,
           templateId: resolvedIds.templateId,
         });
@@ -843,7 +906,21 @@ async function upsertContactIdentityWithEvidence(
   }
 
   if (snowballEvidence) {
-    try {
+    const replayIdentity = resolveSnowballEvidenceReplayIdentity(snowballEvidence, input);
+    if (replayIdentity) {
+      return {
+        ...serializeContactIdentity(replayIdentity),
+        contactId: input.contactId,
+        promotedCandidateIds: [],
+        identityEvidenceReplay: true,
+        message: "Contact identity evidence was already accepted.",
+      };
+    }
+    const canonicalClaim = resolvePlatformClaim("linkedin", snowballEvidence.platformUserId);
+    const alreadyOwnedByTarget = canonicalClaim.claimed &&
+      canonicalClaim.claimant.kind === "contact" &&
+      canonicalClaim.claimant.contactId === input.contactId;
+    if (!alreadyOwnedByTarget) {
       assertSnowballLinkedInEvidenceMatchesCandidate(
         snowballEvidence,
         {
@@ -853,8 +930,6 @@ async function upsertContactIdentityWithEvidence(
         },
         { allowMissingCorroboratedFields: true },
       );
-    } catch (error) {
-      throw snowballEvidenceToolError(error);
     }
   }
 
@@ -1011,6 +1086,7 @@ async function upsertContactIdentityWithEvidence(
     ...serializeContactIdentity(identity),
     contactId: input.contactId,
     promotedCandidateIds,
+    identityEvidenceReplay: false,
     message: "Contact identity upserted.",
   };
 }
@@ -1018,7 +1094,14 @@ async function upsertContactIdentityWithEvidence(
 export async function handleUpsertContactIdentity(
   input: z.infer<typeof upsertContactIdentitySchema>,
 ) {
-  return upsertContactIdentityWithEvidence(input);
+  try {
+    return db.transaction(() => upsertContactIdentityWithEvidence(input));
+  } catch (error) {
+    if (error instanceof SnowballIdentityEvidenceError) {
+      throw snowballEvidenceToolError(error);
+    }
+    throw error;
+  }
 }
 
 export async function handleArchiveContact(input: z.infer<typeof archiveContactSchema>) {
@@ -1512,6 +1595,8 @@ export async function handleCompleteWorkflowRun(input: z.infer<typeof completeWo
     callbackResult.identityEvidenceAudit = {
       auditedIdentityIds: audit.auditedIdentityIds,
       passed: audit.errors.length === 0,
+      violationCount: audit.errors.length,
+      violations: audit.errors,
     };
     if (audit.errors.length > 0) {
       effectiveStatus = "failed";

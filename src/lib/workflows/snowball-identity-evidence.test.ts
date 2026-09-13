@@ -385,9 +385,14 @@ describe("Snowball LinkedIn identity evidence", () => {
       title: "Chief Financial Officer",
       identities: [],
     });
+    expect(JSON.parse(getWorkflowRun(run.id)?.result ?? "{}")[
+      SNOWBALL_IDENTITY_EVIDENCE_RESULT_KEY
+    ]).toEqual([
+      expect.objectContaining({ consumedAt: null, contactId: null, identityId: null }),
+    ]);
   });
 
-  it("does not let completion bless a contact whose candidate context drifted", async () => {
+  it("keeps accepted evidence valid when employment changes later", async () => {
     const { template, run, scopeToken } = createSnowballRun();
     const evidence = await attest(scopeToken);
     const created = await invokeAgentTool("create_contact", {
@@ -406,12 +411,21 @@ describe("Snowball LinkedIn identity evidence", () => {
       getWorkflowRun(run.id)!,
       [created.id],
     )).toEqual({
-      errors: [`snowball_linkedin_identity_evidence_missing:${created.id}`],
+      errors: [],
       auditedIdentityIds: [identityId],
+    });
+    await expect(invokeAgentTool("upsert_contact_identity", {
+      contactId: created.id,
+      identityEvidenceToken: evidence.identityEvidenceToken,
+      workflowRunId: run.id,
+      templateId: template.id,
+    })).resolves.toMatchObject({
+      id: identityId,
+      identityEvidenceReplay: true,
     });
   });
 
-  it("binds tokens to one run and candidate and rejects replay", async () => {
+  it("binds tokens to one run and candidate and accepts exact replay", async () => {
     const first = createSnowballRun();
     const second = createSnowballRun();
     const evidence = await attest(first.scopeToken);
@@ -436,7 +450,7 @@ describe("Snowball LinkedIn identity evidence", () => {
       details: { reason: "evidence_candidate_mismatch" },
     });
 
-    await invokeAgentTool("create_contact", {
+    const created = await invokeAgentTool("create_contact", {
       name: "Jane Doe",
       company: "Acme Inc.",
       title: "Founder",
@@ -444,16 +458,107 @@ describe("Snowball LinkedIn identity evidence", () => {
       identityEvidenceToken: evidence.identityEvidenceToken,
       workflowRunId: first.run.id,
       templateId: first.template.id,
+    }) as { id: string };
+    const replay = await invokeAgentTool("create_contact", {
+      name: "Jane Doe",
+      company: "Acme Inc.",
+      title: "Founder",
+      platform: "linkedin",
+      identityEvidenceToken: evidence.identityEvidenceToken,
+      workflowRunId: first.run.id,
+      templateId: first.template.id,
+    }) as { id: string; identityEvidenceReplay: boolean };
+    expect(replay).toMatchObject({ id: created.id, identityEvidenceReplay: true });
+    const ledger = JSON.parse(getWorkflowRun(first.run.id)?.result ?? "{}")[
+      SNOWBALL_IDENTITY_EVIDENCE_RESULT_KEY
+    ];
+    expect(ledger).toHaveLength(1);
+    expect(ledger[0]).toMatchObject({
+      contactId: created.id,
+      identityId: expect.any(String),
+      consumedAt: expect.any(Number),
     });
-    await expect(invokeAgentTool("create_contact", {
+  });
+
+  it("accepts fresh evidence for an identity whose latest marker belongs to another run", async () => {
+    const first = createSnowballRun();
+    const firstEvidence = await attest(first.scopeToken);
+    const created = await invokeAgentTool("create_contact", {
       name: "Jane Doe",
       company: "Acme Inc.",
       title: "Founder",
       platform: "linkedin",
-      identityEvidenceToken: evidence.identityEvidenceToken,
+      identityEvidenceToken: firstEvidence.identityEvidenceToken,
       workflowRunId: first.run.id,
       templateId: first.template.id,
-    })).rejects.toMatchObject({ details: { reason: "evidence_replayed" } });
+    }) as { id: string };
+    const identityId = getContactById(created.id)!.identities[0].id;
+
+    const second = createSnowballRun();
+    const secondEvidence = await attest(second.scopeToken);
+    const refreshed = await invokeAgentTool("create_contact", {
+      name: "Jane Doe",
+      company: "Acme Inc.",
+      title: "Founder",
+      platform: "linkedin",
+      identityEvidenceToken: secondEvidence.identityEvidenceToken,
+      workflowRunId: second.run.id,
+      templateId: second.template.id,
+    }) as { id: string; identityEvidenceReplay: boolean };
+
+    expect(refreshed).toMatchObject({ id: created.id, identityEvidenceReplay: false });
+    expect(auditSnowballLinkedInIdentityEvidence(
+      getWorkflowRun(first.run.id)!,
+      [created.id],
+    )).toEqual({ errors: [], auditedIdentityIds: [identityId] });
+    expect(auditSnowballLinkedInIdentityEvidence(
+      getWorkflowRun(second.run.id)!,
+      [created.id],
+    )).toEqual({ errors: [], auditedIdentityIds: [identityId] });
+
+    const oldReplay = await invokeAgentTool("create_contact", {
+      name: "Jane Doe",
+      company: "Acme Inc.",
+      title: "Founder",
+      platform: "linkedin",
+      identityEvidenceToken: firstEvidence.identityEvidenceToken,
+      workflowRunId: first.run.id,
+      templateId: first.template.id,
+    }) as { id: string; identityEvidenceReplay: boolean };
+    expect(oldReplay).toMatchObject({ id: created.id, identityEvidenceReplay: true });
+  });
+
+  it("retains bound evidence when later observations exceed the unbound ledger cap", async () => {
+    const { template, run, scopeToken } = createSnowballRun();
+    const acceptedEvidence = await attest(scopeToken);
+    const created = await invokeAgentTool("create_contact", {
+      name: "Jane Doe",
+      company: "Acme Inc.",
+      title: "Founder",
+      platform: "linkedin",
+      identityEvidenceToken: acceptedEvidence.identityEvidenceToken,
+      workflowRunId: run.id,
+      templateId: template.id,
+    }) as { id: string };
+
+    for (let index = 0; index < 105; index += 1) {
+      await attest(scopeToken);
+    }
+
+    const contact = getContactById(created.id)!;
+    const ledger = JSON.parse(getWorkflowRun(run.id)?.result ?? "{}")[
+      SNOWBALL_IDENTITY_EVIDENCE_RESULT_KEY
+    ];
+    expect(ledger).toHaveLength(101);
+    expect(ledger).toContainEqual(expect.objectContaining({
+      contactId: created.id,
+      identityId: contact.identities[0].id,
+      consumedAt: expect.any(Number),
+    }));
+    expect(auditSnowballLinkedInIdentityEvidence(
+      getWorkflowRun(run.id)!,
+      [created.id],
+    )).toEqual({ errors: [], auditedIdentityIds: [contact.identities[0].id] });
   });
 
   it("rejects expired evidence before a Snowball write can consume it", async () => {
@@ -475,6 +580,33 @@ describe("Snowball LinkedIn identity evidence", () => {
       expect(error).toBeInstanceOf(SnowballIdentityEvidenceError);
       expect(error).toMatchObject({ reason: "evidence_expired" });
     }
+  });
+
+  it("rejects malformed partial evidence bindings", async () => {
+    const { template, run, scopeToken } = createSnowballRun();
+    const evidence = await attest(scopeToken);
+    const result = JSON.parse(getWorkflowRun(run.id)?.result ?? "{}") as Record<string, unknown>;
+    const ledger = result[SNOWBALL_IDENTITY_EVIDENCE_RESULT_KEY] as Array<Record<string, unknown>>;
+    updateWorkflowRun(run.id, {
+      result: JSON.stringify({
+        ...result,
+        [SNOWBALL_IDENTITY_EVIDENCE_RESULT_KEY]: [{
+          ...ledger[0],
+          consumedAt: 1_800_000_200,
+          contactId: "contact-partial",
+          identityId: null,
+        }],
+      }),
+    });
+
+    expect(() => claimSnowballLinkedInEvidence({
+      identityEvidenceToken: evidence.identityEvidenceToken,
+      candidateName: "Jane Doe",
+      candidateCompany: "Acme Inc.",
+      candidateTitle: "Founder",
+      workflowRunId: run.id,
+      templateId: template.id,
+    })).toThrow(expect.objectContaining({ reason: "evidence_invalid" }));
   });
 
   it("binds the attested top-card avatar and drops a session-viewer navbar thumb", async () => {

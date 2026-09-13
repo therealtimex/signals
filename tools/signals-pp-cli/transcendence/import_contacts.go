@@ -110,11 +110,10 @@ func (state *importAttributionState) add(ids []string) {
 // attach. OrgID matters because a platform account can be claimed by an org identity
 // as well, which blocks a contact identity just as hard.
 type contactMatch struct {
-	ID                      string
-	Archived                bool
-	OrgID                   string
-	CandidateIDs            []string
-	PlatformIdentityIsBound bool
+	ID           string
+	Archived     bool
+	OrgID        string
+	CandidateIDs []string
 }
 
 // matched reports whether the row resolved to an existing owner of any kind.
@@ -507,17 +506,14 @@ func importAttributedContactChunkWithInvoker(
 				continue
 			}
 			if existing.ID != "" {
-				attribute(existing.ID)
-				includeIdentity, err := existingContactNeedsIdentityWrite(existing, row, invoke)
+				result, err := enrichExistingContact(existing.ID, row, workflowRunID, templateID, true, invoke)
+				if row.IdentityEvidenceToken == "" || result.IdentityCommitted {
+					attribute(existing.ID)
+				}
 				if err != nil {
 					summary.Failed++
 					summary.Errors = append(summary.Errors, err.Error())
-					continue
-				}
-				if enriched, err := enrichExistingContact(existing.ID, row, workflowRunID, templateID, includeIdentity, invoke); err != nil {
-					summary.Failed++
-					summary.Errors = append(summary.Errors, err.Error())
-				} else if enriched {
+				} else if result.Enriched {
 					summary.Enriched++
 				} else {
 					summary.Skipped++
@@ -538,10 +534,10 @@ func importAttributedContactChunkWithInvoker(
 		}
 		summary.Created++
 		attribute(contactID)
-		if enriched, err := enrichExistingContact(contactID, row, workflowRunID, templateID, false, invoke); err != nil {
+		if result, err := enrichExistingContact(contactID, row, workflowRunID, templateID, false, invoke); err != nil {
 			summary.Failed++
 			summary.Errors = append(summary.Errors, err.Error())
-		} else if enriched {
+		} else if result.Enriched {
 			summary.Enriched++
 		}
 	}
@@ -758,28 +754,6 @@ func findExistingPlatformClaimWithInvoker(row contactRow, invoke agentToolInvoke
 	return platformClaimMatch(result)
 }
 
-func existingContactNeedsIdentityWrite(
-	existing contactMatch,
-	row contactRow,
-	invoke agentToolInvoker,
-) (bool, error) {
-	if row.IdentityEvidenceToken == "" {
-		return true, nil
-	}
-	if existing.PlatformIdentityIsBound {
-		return false, nil
-	}
-	platformMatch, err := findExistingPlatformClaimWithInvoker(row, invoke)
-	if err != nil {
-		return false, err
-	}
-	// A repeated evidence-backed import is a no-op for the identity only when
-	// the exact platform claim is already attached to the same contact. An
-	// unclaimed or differently-owned identity still goes through the evidence
-	// gate, preserving one-use enforcement for every new write.
-	return platformMatch.ID != existing.ID, nil
-}
-
 func normalizeEmail(email string) string {
 	return strings.ToLower(strings.TrimSpace(email))
 }
@@ -859,9 +833,8 @@ func platformClaimMatch(result map[string]any) (contactMatch, error) {
 			))
 		}
 		return contactMatch{
-			ID:                      contactID,
-			Archived:                archived,
-			PlatformIdentityIsBound: true,
+			ID:       contactID,
+			Archived: archived,
 		}, nil
 	default:
 		return contactMatch{}, apiErr(fmt.Errorf(
@@ -958,6 +931,11 @@ func createContactFromRow(
 	return contactID, nil
 }
 
+type existingContactEnrichmentResult struct {
+	Enriched          bool
+	IdentityCommitted bool
+}
+
 func enrichExistingContact(
 	contactID string,
 	row contactRow,
@@ -965,8 +943,8 @@ func enrichExistingContact(
 	templateID string,
 	includeIdentity bool,
 	invoke agentToolInvoker,
-) (bool, error) {
-	enriched := false
+) (existingContactEnrichmentResult, error) {
+	result := existingContactEnrichmentResult{}
 	// Validate and persist the evidence-gated identity before changing any other field on an
 	// existing contact. A rejected Snowball row must leave the matched contact untouched.
 	if includeIdentity && row.Platform != "" && (row.PlatformUserID != "" || row.PlatformHandle != "" || row.IdentityEvidenceToken != "") {
@@ -1010,9 +988,10 @@ func enrichExistingContact(
 			}
 		}
 		if _, err := invoke("upsert_contact_identity", identity); err != nil {
-			return false, err
+			return result, err
 		}
-		enriched = true
+		result.Enriched = true
+		result.IdentityCommitted = true
 	}
 
 	enrichInput := map[string]any{
@@ -1029,9 +1008,9 @@ func enrichExistingContact(
 	}
 	if len(enrichInput) > 1 {
 		if _, err := invoke("enrich_contact", enrichInput); err != nil {
-			return enriched, err
+			return result, err
 		}
-		enriched = true
+		result.Enriched = true
 	}
-	return enriched, nil
+	return result, nil
 }
