@@ -56,30 +56,47 @@ describe("Network Snowball event source ingestion", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
-  it("gives root event metadata precedence when the real page also embeds its calendar", async () => {
+  it("keeps the seeded event as root when the default traversal visits its hosting calendar", async () => {
     const run = createWorkflowRun({ workflowType: "search", status: "running", trigger: "template" });
-    const capturedHtml = readFileSync(
+    const eventHtml = readFileSync(
       new URL("./fixtures/luma-event-with-calendar.html", import.meta.url),
       "utf8",
     );
-    const fetchImpl = vi.fn(async () => new Response(capturedHtml, { status: 200 })) as unknown as typeof fetch;
+    const calendarHtml = readFileSync(
+      new URL("./fixtures/luma-calendar-ai-beavers.html", import.meta.url),
+      "utf8",
+    );
+    const pages = new Map([
+      ["https://luma.com/pqr8u92i", eventHtml],
+      ["https://luma.com/ai_beavers", calendarHtml],
+    ]);
+    const fetchImpl = vi.fn(async (url: string | URL | Request) => new Response(
+      pages.get(String(url)) ?? "not found",
+      { status: pages.has(String(url)) ? 200 : 404 },
+    )) as unknown as typeof fetch;
 
     const result = await ingestNetworkSnowballEventSource({
       runId: run.id,
       ownerWorkspace: "signals",
       seedUrl: "https://luma.com/pqr8u92i",
-      traversal: readEventTraversalPolicy({ maxEvents: 1, adjacentEventDepth: 0 }),
+      traversal: readEventTraversalPolicy({}),
       participantAccess: { enabled: false, browserSessionName: "" },
       fetchImpl,
       sleepImpl: async () => undefined,
     });
 
     expect(result?.publicResult).toMatchObject({
-      resolvedRoot: { kind: "event", title: "Build Fridays SF" },
+      rootEventKey: "https://luma.com/pqr8u92i",
+      resolvedRoot: {
+        canonicalUrl: "https://luma.com/pqr8u92i",
+        kind: "event",
+        title: "Build Fridays SF",
+      },
       events: [{ title: "Build Fridays SF" }],
       guestBoundary: { state: "gated", reason: "registration_required" },
       partial: false,
     });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
   it("persists a deterministic public Content item and no protected people", async () => {

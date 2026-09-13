@@ -264,16 +264,17 @@ export async function ingestNetworkSnowballEventSource(input: {
     kind: "event" | "calendar";
     url: string;
     depth: number;
+    isSeed: boolean;
     listedOnCalendar?: string;
   };
   const queue: QueueItem[] = events.length === 0
-    ? [{ kind: input.rootKind ?? "event", url: canonicalSeedUrl, depth: 0 }]
+    ? [{ kind: input.rootKind ?? "event", url: canonicalSeedUrl, depth: 0, isSeed: true }]
     : [
         ...(previousRoot?.relatedEventUrls ?? []).map(
-          (url): QueueItem => ({ kind: "event", url, depth: 1 }),
+          (url): QueueItem => ({ kind: "event", url, depth: 1, isSeed: false }),
         ),
         ...(previousRoot?.calendarUrls ?? []).map(
-          (url): QueueItem => ({ kind: "calendar", url, depth: 0 }),
+          (url): QueueItem => ({ kind: "calendar", url, depth: 0, isSeed: false }),
         ),
       ];
   const visitedCalendarPages = new Set<string>();
@@ -322,25 +323,11 @@ export async function ingestNetworkSnowballEventSource(input: {
         beforeRequest: consumeProviderRequest,
       });
       const { finalUrl, html } = fetched;
-      // Luma event pages embed their owning `data.calendar` alongside `data.event`. At the root,
+      // Luma event pages embed their owning `data.calendar` alongside `data.event`. For the seed,
       // event extraction therefore has precedence and calendar parsing is the fallback below.
-      const isCalendarPage = next.kind === "calendar" && next.depth !== 0;
+      const isCalendarPage = next.kind === "calendar" && !next.isSeed;
       if (isCalendarPage) {
-        if (next.depth === 0) {
-          resolvedRoot = {
-            canonicalUrl: canonicalizeLumaUrl(finalUrl) ?? canonicalSeedUrl,
-            kind: "calendar",
-            title: new URL(finalUrl).hostname,
-          };
-        }
         const calendar = extractLumaCalendarFromHtml({ url: finalUrl, html });
-        if (next.depth === 0) {
-          resolvedRoot = {
-            canonicalUrl: calendar.canonicalUrl,
-            kind: "calendar",
-            title: calendar.title,
-          };
-        }
         if (calendar.eventUrls.length > eventsPerCalendar) {
           calendarTruncated = true;
         }
@@ -368,11 +355,17 @@ export async function ingestNetworkSnowballEventSource(input: {
             kind: "event",
             url: eventUrl,
             depth: next.depth + 1,
+            isSeed: false,
             listedOnCalendar: calendar.canonicalUrl,
           });
         }
         if (calendar.nextPageUrl && visitedCalendarPages.size < traversal.maxCalendarPages) {
-          queue.push({ kind: "calendar", url: calendar.nextPageUrl, depth: next.depth });
+          queue.push({
+            kind: "calendar",
+            url: calendar.nextPageUrl,
+            depth: next.depth,
+            isSeed: false,
+          });
         } else if (calendar.nextPageUrl) {
           calendarTruncated = true;
         }
@@ -385,7 +378,7 @@ export async function ingestNetworkSnowballEventSource(input: {
         // Luma calendar slugs share the same URL shape as event slugs. Classify the fetched root
         // from provider metadata without issuing a second request, then continue through the
         // existing bounded calendar traversal.
-        if (next.depth !== 0) throw eventError;
+        if (!next.isSeed) throw eventError;
         let calendar;
         try {
           calendar = extractLumaCalendarFromHtml({ url: fetched.finalUrl, html: fetched.html });
@@ -404,11 +397,17 @@ export async function ingestNetworkSnowballEventSource(input: {
             kind: "event",
             url: eventUrl,
             depth: 1,
+            isSeed: false,
             listedOnCalendar: calendar.canonicalUrl,
           });
         }
         if (calendar.nextPageUrl && visitedCalendarPages.size < traversal.maxCalendarPages) {
-          queue.push({ kind: "calendar", url: calendar.nextPageUrl, depth: 0 });
+          queue.push({
+            kind: "calendar",
+            url: calendar.nextPageUrl,
+            depth: 0,
+            isSeed: false,
+          });
         } else if (calendar.nextPageUrl) {
           calendarTruncated = true;
         }
@@ -424,7 +423,7 @@ export async function ingestNetworkSnowballEventSource(input: {
           event.key,
         ));
       }
-      if (next.depth === 0) {
+      if (next.isSeed) {
         rootEventKey = event.key;
         resolvedRoot = {
           canonicalUrl: event.canonicalUrl,
@@ -437,12 +436,22 @@ export async function ingestNetworkSnowballEventSource(input: {
       if (next.depth < traversal.adjacentEventDepth) {
         for (const relatedUrl of event.relatedEventUrls.slice(0, eventsPerCalendar)) {
           if (!visited.has(relatedUrl)) {
-            queue.push({ kind: "event", url: relatedUrl, depth: next.depth + 1 });
+            queue.push({
+              kind: "event",
+              url: relatedUrl,
+              depth: next.depth + 1,
+              isSeed: false,
+            });
           }
         }
         for (const calendarUrl of event.calendarUrls ?? []) {
           if (!visitedCalendarPages.has(calendarUrl)) {
-            queue.push({ kind: "calendar", url: calendarUrl, depth: next.depth });
+            queue.push({
+              kind: "calendar",
+              url: calendarUrl,
+              depth: next.depth,
+              isSeed: false,
+            });
           }
         }
       }
