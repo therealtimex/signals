@@ -38,7 +38,7 @@ Then pass `Authorization: Bearer your-secret-token` on each request.
 
 | Tool | Category | Description |
 |------|----------|-------------|
-| `query_contacts` | contacts | Search/filter **active** contacts; `email` is an exact normalized match (incl. non-primary channels), `platformUserId` an exact identity match. Results list their identities. Not a claim lookup — use `resolve_platform_claim` |
+| `query_contacts` | contacts | Search/filter the default Contacts population (non-archived, non-platform-actor contacts; self included); `email` is an exact normalized match (incl. non-primary channels), `platformUserId` an exact identity match. Results list their identities. Not a claim lookup — use `resolve_platform_claim` |
 | `resolve_platform_claim` | contacts | Is this platform account already claimed, by a contact **or an org** identity? Same resolution `upsert_contact_identity` enforces. Returns `{claimed:false}` or `{claimed:true, claimant:{kind, …, archived}}` |
 | `attest_snowball_linkedin_identity` | platforms | Verify a proposed LinkedIn identity in the run-bound authenticated browser; failed gates automatically enter candidate quarantine |
 | `list_snowball_candidates` | contacts | List failed Snowball person/company proposals without exposing them as canonical graph records |
@@ -51,7 +51,7 @@ Then pass `Authorization: Bearer your-secret-token` on each request.
 | `archive_contact` | contacts | Archive with reason |
 | `find_duplicate_contacts` | contacts | Scan for duplicate contacts. Tier 1 = shared email or platform handle, tier 2 = matching name at the same org, tier 3 = shared employment node plus overlapping interaction threads. Read-only |
 | `merge_contacts` | contacts | Merge duplicates into a surviving primary and archive each secondary with `mergedIntoContactId`. Idempotent; supports `options.dryRun` |
-| `query_analytics` | analytics | Dashboard metrics |
+| `query_analytics` | analytics | Dashboard metrics; `totalContacts` uses the same default population as `query_contacts` and the Contacts page |
 | `query_workflows` | workflows | List workflow runs |
 | `list_workflow_templates` | workflows | List startable templates |
 | `start_workflow` | workflows | Record a workflow run (failed until migrated to RTX orchestration) |

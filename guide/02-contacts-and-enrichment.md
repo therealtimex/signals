@@ -12,7 +12,7 @@ Signals treats every person as a single record with multiple **identities** — 
 
 ## The Contacts List
 
-The Contacts page is your central directory. Every person in your CRM appears here, regardless of which platform they came from.
+The Contacts page is your central directory. Every person in your CRM appears here, regardless of which platform they came from. Its default population—and the Contacts total on the dashboard—includes non-archived contact records, including your own self contact. Archived records are hidden until **Show Archived** is enabled, and internal platform-actor placeholders are always excluded. Candidate Quarantine is a separate review population; a candidate joins Contacts only after promotion creates a contact.
 
 ![Contacts list — your unified contact directory](assets/contacts-list.png)
 *The Contacts list: search, filter by funnel stage, and see enrichment scores at a glance.*

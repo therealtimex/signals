@@ -42,6 +42,7 @@ import {
   resolveCreatedSourceDetailForFilter,
   type CreatedSource,
 } from "@/lib/db/creation-sources";
+import { defaultContactListVisibilityConditions } from "@/lib/db/contact-list-visibility";
 
 export type { CreationProvenance, CreatedSourceDetailFilterError };
 
@@ -238,12 +239,7 @@ export function listContacts(opts?: {
   maxEnrichmentScore?: number;
   hasRelationshipGoal?: boolean;
 }): PaginatedResult<ContactDTO> {
-  const conditions: SQL[] = [];
-
-  if (!opts?.includeArchived) {
-    conditions.push(sql`json_extract(${contacts.metadata}, '$.archived') IS NOT 1`);
-  }
-  conditions.push(sql`json_extract(${contacts.metadata}, '$.platformActor') IS NOT 1`);
+  const conditions: SQL[] = defaultContactListVisibilityConditions(opts);
 
   if (opts?.search) {
     const pattern = `%${opts.search}%`;
