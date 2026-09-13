@@ -1,5 +1,6 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import type { Page } from "playwright";
+import { db } from "@/lib/db/client";
 import { getContactById } from "@/lib/db/queries/contacts";
 import { getWorkflowRun, listWorkflowRuns, updateWorkflowRun } from "@/lib/db/queries/workflows";
 import type { WorkflowRunWithSteps } from "@/lib/db/types";
@@ -33,7 +34,7 @@ export const SNOWBALL_HUMAN_QUARANTINE_PROMOTION_KEY =
   "signalsHumanQuarantinePromotion";
 
 const EVIDENCE_TTL_SECONDS = 15 * 60;
-const MAX_EVIDENCE_RECORDS = 100;
+const MAX_UNBOUND_EVIDENCE_RECORDS = 100;
 
 export type SnowballIdentityScopeToken = {
   token: string;
@@ -300,21 +301,89 @@ function readEvidenceLedger(run: Pick<WorkflowRunWithSteps, "result">): Snowball
       typeof value.id === "string" &&
       typeof value.tokenHash === "string" &&
       typeof value.workflowRunId === "string" &&
+      (value.templateId === null || typeof value.templateId === "string") &&
+      typeof value.candidateName === "string" &&
+      typeof value.candidateNameKey === "string" &&
+      (value.candidateCompany === null || typeof value.candidateCompany === "string") &&
+      (value.candidateTitle === null || typeof value.candidateTitle === "string") &&
+      (value.proposedProfileUrl === undefined || typeof value.proposedProfileUrl === "string") &&
       value.platform === "linkedin" &&
       typeof value.platformUserId === "string" &&
-      typeof value.platformUrl === "string"
+      typeof value.platformHandle === "string" &&
+      typeof value.platformUrl === "string" &&
+      typeof value.displayName === "string" &&
+      (value.headline === null || typeof value.headline === "string") &&
+      (value.avatarUrl === undefined || value.avatarUrl === null || typeof value.avatarUrl === "string") &&
+      (value.sessionViewerAvatarUrl === undefined ||
+        value.sessionViewerAvatarUrl === null ||
+        typeof value.sessionViewerAvatarUrl === "string") &&
+      Array.isArray(value.matchedSignals) &&
+      value.matchedSignals.every((signal) => typeof signal === "string") &&
+      typeof value.browserSessionName === "string" &&
+      typeof value.pageDigest === "string" &&
+      typeof value.observedAt === "number" && Number.isFinite(value.observedAt) &&
+      typeof value.expiresAt === "number" && Number.isFinite(value.expiresAt) &&
+      (value.consumedAt === null ||
+        (typeof value.consumedAt === "number" && Number.isFinite(value.consumedAt))) &&
+      (value.contactId === null ||
+        (typeof value.contactId === "string" && value.contactId.length > 0)) &&
+      (value.identityId === null ||
+        (typeof value.identityId === "string" && value.identityId.length > 0))
     );
   });
+}
+
+function isAvailableEvidenceRecord(
+  record: Pick<SnowballIdentityEvidenceRecord, "consumedAt" | "contactId" | "identityId">,
+): boolean {
+  return record.consumedAt === null && record.contactId === null && record.identityId === null;
+}
+
+function isBoundEvidenceRecord(
+  record: Pick<SnowballIdentityEvidenceRecord, "consumedAt" | "contactId" | "identityId">,
+): boolean {
+  return Number.isFinite(record.consumedAt) &&
+    typeof record.contactId === "string" && record.contactId.length > 0 &&
+    typeof record.identityId === "string" && record.identityId.length > 0;
+}
+
+export function getSnowballLinkedInEvidenceBinding(
+  evidence: ClaimedSnowballLinkedInEvidence,
+): { contactId: string; identityId: string } | null {
+  if (isAvailableEvidenceRecord(evidence)) return null;
+  if (isBoundEvidenceRecord(evidence)) {
+    return { contactId: evidence.contactId!, identityId: evidence.identityId! };
+  }
+  throw new SnowballIdentityEvidenceError(
+    "evidence_invalid",
+    "LinkedIn identity evidence has an incomplete persisted binding.",
+    { evidenceId: evidence.id },
+  );
+}
+
+function retainedEvidenceLedger(
+  ledger: SnowballIdentityEvidenceRecord[],
+): SnowballIdentityEvidenceRecord[] {
+  const retainedUnboundIds = new Set(
+    ledger
+      .filter((record) => !isBoundEvidenceRecord(record))
+      .slice(-MAX_UNBOUND_EVIDENCE_RECORDS)
+      .map((record) => record.id),
+  );
+  return ledger.filter((record) =>
+    isBoundEvidenceRecord(record) || retainedUnboundIds.has(record.id),
+  );
 }
 
 function writeEvidenceLedger(
   run: Pick<WorkflowRunWithSteps, "id" | "result">,
   ledger: SnowballIdentityEvidenceRecord[],
 ): void {
+  const currentResult = getWorkflowRun(run.id)?.result ?? run.result;
   updateWorkflowRun(run.id, {
     result: JSON.stringify({
-      ...parseJsonObject(getWorkflowRun(run.id)?.result ?? run.result),
-      [SNOWBALL_IDENTITY_EVIDENCE_RESULT_KEY]: ledger.slice(-MAX_EVIDENCE_RECORDS),
+      ...parseJsonObject(currentResult),
+      [SNOWBALL_IDENTITY_EVIDENCE_RESULT_KEY]: retainedEvidenceLedger(ledger),
     }),
   });
 }
@@ -822,7 +891,16 @@ export async function attestSnowballLinkedInIdentity(
     contactId: null,
     identityId: null,
   };
-  writeEvidenceLedger(run, [...readEvidenceLedger(run), record]);
+  db.transaction(() => {
+    const currentRun = getWorkflowRun(run.id);
+    if (!currentRun) {
+      throw new SnowballIdentityEvidenceError(
+        "run_not_found",
+        "Snowball workflow run was not found while recording LinkedIn identity evidence.",
+      );
+    }
+    writeEvidenceLedger(currentRun, [...readEvidenceLedger(currentRun), record]);
+  });
 
   return {
     identityEvidenceToken,
@@ -914,6 +992,10 @@ export function claimSnowballLinkedInEvidence(input: {
   candidateName: string;
   candidateCompany?: string | null;
   candidateTitle?: string | null;
+  boundReplayCandidateContext?: {
+    candidateCompany?: string | null;
+    candidateTitle?: string | null;
+  };
   workflowRunId?: string | null;
   templateId?: string | null;
   now?: number;
@@ -963,27 +1045,34 @@ export function claimSnowballLinkedInEvidence(input: {
       "LinkedIn identity evidence token is not recognized by this workflow run.",
     );
   }
-  if (record.consumedAt !== null) {
+  const now = input.now ?? Math.floor(Date.now() / 1_000);
+  const binding = isBoundEvidenceRecord(record)
+    ? { contactId: record.contactId!, identityId: record.identityId! }
+    : null;
+  if (!binding && !isAvailableEvidenceRecord(record)) {
     throw new SnowballIdentityEvidenceError(
-      "evidence_replayed",
-      "LinkedIn identity evidence token has already been consumed.",
-      { evidenceId: record.id, identityId: record.identityId },
+      "evidence_invalid",
+      "LinkedIn identity evidence has an incomplete persisted binding.",
+      { evidenceId: record.id },
     );
   }
-  const now = input.now ?? Math.floor(Date.now() / 1_000);
-  if (record.expiresAt < now) {
+  if (!binding && record.expiresAt < now) {
     throw new SnowballIdentityEvidenceError(
       "evidence_expired",
       "LinkedIn identity evidence token has expired; inspect the live profile again.",
       { evidenceId: record.id, expiresAt: record.expiresAt },
     );
   }
-  assertSnowballLinkedInEvidenceMatchesCandidate(record, input);
+  const candidateContext = binding && input.boundReplayCandidateContext
+    ? {
+        candidateName: record.candidateName,
+        candidateCompany: input.boundReplayCandidateContext.candidateCompany ?? record.candidateCompany,
+        candidateTitle: input.boundReplayCandidateContext.candidateTitle ?? record.candidateTitle,
+      }
+    : input;
+  assertSnowballLinkedInEvidenceMatchesCandidate(record, candidateContext);
 
-  const consumed = { ...record, consumedAt: now };
-  ledger[index] = consumed;
-  writeEvidenceLedger(run, ledger);
-  const { tokenHash: _tokenHash, ...claim } = consumed;
+  const { tokenHash: _tokenHash, ...claim } = record;
   return claim;
 }
 
@@ -999,23 +1088,33 @@ export function bindSnowballLinkedInEvidence(
   const ledger = readEvidenceLedger(run);
   const index = ledger.findIndex((record) => record.id === evidence.id);
   const record = index >= 0 ? ledger[index] : undefined;
-  if (!record || record.consumedAt === null) {
+  if (!record) {
     throw new SnowballIdentityEvidenceError(
       "evidence_invalid",
-      "Consumed LinkedIn identity evidence could not be bound to the persisted identity.",
+      "LinkedIn identity evidence could not be bound to the persisted identity.",
     );
   }
-  if (
-    (record.contactId && record.contactId !== contactId) ||
-    (record.identityId && record.identityId !== identityId)
-  ) {
+  if (isBoundEvidenceRecord(record)) {
+    if (record.contactId === contactId && record.identityId === identityId) return;
     throw new SnowballIdentityEvidenceError(
       "evidence_replayed",
       "LinkedIn identity evidence is already bound to another identity.",
       { evidenceId: record.id, contactId: record.contactId, identityId: record.identityId },
     );
   }
-  ledger[index] = { ...record, contactId, identityId };
+  if (!isAvailableEvidenceRecord(record)) {
+    throw new SnowballIdentityEvidenceError(
+      "evidence_invalid",
+      "LinkedIn identity evidence has an incomplete persisted binding.",
+      { evidenceId: record.id },
+    );
+  }
+  ledger[index] = {
+    ...record,
+    consumedAt: Math.floor(Date.now() / 1_000),
+    contactId,
+    identityId,
+  };
   writeEvidenceLedger(run, ledger);
 }
 
@@ -1137,7 +1236,6 @@ export function auditSnowballLinkedInIdentityEvidence(
     return { errors: [], auditedIdentityIds: [] };
   }
   const ledger = readEvidenceLedger(run);
-  const ledgerById = new Map(ledger.map((record) => [record.id, record]));
   const errors: string[] = [];
   const auditedIdentityIds: string[] = [];
   const runStartedAt = run.startedAt ?? run.createdAt;
@@ -1162,34 +1260,17 @@ export function auditSnowballLinkedInIdentityEvidence(
       if (!requiresAttestedContact && !createdByRun && !identityCreatedDuringRun) continue;
       auditedIdentityIds.push(identity.id);
       const platformData = parseJsonObject(identity.platformData);
-      const marker = platformData[SNOWBALL_IDENTITY_PLATFORM_DATA_KEY];
-      const markerObject = marker && typeof marker === "object" && !Array.isArray(marker)
-        ? (marker as Record<string, unknown>)
-        : null;
-      const evidenceId = typeof markerObject?.evidenceId === "string"
-        ? markerObject.evidenceId
-        : null;
-      const record = evidenceId
-        ? ledgerById.get(evidenceId)
-        : undefined;
-      const candidateContextMatches = Boolean(
-        record &&
-        !findCandidateContextMismatch(record, {
-          candidateName: contact.name,
-          candidateCompany: contact.company ?? contact.currentEmployment?.orgName,
-          candidateTitle: contact.title ?? contact.currentEmployment?.title,
-        }),
-      );
-      const valid = Boolean(
-        record &&
-        candidateContextMatches &&
-        record.consumedAt !== null &&
+      const valid = ledger.some((record) =>
+        isBoundEvidenceRecord(record) &&
         record.workflowRunId === run.id &&
+        record.platform === "linkedin" &&
         record.contactId === contact.id &&
         record.identityId === identity.id &&
-        record.platformUserId === identity.platformUserId &&
-        record.platformUrl === identity.platformUrl &&
-        markerObject?.workflowRunId === run.id,
+        record.platformUserId.toLocaleLowerCase("en-US") ===
+          identity.platformUserId.toLocaleLowerCase("en-US") &&
+        record.platformHandle.toLocaleLowerCase("en-US") ===
+          (identity.platformHandle ?? identity.platformUserId).toLocaleLowerCase("en-US") &&
+        record.platformUrl === identity.platformUrl
       );
       const humanPromoted = isHumanQuarantinePromotionForRun(platformData, run.id);
       if (valid || humanPromoted) {

@@ -477,7 +477,7 @@ func TestImportContactChunkForwardsSnowballEvidenceToExistingIdentityUpsert(t *t
 		t.Fatalf("upsert candidate context = %#v", upsertInput)
 	}
 	wantCalls := []string{
-		"query_contacts", "resolve_platform_claim", "upsert_contact_identity", "enrich_contact", "record_workflow_run_contacts",
+		"query_contacts", "upsert_contact_identity", "enrich_contact", "record_workflow_run_contacts",
 	}
 	if !reflect.DeepEqual(calls, wantCalls) {
 		t.Fatalf("calls = %#v, want evidence validation first %#v", calls, wantCalls)
@@ -487,7 +487,7 @@ func TestImportContactChunkForwardsSnowballEvidenceToExistingIdentityUpsert(t *t
 func TestImportContactChunkEvidenceBackedRerunIsIdempotent(t *testing.T) {
 	contactExists := false
 	identityBound := false
-	tokenAuthorizedWrites := 0
+	acceptanceCalls := 0
 	var calls []string
 	invoke := func(tool string, input map[string]any) (map[string]any, error) {
 		calls = append(calls, tool)
@@ -511,13 +511,13 @@ func TestImportContactChunkEvidenceBackedRerunIsIdempotent(t *testing.T) {
 			if input["identityEvidenceToken"] != "run-1.evidence.secret" {
 				t.Fatalf("create evidence token = %#v", input["identityEvidenceToken"])
 			}
-			tokenAuthorizedWrites++
+			acceptanceCalls++
 			contactExists = true
 			identityBound = true
 			return map[string]any{"id": "contact-jane"}, nil
 		case "upsert_contact_identity":
-			tokenAuthorizedWrites++
-			return nil, usageErr(fmt.Errorf("identity evidence replayed"))
+			acceptanceCalls++
+			return map[string]any{"identityEvidenceReplay": true}, nil
 		case "enrich_contact":
 			return map[string]any{}, nil
 		case "record_workflow_run_contacts":
@@ -550,12 +550,12 @@ func TestImportContactChunkEvidenceBackedRerunIsIdempotent(t *testing.T) {
 		}
 	}
 
-	if tokenAuthorizedWrites != 1 {
-		t.Fatalf("token-authorized identity writes = %d, want exactly one", tokenAuthorizedWrites)
+	if acceptanceCalls != 2 {
+		t.Fatalf("server identity acceptance calls = %d, want create plus idempotent replay", acceptanceCalls)
 	}
 	wantCalls := []string{
 		"query_contacts", "resolve_platform_claim", "create_contact", "enrich_contact", "record_workflow_run_contacts",
-		"query_contacts", "resolve_platform_claim", "enrich_contact", "record_workflow_run_contacts",
+		"query_contacts", "upsert_contact_identity", "enrich_contact", "record_workflow_run_contacts",
 	}
 	if !reflect.DeepEqual(calls, wantCalls) {
 		t.Fatalf("calls = %#v, want second pass to skip identity write %#v", calls, wantCalls)
@@ -611,7 +611,7 @@ func TestImportContactChunkRejectsSnowballEvidenceBeforeExistingContactMutation(
 		t.Fatalf("summary = %+v", summary)
 	}
 	wantCalls := []string{
-		"query_contacts", "resolve_platform_claim", "upsert_contact_identity", "record_workflow_run_contacts",
+		"query_contacts", "upsert_contact_identity",
 	}
 	if !reflect.DeepEqual(calls, wantCalls) {
 		t.Fatalf("calls = %#v, want no contact mutation %#v", calls, wantCalls)

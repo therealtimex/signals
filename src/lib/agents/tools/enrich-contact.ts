@@ -208,11 +208,11 @@ function recordEmploymentObservation(
  * Enrich a contact with extracted data using "fill gaps, don't overwrite" strategy.
  * Updates the contact record and recalculates enrichment score.
  */
-export async function enrichContact(
+export function enrichContactSync(
   contactId: string,
   data: EnrichmentData,
   workflowRunId?: string
-): Promise<EnrichContactResult> {
+): EnrichContactResult {
   const startTime = Date.now();
 
   const contact = getContactById(contactId);
@@ -370,4 +370,12 @@ export async function enrichContact(
     emailsObserved,
     experiencesUpserted,
   };
+}
+
+export async function enrichContact(
+  contactId: string,
+  data: EnrichmentData,
+  workflowRunId?: string,
+): Promise<EnrichContactResult> {
+  return enrichContactSync(contactId, data, workflowRunId);
 }

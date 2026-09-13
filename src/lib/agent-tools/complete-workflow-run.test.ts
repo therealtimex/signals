@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resetCoreTables } from "@/test/db";
-import { createContact } from "@/lib/db/queries/contacts";
+import { createContact, updateContact } from "@/lib/db/queries/contacts";
 import { createWorkflowRun, getWorkflowRun, updateWorkflowRun } from "@/lib/db/queries/workflows";
 import { createTemplate } from "@/lib/db/queries/workflow-templates";
 import { createIdentity } from "@/lib/db/queries/identities";
@@ -618,6 +618,83 @@ describe("complete_workflow_run terminal teardown", () => {
     });
   });
 
+  it("completes when accepted evidence predates a legitimate employment graph update", async () => {
+    const { run } = createSnowballRunWithTarget();
+    const contact = createContact(
+      { name: "Jane Doe", company: "Clean Coders", title: "Founder" },
+      { tag: "agent:create_contact", workflowRunId: run.id, templateId: run.templateId },
+    );
+    const identity = createIdentity({
+      contactId: contact.id,
+      platform: "linkedin",
+      platformUserId: "jane-doe",
+      platformHandle: "jane-doe",
+      platformUrl: "https://www.linkedin.com/in/jane-doe/",
+    });
+    updateWorkflowRun(run.id, {
+      result: JSON.stringify({
+        _snowballIdentityEvidence: [{
+          id: "evidence-jane",
+          tokenHash: "server-token-hash",
+          workflowRunId: run.id,
+          templateId: run.templateId,
+          candidateName: "Jane Doe",
+          candidateNameKey: "jane doe",
+          candidateCompany: "Clean Coders",
+          candidateTitle: "Founder",
+          platform: "linkedin",
+          platformUserId: "jane-doe",
+          platformHandle: "jane-doe",
+          platformUrl: "https://www.linkedin.com/in/jane-doe/",
+          displayName: "Jane Doe",
+          headline: "Founder at Clean Coders",
+          matchedSignals: ["company:Clean Coders", "title:Founder"],
+          browserSessionName: "signals-publish-test",
+          pageDigest: "server-page-digest",
+          observedAt: Math.floor(Date.now() / 1_000) - 10,
+          expiresAt: Math.floor(Date.now() / 1_000) + 890,
+          consumedAt: Math.floor(Date.now() / 1_000),
+          contactId: contact.id,
+          identityId: identity.id,
+        }],
+      }),
+    });
+    updateContact(contact.id, {
+      company: "Uncle Bob Consulting LLC",
+      title: "Founder",
+    }, "test:graph-link");
+
+    vi.spyOn(workflowEvents, "emitWorkflowCompletedEvent").mockResolvedValue(
+      mockWorkflowCompletedEvent,
+    );
+    vi.spyOn(workflowCompletionThread, "postWorkflowCompletionThreadMessage").mockResolvedValue({
+      posted: true,
+    });
+    vi.spyOn(resourceTeardown, "stopRunningRtxBrowserSessions").mockResolvedValue({
+      stopped: [],
+      failed: [],
+    });
+
+    const result = await handleCompleteWorkflowRun({
+      runId: run.id,
+      status: "completed",
+      successItems: 1,
+      createdContactIds: [contact.id],
+    });
+    if (!result.success) throw new Error(result.error);
+
+    expect(result.status).toBe("completed");
+    expect(JSON.parse(getWorkflowRun(run.id)?.result ?? "{}")).toMatchObject({
+      identityEvidenceAudit: {
+        passed: true,
+        violationCount: 0,
+        violations: [],
+        auditedIdentityIds: [identity.id],
+      },
+      snowballCandidates: { committed: 1 },
+    });
+  });
+
   it("fails Snowball completion when a run-created LinkedIn identity lacks server evidence", async () => {
     const template = createTemplate({
       name: "Network Snowball",
@@ -662,6 +739,7 @@ describe("complete_workflow_run terminal teardown", () => {
     const result = await handleCompleteWorkflowRun({
       runId: run.id,
       status: "completed",
+      successItems: 1,
       createdContactIds: [contact.id],
     });
     if (!result.success) throw new Error(result.error);
@@ -676,8 +754,11 @@ describe("complete_workflow_run terminal teardown", () => {
       partial: true,
       identityEvidenceAudit: {
         passed: false,
+        violationCount: 1,
+        violations: [`snowball_linkedin_identity_evidence_missing:${identity.id}`],
         auditedIdentityIds: [identity.id],
       },
+      snowballCandidates: { committed: 1 },
     });
   });
 

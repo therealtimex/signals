@@ -18,6 +18,7 @@ import Link from "next/link";
 import type { WorkflowRun } from "@/lib/db/types";
 import type { WorkflowRunSubject } from "@/lib/workflows/workflow-run-subjects-shared";
 import { WorkflowRunSubjectLinks } from "@/components/workflow-run-subject-links";
+import { getWorkflowOutcomeMetrics } from "@/lib/workflows/snowball-outcome";
 
 const TYPE_ICONS: Record<string, typeof RefreshCw> = {
   sync: RefreshCw,
@@ -131,6 +132,13 @@ export function WorkflowRunCard({
       ? Math.round((run.processedItems / run.totalItems) * 100)
       : null;
   const workflowRunHref = `/dashboard/workflows/${run.id}`;
+  const outcome = getWorkflowOutcomeMetrics(run);
+  const swimlaneOutcome = outcome.isSnowball
+    ? [
+        outcome.successValue > 0 ? `${outcome.successValue} committed` : null,
+        outcome.errorValue > 0 ? `${outcome.errorValue} audit` : null,
+      ].filter(Boolean).join(" · ") || run.status
+    : outcome.successValue > 0 ? `${outcome.successValue} ok` : run.status;
 
   if (variant === "swimlane") {
     return (
@@ -144,7 +152,9 @@ export function WorkflowRunCard({
             <span className="text-xs font-medium truncate">{label}</span>
           </div>
           <div className="flex items-center justify-between text-[10px] text-muted-foreground">
-            <span>{run.successItems > 0 ? `${run.successItems} ok` : run.status}</span>
+            <span>
+              {swimlaneOutcome}
+            </span>
             <span>{formatRelativeTime(run.createdAt)}</span>
           </div>
         </Link>
@@ -181,16 +191,16 @@ export function WorkflowRunCard({
 
         <div className="flex items-center justify-between text-[10px] text-muted-foreground">
           <div className="flex items-center gap-2">
-            {run.successItems > 0 && (
-              <span className="flex items-center gap-0.5">
+            {outcome.successValue > 0 && (
+              <span className="flex items-center gap-0.5" title={outcome.successLabel}>
                 <CheckCircle className="h-2.5 w-2.5 text-green-500" />
-                {run.successItems}
+                {outcome.successValue}{outcome.isSnowball ? " committed" : ""}
               </span>
             )}
-            {run.errorItems > 0 && (
-              <span className="flex items-center gap-0.5">
+            {outcome.errorValue > 0 && (
+              <span className="flex items-center gap-0.5" title={outcome.errorLabel}>
                 <XCircle className="h-2.5 w-2.5 text-destructive" />
-                {run.errorItems}
+                {outcome.errorValue}{outcome.isSnowball ? " audit" : ""}
               </span>
             )}
           </div>

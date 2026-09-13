@@ -29,6 +29,7 @@ import Link from "next/link";
 import type { WorkflowRun } from "@/lib/db/types";
 import type { WorkflowRunSubject } from "@/lib/workflows/workflow-run-subjects-shared";
 import { WorkflowRunSubjectLinks } from "@/components/workflow-run-subject-links";
+import { getWorkflowOutcomeMetrics } from "@/lib/workflows/snowball-outcome";
 
 const TYPE_ICONS: Record<string, typeof RefreshCw> = {
   sync: RefreshCw,
@@ -230,6 +231,20 @@ export function WorkflowListView({
     );
   }
 
+  const outcomesByRunId = new Map(
+    runs.map((run) => [run.id, getWorkflowOutcomeMetrics(run)]),
+  );
+  const snowballRunCount = [...outcomesByRunId.values()].filter(
+    (outcome) => outcome.isSnowball,
+  ).length;
+  const hasMixedOutcomeSemantics = snowballRunCount > 0 && snowballRunCount < runs.length;
+  const successColumnLabel = snowballRunCount === runs.length
+    ? "Committed"
+    : hasMixedOutcomeSemantics ? "Outcome" : "Success";
+  const errorColumnLabel = snowballRunCount === runs.length
+    ? "Audit violations"
+    : hasMixedOutcomeSemantics ? "Issues" : "Error";
+
   return (
     <div className="rounded-md border border-border/50">
       <Table>
@@ -239,9 +254,9 @@ export function WorkflowListView({
             <TableHead>Workflow</TableHead>
             <TableHead className="w-[190px] text-right">Subject</TableHead>
             <TableHead className="w-[100px]">Status</TableHead>
-            <TableHead className="w-[80px] text-right">Success</TableHead>
+            <TableHead className="w-[90px] text-right">{successColumnLabel}</TableHead>
             <TableHead className="w-[70px] text-right">Skip</TableHead>
-            <TableHead className="w-[70px] text-right">Error</TableHead>
+            <TableHead className="w-[110px] text-right">{errorColumnLabel}</TableHead>
             <TableHead className="w-[80px] text-right">Duration</TableHead>
             <TableHead className="w-[90px] text-right">When</TableHead>
           </TableRow>
@@ -264,6 +279,7 @@ export function WorkflowListView({
             const StatusIcon = statusConfig.icon;
             const subjects = subjectsByRunId[run.id] ?? [];
             const workflowRunHref = `/dashboard/workflows/${run.id}`;
+            const outcome = outcomesByRunId.get(run.id)!;
 
             return (
               <TableRow key={run.id} className="cursor-pointer hover:bg-muted/50">
@@ -319,7 +335,17 @@ export function WorkflowListView({
                 </TableCell>
                 <TableCell className="text-right tabular-nums text-sm">
                   <Link href={`/dashboard/workflows/${run.id}`} className="block">
-                    {formatMetricValue(run.successItems, run, "success")}
+                    <span
+                      className={hasMixedOutcomeSemantics ? "inline-flex flex-col items-end" : undefined}
+                      title={outcome.successLabel}
+                    >
+                      {formatMetricValue(outcome.successValue, run, "success")}
+                      {hasMixedOutcomeSemantics && (
+                        <span className="text-[9px] font-normal text-muted-foreground">
+                          {outcome.successLabel}
+                        </span>
+                      )}
+                    </span>
                   </Link>
                 </TableCell>
                 <TableCell className="text-right tabular-nums text-sm">
@@ -329,7 +355,17 @@ export function WorkflowListView({
                 </TableCell>
                 <TableCell className="text-right tabular-nums text-sm">
                   <Link href={`/dashboard/workflows/${run.id}`} className="block">
-                    {formatMetricValue(run.errorItems, run, "error")}
+                    <span
+                      className={hasMixedOutcomeSemantics ? "inline-flex flex-col items-end" : undefined}
+                      title={outcome.errorLabel}
+                    >
+                      {formatMetricValue(outcome.errorValue, run, "error")}
+                      {hasMixedOutcomeSemantics && (
+                        <span className="text-[9px] font-normal text-muted-foreground">
+                          {outcome.errorLabel}
+                        </span>
+                      )}
+                    </span>
                   </Link>
                 </TableCell>
                 <TableCell className="text-right font-mono text-xs">
