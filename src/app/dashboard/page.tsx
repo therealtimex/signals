@@ -2,10 +2,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Users, Activity, CheckSquare, FileText } from "lucide-react";
 import { getDashboardMetrics, getFunnelDistribution } from "@/lib/db/queries/dashboard";
 import { FunnelStageBadge } from "@/components/funnel-stage-badge";
-import { PriorityBadge } from "@/components/priority-badge";
 import { AnimatedStat } from "@/components/animated-stat";
 import { DashboardGreeting } from "@/components/dashboard-greeting";
 import { FunnelVisualization } from "@/components/funnel-visualization";
+import { PendingTaskRow } from "@/components/dashboard/pending-task-row";
+import { resolvePendingTaskDestination } from "@/lib/dashboard/pending-task-destination";
 import Link from "next/link";
 
 const statGradients = [
@@ -30,7 +31,7 @@ export default function DashboardPage() {
     {
       title: "Contacts",
       value: metrics.totalContacts,
-      description: "Total contacts in CRM",
+      description: "Visible, non-archived CRM contacts",
       icon: Users,
     },
     {
@@ -62,7 +63,7 @@ export default function DashboardPage() {
         {stats.map((stat, i) => (
           <Card
             key={stat.title}
-            className={`bg-gradient-to-br ${statGradients[i]} border-border/50 animate-fade-slide-in hover:shadow-md transition-all`}
+            className={`bg-gradient-to-br ${statGradients[i]} border-border/50 animate-fade-slide-in hover:shadow-md transition-shadow`}
             style={{ animationDelay: `${i * 80}ms`, animationFillMode: "backwards" }}
           >
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -100,7 +101,7 @@ export default function DashboardPage() {
       {/* Activity cards */}
       <div className="grid gap-4 md:grid-cols-2">
         <Card
-          className="animate-fade-slide-in border-border/50 hover:shadow-md transition-all"
+          className="animate-fade-slide-in border-border/50 hover:shadow-md transition-shadow"
           style={{ animationDelay: "400ms", animationFillMode: "backwards" }}
         >
           <CardHeader>
@@ -142,7 +143,8 @@ export default function DashboardPage() {
         </Card>
 
         <Card
-          className="animate-fade-slide-in border-border/50 hover:shadow-md transition-all"
+          id="pending-tasks"
+          className="animate-fade-slide-in border-border/50 hover:shadow-md transition-shadow"
           style={{ animationDelay: "480ms", animationFillMode: "backwards" }}
         >
           <CardHeader>
@@ -162,20 +164,11 @@ export default function DashboardPage() {
             ) : (
               <div className="space-y-1">
                 {metrics.pendingTasksList.map((task) => (
-                  <div
+                  <PendingTaskRow
                     key={task.id}
-                    className="flex items-center justify-between rounded-lg p-2.5 hover:bg-accent/30 transition-colors"
-                  >
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium truncate">{task.title}</p>
-                      {task.description && (
-                        <p className="text-xs text-muted-foreground truncate">
-                          {task.description}
-                        </p>
-                      )}
-                    </div>
-                    <PriorityBadge priority={task.priority} />
-                  </div>
+                    task={task}
+                    destination={resolvePendingTaskDestination(task)}
+                  />
                 ))}
               </div>
             )}

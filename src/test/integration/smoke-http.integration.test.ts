@@ -14,7 +14,7 @@ describe("smoke:core HTTP", () => {
     expect(response.ok).toBe(true);
     const html = await response.text();
     expect(html).toContain("Contact Pipeline");
-    expect(html).toContain("Total contacts in CRM");
+    expect(html).toContain("Visible, non-archived CRM contacts");
     expect(html).toContain("Your AI-powered social CRM at a glance.");
   });
 

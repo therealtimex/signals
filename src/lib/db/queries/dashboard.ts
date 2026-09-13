@@ -4,6 +4,10 @@ import { contacts, tasks, workflowRuns, contentItems } from "@/lib/db/schema";
 import { attachContactDtos } from "@/lib/db/queries/contact-read-model";
 import type { ContactDTO } from "@/lib/db/queries/contact-dto";
 import type { Task } from "@/lib/db/types";
+import {
+  countDefaultContactListPopulation,
+  defaultContactListVisibilityWhere,
+} from "@/lib/db/contact-list-visibility";
 
 export interface FunnelDistribution {
   stage: string;
@@ -19,6 +23,7 @@ export function getFunnelDistribution(): FunnelDistribution[] {
       count: count(),
     })
     .from(contacts)
+    .where(defaultContactListVisibilityWhere())
     .groupBy(contacts.funnelStage)
     .all();
 
@@ -39,7 +44,7 @@ export interface DashboardMetrics {
 }
 
 export function getDashboardMetrics(): DashboardMetrics {
-  const totalContacts = db.select({ value: count() }).from(contacts).get()?.value ?? 0;
+  const totalContacts = countDefaultContactListPopulation();
 
   const activeWorkflows = db
     .select({ value: count() })
@@ -58,6 +63,7 @@ export function getDashboardMetrics(): DashboardMetrics {
   const recentContactRows = db
     .select()
     .from(contacts)
+    .where(defaultContactListVisibilityWhere())
     .orderBy(desc(contacts.createdAt))
     .limit(5)
     .all();
