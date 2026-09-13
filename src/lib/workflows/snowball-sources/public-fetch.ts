@@ -1,7 +1,10 @@
 import { lookup as dnsLookup } from "node:dns/promises";
 import { request as httpsRequest } from "node:https";
-import { isIP } from "node:net";
-import { resolveSnowballSourceUrl } from "@/lib/workflows/snowball-sources/url";
+import { isIP, type LookupFunction } from "node:net";
+import {
+  resolveSnowballSourceTransportUrl,
+  resolveSnowballSourceUrl,
+} from "@/lib/workflows/snowball-sources/url";
 
 const MAX_REDIRECTS = 3;
 const MAX_BYTES = 2 * 1024 * 1024;
@@ -42,6 +45,8 @@ export type PublicSourceTransportDependencies = {
   lookup?: LookupImpl;
   requestPinned?: PinnedRequestImpl;
 };
+
+export type PublicSourceDestinationValidator = (url: string) => Promise<void>;
 
 function abortReason(signal: AbortSignal): Error {
   return signal.reason instanceof Error
@@ -108,9 +113,8 @@ export function isPublicSourceAddress(address: string): boolean {
       || (a === 100 && b >= 64 && b <= 127)
       || (a === 169 && b === 254)
       || (a === 172 && b >= 16 && b <= 31)
-      || (a === 192 && b === 0)
+      || (a === 192 && b === 0 && (c === 0 || c === 2))
       || (a === 192 && b === 168)
-      || (a === 192 && b === 0 && c === 2)
       || (a === 198 && (b === 18 || b === 19))
       || (a === 198 && b === 51 && c === 100)
       || (a === 203 && b === 0 && c === 113)
@@ -127,13 +131,27 @@ export function isPublicSourceAddress(address: string): boolean {
   return true;
 }
 
+/** Node may request either one pinned address or an array when autoSelectFamily is enabled. */
+export function createPinnedSourceLookup(pinned: LookupAddress): LookupFunction {
+  return (_hostname, options, callback) => {
+    if (typeof options === "object" && options.all === true) {
+      callback(null, [pinned]);
+      return;
+    }
+    callback(null, pinned.address, pinned.family);
+  };
+}
+
 async function resolvePublicAddresses(
   hostname: string,
   signal: AbortSignal,
   lookupImpl: LookupImpl,
 ): Promise<LookupAddress[]> {
   throwIfAborted(signal);
-  const host = hostname.toLowerCase();
+  const lowerHostname = hostname.toLowerCase();
+  const host = lowerHostname.startsWith("[") && lowerHostname.endsWith("]")
+    ? lowerHostname.slice(1, -1)
+    : lowerHostname;
   if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal")) {
     throw new Error("source_host_not_public");
   }
@@ -166,7 +184,7 @@ async function requestPinned(
         "accept-encoding": "identity",
         "user-agent": "Signals-Snowball-Source/1.0",
       },
-      lookup: (_hostname, _options, callback) => callback(null, pinned.address, pinned.family),
+      lookup: createPinnedSourceLookup(pinned),
     }, (response) => {
       const status = response.statusCode ?? 0;
       const contentType = String(response.headers["content-type"] ?? "");
@@ -239,9 +257,9 @@ export function createPublicSnowballSourceTransport(
         bytesRemaining -= response.bytes;
         if (response.status >= 300 && response.status < 400 && response.location) {
           if (redirect === limits.maxRedirects) throw new Error("source_redirect_limit");
-          const next = resolveSnowballSourceUrl(new URL(response.location, current).toString());
+          const next = resolveSnowballSourceTransportUrl(response.location, current);
           if (!next) throw new Error("unsafe_source_redirect");
-          current = next.canonicalUrl;
+          current = next;
           continue;
         }
         if (response.status < 200 || response.status >= 300) throw new Error(`source_http_${response.status}`);
@@ -260,6 +278,31 @@ export function createPublicSnowballSourceTransport(
       deadline.cleanup();
     }
   };
+}
+
+/** Resolve and reject non-public destinations before a source URL can enter an agent brief. */
+export async function assertPublicSnowballSourceDestination(
+  value: string,
+  dependencies: Pick<PublicSourceTransportDependencies, "lookup"> & {
+    timeoutMs?: number;
+    signal?: AbortSignal;
+  } = {},
+): Promise<void> {
+  const source = resolveSnowballSourceUrl(value);
+  if (!source) throw new Error("invalid_source_url");
+  const deadline = createDeadlineSignal(
+    dependencies.timeoutMs ?? REQUEST_TIMEOUT_MS,
+    dependencies.signal,
+  );
+  try {
+    await resolvePublicAddresses(
+      new URL(source.canonicalUrl).hostname,
+      deadline.signal,
+      dependencies.lookup ?? dnsLookup,
+    );
+  } finally {
+    deadline.cleanup();
+  }
 }
 
 export const fetchPublicSnowballSource = createPublicSnowballSourceTransport();

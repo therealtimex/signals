@@ -195,6 +195,20 @@ describe("Luma public extraction", () => {
     });
   });
 
+  it("recognizes embedded calendar metadata without a slug when no root event is present", () => {
+    const html = `<script id="__NEXT_DATA__" type="application/json">{"props":{"pageProps":{"initialData":{"data":{
+      "calendar":{"api_id":"cal-1","name":"AI Builders"},"events":[]
+    }}}}}</script>`;
+    expect(() => extractLumaEventFromHtml({
+      url: "https://luma.com/ai_builders",
+      html,
+    })).toThrow("event_metadata_missing");
+    expect(extractLumaCalendarFromHtml({
+      url: "https://luma.com/ai_builders",
+      html,
+    })).toMatchObject({ title: "AI Builders", eventUrls: [] });
+  });
+
   it("preserves cancelled status and leaves an absent timezone unknown", () => {
     const event = extractLumaEventFromHtml({
       url: "https://luma.com/cancelled",

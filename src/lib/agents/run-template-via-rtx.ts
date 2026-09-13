@@ -78,7 +78,11 @@ import {
   SNOWBALL_RESOLVED_SOURCE_CONFIG_KEY,
   SNOWBALL_SOURCE_ACCESS_CONFIG_KEY,
 } from "@/lib/workflows/snowball-sources/service";
-import type { PublicSourceTransport } from "@/lib/workflows/snowball-sources/public-fetch";
+import {
+  assertPublicSnowballSourceDestination,
+  type PublicSourceDestinationValidator,
+  type PublicSourceTransport,
+} from "@/lib/workflows/snowball-sources/public-fetch";
 import {
   SNOWBALL_BROWSER_TARGET_CONFIG_KEY,
   prepareNetworkSnowballTarget,
@@ -243,6 +247,7 @@ export async function runTemplateViaRtx(
   env: NodeJS.ProcessEnv = process.env,
   fetchImpl: typeof fetch = fetch,
   sourceTransport?: PublicSourceTransport,
+  sourceDestinationValidator: PublicSourceDestinationValidator = assertPublicSnowballSourceDestination,
 ): Promise<RunTemplateViaRtxResult> {
   if (!isRtxEmbedded(env)) {
     return {
@@ -280,19 +285,34 @@ export async function runTemplateViaRtx(
     };
   }
   if (isNetworkSnowball) {
+    const rawSourceSeed = typeof mergedConfig.seedValue === "string"
+      ? mergedConfig.seedValue.trim()
+      : "";
     mergedConfig = {
       ...mergedConfig,
       [NETWORK_SNOWBALL_CONFIG_KEY]: storedTemplateConfig[NETWORK_SNOWBALL_CONFIG_KEY],
     };
     mergedConfig = sanitizeNetworkSnowballConfigRecord(mergedConfig);
     const snowball = readNetworkSnowballConfig(mergedConfig);
-    if (snowball.seedType === "source_url" && !snowball.seedValue) {
+    if (snowball.seedType === "source_url" && rawSourceSeed && !snowball.seedValue) {
       return {
         success: false,
         error: "Network Snowball requires a public HTTPS source link without credentials or a custom port.",
         errorCode: "invalid_source_url",
         httpStatus: 422,
       };
+    }
+    if (snowball.seedType === "source_url" && snowball.seedValue) {
+      try {
+        await sourceDestinationValidator(snowball.seedValue);
+      } catch {
+        return {
+          success: false,
+          error: "Network Snowball source links must resolve to a public HTTPS destination.",
+          errorCode: "invalid_source_url",
+          httpStatus: 422,
+        };
+      }
     }
   }
   const actingTarget = typeof mergedConfig.targetId === "string" && mergedConfig.targetId.trim()
@@ -563,7 +583,7 @@ export async function runTemplateViaRtx(
     }
     if (isNetworkSnowballTemplateConfig(runtimeConfig)) {
       const snowball = readNetworkSnowballConfig(runtimeConfig);
-      if (snowball.seedType === "source_url") {
+      if (snowball.seedType === "source_url" && snowball.seedValue) {
         try {
           sourcePreparation = await prepareNetworkSnowballSource({
             runId: run.id,

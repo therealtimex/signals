@@ -539,14 +539,18 @@ export function extractLumaCalendarFromHtml(input: {
   const $ = cheerio.load(input.html);
   const nextPageData = readLumaNextPageData($);
   const nextCalendarUrl = embeddedCalendarUrl(nextPageData, canonicalUrl);
+  const calendar = asRecord(nextPageData?.calendar);
+  const calendarApiId = stringValue(calendar?.api_id);
+  const embeddedEvent = asRecord(nextPageData?.event);
   const calendarRoot = $(
     '[data-calendar-page], [data-testid*="calendar" i], [data-event-list], [class*="calendar-page" i]',
   ).first();
-  const isEmbeddedCalendarPage = nextCalendarUrl === canonicalUrl;
+  const isEmbeddedCalendarPage = nextCalendarUrl === canonicalUrl || Boolean(
+    calendarApiId?.startsWith("cal-") && !embeddedEvent,
+  );
   if (!calendarRoot.length && !isEmbeddedCalendarPage) {
     throw new Error("calendar_metadata_missing");
   }
-  const calendar = asRecord(nextPageData?.calendar);
   const title = (
     stringValue(calendar?.name)
       ?? stringValue($('meta[property="og:title"]').attr("content"))
@@ -569,7 +573,9 @@ export function extractLumaCalendarFromHtml(input: {
         // Ignore malformed card URLs.
       }
     });
-  if (eventUrls.size === 0) throw new Error("calendar_metadata_missing");
+  if (eventUrls.size === 0 && !isEmbeddedCalendarPage) {
+    throw new Error("calendar_metadata_missing");
+  }
 
   const nextLink = eventRoot
     .find('a[rel="next"][href], a[data-calendar-next][href]')

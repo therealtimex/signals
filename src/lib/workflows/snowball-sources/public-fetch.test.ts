@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  assertPublicSnowballSourceDestination,
+  createPinnedSourceLookup,
   createPublicSnowballSourceTransport,
   fetchPublicSnowballSource,
   isPublicSourceAddress,
@@ -13,6 +15,7 @@ describe("public source network boundary", () => {
     "169.254.169.254",
     "172.20.0.1",
     "192.168.1.1",
+    "192.0.0.1",
     "198.18.0.1",
     "192.0.2.1",
     "198.51.100.1",
@@ -26,10 +29,38 @@ describe("public source network boundary", () => {
     expect(isPublicSourceAddress(address)).toBe(false);
   });
 
-  it.each(["8.8.8.8", "1.1.1.1", "2606:4700:4700::1111"])(
+  it.each([
+    "8.8.8.8",
+    "1.1.1.1",
+    "192.0.66.220",
+    "192.0.78.12",
+    "2606:4700:4700::1111",
+  ])(
     "accepts globally routable address %s",
     (address) => expect(isPublicSourceAddress(address)).toBe(true),
   );
+
+  it("answers the Node pinned lookup contract for scalar and all-address requests", async () => {
+    const lookup = createPinnedSourceLookup({ address: "192.0.66.220", family: 4 });
+    const invoke = (all: boolean) => new Promise<{ address: unknown; family: number | undefined }>(
+      (resolve, reject) => lookup("techcrunch.com", { all }, (error, address, family) => {
+        if (error) reject(error);
+        else resolve({ address, family });
+      }),
+    );
+
+    await expect(invoke(true)).resolves.toEqual({
+      address: [{ address: "192.0.66.220", family: 4 }],
+      family: undefined,
+    });
+    await expect(invoke(false)).resolves.toEqual({ address: "192.0.66.220", family: 4 });
+  });
+
+  it("rejects a hostname when DNS returns any non-public destination", async () => {
+    await expect(assertPublicSnowballSourceDestination("https://private.example/path", {
+      lookup: async () => [{ address: "127.0.0.1", family: 4 }],
+    })).rejects.toThrow("source_address_not_public");
+  });
 
   it.each([
     "https://localhost/secrets",
@@ -104,5 +135,60 @@ describe("public source network boundary", () => {
     })).rejects.toThrow("source_request_budget_exhausted");
     expect(charged).toBe(3);
     expect(requests).toHaveLength(2);
+  });
+
+  it("preserves the validated literal host and trailing slash across redirects", async () => {
+    const requests: string[] = [];
+    const transport = createPublicSnowballSourceTransport({
+      requestPinned: async (url) => {
+        requests.push(url);
+        if (requests.length === 1) {
+          return {
+            url,
+            status: 302,
+            contentType: "text/html",
+            body: "",
+            bytes: 0,
+            location: "https://www.example.com/path/?tk=redirect-secret",
+          };
+        }
+        return {
+          url,
+          status: 200,
+          contentType: "text/html",
+          body: "ok",
+          bytes: 2,
+        };
+      },
+    });
+
+    await expect(transport("https://example.com/start")).resolves.toMatchObject({
+      url: "https://www.example.com/path/",
+      body: "ok",
+    });
+    expect(requests).toEqual([
+      "https://example.com/start",
+      "https://www.example.com/path/",
+    ]);
+  });
+
+  it("rejects an unsafe redirect before requesting its destination", async () => {
+    const requests: string[] = [];
+    const transport = createPublicSnowballSourceTransport({
+      requestPinned: async (url) => {
+        requests.push(url);
+        return {
+          url,
+          status: 302,
+          contentType: "text/html",
+          body: "",
+          bytes: 0,
+          location: "http://127.0.0.1/private",
+        };
+      },
+    });
+
+    await expect(transport("https://example.com/start")).rejects.toThrow("unsafe_source_redirect");
+    expect(requests).toEqual(["https://example.com/start"]);
   });
 });

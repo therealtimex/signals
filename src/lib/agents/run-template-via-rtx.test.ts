@@ -43,6 +43,7 @@ import { sha256 } from "@/lib/writing/hash";
 import { WRITING_SCOPE_TOKEN_CONFIG_KEY } from "@/lib/writing/writing-scope-token";
 import { buildContactWebResearchTemplateConfig } from "@/lib/workflows/contact-web-research";
 import { buildNetworkSnowballTemplateConfig } from "@/lib/workflows/network-snowball";
+import { assertPublicSnowballSourceDestination } from "@/lib/workflows/snowball-sources/public-fetch";
 import { SNOWBALL_IDENTITY_SCOPE_TOKEN_CONFIG_KEY } from "@/lib/workflows/snowball-identity-evidence";
 import { SNOWBALL_BROWSER_TARGET_CONFIG_KEY } from "@/lib/workflows/network-snowball-target";
 import * as resourceTeardown from "@/lib/rtx/resource-teardown";
@@ -73,6 +74,8 @@ const preparedSnowballTarget = {
   leaseExpiresAt: 1_800_000_000,
   preparedAt: 1_799_999_400,
 };
+
+const allowPublicSourceDestination = async () => undefined;
 
 describe("runTemplateViaRtx health preflight", () => {
   let storageDir = "";
@@ -107,15 +110,16 @@ describe("runTemplateViaRtx health preflight", () => {
       name: "Network Snowball",
       templateType: "prospecting",
       status: "active",
-      config: JSON.stringify({
-        ...buildNetworkSnowballTemplateConfig(),
-        seedValue: "http://169.254.169.254/latest/meta-data",
-      }),
+      config: JSON.stringify(buildNetworkSnowballTemplateConfig()),
       isSystem: 1,
     });
     const fetchImpl = vi.fn();
     const result = await runTemplateViaRtx(
-      { templateId: template.id, signalsBaseUrl: "http://127.0.0.1:3099" },
+      {
+        templateId: template.id,
+        config: { seedValue: "http://169.254.169.254/latest/meta-data" },
+        signalsBaseUrl: "http://127.0.0.1:3099",
+      },
       { ...process.env, RTX_APP_ID: "test-app-id", STORAGE_DIR: storageDir },
       fetchImpl as unknown as typeof fetch,
     );
@@ -124,6 +128,107 @@ describe("runTemplateViaRtx health preflight", () => {
       errorCode: "invalid_source_url",
       httpStatus: 422,
     });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("launches the legacy empty-seed default so the agent can choose the seed", async () => {
+    const template = createTemplate({
+      name: "Network Snowball",
+      templateType: "prospecting",
+      status: "active",
+      config: JSON.stringify(buildNetworkSnowballTemplateConfig()),
+      isSystem: 1,
+    });
+    const destinationValidator = vi.fn(allowPublicSourceDestination);
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.endsWith("/api/health")) {
+        return new Response(JSON.stringify({ app: "signals", status: "ok" }), { status: 200 });
+      }
+      if (url.endsWith("/cli/get-workspace/signals")) {
+        return new Response(JSON.stringify({ workspace: { slug: "signals" } }), { status: 200 });
+      }
+      if (url.includes("/cli/create-thread/")) {
+        return new Response(JSON.stringify({ thread: { slug: "network-snowball" } }), { status: 200 });
+      }
+      if (url.endsWith("/cli/send-message/signals/network-snowball")) {
+        return new Response(JSON.stringify({
+          success: true,
+          terminalDispatchAccepted: true,
+          descriptor: { id: "runtime-empty-seed" },
+        }), { status: 200 });
+      }
+      if (url.endsWith("/sdk/desktop/runtime-sessions/open-launcher")) {
+        return new Response(JSON.stringify({ success: true }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ error: `Unexpected request: ${url}` }), { status: 500 });
+    }) as unknown as typeof fetch;
+
+    const result = await runTemplateViaRtx(
+      { templateId: template.id, signalsBaseUrl: "http://127.0.0.1:3099" },
+      {
+        ...process.env,
+        RTX_APP_ID: "test-app-id",
+        RTX_API_BASE_URL: "http://127.0.0.1:3001",
+        STORAGE_DIR: storageDir,
+      },
+      fetchImpl,
+      undefined,
+      destinationValidator,
+    );
+
+    expect(result).toMatchObject({ success: true, workflowRunId: expect.any(String) });
+    if (!result.success) throw new Error(result.error);
+    expect(destinationValidator).not.toHaveBeenCalled();
+    expect(listWorkflowSteps(result.workflowRunId).some(
+      (step) => step.tool === "snowball_source_ingest",
+    )).toBe(false);
+    const brief = readFileSync(join(
+      storageDir,
+      "working-data/signals/workflow-runs",
+      result.workflowRunId,
+      "brief.md",
+    ), "utf8");
+    expect(brief).toContain("the target entity provided in this run");
+    expect(brief).not.toContain("In-process agent orchestration was removed");
+  });
+
+  it.each([
+    {
+      seedValue: "https://127.0.0.1/admin",
+      validate: assertPublicSnowballSourceDestination,
+    },
+    {
+      seedValue: "https://private.example/admin",
+      validate: (value: string) => assertPublicSnowballSourceDestination(value, {
+        lookup: async () => [{ address: "10.0.0.8", family: 4 }],
+      }),
+    },
+  ])("rejects private source destination $seedValue before creating a run", async ({ seedValue, validate }) => {
+    const template = createTemplate({
+      name: "Network Snowball",
+      templateType: "prospecting",
+      status: "active",
+      config: JSON.stringify({ ...buildNetworkSnowballTemplateConfig(), seedValue }),
+      isSystem: 1,
+    });
+    const runsBefore = db.select().from(workflowRuns).all().length;
+    const fetchImpl = vi.fn() as unknown as typeof fetch;
+
+    const result = await runTemplateViaRtx(
+      { templateId: template.id, signalsBaseUrl: "http://127.0.0.1:3099" },
+      { ...process.env, RTX_APP_ID: "test-app-id", STORAGE_DIR: storageDir },
+      fetchImpl,
+      undefined,
+      validate,
+    );
+
+    expect(result).toMatchObject({
+      success: false,
+      errorCode: "invalid_source_url",
+      httpStatus: 422,
+    });
+    expect(db.select().from(workflowRuns).all()).toHaveLength(runsBefore);
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
@@ -466,6 +571,8 @@ describe("runTemplateViaRtx health preflight", () => {
         STORAGE_DIR: storageDir,
       },
       fetchImpl,
+      undefined,
+      allowPublicSourceDestination,
     );
 
     expect(result).toMatchObject({ success: true, workflowRunId: expect.any(String) });
@@ -567,6 +674,8 @@ describe("runTemplateViaRtx health preflight", () => {
         STORAGE_DIR: storageDir,
       },
       fetchImpl,
+      undefined,
+      allowPublicSourceDestination,
     );
 
     expect(result.success).toBe(true);
@@ -640,6 +749,8 @@ describe("runTemplateViaRtx health preflight", () => {
         STORAGE_DIR: storageDir,
       },
       fetchImpl,
+      undefined,
+      allowPublicSourceDestination,
     );
 
     expect(result.success).toBe(true);

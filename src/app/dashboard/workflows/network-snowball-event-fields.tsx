@@ -67,7 +67,9 @@ function provisionalPreview(seedValue: string, signedInRequested: boolean): Snow
 }
 
 function label(value: string): string {
-  return value === "x" ? "X" : value.charAt(0).toUpperCase() + value.slice(1);
+  if (value === "x") return "X";
+  if (value === "linkedin") return "LinkedIn";
+  return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
 /** Shared source resolver and Luma-only event access controls used by both launch surfaces. */

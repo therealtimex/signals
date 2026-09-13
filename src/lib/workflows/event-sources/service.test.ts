@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/lib/db/client";
 import { contentItems, graphEdges } from "@/lib/db/schema";
@@ -53,6 +54,32 @@ describe("Network Snowball event source ingestion", () => {
       partial: false,
     });
     expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it("gives root event metadata precedence when the real page also embeds its calendar", async () => {
+    const run = createWorkflowRun({ workflowType: "search", status: "running", trigger: "template" });
+    const capturedHtml = readFileSync(
+      new URL("./fixtures/luma-event-with-calendar.html", import.meta.url),
+      "utf8",
+    );
+    const fetchImpl = vi.fn(async () => new Response(capturedHtml, { status: 200 })) as unknown as typeof fetch;
+
+    const result = await ingestNetworkSnowballEventSource({
+      runId: run.id,
+      ownerWorkspace: "signals",
+      seedUrl: "https://luma.com/pqr8u92i",
+      traversal: readEventTraversalPolicy({ maxEvents: 1, adjacentEventDepth: 0 }),
+      participantAccess: { enabled: false, browserSessionName: "" },
+      fetchImpl,
+      sleepImpl: async () => undefined,
+    });
+
+    expect(result?.publicResult).toMatchObject({
+      resolvedRoot: { kind: "event", title: "Build Fridays SF" },
+      events: [{ title: "Build Fridays SF" }],
+      guestBoundary: { state: "gated", reason: "registration_required" },
+      partial: false,
+    });
   });
 
   it("persists a deterministic public Content item and no protected people", async () => {

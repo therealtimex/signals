@@ -11,7 +11,6 @@ import {
   createLumaPublicEvidence,
   extractLumaCalendarFromHtml,
   extractLumaEventFromHtml,
-  hasLumaCalendarPageMetadata,
 } from "@/lib/workflows/event-sources/providers/luma";
 import { upsertPublicEventSource } from "@/lib/workflows/event-sources/repository";
 import { attachNetworkSnowballHop0Org } from "@/lib/workflows/network-snowball-hop0";
@@ -323,12 +322,9 @@ export async function ingestNetworkSnowballEventSource(input: {
         beforeRequest: consumeProviderRequest,
       });
       const { finalUrl, html } = fetched;
-      const isCalendarPage = next.kind === "calendar" || (
-        next.depth === 0 && hasLumaCalendarPageMetadata({
-          url: finalUrl,
-          html,
-        })
-      );
+      // Luma event pages embed their owning `data.calendar` alongside `data.event`. At the root,
+      // event extraction therefore has precedence and calendar parsing is the fallback below.
+      const isCalendarPage = next.kind === "calendar" && next.depth !== 0;
       if (isCalendarPage) {
         if (next.depth === 0) {
           resolvedRoot = {

@@ -4,7 +4,6 @@ import { describeGuestBoundary } from "@/lib/workflows/event-sources/boundary";
 import {
   extractLumaCalendarFromHtml,
   extractLumaEventFromHtml,
-  hasLumaCalendarPageMetadata,
 } from "@/lib/workflows/event-sources/providers/luma";
 import {
   ingestNetworkSnowballEventSource,
@@ -176,19 +175,15 @@ export async function previewSnowballSource(input: {
     const finalSource = resolveSnowballSourceUrl(response.url) ?? source;
     let classifiedSource = finalSource;
     if (finalSource.provider === "luma") {
-      if (hasLumaCalendarPageMetadata({ url: response.url, html: response.body })) {
-        classifiedSource = refineSnowballSource(finalSource, "calendar", "metadata", "high");
-      } else {
+      try {
+        extractLumaEventFromHtml({ url: response.url, html: response.body });
+        classifiedSource = refineSnowballSource(finalSource, "event", "metadata", "high");
+      } catch {
         try {
-          extractLumaEventFromHtml({ url: response.url, html: response.body });
-          classifiedSource = refineSnowballSource(finalSource, "event", "metadata", "high");
+          extractLumaCalendarFromHtml({ url: response.url, html: response.body });
+          classifiedSource = refineSnowballSource(finalSource, "calendar", "metadata", "high");
         } catch {
-          try {
-            extractLumaCalendarFromHtml({ url: response.url, html: response.body });
-            classifiedSource = refineSnowballSource(finalSource, "calendar", "metadata", "high");
-          } catch {
-            // Keep the conservative URL classification; launch retries with the full adapter.
-          }
+          // Keep the conservative URL classification; launch retries with the full adapter.
         }
       }
     }
@@ -207,9 +202,12 @@ export async function previewSnowballSource(input: {
     if (input.signal?.aborted) throw error;
     // Classification still gives the operator an actionable public-only preview. The launch path
     // records the bounded read failure separately instead of making UI preview availability a gate.
+    const fallbackSource = source.provider === "luma"
+      ? refineSnowballSource(source, "unknown", "fallback", "low")
+      : source;
     return {
-      resolvedSource: source,
-      accessPlan: sourceAccessPlan(source, input.signedInRequested === true),
+      resolvedSource: fallbackSource,
+      accessPlan: sourceAccessPlan(fallbackSource, input.signedInRequested === true),
       publicSource: null,
       errors: ["Public preview is unavailable; Signals will retry safely at launch."],
     };

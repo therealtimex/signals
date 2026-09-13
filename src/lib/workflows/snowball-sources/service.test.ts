@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/lib/db/client";
 import { contentItems } from "@/lib/db/schema";
@@ -258,6 +259,42 @@ describe("Network Snowball generic source preparation", () => {
     });
     expect(preview).toMatchObject({
       resolvedSource: { provider: "luma", kind: "calendar" },
+      accessPlan: { mode: "public_only", signedInSupported: false },
+    });
+  });
+
+  it("previews a captured Luma event as an event when it embeds its owning calendar", async () => {
+    const capturedHtml = readFileSync(
+      new URL("../event-sources/fixtures/luma-event-with-calendar.html", import.meta.url),
+      "utf8",
+    );
+    const preview = await previewSnowballSource({
+      seedUrl: "https://luma.com/pqr8u92i",
+      signedInRequested: true,
+      transport: async () => ({
+        url: "https://luma.com/pqr8u92i",
+        status: 200,
+        contentType: "text/html",
+        body: capturedHtml,
+      }),
+    });
+
+    expect(preview).toMatchObject({
+      resolvedSource: { provider: "luma", kind: "event" },
+      accessPlan: { mode: "public_and_signed_in", signedInSupported: true },
+      publicSource: { title: "Build Fridays SF" },
+    });
+  });
+
+  it("does not offer signed-in access when a Luma preview cannot be classified", async () => {
+    const preview = await previewSnowballSource({
+      seedUrl: "https://luma.com/large-calendar",
+      signedInRequested: true,
+      transport: async () => { throw new Error("source_response_too_large"); },
+    });
+
+    expect(preview).toMatchObject({
+      resolvedSource: { provider: "luma", kind: "unknown" },
       accessPlan: { mode: "public_only", signedInSupported: false },
     });
   });

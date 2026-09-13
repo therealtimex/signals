@@ -54,7 +54,7 @@ describe("resolveSnowballSourceUrl", () => {
       mode: "public_only",
       signedInRequested: true,
       signedInSupported: false,
-      reason: "linkedin supports public-only source reading.",
+      reason: "LinkedIn supports public-only source reading.",
     });
   });
 });

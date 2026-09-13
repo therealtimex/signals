@@ -114,6 +114,32 @@ export function resolveSnowballSourceUrl(value: string): ResolvedSnowballSource 
   };
 }
 
+/**
+ * Validate a redirect target for transport without applying identity normalization. Redirects
+ * commonly depend on the literal `www.` host or trailing slash, so those details must survive the
+ * request boundary even though canonical source identities intentionally remove them.
+ */
+export function resolveSnowballSourceTransportUrl(value: string, base?: string): string | null {
+  let url: URL;
+  try {
+    url = base ? new URL(value, base) : new URL(value.trim());
+  } catch {
+    return null;
+  }
+  if (
+    url.protocol !== "https:"
+    || url.username
+    || url.password
+    || url.port
+    || !url.hostname
+  ) return null;
+  url.hash = "";
+  for (const key of [...url.searchParams.keys()]) {
+    if (SECRET_QUERY_KEY.test(key)) url.searchParams.delete(key);
+  }
+  return url.toString();
+}
+
 export function refineSnowballSource(
   source: ResolvedSnowballSource,
   kind: SnowballSourceKind,
@@ -133,12 +159,19 @@ export function sourceAccessPlan(
   signedInRequested: boolean,
 ) {
   const supported = source.capabilities.signedInRead;
+  const providerLabel = source.provider === "generic"
+    ? "This source"
+    : source.provider === "x"
+      ? "X"
+      : source.provider === "linkedin"
+        ? "LinkedIn"
+        : source.provider.charAt(0).toUpperCase() + source.provider.slice(1);
   return {
     mode: signedInRequested && supported ? "public_and_signed_in" as const : "public_only" as const,
     signedInRequested,
     signedInSupported: supported,
     reason: signedInRequested && !supported
-      ? `${source.provider === "generic" ? "This source" : source.provider} supports public-only source reading.`
+      ? `${providerLabel} supports public-only source reading.`
       : null,
   };
 }
