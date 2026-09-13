@@ -489,18 +489,25 @@ describe("complete_workflow_run terminal teardown", () => {
     });
   });
 
-  it("preserves the server-owned public event result against completion callbacks", async () => {
+  it("preserves server-owned public event and generalized source results against callbacks", async () => {
     const serverEventResult = {
       version: 1,
       provider: "luma",
       canonicalSeedUrl: "https://luma.com/demo",
       events: [{ title: "Server Event" }],
     };
+    const serverSourceResult = {
+      resolvedSource: { provider: "generic", kind: "organization" },
+      publicSource: { title: "Server Organization" },
+    };
     const run = createWorkflowRun({
       workflowType: "search",
       status: "running",
       trigger: "template",
-      result: JSON.stringify({ eventSource: serverEventResult }),
+      result: JSON.stringify({
+        eventSource: serverEventResult,
+        source: serverSourceResult,
+      }),
     });
     vi.spyOn(workflowEvents, "emitWorkflowCompletedEvent").mockResolvedValue(
       mockWorkflowCompletedEvent,
@@ -520,12 +527,14 @@ describe("complete_workflow_run terminal teardown", () => {
       result: {
         eventSource: { events: [{ title: "Fabricated Event" }] },
         eventSourceRuntime: { requestsUsed: 0 },
+        source: { resolvedSource: { provider: "luma", kind: "event" } },
         safe: true,
       },
     });
 
     expect(JSON.parse(getWorkflowRun(run.id)?.result ?? "{}")).toMatchObject({
       eventSource: serverEventResult,
+      source: serverSourceResult,
       safe: true,
     });
     expect(JSON.parse(getWorkflowRun(run.id)?.result ?? "{}")).not.toHaveProperty("eventSourceRuntime");

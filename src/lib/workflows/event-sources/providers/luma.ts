@@ -507,9 +507,27 @@ export function extractLumaEventFromHtml(input: {
 
 export type LumaCalendarPage = {
   canonicalUrl: string;
+  title: string;
   eventUrls: string[];
   nextPageUrl: string | null;
 };
+
+/** Classify a Luma calendar root independently of whether it currently lists any events. */
+export function hasLumaCalendarPageMetadata(input: { url: string; html: string }): boolean {
+  const canonicalUrl = canonicalizeLumaUrl(input.url);
+  if (!canonicalUrl) return false;
+  const $ = cheerio.load(input.html);
+  const nextPageData = readLumaNextPageData($);
+  const calendar = asRecord(nextPageData?.calendar);
+  const apiId = stringValue(calendar?.api_id);
+  const providerCalendar = Boolean(
+    calendar
+    && (apiId?.startsWith("cal-") || embeddedCalendarUrl(nextPageData, canonicalUrl) === canonicalUrl),
+  );
+  return providerCalendar || Boolean($(
+    '[data-calendar-page], [data-testid*="calendar" i], [data-event-list], [class*="calendar-page" i]',
+  ).first().length);
+}
 
 /** Extract only explicitly marked calendar event cards; a hostname match is not proof. */
 export function extractLumaCalendarFromHtml(input: {
@@ -521,13 +539,24 @@ export function extractLumaCalendarFromHtml(input: {
   const $ = cheerio.load(input.html);
   const nextPageData = readLumaNextPageData($);
   const nextCalendarUrl = embeddedCalendarUrl(nextPageData, canonicalUrl);
+  const calendar = asRecord(nextPageData?.calendar);
+  const calendarApiId = stringValue(calendar?.api_id);
+  const embeddedEvent = asRecord(nextPageData?.event);
   const calendarRoot = $(
     '[data-calendar-page], [data-testid*="calendar" i], [data-event-list], [class*="calendar-page" i]',
   ).first();
-  const isEmbeddedCalendarPage = nextCalendarUrl === canonicalUrl;
+  const isEmbeddedCalendarPage = nextCalendarUrl === canonicalUrl || Boolean(
+    calendarApiId?.startsWith("cal-") && !embeddedEvent,
+  );
   if (!calendarRoot.length && !isEmbeddedCalendarPage) {
     throw new Error("calendar_metadata_missing");
   }
+  const title = (
+    stringValue(calendar?.name)
+      ?? stringValue($('meta[property="og:title"]').attr("content"))
+      ?? stringValue($("title").first().text())
+      ?? new URL(canonicalUrl).hostname
+  ).replace(/\s+/g, " ").trim().slice(0, 200);
 
   const eventUrls = new Set<string>();
   collectEmbeddedEventUrls(nextPageData, canonicalUrl, eventUrls);
@@ -544,7 +573,9 @@ export function extractLumaCalendarFromHtml(input: {
         // Ignore malformed card URLs.
       }
     });
-  if (eventUrls.size === 0) throw new Error("calendar_metadata_missing");
+  if (eventUrls.size === 0 && !isEmbeddedCalendarPage) {
+    throw new Error("calendar_metadata_missing");
+  }
 
   const nextLink = eventRoot
     .find('a[rel="next"][href], a[data-calendar-next][href]')
@@ -562,5 +593,5 @@ export function extractLumaCalendarFromHtml(input: {
       nextPageUrl = null;
     }
   }
-  return { canonicalUrl, eventUrls: [...eventUrls], nextPageUrl };
+  return { canonicalUrl, title, eventUrls: [...eventUrls], nextPageUrl };
 }

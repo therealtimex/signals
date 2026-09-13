@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/lib/db/client";
 import { contentItems, graphEdges } from "@/lib/db/schema";
@@ -22,6 +23,81 @@ function eventHtml(title = "Build Friday", links: string[] = []) {
 
 describe("Network Snowball event source ingestion", () => {
   beforeEach(() => resetCoreTables());
+
+  it("detects a root calendar from provider metadata without a second classification fetch", async () => {
+    const run = createWorkflowRun({ workflowType: "search", status: "running", trigger: "template" });
+    const calendarHtml = `<script id="__NEXT_DATA__" type="application/json">{"props":{"pageProps":{"initialData":{"data":{
+      "calendar":{"api_id":"cal-1","name":"AI Builders","slug":"ai_builders"},
+      "events":[{"api_id":"evt-1","url":"build-night"}]
+    }}}}}</script>`;
+    const fetchImpl = vi.fn(async (url: string | URL | Request) => {
+      if (String(url) === "https://luma.com/ai_builders") {
+        return new Response(calendarHtml, { status: 200 });
+      }
+      if (String(url) === "https://luma.com/build-night") {
+        return new Response(eventHtml("Build Night"), { status: 200 });
+      }
+      return new Response("not found", { status: 404 });
+    }) as unknown as typeof fetch;
+    const result = await ingestNetworkSnowballEventSource({
+      runId: run.id,
+      ownerWorkspace: "signals",
+      seedUrl: "https://luma.com/ai_builders",
+      traversal: readEventTraversalPolicy({ maxEvents: 2 }),
+      participantAccess: { enabled: false, browserSessionName: "" },
+      fetchImpl,
+      sleepImpl: async () => undefined,
+    });
+    expect(result?.publicResult).toMatchObject({
+      canonicalSeedUrl: "https://luma.com/ai_builders",
+      events: [{ title: "Build Night" }],
+      partial: false,
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the seeded event as root when the default traversal visits its hosting calendar", async () => {
+    const run = createWorkflowRun({ workflowType: "search", status: "running", trigger: "template" });
+    const eventHtml = readFileSync(
+      new URL("./fixtures/luma-event-with-calendar.html", import.meta.url),
+      "utf8",
+    );
+    const calendarHtml = readFileSync(
+      new URL("./fixtures/luma-calendar-ai-beavers.html", import.meta.url),
+      "utf8",
+    );
+    const pages = new Map([
+      ["https://luma.com/pqr8u92i", eventHtml],
+      ["https://luma.com/ai_beavers", calendarHtml],
+    ]);
+    const fetchImpl = vi.fn(async (url: string | URL | Request) => new Response(
+      pages.get(String(url)) ?? "not found",
+      { status: pages.has(String(url)) ? 200 : 404 },
+    )) as unknown as typeof fetch;
+
+    const result = await ingestNetworkSnowballEventSource({
+      runId: run.id,
+      ownerWorkspace: "signals",
+      seedUrl: "https://luma.com/pqr8u92i",
+      traversal: readEventTraversalPolicy({}),
+      participantAccess: { enabled: false, browserSessionName: "" },
+      fetchImpl,
+      sleepImpl: async () => undefined,
+    });
+
+    expect(result?.publicResult).toMatchObject({
+      rootEventKey: "https://luma.com/pqr8u92i",
+      resolvedRoot: {
+        canonicalUrl: "https://luma.com/pqr8u92i",
+        kind: "event",
+        title: "Build Fridays SF",
+      },
+      events: [{ title: "Build Fridays SF" }],
+      guestBoundary: { state: "gated", reason: "registration_required" },
+      partial: false,
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
 
   it("persists a deterministic public Content item and no protected people", async () => {
     const run = createWorkflowRun({ workflowType: "search", status: "running", trigger: "template" });

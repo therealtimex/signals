@@ -74,6 +74,35 @@ describe("enqueueSnowballCalendarSeeds", () => {
     });
   });
 
+  it("canonicalizes source URLs before they enter queue metadata or descriptions", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ event: { uuid: "evt-query" }, taskUuid: "task-query" }),
+    });
+    const scoutConfig = readSnowballSeedScoutConfig(buildSnowballSeedScoutTemplateConfig());
+    const result = await enqueueSnowballCalendarSeeds(
+      [{
+        url: "https://facebook.com/story.php?story_fbid=456&id=123&tk=must-not-queue&utm_source=feed",
+        platform: "facebook",
+      }],
+      scoutConfig,
+      {
+        RTX_API_BASE_URL: "http://127.0.0.1:3101",
+        RTX_APP_ID: "signals-app",
+        SIGNALS_RTX_WORKSPACE_SLUG: "signals",
+      },
+      fetchImpl as unknown as typeof fetch,
+    );
+    expect(result.success).toBe(true);
+    const body = JSON.parse(String((fetchImpl.mock.calls[0]?.[1] as RequestInit).body));
+    expect(body.workflowRunConfig).toMatchObject({
+      seedType: "source_url",
+      seedValue: "https://facebook.com/story.php?id=123&story_fbid=456",
+    });
+    expect(JSON.stringify(body)).not.toContain("must-not-queue");
+    expect(JSON.stringify(body)).not.toContain("utm_source");
+  });
+
   it("reports rejected seeds as failures rather than silent skips", async () => {
     const fetchImpl = vi
       .fn()

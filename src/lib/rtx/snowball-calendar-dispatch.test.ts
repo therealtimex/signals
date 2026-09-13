@@ -114,7 +114,8 @@ describe("Snowball Calendar dispatch", () => {
         existingRunId: runId,
         signalsBaseUrl: "http://127.0.0.1:3010",
         config: expect.objectContaining({
-          seedValue: "https://www.linkedin.com/posts/acme-1",
+          seedType: "source_url",
+          seedValue: "https://linkedin.com/posts/acme-1",
           [SNOWBALL_CALENDAR_DISPATCH_CONFIG_KEY]: {
             version: 1,
             taskUuid: context.taskUuid,

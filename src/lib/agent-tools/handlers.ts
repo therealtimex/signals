@@ -123,6 +123,7 @@ import {
   readNetworkSnowballConfig,
 } from "@/lib/workflows/network-snowball";
 import { removeServerOwnedEventResult } from "@/lib/workflows/event-sources/service";
+import { removeServerOwnedSnowballSourceResult } from "@/lib/workflows/snowball-sources/service";
 import {
   getNetworkSnowballTargetFromRunConfig,
   releaseNetworkSnowballTargetFromRunConfig,
@@ -1459,6 +1460,7 @@ export async function handleCompleteWorkflowRun(input: z.infer<typeof completeWo
   const callbackResult: Record<string, unknown> = { ...(input.result ?? {}) };
   delete callbackResult[SNOWBALL_IDENTITY_EVIDENCE_RESULT_KEY];
   removeServerOwnedEventResult(callbackResult);
+  removeServerOwnedSnowballSourceResult(callbackResult);
   let effectiveStatus = input.status;
   let normalizedErrors = uniqueStrings([
     ...parseSerializedStrings(run.errors),

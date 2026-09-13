@@ -157,7 +157,10 @@ export async function enqueueSnowballCalendarSeeds(
 
   const processSeed = async (seed: EnqueueSnowballSeedInput): Promise<void> => {
     const url = String(
-      sanitizeNetworkSnowballConfigRecord({ seedValue: String(seed.url || "") }).seedValue ?? "",
+      sanitizeNetworkSnowballConfigRecord({
+        seedType: "source_url",
+        seedValue: String(seed.url || ""),
+      }).seedValue ?? "",
     ).trim();
     if (!url) {
       skipped.push(url);
@@ -211,7 +214,7 @@ export async function enqueueSnowballCalendarSeeds(
       dispatchKind: "workflow.run",
       workflowTemplate: templateName,
       workflowRunConfig: {
-        seedType: "event_url",
+        seedType: "source_url",
         seedValue: url,
         focus: scoutConfig.snowballFocus,
       },
