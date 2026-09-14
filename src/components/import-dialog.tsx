@@ -13,6 +13,10 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { CheckCircle, FileUp, Loader2, Play, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  IMPORT_RUN_RECORDING_FAILED,
+  type ImportWarning,
+} from "@/lib/workflows/import-warning";
 
 /**
  * Per-platform configuration for the reusable import modal shell.
@@ -59,9 +63,24 @@ export interface ImportSuccess {
   postsAdded?: number;
   uniqueContactCount?: number;
   handlesUpdated?: number;
+  warning?: ImportWarning;
 }
 
+export interface ImportFailure {
+  status: "failed" | "unknown";
+  fileName: string;
+  source: "csv" | "zip" | null;
+  error: string;
+}
+
+export const IMPORT_OUTCOME_UNKNOWN_MESSAGE =
+  "We couldn't confirm whether the import completed. Check Contacts before retrying.";
+
 type Phase = "pick" | "previewing" | "ready" | "importing";
+type ImportDialogError = {
+  message: string;
+  status: ImportFailure["status"] | null;
+};
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -74,13 +93,20 @@ interface ImportDialogProps {
   open: boolean;
   onClose: () => void;
   onSuccess: (result: ImportSuccess) => void;
+  onFailure?: (failure: ImportFailure) => void;
 }
 
-export function ImportDialog({ config, open, onClose, onSuccess }: ImportDialogProps) {
+export function ImportDialog({
+  config,
+  open,
+  onClose,
+  onSuccess,
+  onFailure,
+}: ImportDialogProps) {
   const [phase, setPhase] = useState<Phase>("pick");
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<ImportPreview | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ImportDialogError | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -112,7 +138,7 @@ export function ImportDialog({ config, open, onClose, onSuccess }: ImportDialogP
         const data = await res.json();
 
         if (!res.ok || !data.preview) {
-          setError(data.error || "Could not inspect file");
+          setError({ message: data.error || "Could not inspect file", status: null });
           setPhase("pick");
           return;
         }
@@ -124,7 +150,7 @@ export function ImportDialog({ config, open, onClose, onSuccess }: ImportDialogP
         });
         setPhase("ready");
       } catch {
-        setError("Could not inspect file");
+        setError({ message: "Could not inspect file", status: null });
         setPhase("pick");
       }
     },
@@ -143,10 +169,23 @@ export function ImportDialog({ config, open, onClose, onSuccess }: ImportDialogP
       const data = await res.json();
 
       if (!res.ok) {
-        setError(data.error || "Import failed");
+        const message = data.error || "Import failed";
+        setError({ message, status: "failed" });
         setPhase("ready");
+        onFailure?.({
+          status: "failed",
+          fileName: file.name,
+          source: preview?.source ?? null,
+          error: message,
+        });
         return;
       }
+
+      const warning: ImportWarning | undefined =
+        data.warning?.code === IMPORT_RUN_RECORDING_FAILED &&
+        typeof data.warning?.message === "string"
+          ? data.warning
+          : undefined;
 
       const result: ImportSuccess = {
         added: data.result?.added ?? 0,
@@ -160,14 +199,22 @@ export function ImportDialog({ config, open, onClose, onSuccess }: ImportDialogP
         postsAdded: data.posts?.added,
         uniqueContactCount: data.uniqueContactCount,
         handlesUpdated: data.handleBackfill?.updated,
+        ...(warning && { warning }),
       };
       reset();
       onSuccess(result);
     } catch {
-      setError("Import failed");
+      const message = IMPORT_OUTCOME_UNKNOWN_MESSAGE;
+      setError({ message, status: "unknown" });
       setPhase("ready");
+      onFailure?.({
+        status: "unknown",
+        fileName: file.name,
+        source: preview?.source ?? null,
+        error: message,
+      });
     }
-  }, [file, config.importEndpoint, reset, onSuccess]);
+  }, [file, preview, config.importEndpoint, reset, onSuccess, onFailure]);
 
   const busy = phase === "previewing" || phase === "importing";
 
@@ -276,7 +323,9 @@ export function ImportDialog({ config, open, onClose, onSuccess }: ImportDialogP
                 </p>
               </div>
             </div>
-            <p className="text-xs text-muted-foreground">{config.reimportNote}</p>
+            {error?.status !== "unknown" && (
+              <p className="text-xs text-muted-foreground">{config.reimportNote}</p>
+            )}
             <Button
               variant="ghost"
               size="sm"
@@ -291,8 +340,15 @@ export function ImportDialog({ config, open, onClose, onSuccess }: ImportDialogP
         )}
 
         {error && (
-          <p className="text-sm text-destructive" data-testid="import-dialog-error">
-            {error}
+          <p
+            role="alert"
+            className={cn(
+              "text-sm",
+              error.status === "unknown" ? "text-muted-foreground" : "text-destructive"
+            )}
+            data-testid="import-dialog-error"
+          >
+            {error.message}
           </p>
         )}
 
