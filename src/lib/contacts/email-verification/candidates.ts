@@ -56,7 +56,22 @@ export type EmailCandidateDependencies = {
   mxResolver?: MxResolver;
   probe?: SmtpProbeProvider;
   catchAllAddress?: (domain: string) => string;
+  reinfer?: (orgId: string) => void | Promise<void>;
 };
+
+async function reinferAfterVerification(
+  orgId: string,
+  dependencies: EmailCandidateDependencies,
+): Promise<void> {
+  const settings = (dependencies.settings ?? resolveEmailVerificationSettings)();
+  if (!settings.reinferAfterVerify.effectiveValue) return;
+  if (dependencies.reinfer) {
+    await dependencies.reinfer(orgId);
+    return;
+  }
+  const { inferOrgEmailPatterns } = await import("@/lib/contacts/email-patterns/intelligence");
+  inferOrgEmailPatterns(orgId);
+}
 
 async function resolveProbeEvent(
   candidate: typeof contactEmailCandidates.$inferSelect,
@@ -213,6 +228,9 @@ export async function updateEmailCandidate(
       dedupeKey: `email_verified:${candidate.id}`,
       metadata: { candidateId: candidate.id, verificationMethod: transition.verificationMethod },
     });
+    if (candidate.status !== "verified") {
+      await reinferAfterVerification(candidate.orgId, dependencies);
+    }
   }
   return db.select().from(contactEmailCandidates).where(eq(contactEmailCandidates.id, candidate.id)).get();
 }

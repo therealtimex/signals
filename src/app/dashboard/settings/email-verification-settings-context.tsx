@@ -16,6 +16,12 @@ const DEFAULT_EMAIL_VERIFICATION_SETTINGS: EmailVerificationSettings = {
     source: "default",
     envLocked: false,
   },
+  reinferAfterVerify: {
+    storedValue: true,
+    effectiveValue: true,
+    source: "default",
+    envLocked: false,
+  },
 };
 
 const EmailVerificationSettingsContext = createContext<EmailVerificationSettings>(

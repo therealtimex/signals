@@ -8,6 +8,8 @@ import {
   contacts,
   graphEdges,
   interactions,
+  orgDomains,
+  orgs,
 } from "@/lib/db/schema";
 import { getOwnerContactId } from "@/lib/db/queries/contacts";
 import { INTERACTION_TYPE_GROUPS } from "@/lib/db/interaction-types";
@@ -26,6 +28,10 @@ import { NETWORK_SNOWBALL_TEMPLATE_NAME } from "@/lib/workflows/network-snowball
 
 type VisibilityOptions = { includeLocalOnly?: boolean };
 const COMMUNICATION_TYPES = new Set<string>(INTERACTION_TYPE_GROUPS.communication);
+
+function emailDomain(value: string): string {
+  return value.toLowerCase().split("@").at(-1) ?? "";
+}
 
 function contactEdges(contactId: string, ownerId: string, options?: VisibilityOptions) {
   return db
@@ -154,6 +160,11 @@ export function getOrgRelationshipSummary(orgId: string, options?: VisibilityOpt
   const emailRows = currentIds.length
     ? db.select().from(contactChannels).where(and(inArray(contactChannels.contactId, currentIds), eq(contactChannels.channelType, "email"))).all()
     : [];
+  const domainRows = db.select({ domain: orgDomains.domain }).from(orgDomains)
+    .where(eq(orgDomains.orgId, orgId)).all();
+  const legacyDomain = db.select({ domain: orgs.domain }).from(orgs).where(eq(orgs.id, orgId)).get()?.domain;
+  const workDomains = new Set(domainRows.map((row) => row.domain));
+  if (legacyDomain) workDomains.add(legacyDomain);
   const identityRows = currentIds.length
     ? db.select({ contactId: contactIdentities.contactId }).from(contactIdentities).where(inArray(contactIdentities.contactId, currentIds)).all()
     : [];
@@ -236,7 +247,9 @@ export function getOrgRelationshipSummary(orgId: string, options?: VisibilityOpt
   const emailContactIds = new Set(emailRows.map((row) => row.contactId));
   const verifiedEmailContactIds = new Set<string>();
   for (const row of emailRows) {
-    if (row.isVerified) verifiedEmailContactIds.add(row.contactId);
+    if (row.isVerified && workDomains.has(emailDomain(row.valueNormalized))) {
+      verifiedEmailContactIds.add(row.contactId);
+    }
   }
   const snowballTemplate = getSystemTemplateByName(NETWORK_SNOWBALL_TEMPLATE_NAME);
   const snowballRun = snowballTemplate
@@ -258,6 +271,10 @@ export function getOrgRelationshipSummary(orgId: string, options?: VisibilityOpt
     coverage: {
       withEmail: emailContactIds.size,
       withVerifiedEmail: verifiedEmailContactIds.size,
+      email: {
+        verified: verifiedEmailContactIds.size,
+        total: currentIds.length,
+      },
       withIdentity: identityContactIds.size,
       withRelationship,
       withPersona: personaContactIds.size,

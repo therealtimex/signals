@@ -8,6 +8,7 @@ import {
 const schema = z.object({
   smtpProbeEnabled: z.boolean().optional(),
   allowPredictedInAutomation: z.boolean().optional(),
+  reinferAfterVerify: z.boolean().optional(),
 });
 
 export async function GET() {
@@ -25,7 +26,8 @@ export async function PUT(req: Request) {
   const current = resolveEmailVerificationSettings();
   if (
     (parsed.data.smtpProbeEnabled !== undefined && current.smtpProbeEnabled.envLocked) ||
-    (parsed.data.allowPredictedInAutomation !== undefined && current.allowPredictedInAutomation.envLocked)
+    (parsed.data.allowPredictedInAutomation !== undefined && current.allowPredictedInAutomation.envLocked) ||
+    (parsed.data.reinferAfterVerify !== undefined && current.reinferAfterVerify.envLocked)
   ) {
     return NextResponse.json(
       { error: "One or more email verification settings are locked by the environment.", code: "ENV_LOCKED" },

@@ -10,6 +10,7 @@ export type SignalsConfig = {
   writingApprovalPolicy?: "explicit" | "auto_low_risk";
   emailSmtpProbeEnabled?: boolean;
   allowPredictedEmailInAutomation?: boolean;
+  emailReinferAfterVerify?: boolean;
   personalityProjection?: {
     representedOrgId: string | null;
   };

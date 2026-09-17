@@ -8,6 +8,7 @@ import { createContactEmployment } from "@/lib/db/queries/contact-employments";
 import { ensureContactChannel } from "@/lib/db/queries/contact-channel-writes";
 import {
   generateOrgEmailCandidates,
+  getOrgEmailIntelligence,
   inferOrgEmailPatterns,
 } from "./intelligence";
 import { resetCoreTables } from "@/test/db";
@@ -43,6 +44,26 @@ describe("company email intelligence", () => {
     });
   });
 
+  it("counts verified email-pattern enrichment channels as inference samples", () => {
+    const org = createOrg({ name: "Anchor Co", domain: "anchor.example" });
+    const contact = createContact({ name: "Robert Taylor" });
+    createContactEmployment({ contactId: contact.id, orgId: org.id, source: "test" });
+    ensureContactChannel({
+      contactId: contact.id,
+      channelType: "email",
+      value: "robert@anchor.example",
+      isVerified: true,
+      source: "enrich:email_pattern",
+    });
+
+    const result = inferOrgEmailPatterns(org.id);
+    expect(result.patterns[0]).toMatchObject({
+      pattern: "{first}",
+      matchCount: 1,
+      sampleCount: 1,
+    });
+  });
+
   it("generates predictions separately from real contact channels", () => {
     const org = createOrg({ name: "Candidate Co", domain: "candidate.example" });
     const contact = createContact({ name: "Ludwig van der Berg" });
@@ -60,5 +81,39 @@ describe("company email intelligence", () => {
       confidence: "medium",
     });
     expect(contact.channels).toHaveLength(0);
+  });
+
+  it("reports the ladder level, verified anchors, and candidate domain mismatches", () => {
+    const org = createOrg({ name: "Ladder Co", domain: "ladder.example" });
+    const contact = createContact({ name: "Ladder Person" });
+    createContactEmployment({ contactId: contact.id, orgId: org.id, source: "test" });
+    db.insert(orgEmailPatterns).values({
+      id: nanoid(), orgId: org.id, pattern: "{first}", rank: 1,
+      confidence: "low", score: 1, matchCount: 1, sampleCount: 1,
+      isSelected: true, source: "manual:override", evaluatedAt: 1,
+    }).run();
+    db.insert(contactEmailCandidates).values({
+      id: nanoid(), contactId: contact.id, orgId: org.id,
+      address: "ladder@mail.ladder.example", addressNormalized: "ladder@mail.ladder.example",
+      status: "predicted", confidence: "low", source: "test",
+    }).run();
+
+    expect(getOrgEmailIntelligence(org.id)).toMatchObject({
+      ladder: { level: "L2", label: "L2 · Predictions only" },
+      verifiedAnchorCount: 0,
+      domainMismatches: ["mail.ladder.example"],
+    });
+
+    ensureContactChannel({
+      contactId: contact.id,
+      channelType: "email",
+      value: "ladder@ladder.example",
+      isVerified: true,
+      source: "import:test",
+    });
+    expect(getOrgEmailIntelligence(org.id)).toMatchObject({
+      ladder: { level: "L3", label: "L3 · Anchored" },
+      verifiedAnchorCount: 1,
+    });
   });
 });
