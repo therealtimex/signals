@@ -5,7 +5,7 @@ import Link from "next/link";
 import { CheckCircle2, CircleHelp, ClipboardPlus, Loader2, Mail, Play, Radio, Route, Sparkles, Trash2, UserPlus } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import type { OrgSignalScanState } from "@/lib/orgs/signal-scan-state";
@@ -46,7 +46,7 @@ export function RelationshipOverview({ summary }: { summary: RelationshipSummary
         <div className="grid grid-cols-3 gap-3">
           <div><p className="text-muted-foreground">Current people</p><p className="text-2xl font-semibold tabular-nums">{summary.people.current}</p></div>
           <div><p className="text-muted-foreground">Known relationships</p><p className="text-2xl font-semibold tabular-nums">{summary.coverage.withRelationship}</p></div>
-          <div><p className="text-muted-foreground">Verified emails</p><p className="text-2xl font-semibold tabular-nums">{summary.coverage.withVerifiedEmail}</p></div>
+          <div title="Counts verified channels for current employees at this company, not total candidates."><p className="text-muted-foreground">Email coverage</p><p className="text-2xl font-semibold tabular-nums">{summary.coverage.email.verified} / {summary.coverage.email.total}</p><p className="text-xs text-muted-foreground">verified work emails</p></div>
         </div>
         <div className="flex flex-wrap gap-2">
           {(["strong", "moderate", "weak", "unknown"] as const).map((band) => (
@@ -181,6 +181,7 @@ export function CompanyPeopleTable({ orgId, companyName, people: initialPeople }
                         {person.emailStatus.status === "verified" ? <CheckCircle2 className="size-3.5 text-primary" /> : <CircleHelp className="size-3.5 text-muted-foreground" />}
                         <span className="max-w-48 truncate">{person.emailStatus.address ?? "No email"}</span>
                         {person.emailStatus.status !== "none" ? <Badge variant="outline" className="capitalize">{person.emailStatus.status}</Badge> : null}
+                        {person.emailStatus.status === "predicted" ? <span className="text-xs text-muted-foreground">Not for send</span> : null}
                       </div>
                     </TableCell>
                     <TableCell className="text-muted-foreground">{relativeTime(person.lastInteractionAt)}</TableCell>
@@ -196,26 +197,66 @@ export function CompanyPeopleTable({ orgId, companyName, people: initialPeople }
   );
 }
 
-export function EmailIntelligenceCard({ orgId, initial }: { orgId: string; initial: EmailIntelligence }) {
-  const [intelligence, setIntelligence] = useState(initial);
-  const [pending, setPending] = useState<"infer" | "generate" | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
-  const [pattern, setPattern] = useState(initial.selected?.pattern ?? "{first}.{last}");
-  const [corrections, setCorrections] = useState<Record<string, string>>({});
+type EmailControlProps = {
+  orgId: string;
+  intelligence: EmailIntelligence;
+  disabled: boolean;
+  refresh: () => Promise<void>;
+  setMessage: (message: string | null) => void;
+  setPending: (pending: "update" | null) => void;
+};
 
-  async function refresh() {
-    const response = await fetch(`/api/orgs/${orgId}/email-intelligence`);
-    if (response.ok) setIntelligence(await response.json() as EmailIntelligence);
+function EmailDomainControls({ orgId, intelligence, disabled, refresh, setMessage, setPending }: EmailControlProps) {
+  const [mailAlias, setMailAlias] = useState("");
+  const primaryDomain = intelligence.domains.find((domain) => domain.kind === "primary") ?? intelligence.domains[0];
+
+  async function addMailAlias(value = mailAlias) {
+    const domain = value.trim();
+    if (!domain) return;
+    setPending("update"); setMessage(null);
+    try {
+      const response = await fetch(`/api/orgs/${orgId}/domains`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ domain }),
+      });
+      if (response.ok) {
+        setMailAlias("");
+        await refresh();
+        setMessage(`Added ${domain} as a mail domain alias.`);
+      } else {
+        const body = await response.json().catch(() => ({}));
+        setMessage(typeof body.error === "string" ? body.error : "Mail domain alias could not be added.");
+      }
+    } catch {
+      setMessage("Mail domain alias could not be added.");
+    } finally {
+      setPending(null);
+    }
   }
 
+  return (
+    <>
+      <div className="flex flex-wrap items-center gap-2"><Badge variant="outline">Primary · {intelligence.domain}</Badge>{intelligence.domains.map((domain) => domain.kind === "alias" ? <Badge key={domain.id} variant="outline">Alias · {domain.domain}</Badge> : null)}<Badge variant="secondary">MX {primaryDomain?.mxStatus ?? "unknown"}</Badge><Badge variant="secondary">Catch-all {primaryDomain?.catchAll ?? "unknown"}</Badge></div>
+      {intelligence.domainMismatches.length ? <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3" role="alert"><p><span className="font-medium">Mail domain mismatch</span> — Predictions use {intelligence.domainMismatches.map((domain) => `@${domain}`).join(", ")} but the company record uses {intelligence.domain}.</p><div className="mt-2 flex flex-wrap gap-2">{intelligence.domainMismatches.map((domain) => <Button key={domain} size="sm" variant="outline" disabled={disabled} onClick={() => addMailAlias(domain)}>Add mail alias · @{domain}</Button>)}</div></div> : null}
+      <div className="flex flex-wrap gap-2"><Input aria-label="Mail domain alias" className="max-w-64" placeholder="mail.example.com" value={mailAlias} onChange={(event) => setMailAlias(event.target.value)} /><Button size="sm" variant="outline" disabled={disabled || !mailAlias.trim()} onClick={() => addMailAlias()}>Add mail domain alias</Button></div>
+    </>
+  );
+}
+
+function EmailPatternControls({ orgId, intelligence, disabled, refresh: _refresh, setMessage, setPending }: EmailControlProps) {
+  const [pattern, setPattern] = useState(intelligence.selected?.pattern ?? "{first}.{last}");
+
   async function overridePattern() {
-    setPending("infer"); setMessage(null);
+    setPending("update"); setMessage(null);
     try {
       const response = await fetch(`/api/orgs/${orgId}/email-intelligence/pattern`, {
         method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pattern }),
       });
-      if (response.ok) { setIntelligence(await response.json() as EmailIntelligence); setMessage("Email pattern overridden."); }
-      else setMessage("Pattern override could not be saved.");
+      if (response.ok) {
+        await _refresh();
+        setMessage("Email pattern overridden.");
+      } else {
+        setMessage("Pattern override could not be saved.");
+      }
     } catch {
       setMessage("Pattern override could not be saved.");
     } finally {
@@ -223,20 +264,56 @@ export function EmailIntelligenceCard({ orgId, initial }: { orgId: string; initi
     }
   }
 
+  return (
+    <>
+      <div>
+        <p className="text-muted-foreground">Selected pattern</p>
+        {intelligence.selected ? <div className="mt-1 flex flex-wrap items-center gap-2"><code className="rounded bg-muted px-2 py-1">{intelligence.selected.pattern}</code><Badge className="capitalize">{intelligence.selected.confidence}</Badge><span className="text-muted-foreground">based on {intelligence.selected.sampleCount} sample{intelligence.selected.sampleCount === 1 ? "" : "s"}</span></div> : <p className="mt-1">No pattern inferred yet.</p>}
+      </div>
+      {!intelligence.selected ? <div className="rounded-lg border border-dashed p-3"><p className="font-medium">No pattern evidence yet</p><p className="mt-1 text-muted-foreground">Verify one work email with a cited source, import mail, or connect sync. Then run <span className="font-medium text-foreground">Infer pattern</span> again.</p></div> : null}
+      {intelligence.patterns.length ? <div><p className="font-medium">Ranked alternatives</p><div className="mt-2 divide-y rounded border">{[...intelligence.patterns].sort((a, b) => a.rank - b.rank).map((row) => <details key={row.id} className="p-2"><summary className="cursor-pointer"><span className="font-mono">#{row.rank} {row.pattern}</span> · {Math.round(row.score * 100)}% · {row.confidence}</summary><p className="mt-1 text-xs text-muted-foreground">Evaluated {relativeTime(row.evaluatedAt)} from {row.sampleCount} sample{row.sampleCount === 1 ? "" : "s"}. Evidence: {row.evidence ?? "none"}</p></details>)}</div></div> : null}
+      <div className="flex flex-wrap gap-2"><Input aria-label="Pattern override" className="max-w-64 font-mono" value={pattern} onChange={(event) => setPattern(event.target.value)} /><Button size="sm" variant="outline" disabled={disabled || !pattern.trim()} onClick={overridePattern}>Use pattern</Button></div>
+      <div className="grid grid-cols-4 gap-2 text-center">{(["predicted", "uncertain", "verified", "invalid"] as const).map((status) => <div key={status} className="rounded-lg bg-muted/50 p-2"><p className="font-semibold tabular-nums">{intelligence.candidateCounts[status]}</p><p className="text-xs capitalize text-muted-foreground">{status}</p></div>)}</div>
+    </>
+  );
+}
+
+function EmailCandidateList({ intelligence, disabled, refresh, setMessage, setPending }: Omit<EmailControlProps, "orgId">) {
+  const [corrections, setCorrections] = useState<Record<string, string>>({});
+
   async function updateCandidate(candidateId: string, action: "verify" | "invalidate" | "probe" | "correct") {
-    setPending("generate"); setMessage(null);
+    setPending("update"); setMessage(null);
     try {
       const response = await fetch(`/api/email-candidates/${candidateId}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action, ...(action === "correct" ? { address: corrections[candidateId] } : {}) }),
       });
-      if (response.ok) { await refresh(); setMessage(emailCandidateActionSuccessMessage(action)); }
-      else { const body = await response.json().catch(() => ({})); setMessage(typeof body.error === "string" ? body.error : "Candidate could not be updated."); }
+      if (response.ok) {
+        await refresh();
+        setMessage(emailCandidateActionSuccessMessage(action));
+      } else {
+        const body = await response.json().catch(() => ({}));
+        setMessage(typeof body.error === "string" ? body.error : "Candidate could not be updated.");
+      }
     } catch {
       setMessage("Candidate could not be updated.");
     } finally {
       setPending(null);
     }
+  }
+
+  if (!intelligence.candidates.length) return null;
+  return <div><p className="font-medium">Email candidates</p><div className="mt-2 space-y-2">{intelligence.candidates.map((candidate) => <div key={candidate.id} className="rounded border p-2"><div className="flex flex-wrap items-center gap-2"><code>{candidate.address}</code><Badge variant="outline" className="capitalize">{candidate.status}</Badge><span className="text-xs text-muted-foreground">{candidate.sendable ? "Eligible for this operation" : candidate.reason?.replaceAll("_", " ")}</span></div><div className="mt-2 flex flex-wrap gap-1"><Button size="sm" variant="outline" disabled={disabled} onClick={() => updateCandidate(candidate.id, "verify")}>Verify</Button><Button size="sm" variant="outline" disabled={disabled} onClick={() => updateCandidate(candidate.id, "invalidate")}>Invalidate</Button><Button size="sm" variant="outline" disabled={disabled} onClick={() => updateCandidate(candidate.id, "probe")}>Probe</Button><Input aria-label={`Correct ${candidate.address}`} className="h-8 max-w-64" placeholder="Correct address" value={corrections[candidate.id] ?? ""} onChange={(event) => setCorrections((values) => ({ ...values, [candidate.id]: event.target.value }))} /><Button size="sm" variant="outline" disabled={disabled || !corrections[candidate.id]} onClick={() => updateCandidate(candidate.id, "correct")}>Correct</Button></div><details className="mt-2 text-xs text-muted-foreground"><summary className="cursor-pointer">Inspect evidence</summary><pre className="mt-1 overflow-x-auto whitespace-pre-wrap">{candidate.evidence ?? "{}"}</pre></details></div>)}</div></div>;
+}
+
+export function EmailIntelligenceCard({ orgId, initial }: { orgId: string; initial: EmailIntelligence }) {
+  const [intelligence, setIntelligence] = useState(initial);
+  const [pending, setPending] = useState<"infer" | "generate" | "update" | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+
+  async function refresh() {
+    const response = await fetch(`/api/orgs/${orgId}/email-intelligence`);
+    if (response.ok) setIntelligence(await response.json() as EmailIntelligence);
   }
 
   async function run(action: "infer" | "generate") {
@@ -268,28 +345,22 @@ export function EmailIntelligenceCard({ orgId, initial }: { orgId: string; initi
 
   return (
     <Card>
-      <CardHeader><CardTitle className="flex items-center gap-2"><Mail className="size-4 text-primary" />Email intelligence</CardTitle></CardHeader>
+      <CardHeader>
+        <CardTitle className="flex flex-wrap items-center gap-2"><Mail className="size-4 text-primary" />Email intelligence<Badge variant="outline" title={intelligence.ladder.description}>{intelligence.ladder.label}</Badge></CardTitle>
+        <CardDescription>Learn how this company formats work email, generate predictions for linked people, and verify only with evidence you trust.</CardDescription>
+      </CardHeader>
       <CardContent className="space-y-4 text-sm">
         {!intelligence.canInfer ? (
           <div className="rounded-lg border border-dashed p-4"><p className="font-medium">Add a company domain first</p><p className="mt-1 text-muted-foreground">A domain is required to learn and generate business email patterns.</p></div>
         ) : (
           <>
-            <div className="flex flex-wrap items-center gap-2"><Badge variant="outline">{intelligence.domain}</Badge><Badge variant="secondary">MX {intelligence.domains[0]?.mxStatus ?? "unknown"}</Badge><Badge variant="secondary">Catch-all {intelligence.domains[0]?.catchAll ?? "unknown"}</Badge></div>
-            <div>
-              <p className="text-muted-foreground">Selected pattern</p>
-              {intelligence.selected ? (
-                <div className="mt-1 flex flex-wrap items-center gap-2"><code className="rounded bg-muted px-2 py-1">{intelligence.selected.pattern}</code><Badge className="capitalize">{intelligence.selected.confidence}</Badge><span className="text-muted-foreground">based on {intelligence.selected.sampleCount} sample{intelligence.selected.sampleCount === 1 ? "" : "s"}</span></div>
-              ) : <p className="mt-1">No pattern inferred yet.</p>}
-            </div>
-            {intelligence.patterns.length ? <div><p className="font-medium">Ranked alternatives</p><div className="mt-2 divide-y rounded border">{[...intelligence.patterns].sort((a, b) => a.rank - b.rank).map((row) => <details key={row.id} className="p-2"><summary className="cursor-pointer"><span className="font-mono">#{row.rank} {row.pattern}</span> · {Math.round(row.score * 100)}% · {row.confidence}</summary><p className="mt-1 text-xs text-muted-foreground">Evaluated {relativeTime(row.evaluatedAt)} from {row.sampleCount} sample{row.sampleCount === 1 ? "" : "s"}. Evidence: {row.evidence ?? "none"}</p></details>)}</div></div> : null}
-            <div className="flex flex-wrap gap-2"><Input aria-label="Pattern override" className="max-w-64 font-mono" value={pattern} onChange={(event) => setPattern(event.target.value)} /><Button size="sm" variant="outline" disabled={pending !== null || !pattern.trim()} onClick={overridePattern}>Use pattern</Button></div>
-            <div className="grid grid-cols-4 gap-2 text-center">
-              {(["predicted", "uncertain", "verified", "invalid"] as const).map((status) => <div key={status} className="rounded-lg bg-muted/50 p-2"><p className="font-semibold tabular-nums">{intelligence.candidateCounts[status]}</p><p className="text-xs capitalize text-muted-foreground">{status}</p></div>)}
-            </div>
+            <EmailDomainControls orgId={orgId} intelligence={intelligence} disabled={pending !== null} refresh={refresh} setMessage={setMessage} setPending={setPending} />
+            <EmailPatternControls orgId={orgId} intelligence={intelligence} disabled={pending !== null} refresh={refresh} setMessage={setMessage} setPending={setPending} />
             <div className="flex flex-wrap gap-2"><Button size="sm" variant="outline" disabled={pending !== null} onClick={() => run("infer")}>{pending === "infer" ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}Infer pattern</Button><Button size="sm" disabled={pending !== null || !intelligence.selected} onClick={() => run("generate")}>{pending === "generate" ? <Loader2 className="size-3.5 animate-spin" /> : <Mail className="size-3.5" />}Generate for people</Button></div>
-            {intelligence.candidates.length ? <div><p className="font-medium">Email candidates</p><div className="mt-2 space-y-2">{intelligence.candidates.map((candidate) => <div key={candidate.id} className="rounded border p-2"><div className="flex flex-wrap items-center gap-2"><code>{candidate.address}</code><Badge variant="outline" className="capitalize">{candidate.status}</Badge><span className="text-xs text-muted-foreground">{candidate.sendable ? "Eligible for this operation" : candidate.reason?.replaceAll("_", " ")}</span></div><div className="mt-2 flex flex-wrap gap-1"><Button size="sm" variant="outline" disabled={pending !== null} onClick={() => updateCandidate(candidate.id, "verify")}>Verify</Button><Button size="sm" variant="outline" disabled={pending !== null} onClick={() => updateCandidate(candidate.id, "invalidate")}>Invalidate</Button><Button size="sm" variant="outline" disabled={pending !== null} onClick={() => updateCandidate(candidate.id, "probe")}>Probe</Button><Input aria-label={`Correct ${candidate.address}`} className="h-8 max-w-64" placeholder="Correct address" value={corrections[candidate.id] ?? ""} onChange={(event) => setCorrections((values) => ({ ...values, [candidate.id]: event.target.value }))} /><Button size="sm" variant="outline" disabled={pending !== null || !corrections[candidate.id]} onClick={() => updateCandidate(candidate.id, "correct")}>Correct</Button></div><details className="mt-2 text-xs text-muted-foreground"><summary className="cursor-pointer">Inspect evidence</summary><pre className="mt-1 overflow-x-auto whitespace-pre-wrap">{candidate.evidence ?? "{}"}</pre></details></div>)}</div></div> : null}
+            <EmailCandidateList intelligence={intelligence} disabled={pending !== null} refresh={refresh} setMessage={setMessage} setPending={setPending} />
           </>
         )}
+        <p className="text-xs text-muted-foreground">Patterns are inferred from verified or imported mail on this company&apos;s domains. After you verify an anchor address, Signals can refresh the pattern automatically when enabled in Settings.</p>
         <p className="text-xs text-muted-foreground">Predicted addresses are {intelligence.automationEligibility.effectiveValue ? "eligible only when an outreach operation explicitly opts in" : "blocked from outreach by workspace policy"}. Uncertain and invalid addresses are never sendable.</p>
         {message ? <p className="text-sm" role="status">{message}</p> : null}
       </CardContent>

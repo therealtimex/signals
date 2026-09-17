@@ -44,7 +44,11 @@ export function EmailVerificationCard() {
           <div><Label htmlFor="predicted-automation">Allow predicted emails in automation</Label><p className="mt-1 text-xs text-muted-foreground">Keep disabled unless a workflow explicitly accepts unverified recipients.</p></div>
           <Switch id="predicted-automation" checked={settings.allowPredictedInAutomation.effectiveValue} disabled={settings.allowPredictedInAutomation.envLocked} onCheckedChange={(value) => update({ allowPredictedInAutomation: value })} />
         </div>
-        {settings.smtpProbeEnabled.envLocked || settings.allowPredictedInAutomation.envLocked ? <p className="text-xs text-muted-foreground">Environment-managed settings are read-only here.</p> : null}
+        <div className="flex items-start justify-between gap-4">
+          <div><Label htmlFor="reinfer-after-verify">Re-infer pattern after verify</Label><p className="mt-1 text-xs text-muted-foreground">Refresh company pattern evidence whenever a predicted address becomes verified.</p></div>
+          <Switch id="reinfer-after-verify" checked={settings.reinferAfterVerify.effectiveValue} disabled={settings.reinferAfterVerify.envLocked} onCheckedChange={(value) => update({ reinferAfterVerify: value })} />
+        </div>
+        {settings.smtpProbeEnabled.envLocked || settings.allowPredictedInAutomation.envLocked || settings.reinferAfterVerify.envLocked ? <p className="text-xs text-muted-foreground">Environment-managed settings are read-only here.</p> : null}
         {error ? <p className="text-sm text-destructive" role="alert">{error}</p> : null}
       </CardContent>
     </Card>

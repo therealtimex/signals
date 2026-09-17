@@ -6,11 +6,11 @@ function envBoolean(name: string): boolean | undefined {
   return value === "1" || value.toLowerCase() === "true";
 }
 
-function resolveFlag(storedValue: boolean | undefined, envName: string) {
+function resolveFlag(storedValue: boolean | undefined, envName: string, defaultValue = false) {
   const environment = envBoolean(envName);
   return {
-    storedValue: storedValue ?? false,
-    effectiveValue: environment ?? storedValue ?? false,
+    storedValue: storedValue ?? defaultValue,
+    effectiveValue: environment ?? storedValue ?? defaultValue,
     source: environment === undefined ? (storedValue === undefined ? "default" : "config") : "environment",
     envLocked: environment !== undefined,
   } as const;
@@ -24,6 +24,11 @@ export function resolveEmailVerificationSettings() {
       config.allowPredictedEmailInAutomation,
       "SIGNALS_ALLOW_PREDICTED_EMAIL_AUTOMATION",
     ),
+    reinferAfterVerify: resolveFlag(
+      config.emailReinferAfterVerify,
+      "SIGNALS_EMAIL_REINFER_AFTER_VERIFY",
+      true,
+    ),
   };
 }
 
@@ -32,6 +37,7 @@ export type EmailVerificationSettings = ReturnType<typeof resolveEmailVerificati
 export function updateEmailVerificationSettings(input: {
   smtpProbeEnabled?: boolean;
   allowPredictedInAutomation?: boolean;
+  reinferAfterVerify?: boolean;
 }) {
   const current = resolveEmailVerificationSettings();
   updateSignalsConfig({
@@ -40,6 +46,9 @@ export function updateEmailVerificationSettings(input: {
       : {}),
     ...(input.allowPredictedInAutomation !== undefined && !current.allowPredictedInAutomation.envLocked
       ? { allowPredictedEmailInAutomation: input.allowPredictedInAutomation }
+      : {}),
+    ...(input.reinferAfterVerify !== undefined && !current.reinferAfterVerify.envLocked
+      ? { emailReinferAfterVerify: input.reinferAfterVerify }
       : {}),
   });
   return resolveEmailVerificationSettings();

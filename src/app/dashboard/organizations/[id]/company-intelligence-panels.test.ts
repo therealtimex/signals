@@ -9,6 +9,7 @@ import {
   CompanyFeed,
   CompanyPeopleTable,
   EmailIntelligenceCard,
+  RelationshipOverview,
 } from "./company-intelligence-panels";
 
 type EmailIntelligence = ReturnType<typeof getOrgEmailIntelligence>;
@@ -17,9 +18,12 @@ const emailIntelligenceFixture: EmailIntelligence = {
   canInfer: true,
   domain: "acme.test",
   domains: [{ id: "domain-1", orgId: "org-1", domain: "acme.test", kind: "primary", source: "test", mxStatus: "ok", catchAll: "no", mailCheckedAt: 1, mailEvidence: "{}", createdAt: 1, updatedAt: 1 }],
+  domainMismatches: ["mail.acme.test"],
   patterns: [{ id: "pattern-1", orgId: "org-1", pattern: "{first}.{last}", rank: 1, confidence: "high", score: 1, matchCount: 2, sampleCount: 2, evidence: "[]", isSelected: true, source: "test", evaluatedAt: 1, createdAt: 1, updatedAt: 1 }],
   selected: { id: "pattern-1", orgId: "org-1", pattern: "{first}.{last}", rank: 1, confidence: "high", score: 1, matchCount: 2, sampleCount: 2, evidence: "[]", isSelected: true, source: "test", evaluatedAt: 1, createdAt: 1, updatedAt: 1 },
-  candidates: [{ id: "candidate-1", contactId: "contact-1", orgId: "org-1", address: "ada@acme.test", addressNormalized: "ada@acme.test", pattern: "{first}", status: "predicted", confidence: "high", evidence: "{}", source: "test", verificationMethod: null, verifiedAt: null, checkedAt: null, probeAttempts: 0, promotedChannelId: null, createdAt: 1, updatedAt: 1, sendable: false, reason: "predicted_email_disabled" }],
+  candidates: [{ id: "candidate-1", contactId: "contact-1", orgId: "org-1", address: "ada@mail.acme.test", addressNormalized: "ada@mail.acme.test", pattern: "{first}", status: "predicted", confidence: "high", evidence: "{}", source: "test", verificationMethod: null, verifiedAt: null, checkedAt: null, probeAttempts: 0, promotedChannelId: null, createdAt: 1, updatedAt: 1, sendable: false, reason: "predicted_email_disabled" }],
+  ladder: { level: "L2", label: "L2 · Predictions only", description: "1 predicted · 0 verified anchors." },
+  verifiedAnchorCount: 0,
   candidateCounts: { predicted: 1, uncertain: 0, verified: 0, invalid: 0 },
   evaluatedAt: 1,
   automationEligibility: { storedValue: false, effectiveValue: false, source: "default", envLocked: false },
@@ -56,6 +60,33 @@ describe("company intelligence panels", () => {
       expect(markup).toContain(text);
     }
     expect(markup).toContain("blocked from outreach by workspace policy");
+    expect(markup).toContain("L2 · Predictions only");
+    expect(markup).toContain("Mail domain mismatch");
+    expect(markup).toContain("Add mail alias");
+  });
+
+  it("renders verified work-email coverage against current employees", () => {
+    const summary: Parameters<typeof RelationshipOverview>[0]["summary"] = {
+      people: { total: 3, current: 2, former: 1 },
+      coverage: {
+        withEmail: 2,
+        withVerifiedEmail: 1,
+        email: { verified: 1, total: 2 },
+        withIdentity: 0,
+        withRelationship: 0,
+        withPersona: 0,
+      },
+      strength: { unknown: 2, weak: 0, moderate: 0, strong: 0, best: null },
+      lastInteractionAt: null,
+      owner: null,
+      paths: [],
+      pathCoverage: "none",
+      snowball: null,
+    };
+    const markup = renderToStaticMarkup(createElement(RelationshipOverview, { summary }));
+    expect(markup).toContain("Email coverage");
+    expect(markup).toContain("1 / 2");
+    expect(markup).toContain("verified work emails");
   });
 
   it("renders task/workflow actions and partial, stale scan states", () => {

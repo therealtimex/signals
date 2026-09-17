@@ -15,6 +15,7 @@ import { normalizeChannelValue } from "@/lib/db/channel-types";
 import { deriveNameParts } from "./name-parts";
 import { EMAIL_PATTERNS, isValidEmailPattern, matchPattern, renderPattern } from "./patterns";
 import { listOrgEmailCandidates } from "@/lib/contacts/email-verification/candidates";
+import { isFreemailDomain } from "@/lib/platforms/gmail/email-domain";
 import { resolveEmailVerificationSettings } from "@/lib/settings/email-verification-settings";
 
 const ROLE_ACCOUNTS = new Set([
@@ -33,6 +34,21 @@ function confidence(matchCount: number, score: number): "high" | "medium" | "low
   if (matchCount >= 3 && score >= 0.6) return "high";
   if (matchCount >= 2 && score >= 0.4) return "medium";
   return "low";
+}
+
+function refreshProtectedEvidence(
+  existingEvidence: string | null,
+  samples: { contactId: string; address: string }[],
+): string {
+  try {
+    const parsed: unknown = JSON.parse(existingEvidence ?? "[]");
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return JSON.stringify({ ...parsed, samples });
+    }
+  } catch {
+    // Replace malformed legacy evidence with the current valid sample list.
+  }
+  return JSON.stringify(samples);
 }
 
 function orgDomainRows(orgId: string) {
@@ -104,22 +120,34 @@ export function inferOrgEmailPatterns(orgId: string) {
     ranked.push({ pattern, order, matchCount: row.matchCount, sampleCount: evidence.length, score, evidence: row.evidence });
   }
   ranked.sort((a, b) => b.score - a.score || a.order - b.order);
-  const selectedPatterns = db.select().from(orgEmailPatterns).where(
-    and(eq(orgEmailPatterns.orgId, orgId), eq(orgEmailPatterns.isSelected, true)),
-  ).all();
-  let override: (typeof selectedPatterns)[number] | undefined;
-  for (const row of selectedPatterns) {
-    if (row.source !== "inferred") {
-      override = row;
-      break;
-    }
+  const existingPatterns = db.select().from(orgEmailPatterns)
+    .where(eq(orgEmailPatterns.orgId, orgId)).all();
+  const override = existingPatterns.find((row) => row.isSelected && row.source !== "inferred");
+  const protectedPatterns = new Map<string, (typeof existingPatterns)[number]>();
+  for (const row of existingPatterns) {
+    if (row.source !== "inferred") protectedPatterns.set(row.pattern, row);
   }
+  const rankedPatterns = new Set(ranked.map((row) => row.pattern));
 
   db.transaction((tx) => {
     tx.delete(orgEmailPatterns).where(
       and(eq(orgEmailPatterns.orgId, orgId), eq(orgEmailPatterns.source, "inferred")),
     ).run();
     ranked.forEach((row, index) => {
+      const protectedPattern = protectedPatterns.get(row.pattern);
+      if (protectedPattern) {
+        tx.update(orgEmailPatterns).set({
+          rank: index + 1,
+          confidence: confidence(row.matchCount, row.score),
+          score: row.score,
+          matchCount: row.matchCount,
+          sampleCount: row.sampleCount,
+          evidence: refreshProtectedEvidence(protectedPattern.evidence, row.evidence),
+          evaluatedAt: now,
+          updatedAt: now,
+        }).where(eq(orgEmailPatterns.id, protectedPattern.id)).run();
+        return;
+      }
       tx.insert(orgEmailPatterns).values({
         id: nanoid(),
         orgId,
@@ -135,6 +163,18 @@ export function inferOrgEmailPatterns(orgId: string) {
         evaluatedAt: now,
       }).run();
     });
+    for (const protectedPattern of protectedPatterns.values()) {
+      if (rankedPatterns.has(protectedPattern.pattern)) continue;
+      tx.update(orgEmailPatterns).set({
+        confidence: "low",
+        score: 0,
+        matchCount: 0,
+        sampleCount: evidence.length,
+        evidence: refreshProtectedEvidence(protectedPattern.evidence, []),
+        evaluatedAt: now,
+        updatedAt: now,
+      }).where(eq(orgEmailPatterns.id, protectedPattern.id)).run();
+    }
   });
 
   logOrgActivity({
@@ -303,18 +343,101 @@ export function generateOrgEmailCandidates(orgId: string, options?: { contactIds
 export function getOrgEmailIntelligence(orgId: string) {
   const org = getOrgById(orgId);
   const domains = orgDomainRows(orgId);
+  const knownDomains = new Set(domains.map((row) => row.domain));
   const patterns = db.select().from(orgEmailPatterns).where(eq(orgEmailPatterns.orgId, orgId)).all();
+  const selected = patterns.find((pattern) => pattern.isSelected) ?? null;
   const candidates = listOrgEmailCandidates(orgId);
   const candidateCounts = { predicted: 0, uncertain: 0, verified: 0, invalid: 0 };
   for (const candidate of candidates) candidateCounts[candidate.status]++;
+  const mismatchDomains = new Set<string>();
+  for (const candidate of candidates) {
+    const domain = emailDomain(candidate.addressNormalized);
+    if (
+      candidate.status !== "invalid" &&
+      domain &&
+      !knownDomains.has(domain) &&
+      !isFreemailDomain(domain)
+    ) {
+      mismatchDomains.add(domain);
+    }
+  }
+  const domainMismatches = [...mismatchDomains].sort();
+  const linkedContactRows = db.select({ contactId: contactEmployments.contactId })
+    .from(contactEmployments)
+    .where(eq(contactEmployments.orgId, orgId))
+    .all();
+  const linkedContactIdSet = new Set<string>();
+  for (const row of linkedContactRows) linkedContactIdSet.add(row.contactId);
+  const linkedContactIds = [...linkedContactIdSet];
+  const verifiedContactIds = new Set<string>();
+  for (const candidate of candidates) {
+    if (
+      candidate.status === "verified" &&
+      knownDomains.has(emailDomain(candidate.addressNormalized))
+    ) {
+      verifiedContactIds.add(candidate.contactId);
+    }
+  }
+  if (linkedContactIds.length) {
+    const verifiedChannels = db.select().from(contactChannels).where(and(
+      inArray(contactChannels.contactId, linkedContactIds),
+      eq(contactChannels.channelType, "email"),
+      eq(contactChannels.isVerified, true),
+    )).all();
+    for (const channel of verifiedChannels) {
+      if (knownDomains.has(emailDomain(channel.valueNormalized))) {
+        verifiedContactIds.add(channel.contactId);
+      }
+    }
+  }
+  const verifiedAnchorCount = verifiedContactIds.size;
+  const primaryDomain = domains.find((row) => row.kind === "primary") ?? domains[0];
+  const ladder = (() => {
+    if (!org?.domain) {
+      return {
+        level: "L0" as const,
+        label: "L0 · Needs domain",
+        description: "Add a primary domain or alias before pattern work.",
+      };
+    }
+    if (verifiedAnchorCount > 0) {
+      return {
+        level: "L3" as const,
+        label: "L3 · Anchored",
+        description: `${verifiedAnchorCount} verified · pattern ${selected?.pattern ?? "not selected"}.`,
+      };
+    }
+    if (primaryDomain && (primaryDomain.mxStatus === "none" || primaryDomain.mxStatus === "error")) {
+      return {
+        level: "L1" as const,
+        label: "L1 · MX issue",
+        description: "This domain did not pass MX check; fix the alias or DNS before generating addresses.",
+      };
+    }
+    if (!selected) {
+      return {
+        level: "L1" as const,
+        label: "L1 · No pattern",
+        description: "Infer a pattern or set one manually.",
+      };
+    }
+    return {
+      level: "L2" as const,
+      label: "L2 · Predictions only",
+      description: `${candidateCounts.predicted + candidateCounts.uncertain} predicted · 0 verified anchors. Verify 1–2 addresses before trusting the rest.`,
+    };
+  })();
   return {
     canInfer: Boolean(org?.domain),
     ...(!org?.domain ? { reason: "missing_domain" as const } : {}),
     domain: org?.domain ?? null,
     domains,
+    domainMismatches,
     patterns,
-    selected: patterns.find((pattern) => pattern.isSelected) ?? null,
+    selected,
     candidates,
+    ladder,
+    verifiedAnchorCount,
     automationEligibility: resolveEmailVerificationSettings().allowPredictedInAutomation,
     candidateCounts,
     evaluatedAt: patterns.length ? Math.max(...patterns.map((pattern) => pattern.evaluatedAt)) : null,
