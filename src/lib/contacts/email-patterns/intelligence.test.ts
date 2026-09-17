@@ -64,6 +64,57 @@ describe("company email intelligence", () => {
     });
   });
 
+  it("decays a protected pattern after its verified evidence disappears", () => {
+    const org = createOrg({ name: "Decay Co", domain: "decay.example" });
+    const channels = ["Ada Lovelace", "Grace Hopper", "Alan Turing"].map((name) => {
+      const contact = createContact({ name });
+      createContactEmployment({ contactId: contact.id, orgId: org.id, source: "test" });
+      const [first, last] = name.toLowerCase().split(" ");
+      return ensureContactChannel({
+        contactId: contact.id,
+        channelType: "email",
+        value: `${first}.${last}@decay.example`,
+        isVerified: true,
+        source: "manual",
+      });
+    });
+    db.insert(orgEmailPatterns).values({
+      id: nanoid(), orgId: org.id, pattern: "{first}.{last}", rank: 1,
+      confidence: "low", score: 0, matchCount: 0, sampleCount: 0,
+      isSelected: true, source: "manual:override", evaluatedAt: 1,
+    }).run();
+
+    inferOrgEmailPatterns(org.id);
+    expect(db.select().from(orgEmailPatterns).all()[0]).toMatchObject({
+      confidence: "high",
+      matchCount: 3,
+      sampleCount: 3,
+    });
+
+    for (const channel of channels) {
+      ensureContactChannel({
+        contactId: channel.contactId,
+        channelType: "email",
+        value: channel.value,
+        isVerified: false,
+        source: channel.source,
+      });
+    }
+    inferOrgEmailPatterns(org.id);
+
+    expect(db.select().from(orgEmailPatterns).all()).toEqual([
+      expect.objectContaining({
+        pattern: "{first}.{last}",
+        source: "manual:override",
+        confidence: "low",
+        score: 0,
+        matchCount: 0,
+        sampleCount: 0,
+        evidence: "[]",
+      }),
+    ]);
+  });
+
   it("generates predictions separately from real contact channels", () => {
     const org = createOrg({ name: "Candidate Co", domain: "candidate.example" });
     const contact = createContact({ name: "Ludwig van der Berg" });
@@ -95,7 +146,12 @@ describe("company email intelligence", () => {
     db.insert(contactEmailCandidates).values({
       id: nanoid(), contactId: contact.id, orgId: org.id,
       address: "ladder@mail.ladder.example", addressNormalized: "ladder@mail.ladder.example",
-      status: "predicted", confidence: "low", source: "test",
+      status: "verified", confidence: "low", source: "test",
+    }).run();
+    db.insert(contactEmailCandidates).values({
+      id: nanoid(), contactId: contact.id, orgId: org.id,
+      address: "ladder@gmail.com", addressNormalized: "ladder@gmail.com",
+      status: "verified", confidence: "low", source: "test",
     }).run();
 
     expect(getOrgEmailIntelligence(org.id)).toMatchObject({

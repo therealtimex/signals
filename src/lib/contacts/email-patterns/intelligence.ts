@@ -15,6 +15,7 @@ import { normalizeChannelValue } from "@/lib/db/channel-types";
 import { deriveNameParts } from "./name-parts";
 import { EMAIL_PATTERNS, isValidEmailPattern, matchPattern, renderPattern } from "./patterns";
 import { listOrgEmailCandidates } from "@/lib/contacts/email-verification/candidates";
+import { isFreemailDomain } from "@/lib/platforms/gmail/email-domain";
 import { resolveEmailVerificationSettings } from "@/lib/settings/email-verification-settings";
 
 const ROLE_ACCOUNTS = new Set([
@@ -33,6 +34,21 @@ function confidence(matchCount: number, score: number): "high" | "medium" | "low
   if (matchCount >= 3 && score >= 0.6) return "high";
   if (matchCount >= 2 && score >= 0.4) return "medium";
   return "low";
+}
+
+function refreshProtectedEvidence(
+  existingEvidence: string | null,
+  samples: { contactId: string; address: string }[],
+): string {
+  try {
+    const parsed: unknown = JSON.parse(existingEvidence ?? "[]");
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return JSON.stringify({ ...parsed, samples });
+    }
+  } catch {
+    // Replace malformed legacy evidence with the current valid sample list.
+  }
+  return JSON.stringify(samples);
 }
 
 function orgDomainRows(orgId: string) {
@@ -111,6 +127,7 @@ export function inferOrgEmailPatterns(orgId: string) {
   for (const row of existingPatterns) {
     if (row.source !== "inferred") protectedPatterns.set(row.pattern, row);
   }
+  const rankedPatterns = new Set(ranked.map((row) => row.pattern));
 
   db.transaction((tx) => {
     tx.delete(orgEmailPatterns).where(
@@ -125,7 +142,7 @@ export function inferOrgEmailPatterns(orgId: string) {
           score: row.score,
           matchCount: row.matchCount,
           sampleCount: row.sampleCount,
-          evidence: JSON.stringify(row.evidence),
+          evidence: refreshProtectedEvidence(protectedPattern.evidence, row.evidence),
           evaluatedAt: now,
           updatedAt: now,
         }).where(eq(orgEmailPatterns.id, protectedPattern.id)).run();
@@ -146,6 +163,18 @@ export function inferOrgEmailPatterns(orgId: string) {
         evaluatedAt: now,
       }).run();
     });
+    for (const protectedPattern of protectedPatterns.values()) {
+      if (rankedPatterns.has(protectedPattern.pattern)) continue;
+      tx.update(orgEmailPatterns).set({
+        confidence: "low",
+        score: 0,
+        matchCount: 0,
+        sampleCount: evidence.length,
+        evidence: refreshProtectedEvidence(protectedPattern.evidence, []),
+        evaluatedAt: now,
+        updatedAt: now,
+      }).where(eq(orgEmailPatterns.id, protectedPattern.id)).run();
+    }
   });
 
   logOrgActivity({
@@ -323,7 +352,12 @@ export function getOrgEmailIntelligence(orgId: string) {
   const mismatchDomains = new Set<string>();
   for (const candidate of candidates) {
     const domain = emailDomain(candidate.addressNormalized);
-    if (candidate.status !== "invalid" && domain && !knownDomains.has(domain)) {
+    if (
+      candidate.status !== "invalid" &&
+      domain &&
+      !knownDomains.has(domain) &&
+      !isFreemailDomain(domain)
+    ) {
       mismatchDomains.add(domain);
     }
   }
@@ -337,7 +371,12 @@ export function getOrgEmailIntelligence(orgId: string) {
   const linkedContactIds = [...linkedContactIdSet];
   const verifiedContactIds = new Set<string>();
   for (const candidate of candidates) {
-    if (candidate.status === "verified") verifiedContactIds.add(candidate.contactId);
+    if (
+      candidate.status === "verified" &&
+      knownDomains.has(emailDomain(candidate.addressNormalized))
+    ) {
+      verifiedContactIds.add(candidate.contactId);
+    }
   }
   if (linkedContactIds.length) {
     const verifiedChannels = db.select().from(contactChannels).where(and(

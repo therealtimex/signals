@@ -8,6 +8,7 @@ import { createContactEmployment } from "@/lib/db/queries/contact-employments";
 import { addOrgDomainAlias, createOrg } from "@/lib/db/queries/orgs";
 import { resetCoreTables } from "@/test/db";
 import { resolveEmailVerificationSettings } from "@/lib/settings/email-verification-settings";
+import { setOrgEmailPattern } from "@/lib/contacts/email-patterns/intelligence";
 import { updateEmailCandidate } from "./candidates";
 
 function setup() {
@@ -182,5 +183,36 @@ describe("email candidate SMTP probing", () => {
         isSelected: true,
       }),
     ]);
+  });
+
+  it("preserves cited pattern evidence during verify-triggered re-inference", async () => {
+    vi.stubEnv("SIGNALS_EMAIL_REINFER_AFTER_VERIFY", "1");
+    const org = createOrg({ name: "Cited Override Co", domain: "cited.example" });
+    const contact = createContact({ name: "Robert Taylor" });
+    createContactEmployment({ contactId: contact.id, orgId: org.id, source: "test" });
+    setOrgEmailPattern(org.id, {
+      pattern: "{first}",
+      source: "agent:evidence",
+      evidenceUrl: "https://cite.example/team",
+    });
+    const id = nanoid();
+    db.insert(contactEmailCandidates).values({
+      id, contactId: contact.id, orgId: org.id,
+      address: "robert@cited.example", addressNormalized: "robert@cited.example",
+      status: "predicted", confidence: "high", source: "enrich:email_pattern",
+    }).run();
+
+    await updateEmailCandidate(id, { action: "verify" });
+
+    const pattern = db.select().from(orgEmailPatterns).where(eq(orgEmailPatterns.orgId, org.id)).get();
+    expect(pattern).toMatchObject({
+      source: "agent:evidence",
+      matchCount: 1,
+      sampleCount: 1,
+    });
+    expect(JSON.parse(pattern?.evidence ?? "{}")).toMatchObject({
+      evidenceUrl: "https://cite.example/team",
+      samples: [{ contactId: contact.id, address: "robert@cited.example" }],
+    });
   });
 });
