@@ -3,6 +3,7 @@ import {
   stopRtxBrowserSession,
   type RtxBrowserSessionEntry,
 } from "@/lib/rtx/browser-sessions";
+import { RTX_PUBLISH_SESSION_NAME } from "@/lib/publish/constants";
 import type { EnvLike } from "@/lib/rtx/env";
 import {
   DEFAULT_TERMINAL_SESSION_IDLE_WAIT_DELAYS_MS,
@@ -75,6 +76,7 @@ export async function stopRunningRtxBrowserSessions(
 
   const targets = sessions.filter((entry) => {
     if (!entry.sessionName?.trim() || !isBrowserSessionRunning(entry)) return false;
+    if (entry.sessionName.trim().toLowerCase() === RTX_PUBLISH_SESSION_NAME) return false;
     if (input.stopAllRunning) return true;
     return requestedNames.has(entry.sessionName.trim().toLowerCase());
   });

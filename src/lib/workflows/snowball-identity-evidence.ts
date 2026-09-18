@@ -1,8 +1,10 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
+import { eq } from "drizzle-orm";
 import type { Page } from "playwright";
-import { db } from "@/lib/db/client";
+import { db, type DbRunner } from "@/lib/db/client";
 import { getContactById } from "@/lib/db/queries/contacts";
 import { getWorkflowRun, listWorkflowRuns, updateWorkflowRun } from "@/lib/db/queries/workflows";
+import { workflowRuns } from "@/lib/db/schema";
 import type { WorkflowRunWithSteps } from "@/lib/db/types";
 import {
   getPlatformHomeUrl,
@@ -20,8 +22,10 @@ import { PlatformTargetError } from "@/lib/platforms/target-errors";
 import { sha256 } from "@/lib/writing/hash";
 import { isNetworkSnowballTemplateConfig } from "@/lib/workflows/network-snowball";
 import {
+  assertNetworkSnowballTargetLeaseCurrent,
   getNetworkSnowballTargetFromRunConfig,
   renewNetworkSnowballTargetLease,
+  type NetworkSnowballPreparedTarget,
 } from "@/lib/workflows/network-snowball-target";
 
 export const SNOWBALL_IDENTITY_SCOPE_TOKEN_CONFIG_KEY =
@@ -378,14 +382,14 @@ function retainedEvidenceLedger(
 function writeEvidenceLedger(
   run: Pick<WorkflowRunWithSteps, "id" | "result">,
   ledger: SnowballIdentityEvidenceRecord[],
+  runner: DbRunner = db,
 ): void {
-  const currentResult = getWorkflowRun(run.id)?.result ?? run.result;
   updateWorkflowRun(run.id, {
     result: JSON.stringify({
-      ...parseJsonObject(currentResult),
+      ...parseJsonObject(run.result),
       [SNOWBALL_IDENTITY_EVIDENCE_RESULT_KEY]: retainedEvidenceLedger(ledger),
     }),
-  });
+  }, runner);
 }
 
 /**
@@ -833,8 +837,9 @@ export async function attestSnowballLinkedInIdentity(
       "LinkedIn identity attestation requires the server-bound authenticated LinkedIn browser target for this run.",
     );
   }
+  let renewedTarget: NetworkSnowballPreparedTarget;
   try {
-    renewNetworkSnowballTargetLease(browserTarget, run.id);
+    renewedTarget = renewNetworkSnowballTargetLease(browserTarget, run.id);
   } catch (error) {
     if (!(error instanceof PlatformTargetError)) throw error;
     throw new SnowballIdentityEvidenceError(
@@ -845,7 +850,11 @@ export async function attestSnowballLinkedInIdentity(
   }
 
   const observe = options.observe ?? observeLinkedInProfile;
-  const observation = await observe(input.profileUrl, browserTarget.sessionName, expectedHandle);
+  const observation = await observe(
+    input.profileUrl,
+    renewedTarget.sessionName,
+    renewedTarget.verifiedHandle ?? renewedTarget.expectedHandle ?? expectedHandle,
+  );
   const { identity, matchedSignals } = validateObservation({
     candidateName: input.candidateName,
     candidateCompany: input.candidateCompany,
@@ -877,7 +886,7 @@ export async function attestSnowballLinkedInIdentity(
     avatarUrl,
     sessionViewerAvatarUrl,
     matchedSignals,
-    browserSessionName: browserTarget.sessionName,
+    browserSessionName: renewedTarget.sessionName,
     pageDigest: sha256(JSON.stringify({
       finalUrl: identity.platformUrl,
       visibleName: observation.visibleName,
@@ -891,15 +900,44 @@ export async function attestSnowballLinkedInIdentity(
     contactId: null,
     identityId: null,
   };
-  db.transaction(() => {
-    const currentRun = getWorkflowRun(run.id);
+  db.transaction((tx) => {
+    const currentRun = tx
+      .select()
+      .from(workflowRuns)
+      .where(eq(workflowRuns.id, run.id))
+      .get();
     if (!currentRun) {
       throw new SnowballIdentityEvidenceError(
         "run_not_found",
         "Snowball workflow run was not found while recording LinkedIn identity evidence.",
       );
     }
-    writeEvidenceLedger(currentRun, [...readEvidenceLedger(currentRun), record]);
+    const currentConfig = parseJsonObject(currentRun.config);
+    if (
+      currentRun.status !== "running" ||
+      !safeEqualHash(
+        input.snowballScopeToken,
+        currentConfig[SNOWBALL_IDENTITY_SCOPE_TOKEN_CONFIG_KEY],
+      )
+    ) {
+      throw new SnowballIdentityEvidenceError(
+        currentRun.status === "running" ? "scope_invalid" : "run_not_active",
+        currentRun.status === "running"
+          ? "Snowball identity scope token no longer matches this dispatch."
+          : "Identity attestation is only available while the Network Snowball run is active.",
+      );
+    }
+    try {
+      assertNetworkSnowballTargetLeaseCurrent(renewedTarget, run.id, tx);
+    } catch (error) {
+      if (!(error instanceof PlatformTargetError)) throw error;
+      throw new SnowballIdentityEvidenceError(
+        "browser_target_unavailable",
+        "The server-bound LinkedIn browser-session lease changed before identity evidence could be recorded.",
+        { code: error.code, ...(error.details ?? {}) },
+      );
+    }
+    writeEvidenceLedger(currentRun, [...readEvidenceLedger(currentRun), record], tx);
   });
 
   return {

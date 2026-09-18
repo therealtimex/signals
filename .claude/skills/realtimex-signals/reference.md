@@ -31,7 +31,7 @@ Invoke body: `{ "tool": "<name>", "input": { ... } }`
 | `query_analytics` | Dashboard metrics |
 | `query_workflows` | List workflow runs |
 | `list_workflow_templates` | Templates available to start |
-| `start_workflow` | Start run from `templateId` |
+| `start_workflow` | Start an RTX template run from `templateId`; optional `config`, `systemPrompt`, and `freshThread` are forwarded, while internal launcher fields remain server-owned |
 | `query_content` | List content items |
 | `get_content` | Untruncated content detail; private email/DM/inbound bodies need a durably approved launch source |
 | `create_content_draft` | Idempotently create a single-platform writing draft with ordered units |

@@ -225,7 +225,7 @@ export function buildAgentWorkflowBrief(input: {
   const tools = getTemplateToolsHint(input.template.templateType, input.config).join(", ");
   const configJson = JSON.stringify(stripInternalConfigKeys(input.config), null, 2);
   const teardownContract = isNetworkSnowballTemplateConfig(input.config)
-    ? "Call complete_workflow_run when finished. Signals releases this run's browser lease, stops only a launcher-owned browser session, leaves an explicitly selected borrowed source session running, and schedules release of the linked terminal session after the chat-linked turn finishes — do not continue working in this thread after completion."
+    ? "Call complete_workflow_run when finished. Signals releases this run's browser lease, leaves the shared `signals-publish` session and any explicitly selected borrowed source session running, stops only other eligible launcher-owned browser sessions, and schedules release of the linked terminal session after the chat-linked turn finishes — do not continue working in this thread after completion."
     : WORKFLOW_TERMINAL_TEARDOWN_AFTER_COMPLETE;
   const patrolContract = isSocialPatrolTemplateConfig(input.config)
     ? `${buildSocialPatrolBriefSection({

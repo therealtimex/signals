@@ -120,11 +120,27 @@ function readParticipantAccess(value: unknown): EventParticipantAccessConfig {
   };
 }
 
+const SERVER_OWNED_NETWORK_SNOWBALL_CONFIG_KEYS = [
+  "_resolvedSnowballSource",
+  "_snowballSourceAccess",
+  "_snowballBrowserTarget",
+  "_snowballIdentityScopeTokenHash",
+  "_snowballIdentityEvidence",
+] as const;
+
+export function stripServerOwnedNetworkSnowballConfig(
+  config: Record<string, unknown>,
+): Record<string, unknown> {
+  const next = { ...config };
+  for (const key of SERVER_OWNED_NETWORK_SNOWBALL_CONFIG_KEYS) delete next[key];
+  return next;
+}
+
 /** Sanitize untrusted launch/template config before it can be persisted or logged. */
 export function sanitizeNetworkSnowballConfigRecord(
   config: Record<string, unknown>,
 ): Record<string, unknown> {
-  const next = { ...config };
+  const next = stripServerOwnedNetworkSnowballConfig(config);
   if (next.seedType === "event_url") next.seedType = "source_url";
   if (next.seedType == null) next.seedType = "source_url";
   if (typeof next.seedValue === "string") {
@@ -144,8 +160,6 @@ export function sanitizeNetworkSnowballConfigRecord(
   for (const key of [
     "resolvedSource",
     "sourceAccessPlan",
-    "_resolvedSnowballSource",
-    "_snowballSourceAccess",
   ]) delete next[key];
   return next;
 }
@@ -318,7 +332,7 @@ export function buildNetworkSnowballBriefSection(input: {
   const browserTeardownInstruction = borrowedParticipantSessionName
     ? `    - Server-Owned Browser Teardown: Call complete_workflow_run (step 10) exactly once when finished. Signals releases this run's lease but leaves the user-selected borrowed session \`${borrowedParticipantSessionName}\` running.`
     : browserTarget
-      ? `    - Server-Owned Browser Teardown: Do not close the browser yourself. Call complete_workflow_run (step 10) exactly once when finished. Before that call returns, Signals stops the exact bound session \`${browserTarget.sessionName}\` and releases this run's lease, freeing Chromium RAM and CPU without touching unrelated sessions.`
+      ? `    - Server-Owned Browser Teardown: Do not close the browser yourself. Call complete_workflow_run (step 10) exactly once when finished. Signals releases this run's lease but conservatively leaves the shared session \`${browserTarget.sessionName}\` running so stale cleanup cannot stop a successor's browser.`
       : "    - Browser Teardown: No browser session or lease was acquired for this run. Do not create, start, stop, delete, or substitute a browser session. Call complete_workflow_run (step 10) exactly once when finished.";
   const lumaContext = input.sourcePreparation?.lumaContext
     ?? (input.publicEventSource

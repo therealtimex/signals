@@ -1,10 +1,16 @@
+import { eq } from "drizzle-orm";
+import { db, type DbRunner } from "@/lib/db/client";
+import { updateWorkflowRun } from "@/lib/db/queries/workflows";
 import {
-  getBrowserConnectionById,
-  getPlatformTargetById,
-} from "@/lib/db/queries/platform-targets";
+  browserConnections,
+  browserSessionLeases,
+  platformTargets,
+  workflowRuns,
+} from "@/lib/db/schema";
 import {
-  getSessionLeaseById,
-  renewSessionLease,
+  acquireSessionLeaseWithRunner,
+  releaseSessionLeaseWithRunner,
+  renewSessionLeaseWithRunner,
 } from "@/lib/leases/session-lease";
 import {
   prepareCurrentPlatformTarget,
@@ -14,9 +20,15 @@ import {
   PlatformTargetError,
   type PlatformTargetErrorCode,
 } from "@/lib/platforms/target-errors";
-import type { PlatformTargetPlatform } from "@/lib/platforms/target-identity";
+import {
+  normalizePlatformTargetIdentity,
+  type PlatformTargetPlatform,
+} from "@/lib/platforms/target-identity";
 import type { EnvLike } from "@/lib/rtx/env";
-import { readNetworkSnowballConfig } from "@/lib/workflows/network-snowball";
+import {
+  isNetworkSnowballTemplateConfig,
+  readNetworkSnowballConfig,
+} from "@/lib/workflows/network-snowball";
 
 export const SNOWBALL_BROWSER_TARGET_CONFIG_KEY = "_snowballBrowserTarget";
 export const SNOWBALL_BROWSER_LEASE_TTL_SECONDS = 30 * 60;
@@ -57,6 +69,14 @@ function objectValue(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
+}
+
+function parseConfig(value: string | null | undefined): Record<string, unknown> | null {
+  try {
+    return objectValue(JSON.parse(value ?? "{}"));
+  } catch {
+    return null;
+  }
 }
 
 function targetPlatform(config: Record<string, unknown>): NetworkSnowballBrowserPlatform {
@@ -192,33 +212,192 @@ export function getNetworkSnowballTargetFromRunConfig(
 export function renewNetworkSnowballTargetLease(
   target: NetworkSnowballPreparedTarget,
   workflowRunId: string,
-): { leaseId: string; expiresAt: number } {
-  const platformTarget = getPlatformTargetById(target.targetId);
+): NetworkSnowballPreparedTarget {
+  return db.transaction((tx) => {
+    const run = tx
+      .select()
+      .from(workflowRuns)
+      .where(eq(workflowRuns.id, workflowRunId))
+      .get();
+    const config = parseConfig(run?.config);
+    const storedTarget = getNetworkSnowballTargetFromRunConfig(run?.config);
+    if (
+      !run ||
+      run.status !== "running" ||
+      !config ||
+      !isNetworkSnowballTemplateConfig(config) ||
+      !storedTarget ||
+      storedTarget.targetId !== target.targetId ||
+      storedTarget.platform !== target.platform ||
+      storedTarget.sessionName !== target.sessionName
+    ) {
+      throw staleSnowballLease(target, workflowRunId);
+    }
+
+    const binding = validateSnowballTargetBinding(tx, storedTarget, workflowRunId);
+    const current = tx
+      .select()
+      .from(browserSessionLeases)
+      .where(eq(browserSessionLeases.connectionId, binding.connection.id))
+      .get();
+    const now = Math.floor(Date.now() / 1_000);
+    if (
+      !current ||
+      current.holder !== binding.expectedHolder ||
+      current.targetId !== storedTarget.targetId
+    ) {
+      if (current && current.expiresAt >= now && current.holder !== binding.expectedHolder) {
+        throw new PlatformTargetError(
+          "SESSION_LEASE_HELD",
+          `Browser session is in use by ${current.holder}`,
+          {
+            connectionId: binding.connection.id,
+            holder: current.holder,
+            targetId: current.targetId,
+            expiresAt: current.expiresAt,
+            retryAfterSeconds: Math.max(1, current.expiresAt - now + 1),
+          },
+        );
+      }
+      throw staleSnowballLease(storedTarget, workflowRunId);
+    }
+
+    const lease = current.expiresAt >= now
+      ? renewSessionLeaseWithRunner(
+          tx,
+          current.leaseId,
+          SNOWBALL_BROWSER_LEASE_TTL_SECONDS,
+        )
+      : acquireSessionLeaseWithRunner(tx, binding.connection.id, {
+          holder: binding.expectedHolder,
+          targetId: storedTarget.targetId,
+          intent: "browse",
+          ttlSeconds: SNOWBALL_BROWSER_LEASE_TTL_SECONDS,
+        });
+    const updatedTarget: NetworkSnowballPreparedTarget = {
+      ...storedTarget,
+      expectedHandle: binding.platformTarget.handle,
+      verifiedHandle: binding.verifiedHandle,
+      leaseId: lease.leaseId,
+      leaseExpiresAt: lease.expiresAt,
+    };
+    updateWorkflowRun(run.id, {
+      config: JSON.stringify({
+        ...config,
+        [SNOWBALL_BROWSER_TARGET_CONFIG_KEY]: updatedTarget,
+      }),
+    }, tx);
+    return updatedTarget;
+  });
+}
+
+function staleSnowballLease(
+  target: Pick<NetworkSnowballPreparedTarget, "leaseId" | "targetId">,
+  workflowRunId: string,
+): PlatformTargetError {
+  return new PlatformTargetError(
+    "LEASE_LOST",
+    `Lease is no longer current: ${target.leaseId}`,
+    { leaseId: target.leaseId, targetId: target.targetId, workflowRunId },
+  );
+}
+
+function targetCanBrowse(capabilities: string): boolean {
+  try {
+    const parsed = JSON.parse(capabilities);
+    return Array.isArray(parsed) && parsed.includes("browse");
+  } catch {
+    return false;
+  }
+}
+
+function validateSnowballTargetBinding(
+  runner: DbRunner,
+  target: NetworkSnowballPreparedTarget,
+  workflowRunId: string,
+) {
+  const platformTarget = runner
+    .select()
+    .from(platformTargets)
+    .where(eq(platformTargets.id, target.targetId))
+    .get();
   const connection = platformTarget
-    ? getBrowserConnectionById(platformTarget.connectionId)
+    ? runner
+        .select()
+        .from(browserConnections)
+        .where(eq(browserConnections.id, platformTarget.connectionId))
+        .get()
     : undefined;
-  const lease = getSessionLeaseById(target.leaseId);
   const expectedHolder = `${SNOWBALL_BROWSER_LEASE_HOLDER_PREFIX}${workflowRunId}`;
-  const now = Math.floor(Date.now() / 1_000);
+  const expectedIdentity = normalizePlatformTargetIdentity(
+    target.platform,
+    target.verifiedHandle ?? target.expectedHandle,
+  ).handleNormalized;
   if (
     !platformTarget ||
+    platformTarget.status !== "active" ||
     platformTarget.platform !== target.platform ||
+    !targetCanBrowse(platformTarget.capabilities) ||
+    !platformTarget.handle ||
+    !platformTarget.handleNormalized ||
+    platformTarget.handleNormalized !== expectedIdentity ||
     !connection ||
-    connection.sessionName !== target.sessionName ||
-    !lease ||
-    lease.expiresAt < now ||
-    lease.targetId !== target.targetId ||
-    lease.connectionId !== connection.id ||
-    lease.holder !== expectedHolder
+    connection.status !== "active" ||
+    connection.sessionName !== target.sessionName
   ) {
-    throw new PlatformTargetError(
-      "LEASE_LOST",
-      `Lease is no longer current: ${target.leaseId}`,
-      { leaseId: target.leaseId, targetId: target.targetId },
-    );
+    throw staleSnowballLease(target, workflowRunId);
   }
-  const renewed = renewSessionLease(target.leaseId, SNOWBALL_BROWSER_LEASE_TTL_SECONDS);
-  return { leaseId: renewed.leaseId, expiresAt: renewed.expiresAt };
+  const verifiedIdentity = normalizePlatformTargetIdentity(
+    target.platform,
+    target.verifiedHandle,
+  ).handleNormalized;
+  return {
+    platformTarget,
+    connection,
+    expectedHolder,
+    verifiedHandle:
+      verifiedIdentity === platformTarget.handleNormalized
+        ? target.verifiedHandle
+        : platformTarget.handle,
+  };
+}
+
+export function assertNetworkSnowballTargetLeaseCurrent(
+  target: NetworkSnowballPreparedTarget,
+  workflowRunId: string,
+  runner: DbRunner = db,
+): void {
+  const run = runner
+    .select()
+    .from(workflowRuns)
+    .where(eq(workflowRuns.id, workflowRunId))
+    .get();
+  const currentTarget = getNetworkSnowballTargetFromRunConfig(run?.config);
+  if (
+    !run ||
+    run.status !== "running" ||
+    !currentTarget ||
+    currentTarget.targetId !== target.targetId ||
+    currentTarget.leaseId !== target.leaseId ||
+    currentTarget.sessionName !== target.sessionName
+  ) {
+    throw staleSnowballLease(target, workflowRunId);
+  }
+  const binding = validateSnowballTargetBinding(runner, currentTarget, workflowRunId);
+  const lease = runner
+    .select()
+    .from(browserSessionLeases)
+    .where(eq(browserSessionLeases.connectionId, binding.connection.id))
+    .get();
+  if (
+    !lease ||
+    lease.leaseId !== target.leaseId ||
+    lease.holder !== binding.expectedHolder ||
+    lease.targetId !== target.targetId ||
+    lease.expiresAt < Math.floor(Date.now() / 1_000)
+  ) {
+    throw staleSnowballLease(target, workflowRunId);
+  }
 }
 
 export function releaseNetworkSnowballTarget(
@@ -240,4 +419,52 @@ export function releaseNetworkSnowballTargetFromRunConfig(
 ): NetworkSnowballLeaseRelease | null {
   const target = getNetworkSnowballTargetFromRunConfig(config);
   return target ? releaseNetworkSnowballTarget(target.leaseId) : null;
+}
+
+export function releaseNetworkSnowballTargetForRun(
+  workflowRunId: string,
+): NetworkSnowballLeaseRelease | null {
+  return db.transaction((tx) => {
+    const run = tx
+      .select({ config: workflowRuns.config })
+      .from(workflowRuns)
+      .where(eq(workflowRuns.id, workflowRunId))
+      .get();
+    const target = getNetworkSnowballTargetFromRunConfig(run?.config);
+    if (!target) return null;
+    const platformTarget = tx
+      .select()
+      .from(platformTargets)
+      .where(eq(platformTargets.id, target.targetId))
+      .get();
+    const connection = platformTarget
+      ? tx
+          .select()
+          .from(browserConnections)
+          .where(eq(browserConnections.id, platformTarget.connectionId))
+          .get()
+      : undefined;
+    const current = connection
+      ? tx
+          .select()
+          .from(browserSessionLeases)
+          .where(eq(browserSessionLeases.connectionId, connection.id))
+          .get()
+      : undefined;
+    const expectedHolder = `${SNOWBALL_BROWSER_LEASE_HOLDER_PREFIX}${workflowRunId}`;
+    if (
+      !platformTarget ||
+      platformTarget.platform !== target.platform ||
+      !connection ||
+      connection.sessionName !== target.sessionName ||
+      !current ||
+      current.leaseId !== target.leaseId ||
+      current.holder !== expectedHolder ||
+      current.targetId !== target.targetId
+    ) {
+      return { leaseId: target.leaseId, released: false, alreadyGone: true };
+    }
+    releaseSessionLeaseWithRunner(tx, current.leaseId);
+    return { leaseId: current.leaseId, released: true, alreadyGone: false };
+  });
 }

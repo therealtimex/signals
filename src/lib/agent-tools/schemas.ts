@@ -346,6 +346,8 @@ export const startWorkflowSchema = z.object({
   templateId: z.string().min(1),
   workflowType: z.enum(["search", "enrich", "prune", "agent", "nurture", "content", "sync"]).optional(),
   config: z.record(z.unknown()).optional(),
+  systemPrompt: z.string().optional(),
+  freshThread: z.boolean().optional(),
   parentWorkflowId: z.string().optional(),
   targetContactIds: z.array(z.string().min(1)).optional(),
 });

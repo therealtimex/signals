@@ -161,6 +161,10 @@ describe("buildNetworkSnowballTemplateConfig & buildNetworkSnowballRunConfig", (
       resolvedSource: { provider: "luma", capabilities: { signedInRead: true } },
       sourceAccessPlan: { mode: "public_and_signed_in" },
       _resolvedSnowballSource: { provider: "luma" },
+      _snowballSourceAccess: { mode: "public_only" },
+      _snowballBrowserTarget: browserTarget,
+      _snowballIdentityScopeTokenHash: "caller-owned",
+      _snowballIdentityEvidence: [{ id: "forged" }],
     });
     expect(sanitized).toMatchObject({
       seedType: "source_url",
@@ -169,6 +173,10 @@ describe("buildNetworkSnowballTemplateConfig & buildNetworkSnowballRunConfig", (
     expect(sanitized).not.toHaveProperty("resolvedSource");
     expect(sanitized).not.toHaveProperty("sourceAccessPlan");
     expect(sanitized).not.toHaveProperty("_resolvedSnowballSource");
+    expect(sanitized).not.toHaveProperty("_snowballSourceAccess");
+    expect(sanitized).not.toHaveProperty("_snowballBrowserTarget");
+    expect(sanitized).not.toHaveProperty("_snowballIdentityScopeTokenHash");
+    expect(sanitized).not.toHaveProperty("_snowballIdentityEvidence");
   });
 
   it("drops unsafe source URLs instead of exposing them to the agent brief", () => {
@@ -257,7 +265,7 @@ describe("buildNetworkSnowballBriefSection", () => {
     expect(brief).toContain("Never read document.cookie");
     expect(brief).toContain("Never inspect or edit the Signals source tree");
     expect(brief).toContain("Server-Owned Browser Teardown");
-    expect(brief).toContain("stops the exact bound session `signals-publish`");
+    expect(brief).toContain("leaves the shared session `signals-publish` running");
     expect(brief).toContain("releases this run's lease");
     expect(brief).toContain(
       "schedules release of this workflow's linked terminal session after the chat-linked turn finishes"

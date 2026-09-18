@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { invokeAgentTool } from "@/lib/agent-tools/invoke";
 import {
   countContacts,
@@ -24,7 +24,11 @@ import {
   ensureBrowserConnection,
   registerPlatformTarget,
 } from "@/lib/db/queries/platform-targets";
-import { acquireSessionLease, releaseSessionLease } from "@/lib/leases/session-lease";
+import {
+  acquireSessionLease,
+  getSessionLease,
+  releaseSessionLease,
+} from "@/lib/leases/session-lease";
 import { SNOWBALL_BROWSER_TARGET_CONFIG_KEY } from "@/lib/workflows/network-snowball-target";
 import {
   listSnowballCandidates,
@@ -83,7 +87,15 @@ function createSnowballRun() {
       },
     }),
   });
-  return { template, run: getWorkflowRun(run.id)!, scopeToken: scope.token, sessionName };
+  return {
+    template,
+    run: getWorkflowRun(run.id)!,
+    scopeToken: scope.token,
+    sessionName,
+    connection,
+    target,
+    lease,
+  };
 }
 
 const VIEWER_NAV_THUMB =
@@ -135,6 +147,10 @@ async function attest(
 describe("Snowball LinkedIn identity evidence", () => {
   beforeEach(() => {
     resetCoreTables();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("derives the persisted identity from the final browser URL before auto-commit", async () => {
@@ -775,5 +791,143 @@ describe("Snowball LinkedIn identity evidence", () => {
       { observe: observer },
     )).rejects.toMatchObject({ reason: "browser_target_unavailable" });
     expect(observer).not.toHaveBeenCalled();
+  });
+
+  it("recovers an expired same-owner lease and persists the replacement binding", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-19T12:00:00Z"));
+    const { run, scopeToken, lease } = createSnowballRun();
+    vi.advanceTimersByTime(1_801_000);
+
+    await attest(scopeToken);
+
+    const recovered = JSON.parse(getWorkflowRun(run.id)?.config ?? "{}")[
+      SNOWBALL_BROWSER_TARGET_CONFIG_KEY
+    ] as { leaseId: string; leaseExpiresAt: number };
+    expect(recovered.leaseId).not.toBe(lease.leaseId);
+    expect(recovered.leaseExpiresAt).toBeGreaterThan(Math.floor(Date.now() / 1_000));
+    await expect(attest(scopeToken)).resolves.toMatchObject({
+      workflowRunId: run.id,
+      platform: "linkedin",
+    });
+  });
+
+  it("renews the existing lease at the exact expiry boundary", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-19T12:00:00Z"));
+    const { run, scopeToken, lease } = createSnowballRun();
+    vi.advanceTimersByTime(1_800_000);
+
+    await attest(scopeToken);
+
+    const renewed = JSON.parse(getWorkflowRun(run.id)?.config ?? "{}")[
+      SNOWBALL_BROWSER_TARGET_CONFIG_KEY
+    ] as { leaseId: string; leaseExpiresAt: number };
+    expect(renewed.leaseId).toBe(lease.leaseId);
+    expect(renewed.leaseExpiresAt).toBe(Math.floor(Date.now() / 1_000) + 1_800);
+  });
+
+  it("adopts a current same-owner replacement but never steals another holder", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-19T12:00:00Z"));
+    const { run, scopeToken, connection, target, lease } = createSnowballRun();
+    vi.advanceTimersByTime(1_801_000);
+    const replacement = acquireSessionLease(connection.id, {
+      holder: `network-snowball:${run.id}`,
+      targetId: target.id,
+      intent: "browse",
+      ttlSeconds: 1_800,
+    });
+    expect(replacement.leaseId).not.toBe(lease.leaseId);
+
+    await attest(scopeToken);
+    expect(
+      (JSON.parse(getWorkflowRun(run.id)?.config ?? "{}")[
+        SNOWBALL_BROWSER_TARGET_CONFIG_KEY
+      ] as { leaseId: string }).leaseId,
+    ).toBe(replacement.leaseId);
+
+    vi.advanceTimersByTime(1_801_000);
+    const competing = acquireSessionLease(connection.id, {
+      holder: "network-snowball:another-run",
+      targetId: target.id,
+      intent: "browse",
+      ttlSeconds: 1_800,
+    });
+    const observer = vi.fn(observe());
+    await expect(attestSnowballLinkedInIdentity(
+      {
+        snowballScopeToken: scopeToken,
+        candidateName: "Jane Doe",
+        candidateCompany: "Acme Inc.",
+        candidateTitle: "Founder",
+        profileUrl: "https://www.linkedin.com/in/jane-doe/",
+      },
+      { observe: observer },
+    )).rejects.toMatchObject({
+      reason: "browser_target_unavailable",
+      details: expect.objectContaining({ holder: "network-snowball:another-run" }),
+    });
+    expect(observer).not.toHaveBeenCalled();
+    expect(getSessionLease(connection.id)?.leaseId).toBe(competing.leaseId);
+  });
+
+  it("records no evidence when the run completes during browser observation", async () => {
+    const { run, scopeToken } = createSnowballRun();
+    const observer = vi.fn(async () => {
+      updateWorkflowRun(run.id, { status: "completed" });
+      return observe()();
+    });
+
+    await expect(attestSnowballLinkedInIdentity(
+      {
+        snowballScopeToken: scopeToken,
+        candidateName: "Jane Doe",
+        candidateCompany: "Acme Inc.",
+        candidateTitle: "Founder",
+        profileUrl: "https://www.linkedin.com/in/jane-doe/",
+      },
+      { observe: observer },
+    )).rejects.toMatchObject({ reason: "run_not_active" });
+    expect(JSON.parse(getWorkflowRun(run.id)?.result ?? "{}"))
+      .not.toHaveProperty(SNOWBALL_IDENTITY_EVIDENCE_RESULT_KEY);
+  });
+
+  it("records no evidence when ownership changes during browser observation", async () => {
+    const { run, scopeToken, connection, target, lease } = createSnowballRun();
+    const observer = vi.fn(async () => {
+      releaseSessionLease(lease.leaseId);
+      acquireSessionLease(connection.id, {
+        holder: "network-snowball:successor",
+        targetId: target.id,
+        intent: "browse",
+        ttlSeconds: 1_800,
+      });
+      return observe()();
+    });
+
+    await expect(attestSnowballLinkedInIdentity(
+      {
+        snowballScopeToken: scopeToken,
+        candidateName: "Jane Doe",
+        candidateCompany: "Acme Inc.",
+        candidateTitle: "Founder",
+        profileUrl: "https://www.linkedin.com/in/jane-doe/",
+      },
+      { observe: observer },
+    )).rejects.toMatchObject({ reason: "browser_target_unavailable" });
+    expect(JSON.parse(getWorkflowRun(run.id)?.result ?? "{}"))
+      .not.toHaveProperty(SNOWBALL_IDENTITY_EVIDENCE_RESULT_KEY);
+  });
+
+  it("preserves evidence from concurrent attestations", async () => {
+    const { run, scopeToken } = createSnowballRun();
+    await Promise.all([attest(scopeToken), attest(scopeToken)]);
+
+    expect(
+      JSON.parse(getWorkflowRun(run.id)?.result ?? "{}")[
+        SNOWBALL_IDENTITY_EVIDENCE_RESULT_KEY
+      ],
+    ).toHaveLength(2);
   });
 });

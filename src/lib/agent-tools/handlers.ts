@@ -127,7 +127,7 @@ import { removeServerOwnedEventResult } from "@/lib/workflows/event-sources/serv
 import { removeServerOwnedSnowballSourceResult } from "@/lib/workflows/snowball-sources/service";
 import {
   getNetworkSnowballTargetFromRunConfig,
-  releaseNetworkSnowballTargetFromRunConfig,
+  releaseNetworkSnowballTargetForRun,
 } from "@/lib/workflows/network-snowball-target";
 
 const DEFAULT_PAGE_SIZE = 20;
@@ -1252,6 +1252,9 @@ export async function handleStartWorkflow(input: z.infer<typeof startWorkflowSch
     try {
       const rtxResult = await runTemplateViaRtx({
         templateId: input.templateId,
+        config: input.config,
+        systemPrompt: input.systemPrompt,
+        freshThread: input.freshThread,
       });
       if (rtxResult.success) {
         return {
@@ -1271,6 +1274,7 @@ export async function handleStartWorkflow(input: z.infer<typeof startWorkflowSch
   const run = startAgentWorkflow({
     templateId: input.templateId,
     workflowType: (input.workflowType as WorkflowType) ?? "agent",
+    config: input.config,
   });
 
   return {
@@ -1674,7 +1678,7 @@ export async function handleCompleteWorkflowRun(input: z.infer<typeof completeWo
               sessionNames: [snowballBrowserTarget.sessionName],
             });
       } finally {
-        leaseRelease = releaseNetworkSnowballTargetFromRunConfig(run.config);
+        leaseRelease = releaseNetworkSnowballTargetForRun(run.id);
       }
     } else {
       browserSessionTeardown = { stopped: [], failed: [] };
