@@ -127,7 +127,7 @@ import { removeServerOwnedEventResult } from "@/lib/workflows/event-sources/serv
 import { removeServerOwnedSnowballSourceResult } from "@/lib/workflows/snowball-sources/service";
 import {
   getNetworkSnowballTargetFromRunConfig,
-  releaseNetworkSnowballTargetFromRunConfig,
+  releaseNetworkSnowballTargetForRun,
 } from "@/lib/workflows/network-snowball-target";
 
 const DEFAULT_PAGE_SIZE = 20;
@@ -1674,7 +1674,7 @@ export async function handleCompleteWorkflowRun(input: z.infer<typeof completeWo
               sessionNames: [snowballBrowserTarget.sessionName],
             });
       } finally {
-        leaseRelease = releaseNetworkSnowballTargetFromRunConfig(run.config);
+        leaseRelease = releaseNetworkSnowballTargetForRun(run.id);
       }
     } else {
       browserSessionTeardown = { stopped: [], failed: [] };

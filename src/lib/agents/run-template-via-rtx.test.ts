@@ -10,7 +10,7 @@ const researchTargetMocks = vi.hoisted(() => ({
 
 const snowballTargetMocks = vi.hoisted(() => ({
   prepareNetworkSnowballTarget: vi.fn(),
-  releaseNetworkSnowballTarget: vi.fn(),
+  releaseNetworkSnowballTargetForRun: vi.fn(),
 }));
 
 vi.mock("@/lib/workflows/contact-web-research-target", async (importOriginal) => {
@@ -95,7 +95,7 @@ describe("runTemplateViaRtx health preflight", () => {
       ok: true,
       target: preparedSnowballTarget,
     });
-    snowballTargetMocks.releaseNetworkSnowballTarget.mockReset().mockReturnValue({
+    snowballTargetMocks.releaseNetworkSnowballTargetForRun.mockReset().mockReturnValue({
       leaseId: "lease-snowball",
       released: true,
       alreadyGone: false,
@@ -463,7 +463,9 @@ describe("runTemplateViaRtx health preflight", () => {
     const result = await runTemplateViaRtx(
       {
         templateId: template.id,
-        config: { networkSnowball: false },
+        config: {
+          networkSnowball: false,
+        },
         signalsBaseUrl: "http://127.0.0.1:3099",
       },
       {
@@ -493,12 +495,11 @@ describe("runTemplateViaRtx health preflight", () => {
     const token = /snowballScopeToken: "([^"]+)"/.exec(brief)?.[1];
     expect(token).toBeTruthy();
     expect(hashAtDispatch).toBe(sha256(token!));
-    expect(JSON.parse(getWorkflowRun(result.workflowRunId)?.config ?? "{}")[
-      SNOWBALL_IDENTITY_SCOPE_TOKEN_CONFIG_KEY
-    ]).toBe(sha256(token!));
-    expect(JSON.parse(getWorkflowRun(result.workflowRunId)?.config ?? "{}")[
-      SNOWBALL_BROWSER_TARGET_CONFIG_KEY
-    ]).toEqual(preparedSnowballTarget);
+    const storedConfig = JSON.parse(
+      getWorkflowRun(result.workflowRunId)?.config ?? "{}",
+    ) as Record<string, unknown>;
+    expect(storedConfig[SNOWBALL_IDENTITY_SCOPE_TOKEN_CONFIG_KEY]).toBe(sha256(token!));
+    expect(storedConfig[SNOWBALL_BROWSER_TARGET_CONFIG_KEY]).toEqual(preparedSnowballTarget);
     expect(snowballTargetMocks.prepareNetworkSnowballTarget).toHaveBeenCalledWith(
       expect.objectContaining({ workflowRunId: result.workflowRunId }),
       expect.anything(),
@@ -508,10 +509,10 @@ describe("runTemplateViaRtx health preflight", () => {
     expect(brief).toContain("authenticated as linkedin identity `/in/session-owner`");
     expect(brief).toContain("Never read document.cookie");
     expect(brief).toContain("Never inspect or edit the Signals source tree");
-    expect(brief).toContain("stops the exact bound session `signals-publish`");
+    expect(brief).toContain("leaves the shared session `signals-publish` running");
     expect(brief).not.toContain(SNOWBALL_IDENTITY_SCOPE_TOKEN_CONFIG_KEY);
     expect(brief).not.toContain(SNOWBALL_BROWSER_TARGET_CONFIG_KEY);
-    expect(snowballTargetMocks.releaseNetworkSnowballTarget).not.toHaveBeenCalled();
+    expect(snowballTargetMocks.releaseNetworkSnowballTargetForRun).not.toHaveBeenCalled();
   });
 
   it("dispatches a sanitized public Luma run after a social-target preflight failure", async () => {
@@ -858,16 +859,16 @@ describe("runTemplateViaRtx health preflight", () => {
     );
 
     expect(result.success).toBe(false);
-    expect(snowballTargetMocks.releaseNetworkSnowballTarget).toHaveBeenCalledOnce();
-    expect(snowballTargetMocks.releaseNetworkSnowballTarget).toHaveBeenCalledWith(
-      "lease-snowball",
+    if (result.success || !result.workflowRunId) throw new Error("expected rejected dispatch");
+    expect(snowballTargetMocks.releaseNetworkSnowballTargetForRun).toHaveBeenCalledOnce();
+    expect(snowballTargetMocks.releaseNetworkSnowballTargetForRun).toHaveBeenCalledWith(
+      result.workflowRunId,
     );
     expect(stopSpy).toHaveBeenCalledWith(
       { sessionNames: [preparedSnowballTarget.sessionName] },
       expect.anything(),
       fetchImpl,
     );
-    if (result.success || !result.workflowRunId) throw new Error("expected rejected dispatch");
     const rejectedRun = getWorkflowRun(result.workflowRunId);
     expect(JSON.parse(rejectedRun?.config ?? "{}"))
       .not.toHaveProperty(SNOWBALL_IDENTITY_SCOPE_TOKEN_CONFIG_KEY);

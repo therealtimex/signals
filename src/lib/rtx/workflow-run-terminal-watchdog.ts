@@ -16,6 +16,7 @@ import { requestWorkflowTerminalCleanup } from "@/lib/rtx/workflow-terminal-reco
 import { readWorkflowTerminalLifecycle } from "@/lib/rtx/workflow-terminal-lifecycle";
 import { postWorkflowCompletionThreadMessage } from "@/lib/rtx/workflow-completion-thread";
 import { releaseContactWebResearchTargetFromRunConfig } from "@/lib/workflows/contact-web-research-target";
+import { releaseNetworkSnowballTargetForRun } from "@/lib/workflows/network-snowball-target";
 
 export const DEFAULT_WORKFLOW_TERMINAL_RUN_TIMEOUT_MS = 4 * 60 * 60 * 1000;
 export const WORKFLOW_TERMINAL_RUN_TIMEOUT_ENV = "WORKFLOW_TERMINAL_RUN_TIMEOUT_MS";
@@ -92,6 +93,7 @@ export async function releaseTimedOutWorkflowTerminalRun(
     }, env, fetchImpl),
   ]);
   releaseContactWebResearchTargetFromRunConfig(run.config);
+  releaseNetworkSnowballTargetForRun(run.id);
 
   const teardownNote = formatDeferredTerminalTeardownNote({
     terminal: terminalSessionTeardown,

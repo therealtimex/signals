@@ -26,14 +26,14 @@ describe("stopRunningRtxBrowserSessions", () => {
     await expect(
       stopRunningRtxBrowserSessions({ stopAllRunning: true }, { RTX_APP_ID: "app-1" })
     ).resolves.toEqual({
-      stopped: ["network-snowball", "signals-publish"],
+      stopped: ["network-snowball"],
       failed: [],
     });
 
-    expect(stopSpy).toHaveBeenCalledTimes(2);
+    expect(stopSpy).toHaveBeenCalledOnce();
   });
 
-  it("stops only requested running sessions", async () => {
+  it("retains the shared publish session even when explicitly requested", async () => {
     vi.spyOn(browserSessions, "listRtxBrowserSessions").mockResolvedValue([
       { sessionName: "network-snowball", running: true },
       { sessionName: "signals-publish", running: true },
@@ -48,12 +48,11 @@ describe("stopRunningRtxBrowserSessions", () => {
         { RTX_APP_ID: "app-1" }
       )
     ).resolves.toEqual({
-      stopped: ["signals-publish"],
+      stopped: [],
       failed: [],
     });
 
-    expect(stopSpy).toHaveBeenCalledOnce();
-    expect(stopSpy).toHaveBeenCalledWith("signals-publish", { RTX_APP_ID: "app-1" }, fetch);
+    expect(stopSpy).not.toHaveBeenCalled();
   });
 });
 

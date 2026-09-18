@@ -94,7 +94,7 @@ import {
 import {
   SNOWBALL_BROWSER_TARGET_CONFIG_KEY,
   prepareNetworkSnowballTarget,
-  releaseNetworkSnowballTarget,
+  releaseNetworkSnowballTargetForRun,
   type NetworkSnowballPreparedTarget,
 } from "@/lib/workflows/network-snowball-target";
 import {
@@ -489,7 +489,7 @@ export async function runTemplateViaRtx(
     preparedLeaseId = null;
     preparedLeaseOwner = null;
     const released = owner === "network_snowball"
-      ? releaseNetworkSnowballTarget(leaseId)
+      ? releaseNetworkSnowballTargetForRun(run.id)
       : releaseContactWebResearchTarget(leaseId);
     if (browserError) throw browserError;
     return released;

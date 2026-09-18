@@ -28,6 +28,10 @@ import {
   acquireSessionLease,
   getSessionLeaseById,
 } from "@/lib/leases/session-lease";
+import {
+  SNOWBALL_BROWSER_TARGET_CONFIG_KEY,
+} from "@/lib/workflows/network-snowball-target";
+import { buildNetworkSnowballTemplateConfig } from "@/lib/workflows/network-snowball";
 
 describe("workflow-run terminal watchdog", () => {
   beforeEach(() => {
@@ -326,5 +330,68 @@ describe("workflow-run terminal watchdog", () => {
       released: true,
     });
     expect(getSessionLeaseById(lease.leaseId)).toBeUndefined();
+  });
+
+  it("releases a timed-out Network Snowball lease without stopping signals-publish", async () => {
+    const connection = ensureBrowserConnection({ sessionName: "signals-publish" });
+    const target = registerPlatformTarget({
+      connectionId: connection.id,
+      platform: "linkedin",
+      kind: "profile",
+      name: "/in/current",
+      handle: "/in/current",
+      capabilities: ["browse", "publish"],
+      source: "test",
+    });
+    const run = createWorkflowRun({
+      workflowType: "search",
+      status: "running",
+      trigger: "template",
+      startedAt: Math.floor(Date.now() / 1000) - 8 * 60 * 60,
+      config: JSON.stringify({
+        ...buildNetworkSnowballTemplateConfig(),
+        rtxRuntimeSessionId: "cli-agent:snowball-timeout",
+      }),
+    });
+    const lease = acquireSessionLease(connection.id, {
+      holder: `network-snowball:${run.id}`,
+      targetId: target.id,
+      intent: "browse",
+      ttlSeconds: 1_800,
+    });
+    updateWorkflowRun(run.id, {
+      config: JSON.stringify({
+        ...buildNetworkSnowballTemplateConfig(),
+        rtxRuntimeSessionId: "cli-agent:snowball-timeout",
+        [SNOWBALL_BROWSER_TARGET_CONFIG_KEY]: {
+          targetId: target.id,
+          platform: "linkedin",
+          source: "session",
+          sessionName: "signals-publish",
+          startUrl: "https://www.linkedin.com/in/current",
+          expectedHandle: "/in/current",
+          verifiedHandle: "/in/current",
+          leaseId: lease.leaseId,
+          leaseExpiresAt: lease.expiresAt,
+          preparedAt: Math.floor(Date.now() / 1000),
+        },
+      }),
+    });
+    const stopSpy = vi
+      .spyOn(resourceTeardown, "stopRunningRtxBrowserSessions")
+      .mockResolvedValue({ stopped: [], failed: [] });
+    vi.spyOn(workflowCompletionThread, "postWorkflowCompletionThreadMessage").mockResolvedValue({
+      posted: true,
+    });
+
+    await expect(releaseTimedOutWorkflowTerminalRun(run.id)).resolves.toMatchObject({
+      released: true,
+    });
+    expect(getSessionLeaseById(lease.leaseId)).toBeUndefined();
+    expect(stopSpy).toHaveBeenCalledWith(
+      { stopAllRunning: true },
+      expect.anything(),
+      expect.anything(),
+    );
   });
 });

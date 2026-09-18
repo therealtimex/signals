@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const platformTargetServiceMocks = vi.hoisted(() => ({
   prepareCurrentPlatformTarget: vi.fn(),
@@ -10,9 +10,21 @@ vi.mock("@/lib/platforms/platform-target-service", () => platformTargetServiceMo
 import {
   prepareNetworkSnowballTarget,
   releaseNetworkSnowballTarget,
+  releaseNetworkSnowballTargetForRun,
+  SNOWBALL_BROWSER_TARGET_CONFIG_KEY,
 } from "@/lib/workflows/network-snowball-target";
 import { PlatformTargetError } from "@/lib/platforms/target-errors";
 import { resetCoreTables } from "@/test/db";
+import {
+  ensureBrowserConnection,
+  registerPlatformTarget,
+} from "@/lib/db/queries/platform-targets";
+import { createWorkflowRun, updateWorkflowRun } from "@/lib/db/queries/workflows";
+import {
+  acquireSessionLease,
+  getSessionLease,
+} from "@/lib/leases/session-lease";
+import { buildNetworkSnowballTemplateConfig } from "@/lib/workflows/network-snowball";
 
 function prepared(platform: "linkedin" | "x") {
   const handle = platform === "linkedin" ? "/in/operator" : "@operator";
@@ -37,6 +49,10 @@ describe("Network Snowball browser target", () => {
   beforeEach(() => {
     resetCoreTables();
     vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("binds all-platform runs to the authenticated LinkedIn session", async () => {
@@ -111,5 +127,113 @@ describe("Network Snowball browser target", () => {
       released: false,
       alreadyGone: true,
     });
+  });
+
+  it("releases only the latest lease still owned by the run", () => {
+    const connection = ensureBrowserConnection({ sessionName: "signals-publish" });
+    const target = registerPlatformTarget({
+      connectionId: connection.id,
+      platform: "linkedin",
+      kind: "profile",
+      name: "/in/operator",
+      handle: "/in/operator",
+      capabilities: ["browse", "publish"],
+      source: "test",
+    });
+    const run = createWorkflowRun({
+      workflowType: "search",
+      status: "running",
+      trigger: "template",
+      config: JSON.stringify(buildNetworkSnowballTemplateConfig()),
+    });
+    const lease = acquireSessionLease(connection.id, {
+      holder: `network-snowball:${run.id}`,
+      targetId: target.id,
+      intent: "browse",
+      ttlSeconds: 1_800,
+    });
+    const config = JSON.stringify({
+      ...buildNetworkSnowballTemplateConfig(),
+      [SNOWBALL_BROWSER_TARGET_CONFIG_KEY]: {
+        targetId: target.id,
+        platform: "linkedin",
+        source: "session",
+        sessionName: connection.sessionName,
+        startUrl: "https://www.linkedin.com/in/operator",
+        expectedHandle: "/in/operator",
+        verifiedHandle: "/in/operator",
+        leaseId: lease.leaseId,
+        leaseExpiresAt: lease.expiresAt,
+        preparedAt: Math.floor(Date.now() / 1_000),
+      },
+    });
+    updateWorkflowRun(run.id, { config });
+
+    expect(releaseNetworkSnowballTargetForRun(run.id)).toEqual({
+      leaseId: lease.leaseId,
+      released: true,
+      alreadyGone: false,
+    });
+    expect(releaseNetworkSnowballTargetForRun(run.id)).toEqual({
+      leaseId: lease.leaseId,
+      released: false,
+      alreadyGone: true,
+    });
+  });
+
+  it("does not release a successor lease after the stored binding expires", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-19T12:00:00Z"));
+    const connection = ensureBrowserConnection({ sessionName: "signals-publish" });
+    const target = registerPlatformTarget({
+      connectionId: connection.id,
+      platform: "linkedin",
+      kind: "profile",
+      name: "/in/operator",
+      handle: "/in/operator",
+      capabilities: ["browse", "publish"],
+      source: "test",
+    });
+    const run = createWorkflowRun({
+      workflowType: "search",
+      status: "running",
+      trigger: "template",
+      config: JSON.stringify(buildNetworkSnowballTemplateConfig()),
+    });
+    const lease = acquireSessionLease(connection.id, {
+      holder: `network-snowball:${run.id}`,
+      targetId: target.id,
+      intent: "browse",
+      ttlSeconds: 30,
+    });
+    const config = JSON.stringify({
+      ...buildNetworkSnowballTemplateConfig(),
+      [SNOWBALL_BROWSER_TARGET_CONFIG_KEY]: {
+        targetId: target.id,
+        platform: "linkedin",
+        source: "session",
+        sessionName: connection.sessionName,
+        startUrl: "https://www.linkedin.com/in/operator",
+        expectedHandle: "/in/operator",
+        verifiedHandle: "/in/operator",
+        leaseId: lease.leaseId,
+        leaseExpiresAt: lease.expiresAt,
+        preparedAt: Math.floor(Date.now() / 1_000),
+      },
+    });
+    updateWorkflowRun(run.id, { config });
+    vi.advanceTimersByTime(31_000);
+    const successor = acquireSessionLease(connection.id, {
+      holder: "network-snowball:successor",
+      targetId: target.id,
+      intent: "browse",
+      ttlSeconds: 1_800,
+    });
+
+    expect(releaseNetworkSnowballTargetForRun(run.id)).toMatchObject({
+      released: false,
+      alreadyGone: true,
+    });
+    expect(getSessionLease(connection.id)?.leaseId).toBe(successor.leaseId);
   });
 });

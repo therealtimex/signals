@@ -257,7 +257,7 @@ describe("buildNetworkSnowballBriefSection", () => {
     expect(brief).toContain("Never read document.cookie");
     expect(brief).toContain("Never inspect or edit the Signals source tree");
     expect(brief).toContain("Server-Owned Browser Teardown");
-    expect(brief).toContain("stops the exact bound session `signals-publish`");
+    expect(brief).toContain("leaves the shared session `signals-publish` running");
     expect(brief).toContain("releases this run's lease");
     expect(brief).toContain(
       "schedules release of this workflow's linked terminal session after the chat-linked turn finishes"
