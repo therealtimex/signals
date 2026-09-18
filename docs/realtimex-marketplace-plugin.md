@@ -16,12 +16,12 @@ Package and distribute Signals through the **RealtimeX marketplace** — not pub
 Plugin id: `com.realtimex.signals`  
 Local app id: `47e45f71-3279-42f5-8e95-731de01b6eae`
 
-Version 0.2.18 keeps multi-paragraph X replies intact: compose injects the full draft with one CDP
-`Input.insertText` pass, fails closed when EditorState disagrees with the DOM, and targets the reply
-dialog when it covers the inline box. Standalone installs ship the instrumentation hook so boot
-backfills and template seeding run. Network Snowball restores LinkedIn seed scouting, owns calendar
-dispatch, quarantines rejected candidates, and no longer binds the session viewer avatar. Scheduled
-Workflows UI is retired. Next.js is 16.3.4. `signals-writing` stays at 1.1.0.
+Version 0.2.19 expands Network Snowball from event-specific seeds to public URL sources, adds Luma
+ingest and Hop 0 graph anchors, graduates verified candidates, and makes evidence acceptance,
+terminal teardown, launch configuration, and browser-lease recovery safe under concurrent runs.
+The dashboard now exposes consistent contact totals and actionable pending work, while email
+enrichment gains an evidence-backed intelligence ladder. QA Local Apps report and wait for required
+RealtimeX permissions. `signals-writing` stays at 1.1.0.
 
 ## Build
 
