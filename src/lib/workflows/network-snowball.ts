@@ -120,11 +120,27 @@ function readParticipantAccess(value: unknown): EventParticipantAccessConfig {
   };
 }
 
+const SERVER_OWNED_NETWORK_SNOWBALL_CONFIG_KEYS = [
+  "_resolvedSnowballSource",
+  "_snowballSourceAccess",
+  "_snowballBrowserTarget",
+  "_snowballIdentityScopeTokenHash",
+  "_snowballIdentityEvidence",
+] as const;
+
+export function stripServerOwnedNetworkSnowballConfig(
+  config: Record<string, unknown>,
+): Record<string, unknown> {
+  const next = { ...config };
+  for (const key of SERVER_OWNED_NETWORK_SNOWBALL_CONFIG_KEYS) delete next[key];
+  return next;
+}
+
 /** Sanitize untrusted launch/template config before it can be persisted or logged. */
 export function sanitizeNetworkSnowballConfigRecord(
   config: Record<string, unknown>,
 ): Record<string, unknown> {
-  const next = { ...config };
+  const next = stripServerOwnedNetworkSnowballConfig(config);
   if (next.seedType === "event_url") next.seedType = "source_url";
   if (next.seedType == null) next.seedType = "source_url";
   if (typeof next.seedValue === "string") {
@@ -144,11 +160,6 @@ export function sanitizeNetworkSnowballConfigRecord(
   for (const key of [
     "resolvedSource",
     "sourceAccessPlan",
-    "_resolvedSnowballSource",
-    "_snowballSourceAccess",
-    "_snowballBrowserTarget",
-    "_snowballIdentityScopeTokenHash",
-    "_snowballIdentityEvidence",
   ]) delete next[key];
   return next;
 }

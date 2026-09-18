@@ -78,6 +78,7 @@ import {
   isNetworkSnowballTemplateConfig,
   readNetworkSnowballConfig,
   sanitizeNetworkSnowballConfigRecord,
+  stripServerOwnedNetworkSnowballConfig,
   type NetworkSnowballBrowserFallback,
 } from "@/lib/workflows/network-snowball";
 import type { SnowballSourcePreparation } from "@/lib/workflows/snowball-sources/types";
@@ -282,6 +283,7 @@ export async function runTemplateViaRtx(
   let mergedConfig = stripWorkflowTerminalLifecycle(
     mergeRunConfig(template, input.config),
   );
+  mergedConfig = stripServerOwnedNetworkSnowballConfig(mergedConfig);
   // The approval gate is capability-derived and server-owned. A caller may select a target and
   // request approval, but it cannot submit a gate that widens the surface policy. Workflow kind
   // and writing composition are structural template declarations too: determine them from the
@@ -294,7 +296,9 @@ export async function runTemplateViaRtx(
       [WRITING_INTENT_CONFIG_KEY]: storedTemplateConfig[WRITING_INTENT_CONFIG_KEY],
     };
   }
-  if (isNetworkSnowball) {
+  if (!isNetworkSnowball) {
+    delete mergedConfig[NETWORK_SNOWBALL_CONFIG_KEY];
+  } else {
     const rawSourceSeed = typeof mergedConfig.seedValue === "string"
       ? mergedConfig.seedValue.trim()
       : "";

@@ -1,10 +1,10 @@
 /** Shared teardown copy for workflow and orchestrator agent briefs. */
 
 export const WORKFLOW_TERMINAL_TEARDOWN_AFTER_COMPLETE =
-  "Call complete_workflow_run when finished. Signals stops running browser sessions immediately and schedules release of the linked terminal session after the chat-linked turn finishes — do not continue working in this thread after completion.";
+  "Call complete_workflow_run when finished. Signals stops eligible running browser sessions but leaves the shared `signals-publish` session running, then schedules release of the linked terminal session after the chat-linked turn finishes — do not continue working in this thread after completion.";
 
 export const PUBLISH_TERMINAL_TEARDOWN_AFTER_COMPLETE =
-  "When all publish targets are terminal, complete_publish stops browser sessions and schedules release of the linked terminal session after the chat-linked turn finishes — do not continue working in this thread after the job completes.";
+  "When all publish targets are terminal, complete_publish stops eligible browser sessions but leaves the shared `signals-publish` session running, then schedules release of the linked terminal session after the chat-linked turn finishes — do not continue working in this thread after the job completes.";
 
 export const PERSONA_TERMINAL_TEARDOWN_AFTER_COMPLETE =
   "After complete_persona_job reaches a terminal state, Signals schedules release of the linked terminal session when no other persona jobs are active on it — do not continue working in this thread after submission.";

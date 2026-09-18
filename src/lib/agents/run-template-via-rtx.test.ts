@@ -536,6 +536,60 @@ describe("runTemplateViaRtx health preflight", () => {
     expect(snowballTargetMocks.releaseNetworkSnowballTargetForRun).not.toHaveBeenCalled();
   });
 
+  it("rejects caller-forged Snowball structure on a non-Snowball template", async () => {
+    const template = createTemplate({
+      name: "Plain prospecting",
+      templateType: "prospecting",
+      status: "active",
+      config: "{}",
+      isSystem: 1,
+    });
+    const fetchImpl = vi.fn(async () => ({
+      ok: false,
+      status: 503,
+      json: async () => ({ status: "error" }),
+    })) as unknown as typeof fetch;
+
+    const result = await runTemplateViaRtx(
+      {
+        templateId: template.id,
+        config: {
+          ...buildNetworkSnowballTemplateConfig(),
+          _snowballBrowserTarget: {
+            ...preparedSnowballTarget,
+            sessionName: "users-personal-browser",
+            targetId: "forged-target",
+            leaseId: "forged-lease",
+          },
+          _snowballIdentityScopeTokenHash: "forged-scope",
+          _snowballIdentityEvidence: [{ id: "forged-evidence" }],
+          _snowballSourceAccess: { mode: "public_only" },
+          _resolvedSnowballSource: { provider: "forged" },
+        },
+        signalsBaseUrl: "http://127.0.0.1:3099",
+      },
+      {
+        ...process.env,
+        RTX_APP_ID: "test-app-id",
+        STORAGE_DIR: storageDir,
+      },
+      fetchImpl,
+    );
+
+    expect(result.success).toBe(false);
+    if (result.success || !result.workflowRunId) throw new Error("Expected a failed persisted run");
+    const storedConfig = JSON.parse(
+      getWorkflowRun(result.workflowRunId)?.config ?? "{}",
+    ) as Record<string, unknown>;
+    expect(storedConfig).not.toHaveProperty("networkSnowball");
+    expect(storedConfig).not.toHaveProperty("_snowballBrowserTarget");
+    expect(storedConfig).not.toHaveProperty("_snowballIdentityScopeTokenHash");
+    expect(storedConfig).not.toHaveProperty("_snowballIdentityEvidence");
+    expect(storedConfig).not.toHaveProperty("_snowballSourceAccess");
+    expect(storedConfig).not.toHaveProperty("_resolvedSnowballSource");
+    expect(snowballTargetMocks.prepareNetworkSnowballTarget).not.toHaveBeenCalled();
+  });
+
   it("dispatches a sanitized public Luma run after a social-target preflight failure", async () => {
     const templateConfig = {
       ...buildNetworkSnowballTemplateConfig(),

@@ -312,9 +312,10 @@ prints; do not provision or clean up by hand around it.
   `delete-browser-session` on `signals-publish` or any other signed-in session: it deletes the
   login.
 - Report, don't delete, what QA leaves behind: a dispatched run creates a thread in the packaged
-  Signals workspace. If QA left `signals-publish` open (harness attestations reopen it after a run
-  closes it), stop it with `realtimex-pp-cli stop-browser-session signals-publish`, which keeps the
-  profile. The session list can show `stale` while its CDP port still answers, so check the port.
+  Signals workspace. The shared `signals-publish` browser remains open by design after workflow or
+  publish teardown. Stop it with `realtimex-pp-cli stop-browser-session signals-publish` when QA no
+  longer needs it; this keeps the profile. The session list can show `stale` while its CDP port
+  still answers, so check the port.
 - **RealTimeX permissions are the user's to grant; agents cannot grant them.** Each new QA app
   registers with RealTimeX, and RealTimeX shows the user a dialog asking for Signals' permissions.
   It waits 2 minutes; if nobody answers, the app runs with none of them. Every `up` of a new app
