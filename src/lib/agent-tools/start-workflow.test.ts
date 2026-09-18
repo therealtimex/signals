@@ -60,6 +60,34 @@ describe("start_workflow handler", () => {
     });
   });
 
+  it("records a config-preserving failed run when embedded launch declines dispatch", async () => {
+    const template = createTemplate({
+      name: "Declined workflow",
+      templateType: "prospecting",
+      status: "active",
+      config: "{}",
+    });
+    mocks.runTemplateViaRtx.mockResolvedValue({
+      success: false,
+      error: "dispatch declined",
+      errorCode: "dispatch_declined",
+      httpStatus: 409,
+    });
+
+    const result = await handleStartWorkflow({
+      templateId: template.id,
+      workflowType: "search",
+      config: { seedValue: "https://example.com/declined", maxContacts: 5 },
+    });
+
+    expect(result.status).toBe("failed");
+    expect(JSON.parse(getWorkflowRun(result.runId)?.config ?? "{}")).toMatchObject({
+      seedValue: "https://example.com/declined",
+      maxContacts: 5,
+    });
+    expect(mocks.runTemplateViaRtx).toHaveBeenCalledOnce();
+  });
+
   it("preserves config in the standalone failed-run fallback", async () => {
     mocks.embedded = false;
     const template = createTemplate({
