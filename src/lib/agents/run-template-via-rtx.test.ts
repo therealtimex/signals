@@ -465,6 +465,17 @@ describe("runTemplateViaRtx health preflight", () => {
         templateId: template.id,
         config: {
           networkSnowball: false,
+          seedType: "topic_search",
+          seedValue: "overridden founder infrastructure seed",
+          maxContacts: 12,
+          _snowballBrowserTarget: {
+            ...preparedSnowballTarget,
+            targetId: "forged-target",
+            leaseId: "forged-lease",
+          },
+          _snowballIdentityScopeTokenHash: "forged-scope",
+          _snowballSourceAccess: { mode: "public_only" },
+          _resolvedSnowballSource: { provider: "forged" },
         },
         signalsBaseUrl: "http://127.0.0.1:3099",
       },
@@ -500,6 +511,13 @@ describe("runTemplateViaRtx health preflight", () => {
     ) as Record<string, unknown>;
     expect(storedConfig[SNOWBALL_IDENTITY_SCOPE_TOKEN_CONFIG_KEY]).toBe(sha256(token!));
     expect(storedConfig[SNOWBALL_BROWSER_TARGET_CONFIG_KEY]).toEqual(preparedSnowballTarget);
+    expect(storedConfig).toMatchObject({
+      seedType: "topic_search",
+      seedValue: "overridden founder infrastructure seed",
+      maxContacts: 12,
+    });
+    expect(storedConfig).not.toHaveProperty("_snowballSourceAccess");
+    expect(storedConfig).not.toHaveProperty("_resolvedSnowballSource");
     expect(snowballTargetMocks.prepareNetworkSnowballTarget).toHaveBeenCalledWith(
       expect.objectContaining({ workflowRunId: result.workflowRunId }),
       expect.anything(),
@@ -507,6 +525,9 @@ describe("runTemplateViaRtx health preflight", () => {
     );
     expect(brief).toContain("server-bound session named `signals-publish` only");
     expect(brief).toContain("authenticated as linkedin identity `/in/session-owner`");
+    expect(brief).toContain("overridden founder infrastructure seed");
+    expect(brief).toContain("maxContacts");
+    expect(brief).toContain("12");
     expect(brief).toContain("Never read document.cookie");
     expect(brief).toContain("Never inspect or edit the Signals source tree");
     expect(brief).toContain("leaves the shared session `signals-publish` running");

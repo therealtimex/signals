@@ -146,6 +146,9 @@ export function sanitizeNetworkSnowballConfigRecord(
     "sourceAccessPlan",
     "_resolvedSnowballSource",
     "_snowballSourceAccess",
+    "_snowballBrowserTarget",
+    "_snowballIdentityScopeTokenHash",
+    "_snowballIdentityEvidence",
   ]) delete next[key];
   return next;
 }

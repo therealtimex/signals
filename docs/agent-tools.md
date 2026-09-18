@@ -54,7 +54,7 @@ Then pass `Authorization: Bearer your-secret-token` on each request.
 | `query_analytics` | analytics | Dashboard metrics; `totalContacts` uses the same default population as `query_contacts` and the Contacts page |
 | `query_workflows` | workflows | List workflow runs |
 | `list_workflow_templates` | workflows | List startable templates |
-| `start_workflow` | workflows | Record a workflow run (failed until migrated to RTX orchestration) |
+| `start_workflow` | workflows | Launch a template through RTX with optional config, system prompt, and fresh-thread override; standalone fallback records a failed run |
 | `dispatch_follow_on_workflow` | workflows | Cascade a completed parent run into a configured follow-on workflow |
 | `complete_workflow_run` | workflows | Persist terminal status and structured results, then dispatch configured or conditional cascades |
 | `record_workflow_run_contacts` | workflows | Validate a workflow run/template pair and idempotently add existing contact IDs to the run's durable cohort |

@@ -1351,6 +1351,12 @@
                               "type": "object"
                             }
                           },
+                          "systemPrompt": {
+                            "type": "string"
+                          },
+                          "freshThread": {
+                            "type": "boolean"
+                          },
                           "parentWorkflowId": {
                             "type": "string"
                           },
