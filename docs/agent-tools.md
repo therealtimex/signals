@@ -272,6 +272,17 @@ arbitrary workspace slug. `approve_personality_projection` accepts only durable
 `thread_message` evidence for the configured workspace and is the first operation allowed to call
 the authenticated RealTimeX transaction writer. There is no direct filesystem-write fallback.
 
+If RealTimeX moves the configured workspace to a new directory while retaining its slug, Signals
+reports `workspace_mismatch` and blocks ordinary projection. When the status includes
+`detail.recoveryAvailable: true`, an explicit
+`propose_personality_projection` call with `recoverWorkspaceMismatch: true` creates a new proposal
+for the current workspace only when the previous active binding represents the same Signals
+identity. The proposal records both workspace identities and the previous binding ID, and a fresh
+approval is required before any files change. The previous binding remains recorded for its old
+workspace; the proposal becomes stale if that binding changes before approval. The same option is
+available in Settings → Personality as **Create workspace recovery proposal**. An ID change at the
+same directory has `recoveryAvailable: false` and remains blocked for separate identity repair.
+
 Interrupted and failed host transactions remain visible by stable attempt ID.
 `retry_personality_projection` inspects before resubmitting, requests restore for
 `recovery_required`, and allocates a new attempt only after a separate retry has proven the prior

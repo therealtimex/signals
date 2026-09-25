@@ -743,8 +743,9 @@ export async function detectPlatformHandle(
   if (platform === "facebook") {
     // v1: active personal account in the RTX session (not Page admin or public profile URLs).
     const navSelectors = [
+      '[role="region"][aria-label="Create a post"] a[aria-label*="Timeline"]',
+      'a[aria-label*="Timeline"]',
       'a[aria-label="Your profile"]',
-      'a[aria-label*="profile" i][href*="facebook.com"]',
       'div[role="navigation"] a[href*="facebook.com/me"]',
       'a[href*="/me/"]',
     ];

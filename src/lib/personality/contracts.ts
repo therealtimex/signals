@@ -292,6 +292,10 @@ export const personalityProposalSchema = z.object({
   workspace: workspaceSchema,
   identity: bindingIdentitySchema,
   basedOnBindingId: idSchema("pb").nullable(),
+  workspaceMigration: z.object({
+    previousBindingId: idSchema("pb"),
+    previousWorkspace: workspaceSchema,
+  }).strict().optional(),
   sourceSnapshot: personalitySourceSnapshotSchema.nullable(),
   sourceHash: z.union([hashSchema, z.literal("")]),
   files: z.array(proposalFileSchema).max(5),
@@ -448,6 +452,7 @@ export const personalityStatusSchema = z.object({
       reason: personalityDriftReasonSchema,
     }).strict()).optional(),
     unavailable: z.string().min(1).optional(),
+    recoveryAvailable: z.boolean().optional(),
   }).strict().optional(),
   compatibleTargets: z.array(z.string()),
   host: z.object({

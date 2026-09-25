@@ -173,6 +173,7 @@ function statusDetail(binding: PersonalityBindingView): string {
 }
 
 function proposalTitle(proposal: PersonalityProposal): string {
+  if (proposal.workspaceMigration) return "Workspace recovery proposal";
   if (proposal.kind === "rollback") return "Rollback proposal";
   if (proposal.kind === "unbind") return "Disconnect proposal";
   return proposal.basedOnBindingId ? "Personality update" : "Initial Personality projection";
@@ -217,6 +218,14 @@ function ProposalCard({
         {proposal.preflight.warnings.length > 0 && (
           <div className="rounded-md border border-warning/30 bg-warning/10 p-2 text-xs text-warning">
             {proposal.preflight.warnings.join(" · ")}
+          </div>
+        )}
+        {proposal.workspaceMigration && (
+          <div className="rounded-md border p-2 text-xs">
+            <p>Previous binding {proposal.workspaceMigration.previousBindingId} remains recorded.</p>
+            <p className="break-all">From workspace {proposal.workspaceMigration.previousWorkspace.id}: {proposal.workspaceMigration.previousWorkspace.dir}</p>
+            <p className="break-all">To workspace {proposal.workspace.id}: {proposal.workspace.dir}</p>
+            <p>Approval creates a fresh projection for the current workspace.</p>
           </div>
         )}
         {proposal.noop && (
@@ -454,6 +463,9 @@ export function PersonalityTab() {
 
   const { binding, onboarding, sources, organizations, statements, targets } = data;
   const active = binding.status.binding;
+  const recoverWorkspaceMismatch = binding.status.status === "unavailable"
+    && binding.status.detail?.unavailable === "workspace_mismatch"
+    && binding.status.detail.recoveryAvailable === true;
 
   return (
     <div className="space-y-6">
@@ -621,7 +633,9 @@ export function PersonalityTab() {
             </div>
           ) : (
             <p className="text-sm text-muted-foreground">
-              Review and approve an initial proposal to create the active connection.
+              {recoverWorkspaceMismatch
+                ? "The previous workspace identity changed. Review a fresh proposal for this workspace before reconnecting Personality."
+                : "Review and approve an initial proposal to create the active connection."}
             </p>
           )}
 
@@ -646,17 +660,21 @@ export function PersonalityTab() {
           <Separator />
           <div className="flex flex-wrap gap-2">
             <Button
-              disabled={!sources || binding.status.status === "unavailable" || busy !== null}
+              disabled={!sources || (binding.status.status === "unavailable" && !recoverWorkspaceMismatch) || busy !== null}
               onClick={() =>
                 runAction(
                   "create-proposal",
-                  () => post("/api/personality/proposals", {}),
+                  () => post("/api/personality/proposals", recoverWorkspaceMismatch
+                    ? { recoverWorkspaceMismatch: true }
+                    : {}),
                   "A new immutable proposal is ready for review.",
                 )
               }
             >
               {busy === "create-proposal" ? <Loader2 className="animate-spin" /> : <FileDiff />}
-              {active ? "Create update proposal" : "Create initial proposal"}
+              {recoverWorkspaceMismatch
+                ? "Create workspace recovery proposal"
+                : active ? "Create update proposal" : "Create initial proposal"}
             </Button>
             {active && (
               <Button

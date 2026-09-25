@@ -5,6 +5,7 @@ import { proposePersonalityProjection } from "@/lib/personality/proposal";
 
 const proposalSchema = z.object({
   voiceProfileId: z.string().regex(/^vp_[A-Za-z0-9_-]{6,}$/).optional(),
+  recoverWorkspaceMismatch: z.boolean().optional(),
 }).strict();
 
 export async function POST(request: Request) {

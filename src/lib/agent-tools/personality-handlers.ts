@@ -33,6 +33,7 @@ const threadEvidenceSchema = z.object({
 export const getPersonalityBindingSchema = z.object({}).strict();
 export const proposePersonalityProjectionSchema = z.object({
   voiceProfileId: z.string().regex(/^vp_[A-Za-z0-9_-]{6,}$/).optional(),
+  recoverWorkspaceMismatch: z.boolean().optional(),
 }).strict();
 export const approvePersonalityProjectionSchema = z.object({
   proposalId: personalityIdSchema("prp"),
