@@ -23,6 +23,7 @@ function readJson(rel) {
 
 const pkg = readJson("package.json");
 const plugin = readJson("realtimex-plugin/realtimex.plugin.json");
+const rtxManifest = readJson("rtx-manifest.json");
 const localApp = readJson("realtimex-plugin/marketplace/local-app.manifest.json");
 const nvmNodeVersion = fs.readFileSync(path.join(root, ".nvmrc"), "utf8").trim();
 
@@ -36,6 +37,11 @@ const errors = [];
 if (plugin.version !== pkg.version) {
   errors.push(
     `realtimex.plugin.json version ${plugin.version} != package.json ${pkg.version}`
+  );
+}
+if (rtxManifest.version !== pkg.version) {
+  errors.push(
+    `rtx-manifest.json version ${rtxManifest.version} != package.json ${pkg.version}`
   );
 }
 
