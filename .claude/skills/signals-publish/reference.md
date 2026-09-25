@@ -13,6 +13,9 @@ node scripts/x-reply.cjs --port <cdpPort> --payload <reply.json> [--dry-run]
 
 ```jsonc
 {
+  "jobId": "Signals publish job ID",
+  "contentItemId": "Signals Content item ID",
+  "targetId": "snapshotted target ID when present",
   "text": "Main post body",
   "threadTexts": ["optional tweet 2", "tweet 3"],
   "mediaPaths": ["/abs/path/img.png"],
@@ -21,6 +24,7 @@ node scripts/x-reply.cjs --port <cdpPort> --payload <reply.json> [--dry-run]
 ```
 
 `mediaPaths` may be `string[]` for a single post, or nested arrays per thread tweet.
+Live X and Facebook posts require `SIGNALS_BASE_URL` set to the running local Signals origin. The scripts verify the active job and Content item before opening the browser; `--dry-run` skips this check.
 
 ### stdout (last line)
 
