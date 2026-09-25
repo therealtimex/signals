@@ -12,6 +12,7 @@
 
 const { readFileSync } = require("node:fs");
 const { spawnSync } = require("node:child_process");
+const { verifyPublishJob } = require("./publish-job-guard.cjs");
 
 const { parseEvalJsonArray, parseEvalJsonValue } = require("./parse-eval-json-array.cjs");
 const {
@@ -1185,13 +1186,20 @@ function runRepostOrQuote({ payload, kind, handle, dryRun }) {
   emit(result.success ? { ...result, handle, kind: "quote" } : result);
 }
 
-function main() {
+async function main() {
   const { port, payload, dryRun } = parseArgs(process.argv);
   ensureAgentBrowser();
 
   try {
     validatePayload(payload);
     logPhase(`start dryRun=${dryRun}`);
+    if (!dryRun) {
+      await verifyPublishJob({
+        payload,
+        platform: "x",
+        baseUrl: process.env.SIGNALS_BASE_URL,
+      });
+    }
     connectSession(port);
 
     openXHomeResilient();

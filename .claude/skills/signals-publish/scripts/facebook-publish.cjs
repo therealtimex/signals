@@ -9,6 +9,7 @@
 
 const { readFileSync } = require("node:fs");
 const { spawnSync } = require("node:child_process");
+const { verifyPublishJob } = require("./publish-job-guard.cjs");
 
 const SESSION = process.env.SIGNALS_PUBLISH_AB_SESSION || "signals-publish";
 const AB_BIN = process.env.AGENT_BROWSER_BIN || "agent-browser";
@@ -219,13 +220,20 @@ function uploadMedia(mediaPaths) {
   }
 }
 
-function main() {
+async function main() {
   const { port, payload, dryRun } = parseArgs(process.argv);
   ensureAgentBrowser();
 
   try {
     validatePayload(payload);
     logPhase(`start dryRun=${dryRun}`);
+    if (!dryRun) {
+      await verifyPublishJob({
+        payload,
+        platform: "facebook",
+        baseUrl: process.env.SIGNALS_BASE_URL,
+      });
+    }
     connectSession(port);
     openFacebookHome();
     assertFacebookLoggedIn();
@@ -268,10 +276,11 @@ function main() {
     sleep(3000);
 
     emit({
-      success: true,
+      success: false,
+      postSubmitted: true,
       handle,
-      platformPostId: `fb_${Date.now()}`,
-      platformUrl: FB_HOME_URL,
+      error: "Facebook Post was clicked, but the new post permalink has not been verified. Inspect the acting account's timeline before calling complete_publish; do not click Post again.",
+      errorCode: "verify_uncertain",
     });
   } catch (err) {
     const message = err?.message ?? String(err);
