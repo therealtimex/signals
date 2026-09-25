@@ -161,7 +161,10 @@ do. Link people with `link_contact_to_org` rather than writing `works_at` graph 
 Failed Network Snowball LinkedIn attestations live only in `snowball_candidates`; they are not
 contacts, organizations, identities, employments, or graph edges. The attestation tool writes this
 quarantine record automatically for a valid run scope. Use `list_snowball_candidates` to retrieve
-the proposed person/company context and gate reason. A later successful attestation followed by the
+the proposed person/company context and gate reason. When the profile page was read, `failureDetails`
+may include `observedProfile` (top-card headline, affiliation line, and the first visible Experience
+row) so operators can compare against the agent's proposed company/title without re-opening LinkedIn.
+A later successful attestation followed by the
 normal evidence-token Auto-commit path marks the matching candidate promoted. Operators can also
 promote an unverified candidate from `/dashboard/quarantine` after confirming the LinkedIn profile;
 that dashboard path does not mint an `identityEvidenceToken` and is not available as an agent tool.

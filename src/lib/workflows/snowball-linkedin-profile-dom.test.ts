@@ -55,6 +55,8 @@ describe("LinkedIn Snowball profile DOM extraction", () => {
       headline: "Founder & CEO at Acme, Inc.",
       topCardText:
         "Jane Doe · 2nd Founder & CEO at Acme, Inc. Acme, Inc. · Example University San Francisco Bay Area · Contact info",
+      affiliationLine: "Acme, Inc. · Example University",
+      experiencePreview: null,
       unavailable: false,
       avatarUrl: null,
       sessionViewerAvatarUrl: null,
@@ -81,6 +83,8 @@ describe("LinkedIn Snowball profile DOM extraction", () => {
       visibleName: "Jane Doe",
       headline: "Founder at Acme",
       topCardText: "Jane Doe Founder at Acme Jane Doe Founder at Acme London",
+      affiliationLine: "",
+      experiencePreview: null,
       unavailable: false,
       avatarUrl: null,
       sessionViewerAvatarUrl: null,
@@ -511,6 +515,47 @@ describe("LinkedIn Snowball profile DOM extraction", () => {
     expect(extractLinkedInProfileDomObservation()).toMatchObject({
       visibleName: "",
       unavailable: false,
+    });
+
+    browserWindow.close();
+  });
+
+  it("extracts the first visible Experience entry when the section is on the loaded profile", () => {
+    const browserWindow = renderLinkedInProfile(
+      "https://www.linkedin.com/in/jane-doe/",
+      `
+        <main>
+          <section>
+            <a href="https://www.linkedin.com/in/jane-doe/"
+               componentkey="ProfileVerificationTriggerRef-jane-doe">
+              <h2>Jane Doe</h2>
+            </a>
+            <p>Independent consultant</p>
+            <p>Remote</p>
+          </section>
+          <section id="experience">
+            <h2>Experience</h2>
+            <ul>
+              <li class="pvs-list__paged-list-item">
+                <div data-view-name="profile-component-entity">
+                  Senior Engineer · Vybe
+                  Full-time · 2022 – Present
+                </div>
+              </li>
+            </ul>
+          </section>
+        </main>
+      `,
+    );
+
+    expect(extractLinkedInProfileDomObservation()).toMatchObject({
+      headline: "Independent consultant",
+      affiliationLine: "Remote",
+      experiencePreview: {
+        roleTitle: "Senior Engineer",
+        roleCompany: "Vybe",
+        snippet: expect.stringContaining("Vybe"),
+      },
     });
 
     browserWindow.close();

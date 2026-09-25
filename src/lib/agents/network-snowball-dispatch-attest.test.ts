@@ -34,6 +34,8 @@ const observeJaneDoe = async () => ({
   visibleName: "Jane Doe",
   headline: "Founder at Acme",
   topCardText: "Jane Doe Founder at Acme",
+  affiliationLine: "",
+  experiencePreview: null,
   unavailable: false,
   avatarUrl: null,
   sessionViewerAvatarUrl: null,
