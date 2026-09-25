@@ -16,6 +16,10 @@ Package and distribute Signals through the **RealtimeX marketplace** — not pub
 Plugin id: `com.realtimex.signals`  
 Local app id: `47e45f71-3279-42f5-8e95-731de01b6eae`
 
+Version 0.2.20 fixes Facebook self-profile detection and adds a reviewed recovery proposal when a
+Personality-bound workspace moves to a different directory. The recovery still requires explicit
+approval before writing a new binding.
+
 Version 0.2.19 expands Network Snowball from event-specific seeds to public URL sources, adds Luma
 ingest and Hop 0 graph anchors, graduates verified candidates, and makes evidence acceptance,
 terminal teardown, launch configuration, and browser-lease recovery safe under concurrent runs.
