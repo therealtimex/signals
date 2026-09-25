@@ -28,7 +28,7 @@
     "test": "vitest",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage --project unit && vitest run --project latency",
-    "test:skill-package": "node scripts/test-signals-publish-skill-package.mjs",
+    "test:skill-package": "node scripts/test-signals-publish-skill-package.mjs && node scripts/test-publish-job-guard.mjs",
     "test:signals-pp-cli": "node scripts/test-signals-pp-cli-import.mjs && node scripts/test-signals-pp-cli-targets.mjs && node scripts/test-signals-pp-cli-launcher.mjs && node scripts/test-signals-pp-cli-npm-package.mjs && node scripts/test-signals-pp-cli-npm-publish.mjs",
     "test:standalone-artifact": "node scripts/test-standalone-artifact.mjs",
     "test:plugin-package": "node scripts/test-verify-signals-plugin-provision.mjs && node scripts/test-release-signature.mjs && node scripts/test-realtimex-plugin-package.mjs && node scripts/test-x-compose-text.mjs && node scripts/test-x-publish-agent-browser.mjs",

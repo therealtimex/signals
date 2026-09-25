@@ -25,12 +25,20 @@ const scriptPath = join(
   "x-publish.cjs"
 );
 const fakeAb = join(root, "fixtures", "fake-agent-browser.cjs");
+const fakeSignalsFetch = join(root, "fixtures", "fake-signals-publish-fetch.cjs");
+let publishJobSequence = 0;
 
 function runXPublish(payload, extraEnv = {}, extraArgs = []) {
   const workDir = mkdtempSync(join(tmpdir(), "x-publish-adapter-"));
   const payloadPath = join(workDir, "payload.json");
   const stateFile = join(workDir, "fake-ab-state.json");
-  writeFileSync(payloadPath, JSON.stringify(payload));
+  const sequence = ++publishJobSequence;
+  writeFileSync(payloadPath, JSON.stringify({
+    ...payload,
+    jobId: `pj_test_${sequence}`,
+    contentItemId: `item_test_${sequence}`,
+    targetId: "tgt_test_x",
+  }));
   const result = spawnSync(
     process.execPath,
     [scriptPath, "--port", "9222", "--payload", payloadPath, ...extraArgs], {
@@ -42,6 +50,9 @@ function runXPublish(payload, extraEnv = {}, extraArgs = []) {
       AGENT_BROWSER_BIN_ARGS: fakeAb,
       SIGNALS_PUBLISH_AB_SESSION: "fake-session",
       FAKE_AB_STATE_FILE: stateFile,
+      FAKE_SIGNALS_PUBLISH_PAYLOAD_FILE: payloadPath,
+      SIGNALS_BASE_URL: "http://127.0.0.1:3010",
+      NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --require ${fakeSignalsFetch}`.trim(),
       FAKE_AB_FAIL_ADD: "",
       FAKE_AB_FAIL_THREAD_FILL: "",
       ...extraEnv,
