@@ -180,6 +180,7 @@ function proposalActions(input: {
   workspace: PersonalityWorkspace;
   workspaceFiles: PersonalityWorkspaceFile[];
   activeBinding: PersonalityBinding | null;
+  migrationSource: PersonalityBinding | null;
   host: PersonalityStatus["host"];
   loadSources: typeof loadPersonalitySourceBundle;
 }): PersonalityProposalActions {
@@ -199,6 +200,17 @@ function proposalActions(input: {
   }
   if (proposal.basedOnBindingId !== (activeBinding?.id ?? null)) {
     blockers.push("binding_changed");
+  }
+  if (proposal.workspaceMigration) {
+    const { previousBindingId, previousWorkspace } = proposal.workspaceMigration;
+    if (
+      input.migrationSource?.id !== previousBindingId
+      || input.migrationSource.workspace.key !== previousWorkspace.key
+      || input.migrationSource.workspace.id !== previousWorkspace.id
+      || input.migrationSource.workspace.dir !== previousWorkspace.dir
+    ) {
+      blockers.push("workspace_migration_source_changed");
+    }
   }
 
   const fileHashes = new Map(
@@ -315,15 +327,19 @@ export type PersonalityStatusCoreInput = {
 export function computePersonalityStatus(input: PersonalityStatusCoreInput): PersonalityStatus {
   const bindingSet = input.index.bindings[input.workspace.key];
   if (!bindingSet) {
-    const mismatch = Object.values(input.index.bindings).some(
+    const previous = Object.values(input.index.bindings).find(
       (candidate) => candidate.workspaceSlug === input.workspace.slug,
     );
+    const mismatch = Boolean(previous);
     return personalityStatusSchema.parse({
       workspace: { slug: input.workspace.slug, dir: input.workspace.dir },
       binding: null,
       currentSourceHash: null,
       status: mismatch ? "unavailable" : "unbound",
-      ...(mismatch ? { detail: { unavailable: "workspace_mismatch" } } : {}),
+      ...(mismatch ? { detail: {
+        unavailable: "workspace_mismatch",
+        recoveryAvailable: Boolean(previous?.active),
+      } } : {}),
       compatibleTargets: [],
       host: input.host,
     });
@@ -338,7 +354,7 @@ export function computePersonalityStatus(input: PersonalityStatusCoreInput): Per
       binding: null,
       currentSourceHash: null,
       status: "unavailable",
-      detail: { unavailable: "workspace_mismatch" },
+      detail: { unavailable: "workspace_mismatch", recoveryAvailable: false },
       compatibleTargets: [],
       host: input.host,
     });
@@ -449,6 +465,9 @@ export async function getPersonalityBindingView(
       workspace,
       workspaceFiles,
       activeBinding: bindingSet?.active ?? null,
+      migrationSource: view.proposal.workspaceMigration
+        ? store.index.bindings[view.proposal.workspaceMigration.previousWorkspace.key]?.active ?? null
+        : null,
       host: status.host,
       loadSources,
     }),
@@ -456,7 +475,7 @@ export async function getPersonalityBindingView(
   return {
     status,
     history: workspaceMismatch ? [] : bindingSet?.history ?? [],
-    proposals: workspaceMismatch ? [] : proposals,
+    proposals,
     diagnostics: { orphanProposalIds: store.orphanProposalIds },
   };
 }

@@ -163,7 +163,7 @@ function proposalDependencies(
 function listing(proposal: PersonalityProposal) {
   return {
     success: true as const,
-    workspace: { ...workspace },
+    workspace: { ...proposal.workspace },
     files: proposal.files.flatMap((file) => file.currentFileHash === null
       ? []
       : [{
@@ -220,7 +220,7 @@ function transaction(
     status,
     origin: "sdk",
     appId: "signals-app",
-    workspace: { ...workspace },
+    workspace: { ...proposal.workspace },
     requestHash: "b".repeat(64),
     files: proposal.files.map((file) => ({
       path: file.path,
@@ -262,7 +262,7 @@ function applyDependencies(
 ): PersonalityApplyDependencies {
   return {
     now: () => 1_700_000_001_000,
-    resolveWorkspace: async () => workspace,
+    resolveWorkspace: async () => proposal.workspace,
     readWorkspaceFiles: readPersonalityWorkspaceFiles,
     loadSources: () => sources(),
     probeCapability: async () => capability,
@@ -273,15 +273,15 @@ function applyDependencies(
 
 function materialize(proposal: PersonalityProposal): void {
   for (const file of proposal.files) {
-    const path = join(workspace.dir, file.path);
+    const path = join(proposal.workspace.dir, file.path);
     if (file.proposedFile === null) {
       if (existsSync(path)) unlinkSync(path);
     } else {
       writeFileSync(path, file.proposedFile);
     }
   }
-  if (proposal.shim.createClaudeSymlink && !existsSync(join(workspace.dir, "CLAUDE.md"))) {
-    symlinkSync("AGENTS.md", join(workspace.dir, "CLAUDE.md"));
+  if (proposal.shim.createClaudeSymlink && !existsSync(join(proposal.workspace.dir, "CLAUDE.md"))) {
+    symlinkSync("AGENTS.md", join(proposal.workspace.dir, "CLAUDE.md"));
   }
 }
 
@@ -1215,7 +1215,139 @@ describe.sequential("Personality proposal and apply lifecycle", () => {
     expect(view.status).toMatchObject({
       status: "unavailable",
       binding: null,
-      detail: { unavailable: "workspace_mismatch" },
+      detail: { unavailable: "workspace_mismatch", recoveryAvailable: false },
+    });
+    await expect(proposePersonalityProjection(
+      { recoverWorkspaceMismatch: true },
+      { ...proposalDependencies(), resolveWorkspace: async () => ({ ...workspace, id: "99" }) },
+    )).rejects.toMatchObject({
+      code: "WORKSPACE_UNAVAILABLE",
+      details: { reason: "workspace_mismatch" },
+    });
+  });
+
+  it("recovers a changed workspace only through a fresh approved projection", async () => {
+    const ids = idFactory();
+    const original = await proposePersonalityProjection({}, proposalDependencies(() => sources(), ids));
+    await approvePersonalityProposal({
+      proposalId: original.id,
+      evidence: { kind: "ui", route: "/settings/personality" },
+    }, applyDependencies(original));
+    materialize(original);
+
+    const migratedWorkspace: PersonalityWorkspace = {
+      ...workspace,
+      id: "99",
+      dir: join(root, "workspace-migrated"),
+      key: "abcdef0123456789abcdef0123456789",
+    };
+    rmSync(migratedWorkspace.dir, { recursive: true, force: true });
+    mkdirSync(migratedWorkspace.dir, { recursive: true });
+    const dependencies = {
+      ...proposalDependencies(() => sources(), ids),
+      resolveWorkspace: async () => migratedWorkspace,
+    };
+
+    await expect(proposePersonalityProjection({}, dependencies)).rejects.toMatchObject({
+      code: "WORKSPACE_UNAVAILABLE",
+      details: { reason: "workspace_mismatch" },
+    });
+    await expect(proposePersonalityProjection(
+      { recoverWorkspaceMismatch: true },
+      { ...dependencies, loadSources: () => sources("Another person", "another-contact") },
+    )).rejects.toMatchObject({
+      code: "CONFLICT",
+      details: { reason: "personality_identity_mismatch" },
+    });
+
+    const recovery = await proposePersonalityProjection(
+      { recoverWorkspaceMismatch: true }, dependencies,
+    );
+    expect(recovery.workspaceMigration).toEqual({
+      previousBindingId: original.proposedBindingId,
+      previousWorkspace: workspace,
+    });
+    expect(recovery.preflight.warnings).toContain(
+      "workspace_identity_changed_requires_fresh_approval",
+    );
+    const pending = await getPersonalityBindingView({
+      resolveWorkspace: async () => migratedWorkspace,
+      readWorkspaceFiles: readPersonalityWorkspaceFiles,
+      loadSources: () => sources(),
+      probeCapability: async () => available,
+    });
+    expect(pending.status.status).toBe("unavailable");
+    expect(pending.status.detail?.recoveryAvailable).toBe(true);
+    expect(pending.proposals[0]).toMatchObject({
+      proposal: { id: recovery.id },
+      actions: { canApprove: true },
+    });
+
+    const approved = await approvePersonalityProposal({
+      proposalId: recovery.id,
+      evidence: { kind: "ui", route: "/settings/personality" },
+    }, applyDependencies(recovery));
+    materialize(recovery);
+    const bound = await getPersonalityBindingView({
+      resolveWorkspace: async () => migratedWorkspace,
+      readWorkspaceFiles: readPersonalityWorkspaceFiles,
+      loadSources: () => sources(),
+      probeCapability: async () => available,
+    });
+    expect(bound.status).toMatchObject({
+      status: "bound",
+      binding: { id: approved.binding?.id },
+    });
+    expect(readPersonalityStore().index.bindings[workspace.key].active?.id)
+      .toBe(original.proposedBindingId);
+  });
+
+  it("blocks workspace recovery when its previous binding is disconnected", async () => {
+    const ids = idFactory();
+    const original = await proposePersonalityProjection({}, proposalDependencies(() => sources(), ids));
+    await approvePersonalityProposal({
+      proposalId: original.id,
+      evidence: { kind: "ui", route: "/settings/personality" },
+    }, applyDependencies(original));
+    materialize(original);
+
+    const migratedWorkspace: PersonalityWorkspace = {
+      ...workspace,
+      id: "100",
+      dir: join(root, "workspace-migration-stale"),
+      key: "fedcba9876543210fedcba9876543210",
+    };
+    rmSync(migratedWorkspace.dir, { recursive: true, force: true });
+    mkdirSync(migratedWorkspace.dir, { recursive: true });
+    const recovery = await proposePersonalityProjection(
+      { recoverWorkspaceMismatch: true },
+      { ...proposalDependencies(() => sources(), ids), resolveWorkspace: async () => migratedWorkspace },
+    );
+
+    const disconnect = await proposePersonalityUnbind(
+      { kind: "ui" }, proposalDependencies(() => sources(), ids),
+    );
+    await approvePersonalityProposal({
+      proposalId: disconnect.id,
+      evidence: { kind: "ui", route: "/settings/personality" },
+    }, applyDependencies(disconnect));
+    materialize(disconnect);
+
+    const pending = await getPersonalityBindingView({
+      resolveWorkspace: async () => migratedWorkspace,
+      readWorkspaceFiles: readPersonalityWorkspaceFiles,
+      loadSources: () => sources(),
+      probeCapability: async () => available,
+    });
+    expect(pending.proposals[0].actions.approvalBlockers).toContain(
+      "workspace_migration_source_changed",
+    );
+    await expect(approvePersonalityProposal({
+      proposalId: recovery.id,
+      evidence: { kind: "ui", route: "/settings/personality" },
+    }, applyDependencies(recovery))).rejects.toMatchObject({
+      code: "CONFLICT",
+      details: { reason: "workspace_migration_source_changed" },
     });
   });
 

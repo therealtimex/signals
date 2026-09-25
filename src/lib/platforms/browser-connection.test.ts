@@ -544,6 +544,21 @@ describe("publish session guardrails", () => {
     ).resolves.toBe("/in/session-owner");
   });
 
+  it("reads Facebook identity from the composer rather than a friend's profile photo", async () => {
+    const page = fakePage("https://www.facebook.com/", {
+      hrefs: {
+        '[role="region"][aria-label="Create a post"] a[aria-label*="Timeline"]':
+          "https://www.facebook.com/ledangtrung",
+        'a[aria-label*="profile" i][href*="facebook.com"]':
+          "https://www.facebook.com/hspacehai?__tn__=%3C",
+      },
+    });
+
+    await expect(
+      detectPlatformHandle("facebook", page as never, page.url()),
+    ).resolves.toBe("ledangtrung");
+  });
+
   it("waits for LinkedIn self navigation after the authenticated feed URL appears", async () => {
     vi.useFakeTimers();
     try {

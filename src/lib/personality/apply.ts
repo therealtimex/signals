@@ -148,6 +148,20 @@ function assertBaseBinding(
       current: active?.id ?? null,
     });
   }
+  if (proposal.workspaceMigration) {
+    const { previousBindingId, previousWorkspace } = proposal.workspaceMigration;
+    const previous = session.index.bindings[previousWorkspace.key];
+    if (
+      previous?.active?.id !== previousBindingId
+      || previous.workspaceSlug !== previousWorkspace.slug
+      || previous.workspaceId !== previousWorkspace.id
+      || previous.workspaceDir !== previousWorkspace.dir
+    ) {
+      throw new AgentToolError("CONFLICT", "Previous Personality workspace binding changed", {
+        reason: "workspace_migration_source_changed",
+      });
+    }
+  }
   return active;
 }
 

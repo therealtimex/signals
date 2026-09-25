@@ -175,4 +175,38 @@ describe("PersonalityTab", () => {
       "Approval is blocked by current server state: source changed.",
     );
   });
+
+  it("offers an explicit recovery proposal when the workspace identity changed", async () => {
+    const originalFetch = globalThis.fetch;
+    const requests: unknown[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/personality/binding") {
+        return new Response(JSON.stringify({
+          ...binding,
+          status: {
+            ...binding.status,
+            binding: null,
+            status: "unavailable",
+            detail: { unavailable: "workspace_mismatch", recoveryAvailable: true },
+          },
+          proposals: [],
+        }), { status: 200 });
+      }
+      if (url === "/api/personality/proposals") {
+        requests.push(JSON.parse(String(init?.body)));
+        return new Response(JSON.stringify({ id: "prp_recovery" }), { status: 201 });
+      }
+      return originalFetch(input, init);
+    }));
+
+    await act(async () => root.render(createElement(PersonalityTab)));
+    await flush();
+    const create = Array.from(document.body.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes("Create workspace recovery proposal"),
+    );
+    expect(create?.disabled).toBe(false);
+    await act(async () => create?.click());
+    expect(requests).toEqual([{ recoverWorkspaceMismatch: true }]);
+  });
 });

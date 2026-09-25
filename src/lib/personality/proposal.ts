@@ -159,18 +159,27 @@ function withDynamicIndex(
 function activeBindingFor(
   session: PersonalityStoreSession,
   workspace: PersonalityWorkspace,
-): PersonalityBinding | null {
+  recoverWorkspaceMismatch = false,
+): { active: PersonalityBinding | null; previous: PersonalityBinding | null } {
   const bindingSet = session.index.bindings[workspace.key];
   if (!bindingSet) {
     const sameSlug = Object.values(session.index.bindings).find(
       (candidate) => candidate.workspaceSlug === workspace.slug,
     );
     if (sameSlug) {
-      throw new AgentToolError("WORKSPACE_UNAVAILABLE", "Signals workspace identity changed", {
-        reason: "workspace_mismatch",
+      if (!recoverWorkspaceMismatch || !sameSlug.active) {
+        throw new AgentToolError("WORKSPACE_UNAVAILABLE", "Signals workspace identity changed", {
+          reason: "workspace_mismatch",
+        });
+      }
+      return { active: null, previous: sameSlug.active };
+    }
+    if (recoverWorkspaceMismatch) {
+      throw new AgentToolError("VALIDATION_ERROR", "No previous workspace binding needs recovery", {
+        reason: "workspace_migration_not_needed",
       });
     }
-    return null;
+    return { active: null, previous: null };
   }
   if (
     bindingSet.workspaceSlug !== workspace.slug
@@ -181,7 +190,12 @@ function activeBindingFor(
       reason: "workspace_mismatch",
     });
   }
-  return bindingSet.active;
+  if (recoverWorkspaceMismatch) {
+    throw new AgentToolError("VALIDATION_ERROR", "The current workspace already has a binding", {
+      reason: "workspace_migration_not_needed",
+    });
+  }
+  return { active: bindingSet.active, previous: null };
 }
 
 function desiredFromSources(bundle: LoadedPersonalitySourceBundle): {
@@ -292,6 +306,7 @@ function computeIntentHash(input: {
   workspace: PersonalityWorkspace;
   identity: PersonalityBinding["identity"];
   basedOnBindingId: string | null;
+  workspaceMigration?: PersonalityProposal["workspaceMigration"];
   targetBindingId?: string | null;
   sourceHash: string;
   files: PersonalityProposal["files"];
@@ -303,6 +318,7 @@ function computeIntentHash(input: {
     workspace: input.workspace,
     identity: input.identity,
     basedOnBindingId: input.basedOnBindingId,
+    ...(input.workspaceMigration ? { workspaceMigration: input.workspaceMigration } : {}),
     targetBindingId: input.targetBindingId ?? null,
     sourceHash: input.sourceHash,
     currentFiles: input.files.map((file) => [file.path, file.currentFileHash]),
@@ -376,6 +392,7 @@ function proposalWarnings(
 async function constructProposal(input: {
   kind: PersonalityProposal["kind"];
   voiceProfileId?: string;
+  recoverWorkspaceMismatch?: boolean;
   targetBindingId?: string;
   origin: PersonalityProposalOrigin;
   dependencies: PersonalityProposalDependencies;
@@ -387,7 +404,11 @@ async function constructProposal(input: {
   return withPersonalityStore(async (session) => {
     const workspace = await dependencies.resolveWorkspace();
     const workspaceFiles = dependencies.readWorkspaceFiles(workspace);
-    const active = activeBindingFor(session, workspace);
+    const { active, previous } = activeBindingFor(
+      session,
+      workspace,
+      input.recoverWorkspaceMismatch,
+    );
     let desired: DesiredBlocks;
     let snapshot: PersonalityProposal["sourceSnapshot"];
     let sourceHash: string;
@@ -410,6 +431,12 @@ async function constructProposal(input: {
           "Unbind the active Personality before changing represented identity",
           { reason: "identity_replacement_requires_unbind", bindingId: active.id },
         );
+      }
+      if (previous && !sameIdentity(previous.identity, identity)) {
+        throw new AgentToolError("CONFLICT", "The previous workspace binding represents a different identity", {
+          reason: "personality_identity_mismatch",
+          bindingId: previous.id,
+        });
       }
     } else if (input.kind === "rollback") {
       const bindingSet = session.index.bindings[workspace.key];
@@ -505,6 +532,10 @@ async function constructProposal(input: {
       workspace,
       identity,
       basedOnBindingId: active?.id ?? null,
+      workspaceMigration: previous ? {
+        previousBindingId: previous.id,
+        previousWorkspace: previous.workspace,
+      } : undefined,
       targetBindingId,
       sourceHash,
       files,
@@ -523,11 +554,18 @@ async function constructProposal(input: {
       workspace,
       identity,
       basedOnBindingId: active?.id ?? null,
+      ...(previous ? { workspaceMigration: {
+        previousBindingId: previous.id,
+        previousWorkspace: previous.workspace,
+      } } : {}),
       sourceSnapshot: snapshot,
       sourceHash,
       files,
       shim,
-      preflight: { warnings: proposalWarnings(workspace, workspaceFiles) },
+      preflight: { warnings: [
+        ...proposalWarnings(workspace, workspaceFiles),
+        ...(previous ? ["workspace_identity_changed_requires_fresh_approval"] : []),
+      ] },
       intentHash,
       noop,
       proposedBy: { ...input.origin, at },
@@ -536,12 +574,17 @@ async function constructProposal(input: {
 }
 
 export async function proposePersonalityProjection(
-  input: { voiceProfileId?: string; origin?: PersonalityProposalOrigin } = {},
+  input: {
+    voiceProfileId?: string;
+    recoverWorkspaceMismatch?: boolean;
+    origin?: PersonalityProposalOrigin;
+  } = {},
   dependencies: PersonalityProposalDependencies = {},
 ): Promise<PersonalityProposal> {
   return constructProposal({
     kind: "projection",
     voiceProfileId: input.voiceProfileId,
+    recoverWorkspaceMismatch: input.recoverWorkspaceMismatch,
     origin: input.origin ?? { kind: "tool" },
     dependencies,
   });
