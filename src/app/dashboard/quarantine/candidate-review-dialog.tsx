@@ -28,9 +28,43 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { formatCandidateTimestamp } from "./quarantine-utils";
 import type { QuarantineCandidateItem } from "./types";
+import type { LinkedInObservedProfileSnapshot } from "@/lib/workflows/snowball-identity-evidence";
 
 function formatReason(reason: string): string {
   return reason.replaceAll("_", " ");
+}
+
+function readObservedProfile(
+  failureDetails: Record<string, unknown>,
+): LinkedInObservedProfileSnapshot | null {
+  const raw = failureDetails.observedProfile;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const value = raw as Partial<LinkedInObservedProfileSnapshot>;
+  if (typeof value.headline !== "string") return null;
+  const experience = value.experience;
+  const parsedExperience =
+    experience &&
+    typeof experience === "object" &&
+    !Array.isArray(experience) &&
+    typeof (experience as { roleTitle?: unknown }).roleTitle === "string"
+      ? {
+          roleTitle: (experience as { roleTitle: string }).roleTitle,
+          roleCompany: typeof (experience as { roleCompany?: unknown }).roleCompany === "string"
+            ? (experience as { roleCompany: string }).roleCompany
+            : "",
+          snippet: typeof (experience as { snippet?: unknown }).snippet === "string"
+            ? (experience as { snippet: string }).snippet
+            : "",
+        }
+      : null;
+  return {
+    headline: value.headline,
+    affiliationLine:
+      typeof value.affiliationLine === "string" && value.affiliationLine.trim()
+        ? value.affiliationLine
+        : null,
+    experience: parsedExperience,
+  };
 }
 
 function CandidateStatusBadge({ status }: { status: QuarantineCandidateItem["status"] }) {
@@ -95,6 +129,7 @@ function CandidateDialogHeader({ candidate }: { candidate: QuarantineCandidateIt
 }
 
 function CandidateIdentityContext({ candidate }: { candidate: QuarantineCandidateItem }) {
+  const observedProfile = readObservedProfile(candidate.failureDetails);
   return (
     <div className="grid gap-4 sm:grid-cols-2">
       <section className="min-w-0 rounded-lg border p-4 sm:col-span-2">
@@ -107,6 +142,24 @@ function CandidateIdentityContext({ candidate }: { candidate: QuarantineCandidat
           {candidate.attemptCount === 1 ? "attempt" : "attempts"}
         </p>
       </section>
+
+      {observedProfile ? (
+        <section className="min-w-0 space-y-2 rounded-lg border border-muted p-4 sm:col-span-2">
+          <h3 className="text-sm font-medium">Observed on LinkedIn (attestation)</h3>
+          <p className="text-sm">{observedProfile.headline}</p>
+          {observedProfile.affiliationLine ? (
+            <p className="text-sm text-muted-foreground">{observedProfile.affiliationLine}</p>
+          ) : null}
+          {observedProfile.experience ? (
+            <p className="text-sm text-muted-foreground">
+              Experience: {observedProfile.experience.roleTitle}
+              {observedProfile.experience.roleCompany
+                ? ` · ${observedProfile.experience.roleCompany}`
+                : ""}
+            </p>
+          ) : null}
+        </section>
+      ) : null}
 
       <section className="min-w-0 space-y-3 rounded-lg border p-4">
         <h3 className="text-sm font-medium">Proposed identity</h3>

@@ -45,16 +45,47 @@ export type SnowballIdentityScopeToken = {
   tokenHash: string;
 };
 
+export type LinkedInExperiencePreview = {
+  roleTitle: string;
+  roleCompany: string;
+  snippet: string;
+};
+
+export type LinkedInObservedProfileSnapshot = {
+  headline: string;
+  affiliationLine: string | null;
+  experience: LinkedInExperiencePreview | null;
+};
+
 export type LinkedInProfileObservation = {
   finalUrl: string;
   authenticated: boolean;
   visibleName: string;
   headline: string;
   topCardText: string;
+  affiliationLine: string;
+  experiencePreview: LinkedInExperiencePreview | null;
   unavailable?: boolean;
   avatarUrl?: string | null;
   sessionViewerAvatarUrl?: string | null;
 };
+
+export function buildSnowballObservedProfileDetails(
+  observation: Pick<
+    LinkedInProfileObservation,
+    "headline" | "affiliationLine" | "experiencePreview" | "visibleName"
+  >,
+): { observedProfile: LinkedInObservedProfileSnapshot } {
+  const headline = observation.headline.trim();
+  const affiliationLine = observation.affiliationLine.trim() || null;
+  return {
+    observedProfile: {
+      headline,
+      affiliationLine,
+      experience: observation.experiencePreview,
+    },
+  };
+}
 
 type SnowballIdentityEvidenceRecord = {
   id: string;
@@ -399,7 +430,14 @@ function writeEvidenceLedger(
  */
 export function extractLinkedInProfileDomObservation(): Pick<
   LinkedInProfileObservation,
-  "visibleName" | "headline" | "topCardText" | "unavailable" | "avatarUrl" | "sessionViewerAvatarUrl"
+  | "visibleName"
+  | "headline"
+  | "topCardText"
+  | "affiliationLine"
+  | "experiencePreview"
+  | "unavailable"
+  | "avatarUrl"
+  | "sessionViewerAvatarUrl"
 > {
   const text = (element: Element | null): string =>
     element?.textContent?.replace(/\s+/g, " ").trim() ?? "";
@@ -479,6 +517,38 @@ export function extractLinkedInProfileDomObservation(): Pick<
       }
     }
     return best;
+  };
+  const extractExperiencePreview = (root: Element | null): LinkedInExperiencePreview | null => {
+    if (!root) return null;
+    let experienceRoot: Element | null =
+      root.querySelector("#experience")?.closest("section") ?? null;
+    if (!experienceRoot) {
+      for (const heading of root.querySelectorAll("h2, h3, [role='heading']")) {
+        const label = text(heading).toLocaleLowerCase("en-US");
+        if (label === "experience" || label.startsWith("experience ")) {
+          experienceRoot = heading.closest("section") ?? heading.parentElement;
+          break;
+        }
+      }
+    }
+    if (!experienceRoot) return null;
+    const entity =
+      experienceRoot.querySelector("[data-view-name='profile-component-entity']") ??
+      experienceRoot.querySelector("li.pvs-list__paged-list-item") ??
+      experienceRoot.querySelector("ul li");
+    const snippet = text(entity).slice(0, 500);
+    if (!snippet || snippet.length < 4) return null;
+    const parts = snippet
+      .split(/·|\||\n/)
+      .map((part) => part.trim())
+      .filter(Boolean);
+    const roleTitle = parts[0] ?? "";
+    const roleCompany = (parts[1] ?? "").replace(
+      /\s+(Full-time|Part-time|Contract|Self-employed|Freelance)\b.*$/i,
+      "",
+    ).trim();
+    if (!roleTitle) return null;
+    return { roleTitle, roleCompany, snippet };
   };
 
   const main = document.querySelector("main");
@@ -655,8 +725,19 @@ export function extractLinkedInProfileDomObservation(): Pick<
     findKeyedTopCard(structuralTopCard) ?? findKeyedTopCard(profileAnchor),
   );
   const avatarUrl = pickBestPhoto(topCardUrls);
+  const affiliationLine = text(structuralParagraphs[1] ?? null);
+  const experiencePreview = extractExperiencePreview(main);
 
-  return { visibleName, headline, topCardText, unavailable, avatarUrl, sessionViewerAvatarUrl };
+  return {
+    visibleName,
+    headline,
+    topCardText,
+    affiliationLine,
+    experiencePreview,
+    unavailable,
+    avatarUrl,
+    sessionViewerAvatarUrl,
+  };
 }
 
 async function observeLinkedInProfile(
@@ -687,6 +768,8 @@ async function observeLinkedInProfile(
         visibleName: "",
         headline: "",
         topCardText: "",
+        affiliationLine: "",
+        experiencePreview: null,
         avatarUrl: null,
         sessionViewerAvatarUrl: null,
       };
@@ -763,7 +846,11 @@ function validateObservation(input: {
     throw new SnowballIdentityEvidenceError(
       "profile_name_mismatch",
       `LinkedIn profile name "${observation.visibleName}" does not match candidate "${input.candidateName}".`,
-      { finalUrl: observation.finalUrl, observedName: observation.visibleName },
+      {
+        finalUrl: observation.finalUrl,
+        observedName: observation.visibleName,
+        ...buildSnowballObservedProfileDetails(observation),
+      },
     );
   }
 
@@ -783,6 +870,7 @@ function validateObservation(input: {
         finalUrl: observation.finalUrl,
         candidateCompany: input.candidateCompany ?? null,
         candidateTitle: input.candidateTitle ?? null,
+        ...buildSnowballObservedProfileDetails(observation),
       },
     );
   }
