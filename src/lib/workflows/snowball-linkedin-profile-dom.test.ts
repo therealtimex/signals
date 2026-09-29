@@ -542,6 +542,11 @@ describe("LinkedIn Snowball profile DOM extraction", () => {
                   Full-time · 2022 – Present
                 </div>
               </li>
+              <li class="pvs-list__paged-list-item">
+                <div data-view-name="profile-component-entity">
+                  Intern · OtherCo
+                </div>
+              </li>
             </ul>
           </section>
         </main>
@@ -555,6 +560,38 @@ describe("LinkedIn Snowball profile DOM extraction", () => {
         roleTitle: "Senior Engineer",
         roleCompany: "Vybe",
         snippet: expect.stringContaining("Vybe"),
+      },
+    });
+
+    browserWindow.close();
+  });
+
+  it("parses stacked Experience title and company lines without inline separators", () => {
+    const browserWindow = renderLinkedInProfile(
+      "https://www.linkedin.com/in/jane-doe/",
+      `
+        <main>
+          <section id="experience">
+            <h2>Experience</h2>
+            <ul>
+              <li class="pvs-list__paged-list-item">
+                <div data-view-name="profile-component-entity">
+                  Senior Engineer
+                  Vybe
+                  Full-time · Jan 2022 – Present · San Francisco
+                </div>
+              </li>
+            </ul>
+          </section>
+        </main>
+      `,
+    );
+
+    expect(extractLinkedInProfileDomObservation()).toMatchObject({
+      experiencePreview: {
+        roleTitle: "Senior Engineer",
+        roleCompany: "Vybe",
+        snippet: expect.stringContaining("San Francisco"),
       },
     });
 

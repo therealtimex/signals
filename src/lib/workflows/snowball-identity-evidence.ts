@@ -518,6 +518,29 @@ export function extractLinkedInProfileDomObservation(): Pick<
     }
     return best;
   };
+  const stripEmploymentSuffix = (value: string): string =>
+    value
+      .replace(/\s+(Full-time|Part-time|Contract|Self-employed|Freelance)\b.*$/i, "")
+      .trim();
+  const parseExperienceEntity = (entity: Element | null): LinkedInExperiencePreview | null => {
+    if (!entity) return null;
+    const rawLines = (entity.textContent ?? "")
+      .split(/\r?\n/)
+      .map((line) => line.replace(/\s+/g, " ").trim())
+      .filter(Boolean);
+    if (!rawLines.length || rawLines[0].length < 2) return null;
+    const snippet = rawLines.join(" · ").slice(0, 500);
+    const inlineParts = rawLines[0]
+      .split(/·|\|/)
+      .map((part) => part.trim())
+      .filter(Boolean);
+    const roleTitle = inlineParts[0] ?? rawLines[0];
+    const roleCompany = stripEmploymentSuffix(
+      inlineParts.length >= 2 ? inlineParts[1] : (rawLines[1] ?? ""),
+    );
+    if (!roleTitle) return null;
+    return { roleTitle, roleCompany, snippet };
+  };
   const extractExperiencePreview = (root: Element | null): LinkedInExperiencePreview | null => {
     if (!root) return null;
     let experienceRoot: Element | null =
@@ -536,19 +559,7 @@ export function extractLinkedInProfileDomObservation(): Pick<
       experienceRoot.querySelector("[data-view-name='profile-component-entity']") ??
       experienceRoot.querySelector("li.pvs-list__paged-list-item") ??
       experienceRoot.querySelector("ul li");
-    const snippet = text(entity).slice(0, 500);
-    if (!snippet || snippet.length < 4) return null;
-    const parts = snippet
-      .split(/·|\||\n/)
-      .map((part) => part.trim())
-      .filter(Boolean);
-    const roleTitle = parts[0] ?? "";
-    const roleCompany = (parts[1] ?? "").replace(
-      /\s+(Full-time|Part-time|Contract|Self-employed|Freelance)\b.*$/i,
-      "",
-    ).trim();
-    if (!roleTitle) return null;
-    return { roleTitle, roleCompany, snippet };
+    return parseExperienceEntity(entity);
   };
 
   const main = document.querySelector("main");

@@ -152,10 +152,7 @@ function CandidateIdentityContext({ candidate }: { candidate: QuarantineCandidat
           ) : null}
           {observedProfile.experience ? (
             <p className="text-sm text-muted-foreground">
-              Experience: {observedProfile.experience.roleTitle}
-              {observedProfile.experience.roleCompany
-                ? ` · ${observedProfile.experience.roleCompany}`
-                : ""}
+              Experience: {observedProfile.experience.snippet}
             </p>
           ) : null}
         </section>
