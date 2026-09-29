@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { handleAttestSnowballLinkedInIdentity } from "@/lib/agent-tools/handlers";
 import { invokeAgentTool } from "@/lib/agent-tools/invoke";
 import {
   countContacts,
@@ -111,6 +112,8 @@ function observe(overrides: Partial<{
   visibleName: string;
   headline: string;
   topCardText: string;
+  affiliationLine: string;
+  experiencePreview: import("@/lib/workflows/snowball-identity-evidence").LinkedInExperiencePreview | null;
   unavailable: boolean;
   avatarUrl: string | null;
   sessionViewerAvatarUrl: string | null;
@@ -121,6 +124,8 @@ function observe(overrides: Partial<{
     visibleName: "Jane Doe",
     headline: "Founder & CEO at Acme, Inc.",
     topCardText: "Jane Doe Founder & CEO at Acme San Francisco",
+    affiliationLine: "Acme, Inc. · Example University",
+    experiencePreview: null,
     unavailable: false,
     avatarUrl: null,
     sessionViewerAvatarUrl: null,
@@ -345,11 +350,61 @@ describe("Snowball LinkedIn identity evidence", () => {
     await expect(attest(scopeToken, {
       headline: "Independent consultant",
       topCardText: "Jane Doe Independent consultant London",
+      affiliationLine: "",
+      experiencePreview: null,
     })).rejects.toMatchObject({ reason: "profile_corroboration_missing" });
     await expect(attest(scopeToken, {
       finalUrl: "https://www.linkedin.com/authwall?trk=profile",
       authenticated: false,
     })).rejects.toMatchObject({ reason: "profile_not_authenticated" });
+  });
+
+  it("records observedProfile on quarantine when company corroboration fails", async () => {
+    const { run, scopeToken } = createSnowballRun();
+    const observation = observe({
+      visibleName: "Hoang Le",
+      headline: "Engineer at Vybe",
+      topCardText: "Hoang Le Engineer at Vybe",
+      affiliationLine: "Vybe",
+      experiencePreview: {
+        roleTitle: "Senior Engineer",
+        roleCompany: "Vybe",
+        snippet: "Senior Engineer · Vybe",
+      },
+    });
+    await expect(
+      handleAttestSnowballLinkedInIdentity(
+        {
+          snowballScopeToken: scopeToken,
+          candidateName: "Hoang Le",
+          candidateCompany: "Zalos",
+          candidateTitle: "Co-Founder",
+          profileUrl: "https://www.linkedin.com/in/hoangleitvn/",
+        },
+        {
+          attest: (input) => attestSnowballLinkedInIdentity(input, {
+            observe: observation,
+            now: () => 1_800_000_200,
+          }),
+        },
+      ),
+    ).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+
+    expect(listSnowballCandidates({ workflowRunId: run.id }).data[0]).toMatchObject({
+      proposedCompany: "Zalos",
+      failureReason: "profile_corroboration_missing",
+      failureDetails: {
+        observedProfile: {
+          headline: "Engineer at Vybe",
+          affiliationLine: "Vybe",
+          experience: {
+            roleTitle: "Senior Engineer",
+            roleCompany: "Vybe",
+            snippet: "Senior Engineer · Vybe",
+          },
+        },
+      },
+    });
   });
 
   it("binds direct create and upsert writes to the corroborated company and title", async () => {
