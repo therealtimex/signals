@@ -60,6 +60,7 @@ function buildQuarantineCandidate(
     promotedContactId: null,
     promotedIdentityId: null,
     promotedOrgId: null,
+    promotedAt: null,
     createdAt: 1_800_000_200,
     updatedAt: 1_800_000_200,
     runStatus: "running",
