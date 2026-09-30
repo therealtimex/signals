@@ -1,3 +1,13 @@
+import type {
+  ExploreMapContactNode,
+  ExploreMapEdge,
+  ExploreMapNode,
+  ExploreMapNicheNode,
+} from "@/lib/db/queries/explore-map";
+import type { ExploreMapThemeColors } from "@/components/explore/explore-map-colors";
+import { nicheTypeResolvedColor } from "@/components/explore/explore-map-colors";
+import { contactDisplayInitials } from "@/lib/contact-avatar-client";
+
 const CHART_COLORS = [
   "var(--chart-1)",
   "var(--chart-2)",
@@ -47,4 +57,143 @@ export function formatExploreMapBadge(meta: {
     ? `Showing ${meta.shownContacts} of ${meta.totalContacts} people`
     : `${meta.totalContacts} people`;
   return `${peopleLabel} · ${nicheCount} niches`;
+}
+
+export type ExploreMapLayerVisibility = {
+  showFollows: boolean;
+  showNiches: boolean;
+};
+
+export const EXPLORE_MAP_DEFAULT_LAYERS: ExploreMapLayerVisibility = {
+  showFollows: true,
+  showNiches: true,
+};
+
+/** Target on-screen avatar radius in px at default zoom. */
+export const EXPLORE_MAP_AVATAR_SCREEN_RADIUS = 5;
+export const EXPLORE_MAP_AVATAR_HOVER_SCREEN_RADIUS = 9;
+export const EXPLORE_MAP_OWNER_AVATAR_SCREEN_RADIUS = 10;
+
+export function exploreMapContactScreenRadius(
+  globalScale: number,
+  opts: { isOwner: boolean; isHovered: boolean },
+): number {
+  const screenRadius = opts.isOwner
+    ? EXPLORE_MAP_OWNER_AVATAR_SCREEN_RADIUS
+    : opts.isHovered
+      ? EXPLORE_MAP_AVATAR_HOVER_SCREEN_RADIUS
+      : EXPLORE_MAP_AVATAR_SCREEN_RADIUS;
+  return screenRadius / Math.max(globalScale, 0.05);
+}
+
+export function shouldShowExploreContactAvatar(_node: ExploreMapContactNode): boolean {
+  return true;
+}
+
+export function buildExploreNicheColorMap(
+  nodes: ExploreMapNode[],
+  theme: ExploreMapThemeColors,
+): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const [index, niche] of listExploreMapNiches(nodes).entries()) {
+    map.set(
+      niche.entityId,
+      theme.chart[index % theme.chart.length] ??
+        nicheTypeResolvedColor(niche.nicheType, theme),
+    );
+  }
+  return map;
+}
+
+export function primaryNicheIdForContact(node: ExploreMapContactNode): string | null {
+  return node.nicheIds[0] ?? null;
+}
+
+export function contactNodeBaseColor(
+  node: ExploreMapContactNode,
+  nicheColorMap: Map<string, string>,
+  theme: ExploreMapThemeColors,
+): string {
+  if (node.isOwner) return theme.primary;
+  const nicheId = primaryNicheIdForContact(node);
+  if (nicheId && nicheColorMap.has(nicheId)) {
+    return nicheColorMap.get(nicheId)!;
+  }
+  return theme.mutedForeground;
+}
+
+export function exploreContactInitials(label: string): string {
+  return contactDisplayInitials({ name: label });
+}
+
+export function filterExploreMapEdges(
+  edges: ExploreMapEdge[],
+  layers: ExploreMapLayerVisibility,
+): ExploreMapEdge[] {
+  return edges.filter((edge) => {
+    if (edge.kind === "belongs_to_niche") return layers.showNiches;
+    return layers.showFollows;
+  });
+}
+
+export function listExploreMapNiches(nodes: ExploreMapNode[]): ExploreMapNicheNode[] {
+  return nodes
+    .filter((node): node is ExploreMapNicheNode => node.kind === "niche")
+    .sort(
+      (left, right) =>
+        right.memberCount - left.memberCount || left.label.localeCompare(right.label),
+    );
+}
+
+export function contactMatchesNicheFilter(
+  node: ExploreMapContactNode,
+  selectedNicheId: string | null,
+): boolean {
+  if (!selectedNicheId) return true;
+  if (node.isOwner) return true;
+  return node.nicheIds.includes(selectedNicheId);
+}
+
+export function exploreMapNodeOpacity(
+  node: ExploreMapNode,
+  opts: {
+    selectedNicheId: string | null;
+    hoveredNodeId: string | null;
+  },
+): number {
+  const { selectedNicheId, hoveredNodeId } = opts;
+
+  if (hoveredNodeId === node.id) return 1;
+  if (node.kind === "contact" && node.isOwner) return 1;
+
+  if (selectedNicheId) {
+    if (node.kind === "niche") {
+      return node.entityId === selectedNicheId ? 1 : 0.35;
+    }
+    return contactMatchesNicheFilter(node, selectedNicheId) ? 1 : 0.2;
+  }
+
+  if (hoveredNodeId) return 0.55;
+
+  return 1;
+}
+
+export function shouldRenderExploreNodeLabel(
+  node: ExploreMapNode,
+  hoveredNodeId: string | null,
+): boolean {
+  if (node.kind === "niche") return true;
+  if (node.kind === "contact" && node.isOwner) return true;
+  return hoveredNodeId === node.id;
+}
+
+export function exploreMapNodeTooltip(
+  node: ExploreMapNode,
+  hoveredNodeId: string | null,
+): string {
+  if (hoveredNodeId !== node.id) return "";
+  if (node.kind === "niche") {
+    return `${node.label} · ${node.memberCount} people`;
+  }
+  return node.label;
 }

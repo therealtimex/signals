@@ -121,6 +121,8 @@ jobs:
         env:
           # Boot/migrate touches ~/.signals — keep CI hermetic under the workspace.
           SIGNALS_DATA_DIR: ${{ github.workspace }}/.ci/signals-data
+          # Coverage + 200+ unit files can starve vitest fork IPC on ubuntu-latest.
+          VITEST_MAX_WORKERS: 4
 
       - name: Verify fresh data dir import safety
         run: npm run verify:fresh-import
