@@ -16,6 +16,8 @@ Package and distribute Signals through the **RealtimeX marketplace** — not pub
 Plugin id: `com.realtimex.signals`  
 Local app id: `47e45f71-3279-42f5-8e95-731de01b6eae`
 
+Version 0.2.21 synchronizes TipTap composer state and adds deterministic verification to LinkedIn publishing, guards social posting against untracked payloads and fabricated URLs across X, Facebook, and LinkedIn, prevents duplicate submissions on verify timeout via verify_uncertain, and records observed LinkedIn profiles on Snowball attestation failures.
+
 Version 0.2.20 fixes Facebook self-profile detection and adds a reviewed recovery proposal when a
 Personality-bound workspace moves to a different directory. The recovery still requires explicit
 approval before writing a new binding.
