@@ -9,6 +9,7 @@
 
 const { readFileSync } = require("node:fs");
 const { spawnSync } = require("node:child_process");
+const { verifyPublishJob } = require("./publish-job-guard.cjs");
 
 const SESSION = process.env.SIGNALS_PUBLISH_AB_SESSION || "signals-publish";
 const AB_BIN = process.env.AGENT_BROWSER_BIN || "agent-browser";
@@ -301,13 +302,20 @@ function verifyPublishedPost() {
   }
 }
 
-function main() {
+async function main() {
   const { port, payload, dryRun } = parseArgs(process.argv);
   ensureAgentBrowser();
 
   try {
     validatePayload(payload);
     logPhase(`start dryRun=${dryRun}`);
+    if (!dryRun) {
+      await verifyPublishJob({
+        payload,
+        platform: "linkedin",
+        baseUrl: process.env.SIGNALS_BASE_URL,
+      });
+    }
     connectSession(port);
     openLinkedInFeed();
     assertLinkedInLoggedIn();
@@ -357,16 +365,26 @@ function main() {
     requireAb(["click", LI_SELECTORS.postButton], "click linkedin post button");
     sleep(4000);
 
-    const platformUrl = verifyPublishedPost() || LINKEDIN_FEED_URL;
-    const match = platformUrl.match(/activity[:-](\d+)/);
-    const platformPostId = match ? match[1] : `li_${Date.now()}`;
-
-    emit({
-      success: true,
-      handle,
-      platformPostId,
-      platformUrl,
-    });
+    const verifiedUrl = verifyPublishedPost();
+    if (verifiedUrl) {
+      const match = verifiedUrl.match(/activity[:-](\d+)/);
+      const platformPostId = match ? match[1] : undefined;
+      emit({
+        success: true,
+        handle,
+        platformPostId,
+        platformUrl: verifiedUrl,
+      });
+    } else {
+      emit({
+        success: false,
+        postSubmitted: true,
+        handle,
+        error:
+          "LinkedIn Post was clicked, but the new post permalink has not been verified. Inspect the feed or profile before calling complete_publish; do not click Post again.",
+        errorCode: "verify_uncertain",
+      });
+    }
   } catch (err) {
     const message = err?.message ?? String(err);
     const errorCode =
