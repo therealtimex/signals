@@ -44,6 +44,7 @@ Resolve/create/start the session with `realtimex-pp-cli` or the `agent-browser` 
 | `x` | `repost` or `quote` | `scripts/x-publish.cjs` (same script; `kind` in payload) |
 | `x` | outbound reply (Social Intent Patrol, not a publish job) | `scripts/x-reply.cjs` |
 | `facebook` | `original` | `scripts/facebook-publish.cjs` |
+| `linkedin` | `original` | `scripts/linkedin-publish.cjs` |
 
 ```bash
 node .claude/skills/signals-publish/scripts/x-publish.cjs \
@@ -63,7 +64,24 @@ node .claude/skills/signals-publish/scripts/facebook-publish.cjs \
   --payload /tmp/facebook-publish-job.json
 ```
 
+```bash
+node .claude/skills/signals-publish/scripts/linkedin-publish.cjs \
+  --port <cdpPort> \
+  --payload /tmp/linkedin-publish-job.json
+```
+
 For QA without sending a public post, add `--dry-run` (fills compose fields, skips Post/Tweet/Repost/Reply confirm).
+
+### LinkedIn compose insertion (TipTap / ProseMirror)
+
+LinkedIn has migrated from Quill (`.ql-editor`) to **TipTap / ProseMirror** (`.tiptap.ProseMirror`).
+TipTap renders the document through ProseMirror transactions. If automation injects text via synthetic DOM manipulation (`innerHTML`, `document.execCommand`, clipboard events, or `editor.commands.setContent()`), the TipTap DOM updates visually, but LinkedIn's outer React component state does **not** receive the change because trusted browser `beforeinput` events were bypassed. On submit, LinkedIn serializes the empty React state, publishing an image-only post with dropped text.
+
+- **Sequence media first:** Upload and attach media before text insertion so the compose dialog returns to its stable view.
+- **Focus `.tiptap.ProseMirror`:** Always focus the TipTap ProseMirror contenteditable element.
+- **Inject with native CDP `Input.insertText`:** Use `agent-browser keyboard inserttext "<text>"`. This sends browser-level input events (`isTrusted: true`) that trigger TipTap's ProseMirror transaction cycle and keep LinkedIn's outer React state synchronized.
+- **Pre-flight assertion:** Before clicking Post, assert that `.tiptap.ProseMirror p` contains text and that the Post button (`button.share-actions__primary-action`, `[aria-label="Post"]`) is enabled (`aria-disabled` is not `"true"`).
+- **Post-publish verification:** Inspect the published post URL. If body text is absent on the published update, automatically roll back (delete) the malformed post immediately.
 
 ### X compose insertion (Draft.js / Lexical)
 
@@ -77,7 +95,7 @@ X's inline and modal composers serialize **only the focused active block** if pa
 
 4. Parse the **last stdout line** as JSON. On success call `complete_publish` with `leaseId`, `handle`, `platformPostId`, and `platformUrl`. Include `targetId` only when the job target snapshot contains it; omit `targetId` from both success and failure callbacks for legacy platform-only jobs. On failure pass `leaseId`, optional snapshotted `targetId`, and `error` + `errorCode` (`session_expired`, `captcha`, `upload_failed`, `timeout`, `wrong_account`, `verify_uncertain`, `unknown`).
 5. Always run `signals-pp-cli targets release --lease <leaseId>` after the completion callback, including failures.
-6. **LinkedIn (beta):** shared connections are verify-only. Use a dedicated connection for multiple members; use `agent-browser` interactively or report a clear failure if unsupported.
+6. **LinkedIn:** Use `scripts/linkedin-publish.cjs`. For multi-member setups, use dedicated accounts per lease. Verify published URL after completion.
 
 ## Error handling
 

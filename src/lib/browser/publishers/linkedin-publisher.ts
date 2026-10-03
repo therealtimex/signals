@@ -63,23 +63,44 @@ export async function publishToLinkedIn(request: PublishRequest): Promise<Publis
     await shareBox.click();
     await sleep(1500);
 
-    // Wait for the Quill rich text editor
-    const editorSelector = ".ql-editor";
-    await page.waitForSelector(editorSelector, { timeout: 10_000 });
-
-    // Type the post text
-    await humanTypeText(page, editorSelector, request.text, 15);
-    await sleep(500);
-
-    // Upload media
+    // Upload media first if present so modal stabilizes back to post compose view
     if (request.mediaAssetIds && request.mediaAssetIds.length > 0) {
       await uploadMediaLinkedIn(page, request.mediaAssetIds);
     }
 
+    // Wait for the TipTap / ProseMirror rich text editor (or Quill fallback)
+    const editorSelector = ".tiptap.ProseMirror, .editor-content .ProseMirror, [contenteditable=\"true\"].ProseMirror, .ql-editor";
+    await page.waitForSelector(editorSelector, { timeout: 10_000 });
+
+    const editorLocator = page.locator(editorSelector).first();
+    await editorLocator.click();
+    await sleep(200);
+
+    // Use native keyboard insertText to ensure trusted beforeinput events trigger TipTap transactions
+    await page.keyboard.insertText(request.text);
+    await sleep(500);
+
+    // Pre-flight assertion: verify editor has text content and post button is enabled
+    const editorText = (await editorLocator.innerText()).trim();
+    if (!editorText && request.text.trim()) {
+      throw new PublishError(
+        "LinkedIn TipTap editor failed to synchronize text state before submission.",
+        "unknown"
+      );
+    }
+
+    const postButton = page.locator("button.share-actions__primary-action, button:has-text('Post'), [role='dialog'] button:has-text('Post')").first();
+    await postButton.waitFor({ timeout: 5_000 });
+    const isPostDisabled = (await postButton.getAttribute("aria-disabled")) === "true" || (await postButton.isDisabled());
+    if (isPostDisabled) {
+      throw new PublishError(
+        "LinkedIn Post button remains disabled after text insertion.",
+        "unknown"
+      );
+    }
+
     if (request.mode === "auto") {
       // Auto mode: click the Post button
-      const postButton = page.locator("button.share-actions__primary-action");
-      await postButton.waitFor({ timeout: 5_000 });
       await postButton.click();
 
       // Wait for post to be published
