@@ -31,16 +31,26 @@ const job = {
 };
 const item = { id: payload.contentItemId, status: "publishing", platformTarget: "x" };
 
-function fakeFetch({ jobValue = job, itemValue = item, assets = [{ id: "chart-1" }] } = {}) {
+const defaultAssets = [{ id: "chart-1", filename: "chart.jpg", storagePath: "chart.jpg" }];
+
+function fakeFetch({ jobValue = job, itemValue = item, assets = defaultAssets } = {}) {
   return async (input) => {
-    const path = new URL(input).pathname;
+    const url = new URL(input);
+    const path = url.pathname;
     if (path === `/api/content/publish-jobs/${payload.jobId}`) {
       return Response.json({ success: Boolean(jobValue), job: jobValue }, { status: jobValue ? 200 : 404 });
     }
     if (path === `/api/content/${payload.contentItemId}`) {
       return Response.json({ item: itemValue }, { status: itemValue ? 200 : 404 });
     }
-    if (path === "/api/media") return Response.json({ assets });
+    if (path === "/api/media") {
+      assert.equal(
+        url.searchParams.get("contentItemId"),
+        payload.contentItemId,
+        "/api/media query must include contentItemId"
+      );
+      return Response.json({ assets });
+    }
     throw new Error(`Unexpected URL: ${input}`);
   };
 }
@@ -63,6 +73,9 @@ await rejects("browser payload differs from the queued post text", { payload: { 
 await rejects("browser payload differs from the queued source post", { payload: { sourcePostUrl: "https://x.com/a/status/1" } });
 await rejects("browser payload omits queued media", { payload: { mediaPaths: [] } });
 await rejects("queued media is not attached", { assets: [] });
+await rejects("browser payload media does not match the attached Content asset", {
+  payload: { mediaPaths: [["/tmp/untracked-other.jpg"]] },
+});
 await rejects("requested platform target is not actively publishing", { payload: { targetId: "another-target" } });
 await rejects("job is not actively publishing", { jobValue: { ...job, status: "completed" } });
 await rejects("Content item is not publishing", { itemValue: { ...item, status: "draft" } });
@@ -71,12 +84,40 @@ await assert.rejects(
   (error) => error?.message?.includes("local HTTP origin")
 );
 
+// Repost jobs with empty or omitted text must pass preflight
+const repostJob = {
+  ...job,
+  payload: {
+    ...job.payload,
+    kind: "repost",
+    text: "",
+    sourcePostUrl: "https://x.com/author/status/123",
+    mediaAssetIds: [],
+  },
+};
+const repostPayload = {
+  ...payload,
+  kind: "repost",
+  text: undefined,
+  sourcePostUrl: "https://x.com/author/status/123",
+  mediaPaths: [],
+};
+assert.deepEqual(
+  await verifyPublishJob({
+    payload: repostPayload,
+    platform: "x",
+    baseUrl,
+    fetchImpl: fakeFetch({ jobValue: repostJob }),
+  }),
+  { jobId: "job-1", contentItemId: "item-1", targetId: "target-1" }
+);
+
 const workDir = mkdtempSync(join(tmpdir(), "signals-publish-guard-test-"));
 try {
   const payloadPath = join(workDir, "untracked-post.json");
   const browserStatePath = join(workDir, "browser-state.json");
   writeFileSync(payloadPath, JSON.stringify({ text: "Untracked post" }));
-  for (const platform of ["x", "facebook"]) {
+  for (const platform of ["x", "facebook", "linkedin"]) {
     const script = join(import.meta.dirname, "..", ".claude", "skills", "signals-publish", "scripts", `${platform}-publish.cjs`);
     const result = spawnSync(process.execPath, [script, "--port", "9222", "--payload", payloadPath], {
       encoding: "utf8",

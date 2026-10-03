@@ -4,7 +4,7 @@
  */
 import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -32,12 +32,13 @@ function runXPublish(payload, extraEnv = {}, extraArgs = []) {
   const workDir = mkdtempSync(join(tmpdir(), "x-publish-adapter-"));
   const payloadPath = join(workDir, "payload.json");
   const stateFile = join(workDir, "fake-ab-state.json");
+  const requestsFile = join(workDir, "fake-signals-requests.jsonl");
   const sequence = ++publishJobSequence;
   writeFileSync(payloadPath, JSON.stringify({
-    ...payload,
     jobId: `pj_test_${sequence}`,
     contentItemId: `item_test_${sequence}`,
     targetId: "tgt_test_x",
+    ...payload,
   }));
   const result = spawnSync(
     process.execPath,
@@ -51,6 +52,7 @@ function runXPublish(payload, extraEnv = {}, extraArgs = []) {
       SIGNALS_PUBLISH_AB_SESSION: "fake-session",
       FAKE_AB_STATE_FILE: stateFile,
       FAKE_SIGNALS_PUBLISH_PAYLOAD_FILE: payloadPath,
+      FAKE_SIGNALS_REQUESTS_FILE: requestsFile,
       SIGNALS_BASE_URL: "http://127.0.0.1:3010",
       NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --require ${fakeSignalsFetch}`.trim(),
       FAKE_AB_FAIL_ADD: "",
@@ -58,7 +60,21 @@ function runXPublish(payload, extraEnv = {}, extraArgs = []) {
       ...extraEnv,
     },
   });
+  let requests = [];
+  if (existsSync(requestsFile)) {
+    requests = readFileSync(requestsFile, "utf8")
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+  }
+  let browserState = null;
+  if (existsSync(stateFile)) {
+    browserState = JSON.parse(readFileSync(stateFile, "utf8"));
+  }
   rmSync(workDir, { recursive: true, force: true });
+  result.requests = requests;
+  result.browserState = browserState;
   return result;
 }
 
@@ -114,6 +130,61 @@ if (happy.status !== 0) {
 const happyJson = lastJson(happy.stdout);
 if (!happyJson.success || happyJson.handle !== "@smokeuser") {
   console.error("unexpected happy result:", happyJson);
+  process.exit(1);
+}
+
+// Assert preflight verification was called before browser actions
+const preflightJobReq = happy.requests.find((r) => r.pathname.startsWith("/api/content/publish-jobs/"));
+const preflightItemReq = happy.requests.find((r) => r.pathname.startsWith("/api/content/"));
+if (!preflightJobReq || !preflightItemReq) {
+  console.error("preflight requests were not recorded:", happy.requests);
+  process.exit(1);
+}
+if (!happy.browserState?.connected) {
+  console.error("browser was not connected after preflight");
+  process.exit(1);
+}
+
+// Caller-supplied identity fields must be preserved
+const customIdentity = runXPublish(
+  {
+    text: "caller supplied IDs",
+    jobId: "pj_custom_id_999",
+    contentItemId: "item_custom_id_999",
+    targetId: "tgt_custom_id_999",
+  }
+);
+if (customIdentity.status !== 0) {
+  console.error("custom identity run failed:", customIdentity.stdout, customIdentity.stderr);
+  process.exit(1);
+}
+const customJobReq = customIdentity.requests.find((r) =>
+  r.pathname === "/api/content/publish-jobs/pj_custom_id_999"
+);
+if (!customJobReq) {
+  console.error("custom jobId was not preserved in preflight:", customIdentity.requests);
+  process.exit(1);
+}
+
+// Verification timeout must return verify_uncertain with postSubmitted: true
+const timeoutPost = runXPublish(
+  { text: "timeout post text" },
+  {
+    FAKE_AB_FAIL_POST_VERIFY: "1",
+    SIGNALS_PUBLISH_VERIFY_TIMEOUT_MS: "200",
+  }
+);
+if (timeoutPost.status === 0) {
+  console.error("timeout post should not succeed");
+  process.exit(1);
+}
+const timeoutJson = lastJson(timeoutPost.stdout);
+if (
+  timeoutJson.success ||
+  timeoutJson.errorCode !== "verify_uncertain" ||
+  !timeoutJson.postSubmitted
+) {
+  console.error("unexpected timeout post result:", timeoutJson);
   process.exit(1);
 }
 

@@ -370,6 +370,9 @@ function handleEval(rest, state) {
     return ok(JSON.stringify(JSON.stringify(composeSnapshotFromState(state, index))));
   }
   if (js.includes("ownedCandidates")) {
+    if (process.env.FAKE_AB_FAIL_POST_VERIFY === "1") {
+      return ok(JSON.stringify("[]"));
+    }
     const onRepliesTimeline = /with_replies/i.test(String(state.currentUrl || ""));
     if (
       process.env.FAKE_AB_REPLY_HIDDEN_FROM_THREAD === "1" &&
@@ -553,7 +556,12 @@ const cmd = rest[0];
 
 if (!cmd) fail("missing command");
 
-if (cmd === "connect") return ok();
+if (cmd === "connect") {
+  state.connected = true;
+  state.commands = (state.commands || []).concat(["connect"]);
+  writeState(state);
+  return ok();
+}
 if (cmd === "tab") {
   if (rest[1] === "list") {
     if (rest.includes("--json")) return tabListJson(state);

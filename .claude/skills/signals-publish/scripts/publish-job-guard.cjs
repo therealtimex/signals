@@ -45,6 +45,25 @@ function equalArray(left, right) {
   return JSON.stringify(left ?? []) === JSON.stringify(right ?? []);
 }
 
+function matchesAsset(filePath, asset) {
+  if (typeof filePath !== "string" || !filePath.trim() || !asset) return false;
+  const normalized = filePath.replace(/\\/g, "/");
+  const basename = normalized.split("/").pop();
+  if (asset.path && (filePath === asset.path || normalized === String(asset.path).replace(/\\/g, "/"))) {
+    return true;
+  }
+  if (asset.storagePath) {
+    const storageNormalized = String(asset.storagePath).replace(/\\/g, "/");
+    if (normalized === storageNormalized || normalized.endsWith(`/${storageNormalized}`)) {
+      return true;
+    }
+  }
+  if (asset.filename && basename === asset.filename) {
+    return true;
+  }
+  return false;
+}
+
 /**
  * Fail closed before a public browser click unless the supplied text and target
  * still match a live Signals job and an existing Content item.
@@ -67,7 +86,10 @@ async function verifyPublishJob({ payload, platform, baseUrl, fetchImpl = fetch 
   if (!Array.isArray(job.payload?.platforms) || !job.payload.platforms.includes(platform)) {
     fail("job does not include this platform");
   }
-  if (job.payload.text !== payload.text || !equalArray(job.payload.threadTexts, payload.threadTexts)) {
+  if (
+    String(job.payload.text ?? "") !== String(payload.text ?? "") ||
+    !equalArray(job.payload.threadTexts, payload.threadTexts)
+  ) {
     fail("browser payload differs from the queued post text");
   }
   if (String(job.payload.kind || "original") !== String(payload.kind || "original")) {
@@ -110,8 +132,17 @@ async function verifyPublishJob({ payload, platform, baseUrl, fetchImpl = fetch 
       fetchImpl,
       `${origin}/api/media?contentItemId=${encodeURIComponent(contentItemId)}`
     );
-    const attachedIds = new Set((mediaResponse?.assets ?? []).map((asset) => asset.id));
-    if (mediaIds.some((id) => !attachedIds.has(id))) fail("queued media is not attached to the Content item");
+    const attachedAssets = new Map(
+      (mediaResponse?.assets ?? []).map((asset) => [asset.id, asset])
+    );
+    for (let i = 0; i < mediaIds.length; i++) {
+      const id = mediaIds[i];
+      const asset = attachedAssets.get(id);
+      if (!asset) fail("queued media is not attached to the Content item");
+      if (!matchesAsset(mediaPaths[i], asset)) {
+        fail("browser payload media does not match the attached Content asset");
+      }
+    }
   }
   return { jobId, contentItemId, targetId: target.targetId ?? null };
 }

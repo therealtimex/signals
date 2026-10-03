@@ -1118,8 +1118,9 @@ function waitForVerifiedPost(expectedText, handle, baseline, timeoutMs) {
   }
   return {
     success: false,
-    error: "No newly published post was detected on your X profile.",
-    errorCode: "timeout",
+    postSubmitted: true,
+    error: "Tweet was clicked, but no newly published post was confirmed on your X profile within the verification window. Inspect the profile timeline before calling complete_publish; do not click Tweet again.",
+    errorCode: "verify_uncertain",
   };
 }
 
