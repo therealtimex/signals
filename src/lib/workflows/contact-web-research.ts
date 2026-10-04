@@ -1,5 +1,6 @@
 import type { ArppPersonDocument } from "@/lib/arpp/types";
 import { identityProfileHref } from "@/lib/contact-identity-handle";
+import { corporateEmailDomain } from "@/lib/contacts/corporate-domain";
 import type { ContactWithIdentities } from "@/lib/db/types";
 import {
   buildContactWebResearchQuery,
@@ -39,6 +40,7 @@ export type ContactWebResearchBriefContact = Pick<
   | "profileUrl"
   | "enrichmentScore"
   | "identities"
+  | "email"
 >;
 
 export type ContactWebResearchBriefContext = {
@@ -250,6 +252,7 @@ export function buildContactWebResearchBriefSection(input: {
 }): string {
   const { contact } = input.context;
   const { researchTarget } = input.context;
+  const corporateDomain = corporateEmailDomain(contact.email);
   const query = buildContactWebResearchQuery(contact);
   const refinedQuery = buildContactWebResearchRefinedQuery(contact);
   const googleUrl = buildGoogleSearchUrl(query);
@@ -264,6 +267,11 @@ export function buildContactWebResearchBriefSection(input: {
     "## Contact web research execution contract",
     `Contact ID: ${contact.id}`,
     `Enrichment score: ${contact.enrichmentScore}`,
+    ...(corporateDomain
+      ? [
+          `Corporate email domain: ${corporateDomain}. A profile whose company website, employer, or email domain matches it is strong matching evidence; a mismatch alone is not disqualifying.`,
+        ]
+      : []),
     `ARPP gaps to prioritize: ${input.context.arppMissing.join("; ") || "none listed"}`,
     `Signals callback base URL: ${input.signalsBaseUrl}`,
     "",

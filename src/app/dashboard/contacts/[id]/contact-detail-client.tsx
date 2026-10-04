@@ -69,6 +69,7 @@ import { formatWebsiteLabel, hrefForWebsite, isRedundantHeadline } from "@/lib/c
 import type { ArppPersonDocument } from "@/lib/arpp/types";
 import { shouldRunWebResearch } from "@/lib/contacts/web-research-router";
 import { EnrichContactButton } from "./enrich-contact-button";
+import { EnrichIdentitiesPrompt } from "./enrich-identities-prompt";
 
 const platformLabels: Record<string, string> = {
   x: "X / Twitter",
@@ -479,6 +480,17 @@ export function ContactDetailClient({
             contactName={contact.name}
             title="Platform identities"
             description="Accounts on social and content platforms."
+            emptyAction={
+              canEnrich ? (
+                <EnrichIdentitiesPrompt
+                  contactId={contact.id}
+                  contactName={contact.name}
+                  email={contact.email}
+                  needsWebResearch={needsWebResearch}
+                  profilePipelineTemplateId={profilePipelineTemplateId}
+                />
+              ) : null
+            }
           />
         </TabsContent>
 

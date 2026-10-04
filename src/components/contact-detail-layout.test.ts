@@ -12,8 +12,11 @@ import { ActivityMarkdown } from "@/components/activity-markdown";
 import type { ContactExploreCard } from "@/lib/db/queries/contact-explore";
 import type { ContactWithIdentities } from "@/lib/db/types";
 
+// Stable across renders: EnrichContactButton's polling effect depends on the router identity.
+const router = vi.hoisted(() => ({ refresh: () => {}, push: () => {} }));
+
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }),
+  useRouter: () => router,
   usePathname: () => "/dashboard/contacts/c1",
 }));
 
@@ -35,6 +38,8 @@ vi.mock("@/components/ui/dialog", async () => {
     DialogHeader: passthrough("div"),
     DialogTitle: ({ children }: { children?: React.ReactNode }) => h("h2", null, children),
     DialogDescription: passthrough("p"),
+    DialogFooter: passthrough("div"),
+    DialogTrigger: passthrough("div"),
   };
 });
 
@@ -399,7 +404,7 @@ describe("ContactDetailClient Identities & Channels (#534)", () => {
     expect(html).toContain("Identities &amp; Channels (0)");
   });
 
-  describe("Edit sheet", () => {
+  describe("live", () => {
     let container: HTMLDivElement;
     let root: Root;
 
@@ -410,7 +415,11 @@ describe("ContactDetailClient Identities & Channels (#534)", () => {
       root = createRoot(container);
       vi.stubGlobal(
         "fetch",
-        vi.fn().mockResolvedValue({ ok: true, json: async () => ({ relationship: null }) }),
+        vi.fn(async (input: RequestInfo | URL) =>
+          String(input).includes("/web-research")
+            ? { ok: false, json: async () => ({}) }
+            : { ok: true, json: async () => ({ relationship: null }) },
+        ),
       );
     });
 
@@ -449,6 +458,49 @@ describe("ContactDetailClient Identities & Channels (#534)", () => {
       expect(sheetText).toContain("Email, phone and messaging live under Identities & Channels.");
       expect(sheetText).not.toContain("Add Channel");
       expect(sheetText).not.toContain("Optional — add email, phone, or messenger handles.");
+    });
+
+    async function openIdentitiesTab(contact: ContactWithIdentities) {
+      await act(async () => {
+        root.render(createElement(ContactDetailClient, { contact, tasks: [], explore: exploreFixture }));
+      });
+      const trigger = Array.from(container.querySelectorAll('[role="tab"]')).find((tab) =>
+        tab.textContent?.startsWith("Identities & Channels"),
+      );
+      expect(trigger).toBeTruthy();
+      await act(async () => {
+        trigger!.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }));
+        await Promise.resolve();
+      });
+    }
+
+    it("offers enrichment with the employer domain in the empty identities group", async () => {
+      await openIdentitiesTab({
+        ...contactFixture,
+        email: "bui-sy.giang@mes-engineering.com.vn",
+        identities: [],
+        channels: [channelFixture("ch-email", "email", "bui-sy.giang@mes-engineering.com.vn")],
+      });
+
+      const panel = container.querySelector('[role="tabpanel"][data-state="active"]');
+      expect(panel?.textContent).toContain("Channels");
+      expect(panel?.textContent).toContain("Platform identities");
+      expect(panel?.textContent).toContain(
+        "Enrich public social profiles for Jordan Lee at mes-engineering.com.vn?",
+      );
+      expect(panel?.querySelectorAll("[data-enrichment-route]")).toHaveLength(1);
+    });
+
+    it("does not offer enrichment for an archived contact", async () => {
+      await openIdentitiesTab({
+        ...contactFixture,
+        identities: [],
+        metadata: JSON.stringify({ archived: 1 }),
+      });
+
+      const panel = container.querySelector('[role="tabpanel"][data-state="active"]');
+      expect(panel?.textContent).toContain("No platform identities linked yet.");
+      expect(panel?.querySelector("[data-enrich-identities-prompt]")).toBeNull();
     });
   });
 });

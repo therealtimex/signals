@@ -24,6 +24,7 @@ const contact: ContactWebResearchBriefContact = {
   profileUrl: null,
   enrichmentScore: 20,
   identities: [],
+  email: null,
 };
 
 const researchTarget: ContactWebResearchPreparedTarget = {
@@ -90,6 +91,27 @@ describe("Contact Web Research workflow contract", () => {
     expect(brief).toContain("identity or employment rows do not satisfy this gate");
     expect(brief).toContain("is not a stop condition");
     expect(brief).not.toContain("Open this in RealTimeX Browser");
+  });
+
+  it("adds the corporate email domain as matching evidence only when there is one (#534)", () => {
+    const briefFor = (email: string | null) =>
+      buildContactWebResearchBriefSection({
+        workflowRunId: "run_contact_web",
+        config: {},
+        signalsBaseUrl: "http://localhost:3010",
+        context: { contact: { ...contact, email }, arppMissing: [], researchTarget },
+      });
+
+    const corporate = briefFor("bui-sy.giang@mes-engineering.com.vn");
+    expect(corporate).toContain(
+      "Corporate email domain: mes-engineering.com.vn. A profile whose company website, employer, or email domain matches it is strong matching evidence; a mismatch alone is not disqualifying.",
+    );
+    expect(corporate.indexOf("Corporate email domain:")).toBeGreaterThan(
+      corporate.indexOf("Enrichment score:"),
+    );
+    expect(briefFor("giang.bui@gmail.com")).not.toContain("Corporate email domain");
+    expect(briefFor("giang@yahoo.fr")).not.toContain("Corporate email domain");
+    expect(briefFor(null)).not.toContain("Corporate email domain");
   });
 
   it("puts a linked profile ahead of Google", () => {
