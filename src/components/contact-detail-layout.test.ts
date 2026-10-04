@@ -348,6 +348,111 @@ describe("ContactDetailClient details layout", () => {
   });
 });
 
+describe("ContactDetailClient Identities & Channels (#534)", () => {
+  const channelFixture = (
+    id: string,
+    channelType: string,
+    value: string,
+  ): ContactWithIdentities["channels"][number] => ({
+    id,
+    contactId: "c1",
+    channelType,
+    value,
+    valueNormalized: value.toLowerCase(),
+    label: null,
+    isPrimary: true,
+    isVerified: false,
+    contactIdentityId: null,
+    scope: "shared",
+    source: "agent:create_contact",
+    metadata: "{}",
+    createdAt: 1,
+    updatedAt: 1,
+  });
+
+  it("counts channels and platform identities in one tab", () => {
+    const html = renderToStaticMarkup(
+      createElement(ContactDetailClient, {
+        contact: {
+          ...contactFixture,
+          channels: [
+            channelFixture("ch-email", "email", "bui-sy.giang@mes-engineering.com.vn"),
+            channelFixture("ch-phone", "phone", "+84913039986"),
+          ],
+        },
+        tasks: [],
+        explore: exploreFixture,
+      }),
+    );
+    expect(html).toContain("Identities &amp; Channels (3)");
+    expect(html).not.toContain("Identities (");
+  });
+
+  it("reads (0) only when the contact has neither", () => {
+    const html = renderToStaticMarkup(
+      createElement(ContactDetailClient, {
+        contact: { ...contactFixture, channels: [], identities: [] },
+        tasks: [],
+        explore: exploreFixture,
+      }),
+    );
+    expect(html).toContain("Identities &amp; Channels (0)");
+  });
+
+  describe("Edit sheet", () => {
+    let container: HTMLDivElement;
+    let root: Root;
+
+    beforeEach(() => {
+      (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+      container = document.createElement("div");
+      document.body.appendChild(container);
+      root = createRoot(container);
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue({ ok: true, json: async () => ({ relationship: null }) }),
+      );
+    });
+
+    afterEach(() => {
+      act(() => root.unmount());
+      container.remove();
+      document.body.replaceChildren();
+      vi.unstubAllGlobals();
+      (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = false;
+    });
+
+    it("no longer edits channels and points to the tab instead", async () => {
+      await act(async () => {
+        root.render(
+          createElement(ContactDetailClient, {
+            contact: {
+              ...contactFixture,
+              channels: [channelFixture("ch-email", "email", "jordan@example.com")],
+            },
+            tasks: [],
+            explore: exploreFixture,
+          }),
+        );
+      });
+      const edit = Array.from(container.querySelectorAll("button")).find(
+        (button) => button.textContent?.trim() === "Edit",
+      );
+      expect(edit).toBeTruthy();
+      await act(async () => {
+        edit!.click();
+        await Promise.resolve();
+      });
+
+      const sheetText = document.body.querySelector('[role="dialog"]')?.textContent ?? "";
+      expect(sheetText).toContain("Edit contact");
+      expect(sheetText).toContain("Email, phone and messaging live under Identities & Channels.");
+      expect(sheetText).not.toContain("Add Channel");
+      expect(sheetText).not.toContain("Optional — add email, phone, or messenger handles.");
+    });
+  });
+});
+
 describe("ContactRelationshipSection", () => {
   let container: HTMLDivElement;
   let root: Root;
