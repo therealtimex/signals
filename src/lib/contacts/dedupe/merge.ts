@@ -245,39 +245,59 @@ function bump(counters: Record<string, number>, label: string, delta: number): v
 /**
  * Channels are unique per (contactId, channelType, valueNormalized), so a
  * secondary row whose key the primary already holds must be dropped, not moved.
+ *
+ * One `isPrimary` per (contact, channelType) holds on every write path
+ * (ADR-092-6), and this one moves rows without going through it. So, as in
+ * `mergeIdentities`, an incoming primary yields to the survivor's existing pick
+ * of that type; a type the survivor has no primary for keeps the first incoming
+ * one. Before #534 the flag rode along and left survivors with several primary
+ * emails (repaired by `repairChannelPrimaries`).
  */
 function mergeChannels(primaryId: string, secondaryId: string, counters: Counters): void {
-  const primaryKeys = new Set(
-    db
-      .select({
-        channelType: contactChannels.channelType,
-        valueNormalized: contactChannels.valueNormalized,
-      })
-      .from(contactChannels)
-      .where(eq(contactChannels.contactId, primaryId))
-      .all()
-      .map((row) => `${row.channelType}:${row.valueNormalized}`),
-  );
+  const primaryRows = db
+    .select({
+      channelType: contactChannels.channelType,
+      valueNormalized: contactChannels.valueNormalized,
+      isPrimary: contactChannels.isPrimary,
+    })
+    .from(contactChannels)
+    .where(eq(contactChannels.contactId, primaryId))
+    .all();
+  const primaryKeys = new Set<string>();
+  const typesWithPrimary = new Set<string>();
+  for (const row of primaryRows) {
+    primaryKeys.add(`${row.channelType}:${row.valueNormalized}`);
+    if (row.isPrimary) typesWithPrimary.add(row.channelType);
+  }
 
   const rows = db
     .select({
       id: contactChannels.id,
       channelType: contactChannels.channelType,
       valueNormalized: contactChannels.valueNormalized,
+      isPrimary: contactChannels.isPrimary,
     })
     .from(contactChannels)
     .where(eq(contactChannels.contactId, secondaryId))
+    .orderBy(sql`rowid`)
     .all();
 
   const duplicates: string[] = [];
   const movable: string[] = [];
+  const demoted: string[] = [];
   for (const row of rows) {
     const key = `${row.channelType}:${row.valueNormalized}`;
     if (primaryKeys.has(key)) {
       duplicates.push(row.id);
+      continue;
+    }
+    primaryKeys.add(key);
+    movable.push(row.id);
+    if (!row.isPrimary) continue;
+    if (typesWithPrimary.has(row.channelType)) {
+      demoted.push(row.id);
     } else {
-      primaryKeys.add(key);
-      movable.push(row.id);
+      typesWithPrimary.add(row.channelType);
     }
   }
 
@@ -291,6 +311,12 @@ function mergeChannels(primaryId: string, secondaryId: string, counters: Counter
       .where(inArray(contactChannels.id, movable))
       .run();
     bump(counters.moved, "contactChannels", movable.length);
+  }
+  if (demoted.length > 0) {
+    db.update(contactChannels)
+      .set({ isPrimary: false })
+      .where(inArray(contactChannels.id, demoted))
+      .run();
   }
 }
 
