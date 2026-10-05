@@ -45,7 +45,7 @@ Then pass `Authorization: Bearer your-secret-token` on each request.
 | `get_contact` | contacts | Full contact by ID |
 | `get_contact_arpp` | contacts | Project a contact as ARPP with internal or public visibility |
 | `create_contact` | contacts | Create a contact (`channels[]`, `employments[]` supported) |
-| `update_contact` | contacts | Update contact fields |
+| `update_contact` | contacts | Update contact fields. `channels[]` is a full replace: a channel left out of the list is deleted, so send every channel to keep (or add one with `enrich_contact`'s `email` / `phone`) |
 | `upsert_contact_identity` | contacts | Create or update a platform identity for a contact |
 | `enrich_contact` | contacts | Fill gaps without overwriting |
 | `archive_contact` | contacts | Archive with reason |

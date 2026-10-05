@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -32,9 +32,21 @@ interface IdentitiesSectionProps {
   contactId: string;
   identities: ContactIdentity[];
   contactName?: string | null;
+  /** Group heading; when set, it sits left of the Add button (Identities & Channels tab). */
+  title?: string;
+  description?: string;
+  /** Rendered inside the empty state, under its message. */
+  emptyAction?: ReactNode;
 }
 
-export function IdentitiesSection({ contactId, identities, contactName }: IdentitiesSectionProps) {
+export function IdentitiesSection({
+  contactId,
+  identities,
+  contactName,
+  title,
+  description,
+  emptyAction,
+}: IdentitiesSectionProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [adding, setAdding] = useState(false);
@@ -73,12 +85,22 @@ export function IdentitiesSection({ contactId, identities, contactName }: Identi
 
   return (
     <div className="space-y-3">
-      <div className="flex justify-end">
+      <div
+        className={
+          title ? "flex flex-wrap items-start justify-between gap-3" : "flex justify-end"
+        }
+      >
+        {title ? (
+          <div className="min-w-0">
+            <h3 className="text-lg font-semibold">{title}</h3>
+            {description ? <p className="text-sm text-muted-foreground">{description}</p> : null}
+          </div>
+        ) : null}
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
             <Button size="sm" variant="outline">
               <Plus className="mr-2 h-4 w-4" />
-              Add Identity
+              Add identity
             </Button>
           </DialogTrigger>
           <DialogContent>
@@ -146,10 +168,11 @@ export function IdentitiesSection({ contactId, identities, contactName }: Identi
 
       {identities.length === 0 ? (
         <Card>
-          <CardContent className="pt-6">
+          <CardContent className="space-y-4 pt-6">
             <p className="text-sm text-muted-foreground text-center">
               No platform identities linked yet.
             </p>
+            {emptyAction}
           </CardContent>
         </Card>
       ) : (

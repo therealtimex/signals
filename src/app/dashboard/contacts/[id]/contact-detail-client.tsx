@@ -33,6 +33,7 @@ import type { RelationshipGoal, RelationshipGoalStatus } from "@/lib/relationshi
 import { PriorityBadge } from "@/components/priority-badge";
 import { EnrichmentScoreBadge } from "@/components/enrichment-score-badge";
 import { IdentitiesSection } from "@/components/identities-section";
+import { ContactChannelsSection } from "@/components/contact-channels-section";
 import {
   ArrowLeft,
   Trash2,
@@ -55,7 +56,6 @@ import {
 } from "@/components/ui/tooltip";
 import type { ContactWithIdentities, Task } from "@/lib/db/types";
 import type { ContactExploreCard } from "@/lib/db/queries/contact-explore";
-import type { DraftContactChannel } from "@/lib/contact-channel-draft";
 import type { DraftContactEmployment } from "@/lib/contact-employment-draft";
 import { ContactExploreCardView } from "@/components/contact-explore-card";
 import { ContactTimelineTab } from "@/components/contact-timeline-tab";
@@ -69,6 +69,7 @@ import { formatWebsiteLabel, hrefForWebsite, isRedundantHeadline } from "@/lib/c
 import type { ArppPersonDocument } from "@/lib/arpp/types";
 import { shouldRunWebResearch } from "@/lib/contacts/web-research-router";
 import { EnrichContactButton } from "./enrich-contact-button";
+import { EnrichIdentitiesPrompt } from "./enrich-identities-prompt";
 
 const platformLabels: Record<string, string> = {
   x: "X / Twitter",
@@ -118,7 +119,6 @@ export function ContactDetailClient({
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [selfSaving, setSelfSaving] = useState(false);
   const formChanges = useRef<Record<string, string>>({});
-  const channelsData = useRef<DraftContactChannel[] | null>(null);
   const employmentsData = useRef<DraftContactEmployment[] | null>(null);
 
   async function handleToggleSelf(nextValue: boolean) {
@@ -139,9 +139,8 @@ export function ContactDetailClient({
 
   async function handleSave() {
     const data = formChanges.current;
-    const hasChannelChanges = channelsData.current !== null;
     const hasEmploymentChanges = employmentsData.current !== null;
-    if (Object.keys(data).length === 0 && !hasChannelChanges && !hasEmploymentChanges) return;
+    if (Object.keys(data).length === 0 && !hasEmploymentChanges) return;
 
     setSaving(true);
     try {
@@ -150,13 +149,11 @@ export function ContactDetailClient({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...data,
-          ...(hasChannelChanges ? { channels: channelsData.current } : {}),
           ...(hasEmploymentChanges ? { employments: employmentsData.current } : {}),
         }),
       });
       if (res.ok) {
         formChanges.current = {};
-        channelsData.current = null;
         employmentsData.current = null;
         setEditOpen(false);
         router.refresh();
@@ -451,10 +448,18 @@ export function ContactDetailClient({
       </div>
 
       <Tabs value={tab} onValueChange={setTab}>
-        <TabsList className="max-w-full overflow-x-auto">
+        <TabsList
+          className="max-w-full justify-start overflow-x-auto"
+          // Chrome leaves a partly visible focused tab clipped; reveal it for keyboard users.
+          onFocus={(event) => {
+            if (event.target.getAttribute("role") === "tab") {
+              event.target.scrollIntoView({ block: "nearest", inline: "nearest" });
+            }
+          }}
+        >
           <TabsTrigger value="details">Details</TabsTrigger>
           <TabsTrigger value="identities">
-            Identities ({contact.identities.length})
+            Identities &amp; Channels ({contact.channels.length + contact.identities.length})
           </TabsTrigger>
           <TabsTrigger value="tasks">Tasks ({tasks.length})</TabsTrigger>
           <TabsTrigger value="activity">Activity</TabsTrigger>
@@ -475,11 +480,25 @@ export function ContactDetailClient({
           {agentProfile ? <AgentProfileView profile={agentProfile} /> : null}
         </TabsContent>
 
-        <TabsContent value="identities" className="space-y-4">
+        <TabsContent value="identities" className="space-y-8">
+          <ContactChannelsSection contactId={contact.id} channels={contact.channels} />
           <IdentitiesSection
             contactId={contact.id}
             identities={contact.identities}
             contactName={contact.name}
+            title="Platform identities"
+            description="Accounts on social and content platforms."
+            emptyAction={
+              canEnrich ? (
+                <EnrichIdentitiesPrompt
+                  contactId={contact.id}
+                  contactName={contact.name}
+                  email={contact.email}
+                  needsWebResearch={needsWebResearch}
+                  profilePipelineTemplateId={profilePipelineTemplateId}
+                />
+              ) : null
+            }
           />
         </TabsContent>
 
@@ -560,7 +579,8 @@ export function ContactDetailClient({
           <SheetHeader>
             <SheetTitle>Edit contact</SheetTitle>
             <SheetDescription>
-              Update name, role, and profile fields for {contact.name}.
+              Update name, role, and profile fields for {contact.name}. Email, phone and
+              messaging live under Identities &amp; Channels.
             </SheetDescription>
           </SheetHeader>
           <div className="px-4">
@@ -568,9 +588,6 @@ export function ContactDetailClient({
               defaultValues={contact}
               onChange={(partial) => {
                 formChanges.current = { ...formChanges.current, ...partial };
-              }}
-              onChannelsChange={(channels) => {
-                channelsData.current = channels;
               }}
               onEmploymentsChange={(employments) => {
                 employmentsData.current = employments;

@@ -35,6 +35,16 @@ export async function register() {
     }
 
     try {
+      const { repairChannelPrimaries } = await import("@/lib/db/backfills/channel-primaries");
+      const primaryRepair = repairChannelPrimaries();
+      if (primaryRepair.demoted > 0) {
+        console.log("[instrumentation] Channel primary repair applied:", primaryRepair);
+      }
+    } catch (e) {
+      console.warn("[instrumentation] Channel primary repair skipped:", (e as Error).message);
+    }
+
+    try {
       const { backfillEmployments } = await import("@/lib/db/backfills/employments");
       const employmentBackfill = backfillEmployments();
       if (employmentBackfill.inserted > 0) {

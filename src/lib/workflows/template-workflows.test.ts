@@ -241,6 +241,7 @@ describe("template-brief", () => {
           profileUrl: null,
           enrichmentScore: 20,
           identities: [],
+          email: null,
         },
         arppMissing: ["sameAs (linked public profile)"],
         researchTarget: {

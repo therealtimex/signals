@@ -52,11 +52,22 @@ The detail page has three tabs:
 ### Details Tab
 The main profile view shows:
 - **Contact Information** — Headline, bio, platform origin, and topic tags (investor, podcast, startups, tech-media)
-- **Edit Contact** — All editable fields: name, company, title, headline, email, phone, location, website, funnel stage, platform, and free-form notes
+- **Edit Contact** — Profile fields: name, company, title, headline, location, website, funnel stage, and free-form notes. Email, phone and messaging live under Identities & Channels.
 - **Metadata** — Created date, last updated, enrichment score badge
 
-### Identities Tab
-A contact's linked profiles across platforms. One person might have:
+### Identities & Channels Tab
+Everything that identifies and reaches the contact, in two groups. The tab count adds both, so a
+contact booked through a calendar invite with only a work email and a phone number shows
+`Identities & Channels (2)`, not an empty record.
+
+**Channels** are how you reach them: email addresses, phone numbers, and messaging handles (Zalo,
+WhatsApp, Telegram, and others). Add, edit, or remove a channel here; label it Work, Personal, or
+Other; mark it Verified; and use **Set as primary** to choose which email or phone the contact
+header shows. Each type has one primary. Email, phone, WhatsApp, Telegram, and Zalo values link
+straight to a mail, call, or chat.
+
+**Platform identities** are the contact's accounts on social and content platforms. One person
+might have:
 - An X/Twitter identity (`@handle`)
 - A LinkedIn identity (profile URL)
 - A Gmail identity (email address)

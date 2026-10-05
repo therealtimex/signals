@@ -246,6 +246,80 @@ describe("mergeContacts", () => {
     expect(surviving).toEqual(["demis@deepmind.com", "demis@google.com"]);
   });
 
+  it("keeps one primary channel per type when moved rows were primary (#534)", () => {
+    const primary = createContact({ name: "Giang Bui" });
+    const secondary = createContact({ name: "Giang Bui" });
+    const own = createContactChannel({
+      contactId: primary.id,
+      channelType: "email",
+      value: "giang@mes-engineering.com.vn",
+      isPrimary: true,
+      source: "test",
+    });
+    createContactChannel({
+      contactId: secondary.id,
+      channelType: "email",
+      value: "giang.bui@gmail.com",
+      isPrimary: true,
+      source: "test",
+    });
+    const phone = createContactChannel({
+      contactId: secondary.id,
+      channelType: "phone",
+      value: "+84913039986",
+      isPrimary: true,
+      source: "test",
+    });
+
+    mergeContacts({ primaryContactId: primary.id, secondaryContactIds: [secondary.id] });
+
+    const primaries = db
+      .select({ id: contactChannels.id, channelType: contactChannels.channelType })
+      .from(contactChannels)
+      .where(and(eq(contactChannels.contactId, primary.id), eq(contactChannels.isPrimary, true)))
+      .all()
+      .sort((a, b) => a.channelType.localeCompare(b.channelType));
+    expect(primaries).toEqual([
+      { id: own.id, channelType: "email" },
+      { id: phone.id, channelType: "phone" },
+    ]);
+  });
+
+  it("lets only the first incoming primary win when the survivor has none of that type", () => {
+    const primary = createContact({ name: "Merge Target" });
+    const first = createContact({ name: "Merge Target" });
+    const second = createContact({ name: "Merge Target" });
+    createContactChannel({
+      contactId: primary.id,
+      channelType: "email",
+      value: "plain@example.com",
+      source: "test",
+    });
+    const firstEmail = createContactChannel({
+      contactId: first.id,
+      channelType: "email",
+      value: "first@example.com",
+      isPrimary: true,
+      source: "test",
+    });
+    createContactChannel({
+      contactId: second.id,
+      channelType: "email",
+      value: "second@example.com",
+      isPrimary: true,
+      source: "test",
+    });
+
+    mergeContacts({ primaryContactId: primary.id, secondaryContactIds: [first.id, second.id] });
+
+    const primaries = db
+      .select({ id: contactChannels.id })
+      .from(contactChannels)
+      .where(and(eq(contactChannels.contactId, primary.id), eq(contactChannels.isPrimary, true)))
+      .all();
+    expect(primaries).toEqual([{ id: firstEmail.id }]);
+  });
+
   it("hands the cross-claim identity to the record that had none", () => {
     // The #209 failure mode: the second import was refused the platform claim and
     // was left with zero identities, so it is the one that must not survive.

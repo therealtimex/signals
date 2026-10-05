@@ -12,8 +12,11 @@ import { ActivityMarkdown } from "@/components/activity-markdown";
 import type { ContactExploreCard } from "@/lib/db/queries/contact-explore";
 import type { ContactWithIdentities } from "@/lib/db/types";
 
+// Stable across renders: EnrichContactButton's polling effect depends on the router identity.
+const router = vi.hoisted(() => ({ refresh: () => {}, push: () => {} }));
+
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }),
+  useRouter: () => router,
   usePathname: () => "/dashboard/contacts/c1",
 }));
 
@@ -35,6 +38,8 @@ vi.mock("@/components/ui/dialog", async () => {
     DialogHeader: passthrough("div"),
     DialogTitle: ({ children }: { children?: React.ReactNode }) => h("h2", null, children),
     DialogDescription: passthrough("p"),
+    DialogFooter: passthrough("div"),
+    DialogTrigger: passthrough("div"),
   };
 });
 
@@ -273,6 +278,8 @@ describe("ContactDetailClient details layout", () => {
     expect(tabs).not.toBeNull();
     expect(tabs?.classList.contains("max-w-full")).toBe(true);
     expect(tabs?.classList.contains("overflow-x-auto")).toBe(true);
+    // Centred overflow puts the first tab left of scrollLeft 0, out of reach (#534 UX1).
+    expect(tabs?.classList.contains("justify-start")).toBe(true);
   });
 
   it("hides a headline that repeats title and company", () => {
@@ -345,6 +352,201 @@ describe("ContactDetailClient details layout", () => {
     const wrapper = document.createElement("div");
     wrapper.innerHTML = html;
     expect(wrapper.querySelectorAll("[data-enrichment-route]")).toHaveLength(1);
+  });
+});
+
+describe("ContactDetailClient Identities & Channels (#534)", () => {
+  const channelFixture = (
+    id: string,
+    channelType: string,
+    value: string,
+  ): ContactWithIdentities["channels"][number] => ({
+    id,
+    contactId: "c1",
+    channelType,
+    value,
+    valueNormalized: value.toLowerCase(),
+    label: null,
+    isPrimary: true,
+    isVerified: false,
+    contactIdentityId: null,
+    scope: "shared",
+    source: "agent:create_contact",
+    metadata: "{}",
+    createdAt: 1,
+    updatedAt: 1,
+  });
+
+  it("counts channels and platform identities in one tab", () => {
+    const html = renderToStaticMarkup(
+      createElement(ContactDetailClient, {
+        contact: {
+          ...contactFixture,
+          channels: [
+            channelFixture("ch-email", "email", "bui-sy.giang@mes-engineering.com.vn"),
+            channelFixture("ch-phone", "phone", "+84913039986"),
+          ],
+        },
+        tasks: [],
+        explore: exploreFixture,
+      }),
+    );
+    expect(html).toContain("Identities &amp; Channels (3)");
+    expect(html).not.toContain("Identities (");
+  });
+
+  it("reads (0) only when the contact has neither", () => {
+    const html = renderToStaticMarkup(
+      createElement(ContactDetailClient, {
+        contact: { ...contactFixture, channels: [], identities: [] },
+        tasks: [],
+        explore: exploreFixture,
+      }),
+    );
+    expect(html).toContain("Identities &amp; Channels (0)");
+  });
+
+  describe("live", () => {
+    let container: HTMLDivElement;
+    let root: Root;
+
+    beforeEach(() => {
+      (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+      container = document.createElement("div");
+      document.body.appendChild(container);
+      root = createRoot(container);
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: RequestInfo | URL) =>
+          String(input).includes("/web-research")
+            ? { ok: false, json: async () => ({}) }
+            : { ok: true, json: async () => ({ relationship: null }) },
+        ),
+      );
+    });
+
+    afterEach(() => {
+      act(() => root.unmount());
+      container.remove();
+      document.body.replaceChildren();
+      vi.unstubAllGlobals();
+      (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = false;
+    });
+
+    it("no longer edits channels and points to the tab instead", async () => {
+      await act(async () => {
+        root.render(
+          createElement(ContactDetailClient, {
+            contact: {
+              ...contactFixture,
+              channels: [channelFixture("ch-email", "email", "jordan@example.com")],
+            },
+            tasks: [],
+            explore: exploreFixture,
+          }),
+        );
+      });
+      const edit = Array.from(container.querySelectorAll("button")).find(
+        (button) => button.textContent?.trim() === "Edit",
+      );
+      expect(edit).toBeTruthy();
+      await act(async () => {
+        edit!.click();
+        await Promise.resolve();
+      });
+
+      const sheetText = document.body.querySelector('[role="dialog"]')?.textContent ?? "";
+      expect(sheetText).toContain("Edit contact");
+      expect(sheetText).toContain("Email, phone and messaging live under Identities & Channels.");
+      expect(sheetText).not.toContain("Add Channel");
+      expect(sheetText).not.toContain("Optional — add email, phone, or messenger handles.");
+      // The legacy scalar fields saved through applyLegacyEmailPhone, which adds or deletes rows.
+      const sheet = document.body.querySelector('[role="dialog"]')!;
+      expect(sheet.querySelector("input#email")).toBeNull();
+      expect(sheet.querySelector("input#phone")).toBeNull();
+
+      const headline = sheet.querySelector<HTMLInputElement>("input#headline")!;
+      await act(async () => {
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+        setter?.call(headline, "Representative, MES-Engineering");
+        headline.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      const save = Array.from(sheet.querySelectorAll("button")).find(
+        (button) => button.textContent?.trim() === "Save changes",
+      );
+      await act(async () => {
+        save!.click();
+        await Promise.resolve();
+      });
+      const put = vi
+        .mocked(fetch)
+        .mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === "PUT");
+      expect(put?.[0]).toBe("/api/contacts/c1");
+      const body = JSON.parse(String((put?.[1] as RequestInit).body)) as Record<string, unknown>;
+      expect(body).toEqual({ headline: "Representative, MES-Engineering" });
+    });
+
+    async function openIdentitiesTab(contact: ContactWithIdentities) {
+      await act(async () => {
+        root.render(createElement(ContactDetailClient, { contact, tasks: [], explore: exploreFixture }));
+      });
+      const trigger = Array.from(container.querySelectorAll('[role="tab"]')).find((tab) =>
+        tab.textContent?.startsWith("Identities & Channels"),
+      );
+      expect(trigger).toBeTruthy();
+      await act(async () => {
+        trigger!.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }));
+        await Promise.resolve();
+      });
+    }
+
+    it("offers enrichment with the employer domain in the empty identities group", async () => {
+      await openIdentitiesTab({
+        ...contactFixture,
+        email: "bui-sy.giang@mes-engineering.com.vn",
+        identities: [],
+        channels: [channelFixture("ch-email", "email", "bui-sy.giang@mes-engineering.com.vn")],
+      });
+
+      const panel = container.querySelector('[role="tabpanel"][data-state="active"]');
+      expect(panel?.textContent).toContain("Channels");
+      expect(panel?.textContent).toContain("Platform identities");
+      expect(panel?.textContent).toContain(
+        "Enrich public social profiles for Jordan Lee at mes-engineering.com.vn?",
+      );
+      expect(panel?.querySelectorAll("[data-enrichment-route]")).toHaveLength(1);
+    });
+
+    it("scrolls a keyboard-focused tab fully into the strip (#534 UX1)", async () => {
+      const scrollIntoView = vi.fn();
+      const original = HTMLElement.prototype.scrollIntoView;
+      HTMLElement.prototype.scrollIntoView = scrollIntoView;
+      try {
+        await act(async () => {
+          root.render(createElement(ContactDetailClient, { contact: contactFixture, tasks: [], explore: exploreFixture }));
+        });
+        const audience = Array.from(container.querySelectorAll<HTMLElement>('[role="tab"]')).find(
+          (tab) => tab.textContent === "Audience",
+        );
+        await act(async () => audience!.focus());
+        expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest", inline: "nearest" });
+        expect(scrollIntoView.mock.contexts.at(-1)).toBe(audience);
+      } finally {
+        HTMLElement.prototype.scrollIntoView = original;
+      }
+    });
+
+    it("does not offer enrichment for an archived contact", async () => {
+      await openIdentitiesTab({
+        ...contactFixture,
+        identities: [],
+        metadata: JSON.stringify({ archived: 1 }),
+      });
+
+      const panel = container.querySelector('[role="tabpanel"][data-state="active"]');
+      expect(panel?.textContent).toContain("No platform identities linked yet.");
+      expect(panel?.querySelector("[data-enrich-identities-prompt]")).toBeNull();
+    });
   });
 });
 

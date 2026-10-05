@@ -266,8 +266,10 @@ after about 24 hours. Use it only when a change needs the dev build; see
 
 The packaged app is the user's live environment. Its canonical **Signals** app
 (`47e45f71-3279-42f5-8e95-731de01b6eae`, port `3010`, `SIGNALS_DATA_DIR=/Users/realtimex/.signals`,
-working directory = this main checkout) is in daily use, and its browser sessions are signed in to
-real LinkedIn and X accounts. **Do not start, stop, or restart the packaged app.**
+working directory = this main checkout, or `<storage>/marketplace-deploy/signals-<version>` once
+Signals is installed from the marketplace; the teardown hygiene check accepts either) is in daily
+use, and its browser sessions are signed in to real LinkedIn and X accounts. **Do not start, stop,
+or restart the packaged app.**
 
 Drive the QA app with one script, run from the issue worktree. Call the main checkout's copy by
 absolute path, so branches cut before the script existed still get it:
