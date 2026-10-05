@@ -305,6 +305,95 @@ describe("ContactChannelsSection", () => {
       isVerified: true,
     });
   });
+
+  describe("keyboard focus (#534 UX2)", () => {
+    const settle = async () =>
+      act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+    const active = () => document.activeElement as HTMLElement | null;
+    const label = (element: HTMLElement | null) =>
+      element?.getAttribute("aria-label") ?? element?.textContent?.trim() ?? element?.tagName;
+
+    async function pressEscape() {
+      await act(async () => {
+        document.activeElement?.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+        );
+      });
+      await settle();
+    }
+
+    it("returns focus to Add channel after Cancel and to the row's Edit after Escape", async () => {
+      await render([workEmail, phone]);
+
+      await click(buttons("Add channel")[0]);
+      await click(buttons("Cancel")[0]);
+      await settle();
+      expect(label(active())).toBe("Add channel");
+
+      await click(buttons("Edit +84913039986")[0]);
+      await pressEscape();
+      expect(label(active())).toBe("Edit +84913039986");
+    });
+
+    it("keeps focus on the edited row after Save, even when the refresh reorders it", async () => {
+      fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({}), { status: 200 }));
+      await render([workEmail, otherEmail]);
+
+      await click(buttons("Edit giang.bui@gmail.com")[0]);
+      await act(async () => setInputValue(document.body.querySelector<HTMLInputElement>('input[id$="-value"]')!, "giang.b@gmail.com"));
+      await act(async () => {
+        document.body.querySelector("form")!.requestSubmit();
+        await Promise.resolve();
+      });
+      await settle();
+      expect(label(active())).toBe("Edit giang.bui@gmail.com");
+
+      // The refresh lands with the row moved to the top; a lost focus is recovered.
+      const edited = { ...otherEmail, value: "giang.b@gmail.com", isPrimary: true };
+      (document.activeElement as HTMLElement | null)?.blur();
+      await render([edited, { ...workEmail, isPrimary: false }]);
+      expect(label(active())).toBe("Edit giang.b@gmail.com");
+    });
+
+    it("moves focus to a surviving row after Remove, and to Add channel when none is left", async () => {
+      await render([workEmail, otherEmail, phone]);
+
+      await click(buttons("Remove giang.bui@gmail.com")[0]);
+      // The next row in display order is the phone.
+      expect(label(active())).toBe("Edit +84913039986");
+      await render([workEmail, phone]);
+      expect(label(active())).toBe("Edit +84913039986");
+
+      await click(buttons("Remove +84913039986")[0]);
+      expect(label(active())).toBe("Edit giang@mes-engineering.com.vn");
+      await render([workEmail]);
+
+      await click(buttons("Remove giang@mes-engineering.com.vn")[0]);
+      expect(label(active())).toBe("Add channel");
+    });
+
+    it("lands on the row's Edit button after Set as primary removes that button", async () => {
+      await render([workEmail, otherEmail]);
+
+      await click(buttons("Set as primary")[0]);
+      expect(label(active())).toBe("Edit giang.bui@gmail.com");
+      (document.activeElement as HTMLElement | null)?.blur();
+      await render([{ ...otherEmail, isPrimary: true }, { ...workEmail, isPrimary: false }]);
+      expect(buttons("Set as primary")).toHaveLength(1);
+      expect(label(active())).toBe("Edit giang.bui@gmail.com");
+    });
+
+    it("does not pull focus back after the user moved on", async () => {
+      await render([workEmail, otherEmail]);
+
+      await click(buttons("Set as primary")[0]);
+      buttons("Add channel")[0].focus();
+      await render([{ ...otherEmail, isPrimary: true }, { ...workEmail, isPrimary: false }]);
+      expect(label(active())).toBe("Add channel");
+    });
+  });
 });
 
 describe("IdentitiesSection group heading", () => {

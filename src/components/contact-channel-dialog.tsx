@@ -52,6 +52,8 @@ interface ContactChannelDialogProps {
   /** Types the contact already has a channel of, so the first of a type defaults to primary. */
   typesWithChannels: ReadonlySet<string>;
   onSaved: () => void;
+  /** Where focus goes when the dialog closes; there is no trigger element to return to. */
+  onCloseAutoFocus?: (event: Event) => void;
 }
 
 export function ContactChannelDialog({
@@ -61,6 +63,7 @@ export function ContactChannelDialog({
   channel = null,
   typesWithChannels,
   onSaved,
+  onCloseAutoFocus,
 }: ContactChannelDialogProps) {
   const fieldId = useId();
   const [channelType, setChannelType] = useState(channel?.channelType ?? "email");
@@ -155,7 +158,7 @@ export function ContactChannelDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent onCloseAutoFocus={onCloseAutoFocus}>
         <form onSubmit={handleSubmit} className="grid gap-4">
           <DialogHeader>
             <DialogTitle>{channel ? "Edit channel" : "Add channel"}</DialogTitle>

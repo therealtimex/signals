@@ -278,6 +278,8 @@ describe("ContactDetailClient details layout", () => {
     expect(tabs).not.toBeNull();
     expect(tabs?.classList.contains("max-w-full")).toBe(true);
     expect(tabs?.classList.contains("overflow-x-auto")).toBe(true);
+    // Centred overflow puts the first tab left of scrollLeft 0, out of reach (#534 UX1).
+    expect(tabs?.classList.contains("justify-start")).toBe(true);
   });
 
   it("hides a headline that repeats title and company", () => {
@@ -513,6 +515,25 @@ describe("ContactDetailClient Identities & Channels (#534)", () => {
         "Enrich public social profiles for Jordan Lee at mes-engineering.com.vn?",
       );
       expect(panel?.querySelectorAll("[data-enrichment-route]")).toHaveLength(1);
+    });
+
+    it("scrolls a keyboard-focused tab fully into the strip (#534 UX1)", async () => {
+      const scrollIntoView = vi.fn();
+      const original = HTMLElement.prototype.scrollIntoView;
+      HTMLElement.prototype.scrollIntoView = scrollIntoView;
+      try {
+        await act(async () => {
+          root.render(createElement(ContactDetailClient, { contact: contactFixture, tasks: [], explore: exploreFixture }));
+        });
+        const audience = Array.from(container.querySelectorAll<HTMLElement>('[role="tab"]')).find(
+          (tab) => tab.textContent === "Audience",
+        );
+        await act(async () => audience!.focus());
+        expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest", inline: "nearest" });
+        expect(scrollIntoView.mock.contexts.at(-1)).toBe(audience);
+      } finally {
+        HTMLElement.prototype.scrollIntoView = original;
+      }
     });
 
     it("does not offer enrichment for an archived contact", async () => {

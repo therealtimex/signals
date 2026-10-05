@@ -448,7 +448,15 @@ export function ContactDetailClient({
       </div>
 
       <Tabs value={tab} onValueChange={setTab}>
-        <TabsList className="max-w-full overflow-x-auto">
+        <TabsList
+          className="max-w-full justify-start overflow-x-auto"
+          // Chrome leaves a partly visible focused tab clipped; reveal it for keyboard users.
+          onFocus={(event) => {
+            if (event.target.getAttribute("role") === "tab") {
+              event.target.scrollIntoView({ block: "nearest", inline: "nearest" });
+            }
+          }}
+        >
           <TabsTrigger value="details">Details</TabsTrigger>
           <TabsTrigger value="identities">
             Identities &amp; Channels ({contact.channels.length + contact.identities.length})
