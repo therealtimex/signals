@@ -296,7 +296,36 @@ export function realtimexDbPath(storageRoot, env = process.env) {
   return join(userData, storageRoot, "users", user, "storage", "realtimex.db");
 }
 
-export function canonicalConfigProblems(row, canonicalRepoRoot, home = homedir()) {
+const MARKETPLACE_DEPLOY_DIR = /^signals-\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
+
+/** Where RealTimeX unpacks marketplace installs: `<storage>/marketplace-deploy`, next to its database. */
+export function marketplaceDeployRoot(dbPath) {
+  return join(dirname(resolve(dbPath)), "marketplace-deploy");
+}
+
+/**
+ * The canonical app runs from the main checkout or, once Signals is installed from the marketplace,
+ * from that install's `<marketplace-deploy>/signals-<version>` directory (#535). Both are the user's
+ * own app; a worktree or any other path is neither.
+ */
+export function isCanonicalWorkingDir(workingDir, canonicalRepoRoot, deployRoot = null) {
+  const text = String(workingDir ?? "").trim();
+  if (!text || !isAbsolute(text)) return false;
+  const resolved = resolve(text);
+  if (resolved === resolve(canonicalRepoRoot)) return true;
+  return (
+    Boolean(deployRoot) &&
+    dirname(resolved) === resolve(deployRoot) &&
+    MARKETPLACE_DEPLOY_DIR.test(basename(resolved))
+  );
+}
+
+export function canonicalConfigProblems(
+  row,
+  canonicalRepoRoot,
+  home = homedir(),
+  { marketplaceDeployRoot: deployRoot = null } = {},
+) {
   const problems = [];
   if (!row) return ["canonical Signals Local App record is missing"];
   if (row.id !== CANONICAL_SIGNALS_APP_ID) problems.push("canonical id does not match");
@@ -315,8 +344,12 @@ export function canonicalConfigProblems(row, canonicalRepoRoot, home = homedir()
   }
 
   const expectedRoot = resolve(canonicalRepoRoot);
-  if (!config?.working_dir || resolve(String(config.working_dir)) !== expectedRoot) {
-    problems.push(`canonical working_dir is not ${expectedRoot}`);
+  if (!isCanonicalWorkingDir(config?.working_dir, expectedRoot, deployRoot)) {
+    problems.push(
+      deployRoot
+        ? `canonical working_dir is neither ${expectedRoot} nor a Signals marketplace deploy under ${resolve(deployRoot)}`
+        : `canonical working_dir is not ${expectedRoot}`,
+    );
   }
   const executableText = [config?.command, ...(Array.isArray(config?.args) ? config.args : [])]
     .filter(Boolean)

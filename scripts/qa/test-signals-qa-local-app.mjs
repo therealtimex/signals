@@ -24,6 +24,8 @@ import {
   buildQaCreateCliArgs,
   canonicalSignalsRepoRoot,
   canonicalConfigProblems,
+  isCanonicalWorkingDir,
+  marketplaceDeployRoot,
   defaultQaDataDir,
   findIssueQaApps,
   parseCliJson,
@@ -128,6 +130,65 @@ assert.deepEqual(
     "canonical SIGNALS_DATA_DIR is not ~/.signals",
     "canonical command or args reference ephemeral QA state",
   ],
+);
+
+// A marketplace install runs the canonical app from <storage>/marketplace-deploy/signals-<version> (#535).
+assert.equal(marketplaceDeployRoot("/storage/realtimex.db"), "/storage/marketplace-deploy");
+for (const [workingDir, expected] of [
+  ["/repo/signals", true],
+  ["/repo/signals/", true],
+  ["/storage/marketplace-deploy/signals-0.2.20", true],
+  ["/storage/marketplace-deploy/signals-0.2.21-dev.3", true],
+  ["/storage/marketplace-deploy/signals-0.2.20/src", false],
+  ["/storage/marketplace-deploy/other-app-1.0.0", false],
+  ["/storage/marketplace-deploy/signals-latest", false],
+  ["/elsewhere/marketplace-deploy/signals-0.2.20", false],
+  ["/repo/signals-worktrees/issue-534", false],
+  ["marketplace-deploy/signals-0.2.20", false],
+  ["", false],
+]) {
+  assert.equal(
+    isCanonicalWorkingDir(workingDir, "/repo/signals", "/storage/marketplace-deploy"),
+    expected,
+    workingDir,
+  );
+}
+const marketplaceCanonical = {
+  ...cleanCanonical,
+  config: JSON.stringify({
+    command: "/node/bin/node",
+    args: ["server.js"],
+    working_dir: "/storage/marketplace-deploy/signals-0.2.20",
+    env: { SIGNALS_DATA_DIR: "~/.signals" },
+  }),
+};
+assert.deepEqual(
+  canonicalConfigProblems(marketplaceCanonical, "/repo/signals", undefined, {
+    marketplaceDeployRoot: "/storage/marketplace-deploy",
+  }),
+  [],
+);
+// Without a deploy root (no --db context) only the checkout is canonical.
+assert.deepEqual(canonicalConfigProblems(marketplaceCanonical, "/repo/signals"), [
+  "canonical working_dir is not /repo/signals",
+]);
+// The other guards still apply to a marketplace deploy.
+assert.deepEqual(
+  canonicalConfigProblems(
+    {
+      ...cleanCanonical,
+      config: JSON.stringify({
+        command: "/node/bin/node",
+        args: ["server.js"],
+        working_dir: "/storage/marketplace-deploy/signals-0.2.20",
+        env: { SIGNALS_DATA_DIR: "/private/tmp/signals-qa-issue-535-data" },
+      }),
+    },
+    "/repo/signals",
+    undefined,
+    { marketplaceDeployRoot: "/storage/marketplace-deploy" },
+  ),
+  ["canonical SIGNALS_DATA_DIR is not ~/.signals"],
 );
 
 for (const script of [
@@ -562,6 +623,32 @@ if (sqliteAvailable) {
     const dirtyResult = spawnSync(process.execPath, verifierArgs, { encoding: "utf8" });
     assert.equal(dirtyResult.status, 1);
     assert.match(dirtyResult.stderr, /issue-specific QA Local App record/);
+
+    const setCanonicalWorkingDir = (workingDir) => {
+      const config = JSON.stringify({
+        command: "/node/bin/node",
+        args: ["server.js"],
+        working_dir: workingDir,
+        env: { SIGNALS_DATA_DIR: "~/.signals" },
+      }).replaceAll("'", "''");
+      execFileSync("sqlite3", [
+        verifierDb,
+        `DELETE FROM local_apps WHERE id = 'qa-leftover';
+         UPDATE local_apps SET config = '${config}' WHERE id = '${CANONICAL_SIGNALS_APP_ID}';`,
+      ]);
+    };
+    setCanonicalWorkingDir(join(verifierRoot, "marketplace-deploy", "signals-0.2.20"));
+    const marketplaceResult = spawnSync(process.execPath, verifierArgs, { encoding: "utf8" });
+    assert.equal(marketplaceResult.status, 0, marketplaceResult.stderr);
+    assert.equal(
+      JSON.parse(marketplaceResult.stdout).marketplaceDeployRoot,
+      join(verifierRoot, "marketplace-deploy"),
+    );
+
+    setCanonicalWorkingDir(join(tmpdir(), "elsewhere", "marketplace-deploy", "signals-0.2.20"));
+    const foreignResult = spawnSync(process.execPath, verifierArgs, { encoding: "utf8" });
+    assert.equal(foreignResult.status, 1);
+    assert.match(foreignResult.stderr, /neither \/repo\/signals nor a Signals marketplace deploy/);
   } finally {
     rmSync(verifierRoot, { recursive: true, force: true });
   }

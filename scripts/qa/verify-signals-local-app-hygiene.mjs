@@ -6,6 +6,7 @@ import {
   CANONICAL_SIGNALS_APP_ID,
   canonicalSignalsRepoRoot,
   canonicalConfigProblems,
+  marketplaceDeployRoot,
   normalizeIssueId,
   parseFlagArgs,
   qaAppDisplayName,
@@ -41,7 +42,8 @@ try {
     [--db /path/to/realtimex.db] [--canonical-repo /path/to/signals]
 
 Loop-close gate: the canonical Signals app must use ~/.signals (literal on the dev host,
-expanded on the packaged host) and the canonical checkout, and the issue-specific QA Local App
+expanded on the packaged host) and run from the canonical checkout or a Signals marketplace deploy
+(<storage>/marketplace-deploy/signals-<version>, next to --db), and the issue-specific QA Local App
 record must no longer exist.`);
     process.exit(0);
   }
@@ -65,7 +67,10 @@ record must no longer exist.`);
       (tags.includes("qa") && tags.includes(issueTag))
     );
   });
-  const problems = canonicalConfigProblems(canonical, canonicalRepoRoot);
+  const deployRoot = marketplaceDeployRoot(dbPath);
+  const problems = canonicalConfigProblems(canonical, canonicalRepoRoot, undefined, {
+    marketplaceDeployRoot: deployRoot,
+  });
   if (issueApps.length) {
     problems.push(
       `${issueApps.length} issue-specific QA Local App record(s) still exist: ${issueApps
@@ -88,6 +93,7 @@ record must no longer exist.`);
         dbPath,
         canonicalAppId: CANONICAL_SIGNALS_APP_ID,
         canonicalRepoRoot,
+        marketplaceDeployRoot: deployRoot,
         issueQaAppsRemaining: 0,
       },
       null,
