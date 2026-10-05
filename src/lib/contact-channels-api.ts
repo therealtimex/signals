@@ -160,7 +160,8 @@ export function createChannelForContact(
  *
  * Verification provenance (ADR-534-4) is stamped only when the flag turns on,
  * so re-saving a row that `enrich:email_pattern` verified keeps its origin;
- * turning it off removes the stamp.
+ * turning it off removes the stamp. A verification describes one address, so a
+ * new normalized value starts unverified unless this request verifies it.
  */
 export function updateChannelForContact(
   contactId: string,
@@ -181,12 +182,16 @@ export function updateChannelForContact(
   }
   if (input.label !== undefined) updates.label = input.label;
   if (input.isPrimary !== undefined) updates.isPrimary = input.isPrimary;
-  if (input.isVerified !== undefined) {
-    updates.isVerified = input.isVerified;
+
+  const valueChanged = valueNormalized !== null && valueNormalized !== existing.valueNormalized;
+  if (input.isVerified !== undefined || valueChanged) {
+    const wasVerified = existing.isVerified && !valueChanged;
+    const nextVerified = input.isVerified ?? wasVerified;
+    updates.isVerified = nextVerified;
     const metadata = parseMetadata(existing.metadata);
-    if (input.isVerified && !existing.isVerified) {
+    if (nextVerified && !wasVerified) {
       updates.metadata = { ...metadata, verification: manualVerification() };
-    } else if (!input.isVerified && "verification" in metadata) {
+    } else if (!nextVerified && "verification" in metadata) {
       const { verification: _removed, ...rest } = metadata;
       updates.metadata = rest;
     }

@@ -458,6 +458,30 @@ describe("ContactDetailClient Identities & Channels (#534)", () => {
       expect(sheetText).toContain("Email, phone and messaging live under Identities & Channels.");
       expect(sheetText).not.toContain("Add Channel");
       expect(sheetText).not.toContain("Optional — add email, phone, or messenger handles.");
+      // The legacy scalar fields saved through applyLegacyEmailPhone, which adds or deletes rows.
+      const sheet = document.body.querySelector('[role="dialog"]')!;
+      expect(sheet.querySelector("input#email")).toBeNull();
+      expect(sheet.querySelector("input#phone")).toBeNull();
+
+      const headline = sheet.querySelector<HTMLInputElement>("input#headline")!;
+      await act(async () => {
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+        setter?.call(headline, "Representative, MES-Engineering");
+        headline.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      const save = Array.from(sheet.querySelectorAll("button")).find(
+        (button) => button.textContent?.trim() === "Save changes",
+      );
+      await act(async () => {
+        save!.click();
+        await Promise.resolve();
+      });
+      const put = vi
+        .mocked(fetch)
+        .mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === "PUT");
+      expect(put?.[0]).toBe("/api/contacts/c1");
+      const body = JSON.parse(String((put?.[1] as RequestInit).body)) as Record<string, unknown>;
+      expect(body).toEqual({ headline: "Representative, MES-Engineering" });
     });
 
     async function openIdentitiesTab(contact: ContactWithIdentities) {

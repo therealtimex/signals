@@ -239,6 +239,43 @@ describe("/api/contacts/[id]/channels", () => {
     });
   });
 
+  it("drops a verification that described the old address when the value changes", async () => {
+    const contact = createContact({ name: "Readdressed" });
+    const probed = createContactChannel({
+      contactId: contact.id,
+      channelType: "email",
+      value: "giang@mes-engineering.com.vn",
+      isVerified: true,
+      source: "enrich:email_pattern",
+      metadata: { candidateId: "cand-1", verification: { method: "smtp_probe", at: 1 } },
+    });
+
+    // A case-only edit is the same address: verification stays.
+    expect((await patch(contact.id, probed.id, { value: "Giang@MES-Engineering.com.vn" })).status).toBe(200);
+    expect(getContactChannelById(probed.id)?.isVerified).toBe(true);
+    expect(metadataOf(getContactChannelById(probed.id)).verification).toEqual({ method: "smtp_probe", at: 1 });
+
+    // A new address starts unverified; other provenance stays.
+    expect((await patch(contact.id, probed.id, { value: "bui-sy.giang@mes-engineering.com.vn" })).status).toBe(200);
+    const readdressed = getContactChannelById(probed.id);
+    expect(readdressed?.isVerified).toBe(false);
+    expect(metadataOf(readdressed)).toEqual({ candidateId: "cand-1" });
+
+    // Verifying the new address in the same request records a manual verification of it.
+    const other = createContactChannel({
+      contactId: contact.id,
+      channelType: "phone",
+      value: "+84913039986",
+      isVerified: true,
+      source: "enrich:email_pattern",
+      metadata: { verification: { method: "smtp_probe", at: 1 } },
+    });
+    await patch(contact.id, other.id, { value: "+84 91 303 9987", isVerified: true });
+    const reverified = getContactChannelById(other.id);
+    expect(reverified?.isVerified).toBe(true);
+    expect(metadataOf(reverified).verification).toEqual({ method: "manual", at: expect.any(Number) });
+  });
+
   it("clears a label with an empty string", async () => {
     const contact = createContact({ name: "Labeler" });
     const channel = createContactChannel({

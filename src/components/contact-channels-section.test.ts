@@ -270,6 +270,41 @@ describe("ContactChannelsSection", () => {
     expect(init.method).toBe("PATCH");
     expect(JSON.parse(String(init.body))).toEqual({ value: "+84 91 303 9986" });
   });
+
+  it("turns Verified off when an edit changes the address, and sends it only if re-verified", async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({}), { status: 200 }));
+    await render([workEmail]);
+
+    const verifiedSwitch = () => document.body.querySelector<HTMLButtonElement>('button[id$="-verified"]');
+    const valueInput = () => document.body.querySelector<HTMLInputElement>('input[id$="-value"]')!;
+    const submit = async () =>
+      act(async () => {
+        document.body.querySelector("form")!.requestSubmit();
+        await Promise.resolve();
+      });
+
+    await click(buttons("Edit giang@mes-engineering.com.vn")[0]);
+    expect(verifiedSwitch()?.getAttribute("aria-checked")).toBe("true");
+    // Same address in another case: still verified.
+    await act(async () => setInputValue(valueInput(), "Giang@MES-Engineering.com.vn"));
+    expect(verifiedSwitch()?.getAttribute("aria-checked")).toBe("true");
+    // A different address: the old verification no longer applies.
+    await act(async () => setInputValue(valueInput(), "bui-sy.giang@mes-engineering.com.vn"));
+    expect(verifiedSwitch()?.getAttribute("aria-checked")).toBe("false");
+    await submit();
+    let [, init] = fetchMock.mock.calls.at(-1) as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toEqual({ value: "bui-sy.giang@mes-engineering.com.vn" });
+
+    await click(buttons("Edit giang@mes-engineering.com.vn")[0]);
+    await act(async () => setInputValue(valueInput(), "bui-sy.giang@mes-engineering.com.vn"));
+    await click(verifiedSwitch() ?? undefined);
+    await submit();
+    [, init] = fetchMock.mock.calls.at(-1) as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toEqual({
+      value: "bui-sy.giang@mes-engineering.com.vn",
+      isVerified: true,
+    });
+  });
 });
 
 describe("IdentitiesSection group heading", () => {

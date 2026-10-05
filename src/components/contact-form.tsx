@@ -26,6 +26,11 @@ interface ContactFormProps {
   onChange: (data: Record<string, string>) => void;
   showIdentities?: boolean;
   onIdentitiesChange?: (identities: DraftContactIdentity[]) => void;
+  /**
+   * Renders the channels block. Omit it to leave channels out of the form entirely: the contact
+   * detail page manages them per row under Identities & Channels (#534), and the legacy scalar
+   * email/phone fields saved through rules that silently added or deleted channel rows.
+   */
   onChannelsChange?: (channels: DraftContactChannel[]) => void;
   onEmploymentsChange?: (employments: DraftContactEmployment[]) => void;
 }
@@ -126,29 +131,7 @@ export function ContactForm({
           defaultChannels={defaultValues?.channels}
           onChange={onChannelsChange}
         />
-      ) : (
-        <div className="grid grid-cols-2 gap-4">
-          <div className="grid gap-2">
-            <Label htmlFor="email">Email</Label>
-            <Input
-              id="email"
-              type="email"
-              defaultValue={defaultValues?.email ?? ""}
-              onChange={(e) => handleChange("email", e.target.value)}
-              placeholder="email@example.com"
-            />
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="phone">Phone</Label>
-            <Input
-              id="phone"
-              defaultValue={defaultValues?.phone ?? ""}
-              onChange={(e) => handleChange("phone", e.target.value)}
-              placeholder="+1 (555) 000-0000"
-            />
-          </div>
-        </div>
-      )}
+      ) : null}
 
       <div className="grid grid-cols-2 gap-4">
         <div className="grid gap-2">

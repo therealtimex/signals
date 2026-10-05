@@ -30,9 +30,18 @@ import {
   channelTypeLabels,
   channelValuePlaceholder,
 } from "@/lib/contact-channel-draft";
+import { normalizeChannelValue, type ChannelType } from "@/lib/db/channel-types";
 import type { ContactChannel } from "@/lib/db/types";
 
 const NO_LABEL = "none";
+
+function normalizedOrNull(channelType: string, value: string): string | null {
+  try {
+    return normalizeChannelValue(channelType as ChannelType, value);
+  } catch {
+    return null;
+  }
+}
 
 interface ContactChannelDialogProps {
   contactId: string;
@@ -60,11 +69,17 @@ export function ContactChannelDialog({
   const [primaryChoice, setPrimaryChoice] = useState<boolean | null>(
     channel ? channel.isPrimary : null,
   );
-  const [isVerified, setIsVerified] = useState(channel?.isVerified ?? false);
+  const [verifiedChoice, setVerifiedChoice] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   const isPrimary = primaryChoice ?? !typesWithChannels.has(channelType);
+  const valueChanged = channel
+    ? normalizedOrNull(channelType, value) !== channel.valueNormalized
+    : false;
+  // A verification describes one address: a changed value starts unverified, as on the server.
+  const verifiedBaseline = Boolean(channel?.isVerified) && !valueChanged;
+  const isVerified = verifiedChoice ?? verifiedBaseline;
   // The UI offers no "unset primary": another row of the type takes the flag instead.
   const primaryLocked = Boolean(channel?.isPrimary);
   const showVerified = VERIFIABLE_CHANNEL_TYPES.includes(channelType);
@@ -90,7 +105,7 @@ export function ContactChannelDialog({
     if (value.trim() !== channel.value) body.value = value;
     if (nextLabel !== (channel.label?.trim() || null)) body.label = nextLabel;
     if (isPrimary !== channel.isPrimary) body.isPrimary = isPrimary;
-    if (showVerified && isVerified !== channel.isVerified) body.isVerified = isVerified;
+    if (showVerified && isVerified !== verifiedBaseline) body.isVerified = isVerified;
     return body;
   }
 
@@ -183,7 +198,13 @@ export function ContactChannelDialog({
             <Input
               id={`${fieldId}-value`}
               value={value}
-              onChange={(event) => setValue(event.target.value)}
+              onChange={(event) => {
+                const next = event.target.value;
+                if (channel && normalizedOrNull(channelType, next) !== channel.valueNormalized) {
+                  setVerifiedChoice(null);
+                }
+                setValue(next);
+              }}
               placeholder={channelValuePlaceholder(channelType)}
               autoComplete="off"
               required
@@ -228,7 +249,7 @@ export function ContactChannelDialog({
                 <Switch
                   id={`${fieldId}-verified`}
                   checked={isVerified}
-                  onCheckedChange={setIsVerified}
+                  onCheckedChange={setVerifiedChoice}
                 />
                 <Label htmlFor={`${fieldId}-verified`}>Verified</Label>
               </div>
