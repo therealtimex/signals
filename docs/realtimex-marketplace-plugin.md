@@ -92,7 +92,40 @@ git push origin v0.1.10
 
 Gate logic: `scripts/ci/should-publish-marketplace-release.mjs` (`--main` or `--tag=vX.Y.Z`).
 
-Marketplace store upload remains manual until RealtimeX #1614 provides publisher automation.
+Marketplace store upload uses the publisher scripts below (install orchestration in the desktop app
+remains tracked under RealtimeX #1614).
+
+### Publish to marketplace (after GitHub release)
+
+The GitHub release ships `dist/com.realtimex.signals-plugin.zip` with workspace provisioning
+layout. The marketplace API validates a **skill + local-app** capability contract, so upload a
+repacked bundle that keeps the same files and adds manifest overlays pointing at the six signed
+`.tar.gz` assets on the GitHub release.
+
+1. Download or build the release artifacts for version `X.Y.Z` (`com.realtimex.signals-plugin.zip`
+   and `marketplace/release-manifest.json` from the tag, or local `dist/` + `marketplace/` after CI).
+2. Repack:
+
+```bash
+npm run repack:marketplace-plugin
+# or: node scripts/marketplace/repack-plugin-bundle.mjs \
+#   --zip dist/com.realtimex.signals-plugin.zip \
+#   --manifest marketplace/release-manifest.json
+```
+
+3. Upload with publisher credentials (RealtimeX Secrets login for
+   `marketplace-info@realtimex.co`, or equivalent):
+
+```bash
+rtxexec \
+  --env KC_USER=secret://marketplace-info-realtimex-co-9c17fb18#username \
+  --env KC_PASS=secret://marketplace-info-realtimex-co-9c17fb18#password \
+  -- node scripts/marketplace/publish-release.mjs --submit --approve --publish
+```
+
+Omit `--approve --publish` to leave the release in review. The script targets plugin id
+`e1c6dd2e-4222-44fe-9e7d-55c6e9e14feb` (`com.realtimex.signals`) and API host
+`https://marketplace-api-next.realtimex.ai` by default.
 
 Source layout: `realtimex-plugin/` (manifest, templates, marketplace specs). Three skills are copied from `.claude/skills/` at package time: `realtimex-signals`, `signals-writing`, and `signals-publish`. Signals Writing ships one zero-dependency CJS helper; its development reference corpus under `docs-dev/refs` is never packaged. The `signals-publish` skill's `x-publish.cjs` delegates to the host **`agent-browser` CLI** (locked external skill); the plugin zip contains **no** `node_modules`. Source `SKILL.md` paths stay under `.claude/skills/`; packaging rewrites them to `skills/` in the zip.
 
@@ -137,8 +170,9 @@ Plugin validation uses `scripts/vendor/validate-plugin.cjs` (override with `REAL
 2. Let gated release CI build and boot every supported target.
 3. Confirm CI merged `marketplace/release-manifest.json` with all six target keys.
 4. Confirm `marketplace/release-manifest.sig.json` verifies with the pinned publisher key.
-5. Upload the plugin zip, six target archives, release manifest, and signature envelope.
-6. Confirm the marketplace downloads only the artifact matching the installing host.
+5. Run `npm run repack:marketplace-plugin`, then `publish-release.mjs` (see **Publish to marketplace**).
+6. Confirm the public catalog lists the new version at
+   `https://marketplace.realtimex.ai/plugins/com.realtimex.signals`.
 
 ## Permissions
 
