@@ -16,6 +16,8 @@ Package and distribute Signals through the **RealtimeX marketplace** — not pub
 Plugin id: `com.realtimex.signals`  
 Local app id: `47e45f71-3279-42f5-8e95-731de01b6eae`
 
+Version 0.2.22 makes email, phone and messaging channels first-class on the contact page: the Identities & Channels tab counts them alongside platform identities and lets users add, edit, label, verify, set primary and remove them, offers social-profile enrichment for contacts with a corporate email domain, and repairs contacts that earlier merges left with several primary emails.
+
 Version 0.2.21 synchronizes TipTap composer state and adds deterministic verification to LinkedIn publishing, guards social posting against untracked payloads and fabricated URLs across X, Facebook, and LinkedIn, prevents duplicate submissions on verify timeout via verify_uncertain, and records observed LinkedIn profiles on Snowball attestation failures.
 
 Version 0.2.20 fixes Facebook self-profile detection and adds a reviewed recovery proposal when a
