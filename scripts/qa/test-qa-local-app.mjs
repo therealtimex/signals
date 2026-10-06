@@ -824,7 +824,9 @@ console.log(JSON.stringify({ meta: { source: "mock" }, results }));
   const migState = join(migRoot, "local-apps.json");
   const migDevRoot = join(migRoot, "signals-dev");
   mkdirSync(join(dirname(migDb), "local-apps"), { recursive: true });
-  execFileSync("sqlite3", [migDb, appsTable]);
+  // RealTimeX keeps realtimex.db in WAL mode, and a .backup copy keeps it: a plain -readonly open
+  // of the copy fails because it cannot create the copy's -shm.
+  execFileSync("sqlite3", [migDb, `pragma journal_mode = wal; ${appsTable}`]);
   const storageLink = join(dirname(migDb), "local-apps", CANONICAL_SIGNALS_APP_ID);
   symlinkSync(repo, storageLink);
   const migEnv = { MOCK_LOCAL_APPS_STATE: migState, MOCK_DEV_DB: migDb, SIGNALS_DEV_ROOT: migDevRoot };

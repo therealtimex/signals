@@ -26,7 +26,7 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readlinkSync, realpathSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve, sep } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   CANONICAL_SIGNALS_APP_ID,
   appsFromCliPayload,
@@ -271,7 +271,12 @@ async function main() {
   writeFileSync(rowBackup, backup.text, { encoding: "utf8", mode: 0o600, flag: "wx" });
   if (/['"\n]/.test(dbBackup)) fail("BACKUP_FAILED", `Unsafe backup path ${dbBackup}.`, "Use a Dev root without quotes.");
   const dbCopy = spawnSync("sqlite3", ["-readonly", "-cmd", ".timeout 10000", dbPath, `.backup '${dbBackup}'`], { encoding: "utf8" });
-  const check = dbCopy.status === 0 ? spawnSync("sqlite3", ["-readonly", dbBackup, "pragma quick_check;"], { encoding: "utf8" }) : null;
+  // The copy keeps the Dev database's WAL mode, so a plain -readonly open fails (it cannot create
+  // the copy's -shm). Nothing ever writes to the copy, so an immutable read-only open is exact.
+  const check =
+    dbCopy.status === 0
+      ? spawnSync("sqlite3", [`${pathToFileURL(dbBackup).href}?immutable=1`, "pragma quick_check;"], { encoding: "utf8" })
+      : null;
   if (dbCopy.status !== 0 || check?.stdout.trim() !== "ok") {
     fail("BACKUP_FAILED", dbCopy.stderr?.trim() || check?.stdout.trim() || "Backup B failed its quick_check.", "Nothing was changed; fix the cause and rerun.", { rowBackup });
   }
