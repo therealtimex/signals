@@ -39,6 +39,7 @@ import {
   CANONICAL_SIGNALS_APP_ID,
   canonicalConfigProblems,
   isCanonicalSignalsDataDir,
+  qaTemporaryRoot,
 } from "./signals-qa-local-app.mjs";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
@@ -184,7 +185,8 @@ const pidLog = join(root, "pids.log");
 const mockCli = join(root, "mock-realtimex-pp-cli.mjs");
 const tripwireCli = join(root, "tripwire-realtimex-pp-cli.mjs");
 const legacyTag = String(Date.now()).slice(-7);
-const legacyQaData = join("/private/tmp", `signals-qa-issue-9${legacyTag}-data`);
+// Pre-#541 QA data lived in the platform temp root (/private/tmp on macOS, /tmp on Linux CI).
+const legacyQaData = join(qaTemporaryRoot(), `signals-qa-issue-9${legacyTag}-data`);
 const children = new Set();
 // The launcher promises a `next` on every failure; any run that breaks that lands here.
 const failuresWithoutNext = [];
