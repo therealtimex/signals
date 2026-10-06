@@ -15,8 +15,9 @@ Signals is distributed as a **RealTimeX Local App**. Developers can also run it 
 | **Data directory** | `~/.signals/` (override with `SIGNALS_DATA_DIR`) |
 
 See [`rtx-local-app.example.json`](../rtx-local-app.example.json) for the marketplace v2 runtime
-contract. For source-checkout QA, create a dedicated issue app with
-`scripts/qa/provision-signals-qa-local-app.mjs`; never repoint the canonical **Signals** app.
+contract. For source-checkout QA, run the checkout as a **Signals Dev** app on the RealTimeX Dev
+host with `scripts/qa/qa-local-app.mjs up` (see [Signals Dev apps](#signals-dev-apps-541)); never
+repoint the canonical **Signals** app.
 
 Back up the entire data directory, not only `data.db`: approved voice-evidence profiles are
 immutable files under `writing/voice-profiles/`, with lifecycle state in that directory's
@@ -43,6 +44,14 @@ durable user evidence. No profile is silently backfilled.
 | `RTX_PORT` | Preferred port (Signals also honors `--port`) |
 | `SERVER_URL` | RealTimeX Main App API base for SDK calls |
 | `REALTIMEX_BASE_URL` | Alternate API base (fallback) |
+
+Signals Dev apps (#541) also carry variables that `scripts/qa/qa-local-app.mjs` pins at creation:
+
+| Variable | Purpose |
+|----------|---------|
+| `SIGNALS_INSTANCE` | `dev` marks a Signals Dev app. Signals then refuses external effects (publish, X writes, `signals-publish` browser session, OAuth connect, SMTP probe) with HTTP 403 `DEV_INSTANCE_GUARD`, refuses to boot against `~/.signals`, and reports `instance` in `/api/health`. There is no override. |
+| `SIGNALS_DEV_WORKTREE` | The checkout the Dev app's launcher shim (`scripts/qa/signals-dev-local-app-launcher`) runs `npm run dev` in. |
+| `SIGNALS_SCHEDULER_ENABLED` | Pinned to `0` in Dev apps so a snapshot's scheduled jobs stay inert. |
 
 Inherited from the desktop runtime when available: `SERVER_PORT`, `REALTIMEX_USER_DATA_PATH`, etc.
 
@@ -151,34 +160,30 @@ RTX_PORT=3000 \
 npm run dev
 ```
 
-Register the app in **Settings → Local Apps** first so `/sdk/register` resolves the app id. Issue
-QA should use the guarded provisioner from the issue worktree:
+Register the app in **Settings → Local Apps** first so `/sdk/register` resolves the app id.
+
+### Signals Dev apps (#541)
+
+QA and agent work run each checkout as its own **Signals Dev** app on the RealTimeX Dev host
+(`3101`); the installed app keeps only the canonical **Signals**. From the checkout:
 
 ```bash
-node scripts/qa/provision-signals-qa-local-app.mjs \
-  --issue <N> \
-  --worktree "$PWD" \
-  --loop-id <loop-id>
+node scripts/qa/qa-local-app.mjs up --cli <wrapper>   # create or reuse, start, verify the guard
+node scripts/qa/qa-local-app.mjs down                 # stop + checks; keeps app, data, grants
+node scripts/qa/qa-local-app.mjs remove               # delete the app and ~/.signals-dev/<slot>
+node scripts/qa/qa-local-app.mjs prune [--apply]      # apps/slots whose checkout is gone
 ```
 
-After evidence capture, delete the issue app and verify canonical configuration hygiene:
-
-```bash
-node scripts/qa/cleanup-signals-qa-local-app.mjs --issue <N>
-REALTIMEX_RUNTIME=dev node scripts/qa/verify-signals-local-app-hygiene.mjs --issue <N>
-```
-
-The canonical dev app id (`47e45f71-3279-42f5-8e95-731de01b6eae`) is reserved for manual daily
-development. `scripts/qa/provision-signals-local-app.mjs --restore-canonical` is an incident
-recovery command if that record was corrupted; it is not a QA setup step. Without `--db` or
-`RTX_DB_PATH`, it resolves only the database under `desktop-user-data/dev`; targeting any other
-database requires an explicit path.
+The rules (scoped key, `--profile snapshot`, permissions, the slice-1 migration of the old Dev
+`Signals` row) are in AGENTS.md §10 and [`specs/signals-dev-local-app.md`](../specs/signals-dev-local-app.md).
+`scripts/qa/provision-signals-local-app.mjs --restore-canonical` survives only as the restore path
+for that migration; it is not a QA setup step.
 
 **Agent Workflow Run QA** (issue #153) uses the same `desktop.runtime-sessions` bridge as publish.
 If `POST /api/workflows/templates/{id}/run` returns `503` with a plain `Not Found` body, the
 RealTimeX host at `SERVER_URL` / `RTX_API_BASE_URL` does not expose
 `/sdk/desktop/runtime-sessions/*` — update or restart the RealTimeX desktop app, confirm
-`desktop.runtime-sessions` is granted to the issue QA app, and reprovision that issue app if
+`desktop.runtime-sessions` is granted to the Signals Dev app, and rerun `qa-local-app.mjs up` if
 needed. Do not modify the canonical app.
 
 **Agent workflow preflight** (issue #157):

@@ -42,38 +42,30 @@ Publishable versions repeat the full gate before release in
 
 ## Isolated RealTimeX Local App QA
 
-Never repoint the manually managed **Signals** Local App for issue QA. Create a disposable,
-issue-scoped app instead:
+Never repoint the canonical **Signals** Local App, and never create QA apps on the installed
+RealTimeX app. Run the checkout under test as its own **Signals Dev** app on the RealTimeX Dev host
+(#541, [`specs/signals-dev-local-app.md`](../../specs/signals-dev-local-app.md)):
 
 ```bash
-node scripts/qa/provision-signals-qa-local-app.mjs \
-  --issue 356 \
-  --worktree /absolute/path/to/the/issue-worktree \
-  --loop-id loop-issue-356-example
+QA=/Users/realtimex/github/signals/scripts/qa/qa-local-app.mjs
+node "$QA" up --cli <wrapper> --issue 356 --loop-id loop-issue-356-example
+node "$QA" down     # before the QA handoff: stop + port, Dev-host, and installed-app checks
+node "$QA" remove   # at loop close
 ```
 
-The command uses the supported `realtimex-pp-cli` Local Apps API, creates
-`Signals issue-356 QA`, starts it with `npm run dev` in the supplied worktree, and records the
-generated app id in the platform temp directory (`/private/tmp` on macOS, `/tmp` on Linux) as
-`signals-qa-local-app-issue-356.json`. The app and its data are tagged and isolated from the
-canonical Signals record. It targets the Dev API at `3101` by default and does not inherit an
-ambient production `REALTIMEX_BASE_URL`; use `--base-url` only for a deliberate alternate Dev
-runtime.
+`up` creates `Signals Dev · <slot>` through the supported `realtimex-pp-cli` Local Apps API on
+`3101`, pins its port (3300–3499), data (`~/.signals-dev/<slot>`), and workspace
+(`signals-dev-<slot>`), and runs it with `SIGNALS_INSTANCE=dev`, so Signals refuses to publish, send,
+or connect accounts. Its receipt lives in `~/.signals-dev/<slot>/.launcher/receipt.json`. `down`
+keeps the app and its permission grants for the next round; `remove` deletes both. Every command
+refuses the canonical app and any app that lost its slot tags.
 
-After evidence capture, teardown is mandatory:
+`scripts/qa/verify-signals-local-app-hygiene.mjs` exposes the same checks for loop gates:
+`--dev-db` (no Dev app points at `~/.signals` or pins `3010`) and `--packaged-db [--snapshot]` (the
+installed app's canonical record keeps its shape; nothing was added or changed since `up`).
 
-```bash
-node scripts/qa/cleanup-signals-qa-local-app.mjs --issue 356
-REALTIMEX_RUNTIME=dev node scripts/qa/verify-signals-local-app-hygiene.mjs --issue 356
-```
-
-Cleanup refuses the canonical app id and any record missing the expected issue name and safety
-tags. The verifier reads the authoritative dev SQLite record and fails if the canonical app uses
-an ephemeral data directory/worktree command or if the issue QA record still exists.
-
-`scripts/qa/provision-signals-local-app.mjs` is incident recovery for the canonical record, not a
-QA provisioner. It requires the explicit `--restore-canonical` guard and defaults to the dev
-database; a different database must be supplied explicitly with `--db` or `RTX_DB_PATH`.
+`scripts/qa/provision-signals-local-app.mjs --restore-canonical` only undoes the slice-1 migration
+(`scripts/qa/migrate-dev-signals-row.mjs`); it is not a QA provisioner.
 
 ## CI data directory
 
