@@ -554,6 +554,7 @@ console.log(JSON.stringify({ meta: { source: "mock" }, results }));
   assert.equal(first.json.dataDir, join(devRoot, slotA));
   assert.equal(first.json.workspaceSlug, `signals-dev-${slotA}`);
   assert.equal(first.json.profile, "empty");
+  assert.equal(first.json.timeoutMs, 600000, "a new slot waits out a cold compile");
   assert.ok(first.json.port >= 3300 && first.json.port < 3500, String(first.json.port));
   assert.deepEqual(first.json.instance, { kind: "dev", externalEffects: "denied", scheduler: "disabled", dataDir: join(devRoot, slotA) });
   assert.deepEqual(first.json.permissions, { granted: [], denied: [], pending: requested, lastPromptedAt: null });
@@ -603,6 +604,7 @@ console.log(JSON.stringify({ meta: { source: "mock" }, results }));
   assert.equal(again.json.reused, true);
   assert.equal(again.json.appId, appA);
   assert.equal(again.json.port, first.json.port);
+  assert.equal(again.json.timeoutMs, 240000);
 
   // --needs: only what this build requests; the owner grants while up waits; a denial fails fast.
   const bogus = await qa(["up", "--worktree", wtA, "--needs", "llm.chat,bogus.permission"]);
@@ -701,6 +703,8 @@ console.log(JSON.stringify({ meta: { source: "mock" }, results }));
 
   const silent = await qa(["up", "--worktree", wtA, "--timeout-ms", "1500"], { MOCK_NO_SPAWN: "1" });
   assert.equal(silent.json.errorCode, "HEALTH_TIMEOUT");
+  // A running app that has not answered yet is usually still compiling: rerun up, not down (#543).
+  assert.match(silent.json.next, /^The app is running .* Rerun node \S+ up --worktree \S+ .* --timeout-ms 600000, which reuses the app/);
   assert.equal((await qa(["down", "--worktree", wtA])).status, 0);
 
   // ---- Orphaned slot: the row was deleted in the UI while the receipt stayed ----------------------

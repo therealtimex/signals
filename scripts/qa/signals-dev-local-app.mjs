@@ -9,14 +9,18 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
+  closeSync,
   cpSync,
   existsSync,
   mkdirSync,
+  openSync,
   readdirSync,
   readFileSync,
+  readSync,
   realpathSync,
   renameSync,
   rmSync,
+  statSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import { basename, delimiter, dirname, isAbsolute, join, resolve, sep } from "node:path";
@@ -497,8 +501,9 @@ export function prepareSlotData({ dataDir, profile, env = process.env }) {
   const partial = `${target}.partial`;
   rmSync(partial, { force: true });
   const fail = (message) => {
-    rmSync(partial, { force: true });
-    rmSync(`${partial}-journal`, { force: true });
+    for (const leftover of [partial, `${partial}-journal`, `${partial}-wal`, `${partial}-shm`]) {
+      rmSync(leftover, { force: true });
+    }
     throw new SlotError("SNAPSHOT_FAILED", message, {
       next: "Fix the cause, then rerun up --profile snapshot; nothing was kept.",
     });
@@ -511,6 +516,20 @@ export function prepareSlotData({ dataDir, profile, env = process.env }) {
     `.backup '${assertDotCommandPath(partial)}'`,
   ]);
   if (backup.status !== 0) fail(backup.stderr?.trim() || `sqlite3 .backup exited with ${backup.status}.`);
+  // The copy keeps the source's WAL mode, so every read-write open below would leave
+  // data.db.partial-wal and -shm behind once the copy is renamed. Make it a self-contained
+  // rollback-journal file first; Signals switches its database back to WAL when it opens it.
+  const journal = sqlite([partial, "pragma journal_mode = delete;"]);
+  if (journal.status !== 0 || journal.stdout.trim() !== "delete" || !inRollbackMode(partial)) {
+    fail(journal.stderr?.trim() || `Could not take the snapshot out of WAL mode (${journal.stdout.trim()}).`);
+  }
+  // macOS's system sqlite3 keeps the -shm of a database it has just taken out of WAL mode. With the
+  // header in rollback mode nothing reads it; a non-empty -wal would mean unmerged pages, so stop.
+  if (existsSync(`${partial}-wal`) && statSync(`${partial}-wal`).size > 0) {
+    fail("The snapshot still has unmerged WAL pages after leaving WAL mode.");
+  }
+  rmSync(`${partial}-wal`, { force: true });
+  rmSync(`${partial}-shm`, { force: true });
   const hasAccounts = sqlite([partial, "select count(*) from sqlite_master where type = 'table' and name = 'platform_accounts';"]);
   if (hasAccounts.status !== 0) fail(hasAccounts.stderr?.trim() || "Could not inspect the snapshot.");
   if (hasAccounts.stdout.trim() === "1") {
@@ -523,6 +542,9 @@ export function prepareSlotData({ dataDir, profile, env = process.env }) {
       fail(scrub.stderr?.trim() || "Stored platform credentials survived the scrub.");
     }
   }
+  for (const sidecar of [`${partial}-wal`, `${partial}-shm`]) {
+    if (existsSync(sidecar)) fail(`The snapshot left ${sidecar} behind, so the copy is not self-contained.`);
+  }
   renameSync(partial, target);
   const copied = ["data.db"];
   const media = join(realData, "media");
@@ -531,6 +553,18 @@ export function prepareSlotData({ dataDir, profile, env = process.env }) {
     copied.push("media");
   }
   return { profile, copied };
+}
+
+/** Bytes 18-19 of a SQLite header are 1,1 in rollback-journal mode and 2,2 in WAL mode. */
+function inRollbackMode(dbPath) {
+  const header = Buffer.alloc(2);
+  const fd = openSync(dbPath, "r");
+  try {
+    readSync(fd, header, 0, 2, 18);
+  } finally {
+    closeSync(fd);
+  }
+  return header[0] === 1 && header[1] === 1;
 }
 
 // --- Installed-app snapshot ----------------------------------------------------------------------

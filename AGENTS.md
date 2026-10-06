@@ -278,11 +278,18 @@ If `yarn dev:all` is already running and you did not start it, leave it running.
 starts it. If you started it, stop it afterwards and confirm `3100`, `3101`, `9888`, and the app's
 port are clear.
 
-**Access.** Local App management on the Dev host needs the owner's scoped CLI key: RealTimeX Dev →
-Settings → API Keys, `local-apps` scopes, expiry **never** (the default since realtimex-ai-app
-`25af2c187`). Pass `--cli` an executable wrapper that runs
-`realtimex-pp-cli --credential-ref <ref> "$@"`. `up` records `--cli`, `--db`, and `--packaged-db` in
-`~/.signals-dev/.launcher/host.json`, so later commands reuse them.
+**Access.** Local App management on the Dev host uses the owner's scoped CLI key. The key exists:
+`local-apps` scopes, no expiry, created 2026-10-06. Its wrapper,
+`~/.signals-dev/.launcher/realtimex-pp-cli-dev`, runs `realtimex-pp-cli --credential-ref <ref> "$@"`.
+`~/.signals-dev/.launcher/host.json` records that wrapper, the Dev database, and the installed-app
+database, so commands need no `--cli` or `--db`; explicit flags still win.
+- The launcher strips this terminal's own RealTimeX credentials before every call, so the key is the
+  only credential the Dev host sees.
+- If `up` reports `LOCAL_APP_MANAGEMENT_REFUSED`, the key was revoked or the wrapper is gone. Ask the
+  owner for a new key (RealTimeX Dev → Settings → API Keys, `local-apps` scopes, expiry **never**);
+  do not mint, copy, or print one yourself.
+- The key has no logs scope, so failures print `(could not read logs …)` in place of the app's log
+  lines. Read the Dev app window or ask the owner instead.
 
 Drive the app with one script. Call the main checkout's copy by absolute path, so branches cut
 before the script existed still get it:
@@ -301,6 +308,10 @@ object, and exits 0 only when `ok` is true. Exercise the scenario at the `port` 
 that `up` prints. On failure, act on `errorCode` and run the `next` it prints; do not provision,
 edit, or delete apps by hand around it.
 
+- **Slow first start.** `up` waits up to 600 s for a new slot, whose first start is a cold `next dev`
+  compile, and 240 s for a reused one; `--timeout-ms` overrides both. A `HEALTH_TIMEOUT` with the app
+  running usually means it is still compiling. Rerun `up` as its `next` says: it reuses the app and
+  waits again. Run `down` only if that also times out (#543).
 - **`up`** refuses an unreachable Dev host (`HOST_UNREACHABLE`), a missing key
   (`LOCAL_APP_MANAGEMENT_REFUSED`), a Dev host where any app points at `~/.signals` or pins port
   `3010` (`DEV_HOST_UNSAFE`), a live `next dev` in the checkout (`NEXT_DEV_ALREADY_RUNNING`), and a
@@ -318,9 +329,10 @@ edit, or delete apps by hand around it.
 - **`remove` at loop close**, or `prune --apply` when `up` or `status` reports stale slots.
   `prune --legacy-qa` also covers the pre-#541 `Signals issue-<N> QA` apps.
 - **`--profile snapshot`** copies the real `data.db` (SQLite online backup, read-only) and `media/`
-  into a new slot. It removes stored platform credentials from the copy and copies nothing else: no
-  `browser-profiles/`, `sessions/`, `config.json`, `personality/`, or `writing/`. Scheduled and
-  publish jobs stay in the copy; the pinned `SIGNALS_SCHEDULER_ENABLED=0` keeps them inert.
+  into a new slot as one self-contained file, with no WAL sidecars. It removes stored platform
+  credentials from the copy and copies nothing else: no `browser-profiles/`, `sessions/`,
+  `config.json`, `personality/`, or `writing/`. Scheduled and publish jobs stay in the copy but stay
+  inert, because a dev instance never runs the scheduler.
 - **The guard refuses external effects.** Dev apps run with `SIGNALS_INSTANCE=dev`. Signals then
   answers HTTP 403 `DEV_INSTANCE_GUARD` to publishing, X API writes and engagement, Playwright
   publish sessions, the `signals-publish` browser session, OAuth connect, and the SMTP probe. During
@@ -331,6 +343,14 @@ edit, or delete apps by hand around it.
   not edit the database. When a scenario needs a permission, pass it with `--needs`. `up` waits for
   the owner's decision and fails with `PERMISSIONS_MISSING`, naming what is missing. A
   `PERMISSION_REQUIRED` error from Signals means a missing grant, not a product bug.
+  - **Tell the owner before you run `up` on a new app.** The dialog appears in the RealTimeX Dev
+    window while the app boots. Without `--needs`, `up` does not wait for it.
+  - **Grant only through that dialog,** never RealTimeX's Settings → Local Apps → Permissions screen.
+    That screen saves a nested record that RealTimeX's own permission checks cannot read, and it
+    leaves out `credentials.*` and `desktop.*` (realtimex-ai-app#2277). `up` then reports every
+    permission pending.
+  - **To recover from a Settings grant:** the owner opens that screen and clicks **Reset**. You then
+    run `down` and `up --needs …` while the owner watches for the dialog.
 
   | Scenario | `--needs` |
   |---|---|
@@ -349,12 +369,26 @@ edit, or delete apps by hand around it.
 Anything that publishes, sends, invites, or connects reaches a real account: get the owner's
 explicit OK and prefer `--dry-run` or a local mock.
 
-**Slice 1 (one-shot, before the first `up`).** The Dev host still carries the pre-#541 `Signals` row
-(`~/.signals`, port `3010`) and old per-issue QA apps, so every `up` fails `DEV_HOST_UNSAFE` until
-they are gone. In order: the owner's key, then Delegate judgment for the effect, then
-`node "$QA" prune --legacy-qa --apply`, then
-`node scripts/qa/migrate-dev-signals-row.mjs --plan` and `--expect-row-sha256 <sha>`. The migration
-replaces the row with `Signals Dev · main`. Its header lists the restore commands.
+**Slice 1 is done (2026-10-06).** Under owner-approved Delegate requests:
+- `prune --legacy-qa --apply` removed the five pre-#541 `Signals issue-<N> QA` apps.
+- `migrate-dev-signals-row.mjs` replaced the Dev host's old `Signals` row (`~/.signals`, port `3010`)
+  with `Signals Dev · main`.
+- The Dev host now has no app that points at the real data or pins `3010`.
+- Backups taken before each step are in `~/.signals-dev/_backups/`. Do not delete them.
+- The migration script's header lists the restore commands. Do not rerun the migration.
+- `DEV_HOST_UNSAFE` from now on means something new appeared: report it, don't fix it.
+
+**`Signals Dev · main` runs on a copy of the owner's real data.** It is the main checkout's slot
+(`up` from `/Users/realtimex/github/signals`, port `3393`), created with `--profile snapshot` on
+2026-10-06: about 14.7k contacts, 1.8k content items, 850 workflow runs, and media.
+- **Its effects are real.** The guard and the scheduler pin still apply, but workflows, enrichment,
+  research, and persona jobs run there for real. They spend LLM tokens through RealTimeX Dev and
+  fetch public web pages, so get the owner's OK before bulk runs.
+- **It is a one-way, point-in-time copy.** Nothing flows back to `~/.signals`. Voice profiles and
+  Personality are empty, because `personality/` and `writing/` are not copied.
+- **Refresh the data only when the owner asks.** Run `remove`, then `up --profile snapshot` from the
+  main checkout; the owner answers one new permission dialog.
+- **Loop worktrees stay `--profile empty`** unless a scenario needs real data.
 
 **`rtxtest`** drives only the Dev app over CDP `9888`. Do not point `rtxtest dev up` at the Signals
 repository; Signals is a Local App, not the RealTimeX app repo. If the bundled launcher lacks its
