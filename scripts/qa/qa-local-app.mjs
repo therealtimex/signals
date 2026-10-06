@@ -19,9 +19,9 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import net from "node:net";
-import { dirname, join, resolve, sep } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { IssueLockBusyError, acquireIssueLock as acquireLockFile, pidAlive } from "./qa-issue-lock.mjs";
+import { IssueLockBusyError, acquireIssueLock as acquireLockFile } from "./qa-issue-lock.mjs";
 import {
   CANONICAL_SIGNALS_APP_ID,
   appDisplayName,
@@ -52,6 +52,9 @@ import {
   isDevRow,
   legacyQaIssueId,
   listSlotReceipts,
+  liveNextDevLock,
+  NON_SLOT_ENTRIES,
+  sanitizeSlot,
   normalizeOptionalIssueId,
   packagedHostFingerprint,
   pinnedPorts,
@@ -88,8 +91,8 @@ function usage() {
     [--needs llm.chat,desktop.runtime-sessions] [--issue N] [--loop-id id] \\
     [--cli <wrapper>] [--db <dev realtimex.db>] [--timeout-ms 240000]
   node scripts/qa/qa-local-app.mjs status [--worktree <path>]
-  node scripts/qa/qa-local-app.mjs down   [--worktree <path>]
-  node scripts/qa/qa-local-app.mjs remove [--worktree <path>] [--keep-data]
+  node scripts/qa/qa-local-app.mjs down   [--worktree <path>] [--accept-packaged-change]
+  node scripts/qa/qa-local-app.mjs remove [--worktree <path>] [--keep-data] [--accept-packaged-change]
   node scripts/qa/qa-local-app.mjs prune  [--apply] [--legacy-qa]
 
 Each Signals checkout (default: the current directory, primary or linked) gets one
@@ -104,7 +107,9 @@ up      Creates or reuses the app, starts it, waits for /api/health, and verifie
         them. --no-start creates the app without starting it.
 status  Reports the app, its health and instance guard, permissions, and stale slots.
 down    Stops the app and checks the port, the Dev host, and the installed app. Keeps the app, its
-        data, and its permissions. QA hands off passed only after down exits 0.
+        data, and its permissions. QA hands off passed only after down exits 0. When the installed
+        app changed (PACKAGED_HOST_CHANGED), tell the owner; only after they confirm the change,
+        --accept-packaged-change re-baselines (never for CANONICAL_CHANGED).
 remove  Deletes the app and its data (--keep-data keeps the data). Run it at loop close.
 prune   Lists apps and slots whose checkout is gone; --apply deletes them. --legacy-qa also
         includes the pre-#541 "Signals issue-<N> QA" apps and their /private/tmp data.
@@ -448,25 +453,6 @@ function acquireSlotLock(slot, paths, action) {
   }
 }
 
-// Next 16 holds <dir>/.next/dev/lock for as long as `next dev` runs there and refuses a second
-// dev server in the same directory.
-function liveNextDevLock(worktree) {
-  const lockPath = join(worktree, ".next", "dev", "lock");
-  if (!existsSync(lockPath)) return null;
-  let info = {};
-  try {
-    info = JSON.parse(readFileSync(lockPath, "utf8"));
-  } catch {
-    return null;
-  }
-  const pid = Number(info.pid);
-  if (!pidAlive(pid)) return null;
-  // A recycled pid is not a dev server. Next titles its dev process "next-server (vX)".
-  const ps = spawnSync("ps", ["-o", "command=", "-p", String(pid)], { encoding: "utf8" });
-  if (ps.status === 0 && !/next/i.test(ps.stdout)) return null;
-  return { lockPath, pid, port: Number(info.port) || null, appUrl: info.appUrl ?? null };
-}
-
 function portAnswers(port, timeoutMs = 1000) {
   return new Promise((resolvePort) => {
     const socket = net.connect({ host: "127.0.0.1", port });
@@ -594,16 +580,21 @@ async function waitUntilServing(appId, ctx, { timeoutMs, pollMs, worktree, port 
 
 // --- Stale slots and prune plans -----------------------------------------------------------------
 
+// A slot tag names a lock file and a data directory, so only a tag that is already a clean slot
+// counts.
 function slotTag(row) {
-  return rowTags(row).find((tag) => tag.startsWith("slot-"))?.slice(5) ?? null;
+  const raw = rowTags(row).find((tag) => tag.startsWith("slot-"))?.slice(5) ?? null;
+  return raw && sanitizeSlot(raw) === raw && !NON_SLOT_ENTRIES.has(raw) ? raw : null;
 }
 
+// Only a slot directory directly under the Dev root, never .locks, .launcher, or _backups.
 function devDataDirOf(row) {
   const dataDir = rowConfig(row).env?.SIGNALS_DATA_DIR;
   if (!dataDir) return null;
-  const root = signalsDevRoot();
   const resolved = resolve(dataDir);
-  return dirname(resolved) === root ? resolved : null;
+  if (dirname(resolved) !== signalsDevRoot()) return null;
+  const name = basename(resolved);
+  return sanitizeSlot(name) === name && !NON_SLOT_ENTRIES.has(name) ? resolved : null;
 }
 
 /**
@@ -624,7 +615,11 @@ function buildPrunePlan(devRows, { legacy = false } = {}) {
     }
     if (isDevRow(row)) {
       const worktree = config.env?.SIGNALS_DEV_WORKTREE ?? null;
-      if (worktree && existsSync(worktree)) continue;
+      if (!worktree) {
+        skipped.push({ appId: row.id, displayName: row.display_name, reason: "no SIGNALS_DEV_WORKTREE, so not provably a launcher app" });
+        continue;
+      }
+      if (existsSync(worktree)) continue;
       items.push({
         kind: "dev-app",
         appId: row.id,
@@ -687,7 +682,7 @@ function staleSummary(devRows) {
   return { ...stale, total: stale.devApps + stale.slots + stale.legacyQaApps };
 }
 
-function packagedCheck(ctx, session, failures, warnings) {
+function packagedCheck(ctx, session, failures, warnings, { acceptChange = false } = {}) {
   if (!session?.packaged) {
     warnings.push("No installed-app snapshot from up for this slot, so the installed app was not diffed.");
     return { packagedHostUnchanged: null };
@@ -699,13 +694,18 @@ function packagedCheck(ctx, session, failures, warnings) {
   }
   const diff = diffPackagedHost(session.packaged, now.fingerprint);
   warnings.push(...diff.warnings);
-  if (!diff.unchanged) failures.push("PACKAGED_HOST_CHANGED");
+  // The owner may change their own app. Once they confirm a reported diff, --accept-packaged-change
+  // re-baselines: this run passes and the next up takes a fresh snapshot. It never accepts a broken
+  // canonical record.
+  const accepted = !diff.unchanged && acceptChange;
+  if (!diff.unchanged && !accepted) failures.push("PACKAGED_HOST_CHANGED");
   const canonicalBefore = session.packaged.rows.some((row) => row.id === CANONICAL_SIGNALS_APP_ID);
   const canonicalProblems = canonicalBefore ? canonicalShapeProblems(ctx, now.rows) : [];
   if (canonicalProblems.length) failures.push("CANONICAL_CHANGED");
   return {
     packagedHostUnchanged: diff.unchanged,
     ...(diff.unchanged ? {} : { packagedHostDiff: { added: diff.added, removed: diff.removed, changed: diff.changed } }),
+    ...(accepted ? { acceptedPackagedChange: true } : {}),
     ...(canonicalProblems.length ? { canonicalProblems } : {}),
   };
 }
@@ -728,7 +728,10 @@ function checkNexts(rerun) {
     },
     PACKAGED_HOST_CHANGED: {
       error: "The installed RealTimeX app's Local Apps changed while this slot was up.",
-      next: "Stop and tell the owner: nothing in this launcher touches the installed app. Do not undo it yourself.",
+      next:
+        "Stop and tell the owner what packagedHostDiff lists: nothing in this launcher touches the " +
+        "installed app. Do not undo it yourself. Only after the owner confirms they made those " +
+        `changes, rerun: ${rerun} --accept-packaged-change`,
     },
     CANONICAL_CHANGED: {
       error: "The canonical Signals record on the installed app no longer has its expected shape.",
@@ -1116,7 +1119,9 @@ async function down(flags) {
     if (portReleased === false) failures.push("PORT_STILL_BOUND");
     const unsafe = devHostProblems(readDevRows(ctx));
     if (unsafe.length) failures.push("DEV_HOST_UNSAFE");
-    const packaged = packagedCheck(ctx, session, failures, warnings);
+    const packaged = packagedCheck(ctx, session, failures, warnings, {
+      acceptChange: flags.has("accept-packaged-change"),
+    });
     if (!failures.length) rmSync(paths.sessionPath, { force: true });
     return finish(
       {
@@ -1208,7 +1213,9 @@ async function remove(flags) {
     }
     const unsafe = devHostProblems(readDevRows(ctx));
     if (unsafe.length) failures.push("DEV_HOST_UNSAFE");
-    const packaged = packagedCheck(ctx, session, failures, warnings);
+    const packaged = packagedCheck(ctx, session, failures, warnings, {
+      acceptChange: flags.has("accept-packaged-change"),
+    });
     return finish(
       {
         action: "remove",

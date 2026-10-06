@@ -21,6 +21,7 @@ import {
 import { homedir } from "node:os";
 import { basename, delimiter, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { lockHolderAlive, pidAlive } from "./qa-issue-lock.mjs";
 import { CANONICAL_SIGNALS_APP_ID, DEFAULT_DEV_CLI_BASE_URL } from "./signals-qa-local-app.mjs";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -36,7 +37,7 @@ export const RESERVED_PORTS = Object.freeze([
   3000, 3001, 3010, 3011, 3081, 3100, 3101, 4002, 8001, 8080, 9888,
 ]);
 // Directories under the Dev root that are not slots.
-const NON_SLOT_ENTRIES = new Set([".locks", ".launcher", "_backups"]);
+export const NON_SLOT_ENTRIES = Object.freeze(new Set([".locks", ".launcher", "_backups"]));
 
 export class SlotError extends Error {
   constructor(errorCode, message, extra = {}) {
@@ -239,6 +240,60 @@ export function slotReceiptForWorktree(worktree, env = process.env) {
     return null;
   }
   return listSlotReceipts(env).find((entry) => entry.receipt?.worktree === path)?.receipt ?? null;
+}
+
+// Next 16 holds <dir>/.next/dev/lock for as long as `next dev` runs there and refuses a second
+// dev server in the same directory.
+export function liveNextDevLock(worktree) {
+  const lockPath = join(worktree, ".next", "dev", "lock");
+  if (!existsSync(lockPath)) return null;
+  let info = {};
+  try {
+    info = JSON.parse(readFileSync(lockPath, "utf8"));
+  } catch {
+    return null;
+  }
+  const pid = Number(info.pid);
+  if (!pidAlive(pid)) return null;
+  // A recycled pid is not a dev server. Next titles its dev process "next-server (vX)".
+  const ps = spawnSync("ps", ["-o", "command=", "-p", String(pid)], { encoding: "utf8" });
+  if (ps.status === 0 && !/next/i.test(ps.stdout)) return null;
+  return { lockPath, pid, port: Number(info.port) || null, appUrl: info.appUrl ?? null };
+}
+
+/** The live holder of a slot's launcher lock, or null. */
+export function slotLockHolder(paths) {
+  if (!existsSync(paths.lockPath)) return null;
+  const holder = readJsonFile(paths.lockPath);
+  if (!holder) return { unreadable: true };
+  return lockHolderAlive(holder) ? holder : null;
+}
+
+/**
+ * Why `up` could not create a fresh app for this checkout right now: the slot already has a
+ * receipt, an app already uses its name or slot tag, `next dev` runs in the checkout, or another
+ * launcher run holds the slot. `apps` are `{ id, displayName|display_name, tags }`. The slice-1
+ * migration runs this before it deletes anything (#541 Review F1).
+ */
+export function freshSlotBlockers({ checkout, slot, apps, env = process.env }) {
+  const blockers = [];
+  const paths = slotPaths(slot, env);
+  if (existsSync(paths.receiptPath)) {
+    const owner = readJsonFile(paths.receiptPath)?.worktree;
+    blockers.push(`slot ${slot} already has a receipt (${paths.receiptPath}${owner ? `, for ${owner}` : ""})`);
+  }
+  const name = devAppDisplayName(slot);
+  for (const app of apps) {
+    const tags = Array.isArray(app.tags) ? app.tags : rowTags(app);
+    if ((app.displayName ?? app.display_name) === name || (tags.includes("dev") && tags.includes(`slot-${slot}`))) {
+      blockers.push(`app ${app.id} already uses the name or tag of slot ${slot}`);
+    }
+  }
+  const lock = liveNextDevLock(checkout.path);
+  if (lock) blockers.push(`next dev (pid ${lock.pid}) holds ${lock.lockPath}`);
+  const holder = slotLockHolder(paths);
+  if (holder) blockers.push(`another launcher run holds ${paths.lockPath}${holder.pid ? ` (pid ${holder.pid})` : ""}`);
+  return blockers;
 }
 
 // --- Rows ----------------------------------------------------------------------------------------

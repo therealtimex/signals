@@ -182,6 +182,7 @@ const devDb = join(root, "dev", "realtimex.db");
 const packagedDb = join(root, "app", "realtimex.db");
 const statePath = join(root, "local-apps.json");
 const pidLog = join(root, "pids.log");
+const credLog = join(root, "credentials-sent.log");
 const mockCli = join(root, "mock-realtimex-pp-cli.mjs");
 const tripwireCli = join(root, "tripwire-realtimex-pp-cli.mjs");
 const legacyTag = String(Date.now()).slice(-7);
@@ -281,6 +282,7 @@ function run(script, args, env = {}) {
           MOCK_LOCAL_APPS_STATE: statePath,
           MOCK_DEV_DB: devDb,
           MOCK_PID_LOG: pidLog,
+          MOCK_CRED_LOG: credLog,
           REALTIMEX_PP_CLI: tripwireCli,
           SIGNALS_DEV_ROOT: devRoot,
           SIGNALS_CANONICAL_DATA_DIR: realData,
@@ -391,6 +393,9 @@ const kill = (app) => {
   try { process.kill(app.pid, "SIGTERM"); } catch {}
   app.pid = null;
 };
+if (process.env.MOCK_CRED_LOG && (process.env.REALTIMEX_TERMINAL_SESSION_TOKEN || process.env.REALTIMEX_APP_ID_AUTH || process.env.REALTIMEX_CONFIG)) {
+  appendFileSync(process.env.MOCK_CRED_LOG, command + "\\n");
+}
 if (process.env.MOCK_REFUSE === "1") {
   console.error('Error: GET /' + command + ' returned HTTP 403: {"error":"Scoped credential is not allowed for this route."}');
   process.exit(4);
@@ -532,7 +537,15 @@ console.log(JSON.stringify({ meta: { source: "mock" }, results }));
   assert.equal(mockState().apps.length, 0);
 
   // ---- Happy path: a linked worktree and the main checkout, side by side ------------------------
-  const first = await qa(["up", "--worktree", wtA, ...host, "--issue", "77", "--loop-id", "loop-issue-77-aaaa"]);
+  // Run as an installed-app terminal: its credentials must never reach the Dev host.
+  const installedTerminal = {
+    REALTIMEX_BASE_URL: "http://127.0.0.1:3001/cli",
+    REALTIMEX_TERMINAL_SESSION_TOKEN: "installed-session",
+    REALTIMEX_APP_ID_AUTH: "installed-app-id",
+    REALTIMEX_CONFIG: "/installed/config.toml",
+  };
+  const first = await qa(["up", "--worktree", wtA, ...host, "--issue", "77", "--loop-id", "loop-issue-77-aaaa"], installedTerminal);
+  assert.equal(existsSync(credLog), false, "installed-app credentials reached the Dev host CLI");
   assert.equal(first.status, 0, detail(first));
   const slotA = "loop-issue-77-aaaa";
   assert.equal(first.json.slot, slotA);
@@ -635,8 +648,24 @@ console.log(JSON.stringify({ meta: { source: "mock" }, results }));
   assert.equal(polluted.json.errorCode, "PACKAGED_HOST_CHANGED");
   assert.deepEqual(polluted.json.packagedHostDiff.added.map((row) => row.id), ["stray"]);
   assert.match(polluted.json.next, /tell the owner/);
+  assert.match(polluted.json.next, /--accept-packaged-change$/);
   assert.equal(existsSync(sessionPath(slotA)), true);
+  // Without the owner's confirmation every later down keeps failing; once they confirm, the flag
+  // re-baselines and the next up snapshots the installed app as it now is.
+  assert.equal((await qa(["down", "--worktree", wtA])).json.errorCode, "PACKAGED_HOST_CHANGED");
+  const accepted = await qa(["down", "--worktree", wtA, "--accept-packaged-change"]);
+  assert.equal(accepted.status, 0, detail(accepted));
+  assert.equal(accepted.json.acceptedPackagedChange, true);
+  assert.deepEqual(accepted.json.packagedHostDiff.added.map((row) => row.id), ["stray"]);
+  assert.equal(existsSync(sessionPath(slotA)), false);
+  assert.equal((await qa(["up", "--worktree", wtA])).status, 0);
+  assert.equal((await qa(["down", "--worktree", wtA])).status, 0, "the re-baselined snapshot includes the owner's app");
+  await qa(["up", "--worktree", wtA]);
   packagedSql("delete from local_apps where id = 'stray';");
+  assert.equal((await qa(["down", "--worktree", wtA, "--accept-packaged-change"])).json.acceptedPackagedChange, true);
+  await qa(["up", "--worktree", wtA]);
+  assert.equal((await qa(["down", "--worktree", wtA])).status, 0);
+  await qa(["up", "--worktree", wtA]);
   // A marketplace update of the canonical app is not pollution; a broken shape is an incident.
   packagedSql(`update local_apps set config = ${sql(canonicalConfig("0.2.22"))} where id = ${sql(CANONICAL_SIGNALS_APP_ID)};`);
   packagedSql("insert into workspaces (slug) values ('signals-new');");
@@ -648,6 +677,7 @@ console.log(JSON.stringify({ meta: { source: "mock" }, results }));
   const broken = await qa(["down", "--worktree", wtA]);
   assert.equal(broken.json.errorCode, "CANONICAL_CHANGED");
   assert.match(broken.json.next, /incident/);
+  assert.equal((await qa(["down", "--worktree", wtA, "--accept-packaged-change"])).json.errorCode, "CANONICAL_CHANGED", "the flag never accepts a broken canonical record");
   packagedSql(`update local_apps set config = ${sql(canonicalConfig("0.2.22"))} where id = ${sql(CANONICAL_SIGNALS_APP_ID)};`);
   assert.equal((await qa(["down", "--worktree", wtA])).status, 0);
 
@@ -732,6 +762,23 @@ console.log(JSON.stringify({ meta: { source: "mock" }, results }));
   assert.equal(mockState().apps.some((app) => app.id === recreated.json.appId), false);
 
   // ---- prune: gone checkouts, and the pre-#541 per-issue QA apps ----------------------------------
+  // A dev-tagged row the launcher did not make (no SIGNALS_DEV_WORKTREE) is never planned, and a
+  // row pointing at a non-slot directory or with an unclean slot tag cannot widen what is deleted.
+  addMockApp({ id: "foreign-dev", displayName: "Signals Dev · foreign", tags: ["signals", "dev", "slot-foreign"], persistedStatus: "stopped" }, { config: { env: { SIGNALS_DATA_DIR: join(devRoot, "foreign") } } });
+  mkdirSync(join(devRoot, "_backups"), { recursive: true });
+  writeFileSync(join(devRoot, "_backups", "keep.json"), "{}");
+  addMockApp(
+    { id: "odd-dev", displayName: "Signals Dev · odd", tags: ["signals", "dev", "slot-../../x"], persistedStatus: "stopped" },
+    { config: { env: { SIGNALS_DEV_WORKTREE: "/gone/odd", SIGNALS_DATA_DIR: join(devRoot, "_backups") } } },
+  );
+  const hardened = await qa(["prune"]);
+  assert.deepEqual(hardened.json.skipped.map((item) => item.appId), ["foreign-dev"]);
+  const odd = hardened.json.plan.find((item) => item.appId === "odd-dev");
+  assert.equal(odd.slot, null);
+  assert.equal(odd.dataDir, null);
+  assert.equal((await qa(["prune", "--apply"])).status, 0);
+  assert.equal(existsSync(join(devRoot, "_backups", "keep.json")), true);
+  dropMockApp("foreign-dev");
   const wtC = addWorktree("loop-issue-79-cccc", "issue-79");
   const created = await qa(["up", "--worktree", wtC, "--no-start"]);
   assert.equal(created.status, 0, detail(created));
@@ -805,16 +852,49 @@ console.log(JSON.stringify({ meta: { source: "mock" }, results }));
   assert.equal(blocked.json.errorCode, "DEV_HOST_UNSAFE");
   assert.equal(existsSync(join(migDevRoot, "_backups")), false);
   migSql("delete from local_apps where id = 'legacy-184';");
-  // The row is only changed with the approved hash, and never while it runs.
+  const legacyPresent = () => migSql(`select count(*) from local_apps where id = ${sql(CANONICAL_SIGNALS_APP_ID)};`) === "1";
+
+  // Anything the launcher would refuse is found before the delete (Review F1): a live next dev in
+  // the main checkout, or a leftover slot-main receipt. Plan reports it; apply writes nothing.
+  const mainLockHolder = track(spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)", "next-server-main-lock"]));
+  mkdirSync(join(repo, ".next", "dev"), { recursive: true });
+  writeFileSync(join(repo, ".next", "dev", "lock"), JSON.stringify({ pid: mainLockHolder.pid, port: 4998 }));
+  const lockedPlan = await migrate(["--plan", "--cli", mockCli]);
+  assert.match(lockedPlan.json.blockers.join(), /next dev \(pid \d+\) holds/);
+  assert.equal(lockedPlan.json.managementVerified, true);
+  const lockedApply = await migrate(["--cli", mockCli, "--expect-row-sha256", planned.json.rowSha256]);
+  assert.equal(lockedApply.json.errorCode, "SLOT_NOT_FRESH");
+  assert.match(lockedApply.json.next, /^Nothing was changed\./);
+  assert.equal(legacyPresent(), true);
+  assert.equal(existsSync(storageLink), true);
+  assert.equal(existsSync(join(migDevRoot, "_backups")), false);
+  await stopChild(mainLockHolder);
+  rmSync(join(repo, ".next"), { recursive: true, force: true });
+  const leftover = join(migDevRoot, "main", ".launcher");
+  mkdirSync(leftover, { recursive: true });
+  writeFileSync(join(leftover, "receipt.json"), JSON.stringify({ worktree: repo, appId: "gone" }));
+  assert.match((await migrate(["--plan"])).json.blockers.join(), /slot main already has a receipt/);
+  assert.equal((await migrate(["--cli", mockCli, "--expect-row-sha256", planned.json.rowSha256])).json.errorCode, "SLOT_NOT_FRESH");
+  assert.equal(legacyPresent(), true);
+  rmSync(join(migDevRoot, "main"), { recursive: true, force: true });
+  // The row is only changed with the approved hash, and only when the host says it is stopped.
   assert.equal((await migrate(["--cli", mockCli])).json.errorCode, "USAGE");
+  assert.equal((await migrate(["--expect-row-sha256", planned.json.rowSha256])).json.errorCode, "USAGE");
   assert.equal((await migrate(["--cli", mockCli, "--expect-row-sha256", "0".repeat(64)])).json.errorCode, "ROW_CHANGED");
-  const runningState = JSON.parse(readFileSync(migState, "utf8"));
-  runningState.apps[0].runtime = { status: "running" };
-  writeFileSync(migState, JSON.stringify(runningState));
-  assert.equal((await migrate(["--plan", "--cli", mockCli])).json.errorCode, "ROW_RUNNING");
-  runningState.apps[0].runtime = { status: "stopped" };
-  writeFileSync(migState, JSON.stringify(runningState));
-  assert.equal(migSql(`select count(*) from local_apps where id = ${sql(CANONICAL_SIGNALS_APP_ID)};`), "1");
+  const setLegacyRuntime = (runtime) => {
+    const state = JSON.parse(readFileSync(migState, "utf8"));
+    state.apps[0].runtime = runtime;
+    writeFileSync(migState, JSON.stringify(state));
+  };
+  setLegacyRuntime({ status: "running" });
+  assert.match((await migrate(["--plan", "--cli", mockCli])).json.blockers.join(), /runtime status is running/);
+  assert.equal((await migrate(["--cli", mockCli, "--expect-row-sha256", planned.json.rowSha256])).json.errorCode, "ROW_RUNNING");
+  // An unknown status fails closed (Review F5).
+  setLegacyRuntime(null);
+  assert.equal((await migrate(["--cli", mockCli, "--expect-row-sha256", planned.json.rowSha256])).json.errorCode, "ROW_STATUS_UNKNOWN");
+  setLegacyRuntime({ status: "stopped" });
+  assert.equal(legacyPresent(), true);
+  assert.equal(existsSync(join(migDevRoot, "_backups")), false);
 
   const migrated = await migrate(["--cli", mockCli, "--expect-row-sha256", planned.json.rowSha256]);
   assert.equal(migrated.status, 0, detail(migrated));
@@ -836,7 +916,7 @@ console.log(JSON.stringify({ meta: { source: "mock" }, results }));
   assert.notEqual(replacementConfig.env.PORT, "3010");
   assert.equal(JSON.parse(readFileSync(migState, "utf8")).apps.find((app) => app.id === migrated.json.created.appId).runtime.status, "stopped");
   assert.deepEqual(migrated.json.devHostProblems, []);
-  const migratedAgain = await migrate(["--cli", mockCli]);
+  const migratedAgain = await migrate(["--plan"]);
   assert.equal(migratedAgain.status, 0, detail(migratedAgain));
   assert.equal(migratedAgain.json.alreadyMigrated, true);
 

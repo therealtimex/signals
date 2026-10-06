@@ -26,6 +26,8 @@ import {
   parseCliJson,
   qaAppDisplayName,
   qaTemporaryRoot,
+  REALTIMEX_AUTH_ENV_KEYS,
+  normalizeRealtimeXBaseUrl,
   realtimeXCliEnv,
 } from "./signals-qa-local-app.mjs";
 import {
@@ -69,14 +71,22 @@ assert.deepEqual(legacyQaStatePaths("356").map((path) => path.split("/").pop()),
   "signals-qa-local-app-issue-356.lock",
 ]);
 
-// The installed app's terminal token never travels to the Dev host; a Dev terminal keeps its own.
+// The installed app's credentials never travel to the Dev host; a Dev terminal keeps its own,
+// unless an explicit --cli credential wrapper is in play.
 const dev = "http://127.0.0.1:3101/cli";
-const installedTerminal = { REALTIMEX_BASE_URL: "http://127.0.0.1:3001/cli", REALTIMEX_TERMINAL_SESSION_TOKEN: "t" };
-assert.equal(realtimeXCliEnv(dev, installedTerminal).REALTIMEX_TERMINAL_SESSION_TOKEN, undefined);
+const creds = { REALTIMEX_TERMINAL_SESSION_TOKEN: "t", REALTIMEX_APP_ID_AUTH: "a", REALTIMEX_CONFIG: "/c.toml" };
+const credsOf = (env) => REALTIMEX_AUTH_ENV_KEYS.filter((key) => key in env);
+const installedTerminal = { REALTIMEX_BASE_URL: "http://127.0.0.1:3001/cli", ...creds, OTHER: "kept" };
+assert.deepEqual(credsOf(realtimeXCliEnv(dev, installedTerminal)), []);
 assert.equal(realtimeXCliEnv(dev, installedTerminal).REALTIMEX_BASE_URL, dev);
-assert.equal(realtimeXCliEnv(dev, { ...installedTerminal, REALTIMEX_BASE_URL: `${dev}/` }).REALTIMEX_TERMINAL_SESSION_TOKEN, "t");
-assert.equal(realtimeXCliEnv(dev, { REALTIMEX_TERMINAL_SESSION_TOKEN: "t" }).REALTIMEX_TERMINAL_SESSION_TOKEN, "t");
+assert.equal(realtimeXCliEnv(dev, installedTerminal).OTHER, "kept");
+assert.deepEqual(credsOf(realtimeXCliEnv(dev, creds)), [], "an unknown issuer is another host");
+const devTerminal = { ...creds, REALTIMEX_BASE_URL: "http://localhost:3101/cli/" };
+assert.deepEqual(credsOf(realtimeXCliEnv(dev, devTerminal)), REALTIMEX_AUTH_ENV_KEYS);
+assert.deepEqual(credsOf(realtimeXCliEnv(dev, devTerminal, { explicitCredential: true })), []);
 assert.equal(installedTerminal.REALTIMEX_TERMINAL_SESSION_TOKEN, "t");
+assert.equal(normalizeRealtimeXBaseUrl("http://localhost:3101/cli/"), normalizeRealtimeXBaseUrl(dev));
+assert.notEqual(normalizeRealtimeXBaseUrl("http://127.0.0.1:3001/cli"), normalizeRealtimeXBaseUrl(dev));
 
 const cliPayload = parseCliJson(
   'notice\n{"meta":{"source":"live"},"results":{"apps":[{"id":"dev-app-id","displayName":"Signals Dev · main","tags":["signals","dev","slot-main"]}]}}',

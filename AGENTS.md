@@ -311,7 +311,10 @@ edit, or delete apps by hand around it.
 - **`down` before `passed`.** QA hands off `passed`, and a loop closes, only after `down` exits 0. It
   stops the app, checks the port was released, re-checks the Dev host, and diffs the installed app
   against the snapshot `up` took. `PACKAGED_HOST_CHANGED` or `CANONICAL_CHANGED` is an incident: stop
-  and tell the owner.
+  and tell the owner what changed. If the owner confirms they made a `PACKAGED_HOST_CHANGED` change
+  themselves, rerun `down --accept-packaged-change`. That re-baselines the check, and the next `up`
+  snapshots the app afresh. Never use it without that confirmation, and it never accepts
+  `CANONICAL_CHANGED`.
 - **`remove` at loop close**, or `prune --apply` when `up` or `status` reports stale slots.
   `prune --legacy-qa` also covers the pre-#541 `Signals issue-<N> QA` apps.
 - **`--profile snapshot`** copies the real `data.db` (SQLite online backup, read-only) and `media/`

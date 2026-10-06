@@ -41,6 +41,8 @@ import {
   backupsDir,
   devAppDisplayName,
   devHostProblems,
+  freshSlotBlockers,
+  resolveSignalsCheckout,
   legacyQaIssueId,
   pointsAtRealSignalsData,
   rowConfig,
@@ -143,9 +145,22 @@ async function main() {
     usage();
     return null;
   }
+  const apply = !flags.has("plan");
+  const cliPath = flags.get("cli") || "";
+  const expected = flags.get("expect-row-sha256");
+  if (apply && !cliPath) fail("USAGE", "--cli is required to apply the migration.", "Rerun with --cli <wrapper for the owner's scoped key>.");
+  if (apply && !expected) fail("USAGE", "--expect-row-sha256 is required to apply the migration.", "Run --plan and pass its rowSha256.");
   const dbPath = devDbPath(flags);
   const mainCheckout = realpathSync(resolve(flags.get("main-checkout") || canonicalSignalsRepoRoot(SCRIPT_DIR)));
-  const cliPath = flags.get("cli") || "";
+  let checkout;
+  try {
+    checkout = resolveSignalsCheckout(mainCheckout);
+  } catch (error) {
+    fail("MAIN_CHECKOUT_INVALID", error.message, "Pass --main-checkout <the primary Signals checkout>.");
+  }
+  if (!checkout.primary) {
+    fail("MAIN_CHECKOUT_INVALID", `${mainCheckout} is a linked worktree, not the primary checkout.`, "Pass --main-checkout <the primary Signals checkout>.");
+  }
   const rows = readRows(dbPath);
   const legacy = rows.find((row) => row.id === CANONICAL_SIGNALS_APP_ID) ?? null;
   const replacement = rows.find((row) => row.display_name === devAppDisplayName("main")) ?? null;
@@ -166,24 +181,49 @@ async function main() {
   if (unexpected.length) {
     fail("ROW_UNEXPECTED", `The legacy row is not what slice 1 was approved for: ${unexpected.join("; ")}.`, "Stop and tell the owner; do not change it.");
   }
-  if (replacement) {
-    fail("ROW_UNEXPECTED", `${devAppDisplayName("main")} (${replacement.id}) already exists next to the legacy row.`, "Stop and tell the owner.");
-  }
-  // Every other row must already satisfy the Dev-host invariant: the replacement is provisioned by
-  // the launcher, which refuses an unsafe host, and that must not be found out after the delete.
-  const blockers = devHostProblems(rows.filter((row) => row.id !== CANONICAL_SIGNALS_APP_ID));
-  const pruneFirst = `node ${LAUNCHER} prune --legacy-qa --apply --cli <wrapper> --db ${dbPath}`;
   const backup = legacyRowBackup(dbPath);
   const storageLink = join(dirname(dbPath), "local-apps", CANONICAL_SIGNALS_APP_ID);
-  let runtimeStatus = null;
-  if (cliPath || !flags.has("plan")) {
-    const payload = cli(["get-local-app-status", CANONICAL_SIGNALS_APP_ID], cliPath);
-    const body = payload?.results ?? payload;
-    runtimeStatus = body?.runtime?.status ?? null;
-    if (runtimeStatus && runtimeStatus !== "stopped") {
-      fail("ROW_RUNNING", `The legacy row is ${runtimeStatus}; this script never stops it.`, "Ask the owner to stop it in RealTimeX Dev, then rerun.");
+  const pruneFirst = `node ${LAUNCHER} prune --legacy-qa --apply --cli <wrapper> --db ${dbPath}`;
+
+  // The legacy row is deleted before the launcher provisions its replacement, so everything the
+  // launcher would refuse must be ruled out first (#541 Review F1): other rows breaking the
+  // Dev-host invariant (the launcher refuses an unsafe host) and anything in the way of a fresh
+  // slot main. With --cli, the list call also proves the key may manage Local Apps. This runs in
+  // --plan, before any write, and again immediately before the delete.
+  const preconditions = () => {
+    const now = readRows(dbPath);
+    const invariant = devHostProblems(now.filter((row) => row.id !== CANONICAL_SIGNALS_APP_ID));
+    const apps = cliPath
+      ? appsFromCliPayload(cli(["list-local-apps", "--data-source", "live", "--no-cache"], cliPath))
+      : now;
+    const slot = freshSlotBlockers({ checkout, slot: "main", apps });
+    let runtimeStatus = null;
+    if (cliPath) {
+      const payload = cli(["get-local-app-status", CANONICAL_SIGNALS_APP_ID], cliPath);
+      runtimeStatus = (payload?.results ?? payload)?.runtime?.status ?? null;
     }
-  }
+    return { invariant, slot, runtimeStatus };
+  };
+  const refuse = (checked, written) => {
+    // Fail closed: only an explicit "stopped" lets the row go (#541 Review F5).
+    if (cliPath && checked.runtimeStatus !== "stopped") {
+      fail(
+        checked.runtimeStatus ? "ROW_RUNNING" : "ROW_STATUS_UNKNOWN",
+        checked.runtimeStatus
+          ? `The legacy row is ${checked.runtimeStatus}; this script never stops it.`
+          : "The Dev host did not report the legacy row's runtime status, so it is not known to be stopped.",
+        `${written}Ask the owner to stop it in RealTimeX Dev, then rerun.`,
+      );
+    }
+    if (checked.invariant.length) {
+      fail("DEV_HOST_UNSAFE", `Other Dev host rows break the invariant: ${checked.invariant.join("; ")}.`, `${written}Clear them first (${pruneFirst}), then rerun.`, { blockers: checked.invariant });
+    }
+    if (checked.slot.length) {
+      fail("SLOT_NOT_FRESH", `Signals Dev · main cannot be created fresh: ${checked.slot.join("; ")}.`, `${written}Clear what is listed (stop that next dev; qa-local-app remove --worktree ${mainCheckout}), then rerun.`, { blockers: checked.slot });
+    }
+  };
+
+  const checked = preconditions();
   const steps = [
     `Backup A: the row as JSON (sha256 ${backup.sha256}) into ${backupsDir()}`,
     `Backup B: sqlite3 .backup of ${dbPath} into ${backupsDir()}`,
@@ -192,30 +232,32 @@ async function main() {
     `qa-local-app up --worktree ${mainCheckout} --no-start (slot main, ${slotPaths("main").dataDir}, --profile empty)`,
     "verify: old id gone, new row tagged and pinned as its receipt says, Dev-host invariant",
   ];
-  if (flags.has("plan")) {
+  if (!apply) {
+    const blockers = [
+      ...(cliPath && checked.runtimeStatus !== "stopped" ? [`the legacy row's runtime status is ${checked.runtimeStatus ?? "unknown"}, not stopped`] : []),
+      ...checked.invariant,
+      ...checked.slot,
+    ];
     return {
       ok: true,
       action: "plan",
       devDb: dbPath,
-      row: { id: legacy.id, displayName: legacy.display_name, dbStatus: legacy.status, runtimeStatus },
+      row: { id: legacy.id, displayName: legacy.display_name, dbStatus: legacy.status, runtimeStatus: checked.runtimeStatus },
       rowSha256: backup.sha256,
       storageLink,
       mainCheckout,
+      managementVerified: Boolean(cliPath),
       steps,
       blockers,
       restore,
       next: blockers.length
-        ? `Other rows break the Dev-host invariant; clear them first: ${pruneFirst}`
+        ? checked.invariant.length
+          ? `Other rows break the Dev-host invariant; clear them first: ${pruneFirst}`
+          : "Clear the listed blockers, then rerun --plan."
         : `node ${join(SCRIPT_DIR, "migrate-dev-signals-row.mjs")} --cli <wrapper> --expect-row-sha256 ${backup.sha256}`,
     };
   }
-  if (blockers.length) {
-    fail("DEV_HOST_UNSAFE", `Other Dev host rows break the invariant: ${blockers.join("; ")}.`, `Nothing was changed. Clear them first (${pruneFirst}), then rerun.`, { blockers });
-  }
-
-  if (!cliPath) fail("USAGE", "--cli is required to apply the migration.", "Rerun with --cli <wrapper for the owner's scoped key>.");
-  const expected = flags.get("expect-row-sha256");
-  if (!expected) fail("USAGE", "--expect-row-sha256 is required to apply the migration.", "Run --plan and pass its rowSha256.");
+  refuse(checked, "Nothing was changed. ");
   if (expected !== backup.sha256) {
     fail("ROW_CHANGED", `The row's sha256 is ${backup.sha256}, not the approved ${expected}.`, "The row changed since approval; run --plan and request a fresh judgment.");
   }
@@ -232,6 +274,12 @@ async function main() {
   const check = dbCopy.status === 0 ? spawnSync("sqlite3", ["-readonly", dbBackup, "pragma quick_check;"], { encoding: "utf8" }) : null;
   if (dbCopy.status !== 0 || check?.stdout.trim() !== "ok") {
     fail("BACKUP_FAILED", dbCopy.stderr?.trim() || check?.stdout.trim() || "Backup B failed its quick_check.", "Nothing was changed; fix the cause and rerun.", { rowBackup });
+  }
+
+  // Re-check right before the only destructive step; the backups above are harmless leftovers.
+  refuse(preconditions(), `Only the backups were written (${rowBackup}, ${dbBackup}); nothing was deleted. `);
+  if (legacyRowBackup(dbPath)?.sha256 !== backup.sha256) {
+    fail("ROW_CHANGED", "The legacy row changed while the backups were taken.", `Only the backups were written; nothing was deleted. Run --plan and request a fresh judgment.`);
   }
 
   // 3. Delete through the Dev host's CLI.

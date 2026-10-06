@@ -99,17 +99,41 @@ export function appDisplayName(app) {
   return String(app?.displayName ?? app?.display_name ?? "").trim();
 }
 
-const trimSlashes = (url) => String(url ?? "").trim().replace(/\/+$/, "");
+// The environment variables realtimex-pp-cli authenticates with (2.0.38). Each one belongs to the
+// RealTimeX host that issued it; the scoped key a --cli wrapper adds with --credential-ref is the
+// only credential meant for another host.
+export const REALTIMEX_AUTH_ENV_KEYS = Object.freeze([
+  "REALTIMEX_TERMINAL_SESSION_TOKEN",
+  "REALTIMEX_APP_ID_AUTH",
+  "REALTIMEX_CONFIG",
+]);
+
+/** `http://localhost:3101/cli/` and `http://127.0.0.1:3101/cli` name the same host. */
+export function normalizeRealtimeXBaseUrl(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return "";
+  try {
+    const url = new URL(text);
+    const host = url.hostname === "localhost" ? "127.0.0.1" : url.hostname;
+    const port = url.port || (url.protocol === "https:" ? "443" : "80");
+    return `${url.protocol}//${host}:${port}${url.pathname.replace(/\/+$/, "")}`;
+  } catch {
+    return text.replace(/\/+$/, "");
+  }
+}
 
 /**
- * The child env for one CLI call. A terminal session token belongs to the RealTimeX host that
- * opened the terminal (its REALTIMEX_BASE_URL); any other host rejects it with
- * TERMINAL_SESSION_NOT_ACTIVE, so it only travels to the host that issued it.
+ * The child env for one CLI call. The terminal's own credentials (REALTIMEX_AUTH_ENV_KEYS) travel
+ * only to the host that issued them, the terminal's REALTIMEX_BASE_URL, and never alongside an
+ * explicit credential wrapper, so the wrapper's --credential-ref is the only credential in play.
+ * An unknown issuer counts as a different host.
  */
-export function realtimeXCliEnv(baseUrl, env = process.env) {
+export function realtimeXCliEnv(baseUrl, env = process.env, { explicitCredential = false } = {}) {
   const child = { ...env, REALTIMEX_BASE_URL: baseUrl };
-  const issuer = trimSlashes(env.REALTIMEX_BASE_URL);
-  if (issuer && issuer !== trimSlashes(baseUrl)) delete child.REALTIMEX_TERMINAL_SESSION_TOKEN;
+  const issuer = normalizeRealtimeXBaseUrl(env.REALTIMEX_BASE_URL);
+  if (explicitCredential || !issuer || issuer !== normalizeRealtimeXBaseUrl(baseUrl)) {
+    for (const key of REALTIMEX_AUTH_ENV_KEYS) delete child[key];
+  }
   return child;
 }
 
@@ -118,7 +142,7 @@ export function runRealtimeXCli(args, options = {}) {
   const baseUrl = options.baseUrl || DEFAULT_DEV_CLI_BASE_URL;
   const result = spawnSync(cli, [...args, "--agent", "--compact=false"], {
     encoding: "utf8",
-    env: realtimeXCliEnv(baseUrl),
+    env: realtimeXCliEnv(baseUrl, process.env, { explicitCredential: Boolean(options.cli) }),
     maxBuffer: 10 * 1024 * 1024,
   });
   if (result.status !== 0) {
@@ -138,7 +162,9 @@ export function parseFlagArgs(argv) {
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (!arg.startsWith("--")) throw new Error(`Unexpected argument: ${arg}`);
-    if (["--no-start", "--keep-data", "--help", "--apply", "--legacy-qa", "--plan"].includes(arg)) {
+    if (
+      ["--no-start", "--keep-data", "--help", "--apply", "--legacy-qa", "--plan", "--accept-packaged-change"].includes(arg)
+    ) {
       booleans.add(arg.slice(2));
       continue;
     }
