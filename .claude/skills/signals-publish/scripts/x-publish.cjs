@@ -268,12 +268,35 @@ function assertComposeReadyToSubmit(wrapperSelector, expected, context) {
 }
 
 function focusComposeEditable(wrapperSelector, context) {
+  const scrollJs = `(() => {
+    const root = document.querySelector(${JSON.stringify(wrapperSelector)});
+    if (!root) return false;
+    const editable =
+      root.querySelector('[contenteditable="true"]') ||
+      root.querySelector('[role="textbox"]') ||
+      root.querySelector('[data-contents="true"]') ||
+      root;
+    editable.scrollIntoView({ block: "center", inline: "center" });
+    return true;
+  })()`;
+  try {
+    abText(["eval", scrollJs]);
+  } catch {}
+
   for (const sel of composeEditableSelectors(wrapperSelector)) {
     if (abCount(sel) > 0) {
-      requireAb(["click", sel], `${context} focus editable`);
-      return sel;
+      const res = runAb(["click", sel]);
+      if (res.ok) return sel;
     }
   }
+  const res = runAb(["click", wrapperSelector]);
+  if (res.ok) return wrapperSelector;
+
+  const evalRes = parseEvalJsonValue(
+    abText(["eval", focusComposeEditableEvalJs(wrapperSelector)])
+  );
+  if (evalRes?.ok) return wrapperSelector;
+
   requireAb(["click", wrapperSelector], `${context} focus wrapper`);
   return wrapperSelector;
 }
@@ -287,6 +310,7 @@ function focusComposeEditableEvalJs(wrapperSelector) {
       root.querySelector('[role="textbox"]') ||
       root.querySelector('[data-contents="true"]') ||
       root;
+    editable.scrollIntoView({ block: "center", inline: "center" });
     editable.focus();
     return JSON.stringify({
       ok:
@@ -484,7 +508,7 @@ function buildComposeScope(mode) {
       tweetTextareaAny: '[data-testid^="tweetTextarea_"]',
       addButtonCandidates,
       addButton: addButtonCandidates[0],
-      tweetButton: '[data-testid="tweetButton"]',
+      tweetButton: '[data-testid="tweetButton"], [data-testid="tweetButtonInline"]',
       fileInput: 'input[data-testid="fileInput"]',
       attachments: '[data-testid="attachments"]',
     };
@@ -497,9 +521,10 @@ function buildComposeScope(mode) {
     tweetTextareaAny: '[role="dialog"] [data-testid^="tweetTextarea_"]',
     addButtonCandidates,
     addButton: addButtonCandidates[0],
-    tweetButton: '[role="dialog"] [data-testid="tweetButton"]',
-    fileInput: '[role="dialog"] input[data-testid="fileInput"]',
-    attachments: '[role="dialog"] [data-testid="attachments"]',
+    tweetButton:
+      '[role="dialog"] [data-testid="tweetButton"], [role="dialog"] [data-testid="tweetButtonInline"], [data-testid="tweetButton"], [data-testid="tweetButtonInline"]',
+    fileInput: '[role="dialog"] input[data-testid="fileInput"], input[data-testid="fileInput"]',
+    attachments: '[role="dialog"] [data-testid="attachments"], [data-testid="attachments"]',
   };
 }
 
@@ -520,7 +545,7 @@ function resolveComposeScope() {
     if (mode) return buildComposeScope(mode);
   }
 
-  requireAb(["open", X_COMPOSE_POST_URL], "open compose/post");
+  openUrlResilient(X_COMPOSE_POST_URL, "open compose/post");
   sleep(1500);
   assertXLoggedIn();
 
@@ -531,7 +556,7 @@ function resolveComposeScope() {
     sleep(300);
   }
 
-  requireAb(["open", X_HOME_URL], "open X home for modal compose fallback");
+  openUrlResilient(X_HOME_URL, "open X home for modal compose fallback");
   sleep(1000);
   waitForSelector(X_SELECTORS.composeButton, "wait for compose button");
   requireAb(["click", X_SELECTORS.composeButton], "open compose modal");
@@ -539,9 +564,8 @@ function resolveComposeScope() {
 
   const modalDeadline = Date.now() + COMPOSE_WAIT_TIMEOUT_MS;
   while (Date.now() < modalDeadline) {
-    if (abCount(X_SELECTORS.composeTweetTextarea(0)) > 0) {
-      return buildComposeScope("modal");
-    }
+    const mode = detectComposeUiMode();
+    if (mode) return buildComposeScope(mode);
     sleep(300);
   }
 
@@ -706,21 +730,29 @@ function validateComposeState(scope, payload) {
   return { slots, slotCount: slots.length };
 }
 
+function openUrlResilient(url, context) {
+  const currentUrl = abUrl();
+  if (currentUrl === url) return;
+  const result = runAb(["open", url]);
+  if (!result.ok) {
+    if (/ERR_ABORTED/i.test(result.combined) && isXLoggedInPage()) {
+      return;
+    }
+    const navResult = runAb(["eval", `window.location.href = ${JSON.stringify(url)};`]);
+    if (navResult.ok) return;
+    throw {
+      message: `${context}: ${result.combined || "agent-browser command failed"}`,
+      errorCode: "unknown",
+    };
+  }
+}
+
 function openXHomeResilient() {
   const currentUrl = abUrl();
   if (/x\.com|twitter\.com/i.test(currentUrl) && isXLoggedInPage()) {
     return;
   }
-  const result = runAb(["open", X_HOME_URL]);
-  if (!result.ok) {
-    if (/ERR_ABORTED/i.test(result.combined) && isXLoggedInPage()) {
-      return;
-    }
-    throw {
-      message: `open X home after connect: ${result.combined || "agent-browser command failed"}`,
-      errorCode: "unknown",
-    };
-  }
+  openUrlResilient(X_HOME_URL, "open X home");
 }
 
 function activateComposeThreadAdd(scope, context, threadIndex, mainTweetText) {
@@ -996,7 +1028,7 @@ function detectXDisplayHandle() {
 
 function readProfileStatusCandidates(handle) {
   const profileHandle = handle.replace(/^@/, "");
-  requireAb(["open", `https://x.com/${profileHandle}`], "open profile timeline");
+  openUrlResilient(`https://x.com/${profileHandle}`, "open profile timeline");
   sleep(1000);
 
   const js = `(() => {

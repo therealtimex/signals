@@ -391,7 +391,11 @@ export async function sendContentToAgent(
   const payloadResult = validatePublishJobPayload({
     text: writingPayload?.text ?? input.text,
     threadTexts: writingPayload?.threadTexts ?? (writing ? undefined : input.threadTexts),
-    mediaAssetIds: input.mediaAssetIds ?? [],
+    mediaAssetIds:
+      input.mediaAssetIds ??
+      (writing?.media?.assetIds && writing.media.assetIds.length > 0
+        ? writing.media.assetIds
+        : []),
     platforms,
     title: item.title ?? undefined,
     kind: input.kind,
@@ -504,7 +508,11 @@ export async function sendContentToAgent(
       const freshPayload = validatePublishJobPayload({
         text: gate.payload.text,
         threadTexts: gate.payload.threadTexts,
-        mediaAssetIds: input.mediaAssetIds ?? [],
+        mediaAssetIds:
+          input.mediaAssetIds ??
+          (freshWriting?.media?.assetIds && freshWriting.media.assetIds.length > 0
+            ? freshWriting.media.assetIds
+            : []),
         platforms,
         title: freshItem.title ?? undefined,
         kind: "original",
