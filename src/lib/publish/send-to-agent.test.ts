@@ -286,13 +286,11 @@ describe("send-to-agent writing gates", () => {
 
   it("carries materialized writing media when send-to-agent omits mediaAssetIds", async () => {
     const item = createApprovedWritingItem();
-    const writing = item.platformData?.writing as Record<string, unknown>;
-    item.platformData = mergeContentWriting(item.platformData ?? {}, {
-      ...writing,
+    const platformData = mergeContentWriting(item.platformData, {
       media: { assetIds: ["writing-media-1", "writing-media-2"] },
-    } as Parameters<typeof mergeContentWriting>[1]);
+    });
     db.update(contentItems)
-      .set({ platformData: item.platformData })
+      .set({ platformData })
       .where(eq(contentItems.id, item.id))
       .run();
 
@@ -301,6 +299,7 @@ describe("send-to-agent writing gates", () => {
         contentItemId: item.id,
         platforms: ["x"],
         targets: [{ targetId: item.approvedTargetId }],
+        text: "ignored",
         kind: "original",
         signalsBaseUrl: "http://127.0.0.1:3000",
       },
