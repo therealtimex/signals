@@ -284,6 +284,38 @@ describe("send-to-agent writing gates", () => {
     }
   });
 
+  it("carries materialized writing media when send-to-agent omits mediaAssetIds", async () => {
+    const item = createApprovedWritingItem();
+    const platformData = mergeContentWriting(item.platformData, {
+      media: { assetIds: ["writing-media-1", "writing-media-2"] },
+    });
+    db.update(contentItems)
+      .set({ platformData })
+      .where(eq(contentItems.id, item.id))
+      .run();
+
+    const result = await sendContentToAgent(
+      {
+        contentItemId: item.id,
+        platforms: ["x"],
+        targets: [{ targetId: item.approvedTargetId }],
+        text: "ignored",
+        kind: "original",
+        signalsBaseUrl: "http://127.0.0.1:3000",
+      },
+      env,
+      fakeRtxFetch(),
+    );
+    expect(result).toMatchObject({
+      success: true,
+      payload: {
+        text: "A",
+        threadTexts: ["B", "C"],
+        mediaAssetIds: ["writing-media-1", "writing-media-2"],
+      },
+    });
+  });
+
   it("ignores caller text and carries persisted X thread units through the job API", async () => {
     const item = createApprovedWritingItem();
     const result = await sendContentToAgent(

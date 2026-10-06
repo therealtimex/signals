@@ -67,6 +67,7 @@ export const contentWritingSchema = z
      * may never become a publish job.
      */
     intent: writingIntentRecordSchema.nullable().optional(),
+    media: z.object({ assetIds: z.array(z.string().min(1)).max(10) }).optional(),
   })
   .passthrough();
 
