@@ -22,6 +22,7 @@ import {
 } from "@/lib/platforms/browser-connection";
 import { getPlatformTargetAdapter } from "@/lib/platforms/target-adapters";
 import { PlatformTargetError } from "@/lib/platforms/target-errors";
+import { ExternalEffectDeniedError } from "@/lib/instance/guard";
 import {
   defaultTargetCapabilities,
   defaultTargetKind,
@@ -141,7 +142,8 @@ export async function preparePlatformTarget(
       env,
       fetchImpl
     ).catch((error) => {
-      if (error instanceof PlatformTargetError) throw error;
+      // A Dev instance refusal (ADR-541-5) reaches the route/tool as 403, not as an unavailable connection.
+      if (error instanceof PlatformTargetError || error instanceof ExternalEffectDeniedError) throw error;
       throw new PlatformTargetError(
         "CONNECTION_UNAVAILABLE",
         error instanceof Error ? error.message : "Browser connection is unavailable",
@@ -234,6 +236,8 @@ export async function prepareCurrentPlatformTarget(
       env,
       fetchImpl,
     ).catch((error) => {
+      // Only workflow preflights (snowball, web research) call this; they degrade on an unavailable
+      // connection, so a Dev instance refusal (ADR-541-5) is reported as one rather than thrown.
       if (error instanceof PlatformTargetError) throw error;
       throw new PlatformTargetError(
         "CONNECTION_UNAVAILABLE",
@@ -355,7 +359,8 @@ async function discoverOnConnection(
         env,
         fetchImpl
       ).catch((error) => {
-        if (error instanceof PlatformTargetError) throw error;
+        // A Dev instance refusal (ADR-541-5) reaches the route/tool as 403, not as an unavailable connection.
+        if (error instanceof PlatformTargetError || error instanceof ExternalEffectDeniedError) throw error;
         throw new PlatformTargetError(
           "CONNECTION_UNAVAILABLE",
           error instanceof Error ? error.message : "Browser connection is unavailable",

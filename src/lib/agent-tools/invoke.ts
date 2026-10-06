@@ -1,5 +1,6 @@
 import { AGENT_TOOLS } from "@/lib/agent-tools/registry";
 import { AgentToolError } from "@/lib/agent-tools/types";
+import { ExternalEffectDeniedError } from "@/lib/instance/guard";
 import { getImmutableBirthFieldsError } from "@/lib/api/contact-route-validation";
 
 export const CONTACT_IMPORT_TOOL_NAMES = [
@@ -53,6 +54,9 @@ export async function invokeAgentTool(tool: string, input: unknown) {
   } catch (error) {
     if (error instanceof AgentToolError) {
       throw error;
+    }
+    if (error instanceof ExternalEffectDeniedError) {
+      throw new AgentToolError(error.code, error.message, { effect: error.effect });
     }
     const message = error instanceof Error ? error.message : "Tool execution failed";
     throw new AgentToolError("EXECUTION_ERROR", message, error);

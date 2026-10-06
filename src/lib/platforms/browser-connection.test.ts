@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { chromium } from "playwright";
 import {
   findRtxBrowserSession,
@@ -15,6 +15,7 @@ import {
   extractXHandleFromProfileHref,
   formatFacebookHandle,
   formatLinkedInHandle,
+  getPlatformSessionStatus,
   isFacebookLoggedInUrl,
   isFacebookLoggedOutUrl,
   isLinkedInLoggedInUrl,
@@ -34,6 +35,7 @@ import { createPlatformAccount } from "@/lib/db/queries/platform-accounts";
 import { db } from "@/lib/db/client";
 import { platformAccounts } from "@/lib/db/schema";
 import { resetCoreTables } from "@/test/db";
+import { clearSession, saveSession } from "@/lib/browser/session";
 
 vi.mock("playwright", () => ({
   chromium: { connectOverCDP: vi.fn() },
@@ -729,5 +731,74 @@ describe("publish session guardrails", () => {
         fetchImpl as unknown as typeof fetch
       )
     ).rejects.toThrow(/locked to https:\/\/x\.com\..*signals-publish/s);
+  });
+});
+
+describe("publish browser session on a Dev instance (ADR-541-5)", () => {
+  const DEV_RTX_ENV = {
+    RTX_APP_ID: "app-1",
+    SERVER_URL: "http://127.0.0.1:3001",
+    SIGNALS_INSTANCE: "dev",
+  };
+
+  beforeEach(() => {
+    vi.mocked(chromium.connectOverCDP).mockReset();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    clearSession("x");
+  });
+
+  it("refuses to open a platform tab in signals-publish before any RTX call", async () => {
+    const fetchImpl = vi.fn();
+
+    await expect(
+      openPlatformBrowserSession("x", DEV_RTX_ENV, fetchImpl as unknown as typeof fetch)
+    ).rejects.toMatchObject({ code: "DEV_INSTANCE_GUARD", effect: "browser-session.publish" });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("refuses validation, which would start signals-publish, before any RTX or CDP call", async () => {
+    const fetchImpl = vi.fn();
+
+    await expect(
+      validatePlatformBrowserSession("linkedin", DEV_RTX_ENV, fetchImpl as unknown as typeof fetch)
+    ).rejects.toMatchObject({ code: "DEV_INSTANCE_GUARD", effect: "browser-session.publish" });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(chromium.connectOverCDP).not.toHaveBeenCalled();
+  });
+
+  it("refuses the standalone Playwright setup", async () => {
+    vi.stubEnv("SIGNALS_INSTANCE", "dev");
+
+    await expect(openPlatformBrowserSession("x", {}, vi.fn() as unknown as typeof fetch)).rejects.toMatchObject({
+      code: "DEV_INSTANCE_GUARD",
+      effect: "publish.browser",
+    });
+  });
+
+  it("still reports that a legacy session exists, without decrypting it", async () => {
+    saveSession({
+      platform: "x",
+      cookies: [],
+      userAgent: "test-agent",
+      viewport: { width: 1280, height: 800 },
+      createdAt: 100,
+      lastValidatedAt: 200,
+    });
+
+    await expect(getPlatformSessionStatus("x", {})).resolves.toMatchObject({
+      mode: "legacy",
+      hasSession: true,
+      lastValidatedAt: 200,
+    });
+
+    vi.stubEnv("SIGNALS_INSTANCE", "dev");
+    await expect(getPlatformSessionStatus("x", {})).resolves.toMatchObject({
+      mode: "legacy",
+      hasSession: true,
+      lastValidatedAt: null,
+    });
   });
 });

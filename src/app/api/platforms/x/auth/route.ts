@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { denyExternalEffect } from "@/lib/instance/guard";
 import { randomBytes, createHash } from "crypto";
 import { getXClientCredentials } from "@/lib/platforms/x/auth";
 import { savePkceState } from "@/lib/platforms/x/pkce-store";
@@ -14,6 +15,10 @@ const EXTENDED_SCOPES = "tweet.read tweet.write tweet.moderate.write users.read 
  * Pass ?extended=true to request Basic+ tier scopes (follows.read/write).
  */
 export async function GET(req: NextRequest) {
+  // ADR-541-5: a Dev instance never connects a real account.
+  const denied = denyExternalEffect("oauth.connect");
+  if (denied) return denied;
+
   try {
     const { clientId } = getXClientCredentials();
     const extended = req.nextUrl.searchParams.get("extended") === "true";

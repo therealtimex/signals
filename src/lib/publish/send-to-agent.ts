@@ -61,6 +61,7 @@ import {
   withPersonalityWritingGuard,
 } from "@/lib/writing/personality-guard";
 import { revokeWritingVariantWithRunner } from "@/lib/writing/personality-revocation";
+import { assertExternalEffectAllowed } from "@/lib/instance/guard";
 
 const SENDABLE_ITEM_STATUSES = new Set(["draft", "approved", "failed"]);
 
@@ -190,6 +191,8 @@ export async function sendContentToAgent(
   env: NodeJS.ProcessEnv = process.env,
   fetchImpl: typeof fetch = fetch
 ): Promise<SendToAgentResult> {
+  // ADR-541-5: a Dev instance never dispatches a publish job; refuse before any row is written.
+  assertExternalEffectAllowed("publish.dispatch", env);
   if (!isRtxEmbedded(env)) {
     return {
       success: false,

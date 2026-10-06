@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { sendContentToAgent } from "@/lib/publish/send-to-agent";
+import {
+  ExternalEffectDeniedError,
+  externalEffectDeniedResponse,
+} from "@/lib/instance/guard";
 import { PUBLISH_JOB_KINDS, PUBLISH_PLATFORM_TARGETS } from "@/lib/publish/payload";
 import { resolveSignalsBaseUrlFromRequest } from "@/lib/rtx/resolve-signals-base-url";
 
@@ -48,6 +52,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json(result, { status: 202 });
   } catch (err) {
+    if (err instanceof ExternalEffectDeniedError) return externalEffectDeniedResponse(err);
     return NextResponse.json(
       {
         success: false,

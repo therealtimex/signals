@@ -101,11 +101,17 @@ From repo root you can also use `scripts/invoke-agent-tool.sh` with `SIGNALS_BAS
 
 | Priority | Source | Notes |
 |----------|--------|-------|
-| 1 | `SIGNALS_BASE_URL` | Explicit override |
-| 2 | `RTX_PORT` / `PORT` | Embedded Local App |
-| 3 | Health probe | Tries `3010`, `3000` on localhost |
+| 1 | `SIGNALS_BASE_URL` | Explicit override. Accepted when health reports `"app": "signals"`, whatever the instance. The only way to reach a Dev app |
+| 2 | `RTX_PORT` / `PORT` | Probed on `localhost` and `127.0.0.1`; accepted only if it is the canonical Local App (below) |
+| 3 | Port `3010` | Probed on `localhost` and `127.0.0.1`; accepted only if it is the canonical Local App. `3000` is never probed |
 
-Health check: `GET {base}/api/health` → `{ "app": "signals", "status": "ok" }`
+Health check: `GET {base}/api/health` → `{ "app": "signals", "status": "ok", "rtx": { "mode": "embedded" }, "instance": { "kind": "canonical" } }`
+
+A probed instance (priorities 2–3) counts as the canonical Local App only when health reports
+`"app": "signals"`, `"rtx": { "mode": "embedded" }`, and either `"instance": { "kind": "canonical" }`
+or no `instance` field (older builds). A Dev app (`"instance": { "kind": "dev" }`) or a standalone
+Signals is skipped with a message on stderr; set `SIGNALS_BASE_URL` to its URL only when the task
+is meant for that instance. The resolver reads health with `node`.
 
 ## Invoke contract
 
@@ -329,7 +335,8 @@ Ensure the Signals Local App is running (RTX **Settings → Local Apps**). See [
 
 | Symptom | Fix |
 |---------|-----|
-| `Could not find a running Signals instance` | Start Local App; set `SIGNALS_BASE_URL=http://localhost:{port}` |
+| `Could not find a running Signals instance` | Start the Signals Local App; or set `SIGNALS_BASE_URL=http://localhost:{port}` |
+| `Skipping …: it is a Signals Dev app` | The probe found a Dev app, not the canonical Local App. Set `SIGNALS_BASE_URL` to that URL only if the task targets the Dev app |
 | `VALIDATION_ERROR` | Re-read manifest schema for that tool; fix `input` shape |
 | `403` / unauthorized | API called off-localhost — set `SIGNALS_AGENT_TOOL_TOKEN` |
 | Empty contacts | Expected on fresh DB — create first contact |

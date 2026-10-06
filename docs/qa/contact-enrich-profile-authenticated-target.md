@@ -1,5 +1,11 @@
 # Contact Enrich Profile authenticated-target QA (#384)
 
+> **Historical setup.** `provision-signals-qa-local-app.mjs` and `cleanup-signals-qa-local-app.mjs`
+> were removed in #541. To rerun this scenario, start the worktree with
+> `node scripts/qa/qa-local-app.mjs up --needs desktop.browser,desktop.runtime-sessions` and stop it
+> with `down` (AGENTS.md §10). The steps after setup still apply. A Dev app refuses the
+> `signals-publish` session and OAuth connect by design.
+
 This runbook validates issue #384 only against the RealTimeX **Dev** host and the disposable,
 receipt-backed **Signals issue-384 QA** Local App. Never repoint or exercise the canonical
 **Signals** Local App.

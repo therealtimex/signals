@@ -35,7 +35,9 @@ import {
   X_SELECTORS,
 } from "@/lib/publish/x-browser/x-publish-selectors";
 import { isRtxEmbedded, type EnvLike } from "@/lib/rtx/env";
+import { ExternalEffectDeniedError } from "@/lib/instance/guard";
 import {
+  assertPublishSessionEffectAllowed,
   createRtxBrowserSession,
   findRtxBrowserSession,
   listRtxBrowserSessions,
@@ -454,6 +456,19 @@ export function isOAuthConnected(
   return !!account?.credentialsEncrypted;
 }
 
+/**
+ * A Dev instance refuses to load a stored publish session (ADR-541-5). A status read still reports
+ * that the session exists, just without its validation timestamp.
+ */
+function loadLegacySessionForStatus(platform: BrowserPlatform) {
+  try {
+    return loadSession(platform);
+  } catch (error) {
+    if (error instanceof ExternalEffectDeniedError) return null;
+    throw error;
+  }
+}
+
 export async function getPlatformSessionStatus(
   platform: SocialPlatform,
   env: EnvLike = process.env,
@@ -487,10 +502,11 @@ export async function getPlatformSessionStatus(
     }
   }
 
-  const legacy = loadSession(asBrowserPlatform(platform));
+  const stored = hasSession(asBrowserPlatform(platform));
+  const legacy = stored ? loadLegacySessionForStatus(asBrowserPlatform(platform)) : null;
   return {
-    mode: hasSession(asBrowserPlatform(platform)) ? "legacy" : "none",
-    hasSession: hasSession(asBrowserPlatform(platform)),
+    mode: stored ? "legacy" : "none",
+    hasSession: stored,
     sessionRunning: false,
     lastValidatedAt: legacy?.lastValidatedAt ?? null,
     detectedHandle: getPlatformAccountByPlatform(platform)?.displayName ?? null,
@@ -840,6 +856,7 @@ async function openRtxPlatformTab(
   url: string = PLATFORM_URLS[platform].setupUrl,
   sessionName = RTX_PUBLISH_SESSION_NAME
 ): Promise<void> {
+  assertPublishSessionEffectAllowed(sessionName, env);
   await ensureRtxPublishSessionRegistered(env, fetchImpl, sessionName);
   await startRtxBrowserSession(
     { sessionName, url },

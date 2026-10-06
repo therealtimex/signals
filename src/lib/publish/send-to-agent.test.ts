@@ -501,3 +501,76 @@ describe("send-to-agent writing gates", () => {
     ).toMatchObject({ success: false, errorCode: "invalid_request" });
   });
 });
+
+describe("send-to-agent Dev instance guard (ADR-541-5)", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    resetCoreTables();
+    resetPersonalityStore();
+    storageDir = mkdtempSync(join(tmpdir(), "signals-dev-guard-send-tests-"));
+    env.STORAGE_DIR = storageDir;
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    rmSync(storageDir, { recursive: true, force: true });
+  });
+
+  function sendableItem() {
+    return createContentItem({
+      body: "Stored",
+      contentType: "post",
+      platformTarget: "x",
+      status: "approved",
+      title: "Dev guard",
+    });
+  }
+
+  it("refuses publish.dispatch on a dev instance before any row, status change or RTX call", async () => {
+    const item = sendableItem();
+    const fetchImpl = fakeRtxFetch();
+
+    await expect(
+      sendContentToAgent(
+        { contentItemId: item.id, platforms: ["x"], text: "Caller text" },
+        { ...env, SIGNALS_INSTANCE: "dev" },
+        fetchImpl,
+      ),
+    ).rejects.toMatchObject({ code: "DEV_INSTANCE_GUARD", effect: "publish.dispatch" });
+
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(db.select().from(publishJobs).all()).toHaveLength(0);
+    expect(getContentItem(item.id)?.status).toBe("approved");
+  });
+
+  it("refuses when only the process is a dev instance", async () => {
+    vi.stubEnv("SIGNALS_INSTANCE", "dev");
+    const item = sendableItem();
+    const fetchImpl = fakeRtxFetch();
+
+    await expect(
+      sendContentToAgent(
+        { contentItemId: item.id, platforms: ["x"], text: "Caller text" },
+        { ...env, SIGNALS_INSTANCE: undefined },
+        fetchImpl,
+      ),
+    ).rejects.toMatchObject({ code: "DEV_INSTANCE_GUARD" });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(db.select().from(publishJobs).all()).toHaveLength(0);
+  });
+
+  it("queues the same send on a canonical instance", async () => {
+    const item = sendableItem();
+    const fetchImpl = fakeRtxFetch();
+
+    const result = await sendContentToAgent(
+      { contentItemId: item.id, platforms: ["x"], text: "Caller text" },
+      env,
+      fetchImpl,
+    );
+
+    expect(result).toMatchObject({ success: true, status: "queued" });
+    expect(fetchImpl).toHaveBeenCalled();
+    expect(db.select().from(publishJobs).all()).toHaveLength(1);
+  });
+});

@@ -12,6 +12,7 @@ import {
   requirePlatformTarget,
 } from "@/lib/platforms/platform-target-service";
 import { platformTargetErrorResult } from "@/lib/platforms/target-errors";
+import { ExternalEffectDeniedError } from "@/lib/instance/guard";
 import { setTargetRepresentation } from "@/lib/personality/use-cases";
 import { targetRepresentationSchema } from "@/lib/writing/personality-lineage";
 
@@ -91,6 +92,8 @@ export async function handlePreparePlatformTarget(
   try {
     return await preparePlatformTarget(input);
   } catch (error) {
+    // Invoke maps a Dev instance refusal to HTTP 403 DEV_INSTANCE_GUARD (ADR-541-5).
+    if (error instanceof ExternalEffectDeniedError) throw error;
     return platformTargetErrorResult(error) ?? {
       error: error instanceof Error ? error.message : "Failed to prepare platform target",
       code: "CONNECTION_UNAVAILABLE" as const,

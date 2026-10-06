@@ -1,5 +1,6 @@
 import { getRtxAppId, resolveRtxApiBase, type EnvLike } from "@/lib/rtx/env";
 import { RTX_PUBLISH_SESSION_NAME } from "@/lib/publish/constants";
+import { assertExternalEffectAllowed } from "@/lib/instance/guard";
 
 export type RtxCliBody = Record<string, unknown>;
 
@@ -13,6 +14,19 @@ export type RtxBrowserSessionGuardrails = {
   allowedOrigins: string[];
   blockedOrigins: string[];
 };
+
+/**
+ * The shared `signals-publish` session holds the owner's signed-in profiles, so a Dev instance
+ * may not create, start or stop it (ADR-541-5). Matched the way `findRtxBrowserSession` matches
+ * names (trimmed, case-insensitive); every other session name stays allowed.
+ */
+export function assertPublishSessionEffectAllowed(
+  sessionName: string,
+  env: EnvLike = process.env
+): void {
+  if (sessionName.trim().toLowerCase() !== RTX_PUBLISH_SESSION_NAME) return;
+  assertExternalEffectAllowed("browser-session.publish", env);
+}
 
 export type RtxBrowserSessionEntry = {
   sessionName: string;
@@ -131,6 +145,7 @@ export async function createRtxBrowserSession(
   fetchImpl: typeof fetch = fetch
 ): Promise<RtxCliBody> {
   const sessionName = input.sessionName?.trim() || RTX_PUBLISH_SESSION_NAME;
+  assertPublishSessionEffectAllowed(sessionName, env);
   const { response, body } = await rtxCliRequest(
     "/cli/create-browser-session",
     {
@@ -160,6 +175,7 @@ export async function startRtxBrowserSession(
   fetchImpl: typeof fetch = fetch
 ): Promise<RtxCliBody> {
   const sessionName = input.sessionName?.trim() || RTX_PUBLISH_SESSION_NAME;
+  assertPublishSessionEffectAllowed(sessionName, env);
   const { response, body } = await rtxCliRequest(
     `/cli/start-browser-session/${encodeURIComponent(sessionName)}`,
     {
@@ -184,6 +200,7 @@ export async function stopRtxBrowserSession(
   env: EnvLike = process.env,
   fetchImpl: typeof fetch = fetch
 ): Promise<RtxCliBody> {
+  assertPublishSessionEffectAllowed(sessionName, env);
   const { response, body } = await rtxCliRequest(
     `/cli/stop-browser-session/${encodeURIComponent(sessionName)}`,
     { method: "POST", body: JSON.stringify({}) },

@@ -12,6 +12,9 @@ const COVERAGE_INCLUDE = [
   "src/lib/rtx/env.ts",
   "src/lib/rtx/sdk.ts",
   "src/lib/rtx/bootstrap.ts",
+  "src/lib/instance/instance.ts",
+  "src/lib/instance/guard.ts",
+  "src/lib/instance/data-dir.ts",
 ];
 
 export default defineConfig({

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { denyExternalEffect } from "@/lib/instance/guard";
 import { randomBytes } from "crypto";
 import { getLinkedInClientCredentials } from "@/lib/platforms/linkedin/auth";
 import { saveLinkedInOAuthState } from "@/lib/platforms/linkedin/oauth-state-store";
@@ -11,6 +12,10 @@ const SCOPES = "openid profile email r_connections";
  * Generate LinkedIn OAuth 2.0 authorization URL.
  */
 export async function GET(req: NextRequest) {
+  // ADR-541-5: a Dev instance never connects a real account.
+  const denied = denyExternalEffect("oauth.connect");
+  if (denied) return denied;
+
   try {
     const { clientId } = getLinkedInClientCredentials();
 

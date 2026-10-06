@@ -10,7 +10,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../../.." && pwd)"
 
 if [[ -x "${REPO_ROOT}/scripts/invoke-agent-tool.sh" ]]; then
-  export SIGNALS_BASE_URL="${SIGNALS_BASE_URL:-$("${SCRIPT_DIR}/resolve-base-url.sh")}"
+  # Plain assignment, then export: `export VAR="$(cmd)"` hides cmd's failure from `set -e`, and the
+  # repo helper would fall back to its own default URL instead of stopping.
+  SIGNALS_BASE_URL="${SIGNALS_BASE_URL:-$("${SCRIPT_DIR}/resolve-base-url.sh")}"
+  export SIGNALS_BASE_URL
   exec "${REPO_ROOT}/scripts/invoke-agent-tool.sh" "$@"
 fi
 

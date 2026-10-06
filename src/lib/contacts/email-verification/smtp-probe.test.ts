@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
-import { describe, expect, it } from "vitest";
-import { createSmtpRcptProbe, type SmtpProbeSocket } from "./smtp-probe";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createSmtpRcptProbe, smtpRcptProbe, type SmtpProbeSocket } from "./smtp-probe";
 
 class FakeSocket extends EventEmitter {
   writes: string[] = [];
@@ -81,5 +81,41 @@ describe("SMTP RCPT provider", () => {
     const { socket, result } = setup();
     socket.emit("error", new Error("connection reset"));
     await expect(result).resolves.toMatchObject({ outcome: "inconclusive", detail: "connection reset" });
+  });
+});
+
+describe("SMTP RCPT provider on a Dev instance (ADR-541-5)", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("refuses before the connector can open a socket", async () => {
+    vi.stubEnv("SIGNALS_INSTANCE", "dev");
+    const connect = vi.fn(() => new FakeSocket() as unknown as SmtpProbeSocket);
+    const probe = createSmtpRcptProbe(connect);
+
+    await expect(
+      probe("person@example.com", [{ exchange: "mx.example.com", priority: 10 }]),
+    ).rejects.toMatchObject({ code: "DEV_INSTANCE_GUARD", effect: "email.smtp-probe" });
+    expect(connect).not.toHaveBeenCalled();
+  });
+
+  it("refuses through the default net connector too", async () => {
+    vi.stubEnv("SIGNALS_INSTANCE", "dev");
+    // 192.0.2.0/24 is TEST-NET-1: even a regressed guard could not reach a real mail server.
+    await expect(
+      smtpRcptProbe("person@example.com", [{ exchange: "192.0.2.1", priority: 10 }]),
+    ).rejects.toMatchObject({ code: "DEV_INSTANCE_GUARD" });
+  });
+
+  it("connects unchanged on a canonical instance", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn(() => socket as unknown as SmtpProbeSocket);
+    const result = createSmtpRcptProbe(connect)("person@example.com", [
+      { exchange: "mx.example.com", priority: 10 },
+    ]);
+    expect(connect).toHaveBeenCalledWith({ host: "mx.example.com", port: 25 });
+    socket.emit("data", "554 connection policy\r\n");
+    await expect(result).resolves.toMatchObject({ outcome: "inconclusive" });
   });
 });

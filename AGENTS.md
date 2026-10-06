@@ -68,8 +68,8 @@ applies it in about a second (`SIGNALS_DATA_DIR=/tmp/copy npm run reseed` to reh
   three. Use it while iterating. Narrow it further by passing paths to `vitest run` directly:
   `npx vitest run src/lib/orgs` is a few seconds.
 - `check` — the non-build gate: typecheck → lint → `check:agent-tools-openapi` → automation →
-  writing corpus/skill → coverage → skill-package → provision-verifier → qa-local-app →
-  `db:migrate`.
+  writing corpus/skill → coverage → skill-package → signals-skill-resolver → provision-verifier →
+  qa-local-app → `db:migrate`.
 **Run the gate in this checkout, not a fresh worktree.** `check:all` takes about 2.5 minutes here
 with warm `.next` and Vitest caches; the same gate in a newly created worktree took 12–15 minutes,
 because those caches start cold. Worktrees are for attributing a failure to a baseline (see the
@@ -257,123 +257,112 @@ explicitly in the handoff and name what is missing, rather than routing a tree o
 
 ## 10) RealtimeX integration QA
 
-Validate Signals changes against the **packaged RealTimeX app** already running on this machine,
-with the worktree under test registered as a dedicated QA Local App. This is the default host. The
-dev host refuses Local App management from an agent terminal (HTTP 401 `TERMINAL_SESSION_NOT_ACTIVE`
-or 403 `LOCAL_APP_PEER_MANAGEMENT_FORBIDDEN`) unless the user mints a scoped API key, which expires
-after about 24 hours. Use it only when a change needs the dev build; see
-[Dev host](#dev-host-only-when-the-change-needs-it).
+Validate Signals changes in a **Signals Dev** Local App on the **RealTimeX Dev host**
+(`yarn dev:all` from `/Users/realtimex/rtgit/realtimex-ai-app`: renderer `realtimex-app-dev://app`,
+frontend `3100`, server `3101`, Electron CDP `9888`). Design record:
+[`specs/signals-dev-local-app.md`](./specs/signals-dev-local-app.md) (#541). The owner decided:
 
-The packaged app is the user's live environment. Its canonical **Signals** app
-(`47e45f71-3279-42f5-8e95-731de01b6eae`, port `3010`, `SIGNALS_DATA_DIR=/Users/realtimex/.signals`,
-working directory = this main checkout, or `<storage>/marketplace-deploy/signals-<version>` once
-Signals is installed from the marketplace; the teardown hygiene check accepts either) is in daily
-use, and its browser sessions are signed in to real LinkedIn and X accounts. **Do not start, stop,
-or restart the packaged app.**
+1. **One app per checkout.** Every Signals checkout, primary or linked worktree, gets its own app:
+   `Signals Dev · <slot>`, with its own port, its own data in `~/.signals-dev/<slot>`, and its own
+   workspace `signals-dev-<slot>`. The slot is `main` for the primary checkout and the worktree
+   directory name otherwise.
+2. **The Dev host is the only host agents use.** The installed RealTimeX app (`3001`) belongs to the
+   owner. Its canonical **Signals** app (`47e45f71-3279-42f5-8e95-731de01b6eae`, port `3010`,
+   `~/.signals`, run from `<storage>/marketplace-deploy/signals-<version>`) is in daily use, and its
+   browser sessions are signed in to real LinkedIn and X accounts. Never start, stop, or restart the
+   installed app, and never create apps, workspaces, or threads in it.
+3. **The `realtimex-signals` skill talks to the canonical app.** It reaches a Dev app only through an
+   explicit `SIGNALS_BASE_URL`; its fallback probe refuses Dev and standalone instances.
 
-Drive the QA app with one script, run from the issue worktree. Call the main checkout's copy by
-absolute path, so branches cut before the script existed still get it:
+If `yarn dev:all` is already running and you did not start it, leave it running. The launcher never
+starts it. If you started it, stop it afterwards and confirm `3100`, `3101`, `9888`, and the app's
+port are clear.
+
+**Access.** Local App management on the Dev host needs the owner's scoped CLI key: RealTimeX Dev →
+Settings → API Keys, `local-apps` scopes, expiry **never** (the default since realtimex-ai-app
+`25af2c187`). Pass `--cli` an executable wrapper that runs
+`realtimex-pp-cli --credential-ref <ref> "$@"`. `up` records `--cli`, `--db`, and `--packaged-db` in
+`~/.signals-dev/.launcher/host.json`, so later commands reuse them.
+
+Drive the app with one script. Call the main checkout's copy by absolute path, so branches cut
+before the script existed still get it:
 
 ```bash
 QA=/Users/realtimex/github/signals/scripts/qa/qa-local-app.mjs
-node "$QA" up --issue <N> --loop-id <loop-id>   # provision, then wait until /api/health answers
-node "$QA" status --issue <N>                   # exists? running? answering?
-node "$QA" down --issue <N>                     # delete, hygiene gate, canonical diff, port released
+node "$QA" up --cli <wrapper> [--profile empty|snapshot] [--needs …] [--issue N --loop-id <id>]
+node "$QA" status        # exists? running? healthy? guarded? permissions? stale slots?
+node "$QA" down          # stop + checks; keeps the app, its data, and its grants
+node "$QA" remove        # at loop close: delete the app and its data (--keep-data keeps data)
+node "$QA" prune         # list apps and slots whose checkout is gone; --apply deletes them
 ```
 
-Each command prints one JSON object and exits 0 only when `ok` is true. Exercise the scenario at the
-`port` and `dashboardUrl` that `up` prints. On failure, act on `errorCode` and run the `next` it
-prints; do not provision or clean up by hand around it.
+Each command acts on the current directory's checkout (or `--worktree <path>`), prints one JSON
+object, and exits 0 only when `ok` is true. Exercise the scenario at the `port` and `dashboardUrl`
+that `up` prints. On failure, act on `errorCode` and run the `next` it prints; do not provision,
+edit, or delete apps by hand around it.
 
-- **`up`** refuses:
-  - the primary checkout;
-  - a host that will not manage Local Apps;
-  - an issue QA app with no receipt, or whose receipt names another worktree or host;
-  - a `next dev` already holding the worktree's `.next/dev/lock` (Next 16 runs one dev server per
-    directory; stop yours first);
-  - another `up` or `down` still running for the same issue.
-
-  It snapshots the canonical record read-only, provisions through
-  `provision-signals-qa-local-app.mjs`, and waits for `/api/health`. The provisioner names the app
-  `Signals issue-<N> QA`, pins `SIGNALS_DATA_DIR` under `/private/tmp/signals-qa-*`, tags it
-  `signals,qa,ephemeral,issue-<N>`, and writes a receipt.
-
-  Rerunning `up` for the same worktree and host reuses the app. If `up`'s session snapshot is gone,
-  it stops with `QA_SESSION_MISSING` and `next` set to `down`. If the app lost its safety tags, it
-  stops with `QA_APP_UNSAFE`; neither `up` nor `down` will touch that app, so tell the user rather
-  than running `down`. Start and health failures include the app's last log lines.
-- **`down`** runs `cleanup-signals-qa-local-app.mjs` (deletes only the receipt-backed, safety-tagged
-  issue app, never the canonical one), the hygiene verifier, a diff of the canonical record against
-  `up`'s snapshot, and a check that the QA port was released. Run it before the terminal QA
-  handoff. Do not hand off `passed` or close the loop until it exits 0.
-- **`CANONICAL_CHANGED`** from `down` is an incident: stop and tell the user. Never run
-  `provision-signals-local-app.mjs --restore-canonical` against the packaged host. It writes the
-  literal `~/.signals` straight into the live database.
-- **Anything that publishes, sends, invites, or connects reaches a real account.** Get the user's
-  explicit OK before such a step, and prefer `--dry-run` or a local mock of the platform. Never call
-  `delete-browser-session` on `signals-publish` or any other signed-in session: it deletes the
-  login.
-- Report, don't delete, what QA leaves behind: a dispatched run creates a thread in the packaged
-  Signals workspace. The shared `signals-publish` browser remains open by design after workflow or
-  publish teardown. Stop it with `realtimex-pp-cli stop-browser-session signals-publish` when QA no
-  longer needs it; this keeps the profile. The session list can show `stale` while its CDP port
-  still answers, so check the port.
-- **RealTimeX permissions are the user's to grant; agents cannot grant them.** Each new QA app
-  registers with RealTimeX, and RealTimeX shows the user a dialog asking for Signals' permissions.
-  It waits 2 minutes; if nobody answers, the app runs with none of them. Every `up` of a new app
-  asks again. Never work around the dialog: do not drive the desktop UI for it, and do not edit the
-  database. `up` and `status` print `permissions` (`granted`, `denied`, `pending`).
-
-  When the scenario needs any, pass them to `up` with `--needs`. `up` waits for the user's decision
-  and fails with `PERMISSIONS_MISSING` if one is not granted, naming it. Ask the user to grant it to
-  `Signals issue-<N> QA` (in the dialog, or in Settings → Local Apps), then rerun `up`. A
-  `PERMISSION_REQUIRED` error from Signals during QA means a missing grant, not a product bug.
+- **`up`** refuses an unreachable Dev host (`HOST_UNREACHABLE`), a missing key
+  (`LOCAL_APP_MANAGEMENT_REFUSED`), a Dev host where any app points at `~/.signals` or pins port
+  `3010` (`DEV_HOST_UNSAFE`), a live `next dev` in the checkout (`NEXT_DEV_ALREADY_RUNNING`), and a
+  concurrent run for the slot (`SLOT_LOCKED`). It pins the app's port in `3300–3499`, starts it,
+  waits for `/api/health`, and requires the health `instance` block to say `kind: dev`,
+  `externalEffects: denied`, `scheduler: disabled`, and the slot's data dir. Otherwise it stops the
+  app and fails with `INSTANCE_UNGUARDED`: a branch that predates #541 must merge `main` first.
+- **`down` before `passed`.** QA hands off `passed`, and a loop closes, only after `down` exits 0. It
+  stops the app, checks the port was released, re-checks the Dev host, and diffs the installed app
+  against the snapshot `up` took. `PACKAGED_HOST_CHANGED` or `CANONICAL_CHANGED` is an incident: stop
+  and tell the owner what changed. If the owner confirms they made a `PACKAGED_HOST_CHANGED` change
+  themselves, rerun `down --accept-packaged-change`. That re-baselines the check, and the next `up`
+  snapshots the app afresh. Never use it without that confirmation, and it never accepts
+  `CANONICAL_CHANGED`.
+- **`remove` at loop close**, or `prune --apply` when `up` or `status` reports stale slots.
+  `prune --legacy-qa` also covers the pre-#541 `Signals issue-<N> QA` apps.
+- **`--profile snapshot`** copies the real `data.db` (SQLite online backup, read-only) and `media/`
+  into a new slot. It removes stored platform credentials from the copy and copies nothing else: no
+  `browser-profiles/`, `sessions/`, `config.json`, `personality/`, or `writing/`. Scheduled and
+  publish jobs stay in the copy; the pinned `SIGNALS_SCHEDULER_ENABLED=0` keeps them inert.
+- **The guard refuses external effects.** Dev apps run with `SIGNALS_INSTANCE=dev`. Signals then
+  answers HTTP 403 `DEV_INSTANCE_GUARD` to publishing, X API writes and engagement, Playwright
+  publish sessions, the `signals-publish` browser session, OAuth connect, and the SMTP probe. During
+  QA that is the design working, not a bug.
+- **Permissions are the owner's to grant.** A new app registers with RealTimeX, which shows the owner
+  a permission dialog for 2 minutes. Grants live on the app row, so they survive `down` and later
+  `up`s of the same slot. Never work around the dialog: do not drive the desktop UI for it, and do
+  not edit the database. When a scenario needs a permission, pass it with `--needs`. `up` waits for
+  the owner's decision and fails with `PERMISSIONS_MISSING`, naming what is missing. A
+  `PERMISSION_REQUIRED` error from Signals means a missing grant, not a product bug.
 
   | Scenario | `--needs` |
   |---|---|
   | Semantic search, embeddings | `llm.embed` |
   | Persona generation, other LLM synthesis | `llm.chat` |
-  | Agent workflow runs, publishing | `desktop.runtime-sessions` |
+  | Agent workflow runs | `desktop.runtime-sessions` |
   | Browser automation | `desktop.browser` |
   | Credential and OAuth sync | `credentials.list,credentials.use` |
   | RealTimeX flows triggering Signals | `webhook.trigger` |
   | Committing Personality proposals | `workspace.personality.write` |
 
-### Dev host (only when the change needs it)
+**Standing prohibitions.** Never touch the installed app or its canonical Signals row. Never call
+`delete-browser-session` on `signals-publish` or any other signed-in session, and never use the
+`signals-publish` session from a Dev app. Never run
+`provision-signals-local-app.mjs --restore-canonical` except as the documented slice-1 restore.
+Anything that publishes, sends, invites, or connects reaches a real account: get the owner's
+explicit OK and prefer `--dry-run` or a local mock.
 
-Use the RealTimeX dev build only when the change depends on it: host behavior that has not shipped
-in the packaged app yet, or a scenario that needs `rtxtest` app-automation flows. Those drive only
-the dev app over CDP `9888` and never target the packaged app.
+**Slice 1 (one-shot, before the first `up`).** The Dev host still carries the pre-#541 `Signals` row
+(`~/.signals`, port `3010`) and old per-issue QA apps, so every `up` fails `DEV_HOST_UNSAFE` until
+they are gone. In order: the owner's key, then Delegate judgment for the effect, then
+`node "$QA" prune --legacy-qa --apply`, then
+`node scripts/qa/migrate-dev-signals-row.mjs --plan` and `--expect-row-sha256 <sha>`. The migration
+replaces the row with `Signals Dev · main`. Its header lists the restore commands.
 
-- Start it from the main RealTimeX checkout, not the Signals worktree:
-  `cd /Users/realtimex/rtgit/realtimex-ai-app && yarn dev:all`. Its surfaces are the renderer
-  (`realtimex-app-dev://app`), frontend `3100`, server `3101`, and Electron CDP `9888`. If it is
-  already running and you did not start it, leave it running.
-- Pass `--host dev` to `up`; `status` and `down` follow the host `up` recorded. Local App
-  management there needs the user's scoped CLI key (`local-apps:*` scopes, created in the dev app's
-  Settings → API Keys, valid about 24 hours), so also pass `--cli` an executable wrapper that runs
-  `realtimex-pp-cli --credential-ref <ref> "$@"` to every command.
-- `down` reads the dev database and runs the hygiene verifier with `REALTIMEX_RUNTIME=dev`. If it
-  reports `CANONICAL_CHANGED` here, restore the dev record, then rerun `down`:
+**`rtxtest`** drives only the Dev app over CDP `9888`. Do not point `rtxtest dev up` at the Signals
+repository; Signals is a Local App, not the RealTimeX app repo. If the bundled launcher lacks its
+executable bit in the QA workspace, run it through Node:
 
-  ```bash
-  REALTIMEX_RUNTIME=dev \
-    node scripts/qa/provision-signals-local-app.mjs \
-      --restore-canonical \
-      --db ~/.realtimex.ai/desktop-user-data/dev/users/trungle_rta_vn/storage/realtimex.db
-  ```
-
-- The bundled `rtxtest` launcher may lack its executable bit in the QA workspace. If direct
-  invocation fails with `Permission denied`, run the same script through Node:
-
-  ```bash
-  node /Users/realtimex/.realtimex.ai/desktop-user-data/app/users/trungle_rta_vn/storage/working-data/realtimex-qa/.agents/skills/rtx-test-runner/scripts/bin/rtxtest <verb>
-  ```
-
-  Do not point `rtxtest dev up` at the Signals repository; it is a Local App, not the RealTimeX
-  app repo.
-- Stop `yarn dev:all` afterwards only if you started it, then confirm the Signals port plus `3100`,
-  `3101`, and `9888` are clear.
+```bash
+node /Users/realtimex/.realtimex.ai/desktop-user-data/app/users/trungle_rta_vn/storage/working-data/realtimex-qa/.agents/skills/rtx-test-runner/scripts/bin/rtxtest <verb>
+```
 
 ### Visual evidence for UI changes
 
