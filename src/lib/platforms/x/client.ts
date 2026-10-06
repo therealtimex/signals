@@ -3,6 +3,7 @@ import { getPlatformAccountById, updatePlatformAccount } from "@/lib/db/queries/
 import { refreshXTokenAsync } from "@/lib/platforms/x/auth";
 import { checkRateLimit, updateRateLimitFromHeaders, RateLimitError } from "@/lib/platforms/rate-limiter";
 import type { PlatformCredentials } from "@/lib/platforms/adapter";
+import { assertExternalEffectAllowed } from "@/lib/instance/guard";
 
 // Re-export RateLimitError for backward compatibility
 export { RateLimitError } from "@/lib/platforms/rate-limiter";
@@ -348,6 +349,7 @@ export async function likeTweet(
   userId: string,
   tweetId: string
 ): Promise<{ liked: boolean }> {
+  assertExternalEffectAllowed("engage.x-api");
   const res = await xApiFetch<{ liked: boolean }>(accountId, `/users/${userId}/likes`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -362,6 +364,7 @@ export async function unlikeTweet(
   userId: string,
   tweetId: string
 ): Promise<{ liked: boolean }> {
+  assertExternalEffectAllowed("engage.x-api");
   const res = await xApiFetch<{ liked: boolean }>(accountId, `/users/${userId}/likes/${tweetId}`, {
     method: "DELETE",
   });
@@ -374,6 +377,7 @@ export async function retweet(
   userId: string,
   tweetId: string
 ): Promise<{ retweeted: boolean }> {
+  assertExternalEffectAllowed("engage.x-api");
   const res = await xApiFetch<{ retweeted: boolean }>(accountId, `/users/${userId}/retweets`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -388,6 +392,7 @@ export async function unretweet(
   userId: string,
   tweetId: string
 ): Promise<{ retweeted: boolean }> {
+  assertExternalEffectAllowed("engage.x-api");
   const res = await xApiFetch<{ retweeted: boolean }>(accountId, `/users/${userId}/retweets/${tweetId}`, {
     method: "DELETE",
   });
@@ -400,6 +405,7 @@ export async function replyToTweet(
   tweetId: string,
   text: string
 ): Promise<XTweet> {
+  assertExternalEffectAllowed("engage.x-api");
   const res = await xApiFetch<XTweet>(accountId, `/tweets`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -423,6 +429,7 @@ export async function uploadMedia(
   filePath: string,
   mimeType: string
 ): Promise<string> {
+  assertExternalEffectAllowed("publish.x-api");
   const { readFileSync, statSync } = await import("fs");
   const fileBuffer = readFileSync(filePath);
   const totalBytes = statSync(filePath).size;
@@ -484,6 +491,7 @@ export async function postTweet(
   text: string,
   mediaIds?: string[]
 ): Promise<XTweet> {
+  assertExternalEffectAllowed("publish.x-api");
   const payload: Record<string, unknown> = { text };
   if (mediaIds && mediaIds.length > 0) {
     payload.media = { media_ids: mediaIds };
@@ -502,6 +510,7 @@ export async function postThread(
   tweets: string[],
   tweetMediaIds?: string[][]
 ): Promise<{ posted: XTweet[]; error?: string }> {
+  assertExternalEffectAllowed("publish.x-api");
   const posted: XTweet[] = [];
 
   for (let i = 0; i < tweets.length; i++) {

@@ -1,4 +1,5 @@
 import { createConnection } from "node:net";
+import { assertExternalEffectAllowed } from "@/lib/instance/guard";
 
 export type SmtpProbeResult = {
   outcome: "accepted" | "rejected" | "inconclusive";
@@ -41,6 +42,8 @@ export function createSmtpRcptProbe(
   connect: SmtpConnector = (options) => createConnection(options) as unknown as SmtpProbeSocket,
 ): SmtpProbeProvider {
   return async (address, mxRecords) => {
+    // ADR-541-5: refused before any connector (real or injected) can open a socket.
+    assertExternalEffectAllowed("email.smtp-probe");
     const host = [...mxRecords].sort((a, b) => a.priority - b.priority)[0]?.exchange;
     if (!host) return { outcome: "inconclusive", detail: "No MX host is available." };
 

@@ -13,6 +13,11 @@ import {
   RateLimitError,
   TierRestrictedError,
 } from "@/lib/platforms/x/client";
+import {
+  assertExternalEffectAllowed,
+  ExternalEffectDeniedError,
+  externalEffectDeniedResponse,
+} from "@/lib/instance/guard";
 
 const composeSchema = z.object({
   tweets: z.array(z.string().min(1).max(280)).min(1).max(25),
@@ -54,6 +59,9 @@ export async function POST(req: NextRequest) {
         contentItemId: items[0]?.id,
       });
     }
+
+    // Drafts stay local; publishing is an external effect a Dev instance refuses (ADR-541-5).
+    assertExternalEffectAllowed("publish.x-api");
 
     const account = getPlatformAccountByPlatform("x");
     // A credential-less row is an archive-import placeholder, not a connection.
@@ -173,6 +181,9 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ success: true, items: [item] });
   } catch (error) {
+    if (error instanceof ExternalEffectDeniedError) {
+      return externalEffectDeniedResponse(error);
+    }
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: error.errors }, { status: 400 });
     }

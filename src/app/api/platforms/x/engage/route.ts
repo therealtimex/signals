@@ -13,6 +13,11 @@ import {
   RateLimitError,
   TierRestrictedError,
 } from "@/lib/platforms/x/client";
+import {
+  assertExternalEffectAllowed,
+  ExternalEffectDeniedError,
+  externalEffectDeniedResponse,
+} from "@/lib/instance/guard";
 
 const engageSchema = z.object({
   action: z.enum(["like", "unlike", "retweet", "unretweet", "reply"]),
@@ -27,6 +32,10 @@ const engageSchema = z.object({
  */
 export async function POST(req: NextRequest) {
   try {
+    // Every action here is an outbound engagement; a Dev instance refuses it before any X call
+    // (including the profile lookup below) is made (ADR-541-5).
+    assertExternalEffectAllowed("engage.x-api");
+
     const account = getPlatformAccountByPlatform("x");
     // A credential-less row is an archive-import placeholder, not a connection.
     if (!account || !account.credentialsEncrypted) {
@@ -98,6 +107,9 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ success: true, action, result });
   } catch (error) {
+    if (error instanceof ExternalEffectDeniedError) {
+      return externalEffectDeniedResponse(error);
+    }
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: error.errors }, { status: 400 });
     }

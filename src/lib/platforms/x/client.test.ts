@@ -7,7 +7,15 @@ import { getPlatformAccountById } from "@/lib/db/queries/platform-accounts";
 import {
   getUsersByIds,
   getUsersByUsernames,
+  likeTweet,
+  postThread,
+  postTweet,
+  replyToTweet,
+  retweet,
   TierRestrictedError,
+  unlikeTweet,
+  unretweet,
+  uploadMedia,
   X_USER_LOOKUP_MAX_IDS,
   X_USER_LOOKUP_MAX_USERNAMES,
 } from "@/lib/platforms/x/client";
@@ -137,5 +145,57 @@ describe("getUsersByUsernames", () => {
       ),
     ).rejects.toThrow(/at most 100 usernames/);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("X write calls on a Dev instance (ADR-541-5)", () => {
+  beforeEach(() => {
+    resetCoreTables();
+    db.delete(platformAccounts).run();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  const publishCalls: Array<[string, (accountId: string) => Promise<unknown>]> = [
+    ["postTweet", (accountId) => postTweet(accountId, "hello")],
+    ["postThread", (accountId) => postThread(accountId, ["one", "two"])],
+    ["uploadMedia", (accountId) => uploadMedia(accountId, "/nonexistent/image.png", "image/png")],
+  ];
+  const engageCalls: Array<[string, (accountId: string) => Promise<unknown>]> = [
+    ["likeTweet", (accountId) => likeTweet(accountId, "me", "t1")],
+    ["unlikeTweet", (accountId) => unlikeTweet(accountId, "me", "t1")],
+    ["retweet", (accountId) => retweet(accountId, "me", "t1")],
+    ["unretweet", (accountId) => unretweet(accountId, "me", "t1")],
+    ["replyToTweet", (accountId) => replyToTweet(accountId, "t1", "reply")],
+  ];
+
+  it.each([
+    ...publishCalls.map(([name, call]) => [name, call, "publish.x-api"] as const),
+    ...engageCalls.map(([name, call]) => [name, call, "engage.x-api"] as const),
+  ])("%s is refused with no request to X", async (_name, call, effect) => {
+    vi.stubEnv("SIGNALS_INSTANCE", "dev");
+    const accountId = seedAccount();
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(call(accountId)).rejects.toMatchObject({ code: "DEV_INSTANCE_GUARD", effect });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("posts and engages unchanged on a canonical instance", async () => {
+    const accountId = seedAccount();
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify({ data: { id: "t9", text: "hello" } }), {
+      status: 201,
+      headers: { "content-type": "application/json" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(postTweet(accountId, "hello")).resolves.toEqual({ id: "t9", text: "hello" });
+    await expect(likeTweet(accountId, "me", "t1")).resolves.toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/2/tweets");
   });
 });

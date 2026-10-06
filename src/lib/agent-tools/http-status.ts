@@ -2,6 +2,7 @@ import type { AgentToolErrorCode } from "@/lib/agent-tools/types";
 
 export function agentToolErrorStatus(code: AgentToolErrorCode): number {
   if (code === "TOOL_NOT_FOUND" || code === "NOT_FOUND") return 404;
+  if (code === "DEV_INSTANCE_GUARD") return 403;
   if (
     code === "VALIDATION_ERROR"
     || code === "CAPABILITY_UNSUPPORTED"

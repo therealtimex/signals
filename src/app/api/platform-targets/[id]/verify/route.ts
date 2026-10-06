@@ -4,6 +4,10 @@ import {
   releasePreparedPlatformTarget,
 } from "@/lib/platforms/platform-target-service";
 import { platformTargetErrorResult } from "@/lib/platforms/target-errors";
+import {
+  ExternalEffectDeniedError,
+  externalEffectDeniedResponse,
+} from "@/lib/instance/guard";
 
 export async function POST(
   _request: Request,
@@ -19,6 +23,7 @@ export async function POST(
     releasePreparedPlatformTarget(prepared.lease.leaseId);
     return NextResponse.json(prepared);
   } catch (error) {
+    if (error instanceof ExternalEffectDeniedError) return externalEffectDeniedResponse(error);
     const result = platformTargetErrorResult(error);
     return NextResponse.json(result ?? { error: "Failed to verify target" }, { status: 409 });
   }

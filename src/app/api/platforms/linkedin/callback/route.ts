@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { denyExternalEffect } from "@/lib/instance/guard";
 import { getLinkedInClientCredentials } from "@/lib/platforms/linkedin/auth";
 import { validateLinkedInOAuthState } from "@/lib/platforms/linkedin/oauth-state-store";
 import { encrypt } from "@/lib/auth/crypto";
@@ -14,6 +15,10 @@ import type { PlatformCredentials } from "@/lib/platforms/adapter";
  * OAuth 2.0 callback — exchanges code for tokens, fetches profile+email, stores account.
  */
 export async function GET(req: NextRequest) {
+  // ADR-541-5: a Dev instance never connects a real account.
+  const denied = denyExternalEffect("oauth.connect");
+  if (denied) return denied;
+
   const { searchParams } = new URL(req.url);
   const code = searchParams.get("code");
   const state = searchParams.get("state");

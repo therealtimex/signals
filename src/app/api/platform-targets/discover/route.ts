@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { discoverAndRegisterPlatformTargets } from "@/lib/platforms/platform-target-service";
 import { platformTargetErrorResult } from "@/lib/platforms/target-errors";
+import {
+  ExternalEffectDeniedError,
+  externalEffectDeniedResponse,
+} from "@/lib/instance/guard";
 
 const schema = z.object({
   platform: z.enum(["x", "linkedin", "facebook"]),
@@ -19,6 +23,7 @@ export async function POST(request: Request) {
       parsed.data.connectionId
     ));
   } catch (error) {
+    if (error instanceof ExternalEffectDeniedError) return externalEffectDeniedResponse(error);
     const result = platformTargetErrorResult(error);
     return NextResponse.json(result ?? { error: "Failed to discover targets" }, { status: 409 });
   }

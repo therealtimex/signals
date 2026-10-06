@@ -5,6 +5,7 @@ import { chromium, type BrowserContext, type Browser } from "playwright";
 import { encrypt, decrypt } from "@/lib/auth/crypto";
 import { randomViewport } from "@/lib/browser/anti-detection";
 import type { BrowserPlatform, BrowserSession, CookieData } from "@/lib/browser/types";
+import { assertExternalEffectAllowed } from "@/lib/instance/guard";
 
 const dataDir = process.env.SIGNALS_DATA_DIR?.replace("~", homedir()) ?? join(homedir(), ".signals");
 const SESSIONS_DIR = join(dataDir, "sessions");
@@ -55,6 +56,8 @@ export function hasSession(platform: BrowserPlatform): boolean {
 
 /** Load and decrypt a stored session. Returns null if none exists or decryption fails. */
 export function loadSession(platform: BrowserPlatform): BrowserSession | null {
+  // ADR-541-5: a Dev instance never loads a persisted publish session (it carries real cookies).
+  assertExternalEffectAllowed("publish.browser");
   const path = sessionPath(platform);
   if (!existsSync(path)) return null;
 
@@ -99,6 +102,7 @@ function clearStaleLocks(profileDir: string): void {
 }
 
 export async function setupSession(platform: BrowserPlatform): Promise<BrowserSession> {
+  assertExternalEffectAllowed("publish.browser");
   const config = PLATFORM_CONFIG[platform];
   const viewport = randomViewport();
   const profileDir = join(PROFILES_DIR, platform);

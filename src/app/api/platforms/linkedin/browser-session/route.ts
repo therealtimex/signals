@@ -5,6 +5,10 @@ import {
   openPlatformBrowserSession,
   validatePlatformBrowserSession,
 } from "@/lib/platforms/browser-connection";
+import {
+  ExternalEffectDeniedError,
+  externalEffectDeniedResponse,
+} from "@/lib/instance/guard";
 
 /**
  * POST /api/platforms/linkedin/browser-session
@@ -40,6 +44,9 @@ export async function POST(req: NextRequest) {
         );
     }
   } catch (error) {
+    if (error instanceof ExternalEffectDeniedError) {
+      return externalEffectDeniedResponse(error);
+    }
     const message =
       error instanceof Error ? error.message : "Browser session operation failed";
     return NextResponse.json({ error: message }, { status: 500 });

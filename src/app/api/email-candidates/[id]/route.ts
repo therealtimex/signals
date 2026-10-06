@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { updateEmailCandidate } from "@/lib/contacts/email-verification/candidates";
+import {
+  ExternalEffectDeniedError,
+  externalEffectDeniedResponse,
+} from "@/lib/instance/guard";
 
 const schema = z.object({
   action: z.enum(["verify", "invalidate", "mark_uncertain", "correct", "probe"]),
@@ -16,6 +20,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     if (!candidate) return NextResponse.json({ error: "Candidate not found" }, { status: 404 });
     return NextResponse.json(candidate);
   } catch (error) {
+    if (error instanceof ExternalEffectDeniedError) return externalEffectDeniedResponse(error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Could not update candidate" },
       { status: 400 },

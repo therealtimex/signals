@@ -1,12 +1,17 @@
 import { createRequire } from "node:module";
 import { dirname, join } from "path";
 import { resolveHomePrefixedPath, resolveSignalsDataDir } from "@/lib/signals-data-dir";
+import { assertInstanceDataDir } from "@/lib/instance/data-dir";
 import { mkdirSync, existsSync } from "fs";
 import { fileURLToPath } from "url";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import Database from "better-sqlite3";
 import * as schema from "./schema";
+
+// A Dev instance (SIGNALS_INSTANCE=dev) must never open the canonical ~/.signals database
+// (ADR-541-5): refuse before the data directory is created or SQLite is opened.
+assertInstanceDataDir();
 
 const require = createRequire(import.meta.url);
 

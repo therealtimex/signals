@@ -11,6 +11,7 @@ import {
 } from "@/lib/browser/publishers/publish-utils";
 import { PublishError } from "@/lib/browser/publishers/types";
 import type { PublishRequest, PublishResult } from "@/lib/browser/publishers/types";
+import { assertExternalEffectAllowed } from "@/lib/instance/guard";
 
 /**
  * Publish a post (or thread) to X via browser automation.
@@ -18,6 +19,8 @@ import type { PublishRequest, PublishResult } from "@/lib/browser/publishers/typ
  * Review mode: headed, waits for user to click Post.
  */
 export async function publishToX(request: PublishRequest): Promise<PublishResult> {
+  // Outside the try below on purpose: a Dev instance refusal must not become a PublishResult.
+  assertExternalEffectAllowed("publish.browser");
   let browser: Browser | null = null;
   let context: BrowserContext | null = null;
 

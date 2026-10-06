@@ -32,6 +32,7 @@ export type AgentToolErrorCode =
   | "TARGET_REQUIRED"
   | "STORE_BUSY"
   | "STORE_CONFLICT"
+  | "DEV_INSTANCE_GUARD"
   | "EXECUTION_ERROR";
 
 export class AgentToolError extends Error {

@@ -157,6 +157,9 @@ describe("scheduler enablement", () => {
     expect(isSchedulerEnabled({ SIGNALS_SCHEDULER_ENABLED: "TRUE" })).toBe(true);
     expect(isSchedulerEnabled({ SIGNALS_SCHEDULER_ENABLED: "0" })).toBe(false);
     expect(isSchedulerEnabled({ SIGNALS_SCHEDULER_ENABLED: "false" })).toBe(false);
+    // A Signals Dev app never schedules, even when the launcher's pin is missing or overridden.
+    expect(isSchedulerEnabled({ SIGNALS_INSTANCE: "dev" })).toBe(false);
+    expect(isSchedulerEnabled({ SIGNALS_INSTANCE: "dev", SIGNALS_SCHEDULER_ENABLED: "1" })).toBe(false);
   });
 
   it("runs due jobs on init when enabled", () => {

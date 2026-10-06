@@ -89,6 +89,7 @@ import type {
 import { calibrateSimulationRun, serializeCalibration } from "@/lib/db/queries/calibrations";
 import { serializeSimulationRun } from "@/lib/serializers/gtm";
 import { AgentToolError } from "@/lib/agent-tools/types";
+import { ExternalEffectDeniedError } from "@/lib/instance/guard";
 import { OrgDomainConflictError, OrgValidationError } from "@/lib/orgs/errors";
 import { validateWorkflowRunAndTemplateIds } from "@/lib/db/creation-provenance-input";
 import { attachNetworkSnowballHop0Org } from "@/lib/workflows/network-snowball-hop0";
@@ -288,7 +289,7 @@ export async function handleUpdateEmailCandidate(
     if (!candidate) throw new AgentToolError("NOT_FOUND", "Email candidate not found");
     return candidate;
   } catch (error) {
-    if (error instanceof AgentToolError) throw error;
+    if (error instanceof AgentToolError || error instanceof ExternalEffectDeniedError) throw error;
     throw new AgentToolError("CONFLICT", error instanceof Error ? error.message : "Candidate update failed");
   }
 }

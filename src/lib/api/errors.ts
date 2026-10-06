@@ -15,6 +15,10 @@ import {
 import { OrgDomainConflictError, OrgValidationError } from "@/lib/orgs/errors";
 import { AgentToolError } from "@/lib/agent-tools/types";
 import { agentToolErrorStatus } from "@/lib/agent-tools/http-status";
+import {
+  ExternalEffectDeniedError,
+  externalEffectDeniedResponse,
+} from "@/lib/instance/guard";
 
 export type ApiErrorBody = {
   error: string;
@@ -23,6 +27,10 @@ export type ApiErrorBody = {
 };
 
 export function toErrorResponse(error: unknown): NextResponse<ApiErrorBody> {
+  // A Dev instance refusal (ADR-541-5) is 403 DEV_INSTANCE_GUARD, never a 500.
+  if (error instanceof ExternalEffectDeniedError) {
+    return externalEffectDeniedResponse(error);
+  }
   if (error instanceof AgentToolError) {
     return NextResponse.json(
       { error: error.message, code: error.code, details: error.details },
