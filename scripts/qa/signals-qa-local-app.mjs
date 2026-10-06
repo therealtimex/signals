@@ -1,8 +1,7 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { realpathSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { basename, delimiter, dirname, isAbsolute, join, resolve, sep } from "node:path";
-import { fileURLToPath } from "node:url";
+import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 
 export const CANONICAL_SIGNALS_APP_ID = "47e45f71-3279-42f5-8e95-731de01b6eae";
 export const CANONICAL_SIGNALS_DISPLAY_NAME = "Signals";
@@ -14,7 +13,6 @@ export function qaTemporaryRoot(platform = process.platform, systemTmpDir = tmpd
 
 const QA_TEMP_ROOT = qaTemporaryRoot();
 const QA_DATA_PREFIX = `${QA_TEMP_ROOT}${sep}signals-qa-`;
-const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 
 export function normalizeIssueId(value) {
   const issueId = String(value ?? "").trim().replace(/^#/, "");
@@ -24,44 +22,33 @@ export function normalizeIssueId(value) {
   return issueId;
 }
 
+// Before #541 each QA app was "Signals issue-<N> QA" with data under <platform temp>/signals-qa-*
+// and a receipt next to it. qa-local-app.mjs prune --legacy-qa still recognises those.
 export function qaAppDisplayName(issueId) {
   return `Signals issue-${normalizeIssueId(issueId)} QA`;
-}
-
-export function qaAppTags(issueId, loopId = "") {
-  const tags = ["signals", "qa", "ephemeral", `issue-${normalizeIssueId(issueId)}`];
-  const normalizedLoopId = String(loopId).trim();
-  if (normalizedLoopId) {
-    tags.push(normalizedLoopId.startsWith("loop-") ? normalizedLoopId : `loop-${normalizedLoopId}`);
-  }
-  return tags;
-}
-
-export function defaultQaDataDir(issueId) {
-  return join(QA_TEMP_ROOT, `signals-qa-issue-${normalizeIssueId(issueId)}-data`);
-}
-
-export function assertIssueScopedQaWorkspaceSlug(workspaceSlug, issueId) {
-  const slug = String(workspaceSlug ?? "").trim();
-  if (!slug) return null;
-  const normalizedIssueId = normalizeIssueId(issueId);
-  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) {
-    throw new Error(`QA workspace slug must be lowercase kebab-case; received ${slug}.`);
-  }
-  if (!slug.startsWith(`signals-issue-${normalizedIssueId}-`)) {
-    throw new Error(
-      `QA workspace slug must start with signals-issue-${normalizedIssueId}-; received ${slug}.`,
-    );
-  }
-  return slug;
 }
 
 export function qaReceiptPath(issueId) {
   return join(QA_TEMP_ROOT, `signals-qa-local-app-issue-${normalizeIssueId(issueId)}.json`);
 }
 
-export function qaLauncherDir() {
-  return join(SCRIPT_DIR, "signals-qa-local-app-launcher");
+export function legacyQaStatePaths(issueId) {
+  const id = normalizeIssueId(issueId);
+  return [
+    qaReceiptPath(id),
+    join(QA_TEMP_ROOT, `signals-qa-local-app-issue-${id}.session.json`),
+    join(QA_TEMP_ROOT, `signals-qa-local-app-issue-${id}.lock`),
+  ];
+}
+
+export function assertSafeQaDataDir(dataDir) {
+  const resolved = resolve(String(dataDir || ""));
+  if (!resolved.startsWith(QA_DATA_PREFIX) || resolved === QA_DATA_PREFIX.slice(0, -1)) {
+    throw new Error(
+      `QA data directory must be an absolute ${QA_DATA_PREFIX}* path; received ${resolved}.`,
+    );
+  }
+  return resolved;
 }
 
 export function canonicalSignalsRepoRoot(fromDir = process.cwd()) {
@@ -81,68 +68,6 @@ export function canonicalSignalsRepoRoot(fromDir = process.cwd()) {
     ? resolve(commonDir)
     : resolve(resolvedFromDir, commonDir);
   return dirname(absoluteCommonDir);
-}
-
-export function assertSafeQaDataDir(dataDir) {
-  const resolved = resolve(String(dataDir || ""));
-  if (!resolved.startsWith(QA_DATA_PREFIX) || resolved === QA_DATA_PREFIX.slice(0, -1)) {
-    throw new Error(
-      `QA data directory must be an absolute ${QA_DATA_PREFIX}* path; received ${resolved}.`,
-    );
-  }
-  return resolved;
-}
-
-export function assertIssueBoundQaDataDir(dataDir, issueId) {
-  const safeDataDir = assertSafeQaDataDir(dataDir);
-  const normalizedIssueId = normalizeIssueId(issueId);
-  const issueMarker = new RegExp(`(?:^|-)issue-${normalizedIssueId}(?:-|$)`);
-  if (!issueMarker.test(basename(safeDataDir))) {
-    throw new Error(
-      `Receipt-less QA data directory must include issue-${normalizedIssueId}; received ${safeDataDir}.`,
-    );
-  }
-  return safeDataDir;
-}
-
-export function assertSignalsIssueWorktree(worktree) {
-  const resolved = realpathSync(resolve(String(worktree || "")));
-  const packagePath = join(resolved, "package.json");
-  if (!existsSync(packagePath)) {
-    throw new Error(`Signals worktree has no package.json: ${resolved}`);
-  }
-  const packageJson = JSON.parse(readFileSync(packagePath, "utf8"));
-  if (packageJson.name !== "@realtimex/signals") {
-    throw new Error(`Expected @realtimex/signals at ${resolved}.`);
-  }
-
-  const branchResult = spawnSync("git", ["-C", resolved, "branch", "--show-current"], {
-    encoding: "utf8",
-  });
-  if (branchResult.status !== 0) {
-    throw new Error(branchResult.stderr?.trim() || `Could not inspect worktree ${resolved}.`);
-  }
-  const branch = branchResult.stdout.trim();
-  if (["main", "master"].includes(branch)) {
-    throw new Error(
-      `QA requires an issue worktree, not the canonical ${branch} checkout (${resolved}).`,
-    );
-  }
-
-  const worktreeResult = spawnSync(
-    "git",
-    ["-C", resolved, "rev-parse", "--git-dir", "--git-common-dir"],
-    { encoding: "utf8" },
-  );
-  if (worktreeResult.status !== 0) {
-    throw new Error(worktreeResult.stderr?.trim() || `Could not inspect git metadata for ${resolved}.`);
-  }
-  const [gitDirValue, commonDirValue] = worktreeResult.stdout.trim().split(/\r?\n/);
-  const resolveGitPath = (value) => (value.startsWith(sep) ? resolve(value) : resolve(resolved, value));
-  if (resolveGitPath(gitDirValue) === resolveGitPath(commonDirValue)) {
-    throw new Error(`QA requires a linked issue worktree, not the primary checkout (${resolved}).`);
-  }
-  return { branch, path: resolved };
 }
 
 export function parseCliJson(stdout) {
@@ -174,70 +99,18 @@ export function appDisplayName(app) {
   return String(app?.displayName ?? app?.display_name ?? "").trim();
 }
 
-export function findIssueQaApps(apps, issueId) {
-  const displayName = qaAppDisplayName(issueId);
-  const issueTag = `issue-${normalizeIssueId(issueId)}`;
-  return apps.filter((app) => {
-    const tags = Array.isArray(app?.tags) ? app.tags : [];
-    return appDisplayName(app) === displayName || (tags.includes("qa") && tags.includes(issueTag));
-  });
-}
+const trimSlashes = (url) => String(url ?? "").trim().replace(/\/+$/, "");
 
-export function assertSafeQaApp(app, issueId) {
-  if (!app?.id) throw new Error("QA Local App has no id.");
-  if (app.id === CANONICAL_SIGNALS_APP_ID) {
-    throw new Error("Refusing to mutate the canonical Signals Local App.");
-  }
-  const expectedName = qaAppDisplayName(issueId);
-  if (appDisplayName(app) !== expectedName) {
-    throw new Error(`Refusing Local App ${app.id}: expected display name ${expectedName}.`);
-  }
-  const tags = Array.isArray(app.tags) ? app.tags : [];
-  for (const required of qaAppTags(issueId)) {
-    if (!tags.includes(required)) {
-      throw new Error(`Refusing Local App ${app.id}: missing safety tag ${required}.`);
-    }
-  }
-  return app;
-}
-
-export function buildQaCreateCliArgs({
-  issueId,
-  worktree,
-  dataDir,
-  loopId = "",
-  baseUrl,
-  workspaceSlug = "",
-}) {
-  const normalizedIssueId = normalizeIssueId(issueId);
-  const safeDataDir = assertSafeQaDataDir(dataDir);
-  const safeWorkspaceSlug = assertIssueScopedQaWorkspaceSlug(workspaceSlug, normalizedIssueId);
-  const nodeBinDir = dirname(process.execPath);
-  const env = {
-    HOSTNAME: "127.0.0.1",
-    SIGNALS_DATA_DIR: safeDataDir,
-    SIGNALS_QA_WORKTREE: resolve(worktree),
-    REALTIMEX_BASE_URL: baseUrl || DEFAULT_DEV_CLI_BASE_URL,
-    PATH: `${nodeBinDir}${delimiter}${process.env.PATH || ""}`,
-    ...(safeWorkspaceSlug ? { SIGNALS_RTX_WORKSPACE_SLUG: safeWorkspaceSlug } : {}),
-  };
-  return [
-    "create-local-app",
-    "--display-name",
-    qaAppDisplayName(normalizedIssueId),
-    "--description",
-    `Signals issue-${normalizedIssueId} isolated QA Local App`,
-    "--source-type",
-    "source",
-    "--source-path",
-    qaLauncherDir(),
-    "--env",
-    JSON.stringify(env),
-    "--home-url",
-    "http://localhost:{port}/dashboard",
-    "--tags",
-    qaAppTags(normalizedIssueId, loopId).join(","),
-  ];
+/**
+ * The child env for one CLI call. A terminal session token belongs to the RealTimeX host that
+ * opened the terminal (its REALTIMEX_BASE_URL); any other host rejects it with
+ * TERMINAL_SESSION_NOT_ACTIVE, so it only travels to the host that issued it.
+ */
+export function realtimeXCliEnv(baseUrl, env = process.env) {
+  const child = { ...env, REALTIMEX_BASE_URL: baseUrl };
+  const issuer = trimSlashes(env.REALTIMEX_BASE_URL);
+  if (issuer && issuer !== trimSlashes(baseUrl)) delete child.REALTIMEX_TERMINAL_SESSION_TOKEN;
+  return child;
 }
 
 export function runRealtimeXCli(args, options = {}) {
@@ -245,7 +118,7 @@ export function runRealtimeXCli(args, options = {}) {
   const baseUrl = options.baseUrl || DEFAULT_DEV_CLI_BASE_URL;
   const result = spawnSync(cli, [...args, "--agent", "--compact=false"], {
     encoding: "utf8",
-    env: { ...process.env, REALTIMEX_BASE_URL: baseUrl },
+    env: realtimeXCliEnv(baseUrl),
     maxBuffer: 10 * 1024 * 1024,
   });
   if (result.status !== 0) {
@@ -265,7 +138,7 @@ export function parseFlagArgs(argv) {
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (!arg.startsWith("--")) throw new Error(`Unexpected argument: ${arg}`);
-    if (["--no-start", "--keep-data", "--help"].includes(arg)) {
+    if (["--no-start", "--keep-data", "--help", "--apply", "--legacy-qa", "--plan"].includes(arg)) {
       booleans.add(arg.slice(2));
       continue;
     }

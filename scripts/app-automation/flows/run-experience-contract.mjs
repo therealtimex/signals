@@ -1,8 +1,8 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { qaReceiptPath } from "../../qa/signals-qa-local-app.mjs";
+import { slotReceiptForWorktree } from "../../qa/signals-dev-local-app.mjs";
 import {
   FORM_FACTORS,
   THEMES,
@@ -127,15 +127,10 @@ function defaultOutputDir(repoDir, contractId, env = process.env) {
   return join(root, contractId, stamp());
 }
 
-export function resolveFixtureDataDir(issue, explicitDataDir) {
+// The Signals Dev app that qa-local-app.mjs up created for this checkout owns the fixture's data.
+export function resolveFixtureDataDir(repoDir, explicitDataDir) {
   if (explicitDataDir) return explicitDataDir;
-  const receipt = qaReceiptPath(String(issue));
-  if (!existsSync(receipt)) return null;
-  try {
-    return JSON.parse(readFileSync(receipt, "utf8")).dataDir ?? null;
-  } catch {
-    return null;
-  }
+  return slotReceiptForWorktree(repoDir)?.dataDir ?? null;
 }
 
 function defaultGitState(repoDir) {
@@ -261,7 +256,7 @@ export async function runExperienceContract(args, dependencies = {}) {
 
   try {
     if (contract.fixture) {
-      const dataDir = resolveFixtureDataDir(contract.issue, args.dataDir);
+      const dataDir = resolveFixtureDataDir(repoDir, args.dataDir);
       fixture = await (dependencies.runFixture ?? defaultRunFixture)({
         repoDir,
         name: contract.fixture,

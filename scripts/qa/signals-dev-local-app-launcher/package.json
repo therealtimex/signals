@@ -1,5 +1,5 @@
 {
-  "name": "signals-qa-local-app-launcher",
+  "name": "signals-dev-local-app-launcher",
   "private": true,
   "type": "module",
   "scripts": {

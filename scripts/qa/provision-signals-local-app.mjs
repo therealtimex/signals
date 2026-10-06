@@ -1,8 +1,11 @@
 #!/usr/bin/env node
 /**
- * INCIDENT RECOVERY ONLY: restore the canonical dev Signals Local App in the
- * RealTimeX SQLite database. Normal QA must create an issue-scoped app with
- * provision-signals-qa-local-app.mjs and must never call this script.
+ * RESTORE PATH FOR THE #541 SLICE-1 MIGRATION ONLY. It recreates the pre-#541 RealTimeX Dev row
+ * "Signals" (47e45f71-…, SIGNALS_DATA_DIR=~/.signals, port 3010, all permissions pre-granted)
+ * exactly as it was before migrate-dev-signals-row.mjs replaced it with "Signals Dev · main".
+ * That row is the hazard #541 removed, so run this only on the owner's decision to undo the
+ * migration, never against the installed app, and never from QA: Signals Dev apps are managed by
+ * scripts/qa/qa-local-app.mjs. A follow-up deletes this script once the migration is confirmed.
  *
  * Usage:
  *   node scripts/qa/provision-signals-local-app.mjs --restore-canonical \
@@ -30,7 +33,7 @@ import { canonicalSignalsRepoRoot } from "./signals-qa-local-app.mjs";
 if (!process.argv.includes("--restore-canonical")) {
   console.error("Refusing to update the canonical Signals Local App without --restore-canonical.");
   console.error(
-    "Normal QA must use scripts/qa/provision-signals-qa-local-app.mjs instead.",
+    "Normal QA must use scripts/qa/qa-local-app.mjs instead; this script only undoes the #541 slice-1 migration.",
   );
   process.exit(2);
 }

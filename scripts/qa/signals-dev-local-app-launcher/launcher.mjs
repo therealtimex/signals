@@ -3,16 +3,18 @@ import { spawn } from "node:child_process";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 
-const requestedWorktree = process.env.SIGNALS_QA_WORKTREE?.trim() || "";
+// RealTimeX copies this directory into its Local App storage and runs it; the env the launcher
+// pinned (SIGNALS_INSTANCE=dev, SIGNALS_DATA_DIR, PORT, ...) reaches Next through this process.
+const requestedWorktree = process.env.SIGNALS_DEV_WORKTREE?.trim() || "";
 if (!isAbsolute(requestedWorktree) || !existsSync(requestedWorktree)) {
-  console.error("SIGNALS_QA_WORKTREE must identify an existing absolute Signals worktree.");
+  console.error("SIGNALS_DEV_WORKTREE must identify an existing absolute Signals checkout.");
   process.exit(2);
 }
 
 const worktree = realpathSync(requestedWorktree);
 const packagePath = join(worktree, "package.json");
 if (!existsSync(packagePath)) {
-  console.error(`Signals QA worktree has no package.json: ${worktree}`);
+  console.error(`Signals checkout has no package.json: ${worktree}`);
   process.exit(2);
 }
 const packageJson = JSON.parse(readFileSync(packagePath, "utf8"));
@@ -33,7 +35,7 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
 }
 
 child.on("error", (error) => {
-  console.error(`Could not start Signals QA worktree: ${error.message}`);
+  console.error(`Could not start the Signals Dev app: ${error.message}`);
   process.exit(1);
 });
 child.on("exit", (code, signal) => {
