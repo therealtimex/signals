@@ -402,6 +402,11 @@ try {
     assert.equal(existsSync(join(slotData, "browser-profiles")), false);
     assert.equal(existsSync(join(slotData, "config.json")), false);
     assert.equal(existsSync(join(slotData, "data.db.partial")), false);
+    // The source is WAL; the copy must be one self-contained file with no orphaned sidecars.
+    for (const sidecar of ["data.db.partial-wal", "data.db.partial-shm", "data.db-wal", "data.db-shm"]) {
+      assert.equal(existsSync(join(slotData, sidecar)), false, sidecar);
+    }
+    assert.equal(execFileSync("sqlite3", [join(slotData, "data.db"), "pragma journal_mode;"], { encoding: "utf8" }).trim(), "delete");
     assert.equal(execFileSync("sqlite3", [join(realData, "data.db"), "select credentials_encrypted from platform_accounts;"], { encoding: "utf8" }).trim(), "cipher");
     assert.deepEqual(readFileSync(join(realData, "data.db")), realBefore);
     assert.throws(() => prepareSlotData({ dataDir: slotData, profile: "snapshot" }), (error) => error.errorCode === "SLOT_DATA_EXISTS");

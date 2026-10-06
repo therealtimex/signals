@@ -75,7 +75,10 @@ const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const SELF = join(SCRIPT_DIR, "qa-local-app.mjs");
 const MIGRATE = join(SCRIPT_DIR, "migrate-dev-signals-row.mjs");
 const LIST_ARGS = ["list-local-apps", "--data-source", "live", "--no-cache"];
-const DEFAULT_TIMEOUT_MS = 240_000;
+// A new slot's first start is a cold `next dev` compile, which can take several minutes on the Dev
+// host; a reused slot usually starts warm (#543).
+const NEW_SLOT_TIMEOUT_MS = 600_000;
+const REUSED_SLOT_TIMEOUT_MS = 240_000;
 const STOPPED_GRACE_MS = 15_000;
 const PORT_RELEASE_MS = 20_000;
 // RealTimeX holds its permission dialog open for 120 s; allow a little beyond that.
@@ -89,7 +92,7 @@ function usage() {
   return `Usage:
   node scripts/qa/qa-local-app.mjs up [--worktree <path>] [--profile empty|snapshot] \\
     [--needs llm.chat,desktop.runtime-sessions] [--issue N] [--loop-id id] \\
-    [--cli <wrapper>] [--db <dev realtimex.db>] [--timeout-ms 240000]
+    [--cli <wrapper>] [--db <dev realtimex.db>] [--timeout-ms N]
   node scripts/qa/qa-local-app.mjs status [--worktree <path>]
   node scripts/qa/qa-local-app.mjs down   [--worktree <path>] [--accept-packaged-change]
   node scripts/qa/qa-local-app.mjs remove [--worktree <path>] [--keep-data] [--accept-packaged-change]
@@ -104,7 +107,8 @@ up      Creates or reuses the app, starts it, waits for /api/health, and verifie
         guard. --profile snapshot copies the real data.db (read-only) and media/ into a new slot,
         with stored platform credentials removed. --needs waits for the owner to grant the named
         RealTimeX permissions and fails with PERMISSIONS_MISSING otherwise; agents cannot grant
-        them. --no-start creates the app without starting it.
+        them. --no-start creates the app without starting it. --timeout-ms defaults to 600000 for a
+        new slot (a cold next dev compile) and 240000 for a reused one.
 status  Reports the app, its health and instance guard, permissions, and stale slots.
 down    Stops the app and checks the port, the Dev host, and the installed app. Keeps the app, its
         data, and its permissions. QA hands off passed only after down exits 0. When the installed
@@ -766,10 +770,7 @@ async function up(flags) {
     });
   }
   const needs = parseNeeds(flags, checkout.path);
-  const waitOptions = {
-    timeoutMs: positiveInt(flags.get("timeout-ms"), DEFAULT_TIMEOUT_MS),
-    pollMs: positiveInt(process.env.SIGNALS_QA_POLL_MS, 1000),
-  };
+  const waitOptions = { pollMs: positiveInt(process.env.SIGNALS_QA_POLL_MS, 1000) };
   const slot = resolveSlot(checkout);
   const paths = slotPaths(slot);
 
@@ -924,6 +925,10 @@ async function up(flags) {
     };
     recordHostContext(ctx);
 
+    waitOptions.timeoutMs = positiveInt(
+      flags.get("timeout-ms"),
+      reused ? REUSED_SLOT_TIMEOUT_MS : NEW_SLOT_TIMEOUT_MS,
+    );
     const base = {
       action: "up",
       slot,
@@ -939,6 +944,7 @@ async function up(flags) {
       workspaceSlug: receipt.workspaceSlug,
       receiptPath: paths.receiptPath,
       reused,
+      timeoutMs: waitOptions.timeoutMs,
     };
 
     if (flags.has("no-start")) {
@@ -976,6 +982,14 @@ async function up(flags) {
             // reported through next
           }
           error.extra.next = `Free port ${port} (lsof -iTCP:${port} -sTCP:LISTEN), then rerun up.`;
+        } else if (error.errorCode === "HEALTH_TIMEOUT") {
+          // The app runs but has not answered yet; a cold compile is the usual cause, and a rerun
+          // reuses the app and simply waits again (#543).
+          error.extra.next =
+            "The app is running but /api/health has not answered yet; a cold next dev compile can take " +
+            `several minutes. Rerun ${followUp("up", checkout, ctx)} --timeout-ms ${NEW_SLOT_TIMEOUT_MS}, ` +
+            `which reuses the app and waits again. If it still does not answer, read the app's output in the ` +
+            `RealTimeX Dev window, then ${downCmd}.`;
         } else {
           error.extra.next = `Read the logs above, then ${downCmd} before retrying up.`;
         }

@@ -308,9 +308,10 @@ object, and exits 0 only when `ok` is true. Exercise the scenario at the `port` 
 that `up` prints. On failure, act on `errorCode` and run the `next` it prints; do not provision,
 edit, or delete apps by hand around it.
 
-- **First `up` of a new slot:** pass `--timeout-ms 600000`. A cold `next dev` compile can outlast the
-  240 s default, and the resulting `HEALTH_TIMEOUT` is premature: rerun `up`, which reuses the app,
-  rather than `down` (#543).
+- **Slow first start.** `up` waits up to 600 s for a new slot, whose first start is a cold `next dev`
+  compile, and 240 s for a reused one; `--timeout-ms` overrides both. A `HEALTH_TIMEOUT` with the app
+  running usually means it is still compiling. Rerun `up` as its `next` says: it reuses the app and
+  waits again. Run `down` only if that also times out (#543).
 - **`up`** refuses an unreachable Dev host (`HOST_UNREACHABLE`), a missing key
   (`LOCAL_APP_MANAGEMENT_REFUSED`), a Dev host where any app points at `~/.signals` or pins port
   `3010` (`DEV_HOST_UNSAFE`), a live `next dev` in the checkout (`NEXT_DEV_ALREADY_RUNNING`), and a
@@ -328,9 +329,10 @@ edit, or delete apps by hand around it.
 - **`remove` at loop close**, or `prune --apply` when `up` or `status` reports stale slots.
   `prune --legacy-qa` also covers the pre-#541 `Signals issue-<N> QA` apps.
 - **`--profile snapshot`** copies the real `data.db` (SQLite online backup, read-only) and `media/`
-  into a new slot. It removes stored platform credentials from the copy and copies nothing else: no
-  `browser-profiles/`, `sessions/`, `config.json`, `personality/`, or `writing/`. Scheduled and
-  publish jobs stay in the copy; the pinned `SIGNALS_SCHEDULER_ENABLED=0` keeps them inert.
+  into a new slot as one self-contained file, with no WAL sidecars. It removes stored platform
+  credentials from the copy and copies nothing else: no `browser-profiles/`, `sessions/`,
+  `config.json`, `personality/`, or `writing/`. Scheduled and publish jobs stay in the copy but stay
+  inert, because a dev instance never runs the scheduler.
 - **The guard refuses external effects.** Dev apps run with `SIGNALS_INSTANCE=dev`. Signals then
   answers HTTP 403 `DEV_INSTANCE_GUARD` to publishing, X API writes and engagement, Playwright
   publish sessions, the `signals-publish` browser session, OAuth connect, and the SMTP probe. During
@@ -384,9 +386,8 @@ explicit OK and prefer `--dry-run` or a local mock.
   fetch public web pages, so get the owner's OK before bulk runs.
 - **It is a one-way, point-in-time copy.** Nothing flows back to `~/.signals`. Voice profiles and
   Personality are empty, because `personality/` and `writing/` are not copied.
-- **Refresh the data only when the owner asks.** Run `remove`, then
-  `up --profile snapshot --timeout-ms 600000` from the main checkout; the owner answers one new
-  permission dialog.
+- **Refresh the data only when the owner asks.** Run `remove`, then `up --profile snapshot` from the
+  main checkout; the owner answers one new permission dialog.
 - **Loop worktrees stay `--profile empty`** unless a scenario needs real data.
 
 **`rtxtest`** drives only the Dev app over CDP `9888`. Do not point `rtxtest dev up` at the Signals
