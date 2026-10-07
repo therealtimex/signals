@@ -185,6 +185,7 @@ export function slotPaths(slot, env = process.env) {
     launcherDir,
     receiptPath: join(launcherDir, "receipt.json"),
     sessionPath: join(launcherDir, "session.json"),
+    needsPath: join(launcherDir, "needs.json"),
     lockPath: join(root, ".locks", `${slot}.lock`),
   };
 }
@@ -204,6 +205,55 @@ export function readJsonFile(path) {
   } catch {
     return null;
   }
+}
+
+/**
+ * The RealTimeX permissions a slot's app registers (#545). With SIGNALS_INSTANCE=dev, Signals reads
+ * `<data dir>/.launcher/needs.json` when it registers at boot (src/lib/rtx/requested-permissions.ts)
+ * and asks for nothing when the file is missing. up writes it on every run.
+ */
+export const SLOT_NEEDS_KIND = "signals-dev-needs";
+
+export function readSlotNeeds(needsPath) {
+  const needs = readJsonFile(needsPath)?.needs;
+  return Array.isArray(needs) ? [...new Set(needs.filter((need) => typeof need === "string"))] : [];
+}
+
+/** What a reused slot records next: everything it recorded plus `requested`. Needs only grow. */
+export function mergeSlotNeeds(recorded, requested) {
+  const needs = [...new Set([...recorded, ...requested])];
+  return { needs, added: needs.filter((need) => !recorded.includes(need)) };
+}
+
+export function slotNeedsRecord(needs, now = new Date()) {
+  return { schemaVersion: 1, kind: SLOT_NEEDS_KIND, needs, updatedAt: now.toISOString() };
+}
+
+const PERMISSION_RECORD_MAX_NESTING = 5;
+
+/**
+ * The owner's decisions from a Local App's `metadata.permissions`. RealTimeX writes
+ * `{ granted: [], denied: [], lastPromptedAt }`; its Settings screen, before realtimex-ai-app#2277,
+ * saved `{ granted: { granted, denied }, grantedAt }`. RealTimeX honours both by reading every
+ * nested layer (server/utils/localApps/permissionRecord.js), so this reads them the same way.
+ */
+export function normalizePermissionRecord(value) {
+  const isRecord = (layer) => Boolean(layer) && typeof layer === "object" && !Array.isArray(layer);
+  const names = (list) =>
+    Array.isArray(list) ? list.filter((permission) => typeof permission === "string" && permission.trim()) : [];
+  const granted = [];
+  const denied = [];
+  let layer = value;
+  for (let depth = 0; depth < PERMISSION_RECORD_MAX_NESTING && isRecord(layer); depth += 1) {
+    granted.push(...names(layer.granted));
+    denied.push(...names(layer.denied));
+    layer = layer.granted;
+  }
+  return {
+    granted: [...new Set(granted)],
+    denied: [...new Set(denied)],
+    lastPromptedAt: (isRecord(value) && value.lastPromptedAt) || null,
+  };
 }
 
 /**

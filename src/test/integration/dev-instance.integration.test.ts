@@ -8,7 +8,7 @@
  * host either.
  */
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -102,6 +102,10 @@ describe("Signals Dev instance on the production build (ADR-541-5)", () => {
       db.close();
     }
 
+    // The launcher records the slot's needs here (#545); a Dev app asks RealTimeX only for these.
+    mkdirSync(join(dataDir, ".launcher"));
+    writeFileSync(join(dataDir, ".launcher", "needs.json"), JSON.stringify({ needs: ["llm.chat", "not.in.manifest"] }));
+
     server = spawn(process.execPath, [NEXT_BIN, "start", "-p", String(port), "-H", "127.0.0.1"], {
       cwd: ROOT,
       env,
@@ -124,6 +128,12 @@ describe("Signals Dev instance on the production build (ADR-541-5)", () => {
       clearTimeout(timer);
     }
     if (dataDir) rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  it("asks RealTimeX only for the slot's needs, filtered to the manifest (#545)", async () => {
+    const body = await (await fetch(`${baseUrl}/api/rtx/status`)).json();
+    expect(body.permissions).toEqual(["llm.chat"]);
+    expect(body.manifest.permissions).toHaveLength(8);
   });
 
   it("reports the instance block the launcher verifies", async () => {

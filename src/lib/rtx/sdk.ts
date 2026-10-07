@@ -1,5 +1,6 @@
-import { RTX_MANIFEST, RTX_SDK_PERMISSIONS } from "@/lib/rtx/manifest";
 import { getRtxAppId, getRtxAppName, resolveRtxApiBase, type EnvLike } from "@/lib/rtx/env";
+import { RTX_MANIFEST } from "@/lib/rtx/manifest";
+import { resolveRequestedRtxPermissions } from "@/lib/rtx/requested-permissions";
 
 export type RtxPermissionState = {
   granted: string[];
@@ -49,7 +50,7 @@ export async function registerWithRtx(
       body: JSON.stringify({
         app_id: appId,
         app_name: getRtxAppName(env) ?? RTX_MANIFEST.name,
-        permissions: RTX_SDK_PERMISSIONS,
+        permissions: resolveRequestedRtxPermissions(env),
       }),
     });
 

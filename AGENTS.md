@@ -337,20 +337,26 @@ edit, or delete apps by hand around it.
   answers HTTP 403 `DEV_INSTANCE_GUARD` to publishing, X API writes and engagement, Playwright
   publish sessions, the `signals-publish` browser session, OAuth connect, and the SMTP probe. During
   QA that is the design working, not a bug.
-- **Permissions are the owner's to grant.** A new app registers with RealTimeX, which shows the owner
-  a permission dialog for 2 minutes. Grants live on the app row, so they survive `down` and later
-  `up`s of the same slot. Never work around the dialog: do not drive the desktop UI for it, and do
-  not edit the database. When a scenario needs a permission, pass it with `--needs`. `up` waits for
-  the owner's decision and fails with `PERMISSIONS_MISSING`, naming what is missing. A
-  `PERMISSION_REQUIRED` error from Signals means a missing grant, not a product bug.
-  - **Tell the owner before you run `up` on a new app.** The dialog appears in the RealTimeX Dev
-    window while the app boots. Without `--needs`, `up` does not wait for it.
-  - **Grant only through that dialog,** never RealTimeX's Settings → Local Apps → Permissions screen.
-    That screen saves a nested record that RealTimeX's own permission checks cannot read, and it
-    leaves out `credentials.*` and `desktop.*` (realtimex-ai-app#2277). `up` then reports every
-    permission pending.
-  - **To recover from a Settings grant:** the owner opens that screen and clicks **Reset**. You then
-    run `down` and `up --needs …` while the owner watches for the dialog.
+- **Permissions are the owner's to grant, and a Dev app asks only for what its scenarios need**
+  (#545). The app registers with RealTimeX only the permissions passed with `--needs`, which `up`
+  records in the slot's `.launcher/needs.json`. Without `--needs` it registers none, so the owner
+  sees no dialog. A later `up` adds its `--needs` to the recorded ones and never drops any; when the
+  list grows, `up` restarts the app, and RealTimeX asks only about permissions not yet decided. The
+  canonical app still registers the whole manifest.
+  - Grants live on the app row, so they survive `down`, later `up`s, and a smaller `--needs`.
+  - Never work around the dialog: do not drive the desktop UI for it, and do not edit the database.
+  - `up --needs` waits for the owner's decision and fails with `PERMISSIONS_MISSING`, naming what is
+    missing.
+  - A `PERMISSION_REQUIRED` error from Signals means a missing grant, often a scenario run without
+    its `--needs`. It is not a product bug.
+  - **Tell the owner before you run `up --needs …`** on a new slot or with a new permission. The
+    dialog appears in the RealTimeX Dev window while the app boots, and stays for 2 minutes.
+  - **The dialog is the recommended path.** The owner can also grant from RealTimeX's Settings →
+    Local Apps → Permissions. That works on a Dev host running realtimex-dev `3120272` or later
+    (restart `yarn dev:all` after pulling it) and on installed builds ≥ 1.1.705-dev. `up` and
+    `status` read both the flat record and the nested one older Settings screens saved.
+  - On older builds that screen saves a record RealTimeX cannot read (realtimex-ai-app#2277), so use
+    the dialog there.
 
   | Scenario | `--needs` |
   |---|---|
@@ -386,8 +392,9 @@ explicit OK and prefer `--dry-run` or a local mock.
   fetch public web pages, so get the owner's OK before bulk runs.
 - **It is a one-way, point-in-time copy.** Nothing flows back to `~/.signals`. Voice profiles and
   Personality are empty, because `personality/` and `writing/` are not copied.
-- **Refresh the data only when the owner asks.** Run `remove`, then `up --profile snapshot` from the
-  main checkout; the owner answers one new permission dialog.
+- **Refresh the data only when the owner asks.** Run `remove`, then `up --profile snapshot --needs …`
+  from the main checkout, naming the permissions its scenarios use; the owner answers one dialog for
+  those.
 - **Loop worktrees stay `--profile empty`** unless a scenario needs real data.
 
 **`rtxtest`** drives only the Dev app over CDP `9888`. Do not point `rtxtest dev up` at the Signals
