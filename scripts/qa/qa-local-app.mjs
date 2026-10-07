@@ -4,8 +4,9 @@
  * specs/signals-dev-local-app.md). Every Signals checkout, the main one included, gets its own
  * app, keyed by the checkout's realpath:
  *
- *   up      preflight -> slot lock -> installed-app snapshot -> create or reuse -> start ->
- *           wait for /api/health -> verify the dev-instance guard -> permissions
+ *   up      preflight -> slot lock -> installed-app snapshot -> create or reuse -> record the
+ *           slot's needs (restart when they grew) -> start -> wait for /api/health -> verify the
+ *           dev-instance guard -> permissions
  *   status  where the checkout's app is and whether it answers
  *   down    stop -> port released -> Dev-host invariant -> installed app untouched (keeps the app)
  *   remove  stop -> delete the app -> delete its data (unless --keep-data)
@@ -53,7 +54,9 @@ import {
   legacyQaIssueId,
   listSlotReceipts,
   liveNextDevLock,
+  mergeSlotNeeds,
   NON_SLOT_ENTRIES,
+  normalizePermissionRecord,
   sanitizeSlot,
   normalizeOptionalIssueId,
   packagedHostFingerprint,
@@ -61,12 +64,14 @@ import {
   pointsAtRealSignalsData,
   prepareSlotData,
   readJsonFile,
+  readSlotNeeds,
   resolveSignalsCheckout,
   resolveSlot,
   rowConfig,
   rowTags,
   signalsDevRoot,
   slotAppProblems,
+  slotNeedsRecord,
   slotPaths,
   worktreeHash,
 } from "./signals-dev-local-app.mjs";
@@ -105,10 +110,13 @@ SIGNALS_INSTANCE=dev, so Signals refuses to publish, send, or connect accounts.
 
 up      Creates or reuses the app, starts it, waits for /api/health, and verifies the instance
         guard. --profile snapshot copies the real data.db (read-only) and media/ into a new slot,
-        with stored platform credentials removed. --needs waits for the owner to grant the named
-        RealTimeX permissions and fails with PERMISSIONS_MISSING otherwise; agents cannot grant
-        them. --no-start creates the app without starting it. --timeout-ms defaults to 600000 for a
-        new slot (a cold next dev compile) and 240000 for a reused one.
+        with stored platform credentials removed. The app asks RealTimeX only for the permissions
+        named by --needs, none without it. A reused slot keeps the needs it recorded and adds the
+        new ones; when that list grows, up restarts the app so the owner is asked about the new
+        ones. --needs waits for the owner to grant them and fails with PERMISSIONS_MISSING
+        otherwise; agents cannot grant them. --no-start creates the app without starting it.
+        --timeout-ms defaults to 600000 for a new slot (a cold next dev compile) and 240000 for a
+        reused one.
 status  Reports the app, its health and instance guard, permissions, and stale slots.
 down    Stops the app and checks the port, the Dev host, and the installed app. Keeps the app, its
         data, and its permissions. QA hands off passed only after down exits 0. When the installed
@@ -353,8 +361,9 @@ function canonicalShapeProblems(ctx, rows) {
 
 // --- Permissions ---------------------------------------------------------------------------------
 
-// The permissions this Signals build asks RealTimeX for, from the checkout's rtx-manifest.json.
-function requestedPermissions(worktree) {
+// The permissions this Signals build can ask RealTimeX for, from the checkout's rtx-manifest.json.
+// A Dev app asks only for its slot's needs, a subset of these (#545).
+function manifestPermissions(worktree) {
   try {
     const manifest = JSON.parse(readFileSync(join(worktree, "rtx-manifest.json"), "utf8"));
     return Array.isArray(manifest.permissions) ? manifest.permissions : [];
@@ -372,7 +381,7 @@ function parseNeeds(flags, worktree) {
         .filter(Boolean),
     ),
   ];
-  const requested = requestedPermissions(worktree);
+  const requested = manifestPermissions(worktree);
   if (needs.length && !requested.length) {
     throw new QaError(
       "USAGE",
@@ -392,10 +401,17 @@ function parseNeeds(flags, worktree) {
   return needs;
 }
 
+// What the slot's app asks RealTimeX for: its recorded needs that this build's manifest lists, in
+// manifest order, the way Signals filters them (src/lib/rtx/requested-permissions.ts).
+function askedPermissions(worktree, slotNeeds) {
+  return manifestPermissions(worktree).filter((permission) => slotNeeds.includes(permission));
+}
+
 // RealTimeX records the owner's answer to its permission dialog in local_apps.metadata. The CLI
 // does not expose it, so it is read from the Dev database, read-only. Grants live on the row, so
-// they survive down and later ups of the same slot.
-function appPermissions(ctx, appId, worktree) {
+// they survive down and later ups of the same slot. Only what the app asks for (`requested`) can be
+// pending.
+function appPermissions(ctx, appId, requested) {
   const rows = queryDb(
     ctx.dbPath,
     `select metadata from local_apps where id = '${String(appId).replace(/'/g, "''")}';`,
@@ -406,26 +422,23 @@ function appPermissions(ctx, appId, worktree) {
       next: "Pass --db for the RealTimeX Dev host this app runs on.",
     });
   }
-  let decided = {};
+  let stored = null;
   try {
-    decided = JSON.parse(rows[0].metadata || "{}")?.permissions || {};
+    stored = JSON.parse(rows[0].metadata || "{}")?.permissions ?? null;
   } catch {
-    decided = {};
+    stored = null;
   }
-  const granted = Array.isArray(decided.granted) ? decided.granted : [];
-  const denied = Array.isArray(decided.denied) ? decided.denied : [];
-  const pending = requestedPermissions(worktree).filter(
-    (permission) => !granted.includes(permission) && !denied.includes(permission),
-  );
-  return { granted, denied, pending, lastPromptedAt: decided.lastPromptedAt ?? null };
+  const { granted, denied, lastPromptedAt } = normalizePermissionRecord(stored);
+  const pending = requested.filter((permission) => !granted.includes(permission) && !denied.includes(permission));
+  return { requested, granted, denied, pending, lastPromptedAt };
 }
 
 // Only the owner can grant, so up waits for their decision on the dialog and stops early once a
 // needed permission is denied.
-async function waitForNeeds(ctx, appId, worktree, needs, pollMs) {
+async function waitForNeeds(ctx, appId, requested, needs, pollMs) {
   const deadline = Date.now() + positiveInt(process.env.SIGNALS_QA_PERMISSION_WAIT_MS, PERMISSION_WAIT_MS);
   for (;;) {
-    const permissions = appPermissions(ctx, appId, worktree);
+    const permissions = appPermissions(ctx, appId, requested);
     const denied = needs.filter((permission) => permissions.denied.includes(permission));
     const missing = needs.filter(
       (permission) => !permissions.granted.includes(permission) && !denied.includes(permission),
@@ -925,6 +938,17 @@ async function up(flags) {
     };
     recordHostContext(ctx);
 
+    // The app registers only its slot's needs, and only at boot (#545). A new slot records exactly
+    // --needs; a reused one adds --needs to what it recorded, so a need, like a grant, is never
+    // taken back. A running app restarts when its needs grew, and RealTimeX then asks the owner
+    // only about permissions not yet decided.
+    const { needs: slotNeeds, added: addedNeeds } = mergeSlotNeeds(
+      reused ? readSlotNeeds(paths.needsPath) : [],
+      needs,
+    );
+    writePrivateJson(paths.needsPath, slotNeedsRecord(slotNeeds));
+    const asked = askedPermissions(checkout.path, slotNeeds);
+
     waitOptions.timeoutMs = positiveInt(
       flags.get("timeout-ms"),
       reused ? REUSED_SLOT_TIMEOUT_MS : NEW_SLOT_TIMEOUT_MS,
@@ -945,6 +969,7 @@ async function up(flags) {
       receiptPath: paths.receiptPath,
       reused,
       timeoutMs: waitOptions.timeoutMs,
+      needs: { path: paths.needsPath, recorded: slotNeeds, added: addedNeeds },
     };
 
     if (flags.has("no-start")) {
@@ -953,6 +978,19 @@ async function up(flags) {
     }
 
     const port = receipt.port;
+    let restarted = false;
+    if (reused && addedNeeds.length && !["stopped", "disabled", ""].includes(appStatus(app))) {
+      const stop = await stopAndRelease(receipt, ctx, [app], waitOptions.pollMs);
+      if (stop.portReleased === false) {
+        throw new QaError(
+          "PORT_STILL_BOUND",
+          `${receipt.displayName} was stopped to register ${addedNeeds.join(", ")}, but port ${port} is still in use.`,
+          { next: `Find the listener with lsof -iTCP:${port} -sTCP:LISTEN, stop it if you started it, then rerun up.` },
+        );
+      }
+      app = { ...app, persistedStatus: "stopped", runtime: { status: "stopped" } };
+      restarted = true;
+    }
     let served;
     try {
       if (appStatus(app) !== "running") {
@@ -1018,9 +1056,9 @@ async function up(flags) {
 
     let permissions;
     if (!needs.length) {
-      permissions = appPermissions(ctx, receipt.appId, checkout.path);
+      permissions = appPermissions(ctx, receipt.appId, asked);
     } else {
-      const outcome = await waitForNeeds(ctx, receipt.appId, checkout.path, needs, waitOptions.pollMs);
+      const outcome = await waitForNeeds(ctx, receipt.appId, asked, needs, waitOptions.pollMs);
       permissions = outcome.permissions;
       if (outcome.missing.length || outcome.denied.length) {
         refreshReceipt({ lastUpAt: new Date().toISOString() });
@@ -1039,8 +1077,8 @@ async function up(flags) {
               `Ask the owner to grant ${[...outcome.missing, ...outcome.denied].join(", ")} to ` +
               `"${receipt.displayName}" in RealTimeX Dev ` +
               (outcome.denied.length
-                ? "(Settings → Local Apps, where a denied permission can be changed)"
-                : "(its permission dialog, or Settings → Local Apps)") +
+                ? "(Settings → Local Apps → Permissions, where a denied permission can be changed)"
+                : "(Settings → Local Apps → Permissions; or run down, then this up, to show the dialog again)") +
               `, then rerun: ${followUp("up", checkout, ctx, { needs })}`,
           },
         );
@@ -1052,6 +1090,7 @@ async function up(flags) {
       ok: true,
       ...base,
       started: true,
+      restarted,
       healthUrl: served.health.url,
       instance: served.health.body?.instance ?? null,
       permissions,
@@ -1094,7 +1133,7 @@ async function status(flags) {
     healthy: Boolean(health?.ok),
     instance: health?.body?.instance ?? null,
     instanceProblems: health?.ok ? instanceProblems(health.body, receipt.dataDir) : null,
-    permissions: app ? appPermissions(ctx, app.id, checkout.path) : null,
+    permissions: app ? appPermissions(ctx, app.id, askedPermissions(checkout.path, readSlotNeeds(paths.needsPath))) : null,
     dashboardUrl: receipt ? `http://127.0.0.1:${receipt.port}/dashboard` : null,
     dataDir: receipt?.dataDir ?? null,
     profile: receipt?.profile ?? null,

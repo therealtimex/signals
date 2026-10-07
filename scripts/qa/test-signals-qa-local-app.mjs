@@ -43,15 +43,19 @@ import {
   devHostProblems,
   diffPackagedHost,
   legacyQaIssueId,
+  mergeSlotNeeds,
+  normalizePermissionRecord,
   packagedHostFingerprint,
   pinnedPorts,
   pointsAtRealSignalsData,
   prepareSlotData,
+  readSlotNeeds,
   resolveSignalsCheckout,
   resolveSlot,
   sanitizeSlot,
   signalsDevRoot,
   slotAppProblems,
+  slotNeedsRecord,
   slotPaths,
   slotReceiptForWorktree,
   worktreeHash,
@@ -378,6 +382,46 @@ try {
   assert.equal(resolveSlot(linkedCheckout), "loop-issue-9-abc");
   assert.equal(slotReceiptForWorktree(linked).dataDir, held.dataDir);
   assert.equal(slotReceiptForWorktree(repo), null);
+
+  // needs.json (#545): Signals reads it from <data dir>/.launcher; needs only grow.
+  assert.equal(held.needsPath, join(held.dataDir, ".launcher", "needs.json"));
+  assert.deepEqual(readSlotNeeds(held.needsPath), [], "a missing needs.json means no needs");
+  for (const content of ["{", "null", '["llm.chat"]', '{"needs":"llm.chat"}']) {
+    writeFileSync(held.needsPath, content);
+    assert.deepEqual(readSlotNeeds(held.needsPath), [], content);
+  }
+  writeFileSync(held.needsPath, JSON.stringify(slotNeedsRecord(["llm.chat", "llm.chat", 3, "llm.embed"])));
+  assert.deepEqual(readSlotNeeds(held.needsPath), ["llm.chat", "llm.embed"]);
+  const record = slotNeedsRecord(["llm.chat"], new Date("2026-10-07T00:00:00Z"));
+  assert.deepEqual(record, { schemaVersion: 1, kind: "signals-dev-needs", needs: ["llm.chat"], updatedAt: "2026-10-07T00:00:00.000Z" });
+  assert.deepEqual(mergeSlotNeeds([], []), { needs: [], added: [] });
+  assert.deepEqual(mergeSlotNeeds([], ["llm.chat"]), { needs: ["llm.chat"], added: ["llm.chat"] });
+  assert.deepEqual(mergeSlotNeeds(["llm.chat"], ["llm.chat", "llm.embed"]), { needs: ["llm.chat", "llm.embed"], added: ["llm.embed"] });
+  assert.deepEqual(mergeSlotNeeds(["llm.chat", "llm.embed"], ["llm.embed"]), { needs: ["llm.chat", "llm.embed"], added: [] });
+  assert.deepEqual(mergeSlotNeeds(["llm.chat"], []), { needs: ["llm.chat"], added: [] });
+
+  // Both permission shapes RealTimeX honours (realtimex-ai-app#2277).
+  assert.deepEqual(normalizePermissionRecord({ granted: ["llm.chat"], denied: ["desktop.browser"], lastPromptedAt: "t" }), {
+    granted: ["llm.chat"],
+    denied: ["desktop.browser"],
+    lastPromptedAt: "t",
+  });
+  assert.deepEqual(
+    normalizePermissionRecord({ granted: { granted: ["llm.chat", "llm.embed"], denied: ["desktop.browser"] }, grantedAt: "t" }),
+    { granted: ["llm.chat", "llm.embed"], denied: ["desktop.browser"], lastPromptedAt: null },
+  );
+  assert.deepEqual(
+    normalizePermissionRecord({ granted: ["credentials.list"], denied: [], lastPromptedAt: "t", nested: 1 }).granted,
+    ["credentials.list"],
+  );
+  assert.deepEqual(
+    normalizePermissionRecord({ granted: { granted: { granted: ["llm.chat", "", 4] }, denied: ["llm.chat"] } }),
+    { granted: ["llm.chat"], denied: ["llm.chat"], lastPromptedAt: null },
+  );
+  for (const value of [null, undefined, "granted", ["llm.chat"], {}]) {
+    assert.deepEqual(normalizePermissionRecord(value), { granted: [], denied: [], lastPromptedAt: null }, String(value));
+  }
+  rmSync(held.needsPath);
 
   // Snapshot profile: online backup of data.db + media only, credentials scrubbed, real data intact.
   if (spawnSync("sqlite3", ["-version"]).status === 0) {

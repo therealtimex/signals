@@ -183,6 +183,7 @@ const packagedDb = join(root, "app", "realtimex.db");
 const statePath = join(root, "local-apps.json");
 const pidLog = join(root, "pids.log");
 const credLog = join(root, "credentials-sent.log");
+const registerLog = join(root, "registrations.log");
 const mockCli = join(root, "mock-realtimex-pp-cli.mjs");
 const tripwireCli = join(root, "tripwire-realtimex-pp-cli.mjs");
 const legacyTag = String(Date.now()).slice(-7);
@@ -273,6 +274,30 @@ async function decidePermissions(appId, decision, { afterMs = 0 } = {}) {
   devSql(`update local_apps set metadata = ${sql(JSON.stringify({ permissions: decision }))} where id = ${sql(appId)};`);
 }
 
+// What each Dev app asked RealTimeX for when it booted, oldest first.
+const registrations = (slot) =>
+  existsSync(registerLog)
+    ? readFileSync(registerLog, "utf8")
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => JSON.parse(line))
+        .filter((entry) => entry.dataDir === join(devRoot, slot))
+    : [];
+const needsFile = (slot) => JSON.parse(readFileSync(join(devRoot, slot, ".launcher", "needs.json"), "utf8"));
+
+// The owner answering the dialog a slot's next registration opens. Fails the test if no such
+// registration arrives, so a missing restart cannot pass as an owner who never answered.
+async function ownerAnswers(slot, decision, { after = registrations(slot).length, timeoutMs = 15_000 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (registrations(slot).length <= after) {
+    if (Date.now() > deadline) throw new Error(`${slot} did not register again within ${timeoutMs} ms`);
+    await sleep(50);
+  }
+  const entry = registrations(slot)[after];
+  await decidePermissions(entry.appId, decision);
+  return entry;
+}
+
 function run(script, args, env = {}) {
   return new Promise((resolveRun) => {
     const child = track(
@@ -283,6 +308,7 @@ function run(script, args, env = {}) {
           MOCK_DEV_DB: devDb,
           MOCK_PID_LOG: pidLog,
           MOCK_CRED_LOG: credLog,
+          MOCK_REGISTER_LOG: registerLog,
           REALTIMEX_PP_CLI: tripwireCli,
           SIGNALS_DEV_ROOT: devRoot,
           SIGNALS_CANONICAL_DATA_DIR: realData,
@@ -433,6 +459,22 @@ if (command === "list-local-apps") {
       const env = process.env;
       const dev = env.SIGNALS_INSTANCE === "dev";
       const body = { app: "signals", rtx: { mode: "embedded", appId: null, registered: false } };
+      // Registers at boot the way Signals does (#545): a Dev app asks for its slot's needs.json.
+      // RealTimeX's /sdk/register then prompts only for what the row has not decided yet.
+      if (dev && env.MOCK_REGISTER_LOG) {
+        const fs = require("node:fs");
+        let needs = null;
+        try { needs = JSON.parse(fs.readFileSync(env.SIGNALS_DATA_DIR + "/.launcher/needs.json", "utf8")).needs; } catch {}
+        const registered = Array.isArray(needs) ? needs : [];
+        let decided = {};
+        try {
+          const row = require("node:child_process").execFileSync("sqlite3", [env.MOCK_DEV_DB, "select metadata from local_apps where id = '" + env.MOCK_APP_ID + "';"], { encoding: "utf8" });
+          decided = JSON.parse(row || "{}").permissions || {};
+        } catch {}
+        const known = [].concat(decided.granted || [], decided.denied || []);
+        const prompted = registered.filter((permission) => !known.includes(permission));
+        fs.appendFileSync(env.MOCK_REGISTER_LOG, JSON.stringify({ appId: env.MOCK_APP_ID, dataDir: env.SIGNALS_DATA_DIR, registered, prompted }) + String.fromCharCode(10));
+      }
       if (env.MOCK_HEALTH !== "unguarded") {
         body.instance = {
           kind: dev ? "dev" : "canonical",
@@ -448,7 +490,7 @@ if (command === "list-local-apps") {
     \`, "next-server-fake-dev-app"], {
       detached: true,
       stdio: "ignore",
-      env: { ...process.env, ...app.env, MOCK_HEALTH: health, MOCK_LISTEN_PORT: String(port) },
+      env: { ...process.env, ...app.env, MOCK_APP_ID: app.id, MOCK_HEALTH: health, MOCK_LISTEN_PORT: String(port) },
     });
     child.unref();
     app.pid = child.pid;
@@ -557,7 +599,15 @@ console.log(JSON.stringify({ meta: { source: "mock" }, results }));
   assert.equal(first.json.timeoutMs, 600000, "a new slot waits out a cold compile");
   assert.ok(first.json.port >= 3300 && first.json.port < 3500, String(first.json.port));
   assert.deepEqual(first.json.instance, { kind: "dev", externalEffects: "denied", scheduler: "disabled", dataDir: join(devRoot, slotA) });
-  assert.deepEqual(first.json.permissions, { granted: [], denied: [], pending: requested, lastPromptedAt: null });
+  // Without --needs a new slot asks RealTimeX for nothing, so the owner sees no dialog (#545).
+  assert.deepEqual(first.json.permissions, { requested: [], granted: [], denied: [], pending: [], lastPromptedAt: null });
+  assert.deepEqual(first.json.needs.recorded, []);
+  assert.equal(first.json.restarted, false);
+  assert.deepEqual(needsFile("loop-issue-77-aaaa").needs, []);
+  assert.deepEqual(
+    registrations("loop-issue-77-aaaa").map(({ registered, prompted }) => ({ registered, prompted })),
+    [{ registered: [], prompted: [] }],
+  );
   assert.equal(first.json.staleSlots.total, 0);
   assert.match(first.json.next, /down --worktree /);
   const appA = first.json.appId;
@@ -584,8 +634,17 @@ console.log(JSON.stringify({ meta: { source: "mock" }, results }));
   assert.equal(JSON.parse(readFileSync(join(devRoot, ".launcher", "host.json"), "utf8")).cli, mockCli);
   assert.equal(existsSync(lockPath(slotA)), false);
 
-  const mainUp = await qa(["up", "--worktree", repo, ...host]);
+  // A new slot with --needs asks for exactly those, and up waits for the owner's answer.
+  const [mainUp, mainDialog] = await Promise.all([
+    qa(["up", "--worktree", repo, ...host, "--needs", "llm.chat"], { SIGNALS_QA_PERMISSION_WAIT_MS: "20000" }),
+    ownerAnswers("main", { granted: ["llm.chat"], denied: [] }),
+  ]);
   assert.equal(mainUp.status, 0, detail(mainUp));
+  assert.deepEqual(mainDialog.registered, ["llm.chat"]);
+  assert.deepEqual(mainDialog.prompted, ["llm.chat"]);
+  assert.deepEqual(mainUp.json.needs.recorded, ["llm.chat"]);
+  assert.deepEqual(mainUp.json.permissions.pending, []);
+  assert.equal(mainUp.json.restarted, false);
   assert.equal(mainUp.json.slot, "main");
   assert.equal(mainUp.json.primary, true);
   assert.notEqual(mainUp.json.port, first.json.port);
@@ -605,23 +664,60 @@ console.log(JSON.stringify({ meta: { source: "mock" }, results }));
   assert.equal(again.json.appId, appA);
   assert.equal(again.json.port, first.json.port);
   assert.equal(again.json.timeoutMs, 240000);
+  assert.equal(again.json.restarted, false);
+  assert.equal(registrations(slotA).length, 1, "a rerun without new needs must not restart the app");
 
   // --needs: only what this build requests; the owner grants while up waits; a denial fails fast.
   const bogus = await qa(["up", "--worktree", wtA, "--needs", "llm.chat,bogus.permission"]);
   assert.equal(bogus.status, 2);
   assert.match(bogus.json.error, /bogus\.permission/);
-  const [granted] = await Promise.all([
+  assert.deepEqual(needsFile(slotA).needs, [], "a refused --needs must not be recorded");
+
+  // A reused, running slot whose needs grow restarts, so the app registers again (#545).
+  const [granted, chatDialog] = await Promise.all([
     qa(["up", "--worktree", wtA, "--needs", "llm.chat"], { SIGNALS_QA_PERMISSION_WAIT_MS: "8000" }),
-    decidePermissions(appA, { granted: ["llm.chat", "llm.embed"], denied: ["desktop.browser"] }, { afterMs: 400 }),
+    ownerAnswers(slotA, { granted: ["llm.chat"], denied: ["desktop.browser"] }),
   ]);
   assert.equal(granted.status, 0, detail(granted));
-  assert.deepEqual(granted.json.permissions.granted, ["llm.chat", "llm.embed"]);
+  assert.equal(granted.json.restarted, true);
+  assert.deepEqual(granted.json.needs, { path: join(devRoot, slotA, ".launcher", "needs.json"), recorded: ["llm.chat"], added: ["llm.chat"] });
+  assert.deepEqual(chatDialog.prompted, ["llm.chat"]);
+  assert.deepEqual(granted.json.permissions.granted, ["llm.chat"]);
+  assert.deepEqual(granted.json.permissions.requested, ["llm.chat"]);
+
+  // The same needs again: nothing new, so no restart and no dialog.
+  const sameNeeds = await qa(["up", "--worktree", wtA, "--needs", "llm.chat"]);
+  assert.equal(sameNeeds.status, 0, detail(sameNeeds));
+  assert.equal(sameNeeds.json.restarted, false);
+  assert.deepEqual(sameNeeds.json.needs.added, []);
+  assert.equal(registrations(slotA).length, 2);
+
+  // Growing to llm.chat,llm.embed restarts and the dialog asks only about llm.embed; llm.chat stays
+  // granted.
+  const [grown, embedDialog] = await Promise.all([
+    qa(["up", "--worktree", wtA, "--needs", "llm.chat,llm.embed"], { SIGNALS_QA_PERMISSION_WAIT_MS: "8000" }),
+    ownerAnswers(slotA, { granted: ["llm.chat", "llm.embed"], denied: ["desktop.browser"] }),
+  ]);
+  assert.equal(grown.status, 0, detail(grown));
+  assert.equal(grown.json.restarted, true);
+  assert.deepEqual(grown.json.needs.added, ["llm.embed"]);
+  assert.deepEqual(embedDialog.registered, ["llm.chat", "llm.embed"]);
+  assert.deepEqual(embedDialog.prompted, ["llm.embed"]);
+  assert.deepEqual(grown.json.permissions.granted, ["llm.chat", "llm.embed"]);
+
+  // A smaller --needs never narrows the slot: what it asked for before stays recorded.
+  const narrower = await qa(["up", "--worktree", wtA, "--needs", "llm.embed"]);
+  assert.equal(narrower.status, 0, detail(narrower));
+  assert.equal(narrower.json.restarted, false);
+  assert.deepEqual(needsFile(slotA).needs, ["llm.chat", "llm.embed"]);
+
   const deniedStart = Date.now();
   const denied = await qa(["up", "--worktree", wtA, "--needs", "desktop.browser"], { SIGNALS_QA_PERMISSION_WAIT_MS: "20000" });
   assert.equal(denied.json.errorCode, "PERMISSIONS_MISSING");
   assert.deepEqual(denied.json.denied, ["desktop.browser"]);
   assert.match(denied.json.next, /Signals Dev · loop-issue-77-aaaa/);
   assert.ok(Date.now() - deniedStart < 10_000, "a denied permission must not wait out the dialog");
+  assert.deepEqual(registrations(slotA).at(-1).prompted, [], "a denied permission is not asked again");
 
   // down stops the app and keeps the row, data, receipt, and the owner's grants.
   const downA = await qa(["down", "--worktree", wtA]);
@@ -638,7 +734,34 @@ console.log(JSON.stringify({ meta: { source: "mock" }, results }));
   assert.equal(regrant.status, 0, detail(regrant));
   assert.equal(regrant.json.reused, true);
   assert.deepEqual(regrant.json.permissions.granted, ["llm.chat", "llm.embed"]);
-  assert.equal(regrant.json.permissions.pending.includes("llm.chat"), false);
+  assert.deepEqual(regrant.json.permissions.requested, ["llm.embed", "llm.chat", "desktop.browser"], "manifest order, as Signals asks");
+  assert.deepEqual(regrant.json.permissions.pending, []);
+  assert.equal(regrant.json.restarted, false, "a stopped app registers when it starts; no restart");
+
+  // A grant saved by RealTimeX's Settings screen before realtimex-ai-app#2277 is nested one level
+  // deeper. RealTimeX honours it, so status and up must report it as granted, not pending.
+  await decidePermissions(appA, {
+    granted: { granted: ["llm.chat", "llm.embed"], denied: ["desktop.browser"] },
+    grantedAt: "2026-10-06T00:00:00.000Z",
+  });
+  const nested = await qa(["status", "--worktree", wtA]);
+  assert.equal(nested.status, 0, detail(nested));
+  assert.deepEqual(nested.json.permissions, {
+    requested: ["llm.embed", "llm.chat", "desktop.browser"],
+    granted: ["llm.chat", "llm.embed"],
+    denied: ["desktop.browser"],
+    pending: [],
+    lastPromptedAt: null,
+  });
+  // A recorded need this build's manifest no longer lists is not asked for, so it is never pending.
+  writeFileSync(
+    join(devRoot, slotA, ".launcher", "needs.json"),
+    JSON.stringify({ ...needsFile(slotA), needs: [...needsFile(slotA).needs, "retired.permission"] }),
+  );
+  assert.deepEqual((await qa(["status", "--worktree", wtA])).json.permissions.pending, []);
+  const nestedUp = await qa(["up", "--worktree", wtA, "--needs", "llm.chat,llm.embed"], { SIGNALS_QA_PERMISSION_WAIT_MS: "2000" });
+  assert.equal(nestedUp.status, 0, detail(nestedUp));
+  assert.deepEqual(nestedUp.json.permissions.granted, ["llm.chat", "llm.embed"]);
 
   const mismatch = await qa(["up", "--worktree", wtA, "--profile", "snapshot"]);
   assert.equal(mismatch.json.errorCode, "PROFILE_MISMATCH");

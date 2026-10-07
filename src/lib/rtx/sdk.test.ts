@@ -1,3 +1,6 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   bootstrapRtxIfEmbedded,
@@ -38,6 +41,35 @@ describe("rtx sdk", () => {
     expect(body.permissions).toContain("credentials.list");
     expect(body.permissions).toContain("llm.embed");
     expect(body.permissions).toContain("llm.chat");
+  });
+
+  it("registers a Dev app with only its slot's needs, and with none when there is no needs.json (#545)", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "signals-rtx-register-"));
+    try {
+      const env = {
+        RTX_APP_ID: "dev-app-1",
+        SERVER_URL: "http://127.0.0.1:3101",
+        SIGNALS_INSTANCE: "dev",
+        SIGNALS_DATA_DIR: dataDir,
+      };
+      const registered = async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+          ok: true,
+          json: async () => ({ success: true, message: "All permissions already processed" }),
+        });
+        const result = await registerWithRtx(fetchMock as unknown as typeof fetch, env);
+        expect(result.success).toBe(true);
+        expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:3101/sdk/register", expect.anything());
+        return JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string).permissions;
+      };
+
+      expect(await registered()).toEqual([]);
+      mkdirSync(join(dataDir, ".launcher"));
+      writeFileSync(join(dataDir, ".launcher", "needs.json"), JSON.stringify({ needs: ["llm.chat", "not.in.manifest"] }));
+      expect(await registered()).toEqual(["llm.chat"]);
+    } finally {
+      rmSync(dataDir, { recursive: true, force: true });
+    }
   });
 
   it("pings with x-app-id header", async () => {

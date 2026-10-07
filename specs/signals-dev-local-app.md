@@ -383,6 +383,13 @@ honoured only when `SIGNALS_INSTANCE=dev`, filtered to the manifest set) read by
 `[]` and shows no dialog. Persisting grants per worktree (ADR-541-4) already removes the
 once-per-rework prompt, which is the pain #541 names; narrowing is an optimisation.
 
+**Delivered by #545 with a file instead of the variable.** A slot's env is pinned at creation, and
+`update-local-app` cannot change it with a scoped key. So `up` writes the slot's needs to
+`<SIGNALS_DATA_DIR>/.launcher/needs.json` on every run: exactly `--needs` for a new slot, and the
+union with the recorded needs for a reused one. When the union grows, `up` restarts a running app
+so it registers again. Signals reads the file only when `SIGNALS_INSTANCE=dev`, filters it to the
+manifest, and registers nothing when it is missing.
+
 ### ADR-541-13 AGENTS.md §10 is rewritten
 
 New content: the three owner decisions; the Dev host is the only host for agents; the
