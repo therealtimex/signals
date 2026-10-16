@@ -54,7 +54,7 @@ export type AddFeedback =
       kind: "result";
       result: AddAllowedOriginResult;
       message: string;
-      /** The contract clears the field only once nothing is left to do with the link. */
+      /** Cleared whenever the website was saved; kept only when nothing was. */
       clearInput: boolean;
     }
   | { kind: "field_error"; message: string };
@@ -81,14 +81,16 @@ export function interpretAdd(
     if (result.applied) {
       return { kind: "result", result, message: `Added ${origin}. The browser can open it now.`, clearInput: true };
     }
+    // Saved but not active: the field is cleared too (Product/UX ruling, experience review r1).
+    // The remaining action, Try again, is in the alert.
     if (result.runtime?.reachable) {
-      return { kind: "result", result, message: `Saved ${origin}, but it isn't active yet.`, clearInput: false };
+      return { kind: "result", result, message: `Saved ${origin}, but it isn't active yet.`, clearInput: true };
     }
     return {
       kind: "result",
       result,
       message: `Saved ${origin}. It takes effect when the RealTimeX Browser is available.`,
-      clearInput: false,
+      clearInput: true,
     };
   }
   return { kind: "field_error", message: NO_RESPONSE };
@@ -269,4 +271,31 @@ export function groupRecoverableDenials(denials: readonly RunNavigationDenial[])
 /** Settings → Platforms → Allowed websites, with the connection selected (contract §2.1). */
 export function manageAllowedWebsitesHref(connectionId: string): string {
   return `/dashboard/settings?tab=platforms&connection=${encodeURIComponent(connectionId)}#allowed-websites`;
+}
+
+export const STILL_NOT_ACTIVE = "Still not active. The RealTimeX Browser didn't accept the update.";
+export const STILL_UNREACHABLE = "The RealTimeX Browser still isn't responding.";
+export const SIGNALS_NO_RESPONSE = "Signals didn't respond. Nothing was changed.";
+
+export function allowedAnnouncement(origin: string): string {
+  return `${origin} is allowed. Start the workflow again to use the link.`;
+}
+
+/**
+ * What the run callout's Try again reports (UX experience review r1): the website, or every
+ * website, is now allowed (focus moves to the callout), or it still isn't, with focus left on the
+ * button and the reason announced.
+ */
+export function calloutRetryOutcome(
+  origin: string,
+  origins: readonly string[],
+  next: AllowedOriginsView | null,
+): { message: string; focusCallout: boolean } {
+  if (origins.length > 1 && origins.every((entry) => calloutOriginState(entry, next) === "allowed")) {
+    return { message: "These websites are allowed. Start the workflow again to use them.", focusCallout: true };
+  }
+  if (calloutOriginState(origin, next) === "allowed") {
+    return { message: allowedAnnouncement(origin), focusCallout: true };
+  }
+  return { message: next?.runtime?.reachable ? STILL_NOT_ACTIVE : STILL_UNREACHABLE, focusCallout: false };
 }

@@ -211,10 +211,14 @@ describe("Settings → Platforms → Allowed websites (contract §1)", () => {
     expect(status()).toContain("Saved https://example.org, but it isn't active yet.");
     expect(text()).toContain("Some changes aren't active yet");
     expect(text()).toContain("Not active yet");
+    // Saved, so the field is cleared; Try again is in the alert (experience review r1).
+    expect(input().value).toBe("");
 
+    button("Try again").focus();
     await act(async () => button("Try again").click());
     await settle();
     expect(status()).toContain("All changes are active.");
+    expect(document.activeElement).toBe(input());
     expect(text()).not.toContain("Some changes aren't active yet");
     expect(text()).not.toContain("Not active yet");
   });
@@ -286,7 +290,7 @@ describe("Settings → Platforms → Allowed websites (contract §1)", () => {
     await act(async () => button("Undo").click());
     await settle();
     expect(status()).toContain("Added https://a.example back.");
-    expect(button("Remove https://a.example")).toBeTruthy();
+    expect(document.activeElement).toBe(button("Remove https://a.example"));
   });
 
   it("says the Dev copy can't change signals-publish when Remove is refused", async () => {
@@ -301,6 +305,70 @@ describe("Settings → Platforms → Allowed websites (contract §1)", () => {
 
     expect(status()).toContain("This development copy of Signals can't change signals-publish.");
     expect(document.activeElement).toBe(button("Remove https://a.example"));
+  });
+
+  it("keeps focus on the alert's Try again when RealTimeX refuses again", async () => {
+    const saved = [...DEFAULTS, "https://example.org"];
+    mockApi({
+      get: [
+        {
+          status: 200,
+          body: view({
+            custom: [{ origin: "https://example.org", source: "settings", addedAt: TODAY }],
+            runtime: { reachable: true, allowedOrigins: DEFAULTS, applied: false },
+          }),
+        },
+      ],
+      apply: [{ status: 502, body: { applied: false, effective: saved, runtime: { reachable: true, allowedOrigins: DEFAULTS, applied: false } } }],
+    });
+    await render();
+    const tryAgain = button("Try again");
+    tryAgain.focus();
+
+    await act(async () => tryAgain.click());
+    await settle();
+
+    expect(status()).toContain("Still not active. The RealTimeX Browser didn't accept the update.");
+    expect(document.activeElement).toBe(button("Try again"));
+    expect(button("Try again").hasAttribute("disabled")).toBe(false);
+  });
+
+  it("reports each unreachable Try again: still down, then back but not active", async () => {
+    const custom = [{ origin: "https://example.org", source: "settings" as const, addedAt: TODAY }];
+    const down = view({ custom, runtime: { reachable: false, allowedOrigins: null, applied: null } });
+    const backNotActive = view({ custom, runtime: { reachable: true, allowedOrigins: DEFAULTS, applied: false } });
+    mockApi({
+      get: [{ status: 200, body: down }, { status: 200, body: down }, { status: 200, body: backNotActive }],
+      post: [
+        {
+          status: 502,
+          body: {
+            origin: "https://other.example",
+            status: "added",
+            persisted: true,
+            applied: false,
+            effective: [...DEFAULTS, "https://example.org", "https://other.example"],
+            runtime: { reachable: false, allowedOrigins: null, applied: null },
+          },
+        },
+      ],
+    });
+    await render();
+    await submit("https://other.example");
+    expect(status()).toContain("It takes effect when the RealTimeX Browser is available.");
+
+    button("Try again").focus();
+    await act(async () => button("Try again").click());
+    await settle();
+    expect(status()).toBe("The RealTimeX Browser still isn't responding.");
+    expect(document.activeElement).toBe(button("Try again"));
+
+    await act(async () => button("Try again").click());
+    await settle();
+    expect(text()).toContain("Some changes aren't active yet");
+    // The alert speaks now; the stale "…when the RealTimeX Browser is available." line is gone.
+    expect(status()).toBe("");
+    expect(document.activeElement).toBe(button("Try again"));
   });
 
   it("shows a selector with two connections", async () => {

@@ -9,8 +9,12 @@ import { Button } from "@/components/ui/button";
 import { allowedWebsitesApi } from "@/lib/browser/allowed-websites-client";
 import type { AllowedOriginsChange, AllowedOriginsView } from "@/lib/browser/allowed-websites-types";
 import {
+  allowedAnnouncement,
   calloutOriginState,
+  calloutRetryOutcome,
+  devGuardMessage,
   groupRecoverableDenials,
+  SIGNALS_NO_RESPONSE,
   manageAllowedWebsitesHref,
   viewFromChange,
   type BlockedConnectionGroup,
@@ -21,6 +25,23 @@ import type { RunNavigationDenial } from "@/lib/browser/navigation-blocked";
 
 function Mono({ children }: { children: React.ReactNode }) {
   return <code className="font-mono text-foreground break-words [overflow-wrap:anywhere]">{children}</code>;
+}
+
+/** aria-disabled, not disabled, while busy: a disabled button drops focus to the page. */
+function TryAgainButton({ busy, onClick }: { busy: boolean; onClick: () => void }) {
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      aria-disabled={busy}
+      aria-busy={busy}
+      className="aria-disabled:pointer-events-none aria-disabled:opacity-50"
+      onClick={() => !busy && onClick()}
+    >
+      {busy && <Loader2 className="animate-spin" aria-hidden />}
+      Try again
+    </Button>
+  );
 }
 
 function BlockedLink({ url }: { url: string | null }) {
@@ -52,6 +73,14 @@ function BlockedWebsiteCallout({ group }: { group: BlockedConnectionGroup }) {
   const calloutRef = useRef<HTMLDivElement>(null);
   const openerRef = useRef<HTMLButtonElement | null>(null);
   const focusCalloutOnClose = useRef(false);
+  // After a Try again that allowed the website its button is gone; focus the callout once the
+  // new state has rendered.
+  const focusCalloutAfterUpdate = useRef(false);
+  useEffect(() => {
+    if (!focusCalloutAfterUpdate.current) return;
+    focusCalloutAfterUpdate.current = false;
+    calloutRef.current?.focus();
+  }, [view, announcement]);
 
   const load = useCallback(async () => {
     const outcome = await allowedWebsitesApi.get(connectionId);
@@ -74,20 +103,44 @@ function BlockedWebsiteCallout({ group }: { group: BlockedConnectionGroup }) {
     [connectionId, sessionName],
   );
 
-  async function tryAgain(state: CalloutOriginState) {
+  async function tryAgain(state: CalloutOriginState, origin: string) {
+    if (busy) return;
     setBusy(true);
+    // Clear first, so a repeated result (a second refusal) is announced again.
+    setAnnouncement("");
+    let next: AllowedOriginsView | null = null;
+    let failure: string | null = null;
     try {
       if (state === "not_active") {
         const outcome = await allowedWebsitesApi.apply(connectionId);
         if ((outcome.status === 200 || outcome.status === 502) && outcome.body && "effective" in outcome.body) {
-          applyChange(outcome.body as AllowedOriginsChange);
+          next = viewFromChange(view, outcome.body as AllowedOriginsChange, { connectionId, sessionName });
+        } else {
+          failure = outcome.status === 403 ? devGuardMessage(sessionName) : SIGNALS_NO_RESPONSE;
         }
       } else {
-        await load();
+        const outcome = await allowedWebsitesApi.get(connectionId);
+        if (outcome.status === 200 && outcome.body && "effective" in outcome.body) {
+          next = outcome.body as AllowedOriginsView;
+        } else {
+          failure = SIGNALS_NO_RESPONSE;
+        }
       }
     } finally {
       setBusy(false);
     }
+    if (failure || !next) {
+      setAnnouncement(failure ?? SIGNALS_NO_RESPONSE);
+      return;
+    }
+    setView(next);
+    const result = calloutRetryOutcome(
+      origin,
+      origins.map((entry) => entry.origin),
+      next,
+    );
+    focusCalloutAfterUpdate.current = result.focusCallout;
+    setAnnouncement(result.message);
   }
 
   function openDialog(target: BlockedOrigin, opener: HTMLButtonElement) {
@@ -100,7 +153,7 @@ function BlockedWebsiteCallout({ group }: { group: BlockedConnectionGroup }) {
   function handleAllowed(origin: string) {
     focusCalloutOnClose.current = true;
     setDialogOpen(false);
-    setAnnouncement(`${origin} is allowed. Start the workflow again to use the link.`);
+    setAnnouncement(allowedAnnouncement(origin));
   }
 
   if (!loaded) return null;
@@ -176,10 +229,7 @@ function BlockedWebsiteCallout({ group }: { group: BlockedConnectionGroup }) {
           Allow website…
         </Button>
       ) : (
-        <Button variant="outline" size="sm" disabled={busy} onClick={() => void tryAgain(single.state)}>
-          {busy && <Loader2 className="animate-spin" aria-hidden />}
-          Try again
-        </Button>
+        <TryAgainButton busy={busy} onClick={() => void tryAgain(single.state, single.origin)} />
       );
   }
 
@@ -222,9 +272,7 @@ function BlockedWebsiteCallout({ group }: { group: BlockedConnectionGroup }) {
                   {(entry.state === "not_active" || entry.state === "unreachable") && (
                     <>
                       <Badge variant="warning">Not active yet</Badge>
-                      <Button variant="outline" size="sm" disabled={busy} onClick={() => void tryAgain(entry.state)}>
-                        Try again
-                      </Button>
+                      <TryAgainButton busy={busy} onClick={() => void tryAgain(entry.state, entry.origin)} />
                     </>
                   )}
                 </li>

@@ -30,6 +30,8 @@ import {
   pickInitialConnection,
   rowNotActive,
   SELECT_HELP,
+  SIGNALS_NO_RESPONSE,
+  STILL_UNREACHABLE,
   type CardAlert,
 } from "@/lib/browser/allowed-websites-ui";
 import { listDefaultAllowedOrigins } from "@/lib/platforms/platform-urls";
@@ -76,7 +78,15 @@ function CardStatusAlert({
           ? "Your list is saved. Changes take effect when the RealTimeX Browser is available."
           : "They're saved, but the RealTimeX Browser didn't accept the update. Signals tries again the next time it uses this connection."}
       </p>
-      <Button variant="outline" size="sm" className="mt-3" disabled={busy} onClick={onTryAgain}>
+      {/* aria-disabled, not disabled: a disabled button drops focus while the retry runs. */}
+      <Button
+        variant="outline"
+        size="sm"
+        className="mt-3 aria-disabled:pointer-events-none aria-disabled:opacity-50"
+        aria-disabled={busy}
+        aria-busy={busy}
+        onClick={() => !busy && onTryAgain()}
+      >
         {busy ? <Loader2 className="animate-spin" aria-hidden /> : <RotateCw aria-hidden />}
         Try again
       </Button>
@@ -259,11 +269,8 @@ function DefaultOriginList({ defaults }: { defaults: string[] }) {
   );
 }
 
-/**
- * Settings → Platforms → Allowed websites (#547, UX contract v1 §1). Shown only when Signals runs
- * inside RealTimeX; the parent hides it otherwise.
- */
-export function AllowedWebsitesCard() {
+/** State and actions of the Allowed websites card; every request stays bound to its connection. */
+function useAllowedWebsites() {
   const [connections, setConnections] = useState<BrowserConnectionOption[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [view, setView] = useState<AllowedOriginsView | null>(null);
@@ -434,11 +441,14 @@ export function AllowedWebsitesCard() {
     }
     if (feedback.kind === "field_error") {
       setStatus({ message: feedback.message });
+      setPendingFocus({ kind: "input" });
       return;
     }
     const { result } = feedback;
     setView((current) => (current ? mergeChange(current, result, withCustomOrigin(current, result.origin)) : current));
     setStatus({ message: feedback.message });
+    // Undo unmounts itself; land on the restored row's Remove button.
+    setPendingFocus({ kind: "remove", origin: result.origin });
   }
 
   async function alertTryAgain(alert: CardAlert) {
@@ -446,23 +456,35 @@ export function AllowedWebsitesCard() {
     if (!connectionId) return;
     setAlertBusy(true);
     try {
+      // Success moves focus to the Add field (the alert goes away); otherwise the alert and its
+      // button stay, and so does focus.
       if (alert === "not_active") {
         const feedback = interpretApply(await allowedWebsitesApi.apply(connectionId), sessionName);
         if (!isCurrent(connectionId)) return;
         if (feedback.kind === "result") {
           setView((current) => (current ? mergeChange(current, feedback.change) : current));
+          if (feedback.change.applied) setPendingFocus({ kind: "input" });
         }
         setStatus({ message: feedback.message });
         return;
       }
       const outcome = await allowedWebsitesApi.get(connectionId);
       if (!isCurrent(connectionId)) return;
-      if (outcome.status === 200 && outcome.body && "effective" in outcome.body) {
-        const fresh = outcome.body as AllowedOriginsView;
-        setView(fresh);
-        if (fresh.runtime?.reachable && fresh.runtime.applied === true) {
-          setStatus({ message: "Connected to the RealTimeX Browser. All changes are active." });
-        }
+      if (!(outcome.status === 200 && outcome.body && "effective" in outcome.body)) {
+        setStatus({ message: SIGNALS_NO_RESPONSE });
+        return;
+      }
+      const fresh = outcome.body as AllowedOriginsView;
+      setView(fresh);
+      if (!fresh.runtime?.reachable) {
+        setStatus({ message: STILL_UNREACHABLE });
+      } else if (fresh.runtime.applied === true) {
+        setStatus({ message: "Connected to the RealTimeX Browser. All changes are active." });
+        setPendingFocus({ kind: "input" });
+      } else {
+        // The not-active alert (if any) now speaks; an old "takes effect when…" line would contradict it.
+        setStatus(null);
+        if (!cardAlert(fresh)) setPendingFocus({ kind: "input" });
       }
     } finally {
       setAlertBusy(false);
@@ -474,6 +496,63 @@ export function AllowedWebsitesCard() {
     if (ok) setPendingFocus({ kind: "input" });
   }
 
+  return {
+    connections,
+    selectedId,
+    view,
+    loadState,
+    url,
+    setUrl,
+    fieldError,
+    setFieldError,
+    adding,
+    removing,
+    alertBusy,
+    status,
+    sessionName,
+    busy,
+    inputRef,
+    titleRef,
+    removeRefs,
+    changeConnection,
+    add,
+    remove,
+    undo,
+    alertTryAgain,
+    retryLoad,
+  };
+}
+
+/**
+ * Settings → Platforms → Allowed websites (#547, UX contract v1 §1). Shown only when Signals runs
+ * inside RealTimeX; the parent hides it otherwise.
+ */
+export function AllowedWebsitesCard() {
+  const {
+    connections,
+    selectedId,
+    view,
+    loadState,
+    url,
+    setUrl,
+    fieldError,
+    setFieldError,
+    adding,
+    removing,
+    alertBusy,
+    status,
+    sessionName,
+    busy,
+    inputRef,
+    titleRef,
+    removeRefs,
+    changeConnection,
+    add,
+    remove,
+    undo,
+    alertTryAgain,
+    retryLoad,
+  } = useAllowedWebsites();
   const alert = view ? cardAlert(view) : null;
 
   return (

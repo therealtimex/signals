@@ -356,3 +356,102 @@ describe("allow dialog states (contract §3.1, §4)", () => {
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 });
+
+describe("callout Try again keeps focus and reports (experience review r1)", () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  beforeEach(() => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(() => {
+    act(() => root.unmount());
+    container.remove();
+    vi.unstubAllGlobals();
+  });
+
+  const saved = [...DEFAULTS, EVENTBRITE];
+  const notActive = view({ reachable: true, allowedOrigins: DEFAULTS, applied: false }, saved);
+  const status = () => document.querySelector('[data-testid="blocked-website-callout"] [role="status"]')?.textContent;
+
+  async function render(denials: RunNavigationDenial[]) {
+    await act(async () => {
+      root.render(createElement(BlockedWebsiteCallouts, { denials }));
+    });
+    await flush();
+  }
+
+  it("moves focus to the callout and announces when Try again makes the website active", async () => {
+    mockApi({
+      get: [{ status: 200, body: notActive }],
+      apply: [{ status: 200, body: { applied: true, effective: saved, runtime: { reachable: true, allowedOrigins: saved, applied: true } } }],
+    });
+    await render([denial()]);
+    const tryAgain = button("Try again");
+    tryAgain.focus();
+
+    await act(async () => tryAgain.click());
+    await flush();
+
+    expect(text()).toContain("Website allowed");
+    expect(status()).toBe("https://www.eventbrite.com is allowed. Start the workflow again to use the link.");
+    expect(document.activeElement).toBe(document.querySelector('[data-testid="blocked-website-callout"]'));
+  });
+
+  it("keeps focus on Try again and says it still isn't active after another refusal", async () => {
+    mockApi({
+      get: [{ status: 200, body: notActive }],
+      apply: [{ status: 502, body: { applied: false, effective: saved, runtime: { reachable: true, allowedOrigins: DEFAULTS, applied: false } } }],
+    });
+    await render([denial()]);
+    const tryAgain = button("Try again");
+    tryAgain.focus();
+
+    await act(async () => tryAgain.click());
+    await flush();
+
+    expect(status()).toBe("Still not active. The RealTimeX Browser didn't accept the update.");
+    expect(document.activeElement).toBe(button("Try again"));
+    expect(button("Try again").hasAttribute("disabled")).toBe(false);
+  });
+
+  it("says RealTimeX still isn't responding when a re-read finds it unreachable", async () => {
+    const down = view({ reachable: false, allowedOrigins: null, applied: null }, saved);
+    mockApi({ get: [{ status: 200, body: down }] });
+    await render([denial()]);
+    const tryAgain = button("Try again");
+    tryAgain.focus();
+
+    await act(async () => tryAgain.click());
+    await flush();
+
+    expect(status()).toBe("The RealTimeX Browser still isn't responding.");
+    expect(document.activeElement).toBe(button("Try again"));
+  });
+
+  it("says these websites are allowed when the last blocked row becomes active", async () => {
+    const both = [...DEFAULTS, EVENTBRITE, "https://lu.ma"];
+    mockApi({
+      get: [{ status: 200, body: view({ reachable: true, allowedOrigins: [...DEFAULTS, "https://lu.ma"], applied: false }, both) }],
+      apply: [{ status: 200, body: { applied: true, effective: both, runtime: { reachable: true, allowedOrigins: both, applied: true } } }],
+    });
+    await render([
+      denial(),
+      denial({
+        deniedOrigin: "https://lu.ma",
+        requestedUrl: null,
+        recovery: { kind: "allow_origin", connectionId: "bc_publish", origin: "https://lu.ma" },
+      }),
+    ]);
+
+    await act(async () => button("Try again").click());
+    await flush();
+
+    expect(text()).toContain("Websites allowed");
+    expect(status()).toBe("These websites are allowed. Start the workflow again to use them.");
+  });
+});

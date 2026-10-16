@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { AddAllowedOriginResult, AllowedOriginsView } from "@/lib/browser/allowed-websites-types";
 import {
   calloutOriginState,
+  calloutRetryOutcome,
   cardAlert,
   formatAddedMeta,
   groupRecoverableDenials,
@@ -37,12 +38,12 @@ describe("Add results (contract §1.1)", () => {
     [
       { status: 502, body: added({ applied: false, runtime: reachable(DEFAULTS, false) }) },
       "Saved https://example.org, but it isn't active yet.",
-      false,
+      true,
     ],
     [
       { status: 502, body: added({ applied: false, runtime: unreachable }) },
       "Saved https://example.org. It takes effect when the RealTimeX Browser is available.",
-      false,
+      true,
     ],
     [{ status: 200, body: added({ origin: "https://x.com", status: "already_default" }) }, "https://x.com is already allowed by Signals.", true],
     [{ status: 200, body: added({ status: "already_added" }) }, "https://example.org is already in your list.", true],
@@ -217,5 +218,43 @@ describe("Settings helpers", () => {
     expect(formatAddedMeta(Math.floor(new Date(2026, 9, 16, 9).getTime() / 1000), "recovery", now)).toBe(
       "Added today from a blocked run",
     );
+  });
+});
+
+describe("callout Try again outcome (experience review r1)", () => {
+  const ORIGIN = "https://example.org";
+  const view = (runtime: AllowedOriginsView["runtime"], effective = [...DEFAULTS, ORIGIN]): AllowedOriginsView => ({
+    connectionId: "bc_1",
+    sessionName: "signals-publish",
+    defaults: DEFAULTS,
+    custom: [],
+    effective,
+    runtime,
+  });
+
+  it("moves focus to the callout and says the website is allowed", () => {
+    expect(calloutRetryOutcome(ORIGIN, [ORIGIN], view(reachable([...DEFAULTS, ORIGIN], true)))).toEqual({
+      message: "https://example.org is allowed. Start the workflow again to use the link.",
+      focusCallout: true,
+    });
+  });
+
+  it("says these websites are allowed once every row is", () => {
+    const both = [...DEFAULTS, ORIGIN, "https://lu.ma"];
+    expect(calloutRetryOutcome(ORIGIN, [ORIGIN, "https://lu.ma"], view(reachable(both, true), both))).toEqual({
+      message: "These websites are allowed. Start the workflow again to use them.",
+      focusCallout: true,
+    });
+  });
+
+  it("keeps focus and says why when it still isn't active", () => {
+    expect(calloutRetryOutcome(ORIGIN, [ORIGIN], view(reachable(DEFAULTS, false)))).toEqual({
+      message: "Still not active. The RealTimeX Browser didn't accept the update.",
+      focusCallout: false,
+    });
+    expect(calloutRetryOutcome(ORIGIN, [ORIGIN], view(unreachable))).toEqual({
+      message: "The RealTimeX Browser still isn't responding.",
+      focusCallout: false,
+    });
   });
 });
