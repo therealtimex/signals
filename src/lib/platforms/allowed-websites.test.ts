@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import liveList from "@/lib/rtx/host-fixtures/list-browser-sessions.live.json";
 import { addConnectionOrigin } from "@/lib/db/queries/browser-connection-origins";
 import { ensureBrowserConnection } from "@/lib/db/queries/platform-targets";
 import { ExternalEffectDeniedError } from "@/lib/instance/guard";
@@ -9,6 +8,7 @@ import {
   readAllowedOriginsRuntime,
 } from "@/lib/platforms/allowed-websites";
 import { resetCoreTables } from "@/test/db";
+import { fakeRtxBrowserSessions } from "@/test/fake-rtx-browser-sessions";
 
 const RTX_ENV = { RTX_APP_ID: "app-1", SERVER_URL: "http://127.0.0.1:3001" };
 const DEFAULTS = [
@@ -18,45 +18,12 @@ const DEFAULTS = [
   "https://www.facebook.com",
 ];
 
-type Session = { sessionName: string; guardrails?: Record<string, unknown> };
-type Call = { path: string; body: Record<string, unknown> | null };
-
-/**
- * A RealTimeX stand-in that keeps session records and applies `create-browser-session` the way
- * RTX does (ADR-547-1 / F1): each guardrail key present in the request replaces the stored one,
- * and absent keys are kept. Starts from the live capture in `host-fixtures/`.
- */
 function fakeRtx(options: { createFails?: boolean; createIgnored?: boolean; listFails?: boolean } = {}) {
-  const sessions: Session[] = structuredClone(liveList.sessions) as Session[];
-  const calls: Call[] = [];
-  const fetchImpl = async (url: string, init?: RequestInit) => {
-    const path = new URL(url).pathname;
-    const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : null;
-    calls.push({ path, body });
-    const reply = (status: number, payload: unknown) =>
-      ({ ok: status < 400, status, json: async () => payload }) as Response;
-
-    if (path === "/cli/list-browser-sessions") {
-      if (options.listFails) throw new Error("fetch failed");
-      return reply(200, { success: true, sessions });
-    }
-    if (path === "/cli/create-browser-session") {
-      if (options.createFails) {
-        return reply(500, { success: false, error: "The RealTimeX Browser registry is busy." });
-      }
-      if (options.createIgnored) return reply(200, { success: true, created: false });
-      const name = String(body?.sessionName);
-      let session = sessions.find((entry) => entry.sessionName === name);
-      if (!session) {
-        session = { sessionName: name, guardrails: {} };
-        sessions.push(session);
-      }
-      session.guardrails = { ...session.guardrails, ...(body?.guardrails as object) };
-      return reply(200, { success: true, created: false });
-    }
-    return reply(404, { success: false, error: `unexpected ${path}` });
-  };
-  return { fetchImpl: fetchImpl as unknown as typeof fetch, calls, sessions };
+  return fakeRtxBrowserSessions({
+    createFails: options.createFails ? "The RealTimeX Browser registry is busy." : undefined,
+    createIgnored: options.createIgnored,
+    listFails: options.listFails,
+  });
 }
 
 describe("allowed websites: apply and verify", () => {
