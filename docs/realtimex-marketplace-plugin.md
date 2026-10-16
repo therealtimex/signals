@@ -16,6 +16,8 @@ Package and distribute Signals through the **RealtimeX marketplace** — not pub
 Plugin id: `com.realtimex.signals`  
 Local app id: `47e45f71-3279-42f5-8e95-731de01b6eae`
 
+Version 0.2.23 adds **Allowed websites** for browser connections. Settings → Platform connections lists the websites Signals always allows, now including `https://lnkd.in` so LinkedIn short links open, and lets you add or remove websites per connection by pasting any link. When RealTimeX blocks a website during a workflow run, the run page names it and offers **Allow website…**; the change is applied to the RealTimeX session without restarting it or losing sign-in. This release also includes writing media in publish jobs and hardens X compose, builds `signals-pp-cli` with Go 1.26.9 for standard-library security fixes, and adds the Signals Dev Local App tooling for testing on the RealTimeX Dev host. Upgrading adds one database table (migration 0038, additive).
+
 Version 0.2.22 makes email, phone and messaging channels first-class on the contact page: the Identities & Channels tab counts them alongside platform identities and lets users add, edit, label, verify, set primary and remove them, offers social-profile enrichment for contacts with a corporate email domain, and repairs contacts that earlier merges left with several primary emails.
 
 Version 0.2.21 synchronizes TipTap composer state and adds deterministic verification to LinkedIn publishing, guards social posting against untracked payloads and fabricated URLs across X, Facebook, and LinkedIn, prevents duplicate submissions on verify timeout via verify_uncertain, and records observed LinkedIn profiles on Snowball attestation failures.
