@@ -106,16 +106,24 @@ describe("Remove, Undo and Try again (contract §1.2–§1.3)", () => {
 
 describe("never claims active without RealTimeX (contract §1.3, Addendum A3)", () => {
   it("shows one card alert at a time", () => {
-    expect(cardAlert(null)).toBeNull();
-    expect(cardAlert(unreachable)).toBe("unreachable");
-    expect(cardAlert(reachable(DEFAULTS, false))).toBe("not_active");
-    expect(cardAlert(reachable(DEFAULTS, true))).toBeNull();
-    expect(cardAlert({ reachable: true, allowedOrigins: null, applied: null })).toBeNull();
+    const added = [...DEFAULTS, "https://example.org"];
+    const card = (runtime: AllowedOriginsView["runtime"], effective = added) => ({ runtime, effective, defaults: DEFAULTS });
+    const noList = { reachable: true, allowedOrigins: null, applied: null };
+
+    expect(cardAlert(card(null))).toBeNull();
+    expect(cardAlert(card(unreachable))).toBe("unreachable");
+    expect(cardAlert(card(reachable(DEFAULTS, false)))).toBe("not_active");
+    expect(cardAlert(card(reachable(added, true)))).toBeNull();
+    // RealTimeX holds no list for the session: the user's websites aren't active, so keep Try again.
+    expect(cardAlert(card(noList))).toBe("not_active");
+    // …but with nothing added there is nothing for the user to apply.
+    expect(cardAlert(card(noList, DEFAULTS))).toBeNull();
   });
 
   it("badges a row Not active yet only while RealTimeX is reachable", () => {
     expect(rowNotActive("https://example.org", reachable(DEFAULTS, false))).toBe(true);
     expect(rowNotActive("https://example.org", reachable([...DEFAULTS, "https://example.org"], true))).toBe(false);
+    expect(rowNotActive("https://example.org", { reachable: true, allowedOrigins: null, applied: null })).toBe(true);
     expect(rowNotActive("https://example.org", unreachable)).toBe(false);
     expect(rowNotActive("https://example.org", null)).toBe(false);
   });

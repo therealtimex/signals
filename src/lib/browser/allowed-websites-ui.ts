@@ -145,16 +145,38 @@ export function interpretApply(outcome: ApiOutcome<AllowedOriginsChange>, sessio
 
 export type CardAlert = "unreachable" | "not_active" | null;
 
-/** One card-level alert at a time (contract §1.3, Addendum A3). */
-export function cardAlert(runtime: AllowedOriginsRuntime | null): CardAlert {
+/**
+ * One card-level alert at a time (contract §1.3, Addendum A3). RealTimeX can be reachable yet hold
+ * no list for the session (it was never created, or creating it failed): once the user has added
+ * websites, that is "not active yet" too, so Try again stays available.
+ */
+export function cardAlert(view: Pick<AllowedOriginsView, "runtime" | "effective" | "defaults">): CardAlert {
+  const { runtime } = view;
   if (!runtime) return null;
   if (!runtime.reachable) return "unreachable";
-  return runtime.applied === false ? "not_active" : null;
+  if (runtime.applied === false) return "not_active";
+  const defaults = new Set(view.defaults);
+  const hasAdditions = view.effective.some((origin) => !defaults.has(origin));
+  return runtime.allowedOrigins === null && hasAdditions ? "not_active" : null;
 }
 
-/** "Not active yet" on a row: RealTimeX is reachable and doesn't hold the website. */
+/** "Not active yet" on a row: RealTimeX is reachable and doesn't hold the website (or holds no list). */
 export function rowNotActive(origin: string, runtime: AllowedOriginsRuntime | null): boolean {
-  return !!runtime?.reachable && Array.isArray(runtime.allowedOrigins) && !runtime.allowedOrigins.includes(origin);
+  return !!runtime?.reachable && !(runtime.allowedOrigins ?? []).includes(origin);
+}
+
+/**
+ * Apply an add/remove/apply response to the loaded view. With no view yet (its load failed), the
+ * response alone carries what the run callout needs: the effective list and what RealTimeX holds.
+ */
+export function viewFromChange(
+  current: AllowedOriginsView | null,
+  change: AllowedOriginsChange,
+  identity: { connectionId: string; sessionName: string },
+): AllowedOriginsView {
+  return current
+    ? mergeChange(current, change)
+    : { ...identity, defaults: [], custom: [], effective: change.effective, runtime: change.runtime };
 }
 
 /** Apply an add/remove/apply response to the loaded view. */

@@ -12,7 +12,7 @@ import {
   calloutOriginState,
   groupRecoverableDenials,
   manageAllowedWebsitesHref,
-  mergeChange,
+  viewFromChange,
   type BlockedConnectionGroup,
   type BlockedOrigin,
   type CalloutOriginState,
@@ -65,9 +65,14 @@ function BlockedWebsiteCallout({ group }: { group: BlockedConnectionGroup }) {
     void load();
   }, [load]);
 
-  const applyChange = useCallback((change: AllowedOriginsChange) => {
-    setView((current) => (current ? mergeChange(current, change) : current));
-  }, []);
+  // A verified Allow or apply response counts even when the first load failed: it carries the
+  // effective list and what RealTimeX holds, which is all the callout's state needs.
+  const applyChange = useCallback(
+    (change: AllowedOriginsChange) => {
+      setView((current) => viewFromChange(current, change, { connectionId, sessionName }));
+    },
+    [connectionId, sessionName],
+  );
 
   async function tryAgain(state: CalloutOriginState) {
     setBusy(true);

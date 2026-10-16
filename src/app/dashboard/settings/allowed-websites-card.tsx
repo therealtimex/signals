@@ -36,7 +36,7 @@ import { listDefaultAllowedOrigins } from "@/lib/platforms/platform-urls";
 
 const DEFAULT_LABELS = new Map(listDefaultAllowedOrigins().map((entry) => [entry.origin, entry.label]));
 
-type Status = { message: string; undoOrigin?: string };
+type Status = { message: string; undo?: { connectionId: string; origin: string } };
 type PendingFocus = { kind: "input" } | { kind: "remove"; origin: string } | null;
 
 function readRequestedConnection(): string | null {
@@ -88,11 +88,13 @@ function ConnectionChoice({
   connections,
   selectedId,
   sessionName,
+  disabled,
   onChange,
 }: {
   connections: BrowserConnectionOption[];
   selectedId: string | null;
   sessionName: string;
+  disabled: boolean;
   onChange: (connectionId: string) => void;
 }) {
   const id = useId();
@@ -106,7 +108,7 @@ function ConnectionChoice({
   return (
     <div className="space-y-2">
       <Label htmlFor={id}>Browser connection</Label>
-      <Select value={selectedId ?? undefined} onValueChange={onChange}>
+      <Select value={selectedId ?? undefined} onValueChange={onChange} disabled={disabled}>
         <SelectTrigger id={id} className="w-full" aria-describedby={`${id}-help`}>
           <SelectValue />
         </SelectTrigger>
@@ -277,12 +279,29 @@ export function AllowedWebsitesCard() {
   const titleRef = useRef<HTMLDivElement>(null);
   const removeRefs = useRef(new Map<string, HTMLButtonElement>());
   const deepLinkHandled = useRef(false);
+  // Every request is bound to the connection it started on. A response that lands after the user
+  // picked another connection must not touch the view, the status line or Undo.
+  const selectedRef = useRef<string | null>(null);
+  const isCurrent = (connectionId: string) => selectedRef.current === connectionId;
+  /** A result for a connection the user has since left is reported under that connection's name. */
+  const scoped = (connectionId: string, message: string) => {
+    if (isCurrent(connectionId)) return message;
+    const name = connections.find((connection) => connection.id === connectionId)?.sessionName ?? connectionId;
+    return `${name}: ${message}`;
+  };
 
   const selected = connections.find((connection) => connection.id === selectedId) ?? null;
   const sessionName = selected?.sessionName ?? view?.sessionName ?? "signals-publish";
+  const busy = adding || removing !== null || alertBusy;
+
+  const selectConnection = useCallback((connectionId: string) => {
+    selectedRef.current = connectionId;
+    setSelectedId(connectionId);
+  }, []);
 
   const loadView = useCallback(async (connectionId: string): Promise<boolean> => {
     const outcome = await allowedWebsitesApi.get(connectionId);
+    if (selectedRef.current !== connectionId) return false;
     if (outcome.status === 200 && outcome.body && "effective" in outcome.body) {
       setView(outcome.body as AllowedOriginsView);
       setLoadState("ready");
@@ -310,9 +329,9 @@ export function AllowedWebsitesCard() {
       return false;
     }
     setConnections(rows);
-    setSelectedId(initial.id);
+    selectConnection(initial.id);
     return loadView(initial.id);
-  }, [loadView]);
+  }, [loadView, selectConnection]);
 
   useEffect(() => {
     void loadAll();
@@ -336,7 +355,7 @@ export function AllowedWebsitesCard() {
   }, [pendingFocus]);
 
   async function changeConnection(connectionId: string) {
-    setSelectedId(connectionId);
+    selectConnection(connectionId);
     setFieldError(null);
     setStatus(null);
     setLoadState("loading");
@@ -344,15 +363,23 @@ export function AllowedWebsitesCard() {
   }
 
   async function add() {
-    if (!selectedId || adding) return;
+    const connectionId = selectedRef.current;
+    if (!connectionId || adding) return;
     setAdding(true);
     setStatus(null);
+    let feedback: ReturnType<typeof interpretAdd>;
     try {
-      const feedback = interpretAdd(await allowedWebsitesApi.add(selectedId, url, "settings"), sessionName);
-      if (feedback.kind === "field_error") {
-        setFieldError(feedback.message);
-        return;
-      }
+      feedback = interpretAdd(await allowedWebsitesApi.add(connectionId, url, "settings"), sessionName);
+    } finally {
+      setAdding(false);
+    }
+    if (!isCurrent(connectionId)) {
+      if (feedback.kind === "result") setStatus({ message: scoped(connectionId, feedback.message) });
+      return;
+    }
+    if (feedback.kind === "field_error") {
+      setFieldError(feedback.message);
+    } else {
       const { result } = feedback;
       setView((current) =>
         current
@@ -361,37 +388,50 @@ export function AllowedWebsitesCard() {
       );
       setStatus({ message: feedback.message });
       if (feedback.clearInput) setUrl("");
-    } finally {
-      setAdding(false);
-      setPendingFocus({ kind: "input" });
     }
+    setPendingFocus({ kind: "input" });
   }
 
   async function remove(origin: string) {
-    if (!selectedId || !view) return;
+    const connectionId = selectedRef.current;
+    if (!connectionId || !view) return;
     const index = view.custom.findIndex((row) => row.origin === origin);
     const next = view.custom[index + 1] ?? view.custom[index - 1] ?? null;
     setRemoving(origin);
+    let feedback: ReturnType<typeof interpretRemove>;
     try {
-      const feedback = interpretRemove(await allowedWebsitesApi.remove(selectedId, origin), sessionName);
-      if (feedback.kind === "error") {
-        setStatus({ message: feedback.message });
-        setPendingFocus({ kind: "remove", origin });
-        return;
-      }
-      setView((current) =>
-        current ? mergeChange(current, feedback.result, current.custom.filter((row) => row.origin !== origin)) : current,
-      );
-      setStatus({ message: feedback.message, undoOrigin: origin });
-      setPendingFocus(next ? { kind: "remove", origin: next.origin } : { kind: "input" });
+      feedback = interpretRemove(await allowedWebsitesApi.remove(connectionId, origin), sessionName);
     } finally {
       setRemoving(null);
     }
+    if (!isCurrent(connectionId)) {
+      if (feedback.kind === "result") {
+        setStatus({ message: scoped(connectionId, feedback.message), undo: { connectionId, origin } });
+      }
+      return;
+    }
+    if (feedback.kind === "error") {
+      setStatus({ message: feedback.message });
+      setPendingFocus({ kind: "remove", origin });
+      return;
+    }
+    const { result } = feedback;
+    setView((current) =>
+      current ? mergeChange(current, result, current.custom.filter((row) => row.origin !== origin)) : current,
+    );
+    setStatus({ message: feedback.message, undo: { connectionId, origin } });
+    setPendingFocus(next ? { kind: "remove", origin: next.origin } : { kind: "input" });
   }
 
-  async function undo(origin: string) {
-    if (!selectedId) return;
-    const feedback = interpretUndo(await allowedWebsitesApi.add(selectedId, origin, "settings"), sessionName);
+  async function undo(target: { connectionId: string; origin: string }) {
+    const feedback = interpretUndo(
+      await allowedWebsitesApi.add(target.connectionId, target.origin, "settings"),
+      sessionName,
+    );
+    if (!isCurrent(target.connectionId)) {
+      setStatus({ message: scoped(target.connectionId, feedback.message) });
+      return;
+    }
     if (feedback.kind === "field_error") {
       setStatus({ message: feedback.message });
       return;
@@ -402,18 +442,21 @@ export function AllowedWebsitesCard() {
   }
 
   async function alertTryAgain(alert: CardAlert) {
-    if (!selectedId) return;
+    const connectionId = selectedRef.current;
+    if (!connectionId) return;
     setAlertBusy(true);
     try {
       if (alert === "not_active") {
-        const feedback = interpretApply(await allowedWebsitesApi.apply(selectedId), sessionName);
+        const feedback = interpretApply(await allowedWebsitesApi.apply(connectionId), sessionName);
+        if (!isCurrent(connectionId)) return;
         if (feedback.kind === "result") {
           setView((current) => (current ? mergeChange(current, feedback.change) : current));
         }
         setStatus({ message: feedback.message });
         return;
       }
-      const outcome = await allowedWebsitesApi.get(selectedId);
+      const outcome = await allowedWebsitesApi.get(connectionId);
+      if (!isCurrent(connectionId)) return;
       if (outcome.status === 200 && outcome.body && "effective" in outcome.body) {
         const fresh = outcome.body as AllowedOriginsView;
         setView(fresh);
@@ -427,11 +470,11 @@ export function AllowedWebsitesCard() {
   }
 
   async function retryLoad() {
-    const ok = selectedId ? await loadView(selectedId) : await loadAll();
+    const ok = selectedRef.current ? await loadView(selectedRef.current) : await loadAll();
     if (ok) setPendingFocus({ kind: "input" });
   }
 
-  const alert = view ? cardAlert(view.runtime) : null;
+  const alert = view ? cardAlert(view) : null;
 
   return (
     <Card id="allowed-websites" className="scroll-mt-6">
@@ -471,6 +514,7 @@ export function AllowedWebsitesCard() {
               connections={connections}
               selectedId={selectedId}
               sessionName={sessionName}
+              disabled={busy}
               onChange={(connectionId) => void changeConnection(connectionId)}
             />
             <AddWebsiteForm
@@ -486,13 +530,13 @@ export function AllowedWebsitesCard() {
             />
             <p className="text-sm text-muted-foreground" role="status" aria-live="polite">
               {status?.message}
-              {status?.undoOrigin && (
+              {status?.undo && (
                 <>
                   {" "}
                   <Button
                     variant="link"
                     className="h-auto p-0 align-baseline"
-                    onClick={() => void undo(status.undoOrigin!)}
+                    onClick={() => void undo(status.undo!)}
                   >
                     Undo
                   </Button>
