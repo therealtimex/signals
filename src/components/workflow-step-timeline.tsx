@@ -30,6 +30,10 @@ import {
 import type { WorkflowStep } from "@/lib/db/types";
 import type { WorkflowRunSubject } from "@/lib/workflows/workflow-run-subjects-shared";
 import { formatWorkflowError } from "@/lib/workflows/format-error";
+import {
+  navigationContextFor,
+  type RunNavigationDenial,
+} from "@/lib/browser/navigation-blocked";
 import { formatStepOffsetFromRunStart } from "@/lib/workflows/workflow-step-timing";
 
 const STEP_TYPE_CONFIG: Record<
@@ -98,12 +102,15 @@ export function WorkflowStepTimeline({
   subjectById = {},
   runStartedAt = null,
   agentThreadAction,
+  navigationDenials,
 }: {
   steps: WorkflowStep[];
   animate?: boolean;
   subjectById?: Record<string, WorkflowRunSubject>;
   runStartedAt?: number | null;
   agentThreadAction?: ReactNode;
+  /** The run's blocked websites, so their rows can name the session (#547). */
+  navigationDenials?: RunNavigationDenial[];
 }) {
   if (steps.length === 0) {
     return animate ? (
@@ -158,9 +165,12 @@ export function WorkflowStepTimeline({
                 </p>
               )}
               {step.error && (() => {
-                const friendly = formatWorkflowError(step.error);
+                const friendly = formatWorkflowError(
+                  step.error,
+                  navigationContextFor(step.error, navigationDenials),
+                );
                 return (
-                  <p className="text-xs text-destructive" title={step.error}>
+                  <p className="text-xs text-destructive break-words" title={step.error}>
                     {friendly.title}
                     {friendly.detail && (
                       <span className="text-muted-foreground ml-1">— {friendly.detail}</span>

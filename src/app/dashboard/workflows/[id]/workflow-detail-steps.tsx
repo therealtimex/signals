@@ -10,6 +10,7 @@ import { WorkflowGraphView } from "@/components/workflow-graph-view";
 import type { WorkflowStep } from "@/lib/db/types";
 import type { WorkflowRunSubject } from "@/lib/workflows/workflow-run-subjects-shared";
 import type { WorkflowRunAgentThread } from "@/lib/workflows/workflow-run-agent-thread";
+import type { RunNavigationDenial } from "@/lib/browser/navigation-blocked";
 import { WorkflowRunAgentThreadButton } from "./workflow-run-agent-thread-button";
 
 export function WorkflowDetailSteps({
@@ -20,6 +21,7 @@ export function WorkflowDetailSteps({
   runId,
   runStatus,
   agentThread,
+  navigationDenials,
 }: {
   steps: WorkflowStep[];
   animate?: boolean;
@@ -28,6 +30,7 @@ export function WorkflowDetailSteps({
   runId: string;
   runStatus: string;
   agentThread: WorkflowRunAgentThread;
+  navigationDenials?: RunNavigationDenial[];
 }) {
   const [view, setView] = useState<"timeline" | "graph">("timeline");
 
@@ -69,6 +72,7 @@ export function WorkflowDetailSteps({
             animate={animate}
             subjectById={subjectById}
             runStartedAt={runStartedAt}
+            navigationDenials={navigationDenials}
             agentThreadAction={
               <WorkflowRunAgentThreadButton
                 runId={runId}
@@ -79,7 +83,11 @@ export function WorkflowDetailSteps({
             }
           />
         ) : (
-          <WorkflowGraphView steps={steps} animate={animate} />
+          <WorkflowGraphView
+            steps={steps}
+            animate={animate}
+            navigationDenials={navigationDenials}
+          />
         )}
       </Card>
     </section>

@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import type { WorkflowStep } from "@/lib/db/types";
 import type { WorkflowRunProposalSummary } from "@/lib/writing/workflow-run-proposals";
 import type { WorkflowRunAgentThread } from "@/lib/workflows/workflow-run-agent-thread";
+import type { RunNavigationDenial } from "@/lib/browser/navigation-blocked";
 
 const POLL_INTERVAL_MS = 2000;
 const TERMINAL_STATUSES = ["completed", "failed", "cancelled"];
@@ -33,6 +34,8 @@ export interface ProgressData {
   isComplete: boolean;
   totalSteps: number;
   proposalSummary: WorkflowRunProposalSummary | null;
+  /** Websites the run was refused, resolved to their connection on the server (#547). */
+  navigationDenials: RunNavigationDenial[];
 }
 
 export function useWorkflowPolling(runId: string, initialStatus: string) {

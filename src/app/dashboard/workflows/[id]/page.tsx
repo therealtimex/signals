@@ -19,6 +19,7 @@ import { resolveWorkflowRunSubjectsForDetail } from "@/lib/workflows/workflow-ru
 import { summarizeWorkflowRunProposals } from "@/lib/writing/workflow-run-proposals";
 import { resolveWorkflowRunAgentThread } from "@/lib/workflows/workflow-run-agent-thread";
 import { listSnowballCandidates } from "@/lib/workflows/snowball-candidates";
+import { resolveRunNavigationDenials } from "@/lib/workflows/run-navigation-denials";
 import { WorkflowRunCandidates } from "./workflow-run-candidates";
 import type { WorkflowRunWithSteps } from "@/lib/db/types";
 
@@ -131,6 +132,7 @@ export default async function WorkflowDetailPage({
         contactsCreated={countContactsByCreatedWorkflowRun(id)}
         orgsCreated={countOrgsByCreatedWorkflowRun(id)}
         initialProposalSummary={summarizeWorkflowRunProposals(id)}
+        initialNavigationDenials={resolveRunNavigationDenials(run)}
       />
       <WorkflowRunCandidates candidates={snowballCandidates} />
     </div>

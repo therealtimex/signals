@@ -27,6 +27,10 @@ import {
 } from "lucide-react";
 import type { WorkflowStep } from "@/lib/db/types";
 import { formatWorkflowError } from "@/lib/workflows/format-error";
+import {
+  navigationContextFor,
+  type RunNavigationDenial,
+} from "@/lib/browser/navigation-blocked";
 
 const STEP_TYPE_CONFIG: Record<
   string,
@@ -88,7 +92,15 @@ function parseJson(str: string | null): Record<string, unknown> | null {
   }
 }
 
-function GraphNode({ step, isLast }: { step: WorkflowStep; isLast: boolean }) {
+function GraphNode({
+  step,
+  isLast,
+  navigationDenials,
+}: {
+  step: WorkflowStep;
+  isLast: boolean;
+  navigationDenials?: RunNavigationDenial[];
+}) {
   const [expanded, setExpanded] = useState(false);
   const config = STEP_TYPE_CONFIG[step.stepType] ?? STEP_TYPE_CONFIG.error;
   const StepIcon = config.icon;
@@ -143,9 +155,12 @@ function GraphNode({ step, isLast }: { step: WorkflowStep; isLast: boolean }) {
 
           {/* Error (always visible) */}
           {step.error && (() => {
-            const friendly = formatWorkflowError(step.error);
+            const friendly = formatWorkflowError(
+              step.error,
+              navigationContextFor(step.error, navigationDenials),
+            );
             return (
-              <p className="text-xs text-destructive mt-1" title={step.error}>
+              <p className="text-xs text-destructive mt-1 break-words" title={step.error}>
                 {friendly.title}
                 {friendly.detail && (
                   <span className="text-muted-foreground ml-1">— {friendly.detail}</span>
@@ -185,7 +200,15 @@ function GraphNode({ step, isLast }: { step: WorkflowStep; isLast: boolean }) {
   );
 }
 
-export function WorkflowGraphView({ steps, animate }: { steps: WorkflowStep[]; animate?: boolean }) {
+export function WorkflowGraphView({
+  steps,
+  animate,
+  navigationDenials,
+}: {
+  steps: WorkflowStep[];
+  animate?: boolean;
+  navigationDenials?: RunNavigationDenial[];
+}) {
   if (steps.length === 0) {
     return animate ? (
       <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
@@ -203,7 +226,11 @@ export function WorkflowGraphView({ steps, animate }: { steps: WorkflowStep[]; a
     <div className="pl-2">
       {steps.map((step, i) => (
         <div key={step.id} className={animate ? "animate-step-slide-in" : ""}>
-          <GraphNode step={step} isLast={i === steps.length - 1} />
+          <GraphNode
+            step={step}
+            isLast={i === steps.length - 1}
+            navigationDenials={navigationDenials}
+          />
         </div>
       ))}
     </div>

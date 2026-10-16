@@ -27,6 +27,53 @@ describe("formatWorkflowError", () => {
     expect(result.detail).toContain("Platform Connections");
   });
 
+  it("formats a website the session isn't allowed to open, with its origin (#547)", () => {
+    const raw = "The RealTimeX Browser session does not allow https://lnkd.in.";
+
+    expect(formatWorkflowError(raw)).toEqual({
+      title: "Website not allowed",
+      detail: "This browser session can't open https://lnkd.in.",
+      category: "navigation_blocked",
+      recovery: { kind: "allow_origin", origin: "https://lnkd.in" },
+    });
+    expect(
+      formatWorkflowError(raw, { navigation: { sessionName: "signals-publish", managed: true } })
+        .detail,
+    ).toBe("signals-publish can't open https://lnkd.in.");
+    expect(
+      formatWorkflowError(raw, { navigation: { sessionName: "signals-scout-1", managed: false } })
+        .detail,
+    ).toBe(
+      "signals-scout-1 can't open https://lnkd.in. This browser session isn't managed in Signals settings.",
+    );
+  });
+
+  it("formats the canonical RTX_NAVIGATION_BLOCKED error the same way", () => {
+    const raw = `RTX_NAVIGATION_BLOCKED:${JSON.stringify({
+      reason: "guardrail-origin-not-allowed",
+      sessionName: "brand-x",
+      deniedOrigin: "https://www.eventbrite.com",
+      requestedUrl: "https://www.eventbrite.com/e/1",
+    })}`;
+
+    expect(formatWorkflowError(raw)).toMatchObject({
+      title: "Website not allowed",
+      detail: "brand-x can't open https://www.eventbrite.com.",
+      category: "navigation_blocked",
+      recovery: { kind: "allow_origin", origin: "https://www.eventbrite.com" },
+    });
+  });
+
+  it("keeps the origin-lock text for blocks and anchored sessions", () => {
+    expect(formatWorkflowError("The RealTimeX Browser session blocks https://x.com.")).toMatchObject({
+      category: "session",
+      title: "RealTimeX Browser session is origin-locked",
+    });
+    expect(formatWorkflowError("The RealTimeX Browser session only allows specific origins.").category).toBe(
+      "session",
+    );
+  });
+
   it("formats rate limit with seconds→minutes conversion", () => {
     const raw =
       'Rate limited on /users/123/tweets?tweet.fields=created_at%2Cpublic_metrics&max_results=10&pagination_token=7140dibdnow9c7btw4. Retry after 899s';

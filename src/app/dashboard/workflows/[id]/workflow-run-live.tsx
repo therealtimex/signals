@@ -16,6 +16,10 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { formatWorkflowError } from "@/lib/workflows/format-error";
+import {
+  navigationContextFor,
+  type RunNavigationDenial,
+} from "@/lib/browser/navigation-blocked";
 import { WorkflowDetailSteps } from "./workflow-detail-steps";
 import { PruneResults } from "./prune-results";
 import { WorkflowRunSubjectsPanel } from "@/components/workflow-run-subjects-panel";
@@ -29,6 +33,8 @@ import { WorkflowRunProposalsPanel } from "./workflow-run-proposals";
 import { WorkflowRunAgentThreadButton } from "./workflow-run-agent-thread-button";
 import type { WorkflowRunAgentThread } from "@/lib/workflows/workflow-run-agent-thread";
 import { getWorkflowOutcomeMetrics } from "@/lib/workflows/snowball-outcome";
+
+const NO_NAVIGATION_DENIALS: RunNavigationDenial[] = [];
 
 function parseSerializedIssueList(value: string | null): string[] {
   try {
@@ -56,9 +62,11 @@ function parseSnowballAuditViolations(result: string | null): string[] {
 function WorkflowIssueSection({
   title,
   issues,
+  navigationDenials,
 }: {
   title: string;
   issues: string[];
+  navigationDenials?: RunNavigationDenial[];
 }) {
   if (issues.length === 0) return null;
 
@@ -67,12 +75,12 @@ function WorkflowIssueSection({
       <h2 className="text-sm font-medium text-destructive">{title}</h2>
       <Card className="p-4 space-y-2">
         {issues.map((issue) => {
-          const friendly = formatWorkflowError(issue);
+          const friendly = formatWorkflowError(issue, navigationContextFor(issue, navigationDenials));
           return (
             <div key={issue} className="space-y-0.5" title={issue}>
               <p className="text-xs text-destructive font-medium">{friendly.title}</p>
               {friendly.detail && (
-                <p className="text-xs text-muted-foreground">{friendly.detail}</p>
+                <p className="text-xs text-muted-foreground break-words">{friendly.detail}</p>
               )}
             </div>
           );
@@ -172,6 +180,7 @@ export function WorkflowRunLive({
   contactsCreated = 0,
   orgsCreated = 0,
   initialProposalSummary = null,
+  initialNavigationDenials = NO_NAVIGATION_DENIALS,
 }: {
   initialRun: WorkflowRunWithSteps;
   initialAgentThread: WorkflowRunAgentThread;
@@ -179,6 +188,7 @@ export function WorkflowRunLive({
   contactsCreated?: number;
   orgsCreated?: number;
   initialProposalSummary?: WorkflowRunProposalSummary | null;
+  initialNavigationDenials?: RunNavigationDenial[];
 }) {
   const { data, isPolling } = useWorkflowPolling(initialRun.id, initialRun.status);
   const [proposalSummary, setProposalSummary] = useState(initialProposalSummary);
@@ -187,6 +197,7 @@ export function WorkflowRunLive({
   const run = data?.run ?? initialRun;
   const steps = data?.steps ?? initialRun.steps;
   const agentThread = data?.agentThread ?? initialAgentThread;
+  const navigationDenials = data?.navigationDenials ?? initialNavigationDenials;
   const subjectById = workflowSubjectLookup(subjects);
 
   const statusConfig = STATUS_CONFIG[run.status] ?? STATUS_CONFIG.pending;
@@ -373,10 +384,15 @@ export function WorkflowRunLive({
         runId={run.id}
         runStatus={run.status}
         agentThread={agentThread}
+        navigationDenials={navigationDenials}
       />
 
       <WorkflowIssueSection title="Audit violations" issues={auditViolations} />
-      <WorkflowIssueSection title="Errors" issues={workflowErrors} />
+      <WorkflowIssueSection
+        title="Errors"
+        issues={workflowErrors}
+        navigationDenials={navigationDenials}
+      />
     </>
   );
 }
