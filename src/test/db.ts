@@ -37,6 +37,7 @@ import {
   simulationTranscripts,
   scheduledJobs,
   simulationCalibrations,
+  browserConnectionOrigins,
   browserConnections,
   browserSessionLeases,
   platformTargets,
@@ -90,6 +91,7 @@ export function resetCoreTables(): void {
   db.delete(contentPosts).run();
   db.delete(publishJobs).run();
   db.delete(platformTargets).run();
+  db.delete(browserConnectionOrigins).run();
   db.delete(browserConnections).run();
   db.delete(contentItems).run();
   db.delete(launches).run();

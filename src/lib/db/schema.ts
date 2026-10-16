@@ -77,6 +77,26 @@ export const browserConnections = sqliteTable(
   (table) => [uniqueIndex("idx_browser_connections_session").on(table.sessionName)]
 );
 
+/**
+ * Websites a user allowed for one browser connection, on top of the Signals defaults (#547,
+ * ADR-547-4). `origin` is normalized (`URL.origin`), so the unique key dedupes equivalent links.
+ */
+export const browserConnectionOrigins = sqliteTable(
+  "browser_connection_origins",
+  {
+    id: text("id").primaryKey(),
+    connectionId: text("connection_id")
+      .notNull()
+      .references(() => browserConnections.id, { onDelete: "cascade" }),
+    origin: text("origin").notNull(),
+    source: text("source", { enum: ["settings", "recovery"] }).notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("idx_browser_connection_origins_unique").on(table.connectionId, table.origin),
+  ],
+);
+
 export const platformTargets = sqliteTable(
   "platform_targets",
   {

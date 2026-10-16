@@ -14,6 +14,7 @@ import {
   engagements,
   platformAccounts,
   browserConnections,
+  browserConnectionOrigins,
   platformTargets,
   browserSessionLeases,
   syncCursors,
@@ -100,6 +101,7 @@ export type NewPlatformAccount = InferInsertModel<typeof platformAccounts>;
 
 export type BrowserConnection = InferSelectModel<typeof browserConnections>;
 export type NewBrowserConnection = InferInsertModel<typeof browserConnections>;
+export type BrowserConnectionOrigin = InferSelectModel<typeof browserConnectionOrigins>;
 export type PlatformTarget = InferSelectModel<typeof platformTargets>;
 export type NewPlatformTarget = InferInsertModel<typeof platformTargets>;
 export type BrowserSessionLease = InferSelectModel<typeof browserSessionLeases>;
