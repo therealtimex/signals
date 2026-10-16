@@ -1,7 +1,9 @@
 # Browser connection: allowed websites + blocked-URL recovery (#547)
 
 Status: **data contract fixed; routed `needs_ux` to Product/UX** (System Design, 2026-10-16,
-loop `loop-issue-547-745a3bcb`). Issue: [#547](https://github.com/therealtimex/signals/issues/547).
+loop `loop-issue-547-745a3bcb`). UX contract v1 + Addendum 1:
+`realtimex-product-ux/work/issue-547/contract-v1.md`, `contract-v1-addendum-1.md`
+(prototype https://c.realtimex.ai/a/zLPg3Fma-F-WH5yHfNoa7w/ar/8ccff56cc6f11612/index.html), awaiting Human acknowledgment. Issue: [#547](https://github.com/therealtimex/signals/issues/547).
 Decisions are numbered ADR-547-1 … ADR-547-15; Dev, Product/UX, Review and QA should challenge
 those, not re-derive them. Branch `issue-547` from `origin/main 0b0e635`.
 
@@ -203,7 +205,7 @@ Product/UX asked (2026-10-16) whether the run view may assume `signals-publish` 
 Ruling:
 
 - The **server** resolves the connection for a run denial, in this order, mirroring `resolve.py`: (1) `sessionName` inside an `RTX_NAVIGATION_BLOCKED:<json>` error when present; (2) config `browserSessionName` when it is set and **not** the default; (3) config `targetId` → `platform_targets.connectionId`; (4) config `browserSessionName` (the default). The result is `recovery.connectionId` on the formatted error the run page receives; the UI reads it and never computes one.
-- If none of (1)–(4) yields a `browser_connections` row (e.g. a `signals-scout-*` session, ADR-547-12), `recoverable: false`, `recovery: null`: the callout shows the corrected text and a link to Settings → Allowed websites, with **no** Allow action.
+- If none of (1)–(4) yields a `browser_connections` row (e.g. a `signals-scout-*` session, ADR-547-12), `recoverable: false`, `recovery: null`: **no callout, no Settings link, no Allow action** — the corrected text appears in the step and Errors rows only (UX contract v1 §2.2 + Addendum 1). Every non-recoverable case is a session without a `browser_connections` row, which Settings → Allowed websites can neither show nor change, so a link there would be a dead end that looks like a fix (Product/UX, 2026-10-16).
 - The resolution lives next to `formatWorkflowError`'s consumer on the server side (the run API that serialises `run.errors`/step errors), not in `format-error.ts` itself, which stays pure. Unit test: a scout run with default name + `targetId` resolves to the target's connection, not `signals-publish`.
 
 Why: the data contract already says `connectionId` may be `null` (ADR-547-7); this closes the "never guess" rule with the one place that has the facts.
