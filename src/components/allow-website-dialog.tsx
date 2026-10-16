@@ -228,7 +228,14 @@ export function AllowWebsiteDialog({
           {showPrimary ? (
             <>
               <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
-              <Button ref={primaryRef} onClick={() => void allow()} disabled={busy} aria-busy={busy}>
+              {/* aria-disabled, not disabled: a disabled button drops focus, and focus stays while saving. */}
+              <Button
+                ref={primaryRef}
+                onClick={() => !busy && void allow()}
+                aria-disabled={busy}
+                aria-busy={busy}
+                className="aria-disabled:pointer-events-none aria-disabled:opacity-50"
+              >
                 {busy && <Loader2 className="animate-spin" aria-hidden />}
                 {phase.kind === "saving" ? "Allowing…" : phase.kind === "opening" ? "Opening…" : primaryLabel}
               </Button>
@@ -239,7 +246,13 @@ export function AllowWebsiteDialog({
                 Close
               </AlertDialogCancel>
               {phase.kind !== "denied" && (
-                <Button ref={tryAgainRef} onClick={() => void tryAgain()} disabled={busy} aria-busy={busy}>
+                <Button
+                  ref={tryAgainRef}
+                  onClick={() => !busy && void tryAgain()}
+                  aria-disabled={busy}
+                  aria-busy={busy}
+                  className="aria-disabled:pointer-events-none aria-disabled:opacity-50"
+                >
                   {retrying && <Loader2 className="animate-spin" aria-hidden />}
                   Try again
                 </Button>
