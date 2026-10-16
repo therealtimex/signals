@@ -30,6 +30,10 @@ import {
 import type { WorkflowStep } from "@/lib/db/types";
 import type { WorkflowRunSubject } from "@/lib/workflows/workflow-run-subjects-shared";
 import { formatWorkflowError } from "@/lib/workflows/format-error";
+import {
+  navigationContextFor,
+  type RunNavigationDenial,
+} from "@/lib/browser/navigation-blocked";
 import { formatStepOffsetFromRunStart } from "@/lib/workflows/workflow-step-timing";
 
 const STEP_TYPE_CONFIG: Record<
@@ -98,12 +102,15 @@ export function WorkflowStepTimeline({
   subjectById = {},
   runStartedAt = null,
   agentThreadAction,
+  navigationDenials,
 }: {
   steps: WorkflowStep[];
   animate?: boolean;
   subjectById?: Record<string, WorkflowRunSubject>;
   runStartedAt?: number | null;
   agentThreadAction?: ReactNode;
+  /** The run's blocked websites, so their rows can name the session (#547). */
+  navigationDenials?: RunNavigationDenial[];
 }) {
   if (steps.length === 0) {
     return animate ? (
@@ -132,7 +139,7 @@ export function WorkflowStepTimeline({
         return (
           <div
             key={step.id}
-            className={`flex items-start gap-3 py-2 px-3 rounded-md hover:bg-muted/50 text-sm${animate ? " animate-step-slide-in" : ""}`}
+            className={`flex flex-wrap sm:flex-nowrap items-start gap-x-3 gap-y-1 py-2 px-3 rounded-md hover:bg-muted/50 text-sm${animate ? " animate-step-slide-in" : ""}`}
           >
             {/* Timestamp */}
             <span className="text-xs font-mono text-muted-foreground w-[84px] shrink-0 pt-0.5">
@@ -143,24 +150,28 @@ export function WorkflowStepTimeline({
             </span>
 
             {/* Step type badge */}
-            <div className="flex items-center gap-1.5 w-[140px] shrink-0">
+            <div className="flex items-center gap-1.5 shrink-0 sm:w-[140px]">
               <StepIcon className={`h-3.5 w-3.5 ${config.color}`} />
               <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-normal">
                 {config.label}
               </Badge>
             </div>
 
-            {/* Description / details */}
-            <div className="flex-1 min-w-0 space-y-0.5">
+            {/* Description / details: its own full-width line below sm, where the fixed columns
+                would otherwise leave it about 0 px wide (#547 experience review). */}
+            <div className="order-last basis-full min-w-0 space-y-0.5 sm:order-none sm:basis-0 sm:flex-1">
               {step.url && (
                 <p className="text-xs font-mono truncate text-muted-foreground">
                   {step.url}
                 </p>
               )}
               {step.error && (() => {
-                const friendly = formatWorkflowError(step.error);
+                const friendly = formatWorkflowError(
+                  step.error,
+                  navigationContextFor(step.error, navigationDenials),
+                );
                 return (
-                  <p className="text-xs text-destructive" title={step.error}>
+                  <p className="text-xs text-destructive break-words" title={step.error}>
                     {friendly.title}
                     {friendly.detail && (
                       <span className="text-muted-foreground ml-1">— {friendly.detail}</span>
@@ -179,7 +190,7 @@ export function WorkflowStepTimeline({
             </div>
 
             {/* Status + duration */}
-            <div className="flex items-center gap-2 shrink-0">
+            <div className="ml-auto flex items-center gap-2 shrink-0 sm:ml-0">
               {step.durationMs !== null && step.durationMs > 0 && (
                 <span className="text-[10px] text-muted-foreground font-mono">
                   {formatDurationMs(step.durationMs)}

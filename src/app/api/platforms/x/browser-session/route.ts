@@ -9,6 +9,8 @@ import {
   ExternalEffectDeniedError,
   externalEffectDeniedResponse,
 } from "@/lib/instance/guard";
+import { navigationBlockedBody } from "@/lib/platforms/allowed-websites";
+import { RtxNavigationBlockedError } from "@/lib/rtx/browser-sessions";
 
 /**
  * POST /api/platforms/x/browser-session
@@ -47,6 +49,9 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     if (error instanceof ExternalEffectDeniedError) {
       return externalEffectDeniedResponse(error);
+    }
+    if (error instanceof RtxNavigationBlockedError) {
+      return NextResponse.json(navigationBlockedBody(error), { status: 409 });
     }
     const message =
       error instanceof Error ? error.message : "Browser session operation failed";

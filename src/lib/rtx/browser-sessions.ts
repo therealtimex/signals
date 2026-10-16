@@ -1,6 +1,12 @@
 import { getRtxAppId, resolveRtxApiBase, type EnvLike } from "@/lib/rtx/env";
 import { RTX_PUBLISH_SESSION_NAME } from "@/lib/publish/constants";
 import { assertExternalEffectAllowed } from "@/lib/instance/guard";
+import { normalizeAllowedOrigin } from "@/lib/browser/allowed-origins";
+import {
+  parseNavigationDenial,
+  RTX_NAVIGATION_BLOCKED,
+  type ParsedNavigationDenial,
+} from "@/lib/browser/navigation-blocked";
 
 export type RtxCliBody = Record<string, unknown>;
 
@@ -32,6 +38,13 @@ export type RtxBrowserSessionEntry = {
   sessionName: string;
   running?: boolean;
   remoteDebugPort?: number;
+  /** What RTX holds for the session: the stored record when stopped, the runtime when running. */
+  guardrails?: {
+    mode?: string;
+    primaryOrigin?: string | null;
+    allowedOrigins?: unknown;
+    blockedOrigins?: unknown;
+  } | null;
   runtime?: {
     status?: string;
     remoteDebugPort?: number;
@@ -88,6 +101,68 @@ function describeRtxCliFailure(body: RtxCliBody, fallback: string): string {
   if (!reason.startsWith("guardrail-")) return base;
 
   return `${base} Signals could not clear the session origin lock — update RealTimeX, or delete the ${RTX_PUBLISH_SESSION_NAME} session in Settings → Browser and sign in again.`;
+}
+
+/**
+ * RealTimeX refused to open a URL because of the session's origin guardrails (ADR-547-7).
+ * Detected by `reason`, never by HTTP status: RealTimeX answers these with 503 today.
+ * `guardrail-origin-not-allowed` is recoverable by allowing the website for a connection Signals
+ * manages; `guardrail-origin-mismatch` (an anchored session) is not.
+ */
+export class RtxNavigationBlockedError extends Error {
+  readonly code = RTX_NAVIGATION_BLOCKED;
+
+  constructor(
+    message: string,
+    readonly denial: ParsedNavigationDenial & { primaryOrigin: string | null },
+  ) {
+    super(message);
+    this.name = "RtxNavigationBlockedError";
+  }
+}
+
+function parseRtxNavigationBlocked(
+  body: RtxCliBody,
+  message: string,
+  context: { sessionName: string; requestedUrl: string | null },
+): RtxNavigationBlockedError | null {
+  const reason = typeof body.reason === "string" ? body.reason : "";
+  if (!reason.startsWith("guardrail-origin-")) return null;
+
+  const guardrail =
+    body.guardrail && typeof body.guardrail === "object"
+      ? (body.guardrail as Record<string, unknown>)
+      : {};
+  const fromText = parseNavigationDenial(typeof body.error === "string" ? body.error : "");
+  const target = normalizeAllowedOrigin(
+    guardrail.targetOrigin ?? fromText?.deniedOrigin ?? context.requestedUrl,
+  );
+  if (!target.ok) return null;
+  const primary = normalizeAllowedOrigin(guardrail.primaryOrigin);
+
+  return new RtxNavigationBlockedError(message, {
+    reason,
+    action: typeof guardrail.action === "string" ? guardrail.action : null,
+    sessionName: context.sessionName,
+    deniedOrigin: target.origin,
+    requestedUrl: context.requestedUrl,
+    primaryOrigin: primary.ok ? primary.origin : null,
+  });
+}
+
+/** The error a failed RTX call throws: a typed navigation denial, or a descriptive `Error`. */
+function rtxCliFailure(
+  body: RtxCliBody,
+  fallback: string,
+  context: { sessionName: string; requestedUrl?: string | null },
+): Error {
+  const message = describeRtxCliFailure(body, fallback);
+  return (
+    parseRtxNavigationBlocked(body, message, {
+      sessionName: context.sessionName,
+      requestedUrl: context.requestedUrl ?? null,
+    }) ?? new Error(message)
+  );
 }
 
 export async function listRtxBrowserSessions(
@@ -161,9 +236,10 @@ export async function createRtxBrowserSession(
   );
 
   if (!response.ok || body.success === false) {
-    throw new Error(
-      describeRtxCliFailure(body, `Failed to create RTX browser session (${response.status})`)
-    );
+    throw rtxCliFailure(body, `Failed to create RTX browser session (${response.status})`, {
+      sessionName,
+      requestedUrl: input.url,
+    });
   }
 
   return body;
@@ -187,9 +263,10 @@ export async function startRtxBrowserSession(
   );
 
   if (!response.ok || body.success === false) {
-    throw new Error(
-      describeRtxCliFailure(body, `Failed to start RTX browser session (${response.status})`)
-    );
+    throw rtxCliFailure(body, `Failed to start RTX browser session (${response.status})`, {
+      sessionName,
+      requestedUrl: input.url,
+    });
   }
 
   return body;

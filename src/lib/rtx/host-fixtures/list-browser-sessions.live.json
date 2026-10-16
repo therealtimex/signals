@@ -1,0 +1,40 @@
+{
+  "_capture": "GET /cli/list-browser-sessions?includeReservedSessions=true on the installed RealTimeX, 2026-10-16. Trimmed to two sessions and to type/sessionName/status/running/guardrails; tabs, ports and profile paths removed. Body is the raw HTTP shape (pp-cli adds a meta/results wrapper).",
+  "success": true,
+  "sessions": [
+    {
+      "type": "cli-browser-session",
+      "sessionName": "signals-network-snowball-luma",
+      "status": "stale",
+      "running": false,
+      "guardrails": {
+        "mode": "anchored-origin",
+        "primaryOrigin": "https://luma.com",
+        "allowedOrigins": [
+          "https://luma.com"
+        ],
+        "blockedOrigins": [],
+        "allowNewTab": true,
+        "allowCloseTab": true
+      }
+    },
+    {
+      "type": "cli-browser-session",
+      "sessionName": "signals-publish",
+      "status": "running",
+      "running": true,
+      "guardrails": {
+        "mode": "unrestricted",
+        "primaryOrigin": "https://x.com",
+        "allowedOrigins": [
+          "https://x.com",
+          "https://www.linkedin.com",
+          "https://www.facebook.com"
+        ],
+        "blockedOrigins": [],
+        "allowNewTab": true,
+        "allowCloseTab": true
+      }
+    }
+  ]
+}

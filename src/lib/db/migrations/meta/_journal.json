@@ -267,6 +267,13 @@
       "when": 1789176245032,
       "tag": "0037_condemned_champions",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "6",
+      "when": 1792165427987,
+      "tag": "0038_browser_connection_origins",
+      "breakpoints": true
     }
   ]
 }

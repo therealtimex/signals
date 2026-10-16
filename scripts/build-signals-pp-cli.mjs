@@ -16,7 +16,9 @@ const TRANSCENDENCE_DIR = path.join(TOOLS_ROOT, "transcendence");
 const BIN_ROOT = path.join(TOOLS_ROOT, "bin");
 const CLI_PRINTING_PRESS_PACKAGE =
   "github.com/mvanhorn/cli-printing-press/v4/cmd/cli-printing-press@v4.20.1";
-const MIN_GO_TOOLCHAIN = "go1.26.6";
+// go1.26.9 fixes GO-2026-6603…6617 (net/http, crypto/tls, mime/multipart), which the
+// generator's govulncheck step reports as reachable from the CLI.
+const MIN_GO_TOOLCHAIN = "go1.26.9";
 
 if (!process.env.GOTOOLCHAIN) {
   process.env.GOTOOLCHAIN = `${MIN_GO_TOOLCHAIN}+auto`;

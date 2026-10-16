@@ -6,6 +6,7 @@ import { CheckCircle } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { ConnectionStatus } from "@/components/platform-connection-card";
 import { AiAgentsTab } from "@/app/dashboard/settings/ai-agents-tab";
+import { AllowedWebsitesCard } from "@/app/dashboard/settings/allowed-websites-card";
 import { PersonalityTab } from "@/app/dashboard/settings/personality-tab";
 import {
   PlatformsTab,
@@ -363,6 +364,11 @@ export function SettingsPageClient() {
             onOAuthDisconnect={handleOAuthDisconnect}
             onTargetAction={runTargetAction}
           />
+          {rtxEmbedded && (
+            <div className="mt-6">
+              <AllowedWebsitesCard />
+            </div>
+          )}
         </TabsContent>
 
         <TabsContent value="agents" className="mt-6">

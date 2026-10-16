@@ -6,8 +6,6 @@ import {
   listRtxBrowserSessions,
 } from "@/lib/rtx/browser-sessions";
 import {
-  buildPublishSessionAllowedOrigins,
-  buildPublishSessionGuardrails,
   buildSocialPlatformConnectionPayload,
   detectPlatformHandle,
   extractFacebookProfileSlugFromUrl,
@@ -35,6 +33,9 @@ import { createPlatformAccount } from "@/lib/db/queries/platform-accounts";
 import { db } from "@/lib/db/client";
 import { platformAccounts } from "@/lib/db/schema";
 import { resetCoreTables } from "@/test/db";
+import { buildConnectionGuardrails } from "@/lib/platforms/allowed-websites";
+import { addConnectionOrigin } from "@/lib/db/queries/browser-connection-origins";
+import { ensureBrowserConnection } from "@/lib/db/queries/platform-targets";
 import { clearSession, saveSession } from "@/lib/browser/session";
 
 vi.mock("playwright", () => ({
@@ -436,21 +437,75 @@ describe("publish session guardrails", () => {
     return { fetchImpl, calls, find };
   }
 
-  it("derives the allowlist from the platform registry", () => {
-    expect(buildPublishSessionAllowedOrigins()).toEqual([
-      "https://x.com",
-      "https://www.linkedin.com",
-      "https://www.facebook.com",
-    ]);
-    expect(buildPublishSessionGuardrails()).toEqual({
+  it("derives the allowlist from the platform registry, including LinkedIn short links", () => {
+    expect(buildConnectionGuardrails("signals-publish")).toEqual({
       mode: "unrestricted",
       allowedOrigins: [
         "https://x.com",
         "https://www.linkedin.com",
+        "https://lnkd.in",
         "https://www.facebook.com",
       ],
       blockedOrigins: [],
     });
+  });
+
+  it("declares the connection's own additions on every connect, and only the policy keys", async () => {
+    const shared = ensureBrowserConnection({ sessionName: "signals-publish" });
+    const dedicated = ensureBrowserConnection({ sessionName: "brand-x", kind: "dedicated" });
+    addConnectionOrigin({ connectionId: shared.id, origin: "https://example.org", source: "settings" });
+    addConnectionOrigin({ connectionId: dedicated.id, origin: "https://brand.example", source: "settings" });
+    // RTX still holds the pre-#547 defaults, as after a reconnect from an older build.
+    const { fetchImpl, calls } = mockRtxCli([
+      {
+        sessionName: "signals-publish",
+        running: true,
+        remoteDebugPort: 9223,
+        guardrails: {
+          mode: "unrestricted",
+          primaryOrigin: "https://x.com",
+          allowedOrigins: ["https://x.com", "https://www.linkedin.com", "https://www.facebook.com"],
+        },
+      },
+    ]);
+
+    await openPlatformBrowserSession("x", RTX_ENV, fetchImpl as unknown as typeof fetch);
+
+    const declared = calls.filter((call) => call.url.includes("/cli/create-browser-session"));
+    expect(declared).toHaveLength(1);
+    expect(declared[0].body).toEqual({
+      sessionName: "signals-publish",
+      guardrails: {
+        mode: "unrestricted",
+        allowedOrigins: [
+          "https://x.com",
+          "https://www.linkedin.com",
+          "https://lnkd.in",
+          "https://www.facebook.com",
+          "https://example.org",
+        ],
+        blockedOrigins: [],
+      },
+    });
+    // primaryOrigin / allowNewTab / allowCloseTab are RTX's to keep; no url, so no tab or restart.
+    expect(Object.keys((declared[0].body as { guardrails: object }).guardrails).sort()).toEqual([
+      "allowedOrigins",
+      "blockedOrigins",
+      "mode",
+    ]);
+    // Another connection's additions stay on that connection.
+    expect(JSON.stringify(declared[0].body)).not.toContain("brand.example");
+    expect(buildConnectionGuardrails("brand-x").allowedOrigins).toContain("https://brand.example");
+    expect(buildConnectionGuardrails("brand-x").allowedOrigins).not.toContain("https://example.org");
+  });
+
+  it("declares only the defaults for a session with no browser connection row", () => {
+    expect(buildConnectionGuardrails("signals-scout-123").allowedOrigins).toEqual([
+      "https://x.com",
+      "https://www.linkedin.com",
+      "https://lnkd.in",
+      "https://www.facebook.com",
+    ]);
   });
 
   it("opens a focused platform tab even when the session already runs", async () => {
@@ -469,7 +524,7 @@ describe("publish session guardrails", () => {
     // in place; no `url` here, or RTX would open a second tab for it.
     expect(find("/cli/create-browser-session")?.body).toEqual({
       sessionName: "signals-publish",
-      guardrails: buildPublishSessionGuardrails(),
+      guardrails: buildConnectionGuardrails("signals-publish"),
     });
     expect(find("/cli/start-browser-session/signals-publish")?.body).toEqual({
       url: "https://www.linkedin.com/login",
@@ -492,7 +547,7 @@ describe("publish session guardrails", () => {
     expect(result.isValid).toBe(true);
     expect(find("/cli/create-browser-session")?.body).toEqual({
       sessionName: "signals-publish",
-      guardrails: buildPublishSessionGuardrails(),
+      guardrails: buildConnectionGuardrails("signals-publish"),
     });
     // A tab already exists, so validate must not open one.
     expect(
@@ -695,7 +750,7 @@ describe("publish session guardrails", () => {
     expect(result.detectedHandle).toBe("/in/jane-doe");
     expect(find("/cli/create-browser-session")?.body).toEqual({
       sessionName: "signals-publish",
-      guardrails: buildPublishSessionGuardrails(),
+      guardrails: buildConnectionGuardrails("signals-publish"),
     });
     // Home page, not the login page: a login URL would read as logged out.
     expect(

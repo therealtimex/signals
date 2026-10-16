@@ -8,11 +8,23 @@
  * the outer wrapper first, with the inner message formatted recursively.
  */
 
+import { parseNavigationDenial } from "@/lib/browser/navigation-blocked";
+
 export interface FormattedError {
   title: string;
   detail?: string;
   category: string;
+  /** Present for a website the browser connection isn't allowed to open (#547). */
+  recovery?: { kind: "allow_origin"; origin: string };
 }
+
+/**
+ * What the server resolved about the run's browser session, for a `navigation_blocked` error.
+ * RealTimeX's plain denial text doesn't name the session, so the caller supplies it.
+ */
+export type FormatErrorContext = {
+  navigation?: { sessionName: string | null; managed: boolean };
+};
 
 function formatRetryDuration(seconds: number): string {
   if (seconds >= 3600) {
@@ -30,8 +42,27 @@ function formatRetryDuration(seconds: number): string {
 type PatternMatcher = {
   pattern: RegExp;
   category: string;
-  format: (match: RegExpMatchArray) => FormattedError;
+  format: (match: RegExpMatchArray, raw: string, context?: FormatErrorContext) => FormattedError;
 };
+
+function formatNavigationBlocked(raw: string, context?: FormatErrorContext): FormattedError {
+  const denial = parseNavigationDenial(raw);
+  if (!denial) {
+    return { title: "Website not allowed", category: "navigation_blocked" };
+  }
+  const sessionName = context?.navigation?.sessionName ?? denial.sessionName;
+  const opener = sessionName ? sessionName : "This browser session";
+  const unmanaged =
+    context?.navigation?.managed === false
+      ? " This browser session isn't managed in Signals settings."
+      : "";
+  return {
+    title: "Website not allowed",
+    detail: `${opener} can't open ${denial.deniedOrigin}.${unmanaged}`,
+    category: "navigation_blocked",
+    recovery: { kind: "allow_origin", origin: denial.deniedOrigin },
+  };
+}
 
 const PATTERNS: PatternMatcher[] = [
   // ── Prefix-anchored patterns (composite messages) ─────────────────
@@ -188,9 +219,17 @@ const PATTERNS: PatternMatcher[] = [
     }),
   },
 
-  // 12. RTX Browser session guardrail block
+  // 12a. RTX Browser website not allowed (#547): the session's allowed websites don't include it.
+  // Its own title and the denied origin; the run page offers to allow it.
   {
-    pattern: /RealTimeX Browser session (?:is locked to|blocks|does not allow|only allows)/,
+    pattern: /RTX_NAVIGATION_BLOCKED:|RealTimeX Browser session does not allow/,
+    category: "navigation_blocked",
+    format: (_match, raw, context) => formatNavigationBlocked(raw, context),
+  },
+
+  // 12b. RTX Browser session origin lock (anchored sessions)
+  {
+    pattern: /RealTimeX Browser session (?:is locked to|blocks|only allows)/,
     category: "session",
     format: () => ({
       title: "RealTimeX Browser session is origin-locked",
@@ -224,10 +263,10 @@ const PATTERNS: PatternMatcher[] = [
  * Converts a raw error string into a user-friendly message.
  * First matching pattern wins. Unknown errors are truncated to 80 chars.
  */
-export function formatWorkflowError(raw: string): FormattedError {
+export function formatWorkflowError(raw: string, context?: FormatErrorContext): FormattedError {
   for (const { pattern, format } of PATTERNS) {
     const match = raw.match(pattern);
-    if (match) return format(match);
+    if (match) return format(match, raw, context);
   }
 
   // Fallback: truncate to 80 chars

@@ -92,6 +92,12 @@ In **Settings → Platform connections**:
 - **Facebook** — Browser session connect only (no Meta OAuth). Validates the active personal account in the shared `signals-publish` session for future agent-browser enrichment. Publish is not yet supported.
 - **Google mail** — Himalaya CLI accounts (see Settings mail section and issue #137); no Gmail OAuth in Signals.
 
+### Allowed websites
+
+The RealTimeX Browser opens only the websites a browser connection allows. Signals always allows X, LinkedIn (including `https://lnkd.in` short links) and Facebook. To let a connection open another website, go to **Settings → Platform connections → Allowed websites** and paste any link from it: Signals keeps only the website's address, such as `https://www.example.com`. The address must match exactly, so `example.com` and `www.example.com` are different websites. You can remove a website you added at any time.
+
+When a workflow run is blocked by a website, the run page names it and offers **Allow website…**. Start the workflow again afterwards to use the link. Allowing a website only lets the browser open it; it doesn't let Signals publish, message or take any other action there.
+
 Optional **Advanced: OAuth API sync** unlocks paid API contact sync (X Basic `follows.read`, LinkedIn `r_connections`). File-based imports and agent publish do not require OAuth.
 
 Profile enrichment runs via RealTimeX agent-browser — see `docs/rtx-agent-browser-enrichment.md`.
