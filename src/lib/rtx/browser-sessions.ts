@@ -32,6 +32,13 @@ export type RtxBrowserSessionEntry = {
   sessionName: string;
   running?: boolean;
   remoteDebugPort?: number;
+  /** What RTX holds for the session: the stored record when stopped, the runtime when running. */
+  guardrails?: {
+    mode?: string;
+    primaryOrigin?: string | null;
+    allowedOrigins?: unknown;
+    blockedOrigins?: unknown;
+  } | null;
   runtime?: {
     status?: string;
     remoteDebugPort?: number;

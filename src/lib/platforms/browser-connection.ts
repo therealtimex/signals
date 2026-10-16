@@ -29,11 +29,8 @@ import {
   normalizePlatformTargetIdentity,
 } from "@/lib/platforms/target-identity";
 import { RTX_PUBLISH_SESSION_NAME } from "@/lib/publish/constants";
-import {
-  buildDefaultAllowedOrigins,
-  PLATFORM_URLS,
-  type SocialPlatform,
-} from "@/lib/platforms/platform-urls";
+import { PLATFORM_URLS, type SocialPlatform } from "@/lib/platforms/platform-urls";
+import { buildConnectionGuardrails } from "@/lib/platforms/allowed-websites";
 import {
   X_LOGGED_IN_MARKERS,
   X_PROFILE_HANDLE_SELECTORS,
@@ -49,7 +46,6 @@ import {
   resolveRtxDebugPort,
   startRtxBrowserSession,
   type RtxBrowserSessionEntry,
-  type RtxBrowserSessionGuardrails,
 } from "@/lib/rtx/browser-sessions";
 
 export type { SocialPlatform } from "@/lib/platforms/platform-urls";
@@ -62,29 +58,6 @@ export type PlatformSessionStatus = {
   detectedHandle: string | null;
   sessionName: string;
 };
-
-/**
- * Origins Signals asks RTX to open in every browser connection: the platform pages plus their
- * extra origins (LinkedIn short links). See `listDefaultAllowedOrigins` (ADR-547-3).
- */
-export function buildPublishSessionAllowedOrigins(): string[] {
-  return buildDefaultAllowedOrigins();
-}
-
-/**
- * Guardrails for the shared publish session. RTX anchors every named session to
- * its first URL by default, which locks `signals-publish` to whichever platform
- * connected first and blocks tab opens for the others; unrestricted mode plus a
- * multi-origin allowlist keeps all platforms reachable without opening the
- * session up to arbitrary sites.
- */
-export function buildPublishSessionGuardrails(): RtxBrowserSessionGuardrails {
-  return {
-    mode: "unrestricted",
-    allowedOrigins: buildPublishSessionAllowedOrigins(),
-    blockedOrigins: [],
-  };
-}
 
 /**
  * Login markers, one selector per entry. A comma-joined union resolves through
@@ -780,11 +753,12 @@ export async function detectPlatformHandle(
 }
 
 /**
- * Register the shared publish session with the current guardrails. Re-sent on
- * every connect so a session anchored by an earlier build self-heals in place —
- * RTX merges guardrails into the existing record, keeping the profile and its
- * logins. Deliberately no `url`: RTX would start the session and open a tab for
- * it, which is the caller's decision, not this step's.
+ * Register the session with the connection's guardrails: the Signals defaults plus the websites
+ * the user allowed for it (ADR-547-2). Re-sent on every connect, so a session anchored by an
+ * earlier build, or overwritten by another client, self-heals in place, and user additions are
+ * never lost to a reconnect. RTX replaces the keys it receives and keeps the profile and its
+ * logins. Deliberately no `url`: RTX would start the session and open a tab for it, which is the
+ * caller's decision, not this step's.
  */
 async function ensureRtxPublishSessionRegistered(
   env: EnvLike,
@@ -794,7 +768,7 @@ async function ensureRtxPublishSessionRegistered(
   await createRtxBrowserSession(
     {
       sessionName,
-      guardrails: buildPublishSessionGuardrails(),
+      guardrails: buildConnectionGuardrails(sessionName),
     },
     env,
     fetchImpl
