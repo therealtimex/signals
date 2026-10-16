@@ -39,22 +39,43 @@ RealTimeX anchors every **named** browser session to the first URL opened in it,
 shared session would lock itself to whichever platform connected first and reject tab
 opens for the others (`The RealTimeX Browser session is locked to https://x.com.`).
 
-Signals therefore declares guardrails itself, on **every** connect — `POST
-/cli/create-browser-session` merges them into an existing record, so a session anchored
-by an earlier build migrates in place with its profile and logins intact:
+Signals therefore declares guardrails itself, on **every** connect, for the session of the
+connection it is driving. `POST /cli/create-browser-session` on an existing session replaces
+each guardrail key the request carries and keeps the others, so a session anchored by an
+earlier build migrates in place with its profile and logins intact. Signals sends only these
+three keys; RealTimeX keeps `primaryOrigin`, `allowNewTab` and `allowCloseTab`:
 
 | Field | Value |
 |-------|-------|
 | `mode` | `unrestricted` — no single-origin anchor |
-| `allowedOrigins` | Derived from `PLATFORM_URLS` (`x.com`, `www.linkedin.com`, `www.facebook.com`); adding a platform extends it automatically |
+| `allowedOrigins` | The Signals defaults plus the websites the user allowed for **this** connection (#547). Defaults come from `PLATFORM_URLS` and each platform's `extraOrigins`: `https://x.com`, `https://www.linkedin.com`, `https://lnkd.in` (LinkedIn short links), `https://www.facebook.com`. Adding a platform extends them automatically. |
 | `blockedOrigins` | Empty |
+
+Because RealTimeX replaces `allowedOrigins` rather than merging it, Signals always sends the
+complete list. User additions live in the `browser_connection_origins` table, so a reconnect
+or another client's re-declare can't lose them: the next connect puts them back.
+
+**Allowed websites** (Settings → Platforms) adds or removes a website for one connection: it
+saves the normalized origin (`URL.origin`, the same string RealTimeX compares), re-declares the
+full list and reads it back with `list-browser-sessions`. The UI says a website is active only
+when RealTimeX holds it. A run that RealTimeX refused (`The RealTimeX Browser session does not
+allow <origin>.`) shows the denied website with an **Allow website…** action on the run page.
+The API is `/api/browser-connections/[id]/allowed-origins`; see
+[`specs/browser-allowed-websites.md`](../specs/browser-allowed-websites.md).
+
+Allowing a website only lets the browser open it. It authorizes no publishing, messaging or
+other outbound action.
 
 Two properties worth knowing:
 
-- The guardrail check only covers **RTX-routed** tab opens and navigations. In-page
-  navigation and redirects are never checked, and CDP clients bypass guardrails entirely
-  — which is how session validation and the publish scripts drive the browser. The
-  allowlist is blast-radius control on a session holding live logins, not a boundary.
+- The guardrail check only covers **RTX-routed** tab opens and navigations, against the
+  origin of the URL requested. In-page navigation and redirects are never checked, and CDP
+  clients bypass guardrails entirely — which is how session validation and the publish
+  scripts drive the browser. Allowing `https://lnkd.in` adds exactly that origin; it does not
+  authorize where a short link redirects, and nothing in Signals widens the list to make a
+  redirect pass. RealTimeX enforcing the list on redirects is
+  [realtimex-ai-app#2502](https://rtgit.rta.vn/rtlab/rtwebteam/realtimex-ai-app/-/issues/2502).
+  The allowlist is blast-radius control on a session holding live logins, not a boundary.
 - The registration call carries **no** `url`. A `url` makes RealTimeX start the session
   and open a tab; opening tabs is the caller's job (see below).
 
