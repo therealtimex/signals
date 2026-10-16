@@ -436,10 +436,11 @@ describe("publish session guardrails", () => {
     return { fetchImpl, calls, find };
   }
 
-  it("derives the allowlist from the platform registry", () => {
+  it("derives the allowlist from the platform registry, including LinkedIn short links", () => {
     expect(buildPublishSessionAllowedOrigins()).toEqual([
       "https://x.com",
       "https://www.linkedin.com",
+      "https://lnkd.in",
       "https://www.facebook.com",
     ]);
     expect(buildPublishSessionGuardrails()).toEqual({
@@ -447,6 +448,7 @@ describe("publish session guardrails", () => {
       allowedOrigins: [
         "https://x.com",
         "https://www.linkedin.com",
+        "https://lnkd.in",
         "https://www.facebook.com",
       ],
       blockedOrigins: [],

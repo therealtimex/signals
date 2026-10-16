@@ -30,6 +30,11 @@ import {
 } from "@/lib/platforms/target-identity";
 import { RTX_PUBLISH_SESSION_NAME } from "@/lib/publish/constants";
 import {
+  buildDefaultAllowedOrigins,
+  PLATFORM_URLS,
+  type SocialPlatform,
+} from "@/lib/platforms/platform-urls";
+import {
   X_LOGGED_IN_MARKERS,
   X_PROFILE_HANDLE_SELECTORS,
   X_SELECTORS,
@@ -47,7 +52,7 @@ import {
   type RtxBrowserSessionGuardrails,
 } from "@/lib/rtx/browser-sessions";
 
-export type SocialPlatform = "x" | "linkedin" | "facebook";
+export type { SocialPlatform } from "@/lib/platforms/platform-urls";
 
 export type PlatformSessionStatus = {
   mode: "rtx" | "legacy" | "none";
@@ -58,36 +63,12 @@ export type PlatformSessionStatus = {
   sessionName: string;
 };
 
-const PLATFORM_URLS: Record<SocialPlatform, { setupUrl: string; homeUrl: string; host: string }> =
-  {
-    x: {
-      setupUrl: "https://x.com/login",
-      homeUrl: "https://x.com/home",
-      host: "x.com",
-    },
-    linkedin: {
-      setupUrl: "https://www.linkedin.com/login",
-      homeUrl: "https://www.linkedin.com/feed/",
-      host: "linkedin.com",
-    },
-    facebook: {
-      setupUrl: "https://www.facebook.com/login",
-      homeUrl: "https://www.facebook.com/",
-      host: "facebook.com",
-    },
-  };
-
 /**
- * Origins Signals asks RTX to open in the shared publish session. Derived from
- * PLATFORM_URLS so adding a platform extends the allowlist with no other edit.
+ * Origins Signals asks RTX to open in every browser connection: the platform pages plus their
+ * extra origins (LinkedIn short links). See `listDefaultAllowedOrigins` (ADR-547-3).
  */
 export function buildPublishSessionAllowedOrigins(): string[] {
-  const origins = new Set<string>();
-  for (const { setupUrl, homeUrl } of Object.values(PLATFORM_URLS)) {
-    origins.add(new URL(setupUrl).origin);
-    origins.add(new URL(homeUrl).origin);
-  }
-  return [...origins];
+  return buildDefaultAllowedOrigins();
 }
 
 /**
