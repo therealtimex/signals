@@ -4,7 +4,7 @@ Status: **data contract fixed; routed `needs_ux` to Product/UX** (System Design,
 loop `loop-issue-547-745a3bcb`). UX contract v1 + Addendum 1:
 `realtimex-product-ux/work/issue-547/contract-v1.md`, `contract-v1-addendum-1.md`
 (prototype https://c.realtimex.ai/a/zLPg3Fma-F-WH5yHfNoa7w/ar/8ccff56cc6f11612/index.html), awaiting Human acknowledgment. Issue: [#547](https://github.com/therealtimex/signals/issues/547).
-Decisions are numbered ADR-547-1 … ADR-547-15; Dev, Product/UX, Review and QA should challenge
+Decisions are numbered ADR-547-1 … ADR-547-16; Dev, Product/UX, Review and QA should challenge
 those, not re-derive them. Branch `issue-547` from `origin/main 0b0e635`.
 
 Deliverable split (ADR-547-13): **Slice A** (normalization, persistence, effective policy, RTX
@@ -174,7 +174,7 @@ Facts F4/F10. Signals' deliverable for AC5:
 
 - **No widening**: nothing in Signals adds redirect destinations to the policy; allowing `https://lnkd.in` adds exactly one origin (test).
 - **No compensating blocker**: a CDP post-hoc check cannot prevent a load that already happened in a signed-in profile; Signals will not pretend otherwise.
-- **Check helper**: server-owned navigations that *consume* a page (`snowball-identity-evidence.ts`, `event-browser.ts` `page.goto` paths) call `isOriginAllowed(effective, page.url())` after settle and refuse to use evidence from a final origin outside the connection's effective list (`RTX_NAVIGATION_BLOCKED`-shaped error, `action: "redirect"`). This is evidence hygiene, not enforcement, and the docs say so.
+- **Check helper**: `isOriginAllowed(effective, url)` is the policy predicate for tests and UI state. ~~Server-owned page consumers call it after settle~~ — **withdrawn by ADR-547-16** (2026-10-16): server-owned CDP navigations are a different trust path with their own provider validators; binding them to the RTX allowlist would regress Luma.
 - **Cross-repo dependency**: RTX issue filed (§6) asking the RealTimeX Browser process to evaluate `allowedOrigins` on `will-navigate`/`will-redirect` for `unrestricted` sessions with a non-empty list, surfacing `guardrail-origin-not-allowed` in the tab, plus mapping `guardrail-*` reasons to HTTP 403. Until it lands, QA can verify only the Signals-side properties; the ADR records AC5's enforcement half as **blocked on RTX**, not as done.
 - `docs/rtx-browser-publish.md` guardrails table gains `https://lnkd.in` and a sentence on redirect scope.
 
@@ -210,6 +210,23 @@ Ruling:
 
 Why: the data contract already says `connectionId` may be `null` (ADR-547-7); this closes the "never guess" rule with the one place that has the facts.
 
+### ADR-547-16 Server-owned evidence is validated by provider validators, not by the RTX allowlist (withdraws the ADR-547-9 post-navigation check)
+
+Dev (2026-10-16, building slice A) showed the ADR-547-9 "check helper" bullet conflicts with shipped behaviour:
+
+- `observeAuthorizedLumaParticipants` (`src/lib/rtx/event-browser.ts:399-460`) opens `luma.com` over CDP in the connection named by `participantAccess.browserSessionName` (default `signals-publish`, `network-snowball.ts:116-121, 267`). `https://luma.com` is not in the defaults, so the check would refuse every Luma observation unless the user had added it by hand.
+- LinkedIn identity evidence already validates the final URL by host, authwall and canonical `/in/` path (`validateObservation`, `snowball-identity-evidence.ts:817+`), and `urlMatchesPlatformHost` deliberately accepts country subdomains such as `uk.linkedin.com`, which an exact-origin check would reject.
+
+The underlying error was mine: the RTX `allowedOrigins` list governs **RTX-routed opens** (what agents and the CLI may ask the browser to open, F4). Server-owned CDP navigations never pass through it (F4, F9), and each provider already carries its own validator for what it will consume. Tying the second path to the first conflates two trust boundaries and adds a second, weaker gate on top of a stronger one.
+
+Ruling:
+
+1. The post-navigation `isOriginAllowed` check is **withdrawn**, not deferred. Neither `snowball-identity-evidence.ts` nor `event-browser.ts` changes in #547. Provider validators (`validateObservation`, the Luma inspectors) remain the authority for server-consumed evidence.
+2. `https://luma.com` does **not** become a default. The allowlist controls what agents may open in a signed-in profile; Luma is reached only by server-owned code and adding it would widen agent navigation for no benefit.
+3. `isOriginAllowed` stays as the pure policy predicate (tests, UI "Not active yet"/"Website allowed" state).
+4. AC5 Signals-side scope is therefore: no widening (test: allowing `lnkd.in` adds exactly one origin), the predicate with tests, docs stating redirect scope, and the RTX dependency #2502. The enforcement half of AC5 remains blocked on #2502; nothing in Signals claims otherwise.
+5. Review handoff: cite this ADR, not a "deliberate deviation" — the spec is amended so the implementation matches it.
+
 ## 4. Scenarios against the acceptance criteria
 
 | AC | Scenario | Design | Proof |
@@ -218,7 +235,7 @@ Why: the data contract already says `connectionId` may be `null` (ADR-547-7); th
 | 2 inspect / add / remove without losing sign-in | POST/DELETE only touch `browser_connection_origins` and call `create-browser-session` without `url`; no stop/delete | ADR-547-1/4/6 | route test asserts RTX calls = create (no url) + list only |
 | 3 effective = defaults ∪ custom; reconnect preserves; applied to RTX | `ensureRtxPublishSessionRegistered` body `allowedOrigins` ⊇ custom after a simulated "old build" connect; apply sends full set; verify reads back | ADR-547-2/1 | browser-connection test with fetch capture |
 | 4 denied navigation → origin + Allow/Cancel; Cancel unchanged; failures surfaced | typed error from RTX body; 502 path keeps row, reports `applied:false`; Cancel issues no request | ADR-547-7/8 | route tests + format-error tests |
-| 5 redirects subject to allowlist | allowing `lnkd.in` adds one origin; `isOriginAllowed` false for `https://evil.example`; **RTX enforcement blocked on RTX issue** | ADR-547-9 | unit + documented dependency |
+| 5 redirects subject to allowlist | allowing `lnkd.in` adds one origin; `isOriginAllowed` false for `https://evil.example`; server-owned evidence stays with provider validators; **RTX enforcement blocked on #2502** | ADR-547-9, ADR-547-16 | unit + documented dependency |
 | 6 `lnkd.in` default; short link lands on allowed LinkedIn | defaults contain both; F10 chain | ADR-547-3 | unit; QA manual open in RTX |
 | 7 tests | see §5 | | |
 
