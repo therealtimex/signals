@@ -2,7 +2,7 @@
 
 Status: **data contract fixed; routed `needs_ux` to Product/UX** (System Design, 2026-10-16,
 loop `loop-issue-547-745a3bcb`). Issue: [#547](https://github.com/therealtimex/signals/issues/547).
-Decisions are numbered ADR-547-1 … ADR-547-14; Dev, Product/UX, Review and QA should challenge
+Decisions are numbered ADR-547-1 … ADR-547-15; Dev, Product/UX, Review and QA should challenge
 those, not re-derive them. Branch `issue-547` from `origin/main 0b0e635`.
 
 Deliverable split (ADR-547-13): **Slice A** (normalization, persistence, effective policy, RTX
@@ -195,6 +195,18 @@ Route `needs_ux` now with this contract. Slice A needs no UX decision and is spe
 ### ADR-547-14 What stays stable
 
 `createRtxBrowserSession`/`startRtxBrowserSession` signatures, `RTX_PUBLISH_SESSION_NAME`, the anon X resolver, `browser_connections`/`platform_targets` schemas, lease behaviour, ADR-541-5 chokepoints, and the "no `url` on the registration call" rule all stay as they are.
+
+### ADR-547-15 Resolving the connection for an asynchronous denial: the server resolves, the UI never assumes
+
+Product/UX asked (2026-10-16) whether the run view may assume `signals-publish` when a run has no bound `browserSessionName`. Facts: both run configs always populate `browserSessionName` (defaults to `RTX_PUBLISH_SESSION_NAME` — `network-snowball.ts:267`, `snowball-seed-scout.ts:179`), **but** the scout treats that default as non-binding: a config `targetId` resolves to the target's connection and outranks the defaulted name (`scripts/snowball-seed-scout/lib/resolve.py:112-125`). So the recorded name is not always the session that was denied, and a UI-side fallback would sometimes add an origin to the wrong session.
+
+Ruling:
+
+- The **server** resolves the connection for a run denial, in this order, mirroring `resolve.py`: (1) `sessionName` inside an `RTX_NAVIGATION_BLOCKED:<json>` error when present; (2) config `browserSessionName` when it is set and **not** the default; (3) config `targetId` → `platform_targets.connectionId`; (4) config `browserSessionName` (the default). The result is `recovery.connectionId` on the formatted error the run page receives; the UI reads it and never computes one.
+- If none of (1)–(4) yields a `browser_connections` row (e.g. a `signals-scout-*` session, ADR-547-12), `recoverable: false`, `recovery: null`: the callout shows the corrected text and a link to Settings → Allowed websites, with **no** Allow action.
+- The resolution lives next to `formatWorkflowError`'s consumer on the server side (the run API that serialises `run.errors`/step errors), not in `format-error.ts` itself, which stays pure. Unit test: a scout run with default name + `targetId` resolves to the target's connection, not `signals-publish`.
+
+Why: the data contract already says `connectionId` may be `null` (ADR-547-7); this closes the "never guess" rule with the one place that has the facts.
 
 ## 4. Scenarios against the acceptance criteria
 
