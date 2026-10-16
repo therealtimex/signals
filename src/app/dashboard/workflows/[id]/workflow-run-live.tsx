@@ -21,6 +21,7 @@ import {
   type RunNavigationDenial,
 } from "@/lib/browser/navigation-blocked";
 import { WorkflowDetailSteps } from "./workflow-detail-steps";
+import { BlockedWebsiteCallouts } from "@/components/blocked-website-callout";
 import { PruneResults } from "./prune-results";
 import { WorkflowRunSubjectsPanel } from "@/components/workflow-run-subjects-panel";
 import { useWorkflowPolling } from "@/hooks/use-workflow-polling";
@@ -256,6 +257,8 @@ export function WorkflowRunLive({
             : ""}
         </Badge>
       </div>
+
+      <BlockedWebsiteCallouts denials={navigationDenials} />
 
       {pipelineCtx && (
         <Card className="p-4 text-sm">
