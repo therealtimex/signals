@@ -455,3 +455,60 @@ pre-#549 runs), `signals-writing-skill.test.ts` (card fields pinned, precheck pa
    original snapshot? Recommendation: re-resolve and record `catalogVersion`, since the operator is
    re-dispatching on purpose.
 3. Owner: per-contact persisted objectives (option C) as a follow-up issue once #530 Phase 3 lands.
+
+## 17. UX contract v1 reconciliation (2026-10-17)
+
+Product/UX contract v1 (`realtimex-product-ux/work/issue-549/contract-v1.md`, prototype
+`…/b368e5dadfc4f3c9/index.html`) keeps the data contract. Decisions 1–6 there are accepted. The
+following clarifications answer its §6 and requests R1/R2; none changes a persisted shape.
+
+### ADR-549-14 — offering input shape
+
+`accountObjectiveInputSchema` accepts **either** `offering: OfferingSnapshotInput` (a snapshot body)
+**or** `offeringRef: { kind: "catalog", slug, catalogVersion? }`, never both. Sending `offering`
+implies `offeringRef = { kind: "snapshot", slug }`; the dialog sends only `offering`. Sending
+neither on a commercial objective stamps `offering_missing`.
+
+### ADR-549-15 — the server derives the slug
+
+`offering.slug` is optional on input. When absent the server derives it from `name` with the
+algorithm in contract §6 (NFKD, strip diacritics, lowercase, runs of non `[a-z0-9]` → `-`, trim
+`-`, cut to 63, `offering` when shorter than 2). A provided slug must still match
+`/^[a-z0-9][a-z0-9-]{1,62}$/`. One implementation, in `account-objective.ts`, so the dialog does
+not carry a copy; the dialog may omit it.
+
+### ADR-549-16 — `capturedAt` (R2)
+
+`offering.capturedAt` is optional on input. When absent the server stamps it with the objective's
+`authoredAt`. When present it is kept (a snapshot pasted from an older source may legitimately
+predate the run). A `catalog` resolution (post-#530) always stamps resolution time.
+
+### ADR-549-17 — evidenced-pain claim text on the run page (R1)
+
+Accepted. `listWorkflowRunProposals` already reads each launch's metadata, where the spine lives,
+so per proposal `ask.customerPain` with `status: "evidenced"` is projected as
+`{ status: "evidenced", claims: [{ claimId, text: string | null, sensitivity: "public" | "private" }] }`.
+`text` is the spine claim's `text` cut to 300 characters (with `…`); `null` when the id no longer
+resolves (a spine change after the write; approval is revoked in that case anyway), and the UI
+falls back to "from N cited source(s)". `claimIds` stays on the persisted intent; the projection
+only adds the resolved view. The thread card keeps rendering ids; the agent already has the spine.
+Private claims are shown with their sensitivity; the run page is the operator's own launch view,
+which already shows the full spine, so this adds no new exposure.
+
+### ADR-549-18 — typed 422 on dispatch
+
+`POST /api/workflows/templates/[id]/run` refuses an invalid objective with status 422 and body
+`{ error, errorCode: "invalid_account_objective", details: { reason: "too_large" | "invalid", issues } }`.
+`too_large` is the whole-record 8 KiB refine; everything else is `invalid` with the zod issues, so
+the dialog's two copy variants key off `details.reason`, not off issue text.
+
+### Accepted UX decisions with contract consequences
+
+- Decision 4 (kind never preselected): `source: "default"` therefore only ever comes from API,
+  skill or older-client dispatches; §4.6 stands as the server rule for those.
+- Decision 5 (pre-#549 run renders nothing): the projection still returns `objective: null`;
+  tests pin that.
+- §1 template default: an untouched default is omitted from the run body; the server reads it from
+  template config and records `template_config` (§5 step 1).
+- §5 thread card: labels follow the run-page vocabulary; the parity test pins field paths, not
+  label strings.
