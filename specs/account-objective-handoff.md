@@ -1,0 +1,457 @@
+# Account objective through the writing handoff (#549)
+
+Status: Proposed (System Design, 2026-10-17, loop `loop-issue-549-2ea030a4`). Part of epic #548.
+Routed `needs_ux` for the two Signals UI surfaces (activation dialog authoring, run-page review
+card); the data contract and every non-UI slice below are fixed and may start on `contract_agreed`.
+
+Base: `main` @ `fc53d96` (v0.2.23), branch `issue-549`.
+
+## 1. Problem
+
+The dogfood run that motivated #548 was dispatched to qualify an engineering-workflow offering.
+What reached the writing pipeline was `goal: { id: "warm_conversation", writingGoal: "replies" }`.
+The offering, the desired business outcome, the buyer-fit hypothesis and the operator's proposed
+next step lived in the operator's head and in thread prose. Nothing typed carried them, so the
+agent did what the typed contract asked for: a grounded, audited DM that advanced "replies" and
+asked an unrelated customer-product question. Audit passed because nothing in the audit knows what
+the operator wanted.
+
+The failure is a **missing authority**, not a missing prompt. Every other operator intent on this
+path (mandate, consumer, surfaces, acting target, approval policy) is server-stamped onto the
+launch composition scope and validated on every variant write (#410). The commercial intent is the
+one input that is not.
+
+## 2. Outcomes and acceptance
+
+The six checkboxes on #549, restated as testable outcomes:
+
+| AC | Outcome | Mechanism (section) |
+|---|---|---|
+| 1 | Dispatch → run → launch → variant lineage carries objective + offering references; updates and revisions cannot silently drop them | objective stamped on the composition scope; every `upsert_variant` (create, revise, derive) validates the intent's objective ref against it (§5, §6) |
+| 2 | Before drafting, the agent states how the ask advances or tests the objective, without assuming unverified customer pain | persisted `intent.ask` with a typed relation and a typed customer-pain status; blocker claim rule (§7) |
+| 3 | Business outcome is separate from the `writingGoal` platform metric | `writingGoal` untouched; outcome lives only in the objective; both projected side by side (§8) |
+| 4 | Review card exposes objective, fit hypothesis, uncertainties, next step | thread card from persisted read models; run-page card from the proposals projection (§9) |
+| 5 | Synthetic regression: existing founder connection + recent touch + engineering-workflow objective does not silently become an unrelated question | a proposal without a declared ask relation cannot be persisted; fixture in §11 |
+| 6 | Relationship-only and missing-product-context cases stay supported with truthful limitations | `kind: "relationship_only"` objective; server-computed limitations rendered on both cards (§4.3, §4.4) |
+
+Unchanged on purpose: Personality gate and snapshot, source privacy and redaction, the
+`assist_only` mandate, explicit approval, `auto_low_risk` exclusion, publish refusal.
+
+## 3. Current system (facts)
+
+- `WritingIntent` (`src/lib/writing/writing-intent.ts`) carries `goal: { kind: "relationship_goal", id, writingGoal }`. `writingGoal` is the platform metric the spine is scored against (`replies | reposts | … | leads | awareness`). There is no field for an offering or a business outcome.
+- `launch.metadata.writing.composition` (`launchCompositionSchema`, strict) is stamped by `mergeLaunchMetadata` only from a dispatch-issued scope token, is immutable once present, and is the authority `assertWritingIntentAuthority` validates every variant against. Caller-supplied compositions are stripped.
+- `persistWritingVariant` runs the authority check and `validateCrossDocuments` for **every** write: new variant, in-place revision (`mode: revise`, same id), derived alternative (`derivedFromVariantId`). `intent` is part of `computeAuditInputHash`, so changing it stales the audit and revokes approval.
+- `materializeVariantWithRunner` snapshots `intent` into the content item and `snapshotMatches` compares it.
+- The nurture run config is built in `runTemplateViaRtx` from template config plus the activation dialog's run config; structural keys (`contactNurture`, `writingIntent`) are restored from the stored template, the approval gate is server-derived, and the scope token hash is persisted before the brief is written.
+- The review surface is two-sided: the agent renders the thread card (`core/approval.md`, spec §6.4) and the Signals run page renders `ProposalCard` from `listWorkflowRunProposals`, with Approve & materialize / Reject / Request revision posting `kind: "ui"` evidence. An operator approving from the run page today sees recipient, relationship goal, surface, body, audit, revision note. No objective.
+- `get_writing_context` does not expose the launch composition; the agent learns the scope only from the brief.
+- No product or offering model exists in `src`. `PRODUCTS.md` (#530) is a prototype in one RTX workspace root, not readable by Signals.
+- Seed fixture `seedNurtureProposalFixture` builds composed proposals for the run page; `writing-intent-pipeline.test.ts` runs the real tables end to end.
+
+## 4. Decision summary
+
+Carry the objective the same way the mandate is carried: **captured at dispatch, normalized and
+stamped by the server onto the launch composition, referenced by hash from every intent, validated
+on every variant write, projected to both review surfaces.** The agent never authors the objective.
+The agent authors one thing on top of it, the **ask statement**, and that is persisted next to the
+objective reference so the operator sees how the draft relates to what they asked for.
+
+### 4.1 Options considered
+
+| Option | Verdict |
+|---|---|
+| A. Objective only in the brief prose | Rejected. That is the current state; nothing typed survives to the variant. |
+| B. Objective authored by the agent into the intent | Rejected. Reintroduces "the agent decides"; an objective the agent can rewrite is not an operator authority. |
+| C. Separate `account_objectives` table referenced by id | Deferred. Correct long-term home once objectives are reused across runs and per contact, but it needs DDL, a contact-page UI and a lifecycle, none of which #549 needs. The record shape below is designed so a table can adopt it later without changing the intent reference (`objectiveId` + `hash`). |
+| **D. Typed run-config record, server-normalized, stamped on the composition scope, hash-referenced from the intent** | **Chosen.** No DDL, no migration, reuses the one authority mechanism the pipeline already trusts, and every acceptance item follows from existing enforcement points. |
+
+### 4.2 ADR-549-1 — the objective is part of the composition scope
+
+`launchCompositionSchema` gains an optional `objective: AccountObjective`. It is written by
+`stampLaunchComposition` from the run's normalized config at the moment the scope token mints the
+scope, is deleted from any caller patch exactly like the rest of `composition`, and is immutable
+with it. A launch created before this change has no `objective`, and that is a visible state, not
+an error.
+
+### 4.3 ADR-549-2 — `AccountObjective` v1
+
+```ts
+export const ACCOUNT_OBJECTIVE_KINDS = ["commercial", "relationship_only"] as const; // pinned by test; adding a kind needs an ADR
+
+AccountObjective (strict) {
+  schemaVersion: 1,
+  objectiveId: "aobj_<id>",                       // server-minted; add "aobj" to WRITING_ID_PREFIXES
+  kind: "commercial" | "relationship_only",
+  offeringRef: OfferingRef | null,                // what the operator pointed at
+  offering: OfferingSnapshot | null,              // what the server resolved at dispatch
+  businessOutcome: string | null,                 // ≤ 300 chars; required when commercial
+  fitHypothesis: string | null,                   // ≤ 500
+  knownEvidence: Array<{ text: string ≤ 300; ref?: { kind: "url", url } | { kind: "content_item", contentItemId } }>,  // ≤ 8
+  uncertainties: string[],                        // ≤ 8 × 300
+  proposedNextStep: string | null,                // ≤ 300
+  successEvidence: string | null,                 // ≤ 300
+  limitations: AccountObjectiveLimitation[],      // server-computed, see 4.4
+  source: "run_config" | "template_config" | "default",
+  authoredAt: unixSeconds,
+  hash: string,                                   // sha256Canonical of the record minus `hash`
+}
+```
+
+Whole-record bound: ≤ 8 KiB serialized (refine). Text fields are trimmed; empty strings become
+null. `relationship_only` requires `offeringRef`, `offering` and `businessOutcome` to be null (the
+normalizer rejects a relationship-only objective that smuggles an offering).
+
+Input shape (`accountObjectiveInputSchema`) is the same minus `objectiveId`, `offering`,
+`limitations`, `source`, `authoredAt`, `hash`. Any of those present on input are stripped and
+recomputed by the server; a caller cannot pre-mint an id, a hash or a limitation list.
+
+### 4.4 ADR-549-3 — `OfferingRef` v1 and the #530 seam
+
+```ts
+OfferingRef =
+  | { kind: "snapshot", slug: /^[a-z0-9][a-z0-9-]{1,62}$/ }
+  | { kind: "catalog",  slug, catalogVersion?: string }      // reserved for #530
+
+OfferingSnapshot (strict) {
+  slug, name ≤ 120, oneLiner ≤ 300, category?: ≤ 120,
+  valueProps: string[] ≤ 5 × 300,
+  proofPoints: Array<{ text ≤ 300; url?: string }> ≤ 5,
+  icp?: ≤ 300, cta?: { text ≤ 120; url?: string },
+  capturedAt: unixSeconds,
+}
+```
+
+- A `snapshot` ref is supplied together with its `OfferingSnapshot` body in the input
+  (`offering: { ... }`); the server keeps the body verbatim (after bounds) and sets `offeringRef =
+  { kind: "snapshot", slug }`.
+- A `catalog` ref goes through `resolveOfferingSnapshot(ref)` in `account-objective.ts`. In v1 the
+  resolver has no catalog and returns `null`; the objective is stamped with `offering: null` and the
+  limitation `offering_unresolved`. Dispatch proceeds. When #530 lands, the resolver reads the
+  catalog, fills `offering` and `offeringRef.catalogVersion`, and nothing downstream changes: the
+  snapshot carried in lineage is still what the operator's run saw.
+- The offering snapshot is **context, not evidence**. Nothing in it may become a fact in the
+  artifact unless it is also in the spine (existing hard rule). In v1 a proof point enters the spine
+  as a `note` source whose text is copied verbatim from `offering.proofPoints[i].text` and whose
+  claim `locator` is `offering:<slug>#proof[<i>]`. #551 owns whether that becomes a first-class
+  `offering` source kind; this convention is the seam it can formalize.
+
+### 4.5 ADR-549-4 — server-computed limitations
+
+Computed once at normalization, stamped into `objective.limitations`, rendered on both cards.
+They never change approval policy, risk tier or audit verdict; their job is to make the gap
+visible and to bind the brief's instructions.
+
+| Code | When | Brief consequence |
+|---|---|---|
+| `offering_missing` | commercial, `offeringRef` null | no offering may be named or pitched; asks are discovery only |
+| `offering_unresolved` | catalog ref, resolver returned null | same as above, plus the card says the catalog was unavailable |
+| `offering_proof_missing` | snapshot with zero `proofPoints` | no seller capability or outcome claim may appear in the draft |
+| `fit_hypothesis_missing` | commercial, `fitHypothesis` null | the ask may not presume fit; it may test it |
+| `success_evidence_missing` | commercial, `successEvidence` null | the card says success is undefined; `proposedNextStep` still renders |
+
+`relationship_only` objectives carry no limitations.
+
+### 4.6 ADR-549-5 — default objective
+
+A composed dispatch (`readWritingIntentComposition(mergedConfig)` non-null) that carries no
+`accountObjective` in run or template config is stamped with
+`{ kind: "relationship_only", source: "default" }`. This is the honest statement that no commercial
+objective was given. It is never upgraded by inference: `goal.id = "partnership"` does not make an
+objective commercial, and neither does anything in contact data. The `source: "default"` provenance
+is rendered so an operator who forgot to set one can see that they did.
+
+### 4.7 ADR-549-6 — where the objective is authored
+
+| Path | Status in #549 |
+|---|---|
+| `POST /api/workflows/templates/[id]/run` body `config.accountObjective` (input shape) | **In scope, non-UI.** This is what the activation dialog and any agent-tools or skill dispatcher send. |
+| Activation dialog section for Contact Relationship Nurture | **In scope, UI → Product/UX contract** (§12). |
+| Template config `accountObjective` as a standing default (template builder) | Accepted by the normalizer (`source: "template_config"`); no builder UI in #549. |
+| Per-contact persisted objective (contact page) | **Out of scope**; noted as the natural follow-up with option C in 4.1. |
+
+The run-level objective applies to every contact the run touches. For a batch run the operator
+writes a segment-level hypothesis; per-account adaptation is the agent's ask statement plus its
+evidence references, not an edit of the objective.
+
+## 5. Normalization at dispatch (`run-template-via-rtx.ts`)
+
+Immediately before the scope token is minted (the point where the server still owns the whole
+context), for every composed run:
+
+1. Read `accountObjective` from `mergedConfig` (run override wins over template default; record
+   `source` accordingly; absent → default per 4.6).
+2. Parse with `accountObjectiveInputSchema`; a parse failure is a `422 invalid_account_objective`
+   dispatch refusal with the zod issues in `details`, before any run row is mutated past `pending`
+   (same shape as the `approval_gate_locked` refusal).
+3. Resolve the offering (4.4), compute limitations (4.5), mint `objectiveId`, stamp `authoredAt`,
+   compute `hash`.
+4. Write the normalized record back into `runtimeConfig.accountObjective` and persist it on the
+   run row **in the same `updateWorkflowRun` call that persists the scope token hash**, so a run
+   can never hold a token whose scope would stamp an objective the row does not have.
+5. Hand the normalized record to the brief builder.
+
+`existingRunId` re-dispatch normalizes again from the merged config; an already-normalized record
+present in the stored run config is treated as input (its server fields are stripped and
+recomputed), so re-running keeps the same text but never trusts a stored id or hash blindly.
+
+## 6. Authority on every variant write
+
+### 6.1 ADR-549-7 — intent reference and schema version
+
+`writingIntentShape` gains two optional keys. `WRITING_INTENT_SCHEMA_VERSION` stays `1`: the record
+stays backward-readable (`readWritingIntentRecord` must still parse every existing variant), the
+schema stays `.strict()`, and the authority check, not the schema, decides when the keys are
+required.
+
+```ts
+objective?: { objectiveId: "aobj_…", hash: string } | null
+ask?: WritingIntentAsk | null
+```
+
+### 6.2 ADR-549-8 — `assertWritingIntentAuthority` rules (added to the existing table)
+
+| Situation | Result |
+|---|---|
+| scoped launch whose composition has `objective`, intent `objective` absent/null | `writing_intent_objective_required` |
+| `intent.objective.objectiveId` or `hash` ≠ composition's | `writing_intent_objective_mismatch` |
+| composition has no `objective` (pre-#549 launch), intent carries one | `writing_intent_objective_not_permitted` |
+| composition has `objective`, intent `ask` absent/null | `writing_intent_ask_required` |
+| `ask.relation` ∈ {advances, tests, defers} on a `relationship_only` objective, or `relationship_only` on a commercial one | `writing_intent_ask_relation_invalid` |
+| `ask.relation = "tests"` without `testsUncertainty`, or index outside `objective.uncertainties` | `writing_intent_ask_relation_invalid` |
+| `ask.relation = "defers"` without `deferReason` | `writing_intent_ask_relation_invalid` |
+
+The check runs inside `persistWritingVariant` for create, in-place revise and derived alternatives
+alike, which is what makes AC1 structural rather than procedural. A revision that drops or edits
+the objective reference is rejected with the reason above; a revision that edits the ask is
+accepted, stales the audit (intent is hashed) and revokes any approval, so the operator re-approves
+with the new ask on the card.
+
+### 6.3 Cross-document checks (`validateCrossDocuments`)
+
+Added next to the existing claim/source resolution, because they need the spine:
+
+| Check | Reason |
+|---|---|
+| `ask.customerPain.status = "evidenced"` → every `claimIds[i]` resolves in `spine.claims` | `ask_claim_unknown` |
+| `ask.evidenceSourceIds[i]` resolves in `spine.sources` | `ask_source_unknown` |
+
+## 7. The ask statement (AC2)
+
+### 7.1 ADR-549-9 — `WritingIntentAsk`
+
+```ts
+WritingIntentAsk (strict) {
+  statement: string (1..500),                                  // what this touch asks for, in one or two sentences
+  relation: "advances" | "tests" | "defers" | "relationship_only",
+  testsUncertainty?: number,                                   // index into objective.uncertainties; required for "tests"
+  deferReason?: string ≤ 300,                                  // required for "defers"
+  customerPain:
+    | { status: "none_assumed" }
+    | { status: "evidenced", claimIds: ["clm_…", …] (≥ 1) }     // the pain is a spine claim
+    | { status: "asked", text: string ≤ 300 },                  // a hypothesis the draft asks about, never asserts
+  evidenceSourceIds?: ["src_…", …] ≤ 10,                        // spine sources this ask leans on
+}
+```
+
+Relation semantics:
+
+- `advances`: the ask moves the account toward `businessOutcome` (for example proposes the
+  `proposedNextStep`).
+- `tests`: the ask is designed to resolve one named uncertainty.
+- `defers`: this touch deliberately does not advance or test the objective (relationship nudge,
+  thank-you, congratulation); `deferReason` says why. Allowed, and visible. The dogfood DM would
+  have had to be persisted as `defers` with a reason, which is the "not silently" in AC5.
+- `relationship_only`: the only legal value under a relationship-only objective.
+
+`#550` will add a first-class action decision (wait, continue thread, comment, DM). That record
+references `objectiveId` and may precede the ask; the ask stays the per-artifact statement.
+
+### 7.2 Process rule (brief + skill)
+
+The composed brief instructs: write the ask to the working file and post it in the thread
+**before** drafting units; persist it as `metadata.writing.intent.ask` on the first `upsert_variant`.
+The persisted record proves the ask existed at first persist; the thread proves the order.
+
+### 7.3 ADR-549-10 — claim rule `core/claim/no-assumed-customer-pain`
+
+Added to `core/claims.md` (class `claim`, severity `blocker`, applies `core`): "The draft does not
+assert that the recipient has a problem, pain, or need unless a spine claim evidences it; a
+hypothesis may be asked, never asserted." The structural `customerPain.status` keeps the ask
+honest; the rule keeps the body honest. Verdict derivation is unchanged (a blocker blocks).
+
+## 8. Outcome versus metric (AC3)
+
+ADR-549-11: `writingGoalSchema` and `goal.writingGoal` are untouched; they remain the platform
+signal the spine's CTA and formulas are chosen for. The business outcome exists only in
+`objective.businessOutcome`. Every projection shows them as two fields, never merges them, and the
+brief says in one sentence which is which. No enum change means no persisted-record migration.
+
+## 9. Review surfaces (AC4)
+
+### 9.1 ADR-549-12 — read models expose the stamped objective
+
+- `get_writing_context.launch.writing.composition` is projected (new): `{ consumer, mandate,
+  workflowRunId, surfaces, objective | null }`. Secrets are not involved (the token is never stored
+  in plaintext), so this is a straight projection of the stamped scope.
+- `listWorkflowRunProposals` returns a run-level `objective: AccountObjective | null` (read from the
+  first launch's composition; every launch of a run carries the same stamped record, and a test
+  pins that) and, per valid proposal, `ask: WritingIntentAsk | null`.
+- `WorkflowRunProposal.goal` keeps `{ relationshipGoal, writingGoal }`; the outcome is on the
+  run-level objective.
+
+### 9.2 Thread card (skill contract)
+
+`SKILL.md`, `core/approval.md` and spec §6.4 gain, between `Personality` and `Audit`:
+
+```text
+Objective  <kind> · source <run_config|template_config|default> · offering <slug|none> · outcome <businessOutcome|none> · metric <writingGoal>
+Fit        <fitHypothesis|none> · evidence <n known> · uncertainties: <numbered list or none>
+Ask        <relation[ #n]> — <statement> · pain: <none assumed|evidenced clm_…|asked: "<text>">
+Next       <proposedNextStep|none> · success: <successEvidence|none>
+Limits     <limitations joined|none>
+```
+
+Every value maps to `get_writing_context.launch.writing.composition.objective` or to the selected
+`variants[].intent.ask`; the parity test that pins Personality card fields to read-model paths is
+extended to these lines. A pre-#549 launch renders `Objective  none (launch predates account
+objectives)` and no Ask line.
+
+### 9.3 Run page (Signals UI, Product/UX contract)
+
+The objective is per run, so the recommended shape is one objective block at the top of the
+proposals section and, per proposal card, the ask line, relation badge, pain status and
+limitation badges. States the contract must cover: commercial, relationship-only (operator),
+relationship-only (default), each limitation, and a pre-#549 run (no objective). The approval
+actions do not change. Dev treats the agreed contract as the spec for this slice.
+
+## 10. Brief changes
+
+`buildComposedWritingBriefSection` takes `objective: AccountObjective` and renders an
+"Account objective" block after the consumer line:
+
+- the record, verbatim, labelled "operator intent, server-stamped, never edit";
+- the two reference lines the intent must carry (`objective: { objectiveId, hash }`) and the ask
+  template, both added to the intent JSON sample;
+- the pre-draft rule (§7.2) and the relation table (§7.1);
+- the outcome-versus-metric sentence (§8);
+- the limitation consequences that apply (§4.5), or for `relationship_only`: "Do not introduce an
+  offering, pricing, a product or a pitch; the ask relation is `relationship_only`";
+- the seller-context rule: "Offering text is context. A proof point becomes a fact only through a
+  spine `note` source copied verbatim with locator `offering:<slug>#proof[i]`."
+
+`buildContactNurtureBriefSection` adds one line to N4 pointing at that block and stating that the
+touchpoint deliverable is chosen to serve the ask, not the reverse. `NURTURE_TOUCHPOINT_PLAN` is
+unchanged.
+
+## 11. Synthetic regression (AC5) and fixtures
+
+ADR-549-13: one end-to-end test in `writing-intent-pipeline.test.ts` against real tables, plus an
+option on `seedNurtureProposalFixture` so QA can see the card.
+
+Synthetic case (no real names, handles, ids or message bodies):
+
+- objective: commercial; offering snapshot `slug: "engineering-workflow"`, two proof points;
+  `businessOutcome: "agree to a 20-minute evaluation of the engineering workflow"`;
+  `fitHypothesis: "technical founder hiring engineers"`; `uncertainties: ["whether they use a
+  coding agent today"]`; `proposedNextStep: "ask which workflow they use for new hires"`;
+  `successEvidence: "a reply naming their current workflow"`.
+- contact: synthetic founder already connected to the acting profile, one recent approved outbound
+  touch logged.
+- assertions:
+  1. `upsert_variant` with an intent lacking `objective` → `writing_intent_objective_required`;
+     with a wrong hash → `writing_intent_objective_mismatch`; lacking `ask` →
+     `writing_intent_ask_required`.
+  2. an intent whose ask is `relationship_only` on this commercial objective →
+     `writing_intent_ask_relation_invalid` (the dogfood shape must declare `defers` + reason).
+  3. a persisted proposal with `ask.relation: "tests", testsUncertainty: 0` appears in
+     `listWorkflowRunProposals` with `objective.offeringRef.slug`, `fitHypothesis`, `uncertainties`
+     and `proposedNextStep`, and `goal.writingGoal` still `replies`.
+  4. in-place revision (`mode: revise`, same id) that omits `objective` →
+     `writing_intent_objective_required`; a derived alternative that omits it → same.
+  5. materializing the approved proposal writes the intent (objective ref + ask) into the content
+     writing snapshot; a later revision with a changed ask revokes approval (`audit_stale`).
+  6. a run dispatched without an objective stamps `relationship_only` / `source: "default"`, and an
+     intent with `relation: "advances"` is rejected.
+  7. a commercial objective without an offering stamps `offering_missing`; the brief contains the
+     discovery-only instruction; the projection exposes the limitation.
+  8. a `catalog` ref stamps `offering_unresolved` and the dispatch still succeeds.
+
+## 12. Product/UX contract (why `needs_ux`)
+
+Two Signals surfaces change and both are multi-state user surfaces under the Dev workspace rule:
+
+1. **Activation dialog, Contact Relationship Nurture**: an objective section. Minimum contract:
+   kind toggle (commercial / relationship only); for commercial: offering (snapshot entry with
+   slug, name, one-liner, up to five value props and five proof points, or "none"), business outcome
+   (required), fit hypothesis, known evidence, uncertainties, proposed next step, success evidence
+   (each optional, each with the limitation it leaves when empty). Template-level default is out
+   of scope for the UI.
+2. **Run page proposals**: run-level objective block and per-card ask/relation/pain/limitations
+   (§9.3), with the five states listed there.
+
+Questions for Product/UX: compact versus expanded authoring layout; whether the run page shows the
+objective even when every proposal is materialized; whether the variant detail page should mirror
+the ask line (recommended read-only, can follow). Human acknowledgment on Origin is required before
+the first UI patch; slices A–C below do not wait for it.
+
+## 13. Implementation slices (for Dev)
+
+| Slice | Files | Gate |
+|---|---|---|
+| A. Contract + server | new `src/lib/writing/account-objective.ts` (schemas, `normalizeAccountObjective`, `resolveOfferingSnapshot` seam, limitations, hash, pinned kinds); `writing-intent.ts` (+`objective`, +`ask`); `contracts.ts` (`launchCompositionSchema.objective`); `ids.ts` (`aobj`); `launch-writing.ts` (stamp from authority); `writing-intent-authority.ts` (6.2; `ComposedRunAuthority.objective`); `variant-writing.ts` (6.3); `run-template-via-rtx.ts` (§5); `run/route.ts` (accept `accountObjective`, 422 mapping) | contract_agreed |
+| B. Brief + skill | `writing-composition.ts`, `contact-relationship-nurture.ts` (§10); `.claude/skills/signals-writing/{SKILL.md, core/approval.md, core/claims.md, reference.md}`; `scripts/writing-cli.cjs` precheck parity (`objective_ref_missing`, `ask_missing`, `ask_relation_invalid`, `ask_claim_unknown`, `ask_source_unknown`); skill version 1.1.0 → 1.2.0 and fixture versions; `specs/signals-writing-system.md` §6.4; `docs/composable-writing-intent.md` new section; `docs/agent-tools.md` | contract_agreed |
+| C. Read models | `content-item-handlers.ts` (composition projection), `workflow-run-proposals.ts`, `seed-fixtures/nurture-proposals.ts` (objective option), proposals route test | contract_agreed |
+| D. UI | `activate-dialog.tsx` + `contact-nurture-fields.tsx` (or a sibling `account-objective-fields.tsx`), `workflow-run-proposals.tsx` | agreed UX contract + Human ack |
+
+Tests (minimum): `account-objective.test.ts` (bounds, normalization, stripping, limitations,
+hash stability, pinned kinds), `writing-intent.test.ts` (old records still parse),
+`writing-intent-authority.test.ts` (6.2 table), `launch-writing.test.ts` (stamped from run config,
+caller `objective` stripped, immutable), `run-template-via-rtx.test.ts` (normalized record persisted
+in the same write as the token hash; 422 on invalid input; default provenance; catalog unresolved),
+`contact-relationship-nurture.test.ts` and the composed-brief test (block rendered, relationship-only
+forbids pitch, limitations rendered), `workflow-run-proposals.test.ts` (projection, null for
+pre-#549 runs), `signals-writing-skill.test.ts` (card fields pinned, precheck parity),
+`writing-intent-pipeline.test.ts` (§11).
+
+## 14. Boundaries with sibling issues
+
+| Issue | Boundary |
+|---|---|
+| #550 action choice | `proposedNextStep` is operator input. The action decision record #550 adds references `objectiveId` and may conclude `wait`; it does not edit the objective. `ask.relation = "defers"` is the per-artifact statement; #550 owns the per-account decision. |
+| #551 selective spines / seller proof | Offering proof enters the spine through the `note` convention in 4.4; #551 may promote it to an `offering` source kind and define minimal-proof selection. Nothing here changes claim accounting. |
+| #552 editorial assessment | None of the new fields affect verdict or risk; the only new audit rule is a claim blocker (7.3). |
+| #553 deferred review + completion cards | The completion card may reuse the Objective/Ask lines verbatim from the read models. |
+| #554 visibility widening | The objective lives in launch metadata and in the run config; it inherits launch `scope` and is never copied into a content body. The ask statement is in the intent and therefore in the content writing snapshot; it is operator and agent reasoning, not contact private data. |
+| #516 brief drift | Unchanged; the new block is appended to the composed contract, not to the legacy preamble. |
+
+## 15. Risks, migration, rollback
+
+- **No DDL, no migration.** Every change is additive and optional on persisted records. Old
+  launches have no `objective`; old variants have no `objective`/`ask`; both parse and project as
+  "none". New composed dispatches always stamp an objective (default relationship-only), so the
+  brief grows by one block for every nurture run from the first upgraded dispatch on.
+- **Rollback** is a code revert. Variants written with the new keys stay readable by the old schema
+  only if the old `.strict()` intent schema is not reinstated verbatim; a revert must keep the two
+  optional keys in the record schema (or accept that those proposals project as invalid).
+- **Agent honesty of `relation` is self-reported.** The server enforces presence, legality and
+  evidence resolution, not truth. Mitigation: the relation and statement are on the card the
+  operator approves. This is the same trust model as thread-message approval evidence (spec §9.1).
+- **Objective text on disk.** The normalized record is in the run config and therefore in the
+  brief file like every other config key. No new exposure class; the scope token remains the only
+  secret and is unchanged.
+- **Catalog seam.** `resolveOfferingSnapshot` is the one function #530 replaces. Until then every
+  `catalog` ref is a visible limitation, never a dispatch failure.
+- **Precheck parity drift.** The skill's `writing-cli.cjs` must mirror the two cross-document checks
+  and the relation rules; the existing parity test is the guard.
+- **Run-page objective when launches disagree.** Every launch of a run stamps the same record (same
+  run config); the projection reads the first and a test pins equality, so a future per-launch
+  objective would have to change the projection deliberately.
+
+## 16. Open questions
+
+1. Product/UX: §12.
+2. Owner (post-#530): should a `catalog` ref re-resolve on `existingRunId` re-dispatch, or keep the
+   original snapshot? Recommendation: re-resolve and record `catalogVersion`, since the operator is
+   re-dispatching on purpose.
+3. Owner: per-contact persisted objectives (option C) as a follow-up issue once #530 Phase 3 lands.
