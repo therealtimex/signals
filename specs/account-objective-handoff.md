@@ -1,6 +1,7 @@
 # Account objective through the writing handoff (#549)
 
-Status: Proposed (System Design, 2026-10-17, loop `loop-issue-549-2ea030a4`). Part of epic #548.
+Status: Proposed, **revision 2** (System Design, 2026-10-17, loop `loop-issue-549-2ea030a4`). Part of epic #548.
+**Revision 2 (§18) supersedes the form-based objective input of §4.3–4.5, §4.7, §5, §10, §12, §13 slice D and §17; read §18 first.** The lineage, authority, ask, outcome-versus-metric and read-model decisions (ADR-549-1, -5, -7..-13, -17) are unchanged.
 Routed `needs_ux` for the two Signals UI surfaces (activation dialog authoring, run-page review
 card); the data contract and every non-UI slice below are fixed and may start on `contract_agreed`.
 
@@ -50,6 +51,8 @@ Unchanged on purpose: Personality gate and snapshot, source privacy and redactio
 - Seed fixture `seedNurtureProposalFixture` builds composed proposals for the run page; `writing-intent-pipeline.test.ts` runs the real tables end to end.
 
 ## 4. Decision summary
+
+> Revision 2 note: the *record shape* in 4.3–4.5 and the authoring paths in 4.7 are superseded by §18. The decision in 4.1/4.2 (server-stamped on the composition scope, hash-referenced from every intent) stands.
 
 Carry the objective the same way the mandate is carried: **captured at dispatch, normalized and
 stamped by the server onto the launch composition, referenced by hash from every intent, validated
@@ -512,3 +515,271 @@ the dialog's two copy variants key off `details.reason`, not off issue text.
   template config and records `template_config` (§5 step 1).
 - §5 thread card: labels follow the run-page vocabulary; the parity test pins field paths, not
   label strings.
+
+## 18. Revision 2 — the objective is a markdown brief with workspace mentions (2026-10-17)
+
+### 18.1 Why
+
+The Human reviewed UX contract v1 and redirected the input model (Product/UX thread, verbatim):
+"i think it's wrong direction to make workflow configuration via too detailed form. agents can
+read markdown files and Signals has reusable resources in workspace's personality. I think we can
+define contract in a markdown file and ability to mention personality's files: BRAND.md, SOUL.md,
+PRODUCTS.md, etc". Product/UX proposed, and the Human accepted, that a Business outcome run takes
+one **Objective brief** in markdown (inline or saved and reusable), with `@` mentions of workspace
+resources, and that the offering is a mention of a PRODUCTS.md entry rather than text copied into
+the run config.
+
+What this changes is *where the operator's intent is written and how seller context is referenced*.
+What it does not change is the authority model: the server still snapshots at dispatch, stamps the
+snapshot on the composition scope, and validates every variant against it. The Personality pattern
+is the precedent, and it already gives Signals a safe reader for the workspace directory
+(`src/lib/personality/workspace.ts`: resolved under RealTimeX working-data, symlink and case-alias
+refusal, UTF-8 check, whole-file hash) and a writer for files inside it
+(`src/lib/rtx/workspace-brief-files.ts`).
+
+### 18.2 ADR table for revision 2
+
+| ADR | Status | Note |
+|---|---|---|
+| 549-1 stamped on composition | kept | the stamped value is now the brief snapshot (18.4) |
+| 549-2 record v1 (form fields) | **superseded** by 549-19 | |
+| 549-3 OfferingRef snapshot/catalog | **superseded** by 549-21 | the "#530 seam" is now the PRODUCTS.md reader |
+| 549-4 limitations | revised, 549-23 | codes recomputed from facts the server checks |
+| 549-5 default relationship-only | kept | |
+| 549-6 authoring paths | **superseded** by 549-25 | |
+| 549-7..-13 intent ref, authority, cross-document checks, ask, claim rule, outcome vs metric, read models, fixtures | kept | `testsUncertainty` becomes a 1-based ordinal (18.6) |
+| 549-14 offering input shape, 549-15 server slug, 549-16 capturedAt | **superseded** | no offering sub-form; the slug comes from PRODUCTS.md |
+| 549-17 evidenced-pain claim text | kept | |
+| 549-18 typed 422 | revised, 549-26 | new reasons |
+
+### 18.3 ADR-549-19 — the Objective brief
+
+A brief is markdown text with a small headings convention. Headings are matched
+case-insensitively at any level (`#`, `##`, `###`), in any order; text outside the five headings is
+kept verbatim and not parsed.
+
+| Heading | Parsed into | Required |
+|---|---|---|
+| `Outcome` | `parsed.outcome` (first non-empty paragraph, ≤ 500 chars) | **yes** for `commercial` |
+| `Fit` | `parsed.fit` | no |
+| `Unknowns` | `parsed.unknowns[]`: the list items under it (ordered or bulleted, ≤ 12); prose with no list becomes one item | no |
+| `Next step` | `parsed.nextStep` | no |
+| `Success` | `parsed.success` | no |
+
+Bounds: brief text ≤ 16 KiB. The dialog prefills the five headings; API callers may send any
+markdown that satisfies the convention.
+
+Mentions are tokens of the form `@<FILE>.md` or `@PRODUCTS.md#<slug>` anywhere in the brief:
+
+```
+@(IDENTITY|SOUL|VOICE|BRAND|PRODUCTS)\.md(#[a-z0-9][a-z0-9-]{1,62})?
+```
+
+File names are case-sensitive (the reader already refuses case-fold aliases). `#<slug>` is legal
+only on `PRODUCTS.md`. Saved briefs cannot be mentioned from a brief (no recursion).
+
+### 18.4 ADR-549-20 — the snapshot record (what is stamped on the composition)
+
+```ts
+AccountObjective (strict) {
+  schemaVersion: 2,
+  objectiveId: "aobj_…",
+  kind: "commercial" | "relationship_only",
+  brief: {                                       // null for relationship_only
+    source: { kind: "inline" } | { kind: "saved", path: "objectives/<name>.md", fileHash },
+    text: string,                                // verbatim, ≤ 16 KiB
+    hash: string,                                // sha256 of text
+  } | null,
+  parsed: { outcome, fit, unknowns: string[], nextStep, success } | null,
+  mentions: Array<{                              // in order of first appearance, deduplicated
+    raw: "@PRODUCTS.md#realtimex-desktop",
+    path: "PRODUCTS.md", anchor: "realtimex-desktop" | null,
+    resolved: { fileHash, excerpt: string ≤ 8 KiB, excerptHash } | null,   // null = unresolved
+  }>,
+  offering: {                                    // the one PRODUCTS.md entry mention, or null
+    slug, name, oneLiner: string | null, proofPointCount: number,
+    mentionIndex: number,
+  } | null,
+  limitations: AccountObjectiveLimitation[],
+  sourceHash: string,                            // sha256Canonical of [[path, fileHash]…] for the saved brief + every resolved mention, sorted by path/anchor
+  source: "run_config" | "template_config" | "default",
+  authoredAt: unixSeconds,
+  hash: string,                                  // sha256Canonical of the record minus `hash`
+}
+```
+
+Whole-record bound: ≤ 64 KiB (brief 16 KiB + up to six mentions at 8 KiB). The intent reference
+`objective: { objectiveId, hash }` (ADR-549-7) is unchanged. `relationship_only` requires `brief`,
+`parsed`, `offering` null and `mentions` empty.
+
+### 18.5 ADR-549-21 — PRODUCTS.md reader (answers Q1)
+
+#549 adds a **read-only** `readWorkspaceResource(workspace, "PRODUCTS.md")` next to
+`readPersonalityWorkspaceFiles`, with the same safety rules (inside the resolved Signals workspace
+dir, regular file, no symlink, UTF-8, ≤ 256 KiB). It does not wait for #530 Phase 2: that phase
+owns Settings and projection; this reader becomes its consumer and is replaced only if #530 moves
+the catalog out of the file.
+
+Entry grammar (matches the prototype file and is the convention #530 Phase 1 declared): an entry is
+a `## ` section that contains a line `- **Slug:** \`<slug>\``. The **entry reference is the slug**,
+not the heading text, because headings carry numbering and can be reworded. From the section the
+server extracts `name` (heading text with a leading `N. ` stripped), `oneLiner` (the
+`- **One-Liner:**` line, else null), and `proofPointCount` (bullet items under any heading in the
+section whose text matches `/proof/i`). The section markdown is the mention excerpt. `@PRODUCTS.md`
+without an anchor resolves to the whole file, bounded to 8 KiB, with `offering` null and the
+limitation `offering_missing` (an offering must be a specific entry).
+
+Exactly one entry mention makes the run's `offering`. Two or more different entry mentions stamp
+`offering_ambiguous` with `offering` null; the brief keeps all excerpts.
+
+### 18.6 ADR-549-22 — saved briefs (answers Q2) and the mention allowlist (answers Q3)
+
+Saved briefs live as files in the Signals RealTimeX workspace, `objectives/<name>.md`, the same
+directory the Personality reader resolves. Reasons: the Human's stated premise is that agents read
+markdown files from the workspace; a file there is readable by the operator in the RealTimeX
+editor, by agents from `cwd`, and by Signals through the existing safe reader; and it needs no
+table.
+
+- **Not projected like Personality.** A brief is operator input, not a Signals rendering of CRM
+  facts, so it has no managed blocks, binding, proposal or approval lifecycle. Operators and agents
+  may edit the files freely; dispatch snapshots them.
+- **Name grammar** `^[a-z0-9][a-z0-9-]{1,62}$` → `objectives/<name>.md`; the reader applies the
+  same path safety as Personality (no symlink, regular file, inside the workspace dir) and refuses
+  any path outside `objectives/`.
+- **Routes** (Signals API, non-UI): `GET /api/objectives` lists `{ name, path, outcome (parsed first
+  line), fileHash, updatedAt }`; `GET /api/objectives/[name]` returns text; `PUT /api/objectives/[name]`
+  with `{ text, overwrite?: boolean }` writes through the workspace writer (`409 objective_exists`
+  without `overwrite`); `POST /api/objectives/preview` with `{ text }` returns `{ parsed, mentions,
+  offering, limitations }` without dispatching (the dialog's live preview);
+  `GET /api/objectives/mentions` lists resolvable targets (Personality files present, PRODUCTS.md
+  entries) for the `@` picker.
+- **Dialog → saved:** an inline brief with "Save as reusable brief" is written first, then the run
+  is dispatched with `brief: { kind: "saved", path }`; the snapshot records the file hash.
+- **Allowlist for `@` mentions:** `IDENTITY.md`, `SOUL.md`, `VOICE.md`, `BRAND.md`, `PRODUCTS.md`
+  (whole or `#slug`). Nothing else; no arbitrary paths; no mention of other briefs. Contact data
+  stays out of these files, as for Personality today (recipient boundary unchanged); the brief
+  help text says so, and the server never injects contact data into a brief.
+
+`testsUncertainty` (ADR-549-9) becomes the **1-based ordinal** of the item under `Unknowns`, so the
+card reads "Tests unknown 2" against the numbered list the block renders. The server validates
+`1 ≤ n ≤ parsed.unknowns.length`.
+
+### 18.7 ADR-549-23 — limitations, revised (answers AC6 under rev 2)
+
+Computed at normalization from facts the server can check:
+
+| Code | When |
+|---|---|
+| `offering_missing` | commercial and no `PRODUCTS.md#slug` mention |
+| `offering_unresolved` | a `PRODUCTS.md#slug` mention whose file or slug does not resolve |
+| `offering_ambiguous` | more than one distinct entry mention |
+| `offering_proof_missing` | the resolved entry has `proofPointCount = 0` |
+| `mention_unresolved` | any other mention that does not resolve (file absent) |
+| `fit_missing` | commercial, `Fit` heading absent or empty |
+| `success_missing` | commercial, `Success` heading absent or empty |
+
+A missing `Outcome` on a commercial brief is a dispatch refusal, not a limitation (18.10). The
+brief consequences in §4.5 apply unchanged by code: no offering may be named or pitched under
+`offering_missing | offering_unresolved | offering_ambiguous`; no seller capability or outcome
+claim under `offering_proof_missing`; the ask may test fit but not presume it under `fit_missing`.
+Resolution is also previewed to the operator before dispatch (`/api/objectives/preview`), so an
+unresolved mention is visible before Run, not only on the card.
+
+### 18.8 ADR-549-24 — objective sources that change after launch
+
+Product/UX recorded, and the Human accepted, that a mentioned file or saved brief that changes after
+launch should revoke approval "the same way" Personality does. The mechanism chosen is the one the
+pipeline already uses for a changed evidence set, `revokeVariantsForSpineChange`, not the
+Personality audit guard, because the draft text and its audit are unaffected; only the operator's
+context moved.
+
+- `objective.sourceHash` is the identity of the sources at dispatch (18.4).
+- `observeObjectiveSources(launchId)` re-reads the saved brief and every mentioned file from the
+  workspace, recomputes the hash, and compares it with the launch's server-owned
+  `writing.objectiveState.observedSourceHash` (initialized to `sourceHash` at stamp time; stripped
+  from caller patches like `composition`). On a change it revokes every approved, unmaterialized
+  variant on the launch with `revokedReason: "objective_source_stale"` (added to the enum) and
+  stores the new observed hash, so revocation fires **once per change**.
+- It runs on the three read paths that already touch the launch: `get_writing_context`, the run
+  proposals projection, and `materialize_variant` (before `effectiveApproval`). A fresh explicit
+  approval granted after the observation stands.
+- Status `objectiveSource: "current" | "stale" | "unavailable"` is projected; `stale` renders on
+  both cards as "Objective sources changed since this run started: <paths>" and lists which
+  mention or brief changed. The snapshot remains the run's authority; re-dispatch is how an
+  operator adopts the new text.
+- If the workspace cannot be resolved on read, status is `unavailable` and nothing is revoked (no
+  evidence of change).
+
+### 18.9 ADR-549-25 — authoring paths (replaces 549-6)
+
+| Path | Status |
+|---|---|
+| `POST /api/workflows/templates/[id]/run` body `config.accountObjective` (18.10 input shape) | in scope, non-UI |
+| Activation dialog: kind radio; for Business outcome a saved-brief picker or a markdown box with prefilled headings, `@` picker, live preview of parse/mentions/limitations, "Save as reusable brief" | in scope, UI → Product/UX contract v2 |
+| Template config `accountObjective` default | accepted by the normalizer (`source: "template_config"`); no builder UI |
+| Agent-authored saved briefs (an agent writes `objectives/<name>.md` in the workspace) | works by construction; the server snapshots at dispatch and the agent never edits a running objective (the stamped snapshot is the authority) |
+
+### 18.10 ADR-549-26 — input shape and dispatch refusal (answers Q5)
+
+```ts
+accountObjective (input) =
+  | { kind: "relationship_only" }
+  | { kind: "commercial", brief: { kind: "inline", text: string } | { kind: "saved", path: "objectives/<name>.md" } }
+```
+
+`POST …/run` refuses with 422 `invalid_account_objective` and `details.reason` ∈
+`too_large | outcome_missing | saved_brief_not_found | saved_brief_unsafe | invalid` (plus zod
+`issues` for `invalid`). Unresolved mentions are limitations, never refusals.
+
+Normalization (§5) is otherwise unchanged: resolve the workspace (`resolvePersonalityWorkspace`),
+read the saved brief if any, parse, resolve mentions, compute limitations, `sourceHash`,
+`objectiveId`, `hash`, and persist the record in the same write as the scope-token hash. If the
+workspace is unavailable at dispatch, a commercial objective with a `saved` brief or any mention
+is refused (`422`, reason `workspace_unavailable`); an inline brief with no mentions still
+dispatches, with `mention_unresolved` impossible and `offering_missing` stamped.
+
+### 18.11 Brief, cards, read models under rev 2
+
+- The composed brief block (§10) renders the brief text verbatim, then each mention's snapshot
+  excerpt under its `raw` token, then limitations, with the sentence: "This snapshot is the
+  objective for this run. The same files in your working directory may have changed since; if
+  they differ, say so in the thread and keep drafting against the snapshot."
+- Thread card (§9.2 / contract v1 §5 vocabulary): `Objective` line uses `parsed.outcome` and
+  `offering.name (@PRODUCTS.md#slug)`; `Fit` uses `parsed.fit` and the numbered `unknowns`;
+  `Next` uses `parsed.nextStep` / `parsed.success`; `Limits` as before; a new `Sources` line
+  renders `objectiveSource` when `stale` or `unavailable`.
+- `get_writing_context.launch.writing.composition.objective` is the full record;
+  `listWorkflowRunProposals.objective` is the full record plus `objectiveSource`. Per-proposal
+  `ask` and ADR-549-17 claim text unchanged. v1 run-page decisions 2, 5 and 6 stand.
+
+### 18.12 Tests added or changed by rev 2
+
+`objective-brief.test.ts` (headings, lists, prose-as-one-unknown, mention grammar, bounds),
+`workspace-resources.test.ts` (PRODUCTS.md entry extraction, slug reference, proof count, case
+alias and symlink refusal, 256 KiB cap), `account-objective.test.ts` (normalize: default,
+template provenance, limitations table, `offering_ambiguous`, `sourceHash` stability),
+`objective-sources.test.ts` (revoke once per change, no revoke on `unavailable`, fresh approval
+stands), saved-brief routes (name grammar, `objectives/` confinement, 409 without overwrite),
+dispatch refusals (18.10), and the §11 regression rewritten so the objective is an inline brief
+that mentions `@PRODUCTS.md#engineering-workflow` in a fixture workspace dir (reuse
+`createPersonalityWritingFixture`, which already provisions one).
+
+### 18.13 Slices under rev 2
+
+| Slice | Files | Gate |
+|---|---|---|
+| A. Contract + server | `account-objective.ts` (rev 2 schemas, normalize), new `objective-brief.ts` (parse + mentions), `personality/workspace.ts` (+`readWorkspaceResource`, +`objectives/` reader/writer), `writing-intent.ts`, `contracts.ts` (+`objective_source_stale`), `launch-writing.ts`, `writing-intent-authority.ts`, `variant-writing.ts`, new `objective-sources.ts`, `materialize.ts` (observe step), `run-template-via-rtx.ts`, `run/route.ts`, new `api/objectives/*` routes | contract_agreed |
+| B. Brief + skill | as §13 B, with 18.11 | contract_agreed |
+| C. Read models | as §13 C, plus `objectiveSource` | contract_agreed |
+| D. UI | activation dialog (brief picker, markdown box, `@` picker, preview, save), run page block + `Sources` state | agreed UX contract v2 + Human ack |
+
+### 18.14 Open questions for Product/UX (contract v2)
+
+1. Markdown box: plain textarea with a prefilled skeleton and an `@` picker, or a lightweight
+   editor; the data contract only needs the resulting text.
+2. Preview placement: inline under the box (parsed headings, resolved mentions with name, offering,
+   limitations), updated on blur or debounce; the server route is `POST /api/objectives/preview`.
+3. Saved-brief picker: list with outcome line and updated time; "Edit a copy" opens the text inline
+   as a new inline brief; whether the run page links the saved brief file.
+4. The `Sources` stale state on the run page: banner on the objective block plus the revoked
+   proposals' existing "Approval revoked" state; copy for "re-dispatch to adopt the new text".
