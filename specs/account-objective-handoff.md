@@ -783,3 +783,25 @@ that mentions `@PRODUCTS.md#engineering-workflow` in a fixture workspace dir (re
    as a new inline brief; whether the run page links the saved brief file.
 4. The `Sources` stale state on the run page: banner on the objective block plus the revoked
    proposals' existing "Approval revoked" state; copy for "re-dispatch to adopt the new text".
+
+### 18.15 ADR-549-27 — `objectiveSource` projection shape (contract v2 reconciliation, 2026-10-17)
+
+Contract v2 (`realtimex-product-ux/work/issue-549/contract-v2.md`, prototype
+`…/a64adf4954cd87ed/index.html`) maps to §18 as written; its answers to 18.14 are accepted,
+including "never sends `overwrite`" (a 409 is a field error) and "saved path shown as text, no
+link". The one read-model point is confirmed:
+
+```ts
+objectiveSource: {
+  status: "current" | "stale" | "unavailable",
+  changedPaths: string[],      // e.g. ["objectives/eng-workflow.md", "PRODUCTS.md#realtimex-desktop", "BRAND.md"]
+  observedAt: unixSeconds | null,
+}
+```
+
+`observeObjectiveSources` already compares per-source hashes (the saved brief by path, each mention
+by `path` or `path#anchor`), so `changedPaths` is the list of sources whose current hash differs
+from the snapshot's, in snapshot order; a source that can no longer be read is listed too. Empty
+when `current`; empty with `status: "unavailable"` when the workspace cannot be resolved. The same
+object is returned by `get_writing_context` (for the thread card's `Sources` line) and by
+`listWorkflowRunProposals`.
