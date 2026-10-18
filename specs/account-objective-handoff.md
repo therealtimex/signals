@@ -494,7 +494,7 @@ so per proposal `ask.customerPain` with `status: "evidenced"` is projected as
 `text` is the spine claim's `text` cut to 300 characters (with `…`); `null` when the id no longer
 resolves (a spine change after the write; approval is revoked in that case anyway), and the UI
 falls back to "from N cited source(s)". `claimIds` stays on the persisted intent; the projection
-only adds the resolved view. The thread card keeps rendering ids; the agent already has the spine.
+only adds the resolved view. The thread card renders claim *text* the same way (first resolvable claim quoted, "from a private source" for a private claim, "and N more"), from the spine the agent already reads; claim ids are never shown on either card (amended 2026-10-18 after Product/UX experience review r1; contract v2 §4.2).
 Private claims are shown with their sensitivity; the run page is the operator's own launch view,
 which already shows the full spine, so this adds no new exposure.
 
