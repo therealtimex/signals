@@ -191,9 +191,15 @@ export function AccountObjectiveFields({
   const activeText = draft.mode === "saved" ? savedText ?? undefined : draft.text;
   const selectedSaved = savedBriefs.find((brief) => brief.path === draft.savedPath) ?? null;
 
+  const announceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const announce = useCallback((text: string) => {
+    // Clear first so repeating the same message is announced again.
     setAnnouncement("");
-    setTimeout(() => setAnnouncement(text), 50);
+    if (announceTimer.current) clearTimeout(announceTimer.current);
+    announceTimer.current = setTimeout(() => setAnnouncement(text), 50);
+  }, []);
+  useEffect(() => () => {
+    if (announceTimer.current) clearTimeout(announceTimer.current);
   }, []);
 
   useEffect(() => {
@@ -295,11 +301,10 @@ export function AccountObjectiveFields({
       setPicker(null);
       return;
     }
-    setPicker((current) => {
-      if (!current && targets) announce(mentionListAnnouncement(mentionOptions(targets).length));
-      return { ...next, active: current && current.query === next.query ? current.active : 0 };
-    });
-  }, [announce, targets]);
+    // Announce outside the state update: an updater must stay pure (React may call it twice).
+    if (!picker && targets) announce(mentionListAnnouncement(mentionOptions(targets).length));
+    setPicker({ ...next, active: picker && picker.query === next.query ? picker.active : 0 });
+  }, [announce, picker, targets]);
 
   const syncPicker = (text: string, caret: number) => {
     const match = TOKEN_BEFORE_CARET.exec(text.slice(0, caret));
