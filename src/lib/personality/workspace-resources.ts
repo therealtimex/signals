@@ -107,8 +107,13 @@ export type ProductEntry = {
   name: string;
   oneLiner: string | null;
   proofPointCount: number;
-  /** The entry's `## ` section as written, bounded to 8 KiB. */
+  /** The entry's `## ` section as written, bounded to 8 KiB for display and the brief. */
   excerpt: string;
+  /**
+   * sha256 of the whole section before the excerpt is bounded: the entry's source identity, so an
+   * edit past the display cutoff (where proof points often sit) still reads as a change.
+   */
+  sectionHash: string;
 };
 
 const SLUG_LINE = /^\s{0,3}[-*+]\s+\*\*Slug:\*\*\s*`([^`]+)`\s*$/i;
@@ -173,6 +178,7 @@ export function parseProductsCatalog(content: string): ProductEntry[] {
       oneLiner: oneLiner ? oneLiner.slice(0, 300) : null,
       proofPointCount: countProofPoints(section.lines),
       excerpt: boundExcerpt(body),
+      sectionHash: sha256(body),
     });
   }
   return entries;

@@ -109,6 +109,8 @@ export const objectiveProductEntrySchema = z.object({
   name: z.string().min(1).max(300),
   oneLiner: z.string().max(300).nullable(),
   proofPointCount: z.number().int().nonnegative(),
+  /** Hash of the entry's full section (the excerpt may be bounded); the source identity. */
+  sectionHash: hashSchema,
 }).strict();
 
 export const objectiveMentionSchema = z.object({
@@ -219,8 +221,9 @@ export type ObjectiveSourceEntry = {
 /**
  * The sources a run's objective was snapshotted from, in snapshot order.
  *
- * An anchored PRODUCTS.md mention is keyed by its entry and compared by the entry excerpt, so
- * editing a different product in the same file does not mark this run's objective stale.
+ * An anchored PRODUCTS.md mention is keyed by its entry and compared by the hash of that entry's
+ * whole section, so editing a different product in the same file does not mark this run's
+ * objective stale, while any edit to this product does — including past the excerpt cutoff.
  */
 export function objectiveSourceEntries(
   objective: Pick<AccountObjective, "brief" | "mentions">,
@@ -243,7 +246,9 @@ export function objectiveSourceEntries(
           kind: "entry",
           path: mention.path,
           anchor: mention.anchor,
-          hash: mention.resolved.excerptHash,
+          // The whole entry section, not the bounded excerpt: an edit past the display cutoff
+          // must still read as a change (Review #549 F1).
+          hash: mention.resolved.entry?.sectionHash ?? mention.resolved.excerptHash,
         }
       : {
           key: mention.path,
@@ -337,6 +342,7 @@ function resolveMentions(
           name: entry.name,
           oneLiner: entry.oneLiner,
           proofPointCount: entry.proofPointCount,
+          sectionHash: entry.sectionHash,
         },
       },
       unresolvedReason: null,

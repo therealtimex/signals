@@ -26,7 +26,7 @@ const entry = (slug: string, name: string, proofPointCount = 2) => ({
     fileHash: "f",
     excerpt: `## ${name}`,
     excerptHash: "e",
-    entry: { slug, name, oneLiner: null, proofPointCount },
+    entry: { slug, name, oneLiner: null, proofPointCount, sectionHash: "s" },
   },
   unresolvedReason: null,
 });

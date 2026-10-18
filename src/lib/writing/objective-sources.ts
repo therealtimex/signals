@@ -13,7 +13,7 @@
 
 import { eq, sql } from "drizzle-orm";
 import { db, type DbRunner } from "@/lib/db/client";
-import { launches, variants } from "@/lib/db/schema";
+import { launches, variants, workflowRuns } from "@/lib/db/schema";
 import {
   parseProductsCatalog,
   readWorkspaceResource,
@@ -24,8 +24,10 @@ import {
 } from "@/lib/rtx/objective-brief-files";
 import { resolvePersonalityWorkspace, type PersonalityWorkspace } from "@/lib/personality/workspace";
 import {
+  ACCOUNT_OBJECTIVE_CONFIG_KEY,
   computeObjectiveSourceHash,
   objectiveSourceEntries,
+  readAccountObjective,
   type AccountObjective,
   type ObjectiveSourceEntry,
 } from "@/lib/writing/account-objective";
@@ -35,7 +37,6 @@ import {
   variantWritingSchema,
   type LaunchObjectiveState,
 } from "@/lib/writing/contracts";
-import { sha256 } from "@/lib/writing/hash";
 import { revokeWritingVariantWithRunner } from "@/lib/writing/personality-revocation";
 import type { ObjectiveMentionFile } from "@/lib/writing/objective-brief";
 
@@ -78,7 +79,7 @@ function currentSourceHash(workspace: PersonalityWorkspace, entry: ObjectiveSour
     if (!file) return null;
     if (entry.kind === "file") return file.fileHash;
     const product = parseProductsCatalog(file.content).find((candidate) => candidate.slug === entry.anchor);
-    return product ? sha256(product.excerpt) : null;
+    return product ? product.sectionHash : null;
   } catch {
     return null;
   }
@@ -211,6 +212,45 @@ export async function observeObjectiveSources(
  * Observe every launch of a composed run. Every launch of a run stamps the same objective, so the
  * run-level status is the most severe launch status and the union of changed paths.
  */
+/** The normalized objective dispatch persisted on the run row; `null` before #549. */
+export function readRunAccountObjective(workflowRunId: string, runner: DbRunner = db): AccountObjective | null {
+  const run = runner.select({ config: workflowRuns.config }).from(workflowRuns)
+    .where(eq(workflowRuns.id, workflowRunId)).get();
+  return run ? readAccountObjective(object(run.config)[ACCOUNT_OBJECTIVE_CONFIG_KEY]) : null;
+}
+
+/** Status for an objective nobody has observed yet: no sources means nothing can go stale. */
+export function unobservedObjectiveSourceStatus(objective: AccountObjective): ObjectiveSourceStatus {
+  return { status: "current", changedPaths: [], observedAt: objectiveSourceEntries(objective).length ? null : objective.authoredAt };
+}
+
+/**
+ * A run without a launch has no approvals to revoke and nowhere to record an observation, so its
+ * sources are compared and reported only. The first launch stamps the snapshot and starts the
+ * once-per-change bookkeeping from it.
+ */
+async function observeRunObjectiveWithoutLaunch(
+  objective: AccountObjective,
+  resolveWorkspace: ObjectiveWorkspaceResolver,
+): Promise<ObjectiveSourceObservation> {
+  if (!objectiveSourceEntries(objective).length) {
+    return { objectiveSource: unobservedObjectiveSourceStatus(objective), revokedVariantIds: [] };
+  }
+  const workspace = await resolveWorkspaceOrNull(resolveWorkspace);
+  if (!workspace) {
+    return { objectiveSource: { status: "unavailable", changedPaths: [], observedAt: null }, revokedVariantIds: [] };
+  }
+  const { changedPaths } = compareObjectiveSources(objective, workspace);
+  return {
+    objectiveSource: {
+      status: changedPaths.length ? "stale" : "current",
+      changedPaths,
+      observedAt: Math.floor(Date.now() / 1000),
+    },
+    revokedVariantIds: [],
+  };
+}
+
 export async function observeObjectiveSourcesForRun(
   workflowRunId: string,
   resolveWorkspace: ObjectiveWorkspaceResolver = () => resolvePersonalityWorkspace(),
@@ -218,7 +258,10 @@ export async function observeObjectiveSourcesForRun(
   const launchIds = db.select({ id: launches.id }).from(launches).where(sql`
     json_extract(${launches.metadata}, '$.writing.composition.workflowRunId') = ${workflowRunId}
   `).all().map((row) => row.id);
-  if (!launchIds.length) return null;
+  if (!launchIds.length) {
+    const objective = readRunAccountObjective(workflowRunId);
+    return objective ? observeRunObjectiveWithoutLaunch(objective, resolveWorkspace) : null;
+  }
   const workspace = needsWorkspace(launchIds) ? await resolveWorkspaceOrNull(resolveWorkspace) : null;
   const observations = db.transaction((tx) => launchIds
     .map((launchId) => observeLaunchObjectiveSourcesWithRunner(tx, { launchId, workspace }))

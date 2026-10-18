@@ -120,7 +120,7 @@ function targetsView(targets: ObjectiveMentionTargets | null): ObjectiveMentions
           fileHash: "",
           excerpt: "",
           excerptHash: "",
-          entry: { slug: product.slug, name: product.name, oneLiner: product.oneLiner, proofPointCount: product.proofPointCount },
+          entry: { slug: product.slug, name: product.name, oneLiner: product.oneLiner, proofPointCount: product.proofPointCount, sectionHash: "" },
         },
         unresolvedReason: null,
       })),

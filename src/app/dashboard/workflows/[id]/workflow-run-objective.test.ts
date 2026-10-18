@@ -47,7 +47,7 @@ function commercial(overrides: Partial<AccountObjective> = {}): AccountObjective
           fileHash: "p",
           excerpt: "## Engineering Workflow\n- **Slug:** `engineering-workflow`",
           excerptHash: "e",
-          entry: { slug: "engineering-workflow", name: "Engineering Workflow", oneLiner: "Ship in week one.", proofPointCount: 2 },
+          entry: { slug: "engineering-workflow", name: "Engineering Workflow", oneLiner: "Ship in week one.", proofPointCount: 2, sectionHash: "s" },
         },
         unresolvedReason: null,
       },

@@ -169,7 +169,7 @@ describe("ActivateDialog run objective (#549)", () => {
               raw: "@PRODUCTS.md#engineering-workflow",
               path: "PRODUCTS.md",
               anchor: "engineering-workflow",
-              resolved: { fileHash: "f", excerpt: "", excerptHash: "e", entry: { slug: "engineering-workflow", name: "Engineering Workflow", oneLiner: null, proofPointCount: 2 } },
+              resolved: { fileHash: "f", excerpt: "", excerptHash: "e", entry: { slug: "engineering-workflow", name: "Engineering Workflow", oneLiner: null, proofPointCount: 2, sectionHash: "s" } },
               unresolvedReason: null,
             }],
             brief: { source: { kind: "inline" } },

@@ -47,8 +47,8 @@ import {
   type AccountObjective,
 } from "@/lib/writing/account-objective";
 import { listWorkflowRunProposals } from "@/lib/writing/workflow-run-proposals";
-import { observeObjectiveSources } from "@/lib/writing/objective-sources";
-import { COMMERCIAL_BRIEF, PRODUCTS_FIXTURE } from "@/test/account-objective-fixture";
+import { observeObjectiveSources, observeObjectiveSourcesForRun } from "@/lib/writing/objective-sources";
+import { COMMERCIAL_BRIEF, PRODUCTS_FIXTURE, bigProductsFixture } from "@/test/account-objective-fixture";
 
 let storageDir = "";
 
@@ -999,6 +999,42 @@ describe("account objective through the writing handoff (#549)", () => {
     expect(listWorkflowRunProposals(dispatch.run.id).objective?.limitations).toEqual(["offering_missing"]);
   });
 
+  it("shows the objective saved at dispatch before the agent creates any launch (Review #549 F2)", async () => {
+    const fixture = await newFixture();
+    const objective = await stampedObjective(fixture, {
+      kind: "commercial",
+      brief: { kind: "inline", text: COMMERCIAL_BRIEF },
+    });
+    const dispatch = objectiveRun(objective);
+
+    const projection = listWorkflowRunProposals(dispatch.run.id);
+    expect(projection).toMatchObject({
+      launches: [],
+      proposals: [],
+      objective: { objectiveId: objective.objectiveId, kind: "commercial", offering: { slug: "engineering-workflow" } },
+      objectiveSource: { status: "current", changedPaths: [], observedAt: null },
+    });
+
+    // Without a launch there is nothing to revoke and nowhere to record, but the page still learns
+    // that the files moved.
+    const resolve = async () => fixture.workspace;
+    expect(await observeObjectiveSourcesForRun(dispatch.run.id, resolve)).toMatchObject({
+      objectiveSource: { status: "current", changedPaths: [] },
+      revokedVariantIds: [],
+    });
+    writeFileSync(join(fixture.workspace.dir, "PRODUCTS.md"), PRODUCTS_FIXTURE.replace("Terminals and browsers.", "Terminals only."));
+    expect(await observeObjectiveSourcesForRun(dispatch.run.id, resolve)).toMatchObject({
+      objectiveSource: { status: "stale", changedPaths: ["PRODUCTS.md#engineering-workflow"] },
+      revokedVariantIds: [],
+    });
+    expect(await observeObjectiveSourcesForRun(dispatch.run.id, async () => { throw new Error("down"); }))
+      .toMatchObject({ objectiveSource: { status: "unavailable" } });
+
+    // A composed run from before #549 still projects no objective.
+    expect(listWorkflowRunProposals(composedRun().run.id)).toMatchObject({ objective: null, objectiveSource: null });
+    expect(await observeObjectiveSourcesForRun(composedRun().run.id, resolve)).toBeNull();
+  });
+
   it("keeps launches stamped before #549 readable and refuses an objective reference on them", async () => {
     const fixture = await newFixture();
     const dispatch = composedRun();
@@ -1109,6 +1145,45 @@ describe("objective sources that change after launch (#549, ADR-549-24)", () => 
     rmSync(join(fixture.workspace.dir, "objectives", "eng-founders.md"));
     const removed = await observeObjectiveSources(launchId, resolve);
     expect(removed).toMatchObject({ revokedVariantIds: [proposal.id] });
+  });
+
+  it("sees an edit past the excerpt cutoff of the referenced entry, and only that entry (Review #549 F1)", async () => {
+    const fixture = await newFixture();
+    writeFileSync(join(fixture.workspace.dir, "PRODUCTS.md"), bigProductsFixture());
+    const objective = await normalizeAccountObjective({
+      raw: { kind: "commercial", brief: { kind: "inline", text: "## Outcome\nEvaluate @PRODUCTS.md#big-offering.\n## Fit\nFounders.\n## Success\nA reply." } },
+      source: "run_config",
+      resolveWorkspace: async () => fixture.workspace,
+    });
+    if (!objective.ok) throw new Error(objective.reason);
+    expect(objective.objective.offering).toMatchObject({ slug: "big-offering", proofPointCount: 1 });
+    const dispatch = objectiveRun(objective.objective);
+    const launchId = await composedLaunch(dispatch);
+    const proposal = await propose(fixture, {
+      launchId,
+      workflowRunId: dispatch.run.id,
+      intent: objectiveIntent(dispatch, { contactId: syntheticFounder(), objective: refOf(objective.objective), ask: { statement: "Propose the evaluation.", relation: "advances", customerPain: { status: "none_assumed" } } }),
+    });
+    markApproved(proposal.id);
+    const resolve = async () => fixture.workspace;
+
+    // Another entry changing is not this run's source.
+    writeFileSync(join(fixture.workspace.dir, "PRODUCTS.md"), bigProductsFixture().replace("Terminals and browsers.", "Terminals only."));
+    expect(await observeObjectiveSources(launchId, resolve)).toMatchObject({
+      objectiveSource: { status: "current", changedPaths: [] },
+      revokedVariantIds: [],
+    });
+
+    // Replace the proof point and add one, all past the 8 KiB excerpt the snapshot shows.
+    writeFileSync(
+      join(fixture.workspace.dir, "PRODUCTS.md"),
+      bigProductsFixture(["- **Proven:** A replaced proof point.", "- **Also:** Another proof point."]).replace("Terminals and browsers.", "Terminals only."),
+    );
+    expect(await observeObjectiveSources(launchId, resolve)).toEqual({
+      objectiveSource: { status: "stale", changedPaths: ["PRODUCTS.md#big-offering"], observedAt: expect.any(Number) },
+      revokedVariantIds: [proposal.id],
+    });
+    expect(writingOf(proposal.id).approval).toMatchObject({ state: "revoked", revokedReason: "objective_source_stale" });
   });
 
   it("revokes nothing and records nothing when the workspace cannot be resolved", async () => {

@@ -16,7 +16,12 @@ import {
 import { contentTypeForSurface, type SurfaceId } from "@/lib/writing/surfaces";
 import { isWritingComposedConfig, type WritingIntentAsk } from "@/lib/writing/writing-intent";
 import type { AccountObjective } from "@/lib/writing/account-objective";
-import { readObjectiveSourceStatus, type ObjectiveSourceStatus } from "@/lib/writing/objective-sources";
+import {
+  readObjectiveSourceStatus,
+  readRunAccountObjective,
+  unobservedObjectiveSourceStatus,
+  type ObjectiveSourceStatus,
+} from "@/lib/writing/objective-sources";
 
 function object(value: unknown): Record<string, unknown> {
   if (typeof value === "string") {
@@ -210,13 +215,19 @@ export function listWorkflowRunProposals(
       composition: launchCompositionSchema.safeParse(object(object(launch.metadata).writing).composition),
     }))
     .find(({ composition }) => composition.success && composition.data.objective);
-  const objective = objectiveLaunch?.composition.success
+  // Before the agent creates a launch (or when a run stops before it does), the record dispatch
+  // persisted on the run is the objective: the operator's intent is visible from the start, and a
+  // new run is not mistaken for one from before #549 (Review #549 F2).
+  const launchObjective = objectiveLaunch?.composition.success
     ? objectiveLaunch.composition.data.objective ?? null
     : null;
+  const objective = launchObjective ?? readRunAccountObjective(workflowRunId);
   const objectiveSource = objective
     ? options.objectiveSource !== undefined
       ? options.objectiveSource
-      : readObjectiveSourceStatus(objectiveLaunch!.launch.id)
+      : objectiveLaunch
+        ? readObjectiveSourceStatus(objectiveLaunch.launch.id)
+        : unobservedObjectiveSourceStatus(objective)
     : null;
 
   const proposals: WorkflowRunProposal[] = parsedRows.map(({ launch, variant, parsed, composition }) => {

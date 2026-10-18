@@ -8,7 +8,7 @@ import {
   parseProductsCatalog,
   readWorkspaceResource,
 } from "@/lib/personality/workspace-resources";
-import { PRODUCTS_FIXTURE } from "@/test/account-objective-fixture";
+import { PRODUCTS_FIXTURE, bigProductsFixture } from "@/test/account-objective-fixture";
 
 
 let root = "";
@@ -37,6 +37,20 @@ describe("PRODUCTS.md entries", () => {
     expect(entries[0].excerpt).not.toContain("Bare Offering");
     expect(entries[0].excerpt.endsWith("---")).toBe(false);
     expect(entries[1]).toMatchObject({ name: "Bare Offering", oneLiner: null, proofPointCount: 0 });
+  });
+
+  it("hashes the whole entry section, not the bounded excerpt (Review #549 F1)", () => {
+    const before = parseProductsCatalog(bigProductsFixture()).find((entry) => entry.slug === "big-offering")!;
+    const after = parseProductsCatalog(bigProductsFixture(["- **Proven:** A replaced proof point.", "- **Also:** Another."]))
+      .find((entry) => entry.slug === "big-offering")!;
+    expect(before.excerpt.length).toBe(8 * 1024);
+    expect(before.excerpt).not.toContain("Proven");
+    expect(after.excerpt).toBe(before.excerpt);
+    expect(after.proofPointCount).toBe(2);
+    expect(after.sectionHash).not.toBe(before.sectionHash);
+    // Another entry's hash is untouched by this one's edit.
+    const other = (fixture: string) => parseProductsCatalog(fixture).find((entry) => entry.slug === "engineering-workflow")!.sectionHash;
+    expect(other(bigProductsFixture(["- changed"]))).toBe(other(bigProductsFixture()));
   });
 
   it("references an entry by slug, not by heading text, and keeps the first duplicate", () => {

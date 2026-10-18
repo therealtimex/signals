@@ -180,12 +180,16 @@ side by side.
 `observeObjectiveSources` (`src/lib/writing/objective-sources.ts`) re-reads the saved brief and
 mentioned files; on a change it revokes every approved, unmaterialized proposal on the launch with
 `objective_source_stale`, once per change, and projects `objectiveSource: { status, changedPaths,
-observedAt }`.
+observedAt }`. A saved brief and a whole-file mention are compared by file hash; a
+`PRODUCTS.md#<slug>` mention by the hash of that entry's whole section (not the 8 KiB excerpt the
+snapshot displays), so an edit anywhere in the entry counts and an edit to another entry does not.
 
 **Review surfaces.** The thread card (`core/approval.md`) adds Objective, Fit, Ask, Next, Objective
 limits and Sources lines mapped to `get_writing_context.launch.writing.composition.objective`,
 `launch.writing.objectiveSource` and `variants[].intent`. The run page reads
-`listWorkflowRunProposals().objective`, `.objectiveSource` and each proposal's `ask`.
+`listWorkflowRunProposals().objective`, `.objectiveSource` and each proposal's `ask`. Before the
+agent creates a launch, the run objective comes from the record dispatch saved on the run, and its
+sources are compared without being recorded (there is nothing to revoke yet).
 
 ## Nurture surfaces
 

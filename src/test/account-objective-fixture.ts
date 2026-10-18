@@ -56,3 +56,27 @@ export const COMMERCIAL_BRIEF = [
   "",
   "Tone follows @BRAND.md.",
 ].join("\n");
+
+/**
+ * A PRODUCTS.md whose `big-offering` entry runs past the 8 KiB excerpt cutoff, with its proof
+ * points after the cutoff (Review #549 F1). `proofLines` replaces the proof bullets.
+ */
+export function bigProductsFixture(proofLines: string[] = ["- **Proven:** One proof point."]): string {
+  const filler = Array.from({ length: 120 }, (_, index) =>
+    `- **Detail ${index + 1}:** ${"Background on the offering that the excerpt still shows. ".repeat(1)}`);
+  return [
+    PRODUCTS_FIXTURE.trimEnd(),
+    "",
+    "## 4. Big Offering",
+    "",
+    "- **Slug:** `big-offering`",
+    "- **One-Liner:** An entry long enough to be cut for display.",
+    "",
+    "### Background",
+    ...filler,
+    "",
+    "### Value Propositions & Proof Points",
+    ...proofLines,
+    "",
+  ].join("\n");
+}
