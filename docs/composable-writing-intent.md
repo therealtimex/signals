@@ -130,6 +130,63 @@ Closing that requires scoped request authentication, which is an auth change out
 
 Widening the mandate needs a new ADR, not an enum edit.
 
+## The account objective and the ask (#549)
+
+The mandate says what a proposal may *do*; the account objective says what the operator wants it
+to *achieve*. Before #549 a nurture run carried only `goal: { id, writingGoal }`, so a run
+dispatched to qualify an offering reached the agent as "warm conversation, optimise replies", and
+an audited draft could pass while asking an unrelated question. The objective now travels the same
+authority path as the mandate. Design record: `specs/account-objective-handoff.md`.
+
+**Captured at dispatch, stamped by the server.** `POST /api/workflows/templates/[id]/run` accepts
+`config.accountObjective`: `{ "kind": "relationship_only" }`, or
+`{ "kind": "commercial", "brief": { "kind": "inline", "text": "…" } }` /
+`{ "kind": "commercial", "brief": { "kind": "saved", "path": "objectives/<name>.md" } }`. The brief
+is markdown with five optional headings (Outcome — required for `commercial` —, Fit, Unknowns, Next
+step, Success) and `@` mentions of `IDENTITY.md`, `SOUL.md`, `VOICE.md`, `BRAND.md`, `PRODUCTS.md`
+or one `PRODUCTS.md#<slug>` entry. `normalizeAccountObjective` (`src/lib/writing/account-objective.ts`)
+snapshots the brief and each mentioned excerpt from the Signals workspace, computes the limitations
+(`offering_missing`, `offering_unresolved`, `offering_ambiguous`, `offering_proof_missing`,
+`mention_unresolved`, `fit_missing`, `success_missing`), mints `objectiveId` and hashes the record.
+An invalid objective refuses the dispatch with 422 `invalid_account_objective` and
+`details.reason` (`too_large`, `outcome_missing`, `saved_brief_not_found`, `saved_brief_unsafe`,
+`workspace_unavailable`, `invalid`). A composed run without one is stamped
+`relationship_only` with `source: "default"` — never upgraded by inference.
+
+**Referenced from every intent.** The normalized record is persisted on the run in the same write as
+the scope-token hash, and `stampLaunchComposition` copies it onto `writing.composition.objective`.
+On a launch with an objective every intent must carry `objective: { objectiveId, hash }` and an
+`ask`; `assertWritingIntentAuthority` rejects a missing or changed reference
+(`writing_intent_objective_required` / `_mismatch`), a reference on a pre-#549 launch
+(`writing_intent_objective_not_permitted`), a missing ask (`writing_intent_ask_required`) and an
+illegal relation (`writing_intent_ask_relation_invalid`). It runs for a new variant, an in-place
+revision and a derived alternative alike, so a revision cannot silently shed the objective.
+
+**The ask is the agent's one contribution.** `ask.relation` is `advances`, `tests` (with the 1-based
+`testsUncertainty` of an Unknowns item), `defers` (with `deferReason`) or, only under a
+relationship-only objective, `relationship_only`. `ask.customerPain` is `none_assumed`,
+`evidenced` (spine `claimIds`, resolved in `validateCrossDocuments` as `ask_claim_unknown`) or
+`asked` (a hypothesis). The claim rule `core/claim/no-assumed-customer-pain` blocks a draft that
+asserts an unevidenced pain. The brief tells the agent to write and post the ask before drafting;
+the intent is hashed into the audit input, so changing the ask stales the audit and revokes
+approval.
+
+**Outcome is not the metric.** `goal.writingGoal` (replies, follows, …) stays the platform signal the
+spine is scored against; the business outcome lives only in the objective. Both cards show them
+side by side.
+
+**Sources that change after launch.** The snapshot stays the run's authority. On
+`get_writing_context`, the run proposals projection and `materialize_variant`,
+`observeObjectiveSources` (`src/lib/writing/objective-sources.ts`) re-reads the saved brief and
+mentioned files; on a change it revokes every approved, unmaterialized proposal on the launch with
+`objective_source_stale`, once per change, and projects `objectiveSource: { status, changedPaths,
+observedAt }`.
+
+**Review surfaces.** The thread card (`core/approval.md`) adds Objective, Fit, Ask, Next, Objective
+limits and Sources lines mapped to `get_writing_context.launch.writing.composition.objective`,
+`launch.writing.objectiveSource` and `variants[].intent`. The run page reads
+`listWorkflowRunProposals().objective`, `.objectiveSource` and each proposal's `ask`.
+
 ## Nurture surfaces
 
 Six send-less surfaces carry draft/audit contracts and no publish adapter:
@@ -210,3 +267,7 @@ own goals map onto it.
 | First consumer | `src/lib/workflows/contact-relationship-nurture.ts` |
 | Approval gate | `src/lib/writing/variant-writing.ts`, `src/lib/writing/materialize.ts` |
 | Publish refusal | `src/lib/publish/send-to-agent.ts` |
+| Account objective schema, normalization, preview | `src/lib/writing/account-objective.ts` |
+| Objective brief parsing and mentions | `src/lib/writing/objective-brief.ts` |
+| PRODUCTS.md entries, saved briefs (`objectives/`) | `src/lib/personality/workspace-resources.ts` |
+| Changed objective sources → revocation | `src/lib/writing/objective-sources.ts` |

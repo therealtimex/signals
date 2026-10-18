@@ -125,7 +125,7 @@ for (const rel of ["core/claims.md", "core/voice.md", "core/audit.md", "overlays
     }
   }
 }
-const coreCatalog = ["core/claim/no-invented-fact", "core/claim/no-invented-number", "core/claim/no-invented-date", "core/claim/no-invented-name", "core/claim/no-invented-quote", "core/claim/no-invented-citation", "core/claim/verbatim-claim-kept", "core/claim/claim-source-resolves", "core/claim/private-claim-excluded", "core/claim/no-third-party-dunk", "core/claim/no-unverifiable-promise", "core/claim/named-party-consent", "core/claim/no-manipulation", "core/voice/drift", "core/voice/protected-quirk-kept", "core/voice/avoid-list", "core/voice/taboo", "core/voice/signature-verbatim", "core/voice/personality-source-stale", "core/heuristic/ai-tell-phrases", "core/heuristic/tricolon-cadence", "core/heuristic/uniform-sentence-length", "core/heuristic/rhetorical-question-open", "core/heuristic/summary-close", "core/heuristic/hedge-stack", "core/heuristic/emoji-bullets", "core/heuristic/title-case-headers", "core/aesthetic/em-dash-sparingly", "core/aesthetic/emoji-count", "core/aesthetic/list-vs-prose", "core/aesthetic/sign-off-style"];
+const coreCatalog = ["core/claim/no-invented-fact", "core/claim/no-invented-number", "core/claim/no-invented-date", "core/claim/no-invented-name", "core/claim/no-invented-quote", "core/claim/no-invented-citation", "core/claim/verbatim-claim-kept", "core/claim/claim-source-resolves", "core/claim/private-claim-excluded", "core/claim/no-third-party-dunk", "core/claim/no-unverifiable-promise", "core/claim/named-party-consent", "core/claim/no-manipulation", "core/claim/no-assumed-customer-pain", "core/voice/drift", "core/voice/protected-quirk-kept", "core/voice/avoid-list", "core/voice/taboo", "core/voice/signature-verbatim", "core/voice/personality-source-stale", "core/heuristic/ai-tell-phrases", "core/heuristic/tricolon-cadence", "core/heuristic/uniform-sentence-length", "core/heuristic/rhetorical-question-open", "core/heuristic/summary-close", "core/heuristic/hedge-stack", "core/heuristic/emoji-bullets", "core/heuristic/title-case-headers", "core/aesthetic/em-dash-sparingly", "core/aesthetic/emoji-count", "core/aesthetic/list-vs-prose", "core/aesthetic/sign-off-style"];
 for (const id of coreCatalog) if (!seenRules.has(id)) fail(`missing required core rule ${id}`);
 
 for (const [file, ids] of Object.entries(catalog)) {
@@ -196,7 +196,7 @@ if (actual.includes("SKILL.md")) {
 
 if (actual.includes("reference.md")) {
   const tags = [...read("reference.md").matchAll(/```json (signals-writing:example:[^\s]+)/g)].map((match) => match[1]);
-  const requiredTags = ["launch-writing-patch", "spine", "variant-input", "generation", "audit-input", "voice-profile-input", "materialize-input", "approve-voice-input", "approve-personality-input", "send-to-agent-body"].map((name) => `signals-writing:example:${name}`);
+  const requiredTags = ["launch-writing-patch", "spine", "variant-input", "generation", "audit-input", "voice-profile-input", "materialize-input", "approve-voice-input", "approve-personality-input", "intent-objective-ask", "send-to-agent-body"].map((name) => `signals-writing:example:${name}`);
   for (const tag of requiredTags) {
     const blocks = extractTaggedBlocks(read("reference.md"), tag, "reference.md");
     if (blocks.length !== 1) fail(`reference.md: expected one ${tag} block`);

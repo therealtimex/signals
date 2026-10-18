@@ -118,9 +118,23 @@ Create one `claimMap` entry for every spine claim:
     "class":"claim", "statement":"Content avoids coercive engagement schemes, evasive automation, and manufactured activity.",
     "applies":["core"], "severity":"blocker",
     "source":[{"kind":"spec","path":"specs/signals-writing-system.md"}], "status":"active"
+  },
+  {
+    "id":"core/claim/no-assumed-customer-pain",
+    "class":"claim", "statement":"The draft does not assert that the recipient has a problem, pain, or need unless a spine claim evidences it; a hypothesis may be asked, never asserted.",
+    "applies":["core"], "severity":"blocker",
+    "source":[{"kind":"spec","path":"specs/account-objective-handoff.md"}], "status":"active"
   }
 ]
 ```
+
+## Customer pain and seller context
+
+On a composed run the persisted `ask.customerPain` must match the draft: `evidenced` lists the
+spine claims that show the pain, `asked` is a hypothesis the draft only asks about, and
+`none_assumed` means the draft assumes none. Offering text from PRODUCTS.md is context; a proof
+point becomes a fact only as a `note` source copied verbatim with claim locator
+`offering:<slug>#proof[i]`.
 
 ## Privacy stop conditions
 

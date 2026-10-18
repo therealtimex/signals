@@ -734,6 +734,12 @@ Body     <full text, unit-numbered for threads>
 Limits   <chars per unit> / <limit>  ·  hashtags n  ·  links n  ·  media n
 Claims   <preserved>/<total> preserved  ·  altered: <ids or none>  ·  missing: <ids or none>  ·  invented: none
 Voice    <profile label v<version>>  ·  precedence <voice_first|rules_first>  ·  drift <score>  ·  protected quirks kept: yes
+Objective  <kind>  ·  <source>  ·  <saved brief <path>|brief written for this run>  ·  offering <name> (@PRODUCTS.md#<slug>)|none  ·  outcome: <outcome>  ·  platform metric: <writingGoal>
+Fit      <fit|not stated>  ·  unknowns: <1. … 2. …|none listed>
+Ask      <relation badge> — <statement>  ·  customer pain: <none assumed|asked, not assumed — "<text>"|from a source (<claim ids>)>
+Next     <next step|not stated>  ·  success: <success|not defined>
+Objective limits  <short limitation labels|none>
+Sources  changed since this run started: <changed paths> — drafts still use the snapshot[ · <n> approval(s) revoked] | couldn't be checked
 Audit    <verdict>  ·  blockers <n>  ·  warnings <n>  (list each finding code + one line)
 Risk     <tier>  ·  policy <explicit|auto_low_risk>
 Publish  <direct|beta|draft_only|export_only>  — "draft_only: this platform has no publish adapter; export only"
@@ -742,6 +748,16 @@ Next     approve <variantId> | revise <instruction> | reject
 
 The card is the human-readable projection of §5.4–§5.6; it never contains information that is not
 also persisted. "approve" from the user is recorded as `ApprovalEvidence { kind: "thread_message" }`.
+
+The Objective through Sources lines (#549) appear only on workflow-composed runs. They map to
+`get_writing_context.launch.writing.composition.objective` (the server-stamped account objective),
+`launch.writing.objectiveSource` and the selected `variants[].intent` (goal, objective reference,
+ask); the revoked count on the Sources line counts `variants[].revokedReason` equal to
+`objective_source_stale` and is omitted when zero. The field table is in the skill's
+`core/approval.md`. A launch stamped before #549 renders
+`Objective  none (this run started before run objectives)` and no Ask line; Sources renders only
+for `stale` or `unavailable`. The objective's limitations are labelled "Objective limits" so they
+are not confused with the platform `Limits` line above. Design: `specs/account-objective-handoff.md`.
 
 ### 6.5 Never-do list (skill hard rules)
 

@@ -123,6 +123,38 @@ describe("buildContactNurtureBriefSection", () => {
     expect(brief).toContain("run-nurture-123");
   });
 
+  it("points N4 at the account objective only when the run carries one (#549)", () => {
+    const objective = {
+      schemaVersion: 2,
+      objectiveId: "aobj_fixture1",
+      kind: "relationship_only",
+      brief: null,
+      parsed: null,
+      mentions: [],
+      offering: null,
+      limitations: [],
+      sourceHash: "source-hash",
+      source: "default",
+      authoredAt: 1_760_000_000,
+      hash: "objective-hash",
+    };
+    const withObjective = buildContactNurtureBriefSection({
+      workflowRunId: "run-nurture-123",
+      config: { ...buildContactNurtureTemplateConfig(), accountObjective: objective },
+      signalsBaseUrl: "http://127.0.0.1:3000",
+    });
+    const n4 = withObjective.split("N4.")[1]?.split("N5.")[0] ?? "";
+    expect(n4).toContain("Account objective: every intent carries this run's `objective` reference and an `ask`");
+    expect(n4).toContain("serve the ask, not the reverse");
+
+    const before549 = buildContactNurtureBriefSection({
+      workflowRunId: "run-nurture-123",
+      config: buildContactNurtureTemplateConfig(),
+      signalsBaseUrl: "http://127.0.0.1:3000",
+    });
+    expect(before549).not.toContain("Account objective");
+  });
+
   it("keeps recipient context separate from the speaker identity", () => {
     const brief = buildContactNurtureBriefSection({
       workflowRunId: "run-nurture-123",

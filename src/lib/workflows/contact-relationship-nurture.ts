@@ -23,7 +23,10 @@ import {
 } from "@/lib/relationship-goals";
 import { parseSurfaceId, type SurfaceId } from "@/lib/writing/surfaces";
 import { NURTURE_WRITING_SURFACES } from "@/lib/writing/writing-intent";
-import { buildWritingIntentCompositionConfig } from "@/lib/workflows/writing-composition";
+import {
+  buildWritingIntentCompositionConfig,
+  readRunAccountObjective,
+} from "@/lib/workflows/writing-composition";
 import type { WritingGoal } from "@/lib/workflows/signals-writing";
 import {
   readNurtureApprovalGate,
@@ -260,6 +263,9 @@ export function buildContactNurtureBriefSection(input: {
     "N4. Touchpoint proposals — emit one writing intent per contact and follow the shared writing-intent contract below. Do not draft prose from these instructions:",
     ...touchpointRows,
     "    For each intent set `recipient` to the contact reference, `goal.id` to the relationship goal, `target` to the acting profile above, and `sourceRefs` to the allowlisted evidence you actually read. Attach the intent as `metadata.writing.intent` on upsert_variant.",
+    ...(readRunAccountObjective(input.config)
+      ? ["    Account objective: every intent carries this run's `objective` reference and an `ask` (see \"Account objective\" in the shared writing-intent contract below). State the ask before drafting, then choose the touchpoint deliverable above to serve the ask, not the reverse."]
+      : []),
     "    Personality is the speaker; the contact is the recipient. Never write contact facts, persona attributes, relationship notes, or private CRM fields into IDENTITY.md, SOUL.md, VOICE.md, or BRAND.md.",
     `N5. Approval gate: present proposals in this thread in batches of 3–5 and wait for explicit operator approval before calling materialize_variant. Approvals, rejections, and revision requests may also be made on the Signals run page (\`/dashboard/workflows/${input.workflowRunId}\`). Before materialize_variant and before complete_workflow_run, re-read each variant through get_writing_context; variants[] carries approval, materialization, and revisionRequest. Skip materialized proposals, do not re-present rejected proposals, and produce a revision for any revisionRequest before asking again. Never manufacture approval evidence.`,
     "N6. A refused intent is a result, not a failure: report the persisted Personality status, capability, or target reason and move on. Never repair drift by editing Personality files.",

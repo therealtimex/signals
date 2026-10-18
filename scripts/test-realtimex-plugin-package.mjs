@@ -330,8 +330,8 @@ for (const entry of writingMarkdownEntries) {
 }
 const bundledAdapt = writingMarkdown.get("skills/signals-writing/core/adapt.md") ?? "";
 const bundledWritingSkill = writingMarkdown.get("skills/signals-writing/SKILL.md") ?? "";
-if (!/^version: "1\.1\.0"$/m.test(bundledWritingSkill)) {
-  errors.push("Packaged signals-writing SKILL.md must declare version 1.1.0");
+if (!/^version: "1\.2\.0"$/m.test(bundledWritingSkill)) {
+  errors.push("Packaged signals-writing SKILL.md must declare version 1.2.0");
 }
 if (/\b(?:variant|alternative)\b[\s\S]{0,160}`vs_`|`vs_`[\s\S]{0,160}\b(?:variant|alternative)\b/i.test(bundledAdapt)) {
   errors.push("Packaged adaptation guidance assigns voice-sample vs_ IDs to variants");

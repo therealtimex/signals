@@ -27,7 +27,9 @@ import {
   isSignalsWritingTemplateConfig,
 } from "@/lib/workflows/signals-writing";
 import {
+  ACCOUNT_OBJECTIVE_RUN_CONFIG_KEY,
   buildComposedWritingBriefSection,
+  readRunAccountObjective,
   readWritingIntentComposition,
 } from "@/lib/workflows/writing-composition";
 import {
@@ -156,7 +158,10 @@ function stripInternalConfigKeys(config: Record<string, unknown>): Record<string
       ([key]) =>
         !key.startsWith("_") &&
         key !== "rtxTerminalLifecycle" &&
-        key !== "rtxOrchestratorTerminalLifecycle",
+        key !== "rtxOrchestratorTerminalLifecycle" &&
+        // The composed contract renders the stamped objective as its own block (#549); a second,
+        // JSON copy of up to 64 KiB in the runtime block would only invite the agent to edit it.
+        key !== ACCOUNT_OBJECTIVE_RUN_CONFIG_KEY,
     )
   );
   if (isNetworkSnowballTemplateConfig(visible)) {
@@ -282,6 +287,7 @@ export function buildAgentWorkflowBrief(input: {
         signalsBaseUrl: input.signalsBaseUrl,
         target: resolveActingTarget(input.config, input.platformTarget),
         writingScopeToken: input.writingScopeToken,
+        objective: readRunAccountObjective(input.config),
       })}\n`
     : null;
   const contactWebResearchContract =

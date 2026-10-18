@@ -16,6 +16,12 @@ Limits   <chars per unit> / <limit>  ·  hashtags n  ·  links n  ·  media n
 Claims   <preserved>/<total> preserved  ·  altered: <ids or none>  ·  missing: <ids or none>  ·  invented: none
 Voice    <profile label v<version>>  ·  precedence <voice_first|rules_first>  ·  drift <score>  ·  protected quirks kept: yes
 Personality  <variants[].personality.bindingId>  ·  <variants[].personalityState>  ·  self <variants[].personality.identity.selfContactId> (org <variants[].personality.identity.representedOrgId|none>)  ·  target represents <variants[].personality.target.represents.kind|none>
+Objective  <kind>  ·  <source>  ·  <saved brief <path>|brief written for this run>  ·  offering <name> (@PRODUCTS.md#<slug>)|none  ·  outcome: <outcome>  ·  platform metric: <writingGoal>
+Fit      <fit|not stated>  ·  unknowns: <1. … 2. …|none listed>
+Ask      <relation badge> — <statement>  ·  customer pain: <none assumed|asked, not assumed — "<text>"|from a source (<claim ids>)>
+Next     <next step|not stated>  ·  success: <success|not defined>
+Objective limits  <short limitation labels|none>
+Sources  changed since this run started: <changed paths> — drafts still use the snapshot[ · <n> approval(s) revoked] | couldn't be checked
 Audit    <verdict>  ·  blockers <n>  ·  warnings <n>  (list each finding code + one line)
 Risk     <tier>  ·  policy <explicit|auto_low_risk>
 Publish  <direct|beta|draft_only|export_only>  — draft_only: this platform has no publish adapter; export only
@@ -29,6 +35,30 @@ Map the Personality line exactly from that entry's `personality.bindingId`, `per
 target handle/kind from the context `targets[]` entry, hard and claims from persisted `audit`, voice
 label/version from the resolved profile, risk/policy from `approval`, and publish text from
 `capability.publish`.
+
+### Objective lines (composed runs)
+
+`O` is `launch.writing.composition.objective`; the ask is the selected variant's
+`variants[].intent.ask`. Use the run page's words, never your own summary:
+
+| Card value | Persisted field | Rendering |
+|---|---|---|
+| kind | `O.kind` | `commercial` → Business outcome; `relationship_only` → Relationship only |
+| source | `O.source` | `run_config` → set when the run started; `template_config` → from the template's default; `default` → no objective was given |
+| brief | `O.brief.source.kind`, `O.brief.source.path` | saved brief `<path>`, or brief written for this run |
+| offering | `O.offering.name`, `O.offering.slug` | `<name> (@PRODUCTS.md#<slug>)`, or none |
+| outcome / fit / unknowns | `O.parsed.outcome`, `O.parsed.fit`, `O.parsed.unknowns` | unknowns numbered from 1 |
+| next / success | `O.parsed.nextStep`, `O.parsed.success` | not stated / not defined when null |
+| platform metric | `variants[].intent.goal.writingGoal` | never merged with the outcome |
+| relation badge | `variants[].intent.ask.relation`, `variants[].intent.ask.testsUncertainty` | Advances outcome · Tests unknown n · Defers outcome (add "why: `variants[].intent.ask.deferReason`") · Relationship only |
+| statement | `variants[].intent.ask.statement` | verbatim |
+| customer pain | `variants[].intent.ask.customerPain.status`, `variants[].intent.ask.customerPain.text`, `variants[].intent.ask.customerPain.claimIds` | none assumed · asked, not assumed — "text" · from a source (claim ids) |
+| objective limits | `O.limitations` | no offering · offering not found · more than one offering · no proof points · file not found · fit not stated · success not defined |
+| sources | `launch.writing.objectiveSource.status`, `launch.writing.objectiveSource.changedPaths`, `variants[].revokedReason` | only when stale or unavailable; add "· n approval(s) revoked" only when n ≥ 1 variants on the launch have `variants[].revokedReason` `objective_source_stale` |
+
+A `revoked` approval with reason `objective_source_stale` means a saved brief or mentioned file
+changed after the run started. The snapshot is still the run's objective; render a fresh card and
+ask for a fresh approval.
 
 ## Approval policy
 
