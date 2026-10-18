@@ -93,7 +93,7 @@ export function compareObjectiveSources(
   const current = entries.map((entry) => ({ ...entry, current: currentSourceHash(workspace, entry) }));
   return {
     sourceHash: computeObjectiveSourceHash(current.map((entry) => ({ key: entry.key, hash: entry.current }))),
-    changedPaths: current.filter((entry) => entry.current !== entry.hash).map((entry) => entry.key),
+    changedPaths: current.flatMap((entry) => (entry.current !== entry.hash ? [entry.key] : [])),
   };
 }
 

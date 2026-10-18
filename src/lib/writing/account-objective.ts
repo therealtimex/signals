@@ -349,9 +349,8 @@ function deriveOfferingAndLimitations(input: {
   mentions: ObjectiveMention[];
 }): { offering: AccountObjective["offering"]; limitations: AccountObjectiveLimitation[] } {
   const found = new Set<AccountObjectiveLimitation>();
-  const entryMentions = input.mentions
-    .map((mention, index) => ({ mention, index }))
-    .filter(({ mention }) => mention.path === "PRODUCTS.md" && mention.anchor);
+  const entryMentions = input.mentions.flatMap((mention, index) =>
+    mention.path === "PRODUCTS.md" && mention.anchor ? [{ mention, index }] : []);
   let offering: AccountObjective["offering"] = null;
   if (entryMentions.length === 0) found.add("offering_missing");
   if (entryMentions.some(({ mention }) => !mention.resolved)) found.add("offering_unresolved");
