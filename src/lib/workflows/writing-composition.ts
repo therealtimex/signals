@@ -92,15 +92,18 @@ const SOURCE_LABELS: Record<AccountObjective["source"], string> = {
 };
 
 function limitationConsequence(code: AccountObjectiveLimitation, objective: AccountObjective): string {
-  const unresolvedEntries = objective.mentions
-    .filter((mention) => mention.path === "PRODUCTS.md" && mention.anchor && !mention.resolved)
-    .map((mention) => mention.raw);
-  const entryTokens = objective.mentions
-    .filter((mention) => mention.path === "PRODUCTS.md" && mention.anchor)
-    .map((mention) => mention.resolved?.entry?.name ? `${mention.resolved.entry.name} (${mention.raw})` : mention.raw);
-  const unresolvedFiles = objective.mentions
-    .filter((mention) => !mention.resolved && !(mention.path === "PRODUCTS.md" && mention.anchor))
-    .map((mention) => mention.raw);
+  const unresolvedEntries: string[] = [];
+  const entryTokens: string[] = [];
+  const unresolvedFiles: string[] = [];
+  for (const mention of objective.mentions) {
+    const entry = mention.path === "PRODUCTS.md" && Boolean(mention.anchor);
+    if (entry) {
+      entryTokens.push(mention.resolved?.entry?.name ? `${mention.resolved.entry.name} (${mention.raw})` : mention.raw);
+      if (!mention.resolved) unresolvedEntries.push(mention.raw);
+    } else if (!mention.resolved) {
+      unresolvedFiles.push(mention.raw);
+    }
+  }
   switch (code) {
     case "offering_missing":
       return "`offering_missing` — no product from PRODUCTS.md is mentioned. Do not name or pitch an offering; asks are discovery only.";
