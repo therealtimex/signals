@@ -805,3 +805,33 @@ from the snapshot's, in snapshot order; a source that can no longer be read is l
 when `current`; empty with `status: "unavailable"` when the workspace cannot be resolved. The same
 object is returned by `get_writing_context` (for the thread card's `Sources` line) and by
 `listWorkflowRunProposals`.
+
+### 18.16 ADR-549-28 — the revocation set under the atomic approval model (2026-10-18)
+
+Dev observed (correctly) that a composed proposal is approved only inside `materialize_variant`
+(`effectiveApproval`; `auto_low_risk` is excluded for assist-only), so approval and
+materialization are atomic and the set "approved, unmaterialized" in ADR-549-24 is empty today.
+§18.8 also pointed at `revokeVariantsForSpineChange` as the pattern, and that function does pull
+back materialized content whose item is not in the publish lane. The two sentences disagreed.
+
+Decision: **keep the literal rule, not the spine-change semantics.** Assist-only surfaces have no
+publish lane; a materialized reply or DM is what the operator copies and may already have sent by
+hand, and pulling it back to `draft` would misreport a sent touch as unapproved (the same concern
+#548 raises about counting drafts as touches, in reverse). A changed objective source after
+materialization is information for the operator, not a reversal of their decision.
+
+Consequences, stated plainly:
+
+- Today the visible effect of a source change is the stale alert with `changedPaths`, the
+  `Sources` line on the thread card, and the `objectiveSource` projection. No "Revoked · objective
+  changed" card can appear.
+- `observeObjectiveSources` keeps the revoke step as implemented (approved and not materialized,
+  once per change, nothing on `unavailable`, fresh approval stands) so that a future
+  approval-without-materialization path (#553 deferred decisions is the likely one) inherits the
+  rule instead of silently escaping it. Tests pin both the empty-set behaviour under the current
+  model and the revocation when such a variant exists.
+- `revokeVariantsForSpineChange` remains the precedent only for the once-per-change bookkeeping,
+  not for its treatment of materialized items. §18.8's "mirrors" wording is narrowed to that.
+- Contract v2's copy "Approvals that weren't materialized yet were revoked" stays true; the
+  revoked-card scenario in prototype v2 is unreachable under the current approval model and is not
+  a post-dev experience-review failure.
