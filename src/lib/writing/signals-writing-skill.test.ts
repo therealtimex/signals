@@ -24,6 +24,7 @@ import {
   variantWritingInputSchema,
   voiceProfileInputSchema,
   writingAuditInputSchema,
+  type EvidenceSpine,
 } from "@/lib/writing/contracts";
 import { deriveHard, hardLimit } from "@/lib/writing/variant-writing";
 import {
@@ -103,6 +104,7 @@ type VariantIntent = NonNullable<WritingContextVariant["intent"]>;
 type VariantAsk = NonNullable<VariantIntent["ask"]>;
 type EvidencedPain = Extract<VariantAsk["customerPain"], { status: "evidenced" }>;
 type AskedPain = Extract<VariantAsk["customerPain"], { status: "asked" }>;
+type SpineClaim = EvidenceSpine["claims"][number];
 type SavedBriefSource = Extract<NonNullable<AccountObjective["brief"]>["source"], { kind: "saved" }>;
 /**
  * Objective card lines (#549). `O` abbreviates `launch.writing.composition.objective`, which the
@@ -130,6 +132,10 @@ type ObjectiveCardReadModelFields = {
   "variants[].intent.ask.customerPain.status": VariantAsk["customerPain"]["status"];
   "variants[].intent.ask.customerPain.text": AskedPain["text"];
   "variants[].intent.ask.customerPain.claimIds": EvidencedPain["claimIds"];
+  // Evidenced pain renders the cited spine claim's text, never its id (contract v2 §4.2).
+  "launch.writing.spine.claims[].id": SpineClaim["id"];
+  "launch.writing.spine.claims[].text": SpineClaim["text"] | null;
+  "launch.writing.spine.claims[].sensitivity": SpineClaim["sensitivity"];
   "launch.writing.objectiveSource.status": ObjectiveSourceStatus["status"];
   "launch.writing.objectiveSource.changedPaths": ObjectiveSourceStatus["changedPaths"];
   "variants[].revokedReason": WritingContextVariant["revokedReason"];
@@ -349,6 +355,9 @@ describe("signals-writing skill package", () => {
       "variants[].intent.ask.customerPain.status",
       "variants[].intent.ask.customerPain.text",
       "variants[].intent.ask.customerPain.claimIds",
+      "launch.writing.spine.claims[].id",
+      "launch.writing.spine.claims[].text",
+      "launch.writing.spine.claims[].sensitivity",
       "launch.writing.objectiveSource.status",
       "launch.writing.objectiveSource.changedPaths",
       "variants[].revokedReason",
@@ -359,6 +368,11 @@ describe("signals-writing skill package", () => {
     // revoked count only when there is one.
     expect(card).toContain("— drafts still use the snapshot[ · <n> approval(s) revoked]");
     expect(card).not.toContain("approvals not yet materialized were revoked");
+    // Contract v2 §4.2 (UX experience review r1): the operator sees the evidence, never claim ids.
+    expect(card).toContain('from a source — "<first claim text>"[ and <n> more]');
+    expect(card).toContain('from a private source — "<first claim text>"[ and <n> more]');
+    expect(card).toContain("from <n> cited source(s)");
+    expect(card).not.toMatch(/claim ids?>/);
   });
 
   it("names only registered agent tools in operational prose", () => {

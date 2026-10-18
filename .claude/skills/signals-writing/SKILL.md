@@ -137,7 +137,7 @@ Voice    <profile label v<version>>  ·  precedence <voice_first|rules_first>  �
 Personality  <variants[].personality.bindingId>  ·  <variants[].personalityState>  ·  self <variants[].personality.identity.selfContactId> (org <variants[].personality.identity.representedOrgId|none>)  ·  target represents <variants[].personality.target.represents.kind|none>
 Objective  <kind>  ·  <source>  ·  <saved brief <path>|brief written for this run>  ·  offering <name> (@PRODUCTS.md#<slug>)|none  ·  outcome: <outcome>  ·  platform metric: <writingGoal>
 Fit      <fit|not stated>  ·  unknowns: <1. … 2. …|none listed>
-Ask      <relation badge> — <statement>  ·  customer pain: <none assumed|asked, not assumed — "<text>"|from a source (<claim ids>)>
+Ask      <relation badge> — <statement>  ·  customer pain: <none assumed|asked, not assumed — "<text>"|from a source — "<first claim text>"[ and <n> more]|from a private source — "<first claim text>"[ and <n> more]|from <n> cited source(s)>
 Next     <next step|not stated>  ·  success: <success|not defined>
 Objective limits  <short limitation labels|none>
 Sources  changed since this run started: <changed paths> — drafts still use the snapshot[ · <n> approval(s) revoked] | couldn't be checked

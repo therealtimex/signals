@@ -182,6 +182,8 @@ export function AccountObjectiveFields({
   const [picker, setPicker] = useState<Picker | null>(null);
   const [announcement, setAnnouncement] = useState("");
   const [confirmCopy, setConfirmCopy] = useState(false);
+  /** Set when "Replace" confirmed the copy, so closing the confirm focuses the copied brief. */
+  const copyConfirmed = useRef(false);
   const previewDelay = useRef(0);
   const previewTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const previewAbort = useRef<AbortController | null>(null);
@@ -636,7 +638,22 @@ export function AccountObjectiveFields({
       <p className="sr-only" aria-live="polite">{announcement}</p>
 
       <AlertDialog open={confirmCopy} onOpenChange={setConfirmCopy}>
-        <AlertDialogContent>
+        <AlertDialogContent
+          onCloseAutoFocus={(event) => {
+            // Opened from state with no trigger, Radix would hand focus back to whatever held it
+            // before — on Replace, the Edit a copy button that just unmounted. Contract v2 §7:
+            // Replace lands at the start of the copied brief; Cancel/Esc return to Edit a copy.
+            event.preventDefault();
+            if (copyConfirmed.current) {
+              copyConfirmed.current = false;
+              const element = briefTextRef.current;
+              element?.focus();
+              element?.setSelectionRange(0, 0);
+            } else {
+              editCopyRef.current?.focus();
+            }
+          }}
+        >
           <AlertDialogHeader>
             <AlertDialogTitle>Replace your draft?</AlertDialogTitle>
             <AlertDialogDescription>
@@ -645,7 +662,14 @@ export function AccountObjectiveFields({
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={copySaved}>Replace</AlertDialogAction>
+            <AlertDialogAction
+              onClick={() => {
+                copyConfirmed.current = true;
+                copySaved();
+              }}
+            >
+              Replace
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

@@ -18,7 +18,7 @@ Voice    <profile label v<version>>  ·  precedence <voice_first|rules_first>  �
 Personality  <variants[].personality.bindingId>  ·  <variants[].personalityState>  ·  self <variants[].personality.identity.selfContactId> (org <variants[].personality.identity.representedOrgId|none>)  ·  target represents <variants[].personality.target.represents.kind|none>
 Objective  <kind>  ·  <source>  ·  <saved brief <path>|brief written for this run>  ·  offering <name> (@PRODUCTS.md#<slug>)|none  ·  outcome: <outcome>  ·  platform metric: <writingGoal>
 Fit      <fit|not stated>  ·  unknowns: <1. … 2. …|none listed>
-Ask      <relation badge> — <statement>  ·  customer pain: <none assumed|asked, not assumed — "<text>"|from a source (<claim ids>)>
+Ask      <relation badge> — <statement>  ·  customer pain: <none assumed|asked, not assumed — "<text>"|from a source — "<first claim text>"[ and <n> more]|from a private source — "<first claim text>"[ and <n> more]|from <n> cited source(s)>
 Next     <next step|not stated>  ·  success: <success|not defined>
 Objective limits  <short limitation labels|none>
 Sources  changed since this run started: <changed paths> — drafts still use the snapshot[ · <n> approval(s) revoked] | couldn't be checked
@@ -52,7 +52,7 @@ label/version from the resolved profile, risk/policy from `approval`, and publis
 | platform metric | `variants[].intent.goal.writingGoal` | never merged with the outcome |
 | relation badge | `variants[].intent.ask.relation`, `variants[].intent.ask.testsUncertainty` | Advances outcome · Tests unknown n · Defers outcome (add "why: `variants[].intent.ask.deferReason`") · Relationship only |
 | statement | `variants[].intent.ask.statement` | verbatim |
-| customer pain | `variants[].intent.ask.customerPain.status`, `variants[].intent.ask.customerPain.text`, `variants[].intent.ask.customerPain.claimIds` | none assumed · asked, not assumed — "text" · from a source (claim ids) |
+| customer pain | `variants[].intent.ask.customerPain.status`, `variants[].intent.ask.customerPain.text`, `variants[].intent.ask.customerPain.claimIds` → `launch.writing.spine.claims[].id`, `launch.writing.spine.claims[].text`, `launch.writing.spine.claims[].sensitivity` | none assumed · asked, not assumed — "text" · for `evidenced`, look each claim id up in the spine: from a source — "first claim's text" (from a private source — … when that claim's sensitivity is `private`), plus " and n more" for the other claims; when no cited claim has text (redacted or gone), from n cited source(s). **Never show claim ids**: the operator judges the evidence, not its id |
 | objective limits | `O.limitations` | no offering · offering not found · more than one offering · no proof points · file not found · fit not stated · success not defined |
 | sources | `launch.writing.objectiveSource.status`, `launch.writing.objectiveSource.changedPaths`, `variants[].revokedReason` | only when stale or unavailable; add "· n approval(s) revoked" only when n ≥ 1 variants on the launch have `variants[].revokedReason` `objective_source_stale` |
 
