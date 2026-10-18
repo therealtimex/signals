@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, type ReactNode } from "react";
 import Link from "next/link";
 import { Lock } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -41,6 +41,8 @@ interface ContactNurtureFieldsProps {
   disabled?: boolean;
   /** Test seam for the future publish-capable operator-choice state. */
   approvalGateOverride?: NurtureApprovalGate;
+  /** "What is this run for?" (#549), placed after the goal scope and before shift pacing. */
+  objectiveSection?: ReactNode;
 }
 
 function platformLabel(platform: string | null): string {
@@ -62,6 +64,7 @@ export function ContactNurtureFields({
   onChange,
   disabled,
   approvalGateOverride,
+  objectiveSection,
 }: ContactNurtureFieldsProps) {
   const targets = useActingTargets();
   const selectedTarget = targets?.find((target) => target.id === value.targetId) ?? null;
@@ -155,6 +158,8 @@ export function ContactNurtureFields({
           Filter targets by their assigned goal or nurture across all active goals.
         </p>
       </div>
+
+      {objectiveSection}
 
       {/* Shift Budget & Pacing */}
       <div className="space-y-3 rounded-lg bg-muted/50 p-3">
