@@ -135,6 +135,43 @@ export const writingIntentReplyContextSchema = z
   })
   .strict();
 
+/**
+ * The ask statement (#549, ADR-549-9): how this artifact relates to the run's account objective.
+ *
+ * The objective is operator-owned and server-stamped; the ask is the one thing the agent authors
+ * on top of it, so the operator sees on the card whether a draft advances the objective, tests one
+ * named unknown, or deliberately defers it. `testsUncertainty` is the 1-based number of the item
+ * under the brief's `Unknowns` heading (ADR-549-22).
+ */
+export const WRITING_INTENT_ASK_RELATIONS = ["advances", "tests", "defers", "relationship_only"] as const;
+
+export const writingIntentAskSchema = z
+  .object({
+    statement: z.string().trim().min(1).max(500),
+    relation: z.enum(WRITING_INTENT_ASK_RELATIONS),
+    testsUncertainty: z.number().int().positive().optional(),
+    deferReason: z.string().trim().min(1).max(300).optional(),
+    customerPain: z.discriminatedUnion("status", [
+      z.object({ status: z.literal("none_assumed") }).strict(),
+      z.object({
+        status: z.literal("evidenced"),
+        claimIds: z.array(z.string().regex(/^clm_[A-Za-z0-9_-]{6,}$/)).min(1).max(10),
+      }).strict(),
+      z.object({ status: z.literal("asked"), text: z.string().trim().min(1).max(300) }).strict(),
+    ]),
+    evidenceSourceIds: z.array(z.string().regex(/^src_[A-Za-z0-9_-]{6,}$/)).max(10).optional(),
+  })
+  .strict();
+
+export type WritingIntentAsk = z.infer<typeof writingIntentAskSchema>;
+
+export const writingIntentObjectiveRefSchema = z
+  .object({
+    objectiveId: z.string().regex(/^aobj_[A-Za-z0-9_-]{6,}$/),
+    hash: z.string().min(1).max(128),
+  })
+  .strict();
+
 export const writingIntentLineageSchema = z
   .object({
     workflowRunId: z.string().min(1),
@@ -158,6 +195,13 @@ const writingIntentShape = {
   replyContext: writingIntentReplyContextSchema.nullable(),
   sourceRefs: z.array(writingIntentSourceRefSchema).max(10),
   approvalPolicy: z.literal(WRITING_INTENT_APPROVAL_POLICY),
+  /**
+   * Reference to the launch's stamped account objective (#549). Optional in the schema so every
+   * record written before #549 still parses; `assertWritingIntentAuthority` decides when it is
+   * required.
+   */
+  objective: writingIntentObjectiveRefSchema.nullable().optional(),
+  ask: writingIntentAskSchema.nullable().optional(),
 };
 
 function refineIntent(
@@ -402,6 +446,8 @@ export function buildWritingIntentDraft(input: {
   replyContext?: z.infer<typeof writingIntentReplyContextSchema> | null;
   sourceRefs?: WritingIntentSourceRef[];
   actions?: WritingIntentAction[];
+  objective?: z.infer<typeof writingIntentObjectiveRefSchema> | null;
+  ask?: WritingIntentAsk | null;
 }): WritingIntentDraft {
   return writingIntentDraftSchema.parse({
     schemaVersion: WRITING_INTENT_SCHEMA_VERSION,
@@ -421,5 +467,7 @@ export function buildWritingIntentDraft(input: {
     replyContext: input.replyContext ?? null,
     sourceRefs: input.sourceRefs ?? [],
     approvalPolicy: WRITING_INTENT_APPROVAL_POLICY,
+    ...(input.objective !== undefined ? { objective: input.objective } : {}),
+    ...(input.ask !== undefined ? { ask: input.ask } : {}),
   });
 }

@@ -14,7 +14,9 @@ import {
   type ApprovalState,
 } from "@/lib/writing/contracts";
 import { contentTypeForSurface, type SurfaceId } from "@/lib/writing/surfaces";
-import { isWritingComposedConfig } from "@/lib/writing/writing-intent";
+import { isWritingComposedConfig, type WritingIntentAsk } from "@/lib/writing/writing-intent";
+import type { AccountObjective } from "@/lib/writing/account-objective";
+import { readObjectiveSourceStatus, type ObjectiveSourceStatus } from "@/lib/writing/objective-sources";
 
 function object(value: unknown): Record<string, unknown> {
   if (typeof value === "string") {
@@ -39,6 +41,19 @@ export interface WorkflowRunProposalSummary {
   revoked: number;
 }
 
+/** ADR-549-17: an evidenced customer pain carries the cited claims' text, never just ids. */
+export type WorkflowRunProposalCustomerPain =
+  | { status: "none_assumed" }
+  | { status: "asked"; text: string }
+  | {
+      status: "evidenced";
+      claims: Array<{ claimId: string; text: string | null; sensitivity: "public" | "private" }>;
+    };
+
+export type WorkflowRunProposalAsk = Omit<WritingIntentAsk, "customerPain"> & {
+  customerPain: WorkflowRunProposalCustomerPain;
+};
+
 export interface ValidWorkflowRunProposal {
   valid: true;
   variantId: string;
@@ -54,6 +69,8 @@ export interface ValidWorkflowRunProposal {
     href: string;
   } | null;
   goal: { relationshipGoal: RelationshipGoal; writingGoal: string } | null;
+  /** How this draft relates to the run objective (#549); `null` before #549. */
+  ask: WorkflowRunProposalAsk | null;
   body: string;
   audit: {
     verdict: "pass" | "warn" | "block";
@@ -83,8 +100,54 @@ export type WorkflowRunProposal = ValidWorkflowRunProposal | InvalidWorkflowRunP
 
 export interface WorkflowRunProposals {
   launches: Array<{ id: string; name: string; href: string }>;
+  /** The run's stamped account objective (#549); `null` for a run from before #549. */
+  objective: AccountObjective | null;
+  /** Whether the objective's workspace sources changed since dispatch; `null` without an objective. */
+  objectiveSource: ObjectiveSourceStatus | null;
   proposals: WorkflowRunProposal[];
   summary: WorkflowRunProposalSummary;
+}
+
+const CLAIM_TEXT_MAX = 300;
+
+function projectAsk(
+  ask: WritingIntentAsk | null | undefined,
+  claims: Map<string, { text: string; sensitivity: "public" | "private" }>,
+): WorkflowRunProposalAsk | null {
+  if (!ask) return null;
+  const pain = ask.customerPain;
+  return {
+    ...ask,
+    customerPain: pain.status === "evidenced"
+      ? {
+          status: "evidenced",
+          claims: pain.claimIds.map((claimId) => {
+            const claim = claims.get(claimId);
+            return {
+              claimId,
+              text: claim
+                ? claim.text.length > CLAIM_TEXT_MAX
+                  ? `${claim.text.slice(0, CLAIM_TEXT_MAX - 1).trimEnd()}…`
+                  : claim.text
+                : null,
+              sensitivity: claim?.sensitivity ?? "public",
+            };
+          }),
+        }
+      : pain,
+  };
+}
+
+function spineClaims(launchMetadata: unknown) {
+  const claims = new Map<string, { text: string; sensitivity: "public" | "private" }>();
+  const spine = object(object(object(launchMetadata).writing).spine);
+  for (const raw of Array.isArray(spine.claims) ? spine.claims : []) {
+    const claim = object(raw);
+    if (typeof claim.id === "string" && typeof claim.text === "string") {
+      claims.set(claim.id, { text: claim.text, sensitivity: claim.sensitivity === "private" ? "private" : "public" });
+    }
+  }
+  return claims;
 }
 
 function emptySummary(): WorkflowRunProposalSummary {
@@ -105,7 +168,13 @@ function invalidReason(issues: Array<{ path: PropertyKey[]; message: string }>):
     .join("; ");
 }
 
-export function listWorkflowRunProposals(workflowRunId: string): WorkflowRunProposals {
+export function listWorkflowRunProposals(
+  workflowRunId: string,
+  options: {
+    /** A fresh observation (`observeObjectiveSourcesForRun`); otherwise the last recorded one. */
+    objectiveSource?: ObjectiveSourceStatus | null;
+  } = {},
+): WorkflowRunProposals {
   const launchRows = db.select().from(launches).where(sql`
     json_extract(${launches.metadata}, '$.writing.composition.workflowRunId') = ${workflowRunId}
   `).all();
@@ -132,6 +201,23 @@ export function listWorkflowRunProposals(workflowRunId: string): WorkflowRunProp
       : [],
   ))];
   const contacts = new Map(getContactsByIds(contactIds).map((contact) => [contact.id, contact]));
+  const claimsByLaunch = new Map(launchRows.map((launch) => [launch.id, spineClaims(launch.metadata)]));
+  // Every launch of a run stamps the same objective (same run config); read the first one.
+  const objectiveLaunch = [...launchRows]
+    .sort((left, right) => left.createdAt - right.createdAt || left.id.localeCompare(right.id))
+    .map((launch) => ({
+      launch,
+      composition: launchCompositionSchema.safeParse(object(object(launch.metadata).writing).composition),
+    }))
+    .find(({ composition }) => composition.success && composition.data.objective);
+  const objective = objectiveLaunch?.composition.success
+    ? objectiveLaunch.composition.data.objective ?? null
+    : null;
+  const objectiveSource = objective
+    ? options.objectiveSource !== undefined
+      ? options.objectiveSource
+      : readObjectiveSourceStatus(objectiveLaunch!.launch.id)
+    : null;
 
   const proposals: WorkflowRunProposal[] = parsedRows.map(({ launch, variant, parsed, composition }) => {
     const href = `/dashboard/launches/${launch.id}/variants/${variant.id}`;
@@ -174,6 +260,7 @@ export function listWorkflowRunProposals(workflowRunId: string): WorkflowRunProp
             writingGoal: writing.intent.goal.writingGoal,
           }
         : null,
+      ask: projectAsk(writing.intent?.ask, claimsByLaunch.get(launch.id) ?? new Map()),
       body: writing.units.texts.join("\n\n"),
       audit: writing.audit
         ? {
@@ -230,7 +317,7 @@ export function listWorkflowRunProposals(workflowRunId: string): WorkflowRunProp
     return result;
   }, emptySummary());
 
-  return { launches: launchDtos, proposals, summary };
+  return { launches: launchDtos, objective, objectiveSource, proposals, summary };
 }
 
 export function summarizeWorkflowRunProposals(

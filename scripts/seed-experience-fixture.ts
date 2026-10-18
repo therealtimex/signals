@@ -24,7 +24,20 @@ async function main(): Promise<void> {
     const { seedNurtureProposalFixture } = await import(
       "@/lib/db/seed-fixtures/nurture-proposals"
     );
-    const result = await seedNurtureProposalFixture({ label });
+    const objectiveIndex = process.argv.indexOf("--objective");
+    const objective = objectiveIndex >= 0 ? process.argv[objectiveIndex + 1] : undefined;
+    if (objective !== undefined && !["none", "commercial", "relationship_only"].includes(objective)) {
+      throw Object.assign(new Error(`--objective must be none, commercial or relationship_only`), {
+        code: "fixture_option_invalid",
+      });
+    }
+    const offeringIndex = process.argv.indexOf("--offering");
+    const offeringSlug = offeringIndex >= 0 ? process.argv[offeringIndex + 1] : undefined;
+    const result = await seedNurtureProposalFixture({
+      label,
+      ...(objective ? { objective: objective as "none" | "commercial" | "relationship_only" } : {}),
+      ...(offeringSlug ? { offeringSlug } : {}),
+    });
     process.stdout.write(`${JSON.stringify(result)}\n`);
   } catch (error) {
     const candidate = error as Error & { code?: string; reasons?: string[] };

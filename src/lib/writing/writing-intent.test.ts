@@ -5,6 +5,7 @@ import {
   NURTURE_WRITING_SURFACES,
   WRITING_INTENT_ACTIONS,
   WRITING_INTENT_APPROVAL_POLICY,
+  WRITING_INTENT_ASK_RELATIONS,
   WRITING_INTENT_CONSUMERS,
   WRITING_INTENT_MANDATES,
   WRITING_INTENT_PERSONALITY_SUBMISSION_KEYS,
@@ -168,6 +169,41 @@ describe("writing intent contract", () => {
     expect(isAssistOnlyIntent(record)).toBe(true);
     expect(isAssistOnlyIntent(null)).toBe(false);
     expect(isAssistOnlyIntent({ mandate: "assist_only" })).toBe(false);
+  });
+
+  it("still reads every record written before #549, and pins the ask relations", () => {
+    // `objective` and `ask` are optional in the schema; the authority check decides when they are
+    // required, so variants persisted before account objectives keep parsing (ADR-549-7).
+    const legacy = toWritingIntentRecord(intent);
+    expect(legacy).not.toHaveProperty("objective");
+    expect(readWritingIntentRecord(legacy)).toEqual(legacy);
+    expect(WRITING_INTENT_ASK_RELATIONS).toEqual(["advances", "tests", "defers", "relationship_only"]);
+  });
+
+  it("accepts an objective reference and a well-formed ask, and refuses a malformed one", () => {
+    const withAsk = {
+      ...toWritingIntentRecord(intent),
+      objective: { objectiveId: "aobj_abcdef1", hash: "a".repeat(64) },
+      ask: {
+        statement: "Ask how new engineers get productive in week one.",
+        relation: "tests",
+        testsUncertainty: 1,
+        customerPain: { status: "asked", text: "Is onboarding slower than you want?" },
+        evidenceSourceIds: ["src_abcdef1"],
+      },
+    };
+    expect(readWritingIntentRecord(withAsk)).toMatchObject({ ask: { relation: "tests" } });
+    for (const ask of [
+      { ...withAsk.ask, statement: "" },
+      { ...withAsk.ask, relation: "pitches" },
+      { ...withAsk.ask, testsUncertainty: 0 },
+      { ...withAsk.ask, customerPain: { status: "evidenced", claimIds: [] } },
+      { ...withAsk.ask, customerPain: { status: "assumed" } },
+      { ...withAsk.ask, extra: true },
+    ]) {
+      expect(readWritingIntentRecord({ ...withAsk, ask })).toBeNull();
+    }
+    expect(readWritingIntentRecord({ ...withAsk, objective: { objectiveId: "not-an-id", hash: "x" } })).toBeNull();
   });
 
   it("keeps the consumer registry closed", () => {

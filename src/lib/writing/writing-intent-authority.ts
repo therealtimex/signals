@@ -30,6 +30,11 @@ import { eq } from "drizzle-orm";
 import { AgentToolError } from "@/lib/agent-tools/types";
 import type { DbRunner } from "@/lib/db/client";
 import { launches, workflowRuns, workflowTemplates } from "@/lib/db/schema";
+import {
+  ACCOUNT_OBJECTIVE_CONFIG_KEY,
+  readAccountObjective,
+  type AccountObjective,
+} from "@/lib/writing/account-objective";
 import { launchCompositionSchema, type LaunchComposition } from "@/lib/writing/contracts";
 import { isAssistOnlySurface } from "@/lib/writing/capabilities";
 import type { SurfaceId } from "@/lib/writing/surfaces";
@@ -49,6 +54,11 @@ export type ComposedRunAuthority = {
   workflowRunId: string;
   templateId: string | null;
   composition: WritingIntentComposition;
+  /**
+   * The account objective normalized at dispatch (#549) and persisted on the run row in the same
+   * write as the scope-token hash; `null` for runs dispatched before #549.
+   */
+  objective: AccountObjective | null;
 };
 
 export type WritingIntentAuthorityReason =
@@ -60,6 +70,11 @@ export type WritingIntentAuthorityReason =
   | "writing_intent_surface_not_allowed"
   | "writing_intent_target_mismatch"
   | "writing_intent_lineage_mismatch"
+  | "writing_intent_objective_required"
+  | "writing_intent_objective_mismatch"
+  | "writing_intent_objective_not_permitted"
+  | "writing_intent_ask_required"
+  | "writing_intent_ask_relation_invalid"
   | "composed_scope_required";
 
 function object(value: unknown): Record<string, unknown> {
@@ -94,9 +109,11 @@ export function resolveComposedRunAuthority(
 ): ComposedRunAuthority | null {
   const run = runner.select().from(workflowRuns).where(eq(workflowRuns.id, workflowRunId)).get();
   if (!run) return null;
-  const fromRun = readWritingIntentComposition(object(run.config));
+  const runConfig = object(run.config);
+  const fromRun = readWritingIntentComposition(runConfig);
+  const objective = readAccountObjective(runConfig[ACCOUNT_OBJECTIVE_CONFIG_KEY]);
   if (fromRun) {
-    return { workflowRunId: run.id, templateId: run.templateId ?? null, composition: fromRun };
+    return { workflowRunId: run.id, templateId: run.templateId ?? null, composition: fromRun, objective };
   }
   if (!run.templateId) return null;
   const template = runner
@@ -106,7 +123,7 @@ export function resolveComposedRunAuthority(
     .get();
   const fromTemplate = template ? readWritingIntentComposition(object(template.config)) : null;
   return fromTemplate
-    ? { workflowRunId: run.id, templateId: run.templateId, composition: fromTemplate }
+    ? { workflowRunId: run.id, templateId: run.templateId, composition: fromTemplate, objective }
     : null;
 }
 
@@ -205,7 +222,68 @@ export function assertWritingIntentAuthority(input: {
       "Writing intent lineage names a different template",
     );
   }
+  assertObjectiveAndAsk(composition.objective ?? null, record);
   return record;
+}
+
+/**
+ * ADR-549-8: the account objective and the ask, checked on every write.
+ *
+ * Runs for a new variant, an in-place revision and a derived alternative alike, so a revision that
+ * drops or edits the objective reference is rejected rather than silently shedding the operator's
+ * intent. Editing the ask is allowed: the intent is part of the audit input hash, so the audit
+ * stales and approval is revoked, and the operator re-approves the new ask.
+ */
+function assertObjectiveAndAsk(objective: AccountObjective | null, record: WritingIntentRecord): void {
+  if (!objective) {
+    if (record.objective) {
+      fail(
+        "writing_intent_objective_not_permitted",
+        "This launch predates account objectives, so its writing intent cannot reference one",
+      );
+    }
+    return;
+  }
+  if (!record.objective) {
+    fail(
+      "writing_intent_objective_required",
+      `This run carries account objective ${objective.objectiveId}; metadata.writing.intent.objective must reference it`,
+    );
+  }
+  if (record.objective.objectiveId !== objective.objectiveId || record.objective.hash !== objective.hash) {
+    fail(
+      "writing_intent_objective_mismatch",
+      "Writing intent objective does not match the run's stamped account objective",
+    );
+  }
+  const ask = record.ask;
+  if (!ask) {
+    fail(
+      "writing_intent_ask_required",
+      "A run with an account objective requires metadata.writing.intent.ask, stated before drafting",
+    );
+  }
+  const relationshipOnly = objective.kind === "relationship_only";
+  if (relationshipOnly !== (ask.relation === "relationship_only")) {
+    fail(
+      "writing_intent_ask_relation_invalid",
+      relationshipOnly
+        ? "A relationship-only objective admits only ask.relation \"relationship_only\""
+        : `ask.relation "relationship_only" is not valid for a ${objective.kind} objective; use advances, tests or defers`,
+    );
+  }
+  if (ask.relation === "tests") {
+    const unknowns = objective.parsed?.unknowns.length ?? 0;
+    if (ask.testsUncertainty === undefined || ask.testsUncertainty < 1 || ask.testsUncertainty > unknowns) {
+      fail(
+        "writing_intent_ask_relation_invalid",
+        `ask.relation "tests" requires testsUncertainty between 1 and ${unknowns}, the numbered Unknowns in the brief`,
+      );
+    }
+  }
+  if (ask.relation === "defers" && !ask.deferReason) {
+    fail("writing_intent_ask_relation_invalid", "ask.relation \"defers\" requires deferReason");
+  }
 }
 
 /**

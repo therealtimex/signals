@@ -11,6 +11,7 @@ export const WRITING_ID_PREFIXES = [
   "wint",
   "pb",
   "pm",
+  "aobj",
 ] as const;
 export type WritingIdPrefix = (typeof WRITING_ID_PREFIXES)[number];
 

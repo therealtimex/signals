@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -16,6 +16,7 @@ import { materializeVariantWithRunner } from "@/lib/writing/materialize";
 import { withPersonalityWritingGuard } from "@/lib/writing/personality-guard";
 import { listWorkflowRunProposals } from "@/lib/writing/workflow-run-proposals";
 import { resetCoreTables } from "@/test/db";
+import { PRODUCTS_FIXTURE } from "@/test/account-objective-fixture";
 import {
   installPersonalityBinding,
   personalityWorkspace,
@@ -53,6 +54,60 @@ describe("nurture proposal experience fixture", () => {
 
   afterEach(() => {
     rmSync(storageDir, { recursive: true, force: true });
+  });
+
+  it("stamps a commercial objective and one ask per proposal so QA can see the card (#549)", async () => {
+    const workspace = personalityWorkspace(storageDir);
+    writeFileSync(join(workspace.dir, "PRODUCTS.md"), PRODUCTS_FIXTURE);
+    const authority = await installPersonalityBinding(workspace);
+    const target = registerPlatformTarget({
+      connectionId: ensureBrowserConnection({ sessionName: "experience-fixture-objective" }).id,
+      platform: "x",
+      kind: "account",
+      name: "Experience target",
+      handle: "@experience",
+      capabilities: ["publish"],
+      source: "test",
+    });
+    await setTargetRepresentation({
+      targetId: target.id,
+      bindingId: authority.binding.id,
+      represents: { kind: "self", contactId: authority.self.id },
+      evidence: { kind: "ui", route: "/settings/personality" },
+    }, authority.dependencies);
+    createTemplate({
+      name: "Contact Relationship Nurture",
+      templateType: "nurture",
+      status: "active",
+      config: JSON.stringify(buildContactNurtureTemplateConfig()),
+      isSystem: 1,
+    });
+    const fixture = await seedNurtureProposalFixture({
+      label: "test-issue-549",
+      objective: "commercial",
+      offeringSlug: "engineering-workflow",
+      dependencies: { ...authority.dependencies, probeCapability: async () => capability },
+    });
+
+    const result = listWorkflowRunProposals(fixture.workflowRunId);
+    expect(result.objective).toMatchObject({
+      kind: "commercial",
+      offering: { slug: "engineering-workflow" },
+      parsed: { unknowns: ["Whether they use a coding agent today", "Who owns onboarding for new engineers"] },
+      limitations: [],
+    });
+    expect(result.summary).toMatchObject({ total: 3, pendingReview: 3 });
+    expect(result.proposals.map((proposal) => proposal.valid && proposal.ask?.relation).sort())
+      .toEqual(["advances", "defers", "tests"]);
+    const tested = result.proposals.find((proposal) => proposal.valid && proposal.ask?.relation === "tests");
+    expect(tested?.valid && tested.ask?.customerPain).toEqual({
+      status: "evidenced",
+      claims: [{
+        claimId: "clm_experience1",
+        text: "A considerate relationship touchpoint grounded in the contact record.",
+        sensitivity: "public",
+      }],
+    });
   });
 
   it("seeds three run-anchored pending proposals and materializes with UI evidence", async () => {

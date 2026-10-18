@@ -1,7 +1,9 @@
 import { and, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
-import { userApprovalSchema } from "@/lib/writing/contracts";
+import { launchCompositionSchema, userApprovalSchema } from "@/lib/writing/contracts";
+import { observeObjectiveSources } from "@/lib/writing/objective-sources";
+import { readWritingIntentRecord } from "@/lib/writing/writing-intent";
 import { AgentToolError } from "@/lib/agent-tools/types";
 import { db } from "@/lib/db/client";
 import { PLATFORMS, type Platform } from "@/lib/db/platforms";
@@ -691,11 +693,25 @@ function requestedWritingSurfaces(
   return [...new Set([...(inputSurfaces ?? []), ...stored])];
 }
 
+/** The intent fields the thread card reads (#549): goal, objective reference and ask. */
+function projectVariantIntent(variant: { metadata: unknown }) {
+  const record = readWritingIntentRecord(parseObject(parseObject(variant.metadata).writing).intent);
+  if (!record) return null;
+  return {
+    goal: record.goal,
+    objective: record.objective ?? null,
+    ask: record.ask ?? null,
+  };
+}
+
 export async function handleGetWritingContext(
   input: z.infer<typeof getWritingContextSchema>,
 ) {
-  const launch = getLaunchById(input.launchId);
-  if (!launch) throw new AgentToolError("NOT_FOUND", `Launch not found: ${input.launchId}`);
+  if (!getLaunchById(input.launchId)) throw new AgentToolError("NOT_FOUND", `Launch not found: ${input.launchId}`);
+  // Observe the objective's workspace sources first (#549, ADR-549-24), so the variants below
+  // already reflect any revocation a changed source caused.
+  const objectiveObservation = await observeObjectiveSources(input.launchId);
+  const launch = getLaunchById(input.launchId)!;
   const writing = launchWriting(launch);
   const sources = parseArray(writing?.sources);
   const surfaces = requestedWritingSurfaces(input.surfaces, writing);
@@ -775,6 +791,9 @@ export async function handleGetWritingContext(
       ...(projection?.audit?.verdict ? { auditVerdict: projection.audit.verdict } : {}),
       ...(projection?.approval?.state ? { approvalState: projection.approval.state } : {}),
       ...(projection?.approval?.riskTier ? { riskTier: projection.approval.riskTier } : {}),
+      ...(typeof projection?.approval?.revokedReason === "string"
+        ? { revokedReason: projection.approval.revokedReason }
+        : {}),
       auditStale: Boolean(
         projection?.audit &&
           projection.audit.inputHash !== computeAuditInputHash(variant.body, projection),
@@ -783,6 +802,7 @@ export async function handleGetWritingContext(
       revisionRequest: projection?.revisionRequest ?? null,
       contentItemStatus: variant.contentItemId ? getContentItem(variant.contentItemId)?.status ?? null : null,
       lineage: projection?.lineage ?? null,
+      intent: projectVariantIntent(variant),
       personality: variantPersonality ?? null,
       personalityState: !variantPersonality
         ? "legacy_unbound"
@@ -805,6 +825,21 @@ export async function handleGetWritingContext(
   const briefRedacted = briefSensitivity.level === "private" && !briefApproved;
   const sourceViews = sources.map((source) => sourceView(source, launch.scope));
   const writingView = projectLaunchWriting(writing, sourceViews, input.includeSources, launch.scope);
+  const composition = launchCompositionSchema.safeParse(writing?.composition);
+  if (writingView && composition.success) {
+    // The stamped scope, projected so the agent reads the operator's objective from Signals rather
+    // than only from the brief (#549, ADR-549-12). The scope token is never stored in plaintext.
+    writingView.composition = {
+      consumer: composition.data.consumer,
+      mandate: composition.data.mandate,
+      workflowRunId: composition.data.workflowRunId,
+      surfaces: composition.data.surfaces,
+      objective: composition.data.objective ?? null,
+    };
+    writingView.objectiveSource = composition.data.objective
+      ? objectiveObservation?.objectiveSource ?? null
+      : null;
+  }
   const voice = resolveContextVoice(writing);
 
   return {

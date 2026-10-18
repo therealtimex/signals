@@ -8,6 +8,7 @@ import {
   resolveComposedRunAuthority,
 } from "@/lib/writing/writing-intent-authority";
 import { buildWritingIntentDraft, toWritingIntentRecord } from "@/lib/writing/writing-intent";
+import { normalizeAccountObjective } from "@/lib/writing/account-objective";
 import { resetCoreTables } from "@/test/db";
 
 function nurtureTemplate() {
@@ -61,6 +62,30 @@ describe("composed run authority", () => {
       templateId: template.id,
       composition: { consumer: "contact_relationship_nurture", mandate: "assist_only" },
     });
+  });
+
+  it("carries the objective normalized at dispatch, and none for a run from before #549", async () => {
+    const template = nurtureTemplate();
+    const normalized = await normalizeAccountObjective({
+      raw: { kind: "relationship_only" },
+      source: "run_config",
+      resolveWorkspace: async () => { throw new Error("not needed"); },
+    });
+    if (!normalized.ok) throw new Error(normalized.reason);
+    const run = createWorkflowRun({
+      templateId: template.id,
+      workflowType: "agent",
+      config: JSON.stringify({ ...buildContactNurtureTemplateConfig(), accountObjective: normalized.objective }),
+    });
+    expect(resolveComposedRunAuthority(db, run.id)?.objective).toEqual(normalized.objective);
+
+    // An input-shaped (never normalized) value is not an objective the server stamped.
+    const raw = createWorkflowRun({
+      templateId: template.id,
+      workflowType: "agent",
+      config: JSON.stringify({ ...buildContactNurtureTemplateConfig(), accountObjective: { kind: "relationship_only" } }),
+    });
+    expect(resolveComposedRunAuthority(db, raw.id)?.objective).toBeNull();
   });
 
   it("falls back to the template when the run config predates the opt-in", () => {
