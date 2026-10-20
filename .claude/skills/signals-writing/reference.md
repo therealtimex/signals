@@ -22,6 +22,11 @@ audit input never includes Personality. `unbound` uses the separate terminal ske
   `legacy_unbound sketch` → `upsert_variant` → re-read context and confirm
   `variants[].personalityState` is `legacy_unbound` → stop. Do not run verdict/precheck, approval,
   materialization, export, or publish.
+- **composed run (workflow writing intent):** read
+  `get_writing_context.launch.writing.composition.objective` → write and post the `ask` before
+  drafting → draft and audit as in the full lane → attach the intent with the stamped
+  `objective` reference and the `ask` → `precheck --launch <launch writing file>` (it reads
+  `composition.objective`) → `upsert_variant`. A revision keeps the same `objective` reference.
 - **adapt/revise/humanize:** read the current variant plus spine → preserve or add lineage. In a
   full lane, repeat measure/audit/precheck; for a legacy-unbound sketch, preserve the exact
   targetless/unaudited shape above. Update the same variant unless a derived alternative is explicit.
@@ -56,19 +61,28 @@ request hash while correcting only the server-reported reason.
 ## Variant writing input
 
 ```json signals-writing:example:variant-input
-{"schemaVersion":1,"platform":"x","surface":"x/post","targetId":"target_x_demo","goal":"awareness","formulaId":"x/post/data-point@1","overlay":{"id":"overlay:x","version":1},"core":{"version":1},"voiceProfile":null,"voicePrecedence":"voice_first","spine":{"id":"spn_demo001","hash":"spine_hash_demo"},"units":{"texts":["Aster reduced review time from 10 minutes to 6 minutes."],"count":1,"chars":[55]},"claimMap":[{"claimId":"clm_demo001","present":true,"unit":0,"verbatim":true}],"lineage":{"sourceIds":["src_demo001"]},"media":{"assetIds":[]},"personality":{"bindingId":"pb_demo001"},"audit":{"schemaVersion":1,"auditedAt":1750000001,"auditor":{"kind":"agent","skillVersion":"1.1.0","workflowRunId":"run_demo"},"overlay":{"id":"overlay:x","version":1},"core":{"version":1},"verdict":"pass","findings":[],"claims":{"total":1,"preserved":1,"altered":[],"missing":[],"invented":[],"privateIncluded":[]},"hard":{"units":1,"chars":[55],"limit":280,"hashtags":0,"links":0,"mediaCount":0},"voice":{"status":"none","skipped":[]},"heuristics":{"applied":[],"conflicts":[],"skippedForVoice":[]}}}
+{"schemaVersion":1,"platform":"x","surface":"x/post","targetId":"target_x_demo","goal":"awareness","formulaId":"x/post/data-point@1","overlay":{"id":"overlay:x","version":1},"core":{"version":1},"voiceProfile":null,"voicePrecedence":"voice_first","spine":{"id":"spn_demo001","hash":"spine_hash_demo"},"units":{"texts":["Aster reduced review time from 10 minutes to 6 minutes."],"count":1,"chars":[55]},"claimMap":[{"claimId":"clm_demo001","present":true,"unit":0,"verbatim":true}],"lineage":{"sourceIds":["src_demo001"]},"media":{"assetIds":[]},"personality":{"bindingId":"pb_demo001"},"audit":{"schemaVersion":1,"auditedAt":1750000001,"auditor":{"kind":"agent","skillVersion":"1.2.0","workflowRunId":"run_demo"},"overlay":{"id":"overlay:x","version":1},"core":{"version":1},"verdict":"pass","findings":[],"claims":{"total":1,"preserved":1,"altered":[],"missing":[],"invented":[],"privateIncluded":[]},"hard":{"units":1,"chars":[55],"limit":280,"hashtags":0,"links":0,"mediaCount":0},"voice":{"status":"none","skipped":[]},"heuristics":{"applied":[],"conflicts":[],"skippedForVoice":[]}}}
+```
+
+## Writing intent with account objective and ask
+
+Attach as `metadata.writing.intent` on a composed run. Copy `objective` exactly from
+`composition.objective`; `testsUncertainty` is the 1-based number of the Unknowns item.
+
+```json signals-writing:example:intent-objective-ask
+{"schemaVersion":1,"intentId":"wint_demo001","mandate":"assist_only","actions":["draft","audit","propose"],"consumer":"contact_relationship_nurture","lineage":{"workflowRunId":"run_demo","templateId":"tpl_demo"},"recipient":{"kind":"contact","contactId":"contact_demo","platform":"linkedin"},"goal":{"kind":"relationship_goal","id":"warm_conversation","writingGoal":"replies"},"target":{"platform":"linkedin","targetId":"target_linkedin_demo"},"surface":"linkedin/direct_message","replyContext":null,"sourceRefs":[{"kind":"contact_record","contactId":"contact_demo"}],"approvalPolicy":"explicit","objective":{"objectiveId":"aobj_demo001","hash":"objective_hash_demo"},"ask":{"statement":"Ask which workflow they use to get new engineers productive.","relation":"tests","testsUncertainty":1,"customerPain":{"status":"none_assumed"},"evidenceSourceIds":["src_demo001"]}}
 ```
 
 ## Generation metadata
 
 ```json signals-writing:example:generation
-{"schemaVersion":1,"kind":"signals-writing","mode":"draft","model":null,"skill":{"name":"signals-writing","version":"1.1.0"},"agent":{"workflowRunId":"run_demo","rtxThreadSlug":"thread_demo","briefPath":"workflow-runs/run_demo/brief.md"},"requestHash":"wr1:run_demo:x/post:draft:1","generatedAt":1750000001}
+{"schemaVersion":1,"kind":"signals-writing","mode":"draft","model":null,"skill":{"name":"signals-writing","version":"1.2.0"},"agent":{"workflowRunId":"run_demo","rtxThreadSlug":"thread_demo","briefPath":"workflow-runs/run_demo/brief.md"},"requestHash":"wr1:run_demo:x/post:draft:1","generatedAt":1750000001}
 ```
 
 ## Audit input
 
 ```json signals-writing:example:audit-input
-{"schemaVersion":1,"auditedAt":1750000001,"auditor":{"kind":"agent","skillVersion":"1.1.0","workflowRunId":"run_demo"},"overlay":{"id":"overlay:x","version":1},"core":{"version":1},"verdict":"pass","findings":[],"claims":{"total":1,"preserved":1,"altered":[],"missing":[],"invented":[],"privateIncluded":[]},"hard":{"units":1,"chars":[55],"limit":280,"hashtags":0,"links":0,"mediaCount":0},"voice":{"status":"none","skipped":[]},"heuristics":{"applied":[],"conflicts":[],"skippedForVoice":[]}}
+{"schemaVersion":1,"auditedAt":1750000001,"auditor":{"kind":"agent","skillVersion":"1.2.0","workflowRunId":"run_demo"},"overlay":{"id":"overlay:x","version":1},"core":{"version":1},"verdict":"pass","findings":[],"claims":{"total":1,"preserved":1,"altered":[],"missing":[],"invented":[],"privateIncluded":[]},"hard":{"units":1,"chars":[55],"limit":280,"hashtags":0,"links":0,"mediaCount":0},"voice":{"status":"none","skipped":[]},"heuristics":{"applied":[],"conflicts":[],"skippedForVoice":[]}}
 ```
 
 ## Voice profile input

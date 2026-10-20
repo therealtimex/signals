@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ExternalLink, RefreshCw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -13,6 +13,13 @@ import type {
   WorkflowRunProposalSummary,
   WorkflowRunProposals,
 } from "@/lib/writing/workflow-run-proposals";
+import type { AccountObjective } from "@/lib/writing/account-objective";
+import { RELATIONSHIP_GOAL_LABELS } from "@/lib/relationship-goals";
+import {
+  OBJECTIVE_CHANGED_STATUS,
+  sourcesChangedAnnouncement,
+} from "@/app/dashboard/workflows/account-objective-copy";
+import { ProposalAsk, RunObjectiveBlock } from "@/app/dashboard/workflows/[id]/workflow-run-objective";
 
 function surfaceLabel(surface: string): string {
   const [platform, kind] = surface.split("/");
@@ -47,6 +54,7 @@ function proposalStatus(proposal: ValidWorkflowRunProposal): string {
   if (proposal.audit?.verdict === "block") return "Blocked by audit";
   if (proposal.revisionRequest) return "Revision requested";
   if (proposal.approval.state === "revoked") {
+    if (proposal.approval.revokedReason === "objective_source_stale") return OBJECTIVE_CHANGED_STATUS;
     return proposal.approval.revokedReason
       ? `Revoked · ${proposal.approval.revokedReason.replaceAll("_", " ")}`
       : "Revoked";
@@ -78,10 +86,13 @@ async function responseError(response: Response): Promise<string> {
 function ProposalCard({
   proposal,
   runId,
+  objective,
   onChanged,
 }: {
   proposal: WorkflowRunProposal;
   runId: string;
+  /** The run objective; `null` for runs from before #549, which show no Ask box. */
+  objective: AccountObjective | null;
   onChanged: () => Promise<void>;
 }) {
   const [decision, setDecision] = useState<"reject" | "revision" | null>(null);
@@ -159,8 +170,8 @@ function ProposalCard({
             <p className="font-medium">No recipient</p>
           )}
           {proposal.goal ? (
-            <p className="text-xs text-muted-foreground">
-              {proposal.goal.relationshipGoal.replaceAll("_", " ")}
+            <p className="text-xs text-muted-foreground" data-testid="proposal-goal">
+              {`${RELATIONSHIP_GOAL_LABELS[proposal.goal.relationshipGoal] ?? proposal.goal.relationshipGoal.replaceAll("_", " ")} · platform metric: ${proposal.goal.writingGoal}`}
             </p>
           ) : null}
         </div>
@@ -168,13 +179,21 @@ function ProposalCard({
           <Badge variant="outline">{surfaceLabel(proposal.surface)}</Badge>
           <Badge variant="secondary">{capabilityLabel(proposal.capability.publish)}</Badge>
           <Badge
-            variant={status === "Rejected" || status === "Blocked by audit" ? "destructive" : "outline"}
+            variant={
+              status === "Rejected" || status === "Blocked by audit"
+                ? "destructive"
+                : status === OBJECTIVE_CHANGED_STATUS
+                  ? "warning"
+                  : "outline"
+            }
             data-testid="proposal-status"
           >
             {status}
           </Badge>
         </div>
       </div>
+
+      {objective && proposal.ask ? <ProposalAsk ask={proposal.ask} objective={objective} /> : null}
 
       <pre
         className="max-h-80 overflow-auto whitespace-pre-wrap rounded-md bg-muted p-3 font-sans text-sm"
@@ -275,6 +294,10 @@ export function WorkflowRunProposalsPanel({
   const [data, setData] = useState<WorkflowRunProposals | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Contract decision 6: computed once on first load, never collapsed or expanded on its own after.
+  const [objectiveOpen, setObjectiveOpen] = useState<boolean | null>(null);
+  const [announcement, setAnnouncement] = useState("");
+  const previous = useRef<WorkflowRunProposals | null>(null);
 
   const refresh = useCallback(async () => {
     setError(null);
@@ -285,6 +308,20 @@ export function WorkflowRunProposalsPanel({
         return;
       }
       const next = await response.json() as WorkflowRunProposals;
+      const before = previous.current;
+      previous.current = next;
+      if (before && before.objectiveSource?.status !== "stale" && next.objectiveSource?.status === "stale") {
+        const wasApproved = new Set<string>();
+        for (const proposal of before.proposals) {
+          if (proposal.valid && proposal.approval.state === "approved") wasApproved.add(proposal.variantId);
+        }
+        const revoked = next.proposals.filter((proposal) => proposal.valid
+          && wasApproved.has(proposal.variantId)
+          && proposal.approval.state === "revoked"
+          && proposal.approval.revokedReason === "objective_source_stale").length;
+        setAnnouncement(sourcesChangedAnnouncement(revoked));
+      }
+      setObjectiveOpen((current) => current ?? (next.proposals.length === 0 || next.summary.pendingReview > 0));
       setData(next);
       onSummaryChange(next.summary);
     } catch {
@@ -314,8 +351,21 @@ export function WorkflowRunProposalsPanel({
           <RefreshCw className="mr-1 h-3 w-3" /> Refresh
         </Button>
       </div>
+      <p className="sr-only" role="status" aria-live="polite">{announcement}</p>
       {loading && !data ? <p className="text-sm text-muted-foreground">Loading proposals…</p> : null}
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
+      {data?.objective ? (
+        <RunObjectiveBlock
+          objective={data.objective}
+          objectiveSource={data.objectiveSource ?? null}
+          revokedForObjective={data.proposals.filter((proposal) => proposal.valid
+            && proposal.approval.state === "revoked"
+            && proposal.approval.revokedReason === "objective_source_stale").length}
+          pendingReview={data.summary.pendingReview}
+          open={objectiveOpen ?? true}
+          onOpenChange={setObjectiveOpen}
+        />
+      ) : null}
       {data?.proposals.length === 0 ? (
         <Card className="space-y-3 p-4">
           <p className="text-sm">No proposals were created. Open the thread for the agent&apos;s report.</p>
@@ -329,7 +379,13 @@ export function WorkflowRunProposalsPanel({
         </Card>
       ) : null}
       {data?.proposals.map((proposal) => (
-        <ProposalCard key={proposal.variantId} proposal={proposal} runId={runId} onChanged={refresh} />
+        <ProposalCard
+          key={proposal.variantId}
+          proposal={proposal}
+          runId={runId}
+          objective={data.objective ?? null}
+          onChanged={refresh}
+        />
       ))}
     </section>
   );

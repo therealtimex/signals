@@ -1,4 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import fs from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { buildAgentWorkflowBrief, getTemplateToolsHint } from "@/lib/workflows/template-brief";
 import { buildContactNurtureTemplateConfig } from "@/lib/workflows/contact-relationship-nurture";
 import {
@@ -22,6 +25,12 @@ import {
   readWritingIntentComposition,
 } from "@/lib/workflows/writing-composition";
 import { writingIntentDraftSchema } from "@/lib/writing/writing-intent";
+import {
+  normalizeAccountObjective,
+  type AccountObjective,
+} from "@/lib/writing/account-objective";
+import { buildContactNurtureBriefSection } from "@/lib/workflows/contact-relationship-nurture";
+import { COMMERCIAL_BRIEF, PRODUCTS_FIXTURE } from "@/test/account-objective-fixture";
 
 const composition = readWritingIntentComposition(
   buildWritingIntentCompositionConfig({ consumer: "contact_relationship_nurture" }),
@@ -284,5 +293,146 @@ describe("brief composition boundary", () => {
     });
     expect(brief).toContain("Signals Writing execution contract");
     expect(brief).not.toContain("Shared writing-intent contract");
+  });
+});
+
+describe("account objective in the composed brief (#549)", () => {
+  let workspaceDir = "";
+  let commercial: AccountObjective;
+  let bare: AccountObjective;
+  let relationshipOnly: AccountObjective;
+
+  async function normalize(raw: unknown): Promise<AccountObjective> {
+    const result = await normalizeAccountObjective({
+      raw,
+      source: "run_config",
+      resolveWorkspace: async () => ({ slug: "signals", id: "ws_1", dir: workspaceDir, key: "k".repeat(32) }),
+      now: 1_760_000_000,
+    });
+    if (!result.ok) throw new Error(`fixture objective refused: ${result.reason}`);
+    return result.objective;
+  }
+
+  function briefWith(objective: AccountObjective | null, target = { platform: "linkedin", targetId: "tgt_li" }) {
+    return buildComposedWritingBriefSection({
+      composition,
+      templateId: "tpl_1",
+      templateName: "Contact Relationship Nurture",
+      workflowRunId: "run_1",
+      signalsBaseUrl: "http://127.0.0.1:3000",
+      target,
+      writingScopeToken: "run_1.secret-token",
+      objective,
+    });
+  }
+
+  beforeAll(async () => {
+    // A plain temp directory, not the Personality fixture workspace: writing BRAND.md into a bound
+    // workspace would drift the binding.
+    workspaceDir = fs.mkdtempSync(path.join(tmpdir(), "signals-549-brief-"));
+    fs.writeFileSync(path.join(workspaceDir, "PRODUCTS.md"), PRODUCTS_FIXTURE);
+    fs.writeFileSync(path.join(workspaceDir, "BRAND.md"), "# Brand\n\nPlain words, no hype.\n");
+    commercial = await normalize({ kind: "commercial", brief: { kind: "inline", text: COMMERCIAL_BRIEF } });
+    bare = await normalize({
+      kind: "commercial",
+      brief: { kind: "inline", text: "## Outcome\nA reply that names their review process.\n\nSee @VOICE.md." },
+    });
+    relationshipOnly = (await normalizeAccountObjective({
+      raw: undefined,
+      source: "run_config",
+      resolveWorkspace: async () => { throw new Error("not needed"); },
+    }) as { ok: true; objective: AccountObjective }).objective;
+  });
+
+  afterAll(() => {
+    fs.rmSync(workspaceDir, { recursive: true, force: true });
+  });
+
+  it("renders the stamped brief, mention excerpts and the outcome-versus-metric rule", () => {
+    const brief = briefWith(commercial);
+    expect(brief).toContain("Account objective — operator intent, server-stamped at dispatch; never edit it");
+    expect(brief).toContain(COMMERCIAL_BRIEF);
+    expect(brief).toContain("@PRODUCTS.md#engineering-workflow — Engineering Workflow (Agent Runtime) (this run's offering):");
+    expect(brief).toContain("- **Slug:** `engineering-workflow`");
+    expect(brief).toContain("@BRAND.md:");
+    expect(brief).toContain("Plain words, no hype.");
+    expect(brief).toContain("This snapshot is the objective for this run. The same files in your working directory may have changed since; if they differ, say so in the thread and keep drafting against the snapshot.");
+    expect(brief).toContain("a reply is not the outcome");
+    expect(brief).toContain("`offering:engineering-workflow#proof[i]`");
+    expect(brief).toContain("1. Whether they use a coding agent today");
+    expect(brief).toContain(`objective: ${JSON.stringify({ objectiveId: commercial.objectiveId, hash: commercial.hash })}`);
+    expect(brief).toContain("write the ask");
+    expect(brief).toContain("post it in this thread");
+    expect(brief).toContain("`testsUncertainty` to its number in the Unknowns list (1–1)");
+    expect(brief).toContain("`core/claim/no-assumed-customer-pain`");
+    expect(brief).toContain("Limitations: none.");
+  });
+
+  it("puts the exact objective reference and a valid ask in the intent sample", () => {
+    for (const objective of [commercial, bare, relationshipOnly]) {
+      const sample = sampleIntent(briefWith(objective));
+      expect(sample.objective).toEqual({ objectiveId: objective.objectiveId, hash: objective.hash });
+      const parsed = writingIntentDraftSchema.safeParse({
+        ...sample,
+        intentId: "wint_sample1",
+        recipient: { kind: "contact", contactId: "contact_1", platform: "linkedin" },
+        goal: { kind: "relationship_goal", id: "warm_conversation", writingGoal: "replies" },
+        replyContext: null,
+        sourceRefs: [],
+      });
+      expect(parsed.success).toBe(true);
+    }
+    expect((sampleIntent(briefWith(commercial)).ask as { relation: string }).relation).toBe("tests");
+    expect((sampleIntent(briefWith(bare)).ask as { relation: string }).relation).toBe("advances");
+    expect((sampleIntent(briefWith(relationshipOnly)).ask as { relation: string }).relation).toBe("relationship_only");
+  });
+
+  it("forbids any pitch under a relationship-only objective", () => {
+    const brief = briefWith(relationshipOnly);
+    expect(brief).toContain("Do not introduce an offering, pricing, a product or a pitch; the ask relation is `relationship_only`.");
+    expect(brief).toContain("no objective was given for this run, so Signals stamped relationship-only");
+    expect(brief).toContain("`relationship_only` — the only legal value on this run.");
+    expect(brief).not.toContain("`advances` —");
+    expect(brief).not.toContain("Seller context");
+  });
+
+  it("binds every limitation the server stamped", () => {
+    expect(bare.limitations).toEqual(["offering_missing", "mention_unresolved", "fit_missing", "success_missing"]);
+    const brief = briefWith(bare);
+    expect(brief).toContain("`offering_missing` — no product from PRODUCTS.md is mentioned. Do not name or pitch an offering; asks are discovery only.");
+    expect(brief).toContain("`mention_unresolved` — @VOICE.md could not be read");
+    expect(brief).toContain("@VOICE.md: not found (file_absent); you do not have it.");
+    expect(brief).toContain("`fit_missing` — the brief has no Fit. The ask may test whether there is a fit; it must not presume one.");
+    expect(brief).toContain("`success_missing` — the brief has no Success");
+    expect(brief).toContain("`tests` — not available: the brief lists no Unknowns.");
+  });
+
+  it("renders nothing new for a run dispatched before account objectives", () => {
+    const brief = briefWith(null);
+    expect(brief).not.toContain("Account objective");
+    expect(sampleIntent(brief)).not.toHaveProperty("objective");
+    expect(sampleIntent(brief)).not.toHaveProperty("ask");
+  });
+
+  it("renders the objective block, not a JSON copy, and points N4 at it", () => {
+    const config = { ...buildContactNurtureTemplateConfig(), targetPlatform: "linkedin", accountObjective: commercial };
+    const brief = buildAgentWorkflowBrief({
+      template,
+      workflowRunId: "run_1",
+      config,
+      signalsBaseUrl: "http://127.0.0.1:3000",
+      writingScopeToken: "run_1.secret-token",
+    });
+    expect(brief).toContain("Account objective — operator intent");
+    expect(brief).not.toContain('"accountObjective"');
+    expect(brief).not.toContain(commercial.sourceHash);
+    expect(brief).toContain("choose the touchpoint deliverable above to serve the ask, not the reverse");
+
+    const legacy = buildContactNurtureBriefSection({
+      workflowRunId: "run_1",
+      config: buildContactNurtureTemplateConfig(),
+      signalsBaseUrl: "http://127.0.0.1:3000",
+    });
+    expect(legacy).not.toContain("Account objective");
   });
 });

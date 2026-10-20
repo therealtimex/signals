@@ -57,6 +57,11 @@ import { getWritingApprovalPolicy } from "@/lib/settings/writing-approval-policy
 import { readWritingIntentComposition } from "@/lib/workflows/writing-composition";
 import { WRITING_INTENT_CONFIG_KEY } from "@/lib/writing/writing-intent";
 import {
+  ACCOUNT_OBJECTIVE_CONFIG_KEY,
+  normalizeAccountObjective,
+} from "@/lib/writing/account-objective";
+import { resolvePersonalityWorkspace } from "@/lib/personality/workspace";
+import {
   WRITING_SCOPE_TOKEN_CONFIG_KEY,
   mintWritingScopeToken,
 } from "@/lib/writing/writing-scope-token";
@@ -356,6 +361,32 @@ export async function runTemplateViaRtx(
       targetName: actingTarget.name,
       targetHandle: actingTarget.handle,
     };
+  }
+  // The account objective (#549) is normalized here, before any run row exists, so an invalid one
+  // is a refusal rather than a failed run. Every composed run carries one: the run override wins
+  // over a template default, and with neither the run is stamped relationship-only by default. The
+  // server computes the snapshot, mentions, limitations, id and hash; nothing a caller sends for
+  // those survives.
+  if (readWritingIntentComposition(mergedConfig)) {
+    const fromRun = input.config?.[ACCOUNT_OBJECTIVE_CONFIG_KEY];
+    const fromTemplate = storedTemplateConfig[ACCOUNT_OBJECTIVE_CONFIG_KEY];
+    const normalized = await normalizeAccountObjective({
+      raw: fromRun ?? fromTemplate,
+      source: fromRun !== undefined && fromRun !== null ? "run_config" : "template_config",
+      resolveWorkspace: () => resolvePersonalityWorkspace(env, fetchImpl),
+    });
+    if (!normalized.ok) {
+      return {
+        success: false,
+        error: normalized.message,
+        errorCode: "invalid_account_objective",
+        httpStatus: 422,
+        details: { reason: normalized.reason, ...normalized.details },
+      };
+    }
+    mergedConfig = { ...mergedConfig, [ACCOUNT_OBJECTIVE_CONFIG_KEY]: normalized.objective };
+  } else {
+    delete mergedConfig[ACCOUNT_OBJECTIVE_CONFIG_KEY];
   }
   // Set only after the server resolves a source that actually supports signed-in reading. A
   // caller cannot keep an identity browser alive by merely requesting access on an unsupported URL.
@@ -687,10 +718,13 @@ export async function runTemplateViaRtx(
       // Persist before the plaintext leaves the server. Handing an agent a capability whose hash is
       // not yet stored would leave an accepted dispatch holding a token that verifies against
       // nothing — permanently, if the process dies before the post-dispatch config write below.
+      // The objective goes in the same write as the token hash, so a run can never hold a token
+      // whose scope would stamp an objective the row does not have (#549).
       updateWorkflowRun(run.id, {
         config: JSON.stringify({
           ...parseObject(getWorkflowRun(run.id)?.config),
           [WRITING_SCOPE_TOKEN_CONFIG_KEY]: writingScope.tokenHash,
+          [ACCOUNT_OBJECTIVE_CONFIG_KEY]: mergedConfig[ACCOUNT_OBJECTIVE_CONFIG_KEY],
         }),
       });
       writingScopeMinted = true;

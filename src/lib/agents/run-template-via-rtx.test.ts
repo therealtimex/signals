@@ -1116,6 +1116,132 @@ describe("runTemplateViaRtx health preflight", () => {
       });
   });
 
+  /** RealTimeX + Signals host stub for a composed nurture dispatch that is accepted. */
+  function acceptedNurtureFetch(onDispatch?: (run: typeof workflowRuns.$inferSelect | undefined) => void) {
+    return vi.fn(async (input: RequestInfo | URL) => {
+      const url =
+        typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.endsWith("/api/health")) {
+        return new Response(JSON.stringify({ app: "signals", status: "ok" }), { status: 200 });
+      }
+      if (url.endsWith("/cli/get-workspace/signals")) {
+        return new Response(JSON.stringify({ workspace: { slug: "signals" } }), { status: 200 });
+      }
+      if (url.endsWith("/cli/create-thread/signals")) {
+        return new Response(JSON.stringify({ thread: { slug: "nurture-thread" } }), { status: 200 });
+      }
+      if (url.endsWith("/cli/send-message/signals/nurture-thread")) {
+        onDispatch?.(db.select().from(workflowRuns).all().at(-1));
+        return new Response(
+          JSON.stringify({ success: true, terminalDispatchAccepted: true, descriptor: { id: "runtime-nurture" } }),
+          { status: 200 },
+        );
+      }
+      if (url.endsWith("/sdk/desktop/runtime-sessions/open-launcher")) {
+        return new Response(JSON.stringify({ success: true }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ error: `Unexpected request: ${url}` }), { status: 500 });
+    }) as unknown as typeof fetch;
+  }
+
+  function nurtureTemplate(extra: Record<string, unknown> = {}) {
+    return createTemplate({
+      name: "Contact Relationship Nurture",
+      templateType: "nurture",
+      status: "active",
+      config: JSON.stringify({ ...buildContactNurtureTemplateConfig(), ...extra }),
+      isSystem: 1,
+    });
+  }
+
+  it("stamps a default objective in the same write as the scope hash (#549)", async () => {
+    const template = nurtureTemplate();
+    let atDispatch: Record<string, unknown> = {};
+    const result = await runTemplateViaRtx(
+      { templateId: template.id, signalsBaseUrl: "http://127.0.0.1:3099" },
+      { ...process.env, RTX_APP_ID: "test-app-id", RTX_API_BASE_URL: "http://127.0.0.1:3001", STORAGE_DIR: storageDir },
+      acceptedNurtureFetch((run) => { atDispatch = JSON.parse(run?.config ?? "{}"); }),
+    );
+    if (!result.success) throw new Error(result.error);
+
+    expect(atDispatch[WRITING_SCOPE_TOKEN_CONFIG_KEY]).toMatch(/^[a-f0-9]{64}$/);
+    expect(atDispatch.accountObjective).toMatchObject({
+      schemaVersion: 2,
+      kind: "relationship_only",
+      source: "default",
+      objectiveId: expect.stringMatching(/^aobj_/),
+    });
+    const stored = JSON.parse(getWorkflowRun(result.workflowRunId)?.config ?? "{}");
+    expect(stored.accountObjective).toEqual(atDispatch.accountObjective);
+  });
+
+  it("records template and run provenance, and the run override wins (#549)", async () => {
+    const env = { ...process.env, RTX_APP_ID: "test-app-id", RTX_API_BASE_URL: "http://127.0.0.1:3001", STORAGE_DIR: storageDir };
+    const template = nurtureTemplate({ accountObjective: { kind: "relationship_only" } });
+
+    const fromTemplate = await runTemplateViaRtx(
+      { templateId: template.id, signalsBaseUrl: "http://127.0.0.1:3099", freshThread: true },
+      env,
+      acceptedNurtureFetch(),
+    );
+    if (!fromTemplate.success) throw new Error(fromTemplate.error);
+    expect(JSON.parse(getWorkflowRun(fromTemplate.workflowRunId)?.config ?? "{}").accountObjective)
+      .toMatchObject({ kind: "relationship_only", source: "template_config" });
+
+    const fromRun = await runTemplateViaRtx(
+      {
+        templateId: template.id,
+        config: { accountObjective: { kind: "commercial", brief: { kind: "inline", text: "## Outcome\nBook an evaluation call." } } },
+        signalsBaseUrl: "http://127.0.0.1:3099",
+        freshThread: true,
+      },
+      env,
+      acceptedNurtureFetch(),
+    );
+    if (!fromRun.success) throw new Error(fromRun.error);
+    expect(JSON.parse(getWorkflowRun(fromRun.workflowRunId)?.config ?? "{}").accountObjective).toMatchObject({
+      kind: "commercial",
+      source: "run_config",
+      parsed: { outcome: "Book an evaluation call." },
+      limitations: ["offering_missing", "fit_missing", "success_missing"],
+    });
+  });
+
+  it("refuses an invalid account objective with a typed 422 before creating a run (#549)", async () => {
+    const template = nurtureTemplate();
+    const runsBefore = db.select().from(workflowRuns).all().length;
+    const fetchImpl = vi.fn() as unknown as typeof fetch;
+    const env = { ...process.env, RTX_APP_ID: "test-app-id", STORAGE_DIR: storageDir };
+    const refuse = (accountObjective: unknown) => runTemplateViaRtx(
+      { templateId: template.id, config: { accountObjective }, signalsBaseUrl: "http://127.0.0.1:3099" },
+      env,
+      fetchImpl,
+    );
+
+    await expect(refuse({ kind: "commercial", brief: { kind: "inline", text: "## Fit\nFounders." } })).resolves.toMatchObject({
+      success: false,
+      errorCode: "invalid_account_objective",
+      httpStatus: 422,
+      details: { reason: "outcome_missing" },
+    });
+    await expect(refuse({ kind: "sales" })).resolves.toMatchObject({
+      errorCode: "invalid_account_objective",
+      details: { reason: "invalid", issues: expect.any(Array) },
+    });
+    await expect(refuse({ kind: "commercial", brief: { kind: "inline", text: `## Outcome\n${"x".repeat(16_400)}` } }))
+      .resolves.toMatchObject({ details: { reason: "too_large" } });
+    // A brief that needs the workspace cannot be read without one; nothing is started.
+    await expect(refuse({ kind: "commercial", brief: { kind: "inline", text: "## Outcome\nPitch @PRODUCTS.md#engineering-workflow." } }))
+      .resolves.toMatchObject({ details: { reason: "workspace_unavailable" } });
+    await expect(refuse({ kind: "commercial", brief: { kind: "saved", path: "objectives/eng.md" } }))
+      .resolves.toMatchObject({ details: { reason: "workspace_unavailable" } });
+
+    expect(db.select().from(workflowRuns).all()).toHaveLength(runsBefore);
+    // Only the workspace lookup ran: no health preflight, thread or dispatch.
+    const urls = vi.mocked(fetchImpl).mock.calls.map(([request]) => String(request));
+    expect(urls.filter((url) => /\/api\/health|\/cli\/(create-thread|send-message)/.test(url))).toEqual([]);
+  });
+
   it("revokes the writing scope when terminal dispatch is rejected", async () => {
     // The plaintext token is already on disk in the brief by the time a send can be rejected, so a
     // live hash would let a filesystem reader mint a scope for a dispatch that never happened.

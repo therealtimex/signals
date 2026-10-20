@@ -10,7 +10,12 @@ import {
 } from "@/lib/writing/contracts";
 import { computeSpineHash, sha256 } from "@/lib/writing/hash";
 import { db } from "@/lib/db/client";
-import { launchCompositionSchema, type LaunchComposition } from "@/lib/writing/contracts";
+import {
+  launchCompositionSchema,
+  launchObjectiveStateSchema,
+  type LaunchComposition,
+  type LaunchObjectiveState,
+} from "@/lib/writing/contracts";
 import { resolveComposedRunAuthorityByToken } from "@/lib/writing/writing-intent-authority";
 
 /**
@@ -48,7 +53,7 @@ function stampLaunchComposition(input: {
   const existing = launchCompositionSchema.safeParse(parseObject(input.stored).composition);
   if (existing.success) return existing.data;
   if (!input.authority) return null;
-  const { workflowRunId, templateId, composition } = input.authority;
+  const { workflowRunId, templateId, composition, objective } = input.authority;
   return launchCompositionSchema.parse({
     schemaVersion: 1,
     workflowRunId,
@@ -57,7 +62,27 @@ function stampLaunchComposition(input: {
     mandate: composition.mandate,
     surfaces: composition.surfaces,
     stampedAt: Math.floor(Date.now() / 1000),
+    ...(objective ? { objective } : {}),
   });
+}
+
+/**
+ * Keep the server-owned objective observation; initialize it when the stamped scope first carries
+ * an objective. A caller-supplied `objectiveState` never survives.
+ */
+function objectiveStateFor(
+  stored: Record<string, unknown>,
+  composition: LaunchComposition | null,
+): LaunchObjectiveState | null {
+  const existing = launchObjectiveStateSchema.safeParse(stored.objectiveState);
+  if (existing.success) return existing.data;
+  if (!composition?.objective) return null;
+  return {
+    observedSourceHash: composition.objective.sourceHash,
+    observedAt: composition.stampedAt,
+    status: "current",
+    changedPaths: [],
+  };
 }
 
 function parseObject(value: unknown): Record<string, unknown> {
@@ -278,10 +303,14 @@ export function mergeLaunchMetadata(input: {
     const sources = (Array.isArray(spine.sources) ? spine.sources : []).map((value) => normalizeSource(value, value, input.scope));
     merged.spine = { ...spine, sources, hash: computeSpineHash({ ...spine, sources }) };
   }
-  // Composition is server-owned: drop whatever the caller sent and re-derive it.
+  // Composition and the objective observation are server-owned: drop whatever the caller sent and
+  // re-derive them.
   delete merged.composition;
+  delete merged.objectiveState;
   const composition = stampLaunchComposition({ stored, authority: presentedScope });
   if (composition) merged.composition = composition;
+  const objectiveState = objectiveStateFor(stored, composition);
+  if (objectiveState) merged.objectiveState = objectiveState;
   const parsed = launchWritingSchema.safeParse(merged);
   if (!parsed.success) throw new AgentToolError("VALIDATION_ERROR", "Incomplete launch writing metadata", parsed.error.flatten());
   if (parsed.data.spine && parsed.data.spine.launchId !== input.launchId) validation("Spine launch does not match launch", "spine_launch_mismatch");

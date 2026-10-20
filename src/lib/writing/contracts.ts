@@ -9,6 +9,7 @@ import {
   writingAuditPersonalitySchema,
 } from "@/lib/writing/personality-lineage";
 import { writingIntentRecordSchema } from "@/lib/writing/writing-intent";
+import { accountObjectiveSchema } from "@/lib/writing/account-objective";
 
 const unixSeconds = z.number().int().nonnegative();
 const id = (prefix: string) => z.string().regex(new RegExp(`^${prefix}_[A-Za-z0-9_-]{6,}$`));
@@ -111,7 +112,7 @@ export const writingAuditSchema = z.object({
   personality: writingAuditPersonalitySchema.nullable().optional(),
 }).passthrough();
 
-export const approvalStateSchema = z.object({ schemaVersion: z.literal(1), state: z.enum(["pending", "approved", "rejected", "revoked"]), riskTier: z.enum(["low", "medium", "high"]), policy: approvalPolicySchema, auditId: id("aud").optional(), by: z.enum(["user", "policy"]).optional(), at: unixSeconds.optional(), evidence: approvalEvidenceSchema.optional(), note: z.string().optional(), revokedReason: z.enum(["spine_changed", "audit_stale", "user", "voice_superseded", "personality_stale", "personality_source_stale"]).optional() }).passthrough();
+export const approvalStateSchema = z.object({ schemaVersion: z.literal(1), state: z.enum(["pending", "approved", "rejected", "revoked"]), riskTier: z.enum(["low", "medium", "high"]), policy: approvalPolicySchema, auditId: id("aud").optional(), by: z.enum(["user", "policy"]).optional(), at: unixSeconds.optional(), evidence: approvalEvidenceSchema.optional(), note: z.string().optional(), revokedReason: z.enum(["spine_changed", "audit_stale", "user", "voice_superseded", "personality_stale", "personality_source_stale", "objective_source_stale"]).optional() }).passthrough();
 export const revisionRequestSchema = z.object({
   schemaVersion: z.literal(1),
   requestedAt: unixSeconds,
@@ -174,12 +175,32 @@ export const launchCompositionSchema = z.object({
   mandate: z.literal("assist_only"),
   surfaces: z.array(z.enum(SURFACE_IDS)).min(1),
   stampedAt: unixSeconds,
+  /**
+   * The run's normalized account objective (#549), snapshotted at dispatch. Absent on launches
+   * stamped before #549, which is a visible state rather than an error.
+   */
+  objective: accountObjectiveSchema.optional(),
 }).strict();
 
 export type LaunchComposition = z.infer<typeof launchCompositionSchema>;
 
-export const launchWritingSchema = z.object({ schemaVersion: z.literal(1).optional(), composition: launchCompositionSchema.optional(), goal: writingGoalSchema.optional(), surfaces: z.array(launchSurfaceSchema).optional(), sources: z.array(sourceRefSchema).optional(), spine: evidenceSpineSchema.optional(), voiceProfile: voiceProfileRefSchema.nullable().optional(), voicePrecedence: voicePrecedenceSchema.optional(), approvalPolicy: approvalPolicySchema.optional(), runs: z.array(launchRunSchema).optional() }).passthrough();
-export const completeLaunchWritingSchema = z.object({ schemaVersion: z.literal(1), composition: launchCompositionSchema.optional(), goal: writingGoalSchema, surfaces: z.array(launchSurfaceSchema), sources: z.array(sourceRefSchema), spine: evidenceSpineSchema.optional(), voiceProfile: voiceProfileRefSchema.nullable(), voicePrecedence: voicePrecedenceSchema, approvalPolicy: approvalPolicySchema, runs: z.array(launchRunSchema) }).passthrough();
+/**
+ * Server-owned observation of the objective's workspace sources (#549, ADR-549-24).
+ *
+ * Initialized from the stamped objective and stripped from caller patches like `composition`, so
+ * revocation for a changed source fires once per change rather than on every read.
+ */
+export const launchObjectiveStateSchema = z.object({
+  observedSourceHash: z.string().min(1),
+  observedAt: unixSeconds,
+  status: z.enum(["current", "stale", "unavailable"]),
+  changedPaths: z.array(z.string().min(1)).max(32),
+}).strict();
+
+export type LaunchObjectiveState = z.infer<typeof launchObjectiveStateSchema>;
+
+export const launchWritingSchema = z.object({ schemaVersion: z.literal(1).optional(), composition: launchCompositionSchema.optional(), objectiveState: launchObjectiveStateSchema.optional(), goal: writingGoalSchema.optional(), surfaces: z.array(launchSurfaceSchema).optional(), sources: z.array(sourceRefSchema).optional(), spine: evidenceSpineSchema.optional(), voiceProfile: voiceProfileRefSchema.nullable().optional(), voicePrecedence: voicePrecedenceSchema.optional(), approvalPolicy: approvalPolicySchema.optional(), runs: z.array(launchRunSchema).optional() }).passthrough();
+export const completeLaunchWritingSchema = z.object({ schemaVersion: z.literal(1), composition: launchCompositionSchema.optional(), objectiveState: launchObjectiveStateSchema.optional(), goal: writingGoalSchema, surfaces: z.array(launchSurfaceSchema), sources: z.array(sourceRefSchema), spine: evidenceSpineSchema.optional(), voiceProfile: voiceProfileRefSchema.nullable(), voicePrecedence: voicePrecedenceSchema, approvalPolicy: approvalPolicySchema, runs: z.array(launchRunSchema) }).passthrough();
 
 export const launchWritingPatchSchema = z.object({ schemaVersion: z.literal(1).optional(), goal: writingGoalSchema.optional(), surfaces: z.array(z.object({ platform: platformSchema, surface: z.enum(SURFACE_IDS), targetId: z.string().optional() }).passthrough()).optional(), sources: z.array(sourceRefInputSchema).optional(), spine: z.record(z.unknown()).optional(), voiceProfile: voiceProfileRefSchema.nullable().optional(), voicePrecedence: voicePrecedenceSchema.optional(), approvalPolicy: approvalPolicySchema.optional(), runs: z.array(z.object({ workflowRunId: z.string().min(1), mode: generationModeSchema, startedAt: unixSeconds, rtxThreadSlug: z.string().optional() }).passthrough()).optional() }).passthrough();
 

@@ -29,7 +29,14 @@ import { upsertVariantUseCase } from "@/lib/writing/variant-use-cases";
 import {
   buildWritingIntentDraft,
   toWritingIntentRecord,
+  type WritingIntentAsk,
 } from "@/lib/writing/writing-intent";
+import {
+  ACCOUNT_OBJECTIVE_CONFIG_KEY,
+  normalizeAccountObjective,
+  type AccountObjective,
+} from "@/lib/writing/account-objective";
+import { resolvePersonalityWorkspace } from "@/lib/personality/workspace";
 import {
   mintWritingScopeToken,
   WRITING_SCOPE_TOKEN_CONFIG_KEY,
@@ -49,8 +56,17 @@ export type NurtureProposalFixtureResult = {
   contactIds: string[];
 };
 
+/**
+ * Run objective the fixture stamps (#549). `none` keeps the #413 shape: a run from before account
+ * objectives, which renders no objective block and no Ask box.
+ */
+export type NurtureProposalFixtureObjective = "none" | "commercial" | "relationship_only";
+
 type FixtureOptions = {
   label?: string;
+  objective?: NurtureProposalFixtureObjective;
+  /** PRODUCTS.md entry the commercial brief mentions; omitted → the `offering_missing` limitation. */
+  offeringSlug?: string;
   dependencies?: PersonalityGuardDependencies & Pick<
     PersonalityStatusDependencies,
     "probeCapability" | "listTargets"
@@ -184,8 +200,61 @@ function launchPayload(input: {
   };
 }
 
+/** A synthetic commercial brief: the spec §11 engineering-workflow case, no real names. */
+function fixtureBrief(offeringSlug: string | undefined): string {
+  const offering = offeringSlug ? `@PRODUCTS.md#${offeringSlug}` : "our engineering workflow";
+  return [
+    "## Outcome",
+    `Agree to a 20-minute evaluation of ${offering}.`,
+    "",
+    "## Fit",
+    "Technical founders hiring engineers onto a growing codebase.",
+    "",
+    "## Unknowns",
+    "- Whether they use a coding agent today",
+    "- Who owns onboarding for new engineers",
+    "",
+    "## Next step",
+    "Ask which workflow they use to onboard new engineers.",
+    "",
+    "## Success",
+    "A reply that names their current onboarding workflow.",
+  ].join("\n");
+}
+
+/** One ask per proposal, covering each relation and customer-pain state the card renders. */
+function fixtureAsk(objective: AccountObjective, index: number): WritingIntentAsk {
+  if (objective.kind === "relationship_only") {
+    return {
+      statement: "Keep the conversation warm with a specific, low-effort question.",
+      relation: "relationship_only",
+      customerPain: { status: "none_assumed" },
+    };
+  }
+  return [
+    {
+      statement: "Ask how they get new engineers productive in their first week.",
+      relation: "tests" as const,
+      testsUncertainty: 1,
+      customerPain: { status: "evidenced" as const, claimIds: ["clm_experience1"] },
+    },
+    {
+      statement: "Offer to compare notes on onboarding workflows.",
+      relation: "advances" as const,
+      customerPain: { status: "asked" as const, text: "Is onboarding new engineers slower than you want?" },
+    },
+    {
+      statement: "Congratulate the launch without an ask.",
+      relation: "defers" as const,
+      deferReason: "A recent touch already asked a question; this keeps the thread warm first.",
+      customerPain: { status: "none_assumed" as const },
+    },
+  ][index % 3];
+}
+
 function variantPayload(input: {
   index: number;
+  objective: AccountObjective | null;
   runId: string;
   templateId: string;
   launchId: string;
@@ -218,6 +287,12 @@ function variantPayload(input: {
       target: { platform: "x", targetId: input.targetId },
       surface: input.surface,
       sourceRefs: [{ kind: "contact_record", contactId: input.contactId }],
+      ...(input.objective
+        ? {
+            objective: { objectiveId: input.objective.objectiveId, hash: input.objective.hash },
+            ask: fixtureAsk(input.objective, input.index),
+          }
+        : {}),
     }),
     bindingId: input.bindingId,
   });
@@ -320,7 +395,7 @@ export async function seedNurtureProposalFixture(
     requireApproval: true,
     autoAchieveOnMilestone: true,
   };
-  const runtimeConfig = {
+  let runtimeConfig: Record<string, unknown> = {
     ...buildContactNurtureRunConfig(config),
     templateName: template.name,
     approvalGate: resolveNurtureApprovalGate("x"),
@@ -328,6 +403,20 @@ export async function seedNurtureProposalFixture(
     rtxThreadSlug: `fixture-${label.replace(/[^A-Za-z0-9_-]/g, "-")}`,
     experienceFixture: { name: "nurture-proposals", label },
   };
+  const objectiveKind = options.objective ?? "none";
+  let objective: AccountObjective | null = null;
+  if (objectiveKind !== "none") {
+    const normalized = await normalizeAccountObjective({
+      raw: objectiveKind === "commercial"
+        ? { kind: "commercial", brief: { kind: "inline", text: fixtureBrief(options.offeringSlug) } }
+        : { kind: "relationship_only" },
+      source: "run_config",
+      resolveWorkspace: options.dependencies?.resolveWorkspace ?? (() => resolvePersonalityWorkspace()),
+    });
+    if (!normalized.ok) fixtureError([`account objective refused: ${normalized.reason}`]);
+    objective = normalized.objective;
+    runtimeConfig = { ...runtimeConfig, [ACCOUNT_OBJECTIVE_CONFIG_KEY]: objective };
+  }
   const now = Math.floor(Date.now() / 1_000);
   const run = createWorkflowRun({
     templateId: template.id,
@@ -362,6 +451,7 @@ export async function seedNurtureProposalFixture(
   for (let index = 0; index < contacts.length; index += 1) {
     const variant = await upsertVariantUseCase(variantPayload({
       index,
+      objective,
       runId: run.id,
       templateId: template.id,
       launchId: launch.id,

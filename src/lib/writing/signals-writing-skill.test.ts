@@ -24,6 +24,7 @@ import {
   variantWritingInputSchema,
   voiceProfileInputSchema,
   writingAuditInputSchema,
+  type EvidenceSpine,
 } from "@/lib/writing/contracts";
 import { deriveHard, hardLimit } from "@/lib/writing/variant-writing";
 import {
@@ -40,6 +41,14 @@ import { resetPersonalityStore } from "@/lib/personality/store-paths";
 import type { PersonalityBindingView } from "@/lib/personality/status";
 import { setTargetRepresentation } from "@/lib/personality/use-cases";
 import { resetCoreTables } from "@/test/db";
+import {
+  normalizeAccountObjective,
+  type AccountObjective,
+} from "@/lib/writing/account-objective";
+import type { LaunchComposition } from "@/lib/writing/contracts";
+import type { ObjectiveSourceStatus } from "@/lib/writing/objective-sources";
+import { assertWritingIntentAuthority } from "@/lib/writing/writing-intent-authority";
+import { writingIntentRecordSchema } from "@/lib/writing/writing-intent";
 import {
   installPersonalityBinding,
   personalityGuardDependencies,
@@ -90,6 +99,46 @@ type BindingCardReadModelFields = {
   "targets[].represents.kind": NonNullable<ContextTarget["represents"]>["kind"];
   "targets[].compatible": ContextTarget["compatible"];
   "status.detail": BindingStatus["detail"];
+};
+type VariantIntent = NonNullable<WritingContextVariant["intent"]>;
+type VariantAsk = NonNullable<VariantIntent["ask"]>;
+type EvidencedPain = Extract<VariantAsk["customerPain"], { status: "evidenced" }>;
+type AskedPain = Extract<VariantAsk["customerPain"], { status: "asked" }>;
+type SpineClaim = EvidenceSpine["claims"][number];
+type SavedBriefSource = Extract<NonNullable<AccountObjective["brief"]>["source"], { kind: "saved" }>;
+/**
+ * Objective card lines (#549). `O` abbreviates `launch.writing.composition.objective`, which the
+ * context projects verbatim from the stamped `AccountObjective`; `launch.writing.objectiveSource`
+ * is the `ObjectiveSourceStatus` from `observeObjectiveSources`.
+ */
+type ObjectiveCardReadModelFields = {
+  "O.kind": AccountObjective["kind"];
+  "O.source": AccountObjective["source"];
+  "O.brief.source.kind": NonNullable<AccountObjective["brief"]>["source"]["kind"];
+  "O.brief.source.path": SavedBriefSource["path"];
+  "O.offering.name": NonNullable<AccountObjective["offering"]>["name"];
+  "O.offering.slug": NonNullable<AccountObjective["offering"]>["slug"];
+  "O.parsed.outcome": NonNullable<AccountObjective["parsed"]>["outcome"];
+  "O.parsed.fit": NonNullable<AccountObjective["parsed"]>["fit"];
+  "O.parsed.unknowns": NonNullable<AccountObjective["parsed"]>["unknowns"];
+  "O.parsed.nextStep": NonNullable<AccountObjective["parsed"]>["nextStep"];
+  "O.parsed.success": NonNullable<AccountObjective["parsed"]>["success"];
+  "O.limitations": AccountObjective["limitations"];
+  "variants[].intent.goal.writingGoal": VariantIntent["goal"]["writingGoal"];
+  "variants[].intent.ask.relation": VariantAsk["relation"];
+  "variants[].intent.ask.testsUncertainty": VariantAsk["testsUncertainty"];
+  "variants[].intent.ask.deferReason": VariantAsk["deferReason"];
+  "variants[].intent.ask.statement": VariantAsk["statement"];
+  "variants[].intent.ask.customerPain.status": VariantAsk["customerPain"]["status"];
+  "variants[].intent.ask.customerPain.text": AskedPain["text"];
+  "variants[].intent.ask.customerPain.claimIds": EvidencedPain["claimIds"];
+  // Evidenced pain renders the cited spine claim's text, never its id (contract v2 §4.2).
+  "launch.writing.spine.claims[].id": SpineClaim["id"];
+  "launch.writing.spine.claims[].text": SpineClaim["text"] | null;
+  "launch.writing.spine.claims[].sensitivity": SpineClaim["sensitivity"];
+  "launch.writing.objectiveSource.status": ObjectiveSourceStatus["status"];
+  "launch.writing.objectiveSource.changedPaths": ObjectiveSourceStatus["changedPaths"];
+  "variants[].revokedReason": WritingContextVariant["revokedReason"];
 };
 type ProposalEntry = PersonalityBindingView["proposals"][number];
 type ProposalCardReadModelFields = {
@@ -203,6 +252,7 @@ describe("signals-writing skill package", () => {
     expect(voiceProfileInputSchema.safeParse(example("voice-profile-input")).success).toBe(true);
     expect(materializeVariantSchema.safeParse(example("materialize-input")).success).toBe(true);
     expect(approveVoiceProfileSchema.safeParse(example("approve-voice-input")).success).toBe(true);
+    expect(writingIntentRecordSchema.safeParse(example("intent-objective-ask")).success).toBe(true);
     expect(approvePersonalityProjectionSchema.safeParse(example("approve-personality-input")).success).toBe(true);
     expect(sendToAgentSchema.safeParse(example("send-to-agent-body")).success).toBe(true);
     expect(example("audit-input")).not.toHaveProperty("personality");
@@ -275,6 +325,54 @@ describe("signals-writing skill package", () => {
       expect(personality).toContain(persistedPath);
     }
     expect(personality).not.toContain("record.actions.approvalBlockers");
+
+    // #549: the objective lines sit between Personality and Audit, and every value maps to a
+    // persisted read-model field in approval.md's table.
+    const card = approvalCard(skill)!;
+    const lineOrder = ["Personality", "Objective ", "Fit ", "Ask ", "Next ", "Objective limits", "Sources ", "Audit "]
+      .map((label) => card.indexOf(`\n${label}`));
+    expect(lineOrder.every((index) => index > 0)).toBe(true);
+    expect([...lineOrder].sort((left, right) => left - right)).toEqual(lineOrder);
+    expect(approval).toContain("`O` is `launch.writing.composition.objective`");
+    const objectivePaths = [
+      "O.kind",
+      "O.source",
+      "O.brief.source.kind",
+      "O.brief.source.path",
+      "O.offering.name",
+      "O.offering.slug",
+      "O.parsed.outcome",
+      "O.parsed.fit",
+      "O.parsed.unknowns",
+      "O.parsed.nextStep",
+      "O.parsed.success",
+      "O.limitations",
+      "variants[].intent.goal.writingGoal",
+      "variants[].intent.ask.relation",
+      "variants[].intent.ask.testsUncertainty",
+      "variants[].intent.ask.deferReason",
+      "variants[].intent.ask.statement",
+      "variants[].intent.ask.customerPain.status",
+      "variants[].intent.ask.customerPain.text",
+      "variants[].intent.ask.customerPain.claimIds",
+      "launch.writing.spine.claims[].id",
+      "launch.writing.spine.claims[].text",
+      "launch.writing.spine.claims[].sensitivity",
+      "launch.writing.objectiveSource.status",
+      "launch.writing.objectiveSource.changedPaths",
+      "variants[].revokedReason",
+    ] as const satisfies readonly (keyof ObjectiveCardReadModelFields)[];
+    for (const persistedPath of objectivePaths) expect(approval).toContain(`\`${persistedPath}\``);
+    expect(skill).toContain("`Objective  none (this run started before run objectives)`");
+    // Contract v2 addendum 1 (B3): the stale form says the drafts keep the snapshot and names a
+    // revoked count only when there is one.
+    expect(card).toContain("— drafts still use the snapshot[ · <n> approval(s) revoked]");
+    expect(card).not.toContain("approvals not yet materialized were revoked");
+    // Contract v2 §4.2 (UX experience review r1): the operator sees the evidence, never claim ids.
+    expect(card).toContain('from a source — "<first claim text>"[ and <n> more]');
+    expect(card).toContain('from a private source — "<first claim text>"[ and <n> more]');
+    expect(card).toContain("from <n> cited source(s)");
+    expect(card).not.toMatch(/claim ids?>/);
   });
 
   it("names only registered agent tools in operational prose", () => {
@@ -290,6 +388,7 @@ describe("signals-writing skill package", () => {
       "personality_binding_stale", "personality_drifted", "personality_identity_mismatch",
       "personality_source_stale", "target_identity_mismatch", "workspace_mismatch",
       "personality_workspace_unavailable", "unclaimed_only",
+      "relationship_only", "run_config", "template_config", "objective_source_stale", "none_assumed",
     ]);
     const mentioned = new Set<string>();
     const unsupported: string[] = [];
@@ -373,6 +472,91 @@ describe("signals-writing skill package", () => {
       personality: { bindingId: "pb_binding1" },
     });
     expect(helper.precheck(auditPersonality, spine, launch).problems.map((problem) => problem.reason)).toContain("audit_personality_forbidden");
+  });
+
+  it("prechecks the objective reference and the ask the way the server does (#549)", async () => {
+    const spine = json<{ id: string; claims: { id: string }[]; sources: { id: string }[] }>("spine.json");
+    const normalized = await normalizeAccountObjective({
+      raw: {
+        kind: "commercial",
+        brief: { kind: "inline", text: "## Outcome\nAgree to an evaluation call.\n\n## Unknowns\n- Current workflow\n- Who owns onboarding" },
+      },
+      source: "run_config",
+      resolveWorkspace: async () => { throw new Error("no mentions, no workspace"); },
+    });
+    if (!normalized.ok) throw new Error(normalized.reason);
+    const objective = normalized.objective;
+    const relationshipOnly = await normalizeAccountObjective({
+      raw: { kind: "relationship_only" },
+      source: "run_config",
+      resolveWorkspace: async () => { throw new Error("unused"); },
+    });
+    if (!relationshipOnly.ok) throw new Error(relationshipOnly.reason);
+    const composition = (value: AccountObjective | null): LaunchComposition => ({
+      schemaVersion: 1,
+      workflowRunId: "run_fixture",
+      templateId: "tpl_fixture",
+      consumer: "contact_relationship_nurture",
+      mandate: "assist_only",
+      surfaces: ["x/reply"],
+      stampedAt: 1_750_000_000,
+      ...(value ? { objective: value } : {}),
+    });
+    const intent = (overrides: Record<string, unknown>) => ({
+      schemaVersion: 1,
+      intentId: "wint_fixture01",
+      mandate: "assist_only",
+      actions: ["draft", "audit", "propose"],
+      consumer: "contact_relationship_nurture",
+      lineage: { workflowRunId: "run_fixture", templateId: "tpl_fixture" },
+      recipient: { kind: "contact", contactId: "contact_fixture", platform: "x" },
+      goal: { kind: "relationship_goal", id: "warm_conversation", writingGoal: "replies" },
+      target: { platform: "x", targetId: "target_x_fixture" },
+      surface: "x/reply",
+      replyContext: null,
+      sourceRefs: [],
+      approvalPolicy: "explicit",
+      objective: { objectiveId: objective.objectiveId, hash: objective.hash },
+      ask: { statement: "Ask how they onboard engineers.", relation: "tests", testsUncertainty: 2, customerPain: { status: "none_assumed" } },
+      ...overrides,
+    });
+    const server = (record: Record<string, unknown>, scope: LaunchComposition) => {
+      try {
+        assertWritingIntentAuthority({ composition: scope, intent: record, surface: "x/reply", platform: "x", targetId: "target_x_fixture", workflowRunId: "run_fixture" });
+        return null;
+      } catch (error) {
+        return ((error as { details?: { reason?: string } }).details?.reason) ?? "unknown";
+      }
+    };
+    const helperReasons = (record: Record<string, unknown>, scope: LaunchComposition) => {
+      const payload = variantInput(json<VariantFixture>("x-post.variant.json"));
+      Object.assign(payload.metadata.writing, { intent: record });
+      return helper.precheck(payload, spine, { ...json<Record<string, unknown>>("launch-writing.json"), composition: scope })
+        .problems.map((problem) => problem.reason)
+        .filter((reason) => reason.startsWith("objective_") || reason.startsWith("ask_"));
+    };
+    const otherRunObjective = { objectiveId: "aobj_otherrun1", hash: objective.hash };
+    const cases: Array<[string, Record<string, unknown>, LaunchComposition, string | null, string[]]> = [
+      ["valid tests ask", intent({}), composition(objective), null, []],
+      ["objective dropped on a revision", intent({ objective: undefined }), composition(objective), "writing_intent_objective_required", ["objective_ref_missing"]],
+      ["objective from another run", intent({ objective: otherRunObjective }), composition(objective), "writing_intent_objective_mismatch", ["objective_ref_mismatch"]],
+      ["objective on a pre-#549 launch", intent({}), composition(null), "writing_intent_objective_not_permitted", ["objective_ref_not_permitted"]],
+      ["ask missing", intent({ ask: null }), composition(objective), "writing_intent_ask_required", ["ask_missing"]],
+      ["relationship_only on a commercial objective", intent({ ask: { statement: "Say congrats.", relation: "relationship_only", customerPain: { status: "none_assumed" } } }), composition(objective), "writing_intent_ask_relation_invalid", ["ask_relation_invalid"]],
+      ["advances on a relationship-only objective", intent({ objective: { objectiveId: relationshipOnly.objective.objectiveId, hash: relationshipOnly.objective.hash }, ask: { statement: "Pitch.", relation: "advances", customerPain: { status: "none_assumed" } } }), composition(relationshipOnly.objective), "writing_intent_ask_relation_invalid", ["ask_relation_invalid"]],
+      ["tests an unknown that does not exist", intent({ ask: { statement: "Ask.", relation: "tests", testsUncertainty: 3, customerPain: { status: "none_assumed" } } }), composition(objective), "writing_intent_ask_relation_invalid", ["ask_relation_invalid"]],
+      ["defers without a reason", intent({ ask: { statement: "Congrats.", relation: "defers", customerPain: { status: "none_assumed" } } }), composition(objective), "writing_intent_ask_relation_invalid", ["ask_relation_invalid"]],
+    ];
+    for (const [label, record, scope, serverReason, helperReason] of cases) {
+      expect({ label, reason: server(record, scope) }).toEqual({ label, reason: serverReason });
+      expect({ label, reasons: helperReasons(record, scope) }).toEqual({ label, reasons: helperReason });
+    }
+
+    // Spine resolution: the server rejects these in validateCrossDocuments; the helper mirrors it.
+    const painFromNowhere = intent({ ask: { statement: "Ask.", relation: "advances", customerPain: { status: "evidenced", claimIds: ["clm_unknown01"] }, evidenceSourceIds: ["src_unknown01"] } });
+    expect(helperReasons(painFromNowhere, composition(objective))).toEqual(["ask_claim_unknown", "ask_source_unknown"]);
+    const evidenced = intent({ ask: { statement: "Ask.", relation: "advances", customerPain: { status: "evidenced", claimIds: [spine.claims[0].id] }, evidenceSourceIds: [spine.sources[0].id] } });
+    expect(helperReasons(evidenced, composition(objective))).toEqual([]);
   });
 });
 

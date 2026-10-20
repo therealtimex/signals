@@ -103,12 +103,60 @@ function exactSurfaceUnits(surface, count) {
   return surface === "x/thread" || surface === "threads/thread" ? count >= 2 : count === 1;
 }
 
+// Mirrors the objective/ask rules in assertWritingIntentAuthority
+// (src/lib/writing/writing-intent-authority.ts) and the ask checks in validateCrossDocuments
+// (src/lib/writing/variant-writing.ts). The composition comes from the launch file, so the
+// objective rules run only when that file carries `composition` (get_writing_context
+// `launch.writing` does); the spine checks always run.
+function precheckObjectiveAndAsk(intent, composition, spineIds, problem) {
+  const intentPath = ["metadata", "writing", "intent"];
+  const ask = intent?.ask ?? null;
+  if (intent && composition && typeof composition === "object") {
+    const objective = composition.objective ?? null;
+    if (!objective) {
+      if (intent.objective) problem("objective_ref_not_permitted", [...intentPath, "objective"]);
+    } else if (!intent.objective) {
+      problem("objective_ref_missing", [...intentPath, "objective"]);
+    } else if (intent.objective.objectiveId !== objective.objectiveId || intent.objective.hash !== objective.hash) {
+      problem("objective_ref_mismatch", [...intentPath, "objective"]);
+    } else if (!ask) {
+      problem("ask_missing", [...intentPath, "ask"]);
+    } else {
+      const relationshipOnly = objective.kind === "relationship_only";
+      const unknowns = Array.isArray(objective.parsed?.unknowns) ? objective.parsed.unknowns.length : 0;
+      if (relationshipOnly !== (ask.relation === "relationship_only")) {
+        problem("ask_relation_invalid", [...intentPath, "ask", "relation"]);
+      } else if (ask.relation === "tests" && !(Number.isInteger(ask.testsUncertainty) &&
+          ask.testsUncertainty >= 1 && ask.testsUncertainty <= unknowns)) {
+        problem("ask_relation_invalid", [...intentPath, "ask", "testsUncertainty"]);
+      } else if (ask.relation === "defers" && !(typeof ask.deferReason === "string" && ask.deferReason.trim())) {
+        problem("ask_relation_invalid", [...intentPath, "ask", "deferReason"]);
+      }
+    }
+  }
+  if (ask?.customerPain?.status === "evidenced") {
+    (ask.customerPain.claimIds ?? []).forEach((claimId, index) => {
+      if (!spineIds.claimIds.has(claimId)) {
+        problem("ask_claim_unknown", [...intentPath, "ask", "customerPain", "claimIds", index]);
+      }
+    });
+  }
+  (ask?.evidenceSourceIds ?? []).forEach((sourceId, index) => {
+    if (!spineIds.sourceIds.has(sourceId)) {
+      problem("ask_source_unknown", [...intentPath, "ask", "evidenceSourceIds", index]);
+    }
+  });
+}
+
 function precheck(payload, spinePayload, launchPayload) {
   const input = payload?.input ?? payload;
   const writing = input?.metadata?.writing;
   const generation = input?.generationMetadata;
   const spine = spinePayload?.spine ?? spinePayload?.metadata?.writing?.spine ?? spinePayload;
-  const launch = launchPayload?.input?.metadata?.writing ?? launchPayload?.metadata?.writing ?? launchPayload;
+  const launch = launchPayload?.input?.metadata?.writing
+    ?? launchPayload?.metadata?.writing
+    ?? launchPayload?.launch?.writing
+    ?? launchPayload;
   const problems = [];
   const problem = (reason, path = []) => problems.push({ reason, path });
 
@@ -143,6 +191,7 @@ function precheck(payload, spinePayload, launchPayload) {
   if (launch?.voiceProfile && !writing.voiceProfile) {
     problem("voice_profile_required", ["metadata", "writing", "voiceProfile"]);
   }
+  precheckObjectiveAndAsk(writing.intent, launch?.composition, { claimIds, sourceIds }, problem);
 
   if (Object.hasOwn(writing, "personality")) {
     const selector = writing.personality;

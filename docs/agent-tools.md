@@ -218,8 +218,27 @@ variants. `materialize_variant` checks the current spine, audit, approval, targe
 units before even an idempotent return. It can report `AUDIT_STALE`, `AUDIT_BLOCKED`,
 `APPROVAL_REQUIRED`, `CAPABILITY_UNSUPPORTED`, or `TARGET_REQUIRED`.
 
-The packaged `signals-writing` skill declares version 1.1.0 starting with plugin 0.2.4.
-Personality-aware `signals-writing` clients (version 1.1.0 and later) submit only
+**Account objective (#549).** On a workflow-composed launch, `get_writing_context` projects the
+server-stamped scope as `launch.writing.composition` (`consumer`, `mandate`, `workflowRunId`,
+`surfaces`, `objective`) and `launch.writing.objectiveSource` (`status`: `current` | `stale` |
+`unavailable`, `changedPaths`, `observedAt`); each `variants[]` entry adds `intent` (`goal`,
+`objective` reference, `ask`) and, when the stored approval carries one, `revokedReason`. Every
+intent on such a launch must carry `objective: { objectiveId, hash }` copied from the stamped record
+and an `ask`; `upsert_variant` rejects a missing or changed reference
+(`writing_intent_objective_required`, `writing_intent_objective_mismatch`), a reference on a launch
+stamped before #549 (`writing_intent_objective_not_permitted`), a missing ask
+(`writing_intent_ask_required`), an illegal relation (`writing_intent_ask_relation_invalid`), and an
+ask citing a claim or source outside the spine (`ask_claim_unknown`, `ask_source_unknown`). Reading
+the context, the run proposals, or materializing re-reads the objective's saved brief and mentioned
+files; a change revokes approved, unmaterialized proposals once with `objective_source_stale`.
+The dispatch route `POST /api/workflows/templates/[id]/run` refuses an invalid
+`config.accountObjective` with 422 `invalid_account_objective` and `details.reason`. Saved briefs and
+the run dialog's preview use `GET /api/objectives`, `GET|PUT /api/objectives/[name]`,
+`POST /api/objectives/preview` and `GET /api/objectives/mentions`; they are REST routes, not agent
+tools. Contract: `docs/composable-writing-intent.md`.
+
+The packaged `signals-writing` skill declares version 1.2.0 (account objective and ask, #549);
+1.1.0 shipped with plugin 0.2.4 and introduced the Personality selector. Personality-aware `signals-writing` clients (version 1.1.0 and later) submit only
 `metadata.writing.personality: { "bindingId": "pb_..." }`. The server resolves that selector
 under the Personality and voice locks and replaces it with the complete binding, whole-file,
 source, workspace, represented-identity, and target snapshot. Caller-supplied hashes, workspace

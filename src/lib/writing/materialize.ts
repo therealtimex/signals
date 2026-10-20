@@ -28,6 +28,7 @@ import { revokeWritingVariantWithRunner } from "@/lib/writing/personality-revoca
 import { isAssistOnlySurface } from "@/lib/writing/capabilities";
 import { contentTypeForSurface } from "@/lib/writing/surfaces";
 import { isAssistOnlyIntent } from "@/lib/writing/writing-intent";
+import { observeObjectiveSources } from "@/lib/writing/objective-sources";
 
 type MaterializeApproval = { by: "user"; evidence: ApprovalEvidence; note?: string };
 const LANE = new Set(["queued", "publishing", "published", "scheduled"]);
@@ -234,6 +235,9 @@ export async function materializeVariant(input: {
 }) {
   const initial = db.select().from(variants).where(eq(variants.id, input.variantId)).get();
   if (!initial) throw new AgentToolError("NOT_FOUND", `Variant not found: ${input.variantId}`);
+  // A changed objective source revokes a stored approval before it is honoured (#549, ADR-549-24);
+  // an approval presented with this call is fresh and stands.
+  await observeObjectiveSources(initial.launchId);
   const writing = variantWritingSchema.safeParse(object(initial.metadata).writing);
   const result = writing.success && writing.data.personality
     ? await withPersonalityWritingGuard((guard, tx) => materializeVariantWithRunner(input, guard, tx))

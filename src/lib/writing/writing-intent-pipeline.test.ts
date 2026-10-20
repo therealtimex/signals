@@ -7,7 +7,7 @@
  * composition makes — not the difference an optional payload field makes.
  */
 
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { eq } from "drizzle-orm";
@@ -39,6 +39,16 @@ import {
   personalityLaunchPayload,
   personalityVariantPayload,
 } from "@/test/personality-writing-fixture";
+import { createContact } from "@/lib/db/queries/contacts";
+import { logInteraction } from "@/lib/db/queries/interactions";
+import {
+  ACCOUNT_OBJECTIVE_CONFIG_KEY,
+  normalizeAccountObjective,
+  type AccountObjective,
+} from "@/lib/writing/account-objective";
+import { listWorkflowRunProposals } from "@/lib/writing/workflow-run-proposals";
+import { observeObjectiveSources, observeObjectiveSourcesForRun } from "@/lib/writing/objective-sources";
+import { COMMERCIAL_BRIEF, PRODUCTS_FIXTURE, bigProductsFixture } from "@/test/account-objective-fixture";
 
 let storageDir = "";
 
@@ -640,5 +650,587 @@ describe("assist-only writing intent authority", () => {
       errorCode: "capability_unsupported",
     });
     expect(getContentItem(materialized.contentItemId)?.status).toBe("approved");
+  });
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * #549 — account objective through the writing handoff (spec §11 synthetic regression).
+ *
+ * The dogfood failure: an operator dispatched a run to qualify an engineering-workflow offering,
+ * and the typed handoff carried only `warm_conversation / replies`, so a grounded, audited DM asked
+ * the founder an unrelated customer-product question. Here the objective is a server-stamped
+ * authority, so that draft cannot be persisted without saying how it relates to the objective.
+ * ---------------------------------------------------------------------------------------------- */
+
+const ASK_TESTS_UNKNOWN = {
+  statement: "Ask how they get new engineers productive in their first week.",
+  relation: "tests" as const,
+  testsUncertainty: 1,
+  customerPain: { status: "none_assumed" as const },
+};
+
+async function stampedObjective(fixture: Fixture, raw: unknown): Promise<AccountObjective> {
+  // PRODUCTS.md is not a managed Personality file, so writing it leaves the binding current; the
+  // fixture's own BRAND.md resolves the brief's `@BRAND.md` mention.
+  writeFileSync(join(fixture.workspace.dir, "PRODUCTS.md"), PRODUCTS_FIXTURE);
+  const result = await normalizeAccountObjective({
+    raw,
+    source: raw === undefined ? "default" : "run_config",
+    resolveWorkspace: async () => fixture.workspace,
+  });
+  if (!result.ok) throw new Error(result.reason);
+  return result.objective;
+}
+
+/** A composed dispatch whose run row carries the normalized objective, as dispatch writes it. */
+function objectiveRun(objective: AccountObjective) {
+  const dispatch = composedRun();
+  const config = JSON.parse(db.select().from(workflowRuns).where(eq(workflowRuns.id, dispatch.run.id)).get()!.config ?? "{}");
+  db.update(workflowRuns)
+    .set({ config: JSON.stringify({ ...config, [ACCOUNT_OBJECTIVE_CONFIG_KEY]: objective }) })
+    .where(eq(workflowRuns.id, dispatch.run.id))
+    .run();
+  return dispatch;
+}
+
+/** The synthetic founder: already connected, with one recent approved outbound touch. */
+function syntheticFounder(): string {
+  const founder = createContact({
+    name: "Synthetic Founder",
+    relationshipGoal: "warm_conversation",
+    relationshipGoalStatus: "in_progress",
+  });
+  logInteraction({
+    contactId: founder.id,
+    interactionType: "dm",
+    direction: "outbound",
+    summary: "Approved congratulation on the funding announcement.",
+    isMeaningful: true,
+    occurredAt: Math.floor(Date.now() / 1000) - 2 * 24 * 60 * 60,
+  });
+  return founder.id;
+}
+
+function objectiveIntent(
+  dispatch: ComposedDispatch,
+  input: {
+    contactId: string;
+    objective?: { objectiveId: string; hash: string } | null;
+    ask?: Record<string, unknown> | null;
+  },
+): Record<string, unknown> {
+  const intent = toWritingIntentRecord({
+    ...buildWritingIntentDraft({
+      intentId: "wint_objective1",
+      consumer: "contact_relationship_nurture",
+      lineage: { workflowRunId: dispatch.run.id, templateId: dispatch.template.id },
+      recipient: { kind: "contact", contactId: input.contactId, platform: "x" },
+      goal: { relationshipGoal: "warm_conversation", writingGoal: "replies" },
+      target: { platform: "x", targetId: actingTargetId },
+      surface: "x/reply",
+      sourceRefs: [{ kind: "contact_record", contactId: input.contactId }],
+    }),
+    bindingId: "unused",
+  }) as unknown as Record<string, unknown>;
+  return {
+    ...intent,
+    ...(input.objective !== undefined ? { objective: input.objective } : {}),
+    ...(input.ask !== undefined ? { ask: input.ask } : {}),
+  };
+}
+
+function refOf(objective: AccountObjective) {
+  return { objectiveId: objective.objectiveId, hash: objective.hash };
+}
+
+/** Re-send a payload as a derived alternative (`mode: adapt`, `derivedFromVariantId`). */
+function asDerived(payload: ReturnType<typeof personalityVariantPayload>, fromVariantId: string) {
+  const generation = { ...payload.generationMetadata, mode: "adapt", requestHash: `derived-${fromVariantId}` };
+  const writing = payload.metadata.writing as Record<string, unknown>;
+  return {
+    ...payload,
+    generationMetadata: generation,
+    metadata: {
+      writing: {
+        ...writing,
+        lineage: { ...(writing.lineage as Record<string, unknown>), derivedFromVariantId: fromVariantId },
+      },
+    },
+  };
+}
+
+describe("account objective through the writing handoff (#549)", () => {
+  beforeEach(() => {
+    resetCoreTables();
+    resetPersonalityStore();
+    storageDir = mkdtempSync(join(tmpdir(), "signals-account-objective-"));
+    env.STORAGE_DIR = storageDir;
+    actingTargetId = "";
+  });
+
+  afterEach(() => {
+    rmSync(storageDir, { recursive: true, force: true });
+  });
+
+  it("does not let an engineering-workflow objective silently become an unrelated question", async () => {
+    const fixture = await newFixture();
+    const objective = await stampedObjective(fixture, {
+      kind: "commercial",
+      brief: { kind: "inline", text: COMMERCIAL_BRIEF },
+    });
+    const dispatch = objectiveRun(objective);
+    const launchId = await composedLaunch(dispatch);
+    const founder = syntheticFounder();
+    expect(launchCompositionOf(launchId)).toMatchObject({ objective: { objectiveId: objective.objectiveId, hash: objective.hash } });
+
+    const attempt = (intent: Record<string, unknown>, extra: { id?: string; body?: string } = {}) => propose(fixture, {
+      launchId,
+      workflowRunId: dispatch.run.id,
+      intent,
+      ...extra,
+    });
+
+    // 1. The objective reference and the ask are required, and must match the stamped record.
+    await expect(attempt(objectiveIntent(dispatch, { contactId: founder, ask: ASK_TESTS_UNKNOWN })))
+      .rejects.toMatchObject({ details: { reason: "writing_intent_objective_required" } });
+    await expect(attempt(objectiveIntent(dispatch, {
+      contactId: founder,
+      objective: { objectiveId: objective.objectiveId, hash: "0".repeat(64) },
+      ask: ASK_TESTS_UNKNOWN,
+    }))).rejects.toMatchObject({ details: { reason: "writing_intent_objective_mismatch" } });
+    await expect(attempt(objectiveIntent(dispatch, { contactId: founder, objective: refOf(objective) })))
+      .rejects.toMatchObject({ details: { reason: "writing_intent_ask_required" } });
+
+    // 2. The dogfood DM — a customer-product question with no stated relation — cannot pass as
+    // relationship-only on a commercial objective; it has to say it defers, and why.
+    const unrelated = "Congrats on the round! Which customer segment is growing fastest for you?";
+    await expect(attempt(objectiveIntent(dispatch, {
+      contactId: founder,
+      objective: refOf(objective),
+      ask: { statement: "Ask which customer segment is growing fastest.", relation: "relationship_only", customerPain: { status: "none_assumed" } },
+    }), { body: unrelated })).rejects.toMatchObject({ details: { reason: "writing_intent_ask_relation_invalid" } });
+    await expect(attempt(objectiveIntent(dispatch, {
+      contactId: founder,
+      objective: refOf(objective),
+      ask: { ...ASK_TESTS_UNKNOWN, testsUncertainty: 2 },
+    }))).rejects.toMatchObject({ details: { reason: "writing_intent_ask_relation_invalid" } });
+    await expect(attempt(objectiveIntent(dispatch, {
+      contactId: founder,
+      objective: refOf(objective),
+      ask: { statement: "Congratulate without an ask.", relation: "defers", customerPain: { status: "none_assumed" } },
+    }))).rejects.toMatchObject({ details: { reason: "writing_intent_ask_relation_invalid" } });
+    const deferred = await attempt(objectiveIntent(dispatch, {
+      contactId: founder,
+      objective: refOf(objective),
+      ask: {
+        statement: "Ask which customer segment is growing fastest.",
+        relation: "defers",
+        deferReason: "A recent touch already congratulated them; this keeps the thread warm before the evaluation ask.",
+        customerPain: { status: "none_assumed" },
+      },
+    }), { body: unrelated });
+    expect(writingOf(deferred.id).intent).toMatchObject({ ask: { relation: "defers" } });
+
+    // The ask may lean on evidence only through the spine.
+    await expect(attempt(objectiveIntent(dispatch, {
+      contactId: founder,
+      objective: refOf(objective),
+      ask: { ...ASK_TESTS_UNKNOWN, customerPain: { status: "evidenced", claimIds: ["clm_notinspine"] } },
+    }), { body: "A different body for the evidence check." })).rejects.toMatchObject({ details: { reason: "ask_claim_unknown" } });
+    await expect(attempt(objectiveIntent(dispatch, {
+      contactId: founder,
+      objective: refOf(objective),
+      ask: { ...ASK_TESTS_UNKNOWN, evidenceSourceIds: ["src_notinspine"] },
+    }), { body: "Another body for the source check." })).rejects.toMatchObject({ details: { reason: "ask_source_unknown" } });
+
+    // 3. A proposal that tests the named unknown reaches the run page with the objective beside it,
+    // and the platform metric is still `replies`, separate from the business outcome.
+    const proposal = await attempt(objectiveIntent(dispatch, {
+      contactId: founder,
+      objective: refOf(objective),
+      ask: { ...ASK_TESTS_UNKNOWN, customerPain: { status: "evidenced", claimIds: ["clm_personality1"] } },
+    }), { body: "How do new engineers on your team get productive in their first week?" });
+    const projection = listWorkflowRunProposals(dispatch.run.id);
+    expect(projection.objective).toMatchObject({
+      objectiveId: objective.objectiveId,
+      kind: "commercial",
+      offering: { slug: "engineering-workflow" },
+      parsed: {
+        fit: "Technical founder hiring engineers.",
+        unknowns: ["Whether they use a coding agent today"],
+        nextStep: "Ask which workflow they use for new hires.",
+      },
+    });
+    expect(projection.objectiveSource).toMatchObject({ status: "current", changedPaths: [] });
+    const card = projection.proposals.find((entry) => entry.variantId === proposal.id);
+    expect(card).toMatchObject({
+      valid: true,
+      goal: { relationshipGoal: "warm_conversation", writingGoal: "replies" },
+      ask: {
+        relation: "tests",
+        testsUncertainty: 1,
+        customerPain: {
+          status: "evidenced",
+          claims: [{ claimId: "clm_personality1", text: "Personality-bound publish proof.", sensitivity: "public" }],
+        },
+      },
+    });
+
+    // The agent reads the same stamped objective from Signals, and the ask per variant (thread card).
+    const context = await invokeAgentTool("get_writing_context", { launchId }) as {
+      launch: { writing: { composition: Record<string, unknown>; objectiveSource: Record<string, unknown> | null } };
+      variants: Array<{ id: string; intent: Record<string, unknown> | null }>;
+    };
+    expect(context.launch.writing.composition).toEqual({
+      consumer: "contact_relationship_nurture",
+      mandate: "assist_only",
+      workflowRunId: dispatch.run.id,
+      surfaces: expect.arrayContaining(["x/reply"]),
+      objective,
+    });
+    // The test host has no RealTimeX workspace identity, so the sources cannot be re-read.
+    expect(context.launch.writing.objectiveSource).toMatchObject({ status: "unavailable", changedPaths: [] });
+    expect(context.variants.find((variant) => variant.id === proposal.id)?.intent).toEqual({
+      goal: { kind: "relationship_goal", id: "warm_conversation", writingGoal: "replies" },
+      objective: refOf(objective),
+      ask: expect.objectContaining({ relation: "tests", testsUncertainty: 1 }),
+    });
+
+    // 4. Neither an in-place revision nor a derived alternative can shed the objective reference.
+    await expect(attempt(objectiveIntent(dispatch, { contactId: founder, ask: ASK_TESTS_UNKNOWN }), {
+      id: proposal.id,
+      body: "How do new engineers on your team get productive in their first week?",
+    })).rejects.toMatchObject({ details: { reason: "writing_intent_objective_required" } });
+    const derivedPayload = asDerived(personalityVariantPayload({
+      launchId,
+      bindingId: fixture.binding.id,
+      targetId: fixture.target.id,
+      surface: "x/reply",
+      body: "A shorter alternative that still asks about onboarding.",
+      voiceProfile: fixture.voiceProfile,
+      workflowRunId: dispatch.run.id,
+      intent: objectiveIntent(dispatch, { contactId: founder, ask: ASK_TESTS_UNKNOWN }),
+    }), proposal.id);
+    await expect(upsertVariantUseCase(derivedPayload, fixture.dependencies))
+      .rejects.toMatchObject({ details: { reason: "writing_intent_objective_required" } });
+    const derivedOk = asDerived(personalityVariantPayload({
+      launchId,
+      bindingId: fixture.binding.id,
+      targetId: fixture.target.id,
+      surface: "x/reply",
+      body: "A shorter alternative that still asks about onboarding.",
+      voiceProfile: fixture.voiceProfile,
+      workflowRunId: dispatch.run.id,
+      intent: objectiveIntent(dispatch, { contactId: founder, objective: refOf(objective), ask: ASK_TESTS_UNKNOWN }),
+    }), proposal.id);
+    await expect(upsertVariantUseCase(derivedOk, fixture.dependencies)).resolves.toBeDefined();
+
+    // 5. Materialization carries the objective reference and the ask into the content snapshot; a
+    // later revision that changes the ask revokes the approval, so the operator re-approves it.
+    const materialized = await approve(fixture, proposal.id);
+    const stored = JSON.parse(getContentItem(materialized.contentItemId)!.platformData ?? "{}").writing;
+    expect(stored.intent).toMatchObject({
+      objective: refOf(objective),
+      ask: { relation: "tests", testsUncertainty: 1 },
+      goal: { writingGoal: "replies" },
+    });
+    const approved = writingOf(proposal.id);
+    const revised = await attempt(objectiveIntent(dispatch, {
+      contactId: founder,
+      objective: refOf(objective),
+      ask: {
+        statement: "Propose the 20-minute evaluation directly.",
+        relation: "advances",
+        customerPain: { status: "asked", text: "Is onboarding new engineers slower than you want?" },
+      },
+    }), { id: proposal.id, body: "How do new engineers on your team get productive in their first week?" });
+    const after = writingOf(revised.id);
+    expect(after.audit.inputHash).not.toBe(approved.audit.inputHash);
+    expect(after.approval).toMatchObject({ state: "revoked", revokedReason: "audit_stale" });
+  });
+
+  it("stamps relationship-only by default and refuses a commercial ask under it", async () => {
+    const fixture = await newFixture();
+    const objective = await stampedObjective(fixture, undefined);
+    expect(objective).toMatchObject({ kind: "relationship_only", source: "default", limitations: [] });
+    const dispatch = objectiveRun(objective);
+    const launchId = await composedLaunch(dispatch);
+    const founder = syntheticFounder();
+
+    await expect(propose(fixture, {
+      launchId,
+      workflowRunId: dispatch.run.id,
+      intent: objectiveIntent(dispatch, {
+        contactId: founder,
+        objective: refOf(objective),
+        ask: { statement: "Propose the evaluation.", relation: "advances", customerPain: { status: "none_assumed" } },
+      }),
+    })).rejects.toMatchObject({ details: { reason: "writing_intent_ask_relation_invalid" } });
+    const kept = await propose(fixture, {
+      launchId,
+      workflowRunId: dispatch.run.id,
+      intent: objectiveIntent(dispatch, {
+        contactId: founder,
+        objective: refOf(objective),
+        ask: { statement: "Say congratulations on the launch.", relation: "relationship_only", customerPain: { status: "none_assumed" } },
+      }),
+    });
+    expect(listWorkflowRunProposals(dispatch.run.id)).toMatchObject({
+      objective: { kind: "relationship_only", source: "default" },
+      proposals: [expect.objectContaining({ variantId: kept.id, ask: expect.objectContaining({ relation: "relationship_only" }) })],
+    });
+  });
+
+  it("supports a missing or unresolved offering with a truthful limitation", async () => {
+    const fixture = await newFixture();
+    const missing = await stampedObjective(fixture, {
+      kind: "commercial",
+      brief: { kind: "inline", text: "## Outcome\nBook an evaluation call.\n## Fit\nFounders.\n## Success\nA reply." },
+    });
+    expect(missing.limitations).toEqual(["offering_missing"]);
+    const unresolved = await stampedObjective(fixture, {
+      kind: "commercial",
+      brief: { kind: "inline", text: "## Outcome\nEvaluate @PRODUCTS.md#not-in-catalog.\n## Fit\nFounders.\n## Success\nA reply." },
+    });
+    expect(unresolved).toMatchObject({ offering: null, limitations: ["offering_unresolved"] });
+
+    const dispatch = objectiveRun(missing);
+    await composedLaunch(dispatch);
+    expect(listWorkflowRunProposals(dispatch.run.id).objective?.limitations).toEqual(["offering_missing"]);
+  });
+
+  it("shows the objective saved at dispatch before the agent creates any launch (Review #549 F2)", async () => {
+    const fixture = await newFixture();
+    const objective = await stampedObjective(fixture, {
+      kind: "commercial",
+      brief: { kind: "inline", text: COMMERCIAL_BRIEF },
+    });
+    const dispatch = objectiveRun(objective);
+
+    const projection = listWorkflowRunProposals(dispatch.run.id);
+    expect(projection).toMatchObject({
+      launches: [],
+      proposals: [],
+      objective: { objectiveId: objective.objectiveId, kind: "commercial", offering: { slug: "engineering-workflow" } },
+      objectiveSource: { status: "current", changedPaths: [], observedAt: null },
+    });
+
+    // Without a launch there is nothing to revoke and nowhere to record, but the page still learns
+    // that the files moved.
+    const resolve = async () => fixture.workspace;
+    expect(await observeObjectiveSourcesForRun(dispatch.run.id, resolve)).toMatchObject({
+      objectiveSource: { status: "current", changedPaths: [] },
+      revokedVariantIds: [],
+    });
+    writeFileSync(join(fixture.workspace.dir, "PRODUCTS.md"), PRODUCTS_FIXTURE.replace("Terminals and browsers.", "Terminals only."));
+    expect(await observeObjectiveSourcesForRun(dispatch.run.id, resolve)).toMatchObject({
+      objectiveSource: { status: "stale", changedPaths: ["PRODUCTS.md#engineering-workflow"] },
+      revokedVariantIds: [],
+    });
+    expect(await observeObjectiveSourcesForRun(dispatch.run.id, async () => { throw new Error("down"); }))
+      .toMatchObject({ objectiveSource: { status: "unavailable" } });
+
+    // A composed run from before #549 still projects no objective.
+    expect(listWorkflowRunProposals(composedRun().run.id)).toMatchObject({ objective: null, objectiveSource: null });
+    expect(await observeObjectiveSourcesForRun(composedRun().run.id, resolve)).toBeNull();
+  });
+
+  it("keeps launches stamped before #549 readable and refuses an objective reference on them", async () => {
+    const fixture = await newFixture();
+    const dispatch = composedRun();
+    const launchId = await composedLaunch(dispatch);
+    const objective = await stampedObjective(fixture, { kind: "relationship_only" });
+
+    await expect(propose(fixture, {
+      launchId,
+      workflowRunId: dispatch.run.id,
+      intent: { ...intentFor(dispatch), objective: refOf(objective) },
+    })).rejects.toMatchObject({ details: { reason: "writing_intent_objective_not_permitted" } });
+    const legacy = await propose(fixture, { launchId, workflowRunId: dispatch.run.id, intent: intentFor(dispatch) });
+    expect(listWorkflowRunProposals(dispatch.run.id)).toMatchObject({
+      objective: null,
+      objectiveSource: null,
+      proposals: [expect.objectContaining({ variantId: legacy.id, ask: null })],
+    });
+  });
+});
+
+describe("objective sources that change after launch (#549, ADR-549-24)", () => {
+  beforeEach(() => {
+    resetCoreTables();
+    resetPersonalityStore();
+    storageDir = mkdtempSync(join(tmpdir(), "signals-objective-sources-"));
+    env.STORAGE_DIR = storageDir;
+    actingTargetId = "";
+  });
+
+  afterEach(() => {
+    rmSync(storageDir, { recursive: true, force: true });
+  });
+
+  /** Composed proposals are approved only by materializing; set the stored state directly. */
+  function markApproved(variantId: string) {
+    const row = db.select().from(variants).where(eq(variants.id, variantId)).get()!;
+    const metadata = JSON.parse(row.metadata ?? "{}");
+    metadata.writing.approval = {
+      ...metadata.writing.approval,
+      state: "approved",
+      by: "user",
+      at: 100,
+      evidence: { kind: "ui", route: "/dashboard/workflows" },
+    };
+    db.update(variants).set({ metadata: JSON.stringify(metadata) }).where(eq(variants.id, variantId)).run();
+  }
+
+  async function savedBriefRun(fixture: Fixture) {
+    writeFileSync(join(fixture.workspace.dir, "PRODUCTS.md"), PRODUCTS_FIXTURE);
+    mkdirSync(join(fixture.workspace.dir, "objectives"), { recursive: true });
+    writeFileSync(join(fixture.workspace.dir, "objectives", "eng-founders.md"), COMMERCIAL_BRIEF);
+    const objective = await stampedObjective(fixture, {
+      kind: "commercial",
+      brief: { kind: "saved", path: "objectives/eng-founders.md" },
+    });
+    const dispatch = objectiveRun(objective);
+    const launchId = await composedLaunch(dispatch);
+    const founder = syntheticFounder();
+    const proposal = await propose(fixture, {
+      launchId,
+      workflowRunId: dispatch.run.id,
+      intent: objectiveIntent(dispatch, { contactId: founder, objective: refOf(objective), ask: ASK_TESTS_UNKNOWN }),
+    });
+    return { objective, dispatch, launchId, proposal };
+  }
+
+  it("revokes approved, unmaterialized proposals once per change and lists what changed", async () => {
+    const fixture = await newFixture();
+    const { launchId, proposal, dispatch } = await savedBriefRun(fixture);
+    const resolve = async () => fixture.workspace;
+    markApproved(proposal.id);
+
+    // Unchanged sources: nothing to revoke.
+    expect(await observeObjectiveSources(launchId, resolve)).toEqual({
+      objectiveSource: { status: "current", changedPaths: [], observedAt: expect.any(Number) },
+      revokedVariantIds: [],
+    });
+    // Another product's entry changing is not this run's source.
+    writeFileSync(join(fixture.workspace.dir, "PRODUCTS.md"), PRODUCTS_FIXTURE.replace("## 2. Bare Offering", "## 2. Bare Offering, renamed"));
+    expect((await observeObjectiveSources(launchId, resolve))?.revokedVariantIds).toEqual([]);
+
+    writeFileSync(join(fixture.workspace.dir, "PRODUCTS.md"), PRODUCTS_FIXTURE.replace("Terminals and browsers.", "Terminals, browsers and worktrees."));
+    writeFileSync(join(fixture.workspace.dir, "objectives", "eng-founders.md"), `${COMMERCIAL_BRIEF}\nEdited later.`);
+    const changed = await observeObjectiveSources(launchId, resolve);
+    expect(changed).toEqual({
+      objectiveSource: {
+        status: "stale",
+        changedPaths: ["objectives/eng-founders.md", "PRODUCTS.md#engineering-workflow"],
+        observedAt: expect.any(Number),
+      },
+      revokedVariantIds: [proposal.id],
+    });
+    expect(writingOf(proposal.id).approval).toMatchObject({ state: "revoked", revokedReason: "objective_source_stale" });
+
+    // The same change does not revoke again: a fresh approval after the observation stands.
+    markApproved(proposal.id);
+    const again = await observeObjectiveSources(launchId, resolve);
+    expect(again).toMatchObject({ objectiveSource: { status: "stale" }, revokedVariantIds: [] });
+    expect(writingOf(proposal.id).approval).toMatchObject({ state: "approved" });
+
+    // The run projection reports the last observation.
+    expect(listWorkflowRunProposals(dispatch.run.id).objectiveSource).toMatchObject({
+      status: "stale",
+      changedPaths: ["objectives/eng-founders.md", "PRODUCTS.md#engineering-workflow"],
+    });
+
+    // A source that can no longer be read is a change too.
+    rmSync(join(fixture.workspace.dir, "objectives", "eng-founders.md"));
+    const removed = await observeObjectiveSources(launchId, resolve);
+    expect(removed).toMatchObject({ revokedVariantIds: [proposal.id] });
+  });
+
+  it("sees an edit past the excerpt cutoff of the referenced entry, and only that entry (Review #549 F1)", async () => {
+    const fixture = await newFixture();
+    writeFileSync(join(fixture.workspace.dir, "PRODUCTS.md"), bigProductsFixture());
+    const objective = await normalizeAccountObjective({
+      raw: { kind: "commercial", brief: { kind: "inline", text: "## Outcome\nEvaluate @PRODUCTS.md#big-offering.\n## Fit\nFounders.\n## Success\nA reply." } },
+      source: "run_config",
+      resolveWorkspace: async () => fixture.workspace,
+    });
+    if (!objective.ok) throw new Error(objective.reason);
+    expect(objective.objective.offering).toMatchObject({ slug: "big-offering", proofPointCount: 1 });
+    const dispatch = objectiveRun(objective.objective);
+    const launchId = await composedLaunch(dispatch);
+    const proposal = await propose(fixture, {
+      launchId,
+      workflowRunId: dispatch.run.id,
+      intent: objectiveIntent(dispatch, { contactId: syntheticFounder(), objective: refOf(objective.objective), ask: { statement: "Propose the evaluation.", relation: "advances", customerPain: { status: "none_assumed" } } }),
+    });
+    markApproved(proposal.id);
+    const resolve = async () => fixture.workspace;
+
+    // Another entry changing is not this run's source.
+    writeFileSync(join(fixture.workspace.dir, "PRODUCTS.md"), bigProductsFixture().replace("Terminals and browsers.", "Terminals only."));
+    expect(await observeObjectiveSources(launchId, resolve)).toMatchObject({
+      objectiveSource: { status: "current", changedPaths: [] },
+      revokedVariantIds: [],
+    });
+
+    // Replace the proof point and add one, all past the 8 KiB excerpt the snapshot shows.
+    writeFileSync(
+      join(fixture.workspace.dir, "PRODUCTS.md"),
+      bigProductsFixture(["- **Proven:** A replaced proof point.", "- **Also:** Another proof point."]).replace("Terminals and browsers.", "Terminals only."),
+    );
+    expect(await observeObjectiveSources(launchId, resolve)).toEqual({
+      objectiveSource: { status: "stale", changedPaths: ["PRODUCTS.md#big-offering"], observedAt: expect.any(Number) },
+      revokedVariantIds: [proposal.id],
+    });
+    expect(writingOf(proposal.id).approval).toMatchObject({ state: "revoked", revokedReason: "objective_source_stale" });
+  });
+
+  it("revokes nothing and records nothing when the workspace cannot be resolved", async () => {
+    const fixture = await newFixture();
+    const { launchId, proposal } = await savedBriefRun(fixture);
+    markApproved(proposal.id);
+    writeFileSync(join(fixture.workspace.dir, "objectives", "eng-founders.md"), "## Outcome\nChanged.");
+    const before = db.select().from(launches).where(eq(launches.id, launchId)).get()!.metadata;
+
+    const observation = await observeObjectiveSources(launchId, async () => {
+      throw new Error("workspace unavailable");
+    });
+    expect(observation).toEqual({
+      objectiveSource: { status: "unavailable", changedPaths: [], observedAt: expect.any(Number) },
+      revokedVariantIds: [],
+    });
+    expect(writingOf(proposal.id).approval).toMatchObject({ state: "approved" });
+    expect(db.select().from(launches).where(eq(launches.id, launchId)).get()!.metadata).toBe(before);
+  });
+
+  it("leaves a materialized proposal alone", async () => {
+    const fixture = await newFixture();
+    const { launchId, proposal } = await savedBriefRun(fixture);
+    const materialized = await approve(fixture, proposal.id);
+    writeFileSync(join(fixture.workspace.dir, "objectives", "eng-founders.md"), "## Outcome\nChanged.");
+
+    expect(await observeObjectiveSources(launchId, async () => fixture.workspace))
+      .toMatchObject({ objectiveSource: { status: "stale" }, revokedVariantIds: [] });
+    expect(writingOf(proposal.id).approval).toMatchObject({ state: "approved" });
+    expect(getContentItem(materialized.contentItemId)?.status).toBe("approved");
+  });
+
+  it("strips a caller-supplied observation and keeps the server's", async () => {
+    const fixture = await newFixture();
+    const { launchId, dispatch } = await savedBriefRun(fixture);
+    await invokeAgentTool("upsert_launch", {
+      id: launchId,
+      name: `Nurture proposals ${dispatch.run.id}`,
+      metadata: {
+        writing: {
+          schemaVersion: 1,
+          objectiveState: { observedSourceHash: "forged", observedAt: 1, status: "current", changedPaths: [] },
+        },
+      },
+    });
+    const state = JSON.parse(db.select().from(launches).where(eq(launches.id, launchId)).get()!.metadata ?? "{}").writing.objectiveState;
+    expect(state.observedSourceHash).not.toBe("forged");
+    expect(state.observedSourceHash).toBe(launchCompositionOf(launchId)!.objective && (launchCompositionOf(launchId)!.objective as AccountObjective).sourceHash);
   });
 });

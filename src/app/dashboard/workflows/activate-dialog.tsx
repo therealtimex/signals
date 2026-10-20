@@ -65,6 +65,32 @@ import {
   readNetworkSnowballConfig,
 } from "@/lib/workflows/network-snowball";
 import { EventParticipantReport } from "@/components/event-participant-report";
+import {
+  AccountObjectiveFields,
+  useSavedObjectiveBriefs,
+} from "@/app/dashboard/workflows/account-objective-fields";
+import {
+  BRIEF_NAME_FORMAT_ERROR,
+  BRIEF_OUTCOME_ERROR,
+  RUN_REFUSED_TITLE,
+  SAVED_BRIEF_OUTCOME_ERROR,
+  TEMPLATE_CHANGED_NOTE,
+  TEMPLATE_DEFAULT_NOTE,
+  briefNameExistsError,
+  briefPath,
+  buildAccountObjectiveRunInput,
+  emptyObjectiveDraft,
+  launchedObjectiveLine,
+  objectiveDraftFromTemplate,
+  refusalText,
+  sameObjectiveDraft,
+  validateObjectiveDraft,
+  type ObjectiveDraft,
+  type ObjectiveFieldErrors,
+  type ObjectiveMentionsView,
+} from "@/app/dashboard/workflows/account-objective-copy";
+import { parseObjectiveBrief } from "@/lib/writing/objective-brief";
+import type { ObjectiveBriefPreview } from "@/lib/writing/account-objective";
 
 interface Template {
   id: string;
@@ -102,6 +128,8 @@ function isPipelineTemplateConfig(config: string): boolean {
 interface DialogState {
   running: boolean;
   error: string | null;
+  /** Heading for the red box, e.g. "Signals didn't start the run" for a refused objective. */
+  errorTitle: string | null;
   threadPath: string | null;
   workflowRunId: string | null;
   eventReportCapability: string | null;
@@ -115,12 +143,33 @@ interface DialogState {
   contactNurture: ReturnType<typeof readContactNurtureConfig>;
   snowball: ReturnType<typeof readNetworkSnowballConfig>;
   limits: ReturnType<typeof readRunLimitFromTemplateConfig>;
+  /** Run objective (#549), Contact Relationship Nurture only. */
+  objective: ObjectiveDraft;
+  /** The template's default objective; untouched, it is not sent (the server records the default). */
+  objectiveTemplateDefault: ObjectiveDraft | null;
+  objectiveErrors: ObjectiveFieldErrors;
+  /** "Objective attached: …" once the run launched. */
+  launchedObjective: string | null;
+  /** Saved briefs the server reported missing; they leave the select. */
+  hiddenSavedPaths: string[];
+  /** A brief saved by an earlier attempt in this dialog, so a retry does not hit 409 on itself. */
+  savedBrief: { name: string; text: string } | null;
 }
 
 type DialogAction =
   | { type: "START_RUN" }
-  | { type: "RUN_SUCCESS"; workflowRunId?: string; threadPath?: string; eventReportCapability?: string }
-  | { type: "RUN_ERROR"; error: string; workflowRunId?: string; eventReportCapability?: string }
+  | {
+      type: "RUN_SUCCESS";
+      workflowRunId?: string;
+      threadPath?: string;
+      eventReportCapability?: string;
+      launchedObjective?: string | null;
+    }
+  | { type: "RUN_ERROR"; error: string; title?: string; workflowRunId?: string; eventReportCapability?: string }
+  | { type: "SET_OBJECTIVE"; objective: ObjectiveDraft }
+  | { type: "OBJECTIVE_FIELD_ERRORS"; errors: ObjectiveFieldErrors }
+  | { type: "OBJECTIVE_BRIEF_SAVED"; name: string; text: string }
+  | { type: "SAVED_BRIEF_MISSING"; path: string }
   | { type: "SET_BACKLOG_LOADING"; loading: boolean }
   | { type: "SET_BACKLOG"; backlog: PipelineBacklogPreview | null; batchSize?: number }
   | { type: "SET_PIPELINE_BATCH_SIZE"; batchSize: number }
@@ -148,9 +197,11 @@ function initDialogState(template: Template): DialogState {
     // Interactive launch consent is per-run. A saved/legacy opt-in is never carried forward.
     participantAccess: { ...storedSnowball.participantAccess, enabled: false },
   };
+  const objectiveTemplateDefault = objectiveDraftFromTemplate(config.accountObjective);
   return {
     running: false,
     error: null,
+    errorTitle: null,
     threadPath: null,
     workflowRunId: null,
     eventReportCapability: null,
@@ -164,27 +215,45 @@ function initDialogState(template: Template): DialogState {
     contactNurture,
     snowball,
     limits: readRunLimitFromTemplateConfig(config),
+    objective: objectiveTemplateDefault ?? emptyObjectiveDraft(),
+    objectiveTemplateDefault,
+    objectiveErrors: {},
+    launchedObjective: null,
+    hiddenSavedPaths: [],
+    savedBrief: null,
   };
 }
 
 function dialogReducer(state: DialogState, action: DialogAction): DialogState {
   switch (action.type) {
     case "START_RUN":
-      return { ...state, running: true, error: null, threadPath: null, workflowRunId: null, eventReportCapability: null };
+      return {
+        ...state,
+        running: true,
+        error: null,
+        errorTitle: null,
+        threadPath: null,
+        workflowRunId: null,
+        eventReportCapability: null,
+        objectiveErrors: {},
+      };
     case "RUN_SUCCESS":
       return {
         ...state,
         running: false,
         error: null,
+        errorTitle: null,
         workflowRunId: action.workflowRunId ?? null,
         threadPath: action.threadPath ?? null,
         eventReportCapability: action.eventReportCapability ?? null,
+        launchedObjective: action.launchedObjective ?? null,
       };
     case "RUN_ERROR":
       return {
         ...state,
         running: false,
         error: action.error,
+        errorTitle: action.title ?? null,
         threadPath: null,
         workflowRunId: action.workflowRunId ?? null,
         eventReportCapability: action.eventReportCapability ?? null,
@@ -214,6 +283,18 @@ function dialogReducer(state: DialogState, action: DialogAction): DialogState {
       return { ...state, snowball: action.snowball };
     case "SET_LIMIT":
       return { ...state, limits: { ...state.limits, [action.key]: action.value } };
+    case "SET_OBJECTIVE":
+      return { ...state, objective: action.objective, objectiveErrors: {} };
+    case "OBJECTIVE_FIELD_ERRORS":
+      return { ...state, running: false, objectiveErrors: action.errors };
+    case "OBJECTIVE_BRIEF_SAVED":
+      return { ...state, savedBrief: { name: action.name, text: action.text } };
+    case "SAVED_BRIEF_MISSING":
+      return {
+        ...state,
+        hiddenSavedPaths: [...state.hiddenSavedPaths, action.path],
+        objective: { ...state.objective, mode: "write", savedPath: null },
+      };
     default:
       return state;
   }
@@ -298,19 +379,29 @@ function ActivateDialogRunStatus({
   workflowRunId,
   threadPath,
   eventReportCapability,
+  objectiveLine,
+  boxRef,
 }: {
   isPipeline: boolean;
   workflowRunId: string | null;
   threadPath: string | null;
   eventReportCapability: string | null;
+  objectiveLine: string | null;
+  boxRef: React.RefObject<HTMLDivElement | null>;
 }) {
   return (
-    <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-100 space-y-2">
+    <div
+      ref={boxRef}
+      tabIndex={-1}
+      data-testid="activate-run-status"
+      className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-100 space-y-2"
+    >
       {isPipeline ? (
         <p>Profile pipeline run started.</p>
       ) : (
         <p>Agent launched in RealTimeX.</p>
       )}
+      {objectiveLine ? <p className="break-words" data-testid="activate-objective-line">{objectiveLine}</p> : null}
       {workflowRunId && (
         <Link
           href={`/dashboard/workflows/${workflowRunId}`}
@@ -346,6 +437,7 @@ function ActivateDialogFormFields({
   isNetworkSnowball,
   isOrgDedupe,
   onSnowballSourceReadinessChange,
+  objectiveSection,
   dispatch,
 }: {
   template: Template;
@@ -363,6 +455,7 @@ function ActivateDialogFormFields({
   isContactNurture: boolean;
   isNetworkSnowball: boolean;
   onSnowballSourceReadinessChange: (readiness: SnowballSourceLaunchReadiness) => void;
+  objectiveSection?: React.ReactNode;
   dispatch: React.Dispatch<DialogAction>;
 }) {
   return (
@@ -555,6 +648,7 @@ function ActivateDialogFormFields({
             dispatch({ type: "SET_CONTACT_NURTURE", contactNurture: next })
           }
           disabled={running}
+          objectiveSection={objectiveSection}
         />
       )}
 
@@ -678,7 +772,45 @@ function ActivateDialogContent({
     contactNurture,
     snowball,
     limits,
+    errorTitle,
+    objective,
+    objectiveTemplateDefault,
+    objectiveErrors,
+    launchedObjective,
+    hiddenSavedPaths,
+    savedBrief,
   } = state;
+
+  const briefTextRef = useRef<HTMLTextAreaElement | null>(null);
+  const editCopyRef = useRef<HTMLButtonElement | null>(null);
+  const briefNameRef = useRef<HTMLInputElement | null>(null);
+  const mentionListOpenRef = useRef(false);
+  const errorBoxRef = useRef<HTMLDivElement | null>(null);
+  const launchedBoxRef = useRef<HTMLDivElement | null>(null);
+  const lastObjectivePreview = useRef<ObjectiveBriefPreview | null>(null);
+  const handleObjectivePreview = useCallback((preview: ObjectiveBriefPreview | null) => {
+    lastObjectivePreview.current = preview;
+  }, []);
+  const loadedSavedBriefs = useSavedObjectiveBriefs(isContactNurture && objective.kind === "commercial");
+  const hiddenSaved = new Set(hiddenSavedPaths);
+  const savedBriefs = loadedSavedBriefs.filter((brief) => !hiddenSaved.has(brief.path));
+  const savedOutcome = objective.mode === "saved"
+    ? savedBriefs.find((brief) => brief.path === objective.savedPath)?.outcome
+    : undefined;
+  const objectiveTemplateNote = objectiveTemplateDefault
+    ? sameObjectiveDraft(objective, objectiveTemplateDefault) ? TEMPLATE_DEFAULT_NOTE : TEMPLATE_CHANGED_NOTE
+    : null;
+
+  // Focus the first field with an objective error once it is enabled again (contract §7).
+  useEffect(() => {
+    if (objectiveErrors.brief) briefTextRef.current?.focus();
+    else if (objectiveErrors.saved) editCopyRef.current?.focus();
+    else if (objectiveErrors.name) briefNameRef.current?.focus();
+  }, [objectiveErrors]);
+
+  useEffect(() => {
+    if (error) errorBoxRef.current?.focus();
+  }, [error]);
 
   useEffect(() => {
     if (!isPipeline) return;
@@ -715,7 +847,77 @@ function ActivateDialogContent({
     return () => controller.abort();
   }, [isPipeline, template.id]);
 
+  /** Save the written brief first when "Save as a reusable brief" is on; `false` stops the run. */
+  async function saveObjectiveBrief(): Promise<boolean> {
+    const name = objective.name.trim();
+    if (savedBrief?.name === name && savedBrief.text === objective.text) return true;
+    const response = await fetch(`/api/objectives/${encodeURIComponent(name)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      // Never `overwrite`: a 409 is a field error under Name (contract decision 3).
+      body: JSON.stringify({ text: objective.text }),
+    });
+    if (!response.ok) {
+      const body = (await response.json().catch(() => ({}))) as { errorCode?: unknown };
+      if (response.status === 409 || body.errorCode === "objective_exists") {
+        dispatch({ type: "OBJECTIVE_FIELD_ERRORS", errors: { name: briefNameExistsError(name) } });
+      } else if (body.errorCode === "invalid_name") {
+        dispatch({ type: "OBJECTIVE_FIELD_ERRORS", errors: { name: BRIEF_NAME_FORMAT_ERROR } });
+      } else {
+        dispatch({
+          type: "RUN_ERROR",
+          title: RUN_REFUSED_TITLE,
+          error: refusalText(response.status === 503 ? "workspace_unavailable" : "invalid", {}) ?? "",
+        });
+      }
+      return false;
+    }
+    dispatch({ type: "OBJECTIVE_BRIEF_SAVED", name, text: objective.text });
+    return true;
+  }
+
+  /** "Objective attached: …", from the record the server stamped when it is in the response. */
+  function launchedObjectiveFor(workflowRun: unknown, savedNow: string | null): string | null {
+    if (!isContactNurture || !objective.kind) return null;
+    const run = workflowRun && typeof workflowRun === "object" ? workflowRun as { config?: unknown } : {};
+    const config = typeof run.config === "string" ? parseTemplateConfig(run.config) : {};
+    const stamped = config.accountObjective as {
+      kind?: unknown;
+      parsed?: { outcome?: unknown } | null;
+      mentions?: unknown;
+      brief?: { source?: { kind?: unknown; path?: unknown } } | null;
+    } | undefined;
+    if (stamped?.kind === "relationship_only") {
+      return launchedObjectiveLine({ kind: "relationship_only", outcome: null, view: { mentions: [] }, savedNow: null, fromSaved: null });
+    }
+    if (stamped?.kind === "commercial" && typeof stamped.parsed?.outcome === "string" && Array.isArray(stamped.mentions)) {
+      const source = stamped.brief?.source;
+      return launchedObjectiveLine({
+        kind: "commercial",
+        outcome: stamped.parsed.outcome,
+        view: { mentions: stamped.mentions as ObjectiveMentionsView["mentions"] },
+        savedNow,
+        fromSaved: source?.kind === "saved" && typeof source.path === "string" ? source.path : null,
+      });
+    }
+    const text = objective.mode === "saved" ? null : objective.text;
+    return launchedObjectiveLine({
+      kind: objective.kind,
+      outcome: text === null ? lastObjectivePreview.current?.parsed.outcome ?? null : parseObjectiveBrief(text).outcome,
+      view: lastObjectivePreview.current ?? { mentions: [] },
+      savedNow,
+      fromSaved: objective.mode === "saved" ? objective.savedPath : null,
+    });
+  }
+
   async function handleRun() {
+    if (isContactNurture) {
+      const fieldErrors = validateObjectiveDraft(objective, savedOutcome);
+      if (Object.keys(fieldErrors).length) {
+        dispatch({ type: "OBJECTIVE_FIELD_ERRORS", errors: fieldErrors });
+        return;
+      }
+    }
     dispatch({ type: "START_RUN" });
 
     try {
@@ -730,6 +932,11 @@ function ActivateDialogContent({
         Object.assign(config, buildProfilePublishRunConfig(profilePublish));
       } else if (isContactNurture) {
         Object.assign(config, buildContactNurtureRunConfig(contactNurture));
+        if (objective.kind === "commercial" && objective.mode === "write" && objective.save) {
+          if (!(await saveObjectiveBrief())) return;
+        }
+        const accountObjective = buildAccountObjectiveRunInput(objective, objectiveTemplateDefault);
+        if (accountObjective) config.accountObjective = accountObjective;
       } else if (isNetworkSnowball) {
         Object.assign(config, buildNetworkSnowballRunConfig(snowball));
       } else {
@@ -782,21 +989,43 @@ function ActivateDialogContent({
         let errorMsg = "Failed to start agent";
         let failedRunId: string | undefined;
         let failedEventReportCapability: string | undefined;
+        let errorTitleText: string | undefined;
         try {
           const data = (await res.json()) as {
             error?: unknown;
+            errorCode?: unknown;
+            details?: { reason?: string; name?: unknown; path?: unknown };
             workflowRunId?: string;
             eventReportCapability?: { token?: string };
           };
           if (typeof data.error === "string") errorMsg = data.error;
           failedRunId = data.workflowRunId;
           failedEventReportCapability = data.eventReportCapability?.token;
+          if (data.errorCode === "invalid_account_objective") {
+            // Contract §1.5: every entry is kept; the copy keys off `details.reason`.
+            const reason = data.details?.reason;
+            if (reason === "outcome_missing") {
+              dispatch({
+                type: "OBJECTIVE_FIELD_ERRORS",
+                errors: objective.mode === "saved"
+                  ? { saved: SAVED_BRIEF_OUTCOME_ERROR }
+                  : { brief: BRIEF_OUTCOME_ERROR },
+              });
+              return;
+            }
+            if (reason === "saved_brief_not_found" && objective.mode === "saved" && objective.savedPath) {
+              dispatch({ type: "SAVED_BRIEF_MISSING", path: objective.savedPath });
+            }
+            errorTitleText = RUN_REFUSED_TITLE;
+            errorMsg = refusalText(reason, data.details ?? {}) ?? errorMsg;
+          }
         } catch {
           // ignore json parse error on non-ok status
         }
         dispatch({
           type: "RUN_ERROR",
           error: errorMsg,
+          title: errorTitleText,
           workflowRunId: failedRunId,
           eventReportCapability: failedEventReportCapability,
         });
@@ -806,6 +1035,7 @@ function ActivateDialogContent({
       const data = (await res.json().catch(() => ({}))) as {
         threadPath?: string;
         workflowRunId?: string;
+        workflowRun?: unknown;
         eventReportCapability?: { token?: string };
       };
 
@@ -814,6 +1044,12 @@ function ActivateDialogContent({
         workflowRunId: data.workflowRunId,
         threadPath: data.threadPath,
         eventReportCapability: data.eventReportCapability?.token,
+        launchedObjective: launchedObjectiveFor(
+          data.workflowRun,
+          objective.kind === "commercial" && objective.mode === "write" && objective.save
+            ? briefPath(objective.name.trim())
+            : null,
+        ),
       });
     } catch {
       dispatch({
@@ -824,6 +1060,12 @@ function ActivateDialogContent({
   }
 
   const runLaunched = !error && Boolean(threadPath || workflowRunId);
+  // Contract §1.5: after a launch, focus moves to the confirmation box (then View run details).
+  useEffect(() => {
+    if (runLaunched) launchedBoxRef.current?.focus();
+  }, [runLaunched]);
+  // A nurture run must say what it is for before it can start (contract decision 5).
+  const objectiveRunDisabled = isContactNurture && !objective.kind;
   const pipelineRunDisabled =
     isPipeline &&
     (backlogLoading || backlog == null || backlog.backlogTotal === 0);
@@ -877,6 +1119,10 @@ function ActivateDialogContent({
     <DialogContent
       showCloseButton={false}
       className="sm:max-w-2xl max-h-[85vh] p-0 flex flex-col overflow-hidden gap-0"
+      onEscapeKeyDown={(event) => {
+        // Esc closes the `@` list, not the dialog (contract §1.3).
+        if (mentionListOpenRef.current) event.preventDefault();
+      }}
     >
       <div className="flex flex-col gap-1.5 p-6 pb-4 border-b shrink-0 bg-background">
         <div className="flex items-center justify-between gap-4">
@@ -927,6 +1173,8 @@ function ActivateDialogContent({
             workflowRunId={workflowRunId}
             threadPath={threadPath}
             eventReportCapability={eventReportCapability}
+            objectiveLine={launchedObjective}
+            boxRef={launchedBoxRef}
           />
         )}
 
@@ -947,12 +1195,33 @@ function ActivateDialogContent({
             isNetworkSnowball={isNetworkSnowball}
             isOrgDedupe={isOrgDedupe}
             onSnowballSourceReadinessChange={handleSnowballSourceReadiness}
+            objectiveSection={isContactNurture ? (
+              <AccountObjectiveFields
+                draft={objective}
+                onChange={(next) => dispatch({ type: "SET_OBJECTIVE", objective: next })}
+                errors={objectiveErrors}
+                savedBriefs={savedBriefs}
+                templateNote={objectiveTemplateNote}
+                disabled={running}
+                briefTextRef={briefTextRef}
+                editCopyRef={editCopyRef}
+                nameRef={briefNameRef}
+                mentionListOpenRef={mentionListOpenRef}
+                onPreviewChange={handleObjectivePreview}
+              />
+            ) : undefined}
             dispatch={dispatch}
           />
         )}
 
         {error && (
-          <div className="space-y-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200">
+          <div
+            ref={errorBoxRef}
+            tabIndex={-1}
+            data-testid="activate-run-error"
+            className="space-y-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200"
+          >
+            {errorTitle ? <p className="font-medium">{errorTitle}</p> : null}
             <p>{error}</p>
             {workflowRunId && eventReportCapability && (
               <EventParticipantReport
@@ -976,7 +1245,8 @@ function ActivateDialogContent({
               pipelineRunDisabled ||
               patrolRunDisabled ||
               profilePublishRunDisabled ||
-              networkSnowballRunDisabled
+              networkSnowballRunDisabled ||
+              objectiveRunDisabled
             }
           >
             {running ? (
@@ -988,6 +1258,8 @@ function ActivateDialogContent({
               ? "Launching..."
               : pipelineRunDisabled
                 ? "All contacts are up to date"
+                : objectiveRunDisabled
+                  ? "Choose what this run is for"
                 : patrolRunDisabled || profilePublishRunDisabled
                   ? "Select an acting profile"
                   : networkSnowballRunDisabled

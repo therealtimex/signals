@@ -188,6 +188,13 @@ function validateCrossDocuments(input: {
   const sourceIds = new Set(spine.sources.map((source) => source.id));
   for (const [index, claim] of input.writing.claimMap.entries()) if (!claimIds.has(claim.claimId)) fail("Claim map references an unknown claim", "claim_unknown", ["metadata", "writing", "claimMap", index, "claimId"]);
   for (const [index, sourceId] of input.writing.lineage.sourceIds.entries()) if (!sourceIds.has(sourceId)) fail("Lineage references an unknown source", "lineage_source_unknown", ["metadata", "writing", "lineage", "sourceIds", index]);
+  // The ask may lean on evidence only through the spine (#549, spec §6.3): an evidenced customer
+  // pain must be a spine claim, never an assertion the draft makes on its own.
+  const ask = input.writing.intent?.ask;
+  if (ask?.customerPain.status === "evidenced") {
+    for (const [index, claimId] of ask.customerPain.claimIds.entries()) if (!claimIds.has(claimId)) fail("Ask customer pain references an unknown claim", "ask_claim_unknown", ["metadata", "writing", "intent", "ask", "customerPain", "claimIds", index]);
+  }
+  for (const [index, sourceId] of (ask?.evidenceSourceIds ?? []).entries()) if (!sourceIds.has(sourceId)) fail("Ask evidence references an unknown source", "ask_source_unknown", ["metadata", "writing", "intent", "ask", "evidenceSourceIds", index]);
   for (const ref of [input.writing.lineage.derivedFromVariantId, input.writing.lineage.adaptedFromVariantId].filter(Boolean) as string[]) {
     if (!runner.select({ id: variants.id }).from(variants).where(eq(variants.id, ref)).get()) throw new AgentToolError("NOT_FOUND", `Lineage variant not found: ${ref}`, { reason: "lineage_ref_not_found" });
   }

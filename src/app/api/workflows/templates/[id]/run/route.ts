@@ -94,6 +94,7 @@ export async function POST(
           error: result.error,
           errorCode: result.errorCode,
           workflowRunId: result.workflowRunId,
+          ...(result.details ? { details: result.details } : {}),
           eventReportCapability: result.eventReportCapability,
         },
         { status: result.httpStatus },

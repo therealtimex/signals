@@ -8,7 +8,7 @@ description: >-
   humanize, audit, or approve platform-native posts.
 author: RealtimeX
 license: Apache-2.0
-version: "1.1.0"
+version: "1.2.0"
 coreVersion: 1
 allowed-tools: Read Bash
 ---
@@ -96,6 +96,17 @@ requested supported surface. Use `.claude/skills/signals-writing/reference.md` f
 10. **Close** — call `complete_workflow_run` with variant IDs, content item IDs, blockers, and
    missing surfaces. Publishing remains a separate explicit instruction.
 
+## Account objective (composed runs)
+
+A workflow-composed run carries the operator's account objective, stamped by Signals at dispatch
+on `get_writing_context.launch.writing.composition.objective`. It is operator intent: copy its
+`{ objectiveId, hash }` into every intent's `objective`, render it on the card, and never edit it.
+Before drafting for a contact, write and post the `ask` (statement, relation, customer pain); a
+relation of `tests` names the 1-based Unknowns item it resolves, and `defers` gives a reason.
+The business outcome is never the platform metric (`writingGoal`). Its limitations bind every
+draft, and offering text becomes a fact only through a spine `note` claim with locator
+`offering:<slug>#proof[i]`. `precheck` with `--launch` mirrors the server's objective and ask checks.
+
 ## Contract ownership
 
 | Agent supplies | Signals derives or owns |
@@ -124,6 +135,12 @@ Limits   <chars per unit> / <limit>  ·  hashtags n  ·  links n  ·  media n
 Claims   <preserved>/<total> preserved  ·  altered: <ids or none>  ·  missing: <ids or none>  ·  invented: none
 Voice    <profile label v<version>>  ·  precedence <voice_first|rules_first>  ·  drift <score>  ·  protected quirks kept: yes
 Personality  <variants[].personality.bindingId>  ·  <variants[].personalityState>  ·  self <variants[].personality.identity.selfContactId> (org <variants[].personality.identity.representedOrgId|none>)  ·  target represents <variants[].personality.target.represents.kind|none>
+Objective  <kind>  ·  <source>  ·  <saved brief <path>|brief written for this run>  ·  offering <name> (@PRODUCTS.md#<slug>)|none  ·  outcome: <outcome>  ·  platform metric: <writingGoal>
+Fit      <fit|not stated>  ·  unknowns: <1. … 2. …|none listed>
+Ask      <relation badge> — <statement>  ·  customer pain: <none assumed|asked, not assumed — "<text>"|from a source — "<first claim text>"[ and <n> more]|from a private source — "<first claim text>"[ and <n> more]|from <n> cited source(s)>
+Next     <next step|not stated>  ·  success: <success|not defined>
+Objective limits  <short limitation labels|none>
+Sources  changed since this run started: <changed paths> — drafts still use the snapshot[ · <n> approval(s) revoked] | couldn't be checked
 Audit    <verdict>  ·  blockers <n>  ·  warnings <n>  (list each finding code + one line)
 Risk     <tier>  ·  policy <explicit|auto_low_risk>
 Publish  <direct|beta|draft_only|export_only>  — draft_only: this platform has no publish adapter; export only
@@ -132,6 +149,10 @@ Next     approve <variantId> | revise <instruction> | reject
 
 The Personality placeholders above are exact paths on the selected persisted
 `get_writing_context.variants[]` entry; do not substitute names inferred from workspace files.
+The Objective, Fit, Ask, Next, Objective limits, and Sources lines appear on composed runs; map
+them with the table in `core/approval.md`. A launch from before run objectives renders
+`Objective  none (this run started before run objectives)` and no Ask line. Render Sources only
+when `launch.writing.objectiveSource.status` is `stale` or `unavailable`.
 
 Only approval messages that name the profile/variant and say approve become thread-message
 evidence. Copy the user's approval message verbatim into the evidence note.
