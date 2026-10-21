@@ -1,7 +1,7 @@
 {
   "id": "signals",
   "name": "Signals",
-  "version": "0.2.23",
+  "version": "0.2.24",
   "description": "Local-first social GTM and relationship knowledge graph",
   "healthPath": "/api/health",
   "homePath": "/dashboard",
