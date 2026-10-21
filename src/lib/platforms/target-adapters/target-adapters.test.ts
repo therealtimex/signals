@@ -8,6 +8,8 @@ const browserConnectionMocks = vi.hoisted(() => ({
 vi.mock("@/lib/platforms/browser-connection", () => ({
   probePlatformLogin: browserConnectionMocks.probePlatformLogin,
   detectPlatformHandle: browserConnectionMocks.detectPlatformHandle,
+  detectAuthenticatedPlatformHandle: (platform: string, page: Page) =>
+    browserConnectionMocks.detectPlatformHandle(platform, page, page.url()),
 }));
 
 import type { Page } from "playwright";
@@ -70,6 +72,19 @@ describe("platform target adapters", () => {
     await expect(
       linkedinTargetAdapter.activate(page, target("linkedin", "/in/other", "other"))
     ).rejects.toMatchObject({ code: "TARGET_ACTIVATION_UNSUPPORTED" });
+  });
+
+  it("keeps an undetected LinkedIn identity inactive instead of reporting a switch", async () => {
+    browserConnectionMocks.detectPlatformHandle.mockResolvedValue(null);
+
+    await expect(
+      linkedinTargetAdapter.activate(page, target("linkedin", "/in/current", "current")),
+    ).resolves.toMatchObject({
+      loggedIn: true,
+      detectedHandle: null,
+      active: false,
+      switched: false,
+    });
   });
 
   it("reports a signed-out LinkedIn session instead of a switching error", async () => {

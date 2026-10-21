@@ -644,6 +644,21 @@ async function detectLinkedInHandleViaSelfRedirect(
   return formatLinkedInHandle(vanity);
 }
 
+/**
+ * The signed-in identity on a page that already passed the login probe. LinkedIn falls back to
+ * the account-owned `/in/me/` redirect when its navigation exposes no profile link, as
+ * `probeAuthenticatedPlatformIdentity` does. That navigates the page.
+ */
+export async function detectAuthenticatedPlatformHandle(
+  platform: SocialPlatform,
+  page: Page,
+  timeoutMs: number,
+): Promise<string | null> {
+  const handle = await detectPlatformHandle(platform, page, page.url());
+  if (handle || platform !== "linkedin") return handle;
+  return detectLinkedInHandleViaSelfRedirect(page, timeoutMs);
+}
+
 async function detectLoggedInViaCdp(
   platform: SocialPlatform,
   debugPort: number,
