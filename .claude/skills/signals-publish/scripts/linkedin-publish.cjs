@@ -10,6 +10,7 @@
 const { readFileSync } = require("node:fs");
 const { spawnSync } = require("node:child_process");
 const { verifyPublishJob } = require("./publish-job-guard.cjs");
+const { parseEvalJsonValue } = require("./parse-eval-json-array.cjs");
 
 const SESSION = process.env.SIGNALS_PUBLISH_AB_SESSION || "signals-publish";
 const AB_BIN = process.env.AGENT_BROWSER_BIN || "agent-browser";
@@ -17,6 +18,7 @@ const AB_PREFIX = process.env.AGENT_BROWSER_BIN_ARGS
   ? process.env.AGENT_BROWSER_BIN_ARGS.split(" ").filter(Boolean)
   : [];
 const LINKEDIN_FEED_URL = "https://www.linkedin.com/feed/";
+const LINKEDIN_SELF_PROFILE_URL = "https://www.linkedin.com/in/me/";
 const WAIT_TIMEOUT_MS = 15_000;
 
 let resultEmitted = false;
@@ -148,8 +150,6 @@ function validatePayload(payload) {
 }
 
 const LI_SELECTORS = {
-  feedIndicator:
-    ".global-nav__me, .scaffold-layout, [data-finite-scroll-hotkey-context=\"FEED\"]",
   composerTrigger:
     "button.share-box-feed-entry__trigger, button:has-text('Start a post'), .share-box-feed-entry__top-bar button",
   composerDialog: "[role=\"dialog\"], .share-box",
@@ -169,31 +169,41 @@ function openLinkedInFeed() {
   sleep(2000);
 }
 
-function assertLinkedInLoggedIn() {
-  if (abCount(LI_SELECTORS.feedIndicator) > 0) return;
-  const urlResult = runAb(["get", "url"]);
-  const url = String(urlResult.stdout || "").toLowerCase();
-  if (url.includes("/login") || url.includes("/signup") || url.includes("/authwall")) {
-    throw { message: "LinkedIn session is logged out.", errorCode: "session_expired" };
-  }
-  throw { message: "Could not verify LinkedIn login state.", errorCode: "session_expired" };
+/** "/in/Name", "in/name/", "@name", or a profile URL → "name", as Signals normalizes targets. */
+function linkedInVanity(value) {
+  return String(value ?? "")
+    .trim()
+    .replace(/^https?:\/\/[^/]+/i, "")
+    .replace(/^@/, "")
+    .replace(/^\/?in\//i, "")
+    .replace(/^\/+/, "")
+    .replace(/[/?#].*$/, "")
+    .toLowerCase();
 }
 
+/**
+ * The signed-in profile's vanity. `/in/me/` redirects only an authenticated session to its own
+ * profile; the feed's navigation may carry no profile link, and a profile link in feed content
+ * can be anyone's. A login, checkpoint or authwall page means the session is signed out.
+ */
 function detectLinkedInHandle() {
-  const js = `(() => {
-    const meLink =
-      document.querySelector('a.global-nav__primary-link-me[href*="/in/"]') ||
-      document.querySelector('a[href*="/in/"]');
-    if (!meLink) return JSON.stringify("");
-    const href = meLink.getAttribute("href") || "";
-    const match = href.match(/\\/in\\/([^/?#]+)/i);
-    return JSON.stringify(match ? match[1] : "");
-  })()`;
-  const raw = requireAb(["eval", js], "detect linkedin handle").stdout;
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return "";
+  requireAb(["open", LINKEDIN_SELF_PROFILE_URL], "open linkedin self profile");
+  const deadline = Date.now() + WAIT_TIMEOUT_MS;
+  for (;;) {
+    const url = String(runAb(["get", "url"]).stdout || "");
+    const path = url.replace(/^https?:\/\/[^/]+/i, "").toLowerCase();
+    if (/^\/(login|signup|checkpoint|authwall|uas\/login)/.test(path)) {
+      throw { message: "LinkedIn session is logged out.", errorCode: "session_expired" };
+    }
+    const vanity = linkedInVanity(path.startsWith("/in/") ? path : "");
+    if (vanity && vanity !== "me") return vanity;
+    if (Date.now() >= deadline) {
+      throw {
+        message: `Could not resolve the signed-in LinkedIn profile from ${LINKEDIN_SELF_PROFILE_URL} (at ${url || "unknown URL"}).`,
+        errorCode: "session_expired",
+      };
+    }
+    sleep(300);
   }
 }
 
@@ -254,10 +264,8 @@ function assertPreFlight(expectedText) {
     });
   })()`;
   const raw = requireAb(["eval", checkJs], "run pre-flight check").stdout;
-  let parsed = null;
-  try {
-    parsed = JSON.parse(raw);
-  } catch (err) {
+  const parsed = parseEvalJsonValue(raw);
+  if (!parsed || typeof parsed !== "object") {
     throw {
       message: `Failed to parse pre-flight status: ${raw}`,
       errorCode: "unknown",
@@ -294,12 +302,7 @@ function verifyPublishedPost() {
     return JSON.stringify({ url: '' });
   })()`;
   const raw = runAb(["eval", verifyJs]).stdout;
-  try {
-    const res = JSON.parse(raw);
-    return res.url || null;
-  } catch {
-    return null;
-  }
+  return parseEvalJsonValue(raw)?.url || null;
 }
 
 async function main() {
@@ -317,17 +320,10 @@ async function main() {
       });
     }
     connectSession(port);
-    openLinkedInFeed();
-    assertLinkedInLoggedIn();
 
     const detectedHandle = detectLinkedInHandle();
     const expectedHandle = payload.expectedHandle;
-    if (
-      expectedHandle &&
-      detectedHandle &&
-      String(expectedHandle).replace(/^@/, "").toLowerCase() !==
-        String(detectedHandle).replace(/^@/, "").toLowerCase()
-    ) {
+    if (expectedHandle && linkedInVanity(expectedHandle) !== detectedHandle) {
       emit({
         success: false,
         error: `Wrong LinkedIn identity active: expected ${expectedHandle}, detected ${detectedHandle || "(unknown)"}`,
@@ -337,8 +333,9 @@ async function main() {
       });
       return;
     }
-    const handle = expectedHandle ?? detectedHandle ?? "linkedin";
+    const handle = expectedHandle ?? detectedHandle;
 
+    openLinkedInFeed();
     openComposer();
 
     // 1. Upload media first so compose view is stable
