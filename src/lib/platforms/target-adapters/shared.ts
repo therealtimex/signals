@@ -1,7 +1,7 @@
 import type { Page } from "playwright";
 import type { PlatformTarget } from "@/lib/db/types";
 import {
-  detectPlatformHandle,
+  detectAuthenticatedPlatformHandle,
   probePlatformLogin,
 } from "@/lib/platforms/browser-connection";
 import {
@@ -34,7 +34,7 @@ export async function verifyDetectedTarget(
 ): Promise<PlatformTargetVerification> {
   const loggedIn = await probePlatformLogin(platform, page, VERIFY_TIMEOUT_MS);
   const detectedHandle = loggedIn
-    ? await detectPlatformHandle(platform, page, page.url())
+    ? await detectAuthenticatedPlatformHandle(platform, page, VERIFY_TIMEOUT_MS)
     : null;
   return {
     loggedIn,

@@ -37,6 +37,8 @@ import { buildConnectionGuardrails } from "@/lib/platforms/allowed-websites";
 import { addConnectionOrigin } from "@/lib/db/queries/browser-connection-origins";
 import { ensureBrowserConnection } from "@/lib/db/queries/platform-targets";
 import { clearSession, saveSession } from "@/lib/browser/session";
+import { linkedinTargetAdapter } from "@/lib/platforms/target-adapters/linkedin";
+import type { PlatformTarget } from "@/lib/db/types";
 
 vi.mock("playwright", () => ({
   chromium: { connectOverCDP: vi.fn() },
@@ -706,6 +708,79 @@ describe("publish session guardrails", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  describe("LinkedIn target preparation on a feed whose navigation has no profile link", () => {
+    // What the current LinkedIn UI rendered on 2026-10-20: the feed shows no `.global-nav__me`
+    // and no `nav[aria-label="Primary"]`, while `/in/me/` still redirects to the signed-in profile.
+    const currentFeed = (selfProfileUrl?: string) =>
+      fakePage("https://www.linkedin.com/feed/", {
+        settleNavigation: (url) =>
+          selfProfileUrl && url === "https://www.linkedin.com/in/me/" ? selfProfileUrl : url,
+      });
+    const target: PlatformTarget = {
+      id: "target-linkedin",
+      connectionId: "connection",
+      platform: "linkedin",
+      kind: "profile",
+      externalId: null,
+      name: "/in/session-owner",
+      handle: "/in/session-owner",
+      handleNormalized: "session-owner",
+      canonicalUrl: "https://www.linkedin.com/in/session-owner",
+      authPrincipalTargetId: null,
+      platformAccountId: null,
+      capabilities: '["browse","publish"]',
+      isDefault: true,
+      status: "active",
+      mergedIntoTargetId: null,
+      lastVerifiedAt: null,
+      metadata: "{}",
+      createdAt: 1,
+      updatedAt: 1,
+    };
+
+    it("verifies the target through the self-profile redirect", async () => {
+      const page = currentFeed("https://www.linkedin.com/in/session-owner/?isSelfProfile=true");
+
+      await expect(linkedinTargetAdapter.activate(page as never, target)).resolves.toEqual({
+        loggedIn: true,
+        detectedHandle: "/in/session-owner",
+        active: true,
+        switched: false,
+      });
+      expect(page.goto).toHaveBeenCalledWith("https://www.linkedin.com/in/me/", {
+        waitUntil: "commit",
+        timeout: expect.any(Number),
+      });
+    });
+
+    it("discovers the signed-in profile through the same redirect", async () => {
+      const page = currentFeed("https://www.linkedin.com/in/session-owner/?isSelfProfile=true");
+
+      await expect(linkedinTargetAdapter.discover(page as never)).resolves.toEqual([
+        expect.objectContaining({ kind: "profile", handle: "/in/session-owner" }),
+      ]);
+    });
+
+    it("still refuses a different signed-in account", async () => {
+      const page = currentFeed("https://www.linkedin.com/in/someone-else/?isSelfProfile=true");
+
+      await expect(linkedinTargetAdapter.activate(page as never, target)).rejects.toMatchObject({
+        code: "TARGET_ACTIVATION_UNSUPPORTED",
+      });
+    });
+
+    it("leaves an unresolved identity inactive without claiming a switch", async () => {
+      const page = currentFeed();
+
+      await expect(linkedinTargetAdapter.activate(page as never, target)).resolves.toEqual({
+        loggedIn: true,
+        detectedHandle: null,
+        active: false,
+        switched: false,
+      });
+    });
   });
 
   it("requests a platform tab when the session has none, then validates", async () => {
