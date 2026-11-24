@@ -229,6 +229,26 @@ function serializeContactBirthFields(contact: {
   };
 }
 
+function serializeContactFitFields(contact: {
+  fitScore: number | null;
+  fitTier: string | null;
+  fitProduct: string | null;
+  fitConfidence: number | null;
+  fitRationale: string | null;
+  fitScoreVersion: string | null;
+  fitScoredAt: number | null;
+}) {
+  return {
+    fitScore: contact.fitScore,
+    fitTier: contact.fitTier,
+    fitProduct: contact.fitProduct,
+    fitConfidence: contact.fitConfidence,
+    fitRationale: contact.fitRationale,
+    fitScoreVersion: contact.fitScoreVersion,
+    fitScoredAt: contact.fitScoredAt,
+  };
+}
+
 function primaryPlatform(
   identities: { platform: string; isPrimary: number | boolean }[],
 ): string | null {
@@ -291,6 +311,10 @@ export async function handleQueryContacts(input: z.infer<typeof queryContactsSch
       createdTemplateId: input.createdTemplateId,
       minEnrichmentScore: input.minEnrichmentScore,
       maxEnrichmentScore: input.maxEnrichmentScore,
+      tags: input.tags,
+      nicheId: input.nicheId,
+      fitTier: input.fitTier,
+      minFitScore: input.minFitScore,
     });
 
     return {
@@ -313,6 +337,7 @@ export async function handleQueryContacts(input: z.infer<typeof queryContactsSch
         resolvedAvatarUrl: c.resolvedAvatarUrl,
         emailCandidates: listContactEmailCandidates(c.id),
         ...serializeContactBirthFields(c),
+        ...serializeContactFitFields(c),
       })),
     };
   } catch (error) {
@@ -421,6 +446,7 @@ export async function handleGetContact(input: z.infer<typeof getContactSchema>) 
     identities: contact.identities.map(serializeContactIdentity),
     emailCandidates: listContactEmailCandidates(contact.id),
     ...serializeContactBirthFields(contact),
+    ...serializeContactFitFields(contact),
   };
 }
 

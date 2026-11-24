@@ -15,9 +15,9 @@ Invoke body: `{ "tool": "<name>", "input": { ... } }`
 
 | Tool | Use when |
 |------|----------|
-| `query_contacts` | Search/filter active CRM contacts (`email` = exact normalized match, `platformUserId` = exact identity match) |
+| `query_contacts` | Search/filter active CRM contacts (`email` = exact normalized match, `platformUserId` = exact identity match; `tags[]` = all must match, `nicheId` = `belongs_to_niche` member, `fitTier`, `minFitScore`, `sort: "fitScore"` = best fit first). Each row carries ICP fit fields |
 | `resolve_platform_claim` | Is a platform account already claimed, by a contact or an org? Use before creating a contact for an imported handle |
-| `get_contact` | Full record by `contactId` |
+| `get_contact` | Full record by `contactId`, including ICP fit fields (`fitScore`, `fitTier`, `fitProduct`, `fitConfidence`, `fitRationale`, `fitScoreVersion`, `fitScoredAt`) |
 | `get_contact_arpp` | Agent-readable ARPP projection by `contactId`; supports `visibility` |
 | `create_contact` | New contact (requires `name`; optional `channels[]`, `employments[]`) |
 | `update_contact` | Overwrite fields on existing contact |
@@ -25,6 +25,7 @@ Invoke body: `{ "tool": "<name>", "input": { ... } }`
 | `attest_snowball_linkedin_identity` | Verify a LinkedIn identity in the run-bound browser; failures are quarantined automatically |
 | `list_snowball_candidates` | Read quarantined person/company proposals and gate failure reasons |
 | `enrich_contact` | Fill gaps only; needs `contactId` |
+| `score_contact_fit` | Write ICP fit for up to 200 contacts per call (`items[]` of `contactId`, `fitScore` 0–100, `fitTier` A/B/C/unknown, optional `fitProduct`, `fitConfidence` 0–1, `fitRationale`, `fitScoreVersion`); one result per row, rescoring overwrites. Use this, not `enrich_contact.metadata`, for fit |
 | `archive_contact` | Archive with `reason` |
 | `find_duplicate_contacts` | Find duplicate contact groups (tiers 1-3) with a suggested primary |
 | `merge_contacts` | Merge duplicates into `primaryContactId`; idempotent, `options.dryRun` previews |
@@ -183,6 +184,20 @@ closed. Never reuse a stale materialization or bypass `materialize_variant`/send
 ```json
 { "search": "northwind", "funnelStage": "prospect", "pageSize": 20 }
 ```
+Tier A cohort members in a niche, best fit first:
+```json
+{ "tags": ["hackwithbay-4.0"], "nicheId": "<nicheId>", "fitTier": "A", "sort": "fitScore", "pageSize": 100 }
+```
+
+**score_contact_fit**
+```json
+{ "fitScoreVersion": "icp-v1", "items": [
+  { "contactId": "<id>", "fitScore": 87, "fitTier": "A", "fitProduct": "realtimex-desktop",
+    "fitConfidence": 0.8, "fitRationale": "Agency founder automating client ops" } ] }
+```
+Returns `summary {total, ok, skipped, error}` and `results[]` with `status` `ok`, `skipped`
+(`self`, `archived`, `platform_actor`) or `error` (`invalid_input`, `not_found`, `duplicate_in_batch`).
+A merged contact is skipped with `mergedIntoContactId`; score the survivor.
 
 **resolve_platform_claim**
 ```json

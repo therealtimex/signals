@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { PLATFORMS } from "@/lib/db/platforms";
+import { CONTACT_FIT_TIER_ENUM } from "@/lib/contact-fit";
 import {
   RELATIONSHIP_GOAL_ENUM,
   RELATIONSHIP_GOAL_STATUS_ENUM,
@@ -18,6 +19,10 @@ const relationshipGoal = z.enum(RELATIONSHIP_GOAL_ENUM);
 const relationshipGoalStatus = z.enum(RELATIONSHIP_GOAL_STATUS_ENUM);
 
 const platform = z.enum(PLATFORMS as unknown as [string, ...string[]]);
+
+const contactFitTier = z.enum(CONTACT_FIT_TIER_ENUM);
+
+const CONTACT_TAG_MAX_LENGTH = 200;
 
 export const channelInputSchema = z.object({
   id: z.string().min(1).optional(),
@@ -50,7 +55,12 @@ export const queryContactsSchema = z.object({
   platformUserId: z.string().min(1).optional(),
   page: z.number().int().positive().optional(),
   pageSize: z.number().int().positive().max(100).optional(),
-  sort: z.enum(["createdAt", "enrichmentScore"]).optional(),
+  sort: z
+    .enum(["createdAt", "enrichmentScore", "fitScore"])
+    .optional()
+    .describe(
+      "fitScore sorts best fit first (order defaults to desc) with unscored contacts last in either direction.",
+    ),
   order: z.enum(["asc", "desc"]).optional(),
   createdSource: z.enum(CREATED_SOURCES).optional(),
   createdSourceDetail: z.string().min(1).optional(),
@@ -58,6 +68,100 @@ export const queryContactsSchema = z.object({
   createdTemplateId: z.string().min(1).optional(),
   minEnrichmentScore: z.number().int().optional(),
   maxEnrichmentScore: z.number().int().optional(),
+  tags: z
+    .array(z.string().trim().min(1).max(CONTACT_TAG_MAX_LENGTH))
+    .min(1)
+    .max(20)
+    .optional()
+    .describe("Contacts carrying every listed tag (exact, case-sensitive match)."),
+  nicheId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe("Contacts linked to this niche by a belongs_to_niche edge."),
+  fitTier: contactFitTier.optional(),
+  minFitScore: z
+    .number()
+    .int()
+    .min(0)
+    .max(100)
+    .optional()
+    .describe("Inclusive lower bound on fitScore; unscored contacts never match."),
+});
+
+export const CONTACT_FIT_BATCH_MAX = 200;
+
+/** One row of score_contact_fit. Every call overwrites all seven fit fields. */
+export const scoreContactFitItemSchema = z.object({
+  contactId: z.string().min(1),
+  fitScore: z.number().int().min(0).max(100).describe("ICP fit, integer 0–100."),
+  fitTier: contactFitTier,
+  fitProduct: z
+    .string()
+    .trim()
+    .min(1)
+    .max(120)
+    .nullable()
+    .optional()
+    .describe(
+      "Product slug the contact fits (e.g. from the workspace PRODUCTS.md); free-form, not validated, up to 120 characters.",
+    ),
+  fitConfidence: z
+    .number()
+    .min(0)
+    .max(1)
+    .nullable()
+    .optional()
+    .describe("Scorer confidence, 0–1 (same scale as persona confidence)."),
+  fitRationale: z
+    .string()
+    .trim()
+    .min(1)
+    .max(2_000)
+    .nullable()
+    .optional()
+    .describe("Why the contact fits, up to 2,000 characters."),
+  fitScoreVersion: z
+    .string()
+    .trim()
+    .min(1)
+    .max(64)
+    .nullable()
+    .optional()
+    .describe(
+      "Scoring-rubric version, up to 64 characters; overrides the batch-level fitScoreVersion for this row.",
+    ),
+});
+
+const scoreContactFitShape = {
+  fitScoreVersion: z
+    .string()
+    .trim()
+    .min(1)
+    .max(64)
+    .optional()
+    .describe("Default scoring-rubric version for every row that does not set its own."),
+};
+
+/**
+ * Runtime schema: rows are validated one by one in the handler so a bad row is
+ * reported in its own result instead of rejecting the whole batch.
+ */
+export const scoreContactFitSchema = z.object({
+  items: z.array(z.unknown()).min(1).max(CONTACT_FIT_BATCH_MAX),
+  ...scoreContactFitShape,
+});
+
+/** Advertised schema (manifest/OpenAPI): the row shape the handler enforces per row. */
+export const scoreContactFitDocumentedSchema = z.object({
+  items: z
+    .array(scoreContactFitItemSchema)
+    .min(1)
+    .max(CONTACT_FIT_BATCH_MAX)
+    .describe(
+      `1–${CONTACT_FIT_BATCH_MAX} rows. Each row is validated on its own and gets its own result.`,
+    ),
+  ...scoreContactFitShape,
 });
 
 export const resolvePlatformClaimSchema = z.object({

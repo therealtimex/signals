@@ -108,6 +108,13 @@ const contactFixture: ContactWithIdentities = {
   createdSourceDetail: "agent:create_contact",
   createdWorkflowRunId: null,
   createdTemplateId: null,
+  fitScore: null,
+  fitTier: null,
+  fitProduct: null,
+  fitConfidence: null,
+  fitRationale: null,
+  fitScoreVersion: null,
+  fitScoredAt: null,
   identities: [
     {
       id: "id1",

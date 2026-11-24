@@ -10,6 +10,7 @@ import {
   RELATIONSHIP_GOAL_ENUM,
   RELATIONSHIP_GOAL_STATUS_ENUM,
 } from "../relationship-goals";
+import { CONTACT_FIT_TIER_ENUM } from "../contact-fit";
 
 export const COMPANY_SIZE_ENUM = [
   "1-10",
@@ -180,9 +181,19 @@ export const contacts = sqliteTable("contacts", {
   createdSourceDetail: text("created_source_detail"),
   createdWorkflowRunId: text("created_workflow_run_id"),
   createdTemplateId: text("created_template_id"),
+  // ICP fit (#570): written atomically by the score_contact_fit agent-tool. Distinct from
+  // enrichmentScore, which measures profile completeness rather than fit.
+  fitScore: integer("fit_score"), // 0–100
+  fitTier: text("fit_tier", { enum: CONTACT_FIT_TIER_ENUM }),
+  fitProduct: text("fit_product"), // caller's product slug (customer PRODUCTS.md); not validated
+  fitConfidence: real("fit_confidence"), // 0–1, same scale as persona confidence
+  fitRationale: text("fit_rationale"),
+  fitScoreVersion: text("fit_score_version"), // caller's scoring-rubric version
+  fitScoredAt: integer("fit_scored_at"), // unix seconds, server-set
   ...timestamps,
 }, (table) => [
   index("idx_contacts_name").on(table.name),
+  index("idx_contacts_fit_score").on(table.fitScore),
   index("idx_contacts_created_source").on(table.createdSource, table.createdSourceDetail),
   index("idx_contacts_created_run").on(table.createdWorkflowRunId),
   index("idx_contacts_created_template").on(table.createdTemplateId),

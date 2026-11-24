@@ -38,16 +38,17 @@ Then pass `Authorization: Bearer your-secret-token` on each request.
 
 | Tool | Category | Description |
 |------|----------|-------------|
-| `query_contacts` | contacts | Search/filter the default Contacts population (non-archived, non-platform-actor contacts; self included); `email` is an exact normalized match (incl. non-primary channels), `platformUserId` an exact identity match. Results list their identities. Not a claim lookup — use `resolve_platform_claim` |
+| `query_contacts` | contacts | Search/filter the default Contacts population (non-archived, non-platform-actor contacts; self included); `email` is an exact normalized match (incl. non-primary channels), `platformUserId` an exact identity match. Also filters by `tags[]` (all must match), `nicheId` (`belongs_to_niche` membership), `fitTier` and `minFitScore`, and sorts by `fitScore`. Results list their identities and ICP fit fields. Not a claim lookup — use `resolve_platform_claim` |
 | `resolve_platform_claim` | contacts | Is this platform account already claimed, by a contact **or an org** identity? Same resolution `upsert_contact_identity` enforces. Returns `{claimed:false}` or `{claimed:true, claimant:{kind, …, archived}}` |
 | `attest_snowball_linkedin_identity` | platforms | Verify a proposed LinkedIn identity in the run-bound authenticated browser; failed gates automatically enter candidate quarantine |
 | `list_snowball_candidates` | contacts | List failed Snowball person/company proposals without exposing them as canonical graph records |
-| `get_contact` | contacts | Full contact by ID |
+| `get_contact` | contacts | Full contact by ID, including ICP fit fields |
 | `get_contact_arpp` | contacts | Project a contact as ARPP with internal or public visibility |
 | `create_contact` | contacts | Create a contact (`channels[]`, `employments[]` supported) |
 | `update_contact` | contacts | Update contact fields. `channels[]` is a full replace: a channel left out of the list is deleted, so send every channel to keep (or add one with `enrich_contact`'s `email` / `phone`) |
 | `upsert_contact_identity` | contacts | Create or update a platform identity for a contact |
 | `enrich_contact` | contacts | Fill gaps without overwriting |
+| `score_contact_fit` | contacts | Batch-write ICP fit (`fitScore`, `fitTier`, `fitProduct`, `fitConfidence`, `fitRationale`, `fitScoreVersion`) for up to 200 contacts, with a result per row |
 | `archive_contact` | contacts | Archive with reason |
 | `find_duplicate_contacts` | contacts | Scan for duplicate contacts. Tier 1 = shared email or platform handle, tier 2 = matching name at the same org, tier 3 = shared employment node plus overlapping interaction threads. Read-only |
 | `merge_contacts` | contacts | Merge duplicates into a surviving primary and archive each secondary with `mergedIntoContactId`. Idempotent; supports `options.dryRun` |
@@ -129,6 +130,49 @@ Then pass `Authorization: Bearer your-secret-token` on each request.
 | `release_platform_target` | platforms | Release a target preparation lease |
 
 Simulation run tool responses include additive fields (`populationSpec`, `error`, `workflowRunId`, `createdAt`, `updatedAt`, `transcriptsPrunedAt`) shared with the dashboard REST API (`specs/ui-4.1-rest-api.md`).
+
+**ICP fit scoring** (#570). `score_contact_fit` writes first-class fit fields on contacts;
+`enrichmentScore` keeps measuring profile completeness, not fit. Don't store fit in
+`enrich_contact.metadata`: `get_contact` doesn't return metadata and `query_contacts` can't filter on it.
+
+| Field | Type | Notes |
+|---|---|---|
+| `fitScore` | integer 0–100 | Required on every row |
+| `fitTier` | `A` \| `B` \| `C` \| `unknown` | Required on every row |
+| `fitProduct` | string ≤120 | Product slug, e.g. from the workspace `PRODUCTS.md`; free-form, not validated |
+| `fitConfidence` | number 0–1 | Same scale as persona `confidence` |
+| `fitRationale` | string ≤2,000 | |
+| `fitScoreVersion` | string ≤64 | Scoring-rubric version. A batch-level `fitScoreVersion` applies to rows that don't set one |
+| `fitScoredAt` | unix seconds | Set by the server; not accepted as input |
+
+- Send `{ "fitScoreVersion"?: string, "items": [ { "contactId", "fitScore", "fitTier", ... } ] }` with
+  1–200 rows. A malformed envelope (no `items`, an empty array, more than 200 rows) is a 400
+  `VALIDATION_ERROR` and writes nothing.
+- Each row is validated and resolved on its own. The result is
+  `{ fitScoredAt, summary: { total, ok, skipped, error }, results: [ { index, contactId, status, reason?, message? } ] }`:
+  - `ok`: written.
+  - `skipped`: `self`, `archived` (a merged contact also returns `mergedIntoContactId`; score the
+    survivor) or `platform_actor`. Same contact universe as the enrichment pipeline.
+  - `error`: `invalid_input` (with `issues`), `not_found` or `duplicate_in_batch` (the first row
+    for a contact wins).
+- Rescoring overwrites all seven fields. An optional field left out becomes `null`, so a stale
+  rationale never outlives its score.
+- `query_contacts` reads fit back. `fitTier` is an exact match, `minFitScore` is inclusive and never
+  matches unscored contacts, and `sort: "fitScore"` puts the best fit first (`order` defaults to
+  `desc`). Unscored contacts sort last in either direction, and the self contact is not pinned to
+  the top for this sort. `tags` requires every listed tag (exact, case-sensitive). `nicheId`
+  matches contacts with a `belongs_to_niche` edge to that niche. All filters combine with AND.
+
+```bash
+# Score a batch, then list Tier A cohort members in a niche, best first
+curl -s -X POST http://localhost:3010/api/agent-tools/invoke -H 'Content-Type: application/json' \
+  -d '{"tool":"score_contact_fit","input":{"fitScoreVersion":"icp-v1","items":[
+        {"contactId":"<id>","fitScore":87,"fitTier":"A","fitProduct":"realtimex-desktop",
+         "fitConfidence":0.8,"fitRationale":"Agency founder automating client ops"}]}}' | jq '.result.summary'
+curl -s -X POST http://localhost:3010/api/agent-tools/invoke -H 'Content-Type: application/json' \
+  -d '{"tool":"query_contacts","input":{"tags":["hackwithbay-4.0"],"nicheId":"<nicheId>",
+        "fitTier":"A","sort":"fitScore","pageSize":100}}' | jq '.result.contacts[] | {id,name,fitScore,fitTier,fitProduct}'
+```
 
 `create_contact` / `update_contact` with a `company` field also dual-write an `orgs` row and `works_at` edge (contacts projection unchanged).
 
