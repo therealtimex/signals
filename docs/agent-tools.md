@@ -227,7 +227,9 @@ scored candidates and composes existing tools:
 `get_contact`, `get_contact_arpp`, `upsert_contact_identity`, `enrich_contact`,
 `link_contact_to_org`, `log_interaction`, and `complete_workflow_run`. Its structured completion
 result may include `fieldsUpdated`, `unresolvedFields`, `identityLinked`, `visitedUrls`, `blockedUrls`,
-`serpCandidates`, `ambiguous`, `partial`, and `message`. `identityLinked: true` conditionally
+`serpCandidates`, `ambiguous`, `partial`, `identityProvenanceUsed`, `aliasesAdded`, and `message`.
+`identityProvenanceUsed` names the branch the brief ran for the primary identity's provenance
+(`self_declared`, `agent_verified`, `inferred`, or `unknown`). `identityLinked: true` conditionally
 cascades that contact into Contact profile pipeline. Login, auth-wall, and CAPTCHA URLs are never
 identity evidence. `complete_workflow_run` returns a `leaseRelease` outcome for this lane after
 browser teardown and before cascade dispatch.
