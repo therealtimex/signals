@@ -1002,7 +1002,13 @@ describe("runTemplateViaRtx health preflight", () => {
       fetchImpl,
     );
 
-    expect(result).toMatchObject({ success: false, errorCode: "rtx_unavailable" });
+    // RTX answered the workspace and thread calls, so a lost send is a launch failure (#572).
+    expect(result).toMatchObject({
+      success: false,
+      errorCode: "launch_failed",
+      httpStatus: 502,
+      details: { dispatchState: "uncertain", rtxErrorCode: "rtx_unavailable" },
+    });
     if (result.success || !result.workflowRunId) throw new Error("expected uncertain dispatch");
     const lifecycle = readWorkflowTerminalLifecycle(
       getWorkflowRun(result.workflowRunId)?.config,

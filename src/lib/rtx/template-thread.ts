@@ -17,7 +17,9 @@ export type TemplateThreadResolution =
   /** The pointer was stale (thread deleted in RealTimeX) — recreated and persisted. */
   | "recreated"
   /** Caller asked for an isolated run — a throwaway thread that is not persisted. */
-  | "fresh";
+  | "fresh"
+  /** The dedicated thread failed its liveness check — a new one was created and persisted (#572). */
+  | "replaced";
 
 export type ResolveTemplateThreadResult = {
   threadSlug: string;
@@ -129,6 +131,42 @@ export async function getOrCreateTemplateThread(
   return {
     threadSlug,
     resolution: storedSlug ? "recreated" : "created",
+    ...baseResult,
+  };
+}
+
+/**
+ * Move a template off a dedicated thread that is no longer fit to receive dispatches (#572).
+ *
+ * The dead thread is left in place for the Human to read; the template pointer moves to a new
+ * thread so later runs stop landing in it too. A concurrent replacement wins the pointer swap and
+ * this run joins that thread instead of creating a third.
+ */
+export async function replaceTemplateThread(
+  input: {
+    template: Pick<WorkflowTemplate, "id">;
+    workspaceSlug: string;
+    threadName: string;
+    staleThreadSlug: string;
+  },
+  env: EnvLike = process.env,
+  fetchImpl: typeof fetch = fetch,
+): Promise<ResolveTemplateThreadResult> {
+  const baseResult = {
+    threadName: input.threadName,
+    renameAttempted: false,
+    renamed: false,
+  };
+  const threadSlug = await createRtxPublishThread(
+    input.workspaceSlug,
+    input.threadName,
+    env,
+    fetchImpl,
+  );
+  const claimed = claimTemplateThreadSlug(input.template.id, input.staleThreadSlug, threadSlug);
+  return {
+    threadSlug: claimed,
+    resolution: claimed === threadSlug ? "replaced" : "reused",
     ...baseResult,
   };
 }
