@@ -22,6 +22,8 @@ const (
 	rowOutcomeNew      = "new"
 	rowOutcomeMatch    = "match"
 	rowOutcomeConflict = "conflict"
+	// rowOutcomeUnchecked is a row imported without --dedupe: no lookup ran.
+	rowOutcomeUnchecked = "unchecked"
 
 	rowActionCreate = "create"
 	rowActionUpdate = "update"
@@ -34,6 +36,7 @@ const (
 var readOnlyImportTools = map[string]struct{}{
 	"query_contacts":         {},
 	"resolve_platform_claim": {},
+	"query_niches":           {},
 }
 
 // rowIdentity is one platform identity on an import row.
@@ -41,6 +44,9 @@ type rowIdentity struct {
 	Platform       string
 	PlatformUserID string
 	PlatformHandle string
+	ProfileURL     string
+	// Provenance of this identity; for the primary it lives on contactRow.Provenance.
+	Provenance *identityProvenance
 	// primary is set by contactRow.identities for the row's own platform columns.
 	primary bool
 }
@@ -56,8 +62,8 @@ func (id rowIdentity) claimKey() string {
 }
 
 // identities returns every platform identity on the row, primary first, without repeats.
-// Today a row carries one (platform / platform_user_id / platform_handle); SecondaryIdentities
-// is where #567's `identities[]` lands, and dedupe already considers it.
+// The primary comes from platform / platform_user_id / platform_handle (or identities[0]);
+// SecondaryIdentities holds the rest of `identities[]` (#567).
 func (row contactRow) identities() []rowIdentity {
 	all := make([]rowIdentity, 0, 1+len(row.SecondaryIdentities))
 	if row.Platform != "" {
@@ -115,6 +121,7 @@ type rowMatch struct {
 // `reconcile` output.
 type rowReport struct {
 	Row          int             `json:"row"`
+	Key          string          `json:"key,omitempty"`
 	Name         string          `json:"name"`
 	Outcome      string          `json:"outcome"`
 	Action       string          `json:"action"`
@@ -128,6 +135,7 @@ type rowReport struct {
 func newRowReport(index int, row contactRow, match rowMatch, action string) rowReport {
 	return rowReport{
 		Row:          index,
+		Key:          row.Key,
 		Name:         row.Name,
 		Outcome:      match.Outcome,
 		Action:       action,
@@ -323,8 +331,9 @@ func plannedClaimKey(platform, key string) string {
 }
 
 // record notes what a real run writes for the row: create_contact stores the row's email and
-// primary identity on a new contact; an update attaches the primary identity to the matched
-// contact (enrich_contact does not add the email). Secondary identities are not written yet.
+// primary identity on a new contact, and every further identity is then attached to it; an
+// update attaches all of the row's identities to the matched contact (enrich_contact does not
+// add the email).
 func (p *dryRunPlan) record(index int, row contactRow, match rowMatch, action string) {
 	var owner string
 	switch action {
@@ -341,9 +350,6 @@ func (p *dryRunPlan) record(index int, row contactRow, match rowMatch, action st
 		return
 	}
 	for _, identity := range row.identities() {
-		if !identity.primary {
-			continue
-		}
 		key := plannedClaimKey(identity.Platform, identity.claimKey())
 		if _, exists := p.claims[key]; !exists {
 			p.claims[key] = owner
