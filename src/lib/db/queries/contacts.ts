@@ -7,6 +7,7 @@ import {
   contactEmployments,
   contactIdentities,
   contentItems,
+  graphEdges,
   orgs,
   tasks,
   workflowSteps,
@@ -229,7 +230,7 @@ export function listContacts(opts?: {
   page?: number;
   pageSize?: number;
   includeArchived?: boolean;
-  sort?: "createdAt" | "enrichmentScore";
+  sort?: "createdAt" | "enrichmentScore" | "fitScore";
   order?: "asc" | "desc";
   createdSource?: CreatedSource;
   createdSourceDetail?: string;
@@ -238,6 +239,13 @@ export function listContacts(opts?: {
   minEnrichmentScore?: number;
   maxEnrichmentScore?: number;
   hasRelationshipGoal?: boolean;
+  /** Contact must carry every listed tag (exact match on the JSON `tags` array). */
+  tags?: string[];
+  /** Contact must belong to this niche through a `belongs_to_niche` edge (any scope). */
+  nicheId?: string;
+  fitTier?: NonNullable<Contact["fitTier"]>;
+  /** Inclusive; unscored contacts (null fitScore) never match. */
+  minFitScore?: number;
 }): PaginatedResult<ContactDTO> {
   const conditions: SQL[] = defaultContactListVisibilityConditions(opts);
 
@@ -383,6 +391,41 @@ export function listContacts(opts?: {
   if (opts?.hasRelationshipGoal) {
     conditions.push(isNotNull(contacts.relationshipGoal));
   }
+  for (const tag of new Set(opts?.tags ?? [])) {
+    // `tags` is free text written by update_contact, so guard json_each against
+    // malformed JSON rather than letting one bad row fail the whole query.
+    conditions.push(sql`EXISTS (
+      SELECT 1 FROM json_each(
+        CASE WHEN json_valid(${contacts.tags}) AND json_type(${contacts.tags}) = 'array'
+          THEN ${contacts.tags} ELSE '[]' END
+      )
+      WHERE json_each.value = ${tag}
+    )`);
+  }
+  if (opts?.nicheId) {
+    conditions.push(
+      exists(
+        db
+          .select({ id: graphEdges.id })
+          .from(graphEdges)
+          .where(
+            and(
+              eq(graphEdges.edgeType, "belongs_to_niche"),
+              eq(graphEdges.srcType, "contact"),
+              eq(graphEdges.srcId, contacts.id),
+              eq(graphEdges.dstType, "niche"),
+              eq(graphEdges.dstId, opts.nicheId),
+            ),
+          ),
+      ),
+    );
+  }
+  if (opts?.fitTier) {
+    conditions.push(eq(contacts.fitTier, opts.fitTier));
+  }
+  if (opts?.minFitScore !== undefined) {
+    conditions.push(gte(contacts.fitScore, opts.minFitScore));
+  }
 
   const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
@@ -396,16 +439,30 @@ export function listContacts(opts?: {
   const page = opts?.page ?? 1;
   const pageSize = opts?.pageSize ?? 25;
 
-  const sortField =
-    opts?.sort === "enrichmentScore" ? contacts.enrichmentScore : contacts.createdAt;
-  const orderDirection = opts?.order ?? (opts?.sort === "enrichmentScore" ? "asc" : "desc");
-  const orderByClause = orderDirection === "asc" ? asc(sortField) : desc(sortField);
+  let orderBy: SQL[];
+  if (opts?.sort === "fitScore") {
+    // Best fit first by default. Unscored contacts sort last in either direction, and the
+    // self contact is not pinned: it is never scored, so pinning it would put a null first.
+    const direction = opts.order === "asc" ? asc(contacts.fitScore) : desc(contacts.fitScore);
+    orderBy = [
+      sql`${contacts.fitScore} IS NULL`,
+      direction,
+      desc(contacts.createdAt),
+      asc(contacts.id),
+    ];
+  } else {
+    const sortField =
+      opts?.sort === "enrichmentScore" ? contacts.enrichmentScore : contacts.createdAt;
+    const orderDirection = opts?.order ?? (opts?.sort === "enrichmentScore" ? "asc" : "desc");
+    const orderByClause = orderDirection === "asc" ? asc(sortField) : desc(sortField);
+    orderBy = [desc(contacts.isSelf), orderByClause];
+  }
 
   const rows = db
     .select()
     .from(contacts)
     .where(whereClause)
-    .orderBy(desc(contacts.isSelf), orderByClause)
+    .orderBy(...orderBy)
     .limit(pageSize)
     .offset((page - 1) * pageSize)
     .all();

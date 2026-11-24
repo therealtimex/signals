@@ -201,8 +201,10 @@
                             "type": "string",
                             "enum": [
                               "createdAt",
-                              "enrichmentScore"
-                            ]
+                              "enrichmentScore",
+                              "fitScore"
+                            ],
+                            "description": "fitScore sorts best fit first (order defaults to desc) with unscored contacts last in either direction."
                           },
                           "order": {
                             "type": "string",
@@ -235,6 +237,30 @@
                           },
                           "maxEnrichmentScore": {
                             "type": "number"
+                          },
+                          "tags": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            },
+                            "description": "Contacts carrying every listed tag (exact, case-sensitive match)."
+                          },
+                          "nicheId": {
+                            "type": "string",
+                            "description": "Contacts linked to this niche by a belongs_to_niche edge."
+                          },
+                          "fitTier": {
+                            "type": "string",
+                            "enum": [
+                              "A",
+                              "B",
+                              "C",
+                              "unknown"
+                            ]
+                          },
+                          "minFitScore": {
+                            "type": "number",
+                            "description": "Inclusive lower bound on fitScore; unscored contacts never match."
                           }
                         },
                         "additionalProperties": false
@@ -741,6 +767,78 @@
                         },
                         "required": [
                           "contactId"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "score_contact_fit"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "items": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "contactId": {
+                                  "type": "string"
+                                },
+                                "fitScore": {
+                                  "type": "number",
+                                  "description": "ICP fit, integer 0–100."
+                                },
+                                "fitTier": {
+                                  "type": "string",
+                                  "enum": [
+                                    "A",
+                                    "B",
+                                    "C",
+                                    "unknown"
+                                  ]
+                                },
+                                "fitProduct": {
+                                  "type": "string",
+                                  "description": "Product slug the contact fits (e.g. from the workspace PRODUCTS.md); free-form, not validated, up to 120 characters."
+                                },
+                                "fitConfidence": {
+                                  "type": "number",
+                                  "description": "Scorer confidence, 0–1 (same scale as persona confidence)."
+                                },
+                                "fitRationale": {
+                                  "type": "string",
+                                  "description": "Why the contact fits, up to 2,000 characters."
+                                },
+                                "fitScoreVersion": {
+                                  "type": "string",
+                                  "description": "Scoring-rubric version, up to 64 characters; overrides the batch-level fitScoreVersion for this row."
+                                }
+                              },
+                              "required": [
+                                "contactId",
+                                "fitScore",
+                                "fitTier"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "description": "1–200 rows. Each row is validated on its own and gets its own result."
+                          },
+                          "fitScoreVersion": {
+                            "type": "string",
+                            "description": "Default scoring-rubric version for every row that does not set its own."
+                          }
+                        },
+                        "required": [
+                          "items"
                         ],
                         "additionalProperties": false
                       }
@@ -4991,6 +5089,7 @@
                       "get_contact_arpp",
                       "create_contact",
                       "update_contact",
+                      "score_contact_fit",
                       "enrich_contact",
                       "upsert_contact_identity",
                       "archive_contact",
@@ -5222,6 +5321,6 @@
   ],
   "x-signals-agent-tools": {
     "manifestVersion": "1",
-    "toolCount": 93
+    "toolCount": 94
   }
 }
