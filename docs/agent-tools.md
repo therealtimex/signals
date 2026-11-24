@@ -201,6 +201,27 @@ fields are null for identities written before #571 or without provenance, which 
   carries `provenance: {kind, sourceUrl, observedAt} | null`. The contacts REST payloads expose
   the raw columns `provenanceKind`, `provenanceSourceUrl` and `provenanceObservedAt`.
 
+**Import dedupe across every identity** (#568). `signals-pp-cli import contacts --dedupe`,
+`import contacts --dedupe --dry-run` and `reconcile` classify each row by its email
+(`query_contacts.email`) and **every** platform identity on it (`resolve_platform_claim`, the same
+resolution the `upsert_contact_identity` guard enforces), not just the primary one:
+
+| `rows[].outcome` | When | Import does |
+|---|---|---|
+| `new` | Nothing matches | Creates the contact (`action: create`) |
+| `match` | Exactly one existing contact, and every claimed identity and the email agree on it | Updates it and attaches the row's primary identity, with its provenance unchanged (`action: update`); an archived owner is skipped (`action: skip`) |
+| `conflict` | Claimed identities point at two or more contacts, an identity and the email disagree, the email alone matches several contacts, or an org holds one of the accounts | Skips the row and never creates it (`action: skip`); counted in `conflicts` and explained in `notes` |
+
+Each row reports `contactId`, `matchedBy[]` (`platform`, `platformUserId`, `primary`,
+`claimantKind`, `contactId` / `orgId`, `archived`) and `emailMatches[]`. `--dry-run` and
+`reconcile` run the same read-only lookups and write nothing. They also account for the rows before
+each row: a row that repeats an earlier row's identity or email matches that row, reported as
+`contactId: "row:<n>"`, where a real run reports the ID of the contact row `<n>` created. A conflict
+is skipped, not failed, so it doesn't change the exit code; read `conflicts`. Merging the duplicates
+a conflict names is left to the merge flow (`reconcile --merge`, or the dedupe panel).
+Outside a Network Snowball run, `create_contact` commits the contact, its identity and its fields in
+one transaction, so a failure after the insert leaves nothing behind.
+
 **Name aliases** (#571). `get_contact.aliases` is a string array of other names the contact goes by,
 such as "Sas P" on Luma for "Sasmita S" on LinkedIn. Add aliases with `enrich_contact.aliases`
 (1–20 per call, each ≤120 characters). They are appended, never replaced, and deduped

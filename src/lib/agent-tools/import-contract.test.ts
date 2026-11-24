@@ -160,4 +160,60 @@ describe("contact-import agent-tool response contract", () => {
     });
     expect(listContacts({ search: "Rejected Duplicate" }).total).toBe(0);
   });
+
+  it("resolves a secondary identity to its owner, which the importer's every-identity dedupe relies on (#568)", async () => {
+    // The issue's data: the existing contact has LinkedIn `trungdangle` (primary) and X
+    // `trung_rta` (secondary). The Luma row carries LinkedIn `trung-le-rta` plus X `trung_rta`.
+    const existing = await invoke("create_contact", {
+      name: "Trung Le",
+      platform: "linkedin",
+      platformUserId: "trungdangle",
+    });
+    const contactId = existing.body.result.id as string;
+    const secondary = await invoke("upsert_contact_identity", {
+      contactId,
+      platform: "x",
+      platformUserId: "trung_rta",
+      provenance: { kind: "self_declared" },
+    });
+    expect(secondary.response.status).toBe(200);
+    expect(secondary.body.result.isPrimary).toBe(false);
+
+    const rowPrimary = await invoke("resolve_platform_claim", {
+      platform: "linkedin",
+      platformUserId: "trung-le-rta",
+    });
+    expect(rowPrimary.body).toMatchObject({ success: true, result: { claimed: false } });
+
+    const rowSecondary = await invoke("resolve_platform_claim", {
+      platform: "x",
+      platformUserId: "trung_rta",
+    });
+    expect(rowSecondary.body).toMatchObject({
+      success: true,
+      result: { claimed: true, claimant: { kind: "contact", contactId, archived: false } },
+    });
+
+    // What the importer then does on a match: attach the row's primary identity to the matched
+    // contact. The secondary identity's provenance is untouched.
+    const attach = await invoke("upsert_contact_identity", {
+      contactId,
+      platform: "linkedin",
+      platformUserId: "trung-le-rta",
+      provenance: { kind: "self_declared", sourceUrl: "https://lu.ma/user/trung" },
+    });
+    expect(attach.response.status).toBe(200);
+    const contact = await invoke("get_contact", { contactId });
+    const identities = contact.body.result.identities as Array<{
+      platformUserId: string;
+      provenance: { kind: string } | null;
+    }>;
+    expect(identities.map((i) => i.platformUserId).sort()).toEqual(
+      ["trung-le-rta", "trung_rta", "trungdangle"],
+    );
+    expect(identities.find((i) => i.platformUserId === "trung_rta")?.provenance?.kind).toBe(
+      "self_declared",
+    );
+    expect(listContacts({ search: "Trung Le" }).total).toBe(1);
+  });
 });

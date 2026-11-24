@@ -476,8 +476,10 @@ func TestImportContactChunkForwardsSnowballEvidenceToExistingIdentityUpsert(t *t
 	if upsertInput["candidateCompany"] != "Acme Inc." || upsertInput["candidateTitle"] != "Founder" {
 		t.Fatalf("upsert candidate context = %#v", upsertInput)
 	}
+	// Both lookups run first (#568: every identity is checked even after an email match);
+	// the evidence-gated identity write still precedes any other mutation.
 	wantCalls := []string{
-		"query_contacts", "upsert_contact_identity", "enrich_contact", "record_workflow_run_contacts",
+		"query_contacts", "resolve_platform_claim", "upsert_contact_identity", "enrich_contact", "record_workflow_run_contacts",
 	}
 	if !reflect.DeepEqual(calls, wantCalls) {
 		t.Fatalf("calls = %#v, want evidence validation first %#v", calls, wantCalls)
@@ -555,7 +557,7 @@ func TestImportContactChunkEvidenceBackedRerunIsIdempotent(t *testing.T) {
 	}
 	wantCalls := []string{
 		"query_contacts", "resolve_platform_claim", "create_contact", "enrich_contact", "record_workflow_run_contacts",
-		"query_contacts", "upsert_contact_identity", "enrich_contact", "record_workflow_run_contacts",
+		"query_contacts", "resolve_platform_claim", "upsert_contact_identity", "enrich_contact", "record_workflow_run_contacts",
 	}
 	if !reflect.DeepEqual(calls, wantCalls) {
 		t.Fatalf("calls = %#v, want second pass to skip identity write %#v", calls, wantCalls)
@@ -571,12 +573,10 @@ func TestImportContactChunkRejectsSnowballEvidenceBeforeExistingContactMutation(
 		case "query_contacts":
 			return map[string]any{"contacts": []any{map[string]any{"id": "contact-existing"}}}, nil
 		case "resolve_platform_claim":
-			return map[string]any{
-				"claimed": true,
-				"claimant": map[string]any{
-					"kind": "contact", "contactId": "contact-other", "identityId": "identity-other", "archived": false,
-				},
-			}, nil
+			// Unclaimed, so the row matches contact-existing by email and the server rejects
+			// the expired evidence. (A claim by another contact is a conflict now, caught
+			// before any write: see TestImportContactChunkSkipsEmailIdentityDisagreement.)
+			return map[string]any{"claimed": false}, nil
 		case "upsert_contact_identity":
 			return nil, usageErr(fmt.Errorf("identity evidence expired"))
 		case "enrich_contact":
@@ -611,7 +611,7 @@ func TestImportContactChunkRejectsSnowballEvidenceBeforeExistingContactMutation(
 		t.Fatalf("summary = %+v", summary)
 	}
 	wantCalls := []string{
-		"query_contacts", "upsert_contact_identity",
+		"query_contacts", "resolve_platform_claim", "upsert_contact_identity",
 	}
 	if !reflect.DeepEqual(calls, wantCalls) {
 		t.Fatalf("calls = %#v, want no contact mutation %#v", calls, wantCalls)
@@ -967,6 +967,8 @@ func TestImportContactChunkDoesNotCountRejectedWrites(t *testing.T) {
 					return map[string]any{
 						"contacts": []any{map[string]any{"id": "contact-existing"}},
 					}, nil
+				case "resolve_platform_claim":
+					return map[string]any{"claimed": false}, nil
 				case "create_contact":
 					return map[string]any{"id": "contact-created"}, nil
 				case "enrich_contact", "upsert_contact_identity":
