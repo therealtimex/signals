@@ -1706,6 +1706,23 @@
                               "partial": {
                                 "type": "boolean"
                               },
+                              "identityProvenanceUsed": {
+                                "type": "string",
+                                "enum": [
+                                  "self_declared",
+                                  "agent_verified",
+                                  "inferred",
+                                  "unknown"
+                                ],
+                                "description": "Contact Web Research: which identity-provenance branch ran, read from the primary identity. unknown means none was recorded."
+                              },
+                              "aliasesAdded": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                },
+                                "description": "Contact Web Research: names enrich_contact actually added as aliases in this run."
+                              },
                               "message": {
                                 "type": "string"
                               }

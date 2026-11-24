@@ -8,6 +8,7 @@ import {
 } from "@/lib/identity-provenance";
 import {
   CONTACT_ALIAS_MAX_LENGTH,
+  CONTACT_ALIASES_MAX,
   CONTACT_ALIASES_PER_WRITE_MAX,
 } from "@/lib/contact-aliases";
 import {
@@ -615,6 +616,17 @@ export const completeWorkflowRunSchema = z.object({
         .optional(),
       ambiguous: z.boolean().optional(),
       partial: z.boolean().optional(),
+      identityProvenanceUsed: z
+        .enum([...IDENTITY_PROVENANCE_KIND_ENUM, "unknown"])
+        .optional()
+        .describe(
+          "Contact Web Research: which identity-provenance branch ran, read from the primary identity. unknown means none was recorded.",
+        ),
+      aliasesAdded: z
+        .array(z.string().min(1).max(CONTACT_ALIAS_MAX_LENGTH))
+        .max(CONTACT_ALIASES_MAX)
+        .optional()
+        .describe("Contact Web Research: names enrich_contact actually added as aliases in this run."),
       message: z.string().optional(),
     })
     .passthrough()
