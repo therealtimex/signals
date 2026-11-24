@@ -216,6 +216,33 @@ func TestDropInvalidRowIdentitiesKeepsSnowballEvidenceRows(t *testing.T) {
 	}
 }
 
+// Verifier WP6 r1 finding 1: a valid platformUserId with a junk platformHandle. The server checks
+// the handle too, so the CLI must drop the identity instead of letting the write fail midway.
+func TestDropInvalidRowIdentitiesChecksTheHandleBesideAValidKey(t *testing.T) {
+	identity := rowIdentity{Platform: "x", PlatformUserID: "uid_ok_c1", PlatformHandle: "hi"}
+	v := checkRowIdentity(identity, false)
+	if v == nil || v.Field != "platformHandle" || v.Value != "hi" || v.Rule != "too_short" {
+		t.Fatalf("violation = %+v", v)
+	}
+	if v := checkRowIdentity(identity, true); v != nil {
+		t.Fatalf("with --allow-unusual-handles: %+v", v)
+	}
+
+	rows := []contactRow{{
+		Name: "Key Ok", Platform: "linkedin", PlatformUserID: "key-ok",
+		SecondaryIdentities: []rowIdentity{identity},
+	}, {
+		Name: "Primary Key Ok", Platform: "x", PlatformUserID: "uid_ok_c2", PlatformHandle: "notwitter",
+	}}
+	dropInvalidRowIdentities(rows, false)
+	if len(rows[0].SecondaryIdentities) != 0 || len(rows[0].RejectedIdentities) != 1 || rows[0].RejectedIdentities[0].Field != "platformHandle" {
+		t.Fatalf("row 1 = %+v", rows[0])
+	}
+	if rows[1].Platform != "" || len(rows[1].RejectedIdentities) != 1 || rows[1].RejectedIdentities[0].Rule != "placeholder" {
+		t.Fatalf("row 2 = %+v", rows[1])
+	}
+}
+
 // PR #574 C14: the server skips the value checks for an avatar-like platformUrl, including an
 // image URL with a query string, so the CLI must not drop that identity.
 func TestCheckRowIdentitySkipsAnAvatarURLWithAQueryString(t *testing.T) {
