@@ -42,12 +42,12 @@ Then pass `Authorization: Bearer your-secret-token` on each request.
 | `resolve_platform_claim` | contacts | Is this platform account already claimed, by a contact **or an org** identity? Same resolution `upsert_contact_identity` enforces. Returns `{claimed:false}` or `{claimed:true, claimant:{kind, …, archived}}` |
 | `attest_snowball_linkedin_identity` | platforms | Verify a proposed LinkedIn identity in the run-bound authenticated browser; failed gates automatically enter candidate quarantine |
 | `list_snowball_candidates` | contacts | List failed Snowball person/company proposals without exposing them as canonical graph records |
-| `get_contact` | contacts | Full contact by ID, including ICP fit fields |
+| `get_contact` | contacts | Full contact by ID, including ICP fit fields, `aliases[]`, and each identity's `provenance` |
 | `get_contact_arpp` | contacts | Project a contact as ARPP with internal or public visibility |
-| `create_contact` | contacts | Create a contact (`channels[]`, `employments[]` supported) |
+| `create_contact` | contacts | Create a contact (`channels[]`, `employments[]` supported); optional `provenance` for its platform identity |
 | `update_contact` | contacts | Update contact fields. `channels[]` is a full replace: a channel left out of the list is deleted, so send every channel to keep (or add one with `enrich_contact`'s `email` / `phone`) |
-| `upsert_contact_identity` | contacts | Create or update a platform identity for a contact |
-| `enrich_contact` | contacts | Fill gaps without overwriting |
+| `upsert_contact_identity` | contacts | Create or update a platform identity for a contact; optional `provenance` (`self_declared` / `agent_verified` / `inferred`) |
+| `enrich_contact` | contacts | Fill gaps without overwriting; appends name `aliases[]` |
 | `score_contact_fit` | contacts | Batch-write ICP fit (`fitScore`, `fitTier`, `fitProduct`, `fitConfidence`, `fitRationale`, `fitScoreVersion`) for up to 200 contacts, with a result per row |
 | `archive_contact` | contacts | Archive with reason |
 | `find_duplicate_contacts` | contacts | Scan for duplicate contacts. Tier 1 = shared email or platform handle, tier 2 = matching name at the same org, tier 3 = shared employment node plus overlapping interaction threads. Read-only |
@@ -173,6 +173,41 @@ curl -s -X POST http://localhost:3010/api/agent-tools/invoke -H 'Content-Type: a
   -d '{"tool":"query_contacts","input":{"tags":["hackwithbay-4.0"],"nicheId":"<nicheId>",
         "fitTier":"A","sort":"fitScore","pageSize":100}}' | jq '.result.contacts[] | {id,name,fitScore,fitTier,fitProduct}'
 ```
+
+**Identity provenance** (#571). Each contact identity records where it came from. All three
+fields are null for identities written before #571 or without provenance, which means unknown.
+
+| Field (in `provenance`) | Type | Notes |
+|---|---|---|
+| `kind` | `self_declared` \| `agent_verified` \| `inferred` | Required whenever `provenance` is sent |
+| `sourceUrl` | http(s) URL ≤2,048 | Optional. The page showing the evidence. Login and auth-wall URLs are rejected |
+| `observedAt` | unix seconds | Optional; defaults to the write time |
+
+- **Kinds.** `self_declared`: the subject linked the account on a profile they control (a Luma
+  profile, personal site or X bio). `agent_verified`: an agent corroborated it against name plus
+  company or role. `inferred`: a weaker match, such as a search result or a name match.
+- **Downgrade rule.** Strength is a strict order: `self_declared` > `agent_verified` > `inferred` >
+  null. A write with the same or a stronger kind replaces all three fields: an omitted `sourceUrl`
+  clears it, and an omitted `observedAt` becomes now. A weaker kind leaves the stored provenance
+  alone and still writes the rest of the identity. Leaving `provenance` out never changes it.
+  `self_declared` outranks `agent_verified` because it is first-party ownership evidence, so a
+  later verification must not erase the record that the subject linked the account themselves.
+- **Writes.** `upsert_contact_identity.provenance` and `create_contact.provenance` (applied to the
+  identity built from `platform`/`platformUserId`). The response reports `provenanceWrite`
+  (`create_contact`: `identityProvenanceWrite`) as `applied`, `kept_existing` or `not_provided`.
+  `signals-pp-cli import contacts` forwards CSV columns `provenance_kind`,
+  `provenance_source_url`, `provenance_observed_at`, or a JSON `provenance` object.
+- **Reads.** Every identity in `get_contact.identities[]` and `query_contacts.contacts[].identities[]`
+  carries `provenance: {kind, sourceUrl, observedAt} | null`. The contacts REST payloads expose
+  the raw columns `provenanceKind`, `provenanceSourceUrl` and `provenanceObservedAt`.
+
+**Name aliases** (#571). `get_contact.aliases` is a string array of other names the contact goes by,
+such as "Sas P" on Luma for "Sasmita S" on LinkedIn. Add aliases with `enrich_contact.aliases`
+(1–20 per call, each ≤120 characters). They are appended, never replaced, and deduped
+case-insensitively against stored aliases and the contact's own name; the first spelling wins.
+A contact holds at most 50 aliases, and a write that would exceed the cap fails with
+`VALIDATION_ERROR` before anything is written. `fieldsUpdated` includes `aliases` only when one
+was added. There's no agent-tool for removing aliases yet.
 
 `create_contact` / `update_contact` with a `company` field also dual-write an `orgs` row and `works_at` edge (contacts projection unchanged).
 
