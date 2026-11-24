@@ -18,7 +18,19 @@ import { getDashboardMetrics } from "@/lib/db/queries/dashboard";
 import { getWorkflowRun, listWorkflowRuns, updateWorkflowRun } from "@/lib/db/queries/workflows";
 import { listTemplates } from "@/lib/db/queries/workflow-templates";
 import { listContentItems } from "@/lib/db/queries/content";
-import { listGoals } from "@/lib/db/queries/goals";
+import {
+  createGoal,
+  findGoalsByNaturalKey,
+  getGoalRow,
+  goalProgressPct,
+  linkLaunchToGoal,
+  listGoalLinks,
+  listGoals,
+  setGoalNiche,
+  summarizeGoals,
+  updateGoal,
+} from "@/lib/db/queries/goals";
+import { nodeExists } from "@/lib/db/queries/graph";
 import { createTask } from "@/lib/db/queries/tasks";
 import { getActivePersona, upsertPersona } from "@/lib/db/queries/personas";
 import { assemblePersonaEvidence } from "@/lib/db/queries/persona-evidence";
@@ -69,6 +81,7 @@ import type {
   resolvePlatformClaimSchema,
   queryContentSchema,
   queryGoalsSchema,
+  upsertGoalSchema,
   queryWorkflowsSchema,
   startWorkflowSchema,
   dispatchFollowOnWorkflowSchema,
@@ -1436,6 +1449,7 @@ export async function handleQueryAnalytics(_input: z.infer<typeof queryAnalytics
     activeWorkflows: metrics.activeWorkflows,
     pendingTasks: metrics.pendingTasks,
     contentItems: metrics.contentItems,
+    goals: summarizeGoals(),
     recentContacts: metrics.recentContacts.map((c) => ({
       id: c.id,
       name: c.name,
@@ -1652,17 +1666,116 @@ export async function handleQueryGoals(input: z.infer<typeof queryGoalsSchema>) 
 
   return {
     total: result.total,
-    goals: result.data.map((g) => ({
-      id: g.id,
-      name: g.name,
-      goalType: g.goalType,
-      targetValue: g.targetValue,
-      currentValue: g.currentValue,
-      unit: g.unit,
-      status: g.status,
-      deadline: g.deadline,
-    })),
+    goals: (() => {
+      const links = listGoalLinks(result.data.map((g) => g.id));
+      return result.data.map((g) => ({
+        id: g.id,
+        name: g.name,
+        goalType: g.goalType,
+        targetValue: g.targetValue,
+        currentValue: g.currentValue,
+        unit: g.unit,
+        status: g.status,
+        deadline: g.deadline,
+        progressPct: goalProgressPct(g.currentValue, g.targetValue),
+        nicheIds: links.get(g.id)?.nicheIds ?? [],
+        launchIds: links.get(g.id)?.launchIds ?? [],
+      }));
+    })(),
   };
+}
+
+/**
+ * Create or update a goal (#565). Writes the existing goal fields only; omitted fields keep
+ * their stored values. Progress semantics are unchanged: `currentValue` is the dashboard's
+ * manual mover, and like the dashboard it never changes `status` (the workflow mover's
+ * auto-achieve is not applied).
+ */
+export async function handleUpsertGoal(input: z.infer<typeof upsertGoalSchema>) {
+  if (input.nicheId && !nodeExists("niche", input.nicheId)) {
+    throw new AgentToolError("NOT_FOUND", `Niche not found: ${input.nicheId}`);
+  }
+  if (input.launchId && !nodeExists("launch", input.launchId)) {
+    throw new AgentToolError("NOT_FOUND", `Launch not found: ${input.launchId}`);
+  }
+
+  return db.transaction(() => {
+    let existing: ReturnType<typeof getGoalRow>;
+    let matchedBy: "id" | "natural_key" | null = null;
+    let note: string | undefined;
+    if (input.id) {
+      existing = getGoalRow(input.id);
+      if (!existing) throw new AgentToolError("NOT_FOUND", `Goal not found: ${input.id}`);
+      matchedBy = "id";
+    } else {
+      const matches = findGoalsByNaturalKey(input.name!, input.goalType!);
+      existing = matches[0];
+      if (existing) {
+        matchedBy = "natural_key";
+        if (matches.length > 1) {
+          note = `${matches.length} open ${input.goalType} goals are named "${input.name!.trim()}"; updated the newest (${existing.id}). Pass id to choose another: ${matches.slice(1).map((g) => g.id).join(", ")}.`;
+        }
+      }
+    }
+
+    const fields = {
+      ...(input.name !== undefined ? { name: input.name } : {}),
+      ...(input.goalType !== undefined ? { goalType: input.goalType } : {}),
+      ...(input.targetValue !== undefined ? { targetValue: input.targetValue } : {}),
+      ...(input.currentValue !== undefined ? { currentValue: input.currentValue } : {}),
+      ...(input.unit !== undefined ? { unit: input.unit } : {}),
+      ...(input.platform !== undefined ? { platform: input.platform } : {}),
+      ...(input.deadline !== undefined ? { deadline: input.deadline } : {}),
+      ...(input.status !== undefined ? { status: input.status } : {}),
+    };
+
+    let goal;
+    if (existing) {
+      goal = updateGoal(existing.id, fields)!;
+    } else {
+      const missing = (["targetValue", "unit"] as const).filter((field) => input[field] === undefined);
+      if (missing.length > 0) {
+        throw new AgentToolError(
+          "VALIDATION_ERROR",
+          `Creating a goal requires ${missing.join(" and ")} (no goal named "${input.name!.trim()}" of type ${input.goalType} is open to update).`,
+          { missing },
+        );
+      }
+      goal = createGoal({
+        name: input.name!,
+        goalType: input.goalType!,
+        targetValue: input.targetValue!,
+        currentValue: input.currentValue ?? 0,
+        unit: input.unit!,
+        platform: input.platform ?? null,
+        deadline: input.deadline ?? null,
+        status: input.status ?? "active",
+      });
+    }
+
+    if (input.nicheId !== undefined) setGoalNiche(goal.id, input.nicheId);
+    if (input.launchId) linkLaunchToGoal(goal.id, input.launchId);
+    const links = listGoalLinks([goal.id]).get(goal.id)!;
+
+    return {
+      id: goal.id,
+      name: goal.name,
+      goalType: goal.goalType,
+      platform: goal.platform,
+      targetValue: goal.targetValue,
+      currentValue: goal.currentValue,
+      unit: goal.unit,
+      deadline: goal.deadline,
+      status: goal.status,
+      progressPct: goalProgressPct(goal.currentValue, goal.targetValue),
+      nicheIds: links.nicheIds,
+      launchIds: links.launchIds,
+      created: !existing,
+      matchedBy,
+      ...(note ? { note } : {}),
+      message: existing ? `Goal "${goal.name}" updated.` : `Goal "${goal.name}" created.`,
+    };
+  });
 }
 
 export async function handleCreateTask(input: z.infer<typeof createTaskSchema>) {

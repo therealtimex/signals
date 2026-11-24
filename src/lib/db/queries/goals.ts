@@ -1,13 +1,15 @@
-import { eq, and, desc, count, SQL, gte } from "drizzle-orm";
+import { eq, and, desc, count, SQL, gte, inArray, ne, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db/client";
 import {
   goals,
   goalWorkflows,
   goalProgress,
+  graphEdges,
   workflowTemplates,
   workflowSteps,
 } from "@/lib/db/schema";
+import { upsertGraphEdge } from "@/lib/db/queries/graph";
 import type {
   Goal,
   NewGoal,
@@ -15,6 +17,31 @@ import type {
   GoalProgress as GoalProgressType,
   PaginatedResult,
 } from "@/lib/db/types";
+
+export const GOAL_TYPES = [
+  "audience_growth",
+  "lead_generation",
+  "content_engagement",
+  "pipeline_progression",
+] as const;
+export const GOAL_STATUSES = ["active", "achieved", "missed", "paused"] as const;
+
+/**
+ * Goal links (#565). Relationships only: neither edge moves `currentValue`, which changes only
+ * through linked workflow templates (`updateGoalProgressFromWorkflow`) or a direct write (the
+ * dashboard's manual ± and `upsert_goal`).
+ *
+ * - `targets` goal → niche: the cohort the goal is about. The spec catalogues `targets` for
+ *   launch|variant sources; #565 widens it to goals. A goal targets at most one niche.
+ * - `contributes_to` launch → goal: the catalogued launch link. A goal can have several.
+ */
+export const GOAL_NICHE_EDGE_TYPE = "targets";
+export const GOAL_LAUNCH_EDGE_TYPE = "contributes_to";
+
+/** The dashboard's progress figure (goals list and goal detail): whole percent, capped at 100. */
+export function goalProgressPct(currentValue: number, targetValue: number): number {
+  return targetValue > 0 ? Math.min(100, Math.round((currentValue / targetValue) * 100)) : 0;
+}
 
 // ── Core CRUD ──────────────────────────────────
 
@@ -116,6 +143,154 @@ export function updateGoal(
     .run();
 
   return db.select().from(goals).where(eq(goals.id, id)).get();
+}
+
+export function getGoalRow(id: string): Goal | undefined {
+  return db.select().from(goals).where(eq(goals.id, id)).get();
+}
+
+/**
+ * Goals `upsert_goal` treats as the same goal when no `id` is given: same `goalType`, same
+ * `name` after trimming and ignoring case, and still open (`active` or `paused`). Newest first.
+ */
+export function findGoalsByNaturalKey(name: string, goalType: Goal["goalType"]): Goal[] {
+  const key = name.trim().toLowerCase();
+  return db
+    .select()
+    .from(goals)
+    .where(and(eq(goals.goalType, goalType), inArray(goals.status, ["active", "paused"])))
+    // createdAt is whole seconds; rowid orders goals created in the same second.
+    .orderBy(desc(goals.createdAt), desc(sql`rowid`))
+    .all()
+    .filter((goal) => goal.name.trim().toLowerCase() === key);
+}
+
+export type GoalLinks = { nicheIds: string[]; launchIds: string[] };
+
+export function listGoalLinks(goalIds: string[]): Map<string, GoalLinks> {
+  const links = new Map<string, GoalLinks>(goalIds.map((id) => [id, { nicheIds: [], launchIds: [] }]));
+  if (goalIds.length === 0) return links;
+  const niches = db
+    .select({ goalId: graphEdges.srcId, nicheId: graphEdges.dstId })
+    .from(graphEdges)
+    .where(
+      and(
+        eq(graphEdges.edgeType, GOAL_NICHE_EDGE_TYPE),
+        eq(graphEdges.srcType, "goal"),
+        inArray(graphEdges.srcId, goalIds),
+        eq(graphEdges.dstType, "niche"),
+      ),
+    )
+    .orderBy(graphEdges.createdAt)
+    .all();
+  for (const row of niches) links.get(row.goalId)?.nicheIds.push(row.nicheId);
+  const launches = db
+    .select({ goalId: graphEdges.dstId, launchId: graphEdges.srcId })
+    .from(graphEdges)
+    .where(
+      and(
+        eq(graphEdges.edgeType, GOAL_LAUNCH_EDGE_TYPE),
+        eq(graphEdges.srcType, "launch"),
+        eq(graphEdges.dstType, "goal"),
+        inArray(graphEdges.dstId, goalIds),
+      ),
+    )
+    .orderBy(graphEdges.createdAt)
+    .all();
+  for (const row of launches) links.get(row.goalId)?.launchIds.push(row.launchId);
+  return links;
+}
+
+/**
+ * Point the goal's `targets` edge at `nicheId`, removing any edge to another niche, or remove it
+ * when `nicheId` is null. Re-linking the same niche keeps the existing edge.
+ */
+export function setGoalNiche(goalId: string, nicheId: string | null): void {
+  const others = and(
+    eq(graphEdges.edgeType, GOAL_NICHE_EDGE_TYPE),
+    eq(graphEdges.srcType, "goal"),
+    eq(graphEdges.srcId, goalId),
+    eq(graphEdges.dstType, "niche"),
+  );
+  db.delete(graphEdges)
+    .where(nicheId === null ? others : and(others, ne(graphEdges.dstId, nicheId)))
+    .run();
+  if (nicheId !== null) {
+    upsertGraphEdge({
+      srcType: "goal",
+      srcId: goalId,
+      dstType: "niche",
+      dstId: nicheId,
+      edgeType: GOAL_NICHE_EDGE_TYPE,
+      source: "agent",
+    });
+  }
+}
+
+/** Add a `contributes_to` edge from the launch to the goal; an existing one is kept. */
+export function linkLaunchToGoal(goalId: string, launchId: string): void {
+  upsertGraphEdge({
+    srcType: "launch",
+    srcId: launchId,
+    dstType: "goal",
+    dstId: goalId,
+    edgeType: GOAL_LAUNCH_EDGE_TYPE,
+    source: "agent",
+  });
+}
+
+export type GoalsSummary = {
+  total: number;
+  byStatus: Record<(typeof GOAL_STATUSES)[number], number>;
+  active: Array<{
+    id: string;
+    name: string;
+    goalType: Goal["goalType"];
+    currentValue: number;
+    targetValue: number;
+    unit: string;
+    progressPct: number;
+    deadline: number | null;
+  }>;
+};
+
+const SUMMARY_ACTIVE_LIMIT = 50;
+
+/** Goal counts by status and the active goals' progress, soonest deadline first. */
+export function summarizeGoals(): GoalsSummary {
+  const byStatus = Object.fromEntries(GOAL_STATUSES.map((status) => [status, 0])) as GoalsSummary["byStatus"];
+  const counts = db
+    .select({ status: goals.status, value: count() })
+    .from(goals)
+    .groupBy(goals.status)
+    .all();
+  for (const row of counts) byStatus[row.status] = row.value;
+  const active = db
+    .select()
+    .from(goals)
+    .where(eq(goals.status, "active"))
+    .all()
+    .sort(
+      (a, b) =>
+        (a.deadline ?? Number.MAX_SAFE_INTEGER) - (b.deadline ?? Number.MAX_SAFE_INTEGER) ||
+        b.createdAt - a.createdAt,
+    )
+    .slice(0, SUMMARY_ACTIVE_LIMIT)
+    .map((goal) => ({
+      id: goal.id,
+      name: goal.name,
+      goalType: goal.goalType,
+      currentValue: goal.currentValue,
+      targetValue: goal.targetValue,
+      unit: goal.unit,
+      progressPct: goalProgressPct(goal.currentValue, goal.targetValue),
+      deadline: goal.deadline,
+    }));
+  return {
+    total: Object.values(byStatus).reduce((sum, value) => sum + value, 0),
+    byStatus,
+    active,
+  };
 }
 
 export function deleteGoal(id: string): boolean {

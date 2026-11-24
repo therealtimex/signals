@@ -17,6 +17,7 @@ import {
   scoreContactFitSchema,
   queryContentSchema,
   queryGoalsSchema,
+  upsertGoalSchema,
   queryWorkflowsSchema,
   startWorkflowSchema,
   dispatchFollowOnWorkflowSchema,
@@ -158,6 +159,7 @@ import {
   handleResolvePlatformClaim,
   handleQueryContent,
   handleQueryGoals,
+  handleUpsertGoal,
   handleQueryWorkflows,
   handleStartWorkflow,
   handleDispatchFollowOnWorkflow,
@@ -391,7 +393,7 @@ export const AGENT_TOOLS: Record<string, AgentToolDefinition> = {
   query_analytics: {
     name: "query_analytics",
     description:
-      "Get CRM dashboard metrics: total contacts, active workflows, pending tasks, and content count.",
+      "Get CRM dashboard metrics: total contacts, active workflows, pending tasks, content count, and goals (counts by status, plus each active goal's progressPct and deadline).",
     category: "analytics",
     schema: queryAnalyticsSchema,
     parameters: zodToParameters(queryAnalyticsSchema),
@@ -593,11 +595,21 @@ export const AGENT_TOOLS: Record<string, AgentToolDefinition> = {
   },
   query_goals: {
     name: "query_goals",
-    description: "List and filter goals by status or type.",
+    description:
+      "List and filter goals by status or type. Each goal carries progressPct (the dashboard's min(100, round(current/target·100))) and its links: nicheIds (targets) and launchIds (contributes_to).",
     category: "goals",
     schema: queryGoalsSchema,
     parameters: zodToParameters(queryGoalsSchema),
     execute: handleQueryGoals,
+  },
+  upsert_goal: {
+    name: "upsert_goal",
+    description:
+      "Create or update a goal with the existing goal fields (#565). With id: update it (unknown id → NOT_FOUND). Without id: an open (active or paused) goal with the same name (trimmed, case-insensitive) and goalType is updated instead of creating a second one, so a retry is safe; matchedBy says which happened. Omitted fields keep their stored values. currentValue is the same progress mover as the dashboard's manual ± and does not change status. Optional nicheId links the goal to one niche (targets) and launchId adds a launch link (contributes_to); links don't change how progress is counted, and a missing niche or launch is NOT_FOUND before any write.",
+    category: "goals",
+    schema: upsertGoalSchema,
+    parameters: zodToParameters(upsertGoalSchema),
+    execute: handleUpsertGoal,
   },
   create_task: {
     name: "create_task",
