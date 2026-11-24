@@ -46,7 +46,8 @@ Then pass `Authorization: Bearer your-secret-token` on each request.
 | `get_contact_arpp` | contacts | Project a contact as ARPP with internal or public visibility |
 | `create_contact` | contacts | Create a contact (`channels[]`, `employments[]` supported); optional `provenance` for its platform identity |
 | `update_contact` | contacts | Update contact fields. `channels[]` is a full replace: a channel left out of the list is deleted, so send every channel to keep (or add one with `enrich_contact`'s `email` / `phone`) |
-| `upsert_contact_identity` | contacts | Create or update a platform identity for a contact; optional `provenance` (`self_declared` / `agent_verified` / `inferred`) |
+| `upsert_contact_identity` | contacts | Create or update a platform identity for a contact; optional `provenance` (`self_declared` / `agent_verified` / `inferred`). Account values are checked per platform; see "Identity values" below |
+| `remove_contact_identity` | contacts | Remove one identity from a contact (`contactId` + `identityId`). Releases its claim and drops it from every lookup; see "Removing an identity" below |
 | `enrich_contact` | contacts | Fill gaps without overwriting; appends name `aliases[]` |
 | `score_contact_fit` | contacts | Batch-write ICP fit (`fitScore`, `fitTier`, `fitProduct`, `fitConfidence`, `fitRationale`, `fitScoreVersion`) for up to 200 contacts, with a result per row |
 | `archive_contact` | contacts | Archive with reason |
@@ -236,6 +237,22 @@ identity columns, a row can carry:
   columns are the primary identity, and `identities` adds to it. A row without them promotes
   `identities[0]` to primary. The flat `provenance_*` columns describe the primary; giving
   provenance twice for a promoted primary is a usage error.
+- **Junk handles** (#569). Before dedupe, each identity's values get the same checks the server
+  applies (see "Identity values" below). An identity that fails is dropped from the row and listed
+  in the row's `rejectedIdentities[]` (`platform`, `field`, `value`, `rule`, `message`). The summary
+  counts it in `identitiesRejected` and adds a note. The run carries on and the exit code doesn't
+  change.
+  - **A bad secondary** costs the row only that identity. The row's other identities and fields
+    are imported as usual.
+  - **A bad primary** is dropped together with its provenance, and the first valid secondary is
+    promoted, as `identities[0]` is when a row has no legacy columns. If none is left, the row is
+    matched and written by email and name alone.
+  - Dropping happens before dedupe, so a row's junk `x:in` can't match or conflict with a guest who
+    already holds `x:in`.
+  - `--allow-unusual-handles` keeps values that fail only a heuristic rule and forwards
+    `allowUnusualHandle: true` with them. `reconcile` takes the same flag and drops the same
+    identities.
+  - Snowball evidence rows aren't checked: the server derives those accounts.
 - **Platforms and keys.** Every `platform` (primary or in `identities`) must be one of `x`,
   `linkedin`, `gmail`, `substack`, `instagram`, `facebook`, `threads`, `tiktok`, `youtube`,
   `bluesky`, `telegram`, `whatsapp`, case-insensitive. Anything else (`github`, a personal site)
@@ -265,6 +282,53 @@ identity columns, a row can carry:
 - **Size.** One invocation takes up to 5,000 rows (a CLI guardrail; the server has no matching
   limit) and sends them in `--batch-size` chunks of up to 50. Without `--dedupe`, rows report
   `outcome: "unchecked"`.
+
+**Identity values** (#569). `upsert_contact_identity` and `create_contact` check the
+`platformUserId`, `platformHandle` and `platformUrl` a write introduces, after trimming and
+dropping a leading `@`. A value that fails returns `VALIDATION_ERROR`; nothing is written. The
+message names the platform, the field, the value and the rule. `details` carries `{field, platform,
+value, rule, heuristic}`. The rules are in `src/lib/identity-handle-validation.ts`, and
+`signals-pp-cli` mirrors them, pinned by shared test cases.
+
+| Rule | Kind | Rejects |
+|---|---|---|
+| `foreign_url` | hard | A URL on another platform's host, in any field: `linkedin.com/in/…` in an X field, `x.com/…` on a LinkedIn identity |
+| `syntax` | hard | Invalid account syntax, on the platforms whose syntax is fixed: X `^[A-Za-z0-9_]{1,15}$` (`platformUserId` may also be a numeric ID); Instagram and Threads `^[A-Za-z0-9._]{1,30}$`; TikTok `^[A-Za-z0-9._]{1,24}$` (or a numeric ID). An X profile URL in an X field fails here, and the message gives the bare handle to pass instead. Other platforms have no syntax rule, because LinkedIn vanity names, Substack and Bluesky custom domains, YouTube channel IDs and phone numbers vary too much |
+| `too_short` | heuristic | Two characters or fewer, unless all digits (X's numeric ID `12` is valid): `in`, `x`, `i`, `hi`, `v` |
+| `placeholder` | heuristic | `none`, `null`, `nil`, `n/a`, `nope`, `unknown`, `notwitter`, `nolinkedin`, `noinstagram`, `twitter`, `linkedin`, `instagram`, `facebook`, case-insensitive |
+
+- **Heuristic rules can be wrong.** `x`, `hi` and `v` are real, valid X handles. Pass
+  `allowUnusualHandle: true` when the value really is the account; the error message says so.
+  Nothing overrides a hard rule.
+- **Only new values are checked.** Updating an identity in place (addressed by `id`, or the same
+  `platform` + `platformUserId` on the contact that holds it) passes values equal to the stored
+  ones, so identities stored before these checks stay readable, updatable and removable. Nothing
+  is migrated or rewritten.
+- **`create_contact` checks before dedupe**, with no in-place exemption. It finds its contact by
+  these values, so a junk handle another contact already holds is rejected rather than routing
+  the new person to that contact.
+- Snowball evidence writes aren't checked: the server derives the account from browser evidence.
+
+**Removing an identity** (#569). `remove_contact_identity {contactId, identityId}` deletes the
+identity row. The unique index on `(platform, platformUserId)` is the claim, so deleting the row
+is what frees the account for another contact. It also takes the identity out of every lookup:
+`resolve_platform_claim`, `query_contacts {platform, platformUserId}`, import dedupe,
+`get_contact` and research.
+- **Scope.** `identityId` must belong to `contactId`, or the result is `NOT_FOUND` and nothing is
+  removed. The self contact is refused (`VALIDATION_ERROR`): its identities are the owner's
+  connected accounts, so remove those in the UI. Org identities are a separate table and this
+  tool can't reach them.
+- **Primary.** If the removed identity was primary, the contact's earliest-created remaining
+  **active** identity becomes primary (`promotedIdentityId`), so research's primary-identity
+  resolution and the profile resolver keep agreeing. An inactive identity is never promoted. With
+  no active identity left, none is primary.
+- **Result.** `{contactId, removed, releasedClaim: {platform, platformUserId}, promotedIdentityId,
+  message}`. `removed` is the deleted identity, provenance included: the record of what was there.
+- **Deactivating is not removing.** `isActive: false` still claims the account; it marks an
+  account that is still this person's but no longer in use. Use `remove_contact_identity` to
+  release a wrong one.
+- The dashboard's identity delete (`DELETE /api/contacts/:id/identities/:identityId`) uses the
+  same function, so it promotes the same way.
 
 **Name aliases** (#571). `get_contact.aliases` is a string array of other names the contact goes by,
 such as "Sas P" on Luma for "Sasmita S" on LinkedIn. Add aliases with `enrich_contact.aliases`
