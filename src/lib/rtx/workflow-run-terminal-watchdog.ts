@@ -2,8 +2,13 @@ import {
   getRtxRuntimeSessionIdFromRunConfig,
 } from "@/lib/agents/run-template-via-rtx";
 import {
+  createWorkflowStep,
+  failActiveWorkflowRunIfUnchanged,
+  getLatestWorkflowStepCreatedAt,
   getWorkflowRun,
+  listActiveContactWebResearchRuns,
   listRunningTerminalAgentWorkflowRuns,
+  nextStepIndex,
   updateWorkflowRun,
 } from "@/lib/db/queries/workflows";
 import type { WorkflowRun } from "@/lib/db/types";
@@ -12,14 +17,33 @@ import {
   formatDeferredTerminalTeardownNote,
   stopRunningRtxBrowserSessions,
 } from "@/lib/rtx/resource-teardown";
+import {
+  inspectTerminalRuntimeSessions,
+  isTerminalRuntimeSessionBusy,
+  type TerminalRuntimeSessionInspection,
+} from "@/lib/rtx/runtime-sessions";
 import { requestWorkflowTerminalCleanup } from "@/lib/rtx/workflow-terminal-reconciler";
-import { readWorkflowTerminalLifecycle } from "@/lib/rtx/workflow-terminal-lifecycle";
+import {
+  parseWorkflowRunConfig,
+  readWorkflowTerminalLifecycle,
+} from "@/lib/rtx/workflow-terminal-lifecycle";
 import { postWorkflowCompletionThreadMessage } from "@/lib/rtx/workflow-completion-thread";
 import { releaseContactWebResearchTargetFromRunConfig } from "@/lib/workflows/contact-web-research-target";
 import { releaseNetworkSnowballTargetForRun } from "@/lib/workflows/network-snowball-target";
 
 export const DEFAULT_WORKFLOW_TERMINAL_RUN_TIMEOUT_MS = 4 * 60 * 60 * 1000;
 export const WORKFLOW_TERMINAL_RUN_TIMEOUT_ENV = "WORKFLOW_TERMINAL_RUN_TIMEOUT_MS";
+
+/**
+ * Dispatch-liveness window for Contact Web Research (#572). Healthy runs finish in 3–6 minutes;
+ * a run with no heartbeat for this long, and no busy terminal of its own, was lost in dispatch.
+ */
+export const DEFAULT_WORKFLOW_DISPATCH_LIVENESS_TIMEOUT_MS = 15 * 60 * 1000;
+export const WORKFLOW_DISPATCH_LIVENESS_TIMEOUT_ENV = "WORKFLOW_DISPATCH_LIVENESS_TIMEOUT_MS";
+export const DISPATCH_LOST_ERROR_CODE = "dispatch_lost";
+
+const DISPATCH_LOST_SUMMARY =
+  "dispatch_lost: the research agent never reported back and its terminal is not working on this run. Signals failed the run so the contact can be researched again.";
 
 const TIMEOUT_SUMMARY =
   "Workflow timed out waiting for complete_workflow_run. Signals released the linked terminal session.";
@@ -111,6 +135,296 @@ export async function releaseTimedOutWorkflowTerminalRun(
       .filter(Boolean)
       .join(" "),
   };
+}
+
+// ── Dispatch liveness (#572) ──────────────────────────────────────────────
+
+export function resolveWorkflowDispatchLivenessTimeoutMs(env: EnvLike = process.env): number {
+  const parsed = Number.parseInt(env[WORKFLOW_DISPATCH_LIVENESS_TIMEOUT_ENV] ?? "", 10);
+  return Number.isFinite(parsed) && parsed > 0
+    ? parsed
+    : DEFAULT_WORKFLOW_DISPATCH_LIVENESS_TIMEOUT_MS;
+}
+
+/**
+ * The last moment Signals heard anything about a run, in epoch milliseconds.
+ *
+ * Heartbeats are the signals Signals already receives, all local:
+ * - the run row's `updatedAt` (every Signals-side write: dispatch settle, progress, cohort records);
+ * - the newest workflow step recorded for the run (tool calls Signals logs against it);
+ * - the terminal lifecycle's dispatch `startedAt`/`settledAt` (when Signals handed it to RTX).
+ * `startedAt`/`createdAt` anchor runs that never got further than the row (`pending`).
+ */
+export function getWorkflowRunHeartbeatAtMs(
+  run: Pick<WorkflowRun, "config" | "createdAt" | "startedAt" | "updatedAt">,
+  latestStepCreatedAtSec: number | null = null,
+): number {
+  const lifecycle = readWorkflowTerminalLifecycle(run.config);
+  const candidates = [
+    run.createdAt,
+    run.startedAt,
+    run.updatedAt,
+    latestStepCreatedAtSec,
+  ]
+    .filter((value): value is number => typeof value === "number" && value > 0)
+    .map((sec) => sec * 1000);
+  if (lifecycle) {
+    candidates.push(lifecycle.dispatch.startedAt);
+    if (typeof lifecycle.dispatch.settledAt === "number") {
+      candidates.push(lifecycle.dispatch.settledAt);
+    }
+  }
+  return candidates.length > 0 ? Math.max(...candidates) : 0;
+}
+
+export function isWorkflowRunDispatchLivenessExpired(
+  run: Pick<WorkflowRun, "status" | "config" | "createdAt" | "startedAt" | "updatedAt">,
+  latestStepCreatedAtSec: number | null,
+  nowMs = Date.now(),
+  timeoutMs = DEFAULT_WORKFLOW_DISPATCH_LIVENESS_TIMEOUT_MS,
+): boolean {
+  if (run.status !== "pending" && run.status !== "running") return false;
+  const heartbeatMs = getWorkflowRunHeartbeatAtMs(run, latestStepCreatedAtSec);
+  if (heartbeatMs <= 0) return false;
+  return nowMs - heartbeatMs >= timeoutMs;
+}
+
+type RunTerminalRef = {
+  workspaceSlug: string;
+  threadSlug: string;
+  aliases: string[];
+  dispatchedAtMs: number;
+};
+
+function readRunTerminalRef(run: Pick<WorkflowRun, "config" | "startedAt">): RunTerminalRef | null {
+  const lifecycle = readWorkflowTerminalLifecycle(run.config);
+  const config = parseWorkflowRunConfig(run.config);
+  const legacySessionId =
+    typeof config.rtxRuntimeSessionId === "string" ? config.rtxRuntimeSessionId.trim() : "";
+  const aliases = [
+    ...(lifecycle?.dispatch.session?.aliases ?? []),
+    lifecycle?.dispatch.session?.id ?? "",
+    legacySessionId,
+  ]
+    .map((alias) => alias.trim())
+    .filter(Boolean);
+  const workspaceSlug =
+    lifecycle?.dispatch.routing.workspaceSlug ||
+    (typeof config.rtxWorkspaceSlug === "string" ? config.rtxWorkspaceSlug : "");
+  const threadSlug =
+    lifecycle?.dispatch.routing.threadSlug ||
+    (typeof config.rtxThreadSlug === "string" ? config.rtxThreadSlug : "");
+  if (aliases.length === 0 || !workspaceSlug.trim() || !threadSlug.trim()) return null;
+  return {
+    workspaceSlug: workspaceSlug.trim(),
+    threadSlug: threadSlug.trim(),
+    aliases: [...new Set(aliases)],
+    dispatchedAtMs: lifecycle?.dispatch.settledAt ?? lifecycle?.dispatch.startedAt ??
+      (run.startedAt ?? 0) * 1000,
+  };
+}
+
+type ThreadInspectionCache = Map<string, Promise<TerminalRuntimeSessionInspection>>;
+
+/**
+ * Whether the run's own terminal session is still busy on it — the one RTX-side heartbeat.
+ *
+ * One read-only `GET /cli/list-terminal-sessions` per thread; nothing is sent to the terminal. A
+ * busy session counts for this run only if no newer active run was dispatched into the same
+ * session, because a shared thread's session may be busy on someone else's turn.
+ */
+async function isRunTerminalBusyOnRun(
+  run: WorkflowRun,
+  activeRuns: WorkflowRun[],
+  cache: ThreadInspectionCache,
+  env: EnvLike,
+  fetchImpl: typeof fetch,
+): Promise<boolean> {
+  const ref = readRunTerminalRef(run);
+  if (!ref) return false;
+
+  const newerOwner = activeRuns.some((other) => {
+    if (other.id === run.id) return false;
+    const otherRef = readRunTerminalRef(other);
+    return Boolean(
+      otherRef &&
+        otherRef.dispatchedAtMs > ref.dispatchedAtMs &&
+        otherRef.aliases.some((alias) => ref.aliases.includes(alias)),
+    );
+  });
+  if (newerOwner) return false;
+
+  const key = `${ref.workspaceSlug}\u0000${ref.threadSlug}`;
+  let inspection = cache.get(key);
+  if (!inspection) {
+    inspection = inspectTerminalRuntimeSessions(
+      { workspaceSlug: ref.workspaceSlug, threadSlug: ref.threadSlug, includeClosed: false },
+      env,
+      fetchImpl,
+    );
+    cache.set(key, inspection);
+  }
+  const { available, sessions } = await inspection;
+  if (!available) return false;
+  const session = sessions.find((candidate) =>
+    [candidate.id, ...(candidate.aliases ?? [])].some((alias) => ref.aliases.includes(alias)),
+  );
+  return isTerminalRuntimeSessionBusy(session);
+}
+
+export type LostWorkflowDispatchOutcome = {
+  released: boolean;
+  runId: string;
+  reason?:
+    | "not_found"
+    | "not_active"
+    | "not_contact_research"
+    | "heartbeat_recent"
+    | "terminal_busy"
+    | "changed_concurrently";
+  message?: string;
+};
+
+async function releaseLostWorkflowDispatchFromSnapshot(
+  run: WorkflowRun,
+  activeRuns: WorkflowRun[],
+  cache: ThreadInspectionCache,
+  timeoutMs: number,
+  env: EnvLike,
+  fetchImpl: typeof fetch,
+): Promise<LostWorkflowDispatchOutcome> {
+  const latestStepAt = getLatestWorkflowStepCreatedAt(run.id);
+  if (!isWorkflowRunDispatchLivenessExpired(run, latestStepAt, Date.now(), timeoutMs)) {
+    return { released: false, runId: run.id, reason: "heartbeat_recent" };
+  }
+  if (await isRunTerminalBusyOnRun(run, activeRuns, cache, env, fetchImpl)) {
+    return { released: false, runId: run.id, reason: "terminal_busy" };
+  }
+
+  const lastHeartbeatAt = Math.floor(getWorkflowRunHeartbeatAtMs(run, latestStepAt) / 1000);
+  const completedAt = Math.floor(Date.now() / 1000);
+  const previousResult = parseWorkflowRunConfig(run.result);
+  const updated = failActiveWorkflowRunIfUnchanged(run.id, run.updatedAt, {
+    completedAt,
+    errors: JSON.stringify([DISPATCH_LOST_SUMMARY]),
+    errorItems: 1,
+    result: JSON.stringify({
+      ...previousResult,
+      summary: DISPATCH_LOST_SUMMARY,
+      message: DISPATCH_LOST_SUMMARY,
+      errorCode: DISPATCH_LOST_ERROR_CODE,
+      dispatchLost: true,
+      timedOut: true,
+      lastHeartbeatAt,
+      livenessTimeoutMs: timeoutMs,
+    }),
+  });
+  if (!updated) {
+    return { released: false, runId: run.id, reason: "changed_concurrently" };
+  }
+
+  createWorkflowStep({
+    workflowRunId: run.id,
+    stepIndex: nextStepIndex(run.id),
+    stepType: "error",
+    status: "failed",
+    tool: "workflow_dispatch_watchdog",
+    error: DISPATCH_LOST_SUMMARY,
+    output: JSON.stringify({
+      code: DISPATCH_LOST_ERROR_CODE,
+      previousStatus: run.status,
+      lastHeartbeatAt,
+      livenessTimeoutMs: timeoutMs,
+    }),
+    durationMs: 0,
+  });
+
+  // Browser sessions are deliberately left alone: the research target is the shared, signed-in
+  // `signals-publish` session, and a lost dispatch never owned it beyond the lease released here.
+  const terminalSessionTeardown = requestWorkflowTerminalCleanup(
+    updated.id,
+    "workflow_dispatch_lost_resumable",
+    env,
+    fetchImpl,
+  );
+  releaseContactWebResearchTargetFromRunConfig(run.config);
+  const completionThreadMessage = await postWorkflowCompletionThreadMessage(
+    updated,
+    { status: "failed", summary: DISPATCH_LOST_SUMMARY },
+    env,
+    fetchImpl,
+  ).catch(() => ({ posted: false }));
+
+  return {
+    released: true,
+    runId: run.id,
+    message: [
+      DISPATCH_LOST_SUMMARY,
+      terminalSessionTeardown.scheduled ? "Terminal session release scheduled." : "",
+      completionThreadMessage.posted ? "Completion summary posted to thread." : "",
+    ]
+      .filter(Boolean)
+      .join(" "),
+  };
+}
+
+/**
+ * Fail one Contact Web Research run as `dispatch_lost` if its dispatch-liveness window expired.
+ * Called by the web-research route before it refuses a re-run with `ENRICHMENT_IN_PROGRESS`, so a
+ * lost run never blocks its contact even when the scheduler sweep is off.
+ */
+export async function releaseLostWorkflowDispatch(
+  runId: string,
+  env: EnvLike = process.env,
+  fetchImpl: typeof fetch = fetch,
+): Promise<LostWorkflowDispatchOutcome> {
+  const run = getWorkflowRun(runId);
+  if (!run) return { released: false, runId, reason: "not_found" };
+  if (run.status !== "pending" && run.status !== "running") {
+    return { released: false, runId, reason: "not_active" };
+  }
+  const activeRuns = listActiveContactWebResearchRuns();
+  if (!activeRuns.some((candidate) => candidate.id === runId)) {
+    return { released: false, runId, reason: "not_contact_research" };
+  }
+  return releaseLostWorkflowDispatchFromSnapshot(
+    run,
+    activeRuns,
+    new Map(),
+    resolveWorkflowDispatchLivenessTimeoutMs(env),
+    env,
+    fetchImpl,
+  );
+}
+
+/**
+ * Sweep every unfinished Contact Web Research run for lost dispatches.
+ *
+ * Driven by the always-on terminal cleanup runner, not the optional scheduler: installed Local
+ * Apps run with `SIGNALS_SCHEDULER_ENABLED=0`, where a scheduler-only sweep never runs.
+ */
+export async function releaseLostWorkflowDispatches(
+  env: EnvLike = process.env,
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ scanned: number; released: string[]; skipped: Array<{ runId: string; reason: string }> }> {
+  const timeoutMs = resolveWorkflowDispatchLivenessTimeoutMs(env);
+  const activeRuns = listActiveContactWebResearchRuns();
+  const cache: ThreadInspectionCache = new Map();
+  const released: string[] = [];
+  const skipped: Array<{ runId: string; reason: string }> = [];
+  for (const run of activeRuns) {
+    const outcome = await releaseLostWorkflowDispatchFromSnapshot(
+      run,
+      activeRuns,
+      cache,
+      timeoutMs,
+      env,
+      fetchImpl,
+    );
+    if (outcome.released) released.push(run.id);
+    else skipped.push({ runId: run.id, reason: outcome.reason ?? "skipped" });
+  }
+  return { scanned: activeRuns.length, released, skipped };
 }
 
 export async function releaseStaleWorkflowTerminalRuns(

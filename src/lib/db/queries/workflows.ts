@@ -173,6 +173,85 @@ export function listRunningTerminalAgentWorkflowRuns(): WorkflowRun[] {
     .all();
 }
 
+/**
+ * Contact Web Research runs that have not finished yet (`pending` or `running`), whether or not
+ * their dispatch ever reached a terminal. The dispatch-liveness watchdog (#572) decides which of
+ * them are lost.
+ */
+export function listActiveContactWebResearchRuns(): WorkflowRun[] {
+  return db
+    .select()
+    .from(workflowRuns)
+    .where(
+      and(
+        sql`${workflowRuns.status} IN ('pending', 'running')`,
+        sql`json_valid(${workflowRuns.config})`,
+        sql`json_type(${workflowRuns.config}, '$.contactWebResearch') = 'object'`,
+      ),
+    )
+    .all();
+}
+
+/** Unix seconds of the newest step recorded for a run, or null when it has none. */
+export function getLatestWorkflowStepCreatedAt(workflowRunId: string): number | null {
+  const row = db
+    .select({ createdAt: sql<number | null>`max(${workflowSteps.createdAt})` })
+    .from(workflowSteps)
+    .where(eq(workflowSteps.workflowRunId, workflowRunId))
+    .get();
+  return typeof row?.createdAt === "number" ? row.createdAt : null;
+}
+
+/**
+ * Most recent runs of one template that were routed to one RTX thread, newest first. Used to
+ * judge whether the template's shared thread is still fit to receive a dispatch (#572).
+ */
+export function listRecentTemplateRunsOnThread(
+  templateId: string,
+  threadSlug: string,
+  limit = 10,
+): WorkflowRun[] {
+  return db
+    .select()
+    .from(workflowRuns)
+    .where(
+      and(
+        eq(workflowRuns.templateId, templateId),
+        sql`json_valid(${workflowRuns.config})`,
+        sql`json_extract(${workflowRuns.config}, '$.rtxThreadSlug') = ${threadSlug}`,
+      ),
+    )
+    .orderBy(desc(workflowRuns.createdAt), desc(sql`rowid`))
+    .limit(limit)
+    .all();
+}
+
+/**
+ * Fail a `pending`/`running` run only if nothing touched it since `expectedUpdatedAt`.
+ *
+ * A watchdog decides from a snapshot; a `complete_workflow_run` or progress write that lands between
+ * that read and this write must win, so the update is a compare-and-set on status and `updatedAt`.
+ */
+export function failActiveWorkflowRunIfUnchanged(
+  id: string,
+  expectedUpdatedAt: number,
+  data: Pick<WorkflowRun, "completedAt" | "errors" | "result"> & { errorItems?: number },
+): WorkflowRun | undefined {
+  const changed = db
+    .update(workflowRuns)
+    .set({ ...data, status: "failed", updatedAt: Math.floor(Date.now() / 1000) })
+    .where(
+      and(
+        eq(workflowRuns.id, id),
+        sql`${workflowRuns.status} IN ('pending', 'running')`,
+        eq(workflowRuns.updatedAt, expectedUpdatedAt),
+      ),
+    )
+    .run();
+  if (changed.changes === 0) return undefined;
+  return db.select().from(workflowRuns).where(eq(workflowRuns.id, id)).get();
+}
+
 /** Terminal workflow runs whose durable RTX cleanup intent is ready to reconcile. */
 export function listWorkflowRunsPendingTerminalCleanup(
   nowMs = Date.now(),
