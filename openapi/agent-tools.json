@@ -574,6 +574,33 @@
                             "type": "string",
                             "description": "One-use token returned by attest_snowball_linkedin_identity. Required before a Network Snowball run can write a LinkedIn identity."
                           },
+                          "provenance": {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "self_declared",
+                                  "agent_verified",
+                                  "inferred"
+                                ],
+                                "description": "self_declared: the subject linked this account on a profile they control (Luma profile, personal site, X bio). agent_verified: an agent corroborated it (name plus company or role). inferred: weaker match such as a search result. Strength: self_declared > agent_verified > inferred; a weaker kind never overwrites a stronger one already stored."
+                              },
+                              "sourceUrl": {
+                                "type": "string",
+                                "description": "Page that shows the evidence, e.g. the subject's Luma profile linking this account."
+                              },
+                              "observedAt": {
+                                "type": "number",
+                                "description": "Unix seconds when the evidence was observed; defaults to the write time."
+                              }
+                            },
+                            "required": [
+                              "kind"
+                            ],
+                            "additionalProperties": false,
+                            "description": "Optional provenance for the platform identity created or matched from platform/platformUserId; ignored when no platform identity is given."
+                          },
                           "notes": {
                             "type": "string"
                           },
@@ -890,6 +917,13 @@
                               "type": "string"
                             }
                           },
+                          "aliases": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            },
+                            "description": "Other names the contact goes by (e.g. a nickname or the name on another platform). Appended, never replaced; deduped case-insensitively against stored aliases and the contact's name. A contact holds at most 50."
+                          },
                           "metadata": {
                             "type": "object",
                             "additionalProperties": {
@@ -1112,6 +1146,33 @@
                           "identityEvidenceToken": {
                             "type": "string",
                             "description": "One-use token returned by attest_snowball_linkedin_identity. Required before a Network Snowball run can write a LinkedIn identity."
+                          },
+                          "provenance": {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "self_declared",
+                                  "agent_verified",
+                                  "inferred"
+                                ],
+                                "description": "self_declared: the subject linked this account on a profile they control (Luma profile, personal site, X bio). agent_verified: an agent corroborated it (name plus company or role). inferred: weaker match such as a search result. Strength: self_declared > agent_verified > inferred; a weaker kind never overwrites a stronger one already stored."
+                              },
+                              "sourceUrl": {
+                                "type": "string",
+                                "description": "Page that shows the evidence, e.g. the subject's Luma profile linking this account."
+                              },
+                              "observedAt": {
+                                "type": "number",
+                                "description": "Unix seconds when the evidence was observed; defaults to the write time."
+                              }
+                            },
+                            "required": [
+                              "kind"
+                            ],
+                            "additionalProperties": false,
+                            "description": "Optional identity provenance. Omit it to leave the stored provenance unchanged; the same or a stronger kind replaces all three fields."
                           }
                         },
                         "required": [
