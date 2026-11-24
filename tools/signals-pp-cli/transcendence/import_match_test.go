@@ -17,18 +17,24 @@ import (
 // fakeSignals is an in-memory Signals for dedupe tests: contacts by email, and platform
 // claims keyed exactly as resolve_platform_claim resolves them.
 type fakeSignals struct {
-	t       *testing.T
-	emails  map[string][]string
-	claims  map[string]map[string]any
-	calls   []string
-	writes  []string
-	upserts []map[string]any
-	creates []map[string]any
-	nextID  int
+	t        *testing.T
+	emails   map[string][]string
+	claims   map[string]map[string]any
+	calls    []string
+	writes   []string
+	upserts  []map[string]any
+	creates  []map[string]any
+	enriches []map[string]any
+	niches   map[string]bool
+	edges    map[string]int // "contactId->nicheId" → upsert_edge calls
+	nextID   int
 }
 
 func newFakeSignals(t *testing.T) *fakeSignals {
-	return &fakeSignals{t: t, emails: map[string][]string{}, claims: map[string]map[string]any{}}
+	return &fakeSignals{
+		t: t, emails: map[string][]string{}, claims: map[string]map[string]any{},
+		niches: map[string]bool{}, edges: map[string]int{},
+	}
 }
 
 func claimKey(platform, platformUserID string) string {
@@ -85,16 +91,38 @@ func (f *fakeSignals) invoke(tool string, input map[string]any) (map[string]any,
 		}
 		return map[string]any{"id": id}, nil
 	case "upsert_contact_identity":
-		f.upserts = append(f.upserts, input)
 		platform, _ := input["platform"].(string)
 		key, _ := input["platformUserId"].(string)
+		if _, hasEvidence := input["identityEvidenceToken"]; key == "" && !hasEvidence {
+			// The server's rule (handleUpsertContactIdentity).
+			return nil, usageErr(fmt.Errorf(
+				"upsert_contact_identity: platform and platformUserId, or identityEvidenceToken, are required when creating a new identity",
+			))
+		}
+		f.upserts = append(f.upserts, input)
 		contactID, _ := input["contactId"].(string)
 		if claimant, ok := f.claims[claimKey(platform, key)]; ok && claimant["contactId"] != contactID {
 			return nil, apiErr(fmt.Errorf("upsert_contact_identity (CONFLICT): already claimed"))
 		}
 		f.contactClaim(platform, key, contactID, false)
 		return map[string]any{}, nil
-	case "enrich_contact", "record_workflow_run_contacts":
+	case "query_niches":
+		id, _ := input["id"].(string)
+		niches := []any{}
+		if f.niches[id] {
+			niches = append(niches, map[string]any{"id": id, "name": "Niche " + id})
+		}
+		return map[string]any{"total": float64(len(niches)), "niches": niches}, nil
+	case "upsert_edge":
+		if input["edgeType"] != "belongs_to_niche" || input["srcType"] != "contact" || input["dstType"] != "niche" {
+			f.t.Fatalf("unexpected edge %#v", input)
+		}
+		f.edges[fmt.Sprintf("%v->%v", input["srcId"], input["dstId"])]++
+		return map[string]any{"id": "edge"}, nil
+	case "enrich_contact":
+		f.enriches = append(f.enriches, input)
+		return map[string]any{}, nil
+	case "record_workflow_run_contacts":
 		return map[string]any{"runId": "run-1", "cohortSize": float64(0)}, nil
 	default:
 		f.t.Fatalf("unexpected tool call %q", tool)
@@ -331,6 +359,15 @@ func parityRows() []contactRow {
 		{Name: "Brand New Mail", Email: "new@example.com"},
 		{Name: "Mail Attach", Email: "mail@example.com", Platform: "linkedin", PlatformUserID: "attach-me"},
 		{Name: "Attached Later", Platform: "linkedin", PlatformUserID: "attach-me"},
+		// Secondary identities written earlier in the file (verifier finding 3, WP5 r1): one a
+		// created row carries, one a matched row attaches. A dry-run plan that recorded only
+		// primaries would call rows 13 and 15 new.
+		{Name: "Secondary Creator", Platform: "x", PlatformUserID: "sec_creator",
+			SecondaryIdentities: []rowIdentity{{Platform: "linkedin", PlatformUserID: "sec-shared"}}},
+		{Name: "Secondary Repeat", Platform: "linkedin", PlatformUserID: "sec-shared"},
+		{Name: "Known Plus", Platform: "linkedin", PlatformUserID: "known",
+			SecondaryIdentities: []rowIdentity{{Platform: "x", PlatformHandle: "@known_x"}}},
+		{Name: "Known X", Platform: "x", PlatformUserID: "known_x"},
 	}
 }
 
@@ -362,7 +399,7 @@ func TestImportDryRunReportsTheSameClassificationAsARealRun(t *testing.T) {
 	if dryCounts != realCounts {
 		t.Fatalf("dry run counts %+v, real run counts %+v", dryCounts, realCounts)
 	}
-	if want := (counts{Created: 1, Skipped: 4, Enriched: 7, Conflicts: 2}); realCounts != want {
+	if want := (counts{Created: 2, Skipped: 4, Enriched: 11, Conflicts: 2}); realCounts != want {
 		t.Fatalf("real run counts %+v, want %+v", realCounts, want)
 	}
 	if !reflect.DeepEqual(drySummary.Notes, realSummary.Notes) {
@@ -376,11 +413,13 @@ func TestImportDryRunReportsTheSameClassificationAsARealRun(t *testing.T) {
 		rowOutcomeNew, rowOutcomeMatch, rowOutcomeMatch, rowOutcomeMatch,
 		rowOutcomeConflict, rowOutcomeMatch, rowOutcomeConflict,
 		rowOutcomeMatch, rowOutcomeMatch, rowOutcomeMatch, rowOutcomeMatch,
+		rowOutcomeNew, rowOutcomeMatch, rowOutcomeMatch, rowOutcomeMatch,
 	}
 	wantContacts := []string{
 		"contact-new-1", "contact-known", "UlrgYWF3", "contact-mail",
 		"", "contact-gone", "",
 		"contact-new-1", "contact-new-1", "contact-mail", "contact-mail",
+		"contact-new-2", "contact-new-2", "contact-known", "contact-known",
 	}
 	// A dry run names a contact the file will create after the row creating it ("row:1"); the
 	// real run has its ID. Map one onto the other, and nothing else may differ.
@@ -395,12 +434,9 @@ func TestImportDryRunReportsTheSameClassificationAsARealRun(t *testing.T) {
 		if real.Outcome != wantOutcomes[i] || real.ContactID != wantContacts[i] {
 			t.Fatalf("row %d = %s/%q, want %s/%q", i+1, real.Outcome, real.ContactID, wantOutcomes[i], wantContacts[i])
 		}
-		if real.Action == rowActionCreate {
-			// Only a real run knows the new contact's ID.
-			if dry.ContactID != "" {
-				t.Fatalf("dry create row %d has contactId %q", i+1, dry.ContactID)
-			}
-			real.ContactID = ""
+		if real.Action == rowActionCreate && dry.ContactID != plannedRowOwner(i+1) {
+			// Only a real run knows the new contact's ID; a dry run names the planned one.
+			t.Fatalf("dry create row %d has contactId %q, want %q", i+1, dry.ContactID, plannedRowOwner(i+1))
 		}
 		if id, planned := plannedIDs[dry.ContactID]; planned {
 			dry.ContactID = id
@@ -427,6 +463,9 @@ func TestImportDryRunReportsTheSameClassificationAsARealRun(t *testing.T) {
 	}
 	if got := drySummary.Rows[7].ContactID; got != "row:1" {
 		t.Fatalf("dry run names the repeated row's match %q, want row:1", got)
+	}
+	if got := drySummary.Rows[12].ContactID; got != "row:12" {
+		t.Fatalf("dry run names the repeated secondary identity's match %q, want row:12", got)
 	}
 }
 
@@ -510,11 +549,17 @@ func runCommandCapturingStdout(t *testing.T, run func() error) (string, error) {
 		t.Fatal(err)
 	}
 	os.Stdout = writer
+	// Drain while the command runs: an output larger than the pipe buffer would otherwise
+	// block its fmt.Println forever.
+	captured := make(chan []byte, 1)
+	go func() {
+		out, _ := io.ReadAll(reader)
+		captured <- out
+	}()
 	runErr := run()
 	writer.Close()
 	os.Stdout = original
-	out, _ := io.ReadAll(reader)
-	return string(out), runErr
+	return string(<-captured), runErr
 }
 
 func writeRowsFile(t *testing.T, rows []map[string]any) string {
@@ -570,7 +615,7 @@ func TestImportContactsDryRunCommandClassifiesAgainstSignalsAndWritesNothing(t *
 	for _, row := range summary.Rows {
 		got = append(got, row.Outcome+"/"+row.Action+"/"+row.ContactID)
 	}
-	want := []string{"match/update/UlrgYWF3", "conflict/skip/", "new/create/"}
+	want := []string{"match/update/UlrgYWF3", "conflict/skip/", "new/create/row:3"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("rows = %v, want %v", got, want)
 	}

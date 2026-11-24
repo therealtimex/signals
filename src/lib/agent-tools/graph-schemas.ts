@@ -212,6 +212,11 @@ export const logInteractionSchema = z.object({
 });
 
 export const queryNichesSchema = z.object({
+  id: z
+    .string()
+    .min(1)
+    .optional()
+    .describe("Exact niche ID. Returns that niche or nothing, e.g. to check a niche exists before attaching members."),
   search: z.string().optional(),
   status: z.enum(["candidate", "active", "merged", "archived"]).optional(),
   page: z.number().int().positive().optional(),

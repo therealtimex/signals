@@ -8,6 +8,7 @@ import type { Niche, PaginatedResult } from "@/lib/db/types";
 export type NicheWithMemberCount = Niche & { memberCount: number };
 
 export function listNiches(opts?: {
+  id?: string;
   search?: string;
   status?: Niche["status"];
   page?: number;
@@ -20,6 +21,9 @@ export function listNiches(opts?: {
 
   if (!opts?.includeLocalOnly) {
     conditions.push(eq(niches.scope, "shared"));
+  }
+  if (opts?.id) {
+    conditions.push(eq(niches.id, opts.id));
   }
   if (opts?.status) {
     conditions.push(eq(niches.status, opts.status));

@@ -108,7 +108,7 @@ Then pass `Authorization: Bearer your-secret-token` on each request.
 | `query_graph` | graph | 1-hop graph traversal from a node |
 | `upsert_edge` | graph | Create/update typed graph edge |
 | `log_interaction` | graph | Append interaction event for a contact |
-| `query_niches` | graph | List/search niche clusters with member counts |
+| `query_niches` | graph | List/search niche clusters with member counts; `id` returns one exact niche (or none) |
 | `upsert_niche` | graph | Create or update a niche cluster |
 | `query_launches` | graph | List GTM launches with variant summaries (`variantType`, `predictionConfidence`, `simulatedAt`, `contentItemId` additive fields) and goal links |
 | `upsert_launch` | graph | Create or update a GTM launch |
@@ -209,7 +209,7 @@ resolution the `upsert_contact_identity` guard enforces), not just the primary o
 | `rows[].outcome` | When | Import does |
 |---|---|---|
 | `new` | Nothing matches | Creates the contact (`action: create`) |
-| `match` | Exactly one existing contact, and every claimed identity and the email agree on it | Updates it and attaches the row's primary identity, with its provenance unchanged (`action: update`); an archived owner is skipped (`action: skip`) |
+| `match` | Exactly one existing contact, and every claimed identity and the email agree on it | Updates it and attaches the row's identities, each with its provenance (`action: update`); an archived owner is skipped (`action: skip`) |
 | `conflict` | Claimed identities point at two or more contacts, an identity and the email disagree, the email alone matches several contacts, or an org holds one of the accounts | Skips the row and never creates it (`action: skip`); counted in `conflicts` and explained in `notes` |
 
 Each row reports `contactId`, `matchedBy[]` (`platform`, `platformUserId`, `primary`,
@@ -221,6 +221,50 @@ is skipped, not failed, so it doesn't change the exit code; read `conflicts`. Me
 a conflict names is left to the merge flow (`reconcile --merge`, or the dedupe panel).
 Outside a Network Snowball run, `create_contact` commits the contact, its identity and its fields in
 one transaction, so a failure after the insert leaves nothing behind.
+
+**Cohort import rows** (#567). Besides `name`, `email`, `company`, `title`, `notes` and the primary
+identity columns, a row can carry:
+
+| Field | JSON | CSV cell |
+|---|---|---|
+| `key` | string or whole number; keys the result's `mapping` | text |
+| `bio`, `headline`, `website`, `location` | strings | text |
+| `tags` | string array (≤50, each ≤100 characters) | a JSON array, or a `;`-separated list |
+| `identities` | array (≤20) of `{platform, platformUserId \| handle, url?, provenance?}`; `provenance` is the identity provenance object above | the same JSON array |
+
+- **How identities combine.** The legacy `platform` / `platform_user_id` / `platform_handle`
+  columns are the primary identity, and `identities` adds to it. A row without them promotes
+  `identities[0]` to primary. The flat `provenance_*` columns describe the primary; giving
+  provenance twice for a promoted primary is a usage error.
+- **Platforms and keys.** Every `platform` (primary or in `identities`) must be one of `x`,
+  `linkedin`, `gmail`, `substack`, `instagram`, `facebook`, `threads`, `tiktok`, `youtube`,
+  `bluesky`, `telegram`, `whatsapp`, case-insensitive. Anything else (`github`, a personal site)
+  is a usage error naming the row, checked when the file is read and before any call, so it can't
+  abort a run halfway through. Put a personal site in `website`. An identity given only by `handle`
+  is keyed by the handle without `@`, both in dedupe and when it is attached.
+- **Use `--dedupe` with `identities`.** Without it, rows are written without checking whether
+  any of their identities already belongs to another contact. With it, such a row comes back as a
+  `conflict` before any write.
+- **CSV arrays are JSON-in-cell.** Repeated columns (`identity_1_platform`, …) would need a numbering
+  scheme, cap the count at the header, and can't carry the nested `provenance` object. JSON-in-cell
+  is the JSON row shape verbatim.
+- **Writes.** Dedupe checks every identity (above). On a create or a match, each further identity
+  is attached with `upsert_contact_identity` and its own provenance, so part A's downgrade rule
+  applies. One the contact already holds is left alone unless the row brings provenance for it, and
+  one another contact holds made the row a `conflict` before any write. `create_contact` gets
+  `bio`, `headline`, `website` and `location`; on a match, `enrich_contact` fills only empty ones.
+  `tags` are merged into the contact's JSON tag array. A legacy non-JSON value is kept and rewritten
+  as an array, so `query_contacts { tags, nicheId }` finds the cohort.
+- **`--niche <id>`** adds every created or matched contact to the niche with a `belongs_to_niche`
+  edge (`nicheMembers` counts them). A rerun updates the same edge. A niche that doesn't exist
+  stops the import with exit 3 before any row is written.
+- **`mapping`** has one entry per row, keyed by the row's `key` (else its 1-based row number), with
+  `{contactId, outcome, action}`. `contactId` is null for a skipped row (a conflict or an archived
+  owner) and for a row that failed before reaching a contact. In a dry run, a contact the file will
+  create is `"row:<n>"`. Keys must be unique.
+- **Size.** One invocation takes up to 5,000 rows (a CLI guardrail; the server has no matching
+  limit) and sends them in `--batch-size` chunks of up to 50. Without `--dedupe`, rows report
+  `outcome: "unchecked"`.
 
 **Name aliases** (#571). `get_contact.aliases` is a string array of other names the contact goes by,
 such as "Sas P" on Luma for "Sasmita S" on LinkedIn. Add aliases with `enrich_contact.aliases`

@@ -3920,6 +3920,10 @@
                       "input": {
                         "type": "object",
                         "properties": {
+                          "id": {
+                            "type": "string",
+                            "description": "Exact niche ID. Returns that niche or nothing, e.g. to check a niche exists before attaching members."
+                          },
                           "search": {
                             "type": "string"
                           },

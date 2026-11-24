@@ -20,7 +20,10 @@ import (
 const (
 	defaultImportBatchSize = 50
 	maxImportBatchSize     = 50
-	maxImportRows          = 500
+	// maxImportRows bounds one invocation. It is a CLI guardrail only (the server has no
+	// matching limit); rows still go to Signals in --batch-size chunks. 5,000 covers a full
+	// event cohort (HackwithBay 4.0 is 603 rows) in one call (#567).
+	maxImportRows = 5000
 )
 
 var contactImportTools = map[string]struct{}{
@@ -30,9 +33,15 @@ var contactImportTools = map[string]struct{}{
 	"enrich_contact":               {},
 	"upsert_contact_identity":      {},
 	"record_workflow_run_contacts": {},
+	"query_niches":                 {},
+	"upsert_edge":                  {},
 }
 
 type contactRow struct {
+	// Key is the row's own `key` field; RowKey is Key or, without one, the 1-based row number.
+	// The import result's mapping is keyed by RowKey.
+	Key                   string
+	RowKey                string
 	Name                  string
 	Company               string
 	Title                 string
@@ -44,11 +53,17 @@ type contactRow struct {
 	AvatarURL             string
 	IdentityEvidenceToken string
 	Notes                 string
+	Bio                   string
+	Headline              string
+	Website               string
+	Location              string
+	// Tags are merged additively into the contact's JSON tag array.
+	Tags []string
 	// Provenance of the row's platform identity (#571). Nil when the row carries none.
 	Provenance *identityProvenance
-	// SecondaryIdentities are further platform identities on the row. Dedupe checks every one
-	// of them (#568). No reader fills this yet; #567's `identities[]` will, and will also
-	// decide how they are written.
+	// SecondaryIdentities are the row's further platform identities, from `identities[]`
+	// (#567). Dedupe checks every one of them (#568), and they are written to the created or
+	// matched contact with upsert_contact_identity.
 	SecondaryIdentities []rowIdentity
 }
 
@@ -91,12 +106,27 @@ type importContactsSummary struct {
 	// Conflicts counts rows skipped because their matches disagree (#568). They are a subset
 	// of Skipped and are never created.
 	Conflicts int `json:"conflicts"`
-	// Rows has one classification per row when --dedupe is on, in file order, for real and
-	// dry runs alike.
-	Rows        []rowReport               `json:"rows,omitempty"`
+	// Rows has one line per row, in file order, for real and dry runs alike. Without --dedupe
+	// the outcome is "unchecked".
+	Rows []rowReport `json:"rows,omitempty"`
+	// Mapping has one entry per row, keyed by rowKey (the row's `key`, else its row number):
+	// the contact it created or matched, or null when the row was skipped or failed (#567).
+	Mapping     map[string]rowMapping     `json:"mapping"`
 	Attribution *importAttributionSummary `json:"attribution,omitempty"`
 	// plan carries a dry run's planned writes across chunks (see dryRunPlan).
 	plan *dryRunPlan
+	// NicheMembers counts the rows attached to --niche (each created or matched contact).
+	NicheMembers int `json:"nicheMembers,omitempty"`
+	// nicheID, when set, gets a belongs_to_niche edge from every created or matched contact.
+	nicheID string
+}
+
+// rowMapping is one entry of the import result's rowKey → contactId mapping. ContactID is
+// "row:<n>" in a dry run when the contact is the one row n would create.
+type rowMapping struct {
+	ContactID *string `json:"contactId"`
+	Outcome   string  `json:"outcome"`
+	Action    string  `json:"action"`
 }
 
 type importAttributionSummary struct {
@@ -179,6 +209,7 @@ func newImportContactsCmd(flags *rootFlags) *cobra.Command {
 	var limit int
 	var workflowRunID string
 	var templateID string
+	var nicheID string
 
 	cmd := &cobra.Command{
 		Use:   "contacts",
@@ -197,18 +228,41 @@ identity or email matches that row, named "row:<n>", as the real run would
 match the contact it creates. Conflicts are skipped, not failed: they do
 not change the exit code, so read "conflicts".
 
+Rows may carry several identities, profile fields and tags (#567): JSON keys
+(or CSV columns) key, bio, headline, website, location, tags and
+identities. identities is an array of {platform, platformUserId | handle,
+url, provenance}; in CSV the identities cell is that JSON array and the
+tags cell a JSON array or a ";"-separated list. The legacy platform /
+platform_user_id / platform_handle columns are the primary identity and
+identities adds to it; without them identities[0] is the primary. Each
+further identity is attached with upsert_contact_identity; one already held
+by another contact makes the row a conflict.
+
+--niche <id> adds every created or matched contact to that niche
+(belongs_to_niche; rerunning is a no-op). A niche that does not exist stops
+the import before any row is written.
+
+The result's "mapping" has one entry per row, keyed by the row's key (else
+its row number): the contact it created or matched, or null when skipped.
+One invocation takes up to 5000 rows and sends them in --batch-size chunks.
+
 Optional identity provenance per row: CSV columns provenance_kind
 (self_declared | agent_verified | inferred), provenance_source_url and
 provenance_observed_at (unix seconds), or a JSON "provenance" object with
 kind, sourceUrl and observedAt. A weaker kind never replaces a stronger one
 already stored on the identity.`,
-		Example: `  signals-pp-cli import contacts --file workflow-runs/run_1/contacts.csv --dedupe`,
+		Example: `  signals-pp-cli import contacts --file workflow-runs/run_1/contacts.csv --dedupe
+  signals-pp-cli import contacts --file cohort.json --dedupe --niche <nicheId> --dry-run`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if filePath == "" {
 				return usageErr(fmt.Errorf("required flag \"file\" not set"))
 			}
 			if err := validateImportAttributionFlags(workflowRunID, templateID); err != nil {
 				return err
+			}
+			nicheID = strings.TrimSpace(nicheID)
+			if cmd.Flags().Changed("niche") && nicheID == "" {
+				return usageErr(fmt.Errorf("--niche needs a niche ID"))
 			}
 			if batchSize <= 0 {
 				batchSize = defaultImportBatchSize
@@ -248,6 +302,7 @@ already stored on the identity.`,
 				Success: true,
 				Errors:  []string{},
 				Notes:   []string{},
+				nicheID: nicheID,
 			}
 			preflightFailed, terminalErr := runContactImportWithInvoker(
 				rows,
@@ -286,7 +341,8 @@ already stored on the identity.`,
 	cmd.Flags().BoolVar(&dedupe, "dedupe", false, "Match rows to existing contacts by email and every platform identity; skip conflicts")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Preview without mutating Signals (dedupe lookups still run)")
 	cmd.Flags().IntVar(&batchSize, "batch-size", defaultImportBatchSize, "Rows per invoke chunk (max 50)")
-	cmd.Flags().IntVar(&limit, "limit", 0, "Max rows to process (default 500, hard cap 500)")
+	cmd.Flags().IntVar(&limit, "limit", 0, fmt.Sprintf("Max rows to process (default and hard cap %d)", maxImportRows))
+	cmd.Flags().StringVar(&nicheID, "niche", "", "Add every created or matched contact to this niche (belongs_to_niche)")
 	cmd.Flags().StringVar(&workflowRunID, "workflow-run-id", "", "Attribute imported contacts to this workflow run")
 	cmd.Flags().StringVar(&templateID, "template-id", "", "Template for --workflow-run-id")
 
@@ -310,6 +366,12 @@ func runContactImportWithInvoker(
 	summary *importContactsSummary,
 	invoke agentToolInvoker,
 ) (preflightFailed bool, terminalErr error) {
+	if summary.nicheID != "" {
+		// Fail fast: a missing niche must stop the import before any row is written.
+		if err := assertNicheExists(summary.nicheID, invoke); err != nil {
+			return true, err
+		}
+	}
 	var attribution *importAttributionState
 	if workflowRunID != "" {
 		attribution = newImportAttributionState(workflowRunID, templateID)
@@ -353,15 +415,24 @@ func readContactRows(filePath string, limit int) ([]contactRow, error) {
 		}
 	}
 
+	var rows []contactRow
+	var err error
 	ext := strings.ToLower(filepath.Ext(path))
 	switch ext {
 	case ".json":
-		return readContactJSON(path, limit)
+		rows, err = readContactJSON(path, limit)
 	case ".csv":
-		return readContactCSV(path, limit)
+		rows, err = readContactCSV(path, limit)
 	default:
 		return nil, fmt.Errorf("unsupported file type %q (use .csv or .json)", ext)
 	}
+	if err != nil {
+		return nil, err
+	}
+	if err := assignRowKeys(rows); err != nil {
+		return nil, err
+	}
+	return rows, nil
 }
 
 func readContactJSON(path string, limit int) ([]contactRow, error) {
@@ -460,22 +531,42 @@ func mapContactRow(item map[string]any) (contactRow, error) {
 		Company:               get("company"),
 		Title:                 get("title"),
 		Email:                 normalizeEmail(get("email")),
-		Platform:              get("platform"),
+		Platform:              strings.ToLower(get("platform")),
 		PlatformUserID:        get("platform_user_id", "platformUserId"),
 		PlatformHandle:        get("platform_handle", "platformHandle"),
 		ProfileURL:            get("profile_url", "profileUrl"),
 		AvatarURL:             get("avatar_url", "avatarUrl"),
 		IdentityEvidenceToken: get("identity_evidence_token", "identityEvidenceToken"),
 		Notes:                 get("notes"),
+		Bio:                   get("bio"),
+		Headline:              get("headline"),
+		Website:               get("website"),
+		Location:              get("location"),
 	}
 	if row.Email != "" && !strings.Contains(row.Email, "@") {
 		return contactRow{}, usageErr(fmt.Errorf("invalid email %q", row.Email))
+	}
+	if row.Platform != "" && !isSignalsPlatform(row.Platform) {
+		return contactRow{}, unsupportedPlatformErr(row.Name, "platform", row.Platform)
 	}
 	provenance, err := mapRowProvenance(item, get)
 	if err != nil {
 		return contactRow{}, err
 	}
 	row.Provenance = provenance
+	if row.Key, err = readRowKey(item); err != nil {
+		return contactRow{}, err
+	}
+	if row.Tags, err = readRowTags(item); err != nil {
+		return contactRow{}, err
+	}
+	identities, err := readRowIdentities(item)
+	if err != nil {
+		return contactRow{}, err
+	}
+	if err := applyRowIdentities(&row, identities); err != nil {
+		return contactRow{}, err
+	}
 	return row, nil
 }
 
@@ -610,66 +701,10 @@ func importAttributedContactChunkWithInvoker(
 	}
 
 	for _, row := range rows {
-		if dedupe {
-			index := len(summary.Rows) + 1
-			match, err := classifyContactRow(row, lookup)
-			if err != nil {
-				// A failed lookup fails the row in a dry run too: counting it as a create
-				// would promise something the real run might refuse.
-				summary.Failed++
-				summary.Errors = append(summary.Errors, err.Error())
-				report := newRowReport(index, row, rowMatch{}, rowActionFailed)
-				report.Error = err.Error()
-				summary.Rows = append(summary.Rows, report)
-				continue
-			}
-			action := plannedRowAction(match)
-			report := newRowReport(index, row, match, action)
-			if summary.plan != nil {
-				summary.plan.record(index, row, match, action)
-			}
-			switch action {
-			case rowActionSkip:
-				// A conflict, an org-held account, or an archived owner. Never create:
-				// upsert_contact_identity would reject the claim right after.
-				summary.Skipped++
-				if match.Outcome == rowOutcomeConflict {
-					summary.Conflicts++
-				}
-				summary.Notes = append(summary.Notes, fmt.Sprintf("%s: %s", row.Name, match.Reason))
-				summary.Rows = append(summary.Rows, report)
-				continue
-			case rowActionUpdate:
-				result, err := enrichExistingContact(match.ContactID, row, workflowRunID, templateID, true, invoke)
-				if row.IdentityEvidenceToken == "" || result.IdentityCommitted {
-					attribute(match.ContactID)
-				}
-				if err != nil {
-					summary.Failed++
-					summary.Errors = append(summary.Errors, err.Error())
-					report.Action = rowActionFailed
-					report.Error = err.Error()
-				} else if result.Enriched {
-					summary.Enriched++
-				} else {
-					summary.Skipped++
-				}
-				summary.Rows = append(summary.Rows, report)
-				continue
-			}
-			// rowActionCreate falls through to the create below.
-			contactID, err := createAndEnrichRow(row, dryRun, workflowRunID, templateID, summary, attribute, invoke)
-			if err != nil {
-				report.Action = rowActionFailed
-				report.Error = err.Error()
-			} else if !dryRun {
-				report.ContactID = contactID
-			}
-			summary.Rows = append(summary.Rows, report)
-			continue
-		}
-
-		_, _ = createAndEnrichRow(row, dryRun, workflowRunID, templateID, summary, attribute, invoke)
+		index := len(summary.Rows) + 1
+		report := importRow(index, row, dedupe, dryRun, workflowRunID, templateID, summary, attribute, lookup, invoke)
+		summary.Rows = append(summary.Rows, report)
+		summary.addMapping(row, report)
 	}
 
 	if len(chunkContactIDs) > 0 {
@@ -689,37 +724,160 @@ func importAttributedContactChunkWithInvoker(
 	return nil
 }
 
-// createAndEnrichRow creates the row's contact and then fills the remaining fields, counting
-// the outcome in summary. It returns the new contact ID ("dry-run" in a dry run) and the
-// create error, if any; an enrichment error is counted but does not undo the create.
-func createAndEnrichRow(
+// importRow classifies one row (with --dedupe), carries out its planned action and reports it.
+// lookup answers the dedupe reads (with a dry run's planned writes layered on); invoke makes
+// every call, writes included.
+func importRow(
+	index int,
 	row contactRow,
+	dedupe bool,
 	dryRun bool,
 	workflowRunID string,
 	templateID string,
 	summary *importContactsSummary,
 	attribute func(contactID string),
+	lookup agentToolInvoker,
 	invoke agentToolInvoker,
-) (string, error) {
-	contactID, err := createContactFromRow(row, dryRun, workflowRunID, templateID, invoke)
-	if err != nil {
-		if dryRun {
-			summary.Created++
-			return "", nil
+) rowReport {
+	match := rowMatch{Outcome: rowOutcomeUnchecked}
+	action := rowActionCreate
+	if dedupe {
+		classified, err := classifyContactRow(row, lookup)
+		if err != nil {
+			// A failed lookup fails the row in a dry run too: counting it as a create would
+			// promise something the real run might refuse.
+			summary.Failed++
+			summary.Errors = append(summary.Errors, err.Error())
+			report := newRowReport(index, row, rowMatch{}, rowActionFailed)
+			report.Error = err.Error()
+			return report
 		}
+		match = classified
+		action = plannedRowAction(match)
+	}
+	report := newRowReport(index, row, match, action)
+	if summary.plan != nil {
+		summary.plan.record(index, row, match, action)
+	}
+	fail := func(contactID string, err error) rowReport {
 		summary.Failed++
 		summary.Errors = append(summary.Errors, err.Error())
-		return "", err
+		report.Action = rowActionFailed
+		report.ContactID = contactID
+		report.Error = err.Error()
+		return report
 	}
-	summary.Created++
-	attribute(contactID)
-	if result, err := enrichExistingContact(contactID, row, workflowRunID, templateID, false, invoke); err != nil {
-		summary.Failed++
-		summary.Errors = append(summary.Errors, err.Error())
-	} else if result.Enriched {
-		summary.Enriched++
+
+	switch action {
+	case rowActionSkip:
+		// A conflict, an org-held account, or an archived owner. Never create:
+		// upsert_contact_identity would reject the claim right after.
+		summary.Skipped++
+		if match.Outcome == rowOutcomeConflict {
+			summary.Conflicts++
+		}
+		summary.Notes = append(summary.Notes, fmt.Sprintf("%s: %s", row.Name, match.Reason))
+		// rows[] still names an archived owner; the mapping entry is null (see addMapping).
+		return report
+	case rowActionUpdate:
+		contactID := match.ContactID
+		result, err := enrichExistingContact(contactID, row, match, workflowRunID, templateID, true, invoke)
+		if row.IdentityEvidenceToken == "" || result.IdentityCommitted {
+			attribute(contactID)
+		}
+		if err != nil {
+			return fail(contactID, err)
+		}
+		if result.Enriched {
+			summary.Enriched++
+		} else {
+			summary.Skipped++
+		}
+		if err := attachToNiche(contactID, summary, invoke); err != nil {
+			return fail(contactID, err)
+		}
+		return report
+	default:
+		contactID, err := createContactFromRow(row, dryRun, workflowRunID, templateID, invoke)
+		if err != nil {
+			return fail("", err)
+		}
+		if dryRun {
+			contactID = plannedRowOwner(index)
+		}
+		summary.Created++
+		attribute(contactID)
+		report.ContactID = contactID
+		result, err := enrichExistingContact(contactID, row, match, workflowRunID, templateID, false, invoke)
+		if err != nil {
+			// The contact exists; report it with the failure so a rerun can match it.
+			return fail(contactID, err)
+		}
+		if result.Enriched {
+			summary.Enriched++
+		}
+		if err := attachToNiche(contactID, summary, invoke); err != nil {
+			return fail(contactID, err)
+		}
+		return report
 	}
-	return contactID, nil
+}
+
+// addMapping records the row's rowKey → contactId entry: the contact it created or matched, or
+// null when it was skipped or failed before reaching a contact.
+func (summary *importContactsSummary) addMapping(row contactRow, report rowReport) {
+	if summary.Mapping == nil {
+		summary.Mapping = map[string]rowMapping{}
+	}
+	entry := rowMapping{Outcome: report.Outcome, Action: report.Action}
+	if report.ContactID != "" && report.Action != rowActionSkip {
+		contactID := report.ContactID
+		entry.ContactID = &contactID
+	}
+	key := row.RowKey
+	if key == "" {
+		key = fmt.Sprintf("%d", report.Row)
+	}
+	summary.Mapping[key] = entry
+}
+
+// assertNicheExists stops the import before any row when --niche names no niche.
+func assertNicheExists(nicheID string, invoke agentToolInvoker) error {
+	result, err := invoke("query_niches", map[string]any{
+		"id":               nicheID,
+		"includeLocalOnly": true,
+		"pageSize":         1,
+	})
+	if err != nil {
+		return err
+	}
+	niches, _ := result["niches"].([]any)
+	for _, item := range niches {
+		if niche, ok := item.(map[string]any); ok && niche["id"] == nicheID {
+			return nil
+		}
+	}
+	return notFoundErr(fmt.Errorf("niche %s not found; create it (upsert_niche) or fix --niche before importing", nicheID))
+}
+
+// attachToNiche adds the contact to --niche. upsert_edge updates an existing edge in place, so
+// a rerun adds nothing.
+func attachToNiche(contactID string, summary *importContactsSummary, invoke agentToolInvoker) error {
+	if summary.nicheID == "" || contactID == "" {
+		return nil
+	}
+	if _, err := invoke("upsert_edge", map[string]any{
+		"srcType":  "contact",
+		"srcId":    contactID,
+		"dstType":  "niche",
+		"dstId":    summary.nicheID,
+		"edgeType": "belongs_to_niche",
+		"source":   "import",
+	}); err != nil {
+		return err
+	}
+	summary.NicheMembers++
+	return nil
 }
 
 func recordWorkflowRunContacts(
@@ -1013,6 +1171,13 @@ func createContactFromRow(
 	if row.Notes != "" {
 		input["notes"] = row.Notes
 	}
+	for field, value := range map[string]string{
+		"bio": row.Bio, "headline": row.Headline, "website": row.Website, "location": row.Location,
+	} {
+		if value != "" {
+			input[field] = value
+		}
+	}
 	if row.IdentityEvidenceToken != "" {
 		input["identityEvidenceToken"] = row.IdentityEvidenceToken
 	}
@@ -1048,6 +1213,7 @@ type existingContactEnrichmentResult struct {
 func enrichExistingContact(
 	contactID string,
 	row contactRow,
+	match rowMatch,
 	workflowRunID string,
 	templateID string,
 	includeIdentity bool,
@@ -1063,6 +1229,12 @@ func enrichExistingContact(
 		}
 		if row.PlatformUserID != "" {
 			identity["platformUserId"] = row.PlatformUserID
+		} else if row.IdentityEvidenceToken == "" && row.PlatformHandle != "" {
+			// upsert_contact_identity needs platformUserId to attach a new identity. Derive it
+			// from the handle the way create_contact and dedupe do (trimmed, no "@"), or a
+			// handle-only row fails on every match. Snowball evidence rows are unchanged: the
+			// server takes the account from the evidence.
+			identity["platformUserId"] = strings.TrimPrefix(strings.TrimSpace(row.PlatformHandle), "@")
 		}
 		if row.PlatformHandle != "" {
 			identity["platformHandle"] = row.PlatformHandle
@@ -1106,6 +1278,15 @@ func enrichExistingContact(
 		result.IdentityCommitted = true
 	}
 
+	// Then the row's further identities (#567), still before any other field changes.
+	written, err := writeSecondaryIdentities(contactID, row, match, workflowRunID, templateID, invoke)
+	if written {
+		result.Enriched = true
+	}
+	if err != nil {
+		return result, err
+	}
+
 	enrichInput := map[string]any{
 		"contactId": contactID,
 	}
@@ -1118,6 +1299,18 @@ func enrichExistingContact(
 	if row.Notes != "" {
 		enrichInput["notes"] = row.Notes
 	}
+	// Profile fields fill only empty ones (enrich_contact never overwrites them); tags are
+	// merged into the contact's JSON tag array.
+	for field, value := range map[string]string{
+		"bio": row.Bio, "headline": row.Headline, "website": row.Website, "location": row.Location,
+	} {
+		if value != "" {
+			enrichInput[field] = value
+		}
+	}
+	if len(row.Tags) > 0 {
+		enrichInput["tags"] = row.Tags
+	}
 	if len(enrichInput) > 1 {
 		if _, err := invoke("enrich_contact", enrichInput); err != nil {
 			return result, err
@@ -1125,4 +1318,60 @@ func enrichExistingContact(
 		result.Enriched = true
 	}
 	return result, nil
+}
+
+// writeSecondaryIdentities attaches the row's further identities to the contact with
+// upsert_contact_identity, forwarding each identity's own provenance (the server applies part
+// A's downgrade rule). One the contact already holds is left alone unless the row brings
+// provenance for it, so a rerun makes no calls. One held by another contact or an org never
+// gets here: classification made the row a conflict and skipped it before any write.
+func writeSecondaryIdentities(
+	contactID string,
+	row contactRow,
+	match rowMatch,
+	workflowRunID string,
+	templateID string,
+	invoke agentToolInvoker,
+) (bool, error) {
+	held := map[string]struct{}{}
+	for _, claim := range match.Claims {
+		if claim.ContactID == contactID {
+			held[strings.ToLower(claim.Platform)+"\x00"+claim.PlatformUserID] = struct{}{}
+		}
+	}
+	written := false
+	for _, identity := range row.identities() {
+		if identity.primary {
+			continue
+		}
+		key := identity.claimKey()
+		if _, alreadyHeld := held[strings.ToLower(identity.Platform)+"\x00"+key]; alreadyHeld && identity.Provenance == nil {
+			continue
+		}
+		input := map[string]any{
+			"contactId":      contactID,
+			"platform":       identity.Platform,
+			"platformUserId": key,
+		}
+		if identity.PlatformHandle != "" {
+			input["platformHandle"] = identity.PlatformHandle
+		}
+		if identity.ProfileURL != "" && !isLikelyAvatarURL(identity.ProfileURL) {
+			input["platformUrl"] = identity.ProfileURL
+		}
+		if identity.Provenance != nil {
+			input["provenance"] = identity.Provenance.payload()
+		}
+		if workflowRunID != "" {
+			input["workflowRunId"] = workflowRunID
+		}
+		if templateID != "" {
+			input["templateId"] = templateID
+		}
+		if _, err := invoke("upsert_contact_identity", input); err != nil {
+			return written, fmt.Errorf("%s: attaching %s/%s: %w", row.Name, identity.Platform, key, err)
+		}
+		written = true
+	}
+	return written, nil
 }

@@ -52,6 +52,8 @@ Use `run-signals-pp-cli.sh reconcile --file …` or `import contacts --dedupe --
 - `conflict`: the matches point at different contacts (identity vs identity, or identity vs email), the email alone matches several, or an org holds the account. Import skips it and never creates it; the note lists every match, so the duplicates can be merged first.
 - `new`: nothing matches; import creates it.
 
+A cohort file can carry several identities, profile fields and tags per row: `identities[]` (`{platform, platformUserId | handle, url, provenance}`), `bio`, `headline`, `website`, `location`, `tags[]` and a `key` (#567). In CSV the `identities` cell is that JSON array and `tags` a JSON array or `;` list. Add `--niche <id>` to put every created or matched contact in a niche. The result's `mapping` gives each row key's `contactId` (null when skipped). One call takes up to 5,000 rows, e.g. `import contacts --file cohort.json --dedupe --niche <nicheId>`; preview it with `--dry-run` first. Platforms must be Signals platforms (`x`, `linkedin`, `bluesky`, … not `github`); a site goes in `website`.
+
 An archived owner is a `match` with `action: skip` (restore the contact first). In a preview, a row that repeats an earlier row's identity or email matches `contactId: "row:<n>"`, the contact row `<n>` would create. Conflicts don't fail the run or change the exit code; read `conflicts`.
 
 When a brief provides a specific Local App URL, pin the CLI to that instance:
