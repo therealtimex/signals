@@ -30,6 +30,11 @@ import {
 import { postWorkflowCompletionThreadMessage } from "@/lib/rtx/workflow-completion-thread";
 import { releaseContactWebResearchTargetFromRunConfig } from "@/lib/workflows/contact-web-research-target";
 import { releaseNetworkSnowballTargetForRun } from "@/lib/workflows/network-snowball-target";
+import {
+  DISPATCH_LOST_ERROR_CODE,
+  DISPATCH_LOST_SUMMARY,
+  TERMINAL_RUN_TIMEOUT_SUMMARY,
+} from "@/lib/rtx/workflow-run-watchdog-markers";
 
 export const DEFAULT_WORKFLOW_TERMINAL_RUN_TIMEOUT_MS = 4 * 60 * 60 * 1000;
 export const WORKFLOW_TERMINAL_RUN_TIMEOUT_ENV = "WORKFLOW_TERMINAL_RUN_TIMEOUT_MS";
@@ -40,13 +45,9 @@ export const WORKFLOW_TERMINAL_RUN_TIMEOUT_ENV = "WORKFLOW_TERMINAL_RUN_TIMEOUT_
  */
 export const DEFAULT_WORKFLOW_DISPATCH_LIVENESS_TIMEOUT_MS = 15 * 60 * 1000;
 export const WORKFLOW_DISPATCH_LIVENESS_TIMEOUT_ENV = "WORKFLOW_DISPATCH_LIVENESS_TIMEOUT_MS";
-export const DISPATCH_LOST_ERROR_CODE = "dispatch_lost";
+export { DISPATCH_LOST_ERROR_CODE };
 
-const DISPATCH_LOST_SUMMARY =
-  "dispatch_lost: the research agent never reported back and its terminal is not working on this run. Signals failed the run so the contact can be researched again.";
-
-const TIMEOUT_SUMMARY =
-  "Workflow timed out waiting for complete_workflow_run. Signals released the linked terminal session.";
+const TIMEOUT_SUMMARY = TERMINAL_RUN_TIMEOUT_SUMMARY;
 
 export function resolveWorkflowTerminalRunTimeoutMs(env: EnvLike = process.env): number {
   const parsed = Number.parseInt(env[WORKFLOW_TERMINAL_RUN_TIMEOUT_ENV] ?? "", 10);
