@@ -601,6 +601,10 @@
                             "additionalProperties": false,
                             "description": "Optional provenance for the platform identity created or matched from platform/platformUserId; ignored when no platform identity is given."
                           },
+                          "allowUnusualHandle": {
+                            "type": "boolean",
+                            "description": "Accept a handle that passes the platform's syntax but looks like junk: two characters or fewer, or a placeholder such as notwitter or none (#569). Set it only when the value really is the account. It never accepts a URL from another platform or invalid syntax."
+                          },
                           "notes": {
                             "type": "string"
                           },
@@ -1173,10 +1177,44 @@
                             ],
                             "additionalProperties": false,
                             "description": "Optional identity provenance. Omit it to leave the stored provenance unchanged; the same or a stronger kind replaces all three fields."
+                          },
+                          "allowUnusualHandle": {
+                            "type": "boolean",
+                            "description": "Accept a handle that passes the platform's syntax but looks like junk: two characters or fewer, or a placeholder such as notwitter or none (#569). Set it only when the value really is the account. It never accepts a URL from another platform or invalid syntax."
                           }
                         },
                         "required": [
                           "contactId"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "const": "remove_contact_identity"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "contactId": {
+                            "type": "string",
+                            "description": "The contact the identity belongs to."
+                          },
+                          "identityId": {
+                            "type": "string",
+                            "description": "The identity's id, from get_contact identities[].id. It must belong to contactId."
+                          }
+                        },
+                        "required": [
+                          "contactId",
+                          "identityId"
                         ],
                         "additionalProperties": false
                       }
@@ -5174,6 +5212,7 @@
                       "score_contact_fit",
                       "enrich_contact",
                       "upsert_contact_identity",
+                      "remove_contact_identity",
                       "archive_contact",
                       "find_duplicate_contacts",
                       "find_duplicate_orgs",
@@ -5403,6 +5442,6 @@
   ],
   "x-signals-agent-tools": {
     "manifestVersion": "1",
-    "toolCount": 94
+    "toolCount": 95
   }
 }

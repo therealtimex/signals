@@ -18,9 +18,11 @@ type reconcileSummary struct {
 	WouldCreate int  `json:"wouldCreate"`
 	// WouldMatch counts rows import would update on an existing contact; Conflicts counts rows
 	// whose matches disagree. Both are subsets of WouldSkip, which keeps meaning "not created".
-	WouldMatch int         `json:"wouldMatch"`
-	Conflicts  int         `json:"conflicts"`
-	Rows       []rowReport `json:"rows"`
+	WouldMatch int `json:"wouldMatch"`
+	Conflicts  int `json:"conflicts"`
+	// IdentitiesRejected counts identities dropped as import would drop them (#569).
+	IdentitiesRejected int         `json:"identitiesRejected,omitempty"`
+	Rows               []rowReport `json:"rows"`
 }
 
 // mergeSummary is the --merge counterpart of reconcileSummary. AlreadyMerged is
@@ -50,6 +52,7 @@ func newReconcileCmd(flags *rootFlags) *cobra.Command {
 	var filePath string
 	var merge bool
 	var dryRun bool
+	var allowUnusualHandles bool
 	var minConfidence float64
 
 	cmd := &cobra.Command{
@@ -75,6 +78,8 @@ func newReconcileCmd(flags *rootFlags) *cobra.Command {
 				}
 				return usageErr(err)
 			}
+			// Classify what import would write: the same identities it drops are dropped here.
+			dropInvalidRowIdentities(rows, allowUnusualHandles)
 
 			c, err := flags.newClient()
 			if err != nil {
@@ -105,6 +110,7 @@ func newReconcileCmd(flags *rootFlags) *cobra.Command {
 				action := plannedRowAction(match)
 				plan.record(index+1, row, match, action)
 				summary.Rows = append(summary.Rows, newRowReport(index+1, row, match, action))
+				summary.IdentitiesRejected += len(row.RejectedIdentities)
 				switch action {
 				case rowActionCreate:
 					summary.WouldCreate++
@@ -131,6 +137,7 @@ func newReconcileCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().StringVar(&filePath, "file", "", "Path to contacts.csv/.json, or dedup-candidates.json with --merge")
 	cmd.Flags().BoolVar(&merge, "merge", false, "Merge the duplicate groups staged in --file via merge_contacts")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Preview the merge without mutating Signals")
+	cmd.Flags().BoolVar(&allowUnusualHandles, "allow-unusual-handles", false, "Classify very short and placeholder-looking handles instead of dropping them, as import --allow-unusual-handles does")
 	cmd.Flags().Float64Var(&minConfidence, "min-confidence", 0, "Skip groups below this confidence (0-1, requires --merge)")
 	return cmd
 }

@@ -130,19 +130,23 @@ type rowReport struct {
 	EmailMatches []string        `json:"emailMatches,omitempty"`
 	Reason       string          `json:"reason,omitempty"`
 	Error        string          `json:"error,omitempty"`
+	// RejectedIdentities are identities dropped before dedupe because their values fail the
+	// server's checks (#569).
+	RejectedIdentities []identityViolation `json:"rejectedIdentities,omitempty"`
 }
 
 func newRowReport(index int, row contactRow, match rowMatch, action string) rowReport {
 	return rowReport{
-		Row:          index,
-		Key:          row.Key,
-		Name:         row.Name,
-		Outcome:      match.Outcome,
-		Action:       action,
-		ContactID:    match.ContactID,
-		MatchedBy:    match.Claims,
-		EmailMatches: match.EmailMatches,
-		Reason:       match.Reason,
+		Row:                index,
+		Key:                row.Key,
+		Name:               row.Name,
+		Outcome:            match.Outcome,
+		Action:             action,
+		ContactID:          match.ContactID,
+		MatchedBy:          match.Claims,
+		EmailMatches:       match.EmailMatches,
+		Reason:             match.Reason,
+		RejectedIdentities: row.RejectedIdentities,
 	}
 }
 

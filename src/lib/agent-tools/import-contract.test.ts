@@ -139,13 +139,13 @@ describe("contact-import agent-tool response contract", () => {
     const identity = createOrgIdentity({
       orgId: org.id,
       platform: "x",
-      platformUserId: "claimed-account",
+      platformUserId: "claimed_account",
     });
 
     const { response, body } = await invoke("create_contact", {
       name: "Rejected Duplicate",
       platform: "x",
-      platformUserId: "claimed-account",
+      platformUserId: "claimed_account",
     });
 
     expect(response.status).toBe(409);
@@ -154,7 +154,7 @@ describe("contact-import agent-tool response contract", () => {
       code: "CONFLICT",
       details: {
         platform: "x",
-        platformUserId: "claimed-account",
+        platformUserId: "claimed_account",
         claimant: { kind: "org", orgId: org.id, identityId: identity.id },
       },
     });
