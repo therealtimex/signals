@@ -1,4 +1,5 @@
 import { reconcileWorkflowTerminalCleanups } from "@/lib/rtx/workflow-terminal-reconciler";
+import { releaseLostWorkflowDispatches } from "@/lib/rtx/workflow-run-terminal-watchdog";
 
 export const WORKFLOW_TERMINAL_CLEANUP_INTERVAL_MS = 60_000;
 
@@ -29,6 +30,25 @@ function runCleanupPass(reconcile: CleanupReconcilePass): Promise<void> {
 }
 
 /**
+ * One always-on maintenance pass: fail lost Contact Web Research dispatches (#572), then replay
+ * durable terminal cleanup — which picks up the cleanup each `dispatch_lost` run just requested.
+ * A failed liveness sweep never blocks cleanup.
+ */
+export async function runWorkflowTerminalMaintenancePass(
+  deps: {
+    releaseLostDispatches?: () => Promise<unknown>;
+    reconcileCleanups?: () => Promise<unknown>;
+  } = {},
+): Promise<void> {
+  try {
+    await (deps.releaseLostDispatches ?? (() => releaseLostWorkflowDispatches()))();
+  } catch (error) {
+    console.warn("[workflow-terminal-cleanup] Dispatch-liveness sweep failed:", error);
+  }
+  await (deps.reconcileCleanups ?? (() => reconcileWorkflowTerminalCleanups()))();
+}
+
+/**
  * Start terminal cleanup recovery independently of optional workflow scheduling.
  *
  * The standalone Local App intentionally disables scheduled workflow execution,
@@ -41,7 +61,7 @@ export function initWorkflowTerminalCleanupReconciler(
   initialized = true;
 
   const reconcile =
-    options.reconcile ?? (() => reconcileWorkflowTerminalCleanups());
+    options.reconcile ?? (() => runWorkflowTerminalMaintenancePass());
   intervalId = setInterval(() => {
     void runCleanupPass(reconcile);
   }, WORKFLOW_TERMINAL_CLEANUP_INTERVAL_MS);

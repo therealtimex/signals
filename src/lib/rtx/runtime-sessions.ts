@@ -109,6 +109,18 @@ function mapLaunchHttpError(
   if (status === 403 || code === "PERMISSION_REQUIRED" || code === "PERMISSION_DENIED") {
     return { success: false, error, errorCode: "permission_required", httpStatus: status };
   }
+  // RealTimeX #3191: the terminal did not confirm the turn in time but may still have taken it
+  // (409 `SEND_MESSAGE_OUTCOME_UNKNOWN`, `status: delivery_unknown`). That is an uncertain
+  // dispatch, not a refusal: the caller must keep its cleanup intent and not send it again (#572).
+  if (code === "SEND_MESSAGE_OUTCOME_UNKNOWN" || body.status === "delivery_unknown") {
+    return {
+      success: false,
+      error,
+      errorCode: "launch_failed",
+      httpStatus: status,
+      dispatchState: "uncertain",
+    };
+  }
   if (
     status === 404 ||
     code === "APP_NOT_FOUND" ||

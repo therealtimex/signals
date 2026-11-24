@@ -8,7 +8,20 @@ import {
 import { getContactWebResearchState } from "@/lib/contacts/web-research-state";
 import { runTemplateViaRtx } from "@/lib/agents/run-template-via-rtx";
 import { resolveSignalsBaseUrlFromRequest } from "@/lib/rtx/resolve-signals-base-url";
+import { releaseLostWorkflowDispatch } from "@/lib/rtx/workflow-run-terminal-watchdog";
 import { notFoundResponse } from "@/lib/api/errors";
+
+/**
+ * Research state, after failing a run that was lost in dispatch (#572). Polling clients and the
+ * re-run guard both see `failed`/`dispatch_lost` as soon as the liveness window has passed, without
+ * waiting for the background sweep.
+ */
+async function getLiveContactWebResearchState(contactId: string) {
+  const state = getContactWebResearchState(contactId);
+  if (state.status !== "pending" || !state.workflowRunId) return state;
+  const lost = await releaseLostWorkflowDispatch(state.workflowRunId);
+  return lost.released ? getContactWebResearchState(contactId) : state;
+}
 
 export async function GET(
   _req: NextRequest,
@@ -16,7 +29,7 @@ export async function GET(
 ) {
   const { id } = await params;
   if (!getContactById(id)) return notFoundResponse("Contact not found");
-  return NextResponse.json(getContactWebResearchState(id));
+  return NextResponse.json(await getLiveContactWebResearchState(id));
 }
 
 export async function POST(
@@ -37,7 +50,7 @@ export async function POST(
   }
 
   seedTemplates();
-  const state = getContactWebResearchState(id);
+  const state = await getLiveContactWebResearchState(id);
   if (state.status === "pending") {
     return NextResponse.json(
       {
@@ -56,11 +69,15 @@ export async function POST(
     signalsBaseUrl: resolveSignalsBaseUrlFromRequest(req),
   });
   if (!result.success) {
-    const unavailable = result.errorCode === "standalone" || result.errorCode === "rtx_unavailable";
+    // `standalone` means Signals is not running inside RealTimeX; `rtx_unavailable` now only means
+    // RealTimeX could not be reached for runtime sessions at all. Every other dispatch failure —
+    // including one caused by the previous run's bad handoff — keeps its own code (#572).
+    const standalone = result.errorCode === "standalone";
+    const unavailable = standalone || result.errorCode === "rtx_unavailable";
     const researchTargetUnavailable = result.errorCode === "research_target_unavailable";
     return NextResponse.json(
       {
-        error: unavailable ? "Contact web research is available inside RealTimeX" : result.error,
+        error: standalone ? "Contact web research is available inside RealTimeX" : result.error,
         code: unavailable
           ? "RTX_UNAVAILABLE"
           : researchTargetUnavailable

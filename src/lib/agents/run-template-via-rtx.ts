@@ -30,7 +30,11 @@ import {
   ensureRtxWorkspace,
   getSignalsRtxWorkspaceSlug,
 } from "@/lib/rtx/cli-provisioning";
-import { getOrCreateTemplateThread } from "@/lib/rtx/template-thread";
+import { getOrCreateTemplateThread, replaceTemplateThread } from "@/lib/rtx/template-thread";
+import {
+  assessTemplateThreadLiveness,
+  type TemplateThreadLiveness,
+} from "@/lib/rtx/template-thread-liveness";
 import { isRtxEmbedded } from "@/lib/rtx/env";
 import { resolveSignalsBaseUrlFromEnv } from "@/lib/rtx/resolve-signals-base-url";
 import {
@@ -471,6 +475,7 @@ export async function runTemplateViaRtx(
   let writingScopeMinted = false;
   let snowballIdentityScopeMinted = false;
   let sourcePreparation: SnowballSourcePreparation | null = null;
+  let threadLivenessFailure: Extract<TemplateThreadLiveness, { alive: false }> | null = null;
 
   /**
    * Drop the composed dispatch's capability when the dispatch never happened.
@@ -537,7 +542,7 @@ export async function runTemplateViaRtx(
       env,
       fetchImpl
     );
-    const thread = await getOrCreateTemplateThread(
+    let thread = await getOrCreateTemplateThread(
         {
           template,
           workspaceSlug,
@@ -547,6 +552,42 @@ export async function runTemplateViaRtx(
         env,
         fetchImpl
       );
+    // #572: a shared thread whose last handoff was never confirmed (or whose terminal vanished)
+    // swallows every later dispatch silently. Check it before sending anything, and move the
+    // template to a new thread instead of sending into a dead one.
+    if (thread.resolution === "reused") {
+      const liveness = await assessTemplateThreadLiveness(
+        { templateId: template.id, workspaceSlug, threadSlug: thread.threadSlug, excludeRunId: run.id },
+        env,
+        fetchImpl,
+      );
+      if (!liveness.alive) {
+        threadLivenessFailure = liveness;
+        const staleThreadSlug = thread.threadSlug;
+        thread = await replaceTemplateThread(
+          { template, workspaceSlug, threadName: thread.threadName, staleThreadSlug },
+          env,
+          fetchImpl,
+        );
+        createWorkflowStep({
+          workflowRunId: run.id,
+          stepIndex: nextStepIndex(run.id),
+          stepType: "tool_call",
+          status: "completed",
+          tool: "rtx_thread_liveness",
+          output: JSON.stringify({
+            alive: false,
+            reason: liveness.reason,
+            previousRunId: liveness.previousRunId,
+            previousErrorCode: liveness.previousErrorCode,
+            staleThreadSlug,
+            threadSlug: thread.threadSlug,
+            threadResolution: thread.resolution,
+          }),
+          durationMs: 0,
+        });
+      }
+    }
     const { threadSlug, resolution: threadResolution } = thread;
 
     let runtimeConfig = { ...mergedConfig };
@@ -913,6 +954,13 @@ export async function runTemplateViaRtx(
       }
       errorMessage += revokeWritingScopeIfUnaccepted();
       errorMessage += revokeSnowballIdentityScopeIfUnaccepted();
+      // RTX answered the workspace and thread calls a moment ago, so it is up: a dispatch failure
+      // here is a launch failure, not "RealTimeX unavailable" (#572). Only a 404 from the runtime
+      // sessions surface (old host, or the permission not granted) still means unavailable.
+      const errorCode =
+        launch.errorCode === "rtx_unavailable" && launch.httpStatus !== 404
+          ? "launch_failed"
+          : launch.errorCode;
       const settledLifecycle = settleWorkflowTerminalDispatch(
         readWorkflowTerminalLifecycle(getWorkflowRun(run.id)?.config) ??
           dispatchLifecycle,
@@ -927,6 +975,12 @@ export async function runTemplateViaRtx(
         completedAt: now,
         errors: JSON.stringify([errorMessage]),
         errorItems: 1,
+        result: JSON.stringify({
+          ...parseObject(getWorkflowRun(run.id)?.result),
+          message: errorMessage,
+          errorCode,
+          ...(errorCode !== launch.errorCode ? { rtxErrorCode: launch.errorCode } : {}),
+        }),
         config: writeWorkflowTerminalLifecycle(
           getWorkflowRun(run.id)?.config,
           settledLifecycle,
@@ -951,22 +1005,36 @@ export async function runTemplateViaRtx(
       });
 
       const httpStatus =
-        launch.errorCode === "permission_required"
+        errorCode === "permission_required"
           ? 403
-          : launch.errorCode === "standalone"
+          : errorCode === "standalone"
             ? 400
-            : launch.errorCode === "terminal_dispatch_required"
+            : errorCode === "terminal_dispatch_required"
               ? 409
-            : launch.errorCode === "launch_failed"
+            : errorCode === "launch_failed"
               ? 502
               : 503;
 
       return {
         success: false,
         error: errorMessage,
-        errorCode: launch.errorCode,
+        errorCode,
         httpStatus,
         workflowRunId: run.id,
+        details: {
+          dispatchState: launch.dispatchState === "uncertain" ? "uncertain" : "failed",
+          ...(errorCode !== launch.errorCode ? { rtxErrorCode: launch.errorCode } : {}),
+          ...(launch.httpStatus !== undefined ? { rtxHttpStatus: launch.httpStatus } : {}),
+          ...(threadLivenessFailure
+            ? {
+                previousDispatch: {
+                  workflowRunId: threadLivenessFailure.previousRunId,
+                  errorCode: threadLivenessFailure.previousErrorCode,
+                  reason: threadLivenessFailure.reason,
+                },
+              }
+            : {}),
+        },
         ...(sourcePreparation?.eventReportCapability
           ? { eventReportCapability: sourcePreparation.eventReportCapability }
           : {}),
