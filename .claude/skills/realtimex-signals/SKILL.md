@@ -288,6 +288,23 @@ signals-pp-cli agent-tools invoke --agent \
   --body-json '{"tool":"query_analytics","input":{}}'
 ```
 
+### Track a goal
+
+```bash
+# Create (or, on a retry, find) the goal and link it to the cohort's niche:
+signals-pp-cli agent-tools invoke --agent \
+  --body-json '{"tool":"upsert_goal","input":{"name":"Book 10 meetings from HackwithBay 4.0","goalType":"pipeline_progression","targetValue":10,"unit":"meetings","nicheId":"<niche id>"}}'
+
+# Record progress yourself when a meeting is booked:
+signals-pp-cli agent-tools invoke --agent \
+  --body-json '{"tool":"upsert_goal","input":{"id":"<goal id>","currentValue":3}}'
+```
+
+- Progress is what you write in `currentValue`, like the dashboard's manual ±. The niche link (`targets`) and launch links (`contributes_to`, via `launchId`) are relationships only: they never count meetings or members for you.
+- Without `id`, an open goal with the same `name` (ignoring case and outer spaces) and `goalType` is updated, so retrying is safe. Check `created` / `matchedBy`, and read `note` when several goals matched.
+- Fields you leave out keep their values. Reaching the target doesn't mark the goal achieved; send `status: "achieved"`.
+- Read back with `query_goals` (`progressPct`, `nicheIds`, `launchIds`) or `query_analytics` (`goals`).
+
 ### Research → CRM (with RTX browser)
 
 1. Use RTX browser / web tools to gather profile data

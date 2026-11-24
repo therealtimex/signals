@@ -29,7 +29,7 @@ Invoke body: `{ "tool": "<name>", "input": { ... } }`
 | `archive_contact` | Archive with `reason` |
 | `find_duplicate_contacts` | Find duplicate contact groups (tiers 1-3) with a suggested primary |
 | `merge_contacts` | Merge duplicates into `primaryContactId`; idempotent, `options.dryRun` previews |
-| `query_analytics` | Dashboard metrics |
+| `query_analytics` | Dashboard metrics, plus `goals` (counts by status, active goals' progress) |
 | `query_workflows` | List workflow runs |
 | `list_workflow_templates` | Templates available to start |
 | `start_workflow` | Start an RTX template run from `templateId`; optional `config`, `systemPrompt`, and `freshThread` are forwarded, while internal launcher fields remain server-owned |
@@ -53,7 +53,8 @@ Invoke body: `{ "tool": "<name>", "input": { ... } }`
 | `materialize_variant` | Create or refresh one approved content artifact from a current audited writing variant |
 | `revoke_variant_approval` | Revoke approval and return an unqueued writing artifact to draft |
 | `set_target_representation` | Bind/unbind one acting target to the exact active self/org identity with thread-message evidence |
-| `query_goals` | List goals |
+| `query_goals` | List goals with `progressPct`, `nicheIds`, `launchIds` |
+| `upsert_goal` | Create/update a goal; natural-key retry-safe; optional `nicheId` / `launchId` links |
 | `create_task` | Follow-up task |
 | `create_simulation_run` | Wind Tunnel: create + start a simulation run for a variant |
 | `query_simulations` | List runs; `includeAgents: true` returns public grounding |

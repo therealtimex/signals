@@ -111,11 +111,16 @@ erDiagram
 | edge_type | src → dst | Key properties | Scope default |
 |---|---|---|---|
 | `belongs_to_niche` | contact\|org → niche | `weight` = confidence 0–1 | shared *(catalogued in Phase 1, live now)* |
-| `targets` | launch\|variant → niche\|org\|contact | `priority` | shared |
+| `targets` | launch\|variant → niche\|org\|contact; goal → niche (#565: the cohort a goal is about, at most one per goal) | `priority` | shared |
 | `published_as` | variant → content | `platform`, `published_at` | shared |
 | `contributes_to` | launch → goal | `contribution`, `delta_rule` | shared *(src widened per Phase 1 catalog)* |
 
 Edge multiplicity rule unchanged: one edge per `(edge_type, src, dst)`; repeated events are `interactions`.
+
+*#565:* `upsert_goal` writes the goal → niche `targets` edge (`nicheId`) and the launch → goal
+`contributes_to` edge (`launchId`); `upsert_edge` can write both too. Neither edge moves goal
+progress yet: the `delta_rule` evaluation of `contributes_to` was never implemented, and goal
+progress still comes only from linked workflow templates and direct `currentValue` writes.
 
 ---
 
