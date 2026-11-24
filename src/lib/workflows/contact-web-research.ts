@@ -328,6 +328,24 @@ function buildIdentityProvenanceLines(
   ];
 }
 
+/**
+ * LinkedIn's own Experience details view for a `/in/<slug>` profile URL (#571 gap 2): the page
+ * the profile's "Show all experiences" control opens. Null for anything that is not a LinkedIn
+ * member profile.
+ */
+export function linkedInExperienceDetailsUrl(profileUrl: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(profileUrl);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+  if (!/(^|\.)linkedin\.com$/i.test(url.hostname)) return null;
+  const slug = /^\/in\/([^/]+)/i.exec(url.pathname)?.[1];
+  return slug ? `https://www.linkedin.com/in/${slug}/details/experience/` : null;
+}
+
 export function buildContactWebResearchBriefSection(input: {
   workflowRunId: string;
   config: Record<string, unknown>;
@@ -343,6 +361,10 @@ export function buildContactWebResearchBriefSection(input: {
   const refinedGoogleUrl = buildGoogleSearchUrl(refinedQuery);
   const knownProfileCandidates = resolveContactWebResearchKnownProfileCandidates(contact);
   const primaryIdentity = resolveContactWebResearchPrimaryIdentity(contact);
+  const experienceDetailsLines = knownProfileCandidates.flatMap((candidate) => {
+    const detailsUrl = linkedInExperienceDetailsUrl(candidate.url);
+    return detailsUrl ? [`  - ${candidate.url} → ${detailsUrl}`] : [];
+  });
   const primaryConfirmed =
     primaryIdentity.identity !== null && isConfirmedProvenance(primaryIdentity.provenanceUsed);
   const knownProfileCandidateLines = knownProfileCandidates.map(
@@ -397,6 +419,12 @@ export function buildContactWebResearchBriefSection(input: {
     "",
     "### Verified LinkedIn profile mining gate (required before completion)",
     "- On every matching LinkedIn /in/ profile, inspect the visible About text, Contact info when available, and the complete visible Experience section (including the same-profile Show all experiences control and its resulting details view). Existing identity or employment rows do not satisfy this gate.",
+    `- LinkedIn renders Experience lazily, below the fold, so a snapshot taken at the top of the profile does not show it. Before deciding Experience is missing: scroll it into view (agent-browser --session ${researchTarget.sessionName} scrollintoview "#experience", or scroll down 2000 repeated until the page bottom), wait for it to render (wait 2000), then take a fresh snapshot. If the page stays blank, check document.visibilityState as the agent-browser skill describes.`,
+    "- If Experience is still missing, or the Show all experiences control does not render, open the profile's own Experience details view in the same session: https://www.linkedin.com/in/<slug>/details/experience/ with the verified profile's exact slug. Wait for its list, then snapshot. It is the page Show all experiences opens, so it is part of the same profile and does not consume another page visit.",
+    ...(experienceDetailsLines.length > 0
+      ? ["  Experience details views for the known LinkedIn candidates:", ...experienceDetailsLines]
+      : []),
+    "- If the details view redirects to an auth wall, login or checkpoint page, that is an auth-state failure under the rules above, not missing data. Add the details URL to visitedUrls. Keep the /in/<slug>/ profile URL itself in verifiedProfileUrls and as the identity platformUrl; the details URL may be the evidenceUrl for roles read from it.",
     "- Mine every visible Experience entry, not only the current role. Call enrich_contact with employmentObservations containing orgName, title, isCurrent, evidenceUrl, and dates as UTC Unix seconds only when the page shows them precisely enough; omit uncertain dates rather than infer them.",
     "- Deduplicate an existing incomplete role by organization plus title; enrich its missing dates/evidence instead of creating a duplicate. Do not delete employment rows that are absent from the visible page.",
     "- Mine only email addresses explicitly self-published by this person in About or Contact info. Call enrich_contact with observedEmails containing the exact address, the LinkedIn profile evidenceUrl, the visible sentence as evidenceText, and sourcePlatform=linkedin. Never guess or derive an address.",
@@ -427,7 +455,7 @@ export function buildContactWebResearchBriefSection(input: {
       : "If ambiguity remains, do not call upsert_contact_identity. Complete with ambiguous=true, partial=true, and unresolvedFields including sameAs.",
     "",
     "### Hop policy and evidence",
-    "- Max 2 Google searches, 3 page visits after SERP, 2 registrable domains, and about 120 seconds wall clock. Expanding About, Contact info, or Experience on the same verified profile does not consume another page visit.",
+    "- Max 2 Google searches, 3 page visits after SERP, 2 registrable domains, and about 120 seconds wall clock. Expanding About, Contact info, or Experience on the same verified profile, including opening its /details/experience/ view, does not consume another page visit.",
     "- Visit all listed known identity candidates first. After SERP triage, prefer one additional LinkedIn or X profile visit. Use a company /about or /team page only when employment remains empty.",
     "- Write only facts visible on pages you visited. Never overwrite existing non-empty contact fields.",
     "- Linking an identity or filling bio/headline is not a stop condition while a verified LinkedIn profile still has uninspected required sections. Stop after known-identity and missing-LinkedIn discovery plus the verified-profile mining gate are attempted, ambiguity is declared, or the hop budget is exhausted.",
