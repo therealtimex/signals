@@ -424,7 +424,8 @@ export function buildContactWebResearchBriefSection(input: {
     ...(experienceDetailsLines.length > 0
       ? ["  Experience details views for the known LinkedIn candidates:", ...experienceDetailsLines]
       : []),
-    "- If the details view redirects to an auth wall, login or checkpoint page, that is an auth-state failure under the rules above, not missing data. Add the details URL to visitedUrls. Keep the /in/<slug>/ profile URL itself in verifiedProfileUrls and as the identity platformUrl; the details URL may be the evidenceUrl for roles read from it.",
+    "- If the details view redirects to an auth wall, login or checkpoint page, that is an auth-state failure under the rules above, not missing data: record the landed auth-wall URL (not the details URL) in blockedUrls and follow the auth_state_lost rule.",
+    "- Whenever you open the details view, add its URL to visitedUrls. Keep the /in/<slug>/ profile URL itself in verifiedProfileUrls and as the identity platformUrl; the details URL may be the evidenceUrl for roles read from it.",
     "- Mine every visible Experience entry, not only the current role. Call enrich_contact with employmentObservations containing orgName, title, isCurrent, evidenceUrl, and dates as UTC Unix seconds only when the page shows them precisely enough; omit uncertain dates rather than infer them.",
     "- Deduplicate an existing incomplete role by organization plus title; enrich its missing dates/evidence instead of creating a duplicate. Do not delete employment rows that are absent from the visible page.",
     "- Mine only email addresses explicitly self-published by this person in About or Contact info. Call enrich_contact with observedEmails containing the exact address, the LinkedIn profile evidenceUrl, the visible sentence as evidenceText, and sourcePlatform=linkedin. Never guess or derive an address.",

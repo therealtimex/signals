@@ -129,11 +129,17 @@ describe("Contact Web Research brief: lazily loaded Experience (#571 gap 2)", ()
 
   it("keeps an auth wall on the details view an auth-state failure, and the profile URL canonical", () => {
     const text = brief([linkedIn]);
-    expect(text).toContain(
-      "If the details view redirects to an auth wall, login or checkpoint page, that is an auth-state failure under the rules above, not missing data.",
+    const authLine = text
+      .split("\n")
+      .find((line) => line.startsWith("- If the details view redirects to an auth wall"));
+    // The server only sees an auth wall through the landed URL: /details/experience/ itself
+    // classifies as content, so recording only that URL would slip past the blocked-URL floor.
+    expect(authLine).toContain(
+      "record the landed auth-wall URL (not the details URL) in blockedUrls and follow the auth_state_lost rule.",
     );
+    expect(authLine).not.toContain("visitedUrls");
     expect(text).toContain(
-      "Keep the /in/<slug>/ profile URL itself in verifiedProfileUrls and as the identity platformUrl",
+      "- Whenever you open the details view, add its URL to visitedUrls. Keep the /in/<slug>/ profile URL itself in verifiedProfileUrls and as the identity platformUrl",
     );
     // The existing auth-wall rule the details view defers to is unchanged.
     expect(text).toContain(
