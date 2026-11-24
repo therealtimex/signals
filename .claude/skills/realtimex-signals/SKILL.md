@@ -46,7 +46,13 @@ skills/realtimex-signals/scripts/run-signals-pp-cli.sh health
 
 Provisioned plugin workspaces do **not** bundle native CLI binaries — always bootstrap via health-pinned `npx` (or `run-signals-pp-cli.sh`). Standalone offline installs may still ship `tools/signals-pp-cli/bin/` in the app artifact.
 
-Use `run-signals-pp-cli.sh reconcile --file …` to preview dedupe without mutating. For `--dedupe --dry-run` imports, reconcile is the accurate preview (dry-run skips dedupe queries).
+Use `run-signals-pp-cli.sh reconcile --file …` or `import contacts --dedupe --dry-run --file …` to preview dedupe without mutating; both run the same read-only lookups and report the same per-row `rows[]` classification (#568). Every platform identity on a row and its email are checked:
+
+- `match`: one existing contact; import updates it (`contactId`, `matchedBy[]` names the identity that matched, `primary: false` for a secondary one).
+- `conflict`: the matches point at different contacts (identity vs identity, or identity vs email), the email alone matches several, or an org holds the account. Import skips it and never creates it; the note lists every match, so the duplicates can be merged first.
+- `new`: nothing matches; import creates it.
+
+An archived owner is a `match` with `action: skip` (restore the contact first).
 
 When a brief provides a specific Local App URL, pin the CLI to that instance:
 
