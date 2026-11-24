@@ -3,6 +3,7 @@ import { db } from "@/lib/db/client";
 import { contactChannels, mediaAttachments } from "@/lib/db/schema";
 import type { Contact, ContactChannel, ContactEmployment, ContactIdentity } from "@/lib/db/types";
 import type { CreatedSource } from "@/lib/db/creation-sources";
+import { parseContactAliases } from "@/lib/contact-aliases";
 import {
   hasVerifiedGravatar,
   resolveContactAvatar,
@@ -62,6 +63,7 @@ export type ContactDTO = {
   fitRationale: string | null;
   fitScoreVersion: string | null;
   fitScoredAt: number | null;
+  aliases: string[];
 };
 
 function pickPrimaryChannel(
@@ -179,6 +181,7 @@ export function assembleContactDto(
     fitRationale: contact.fitRationale,
     fitScoreVersion: contact.fitScoreVersion,
     fitScoredAt: contact.fitScoredAt,
+    aliases: parseContactAliases(contact.aliases),
   };
 }
 

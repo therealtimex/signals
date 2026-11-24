@@ -24,6 +24,7 @@ import {
   nextStepIndex,
 } from "@/lib/db/queries/workflows";
 import type { EnrichContactResult } from "@/lib/agents/types";
+import { CONTACT_ALIASES_MAX, mergeContactAliases } from "@/lib/contact-aliases";
 
 type ResearchEvidence = {
   evidenceUrl: string;
@@ -54,6 +55,7 @@ type EnrichmentData = {
   website?: string;
   bio?: string;
   tags?: string[];
+  aliases?: string[];
   metadata?: Record<string, unknown>;
   observedEmails?: ObservedEmail[];
   employmentObservations?: EmploymentObservation[];
@@ -280,6 +282,15 @@ export function enrichContactSync(
     if (mergedTags.length > existingTags.length) {
       updates.tags = JSON.stringify(mergedTags);
       fieldsUpdated.push("tags");
+    }
+  }
+
+  // Append aliases (deduped case-insensitively, never replaced)
+  if (data.aliases && data.aliases.length > 0) {
+    const merged = mergeContactAliases(contact.aliases, data.aliases, contact.name);
+    if (merged.added.length > 0) {
+      updates.aliases = JSON.stringify(merged.aliases.slice(0, CONTACT_ALIASES_MAX));
+      fieldsUpdated.push("aliases");
     }
   }
 

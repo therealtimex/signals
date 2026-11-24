@@ -81,6 +81,18 @@ import { identityProfileHref } from "@/lib/contact-identity-handle";
 import { validateWorkflowRunAndTemplateIds } from "@/lib/db/creation-provenance-input";
 import { CreatedSourceDetailFilterError } from "@/lib/db/creation-sources";
 import { AgentToolError } from "@/lib/agent-tools/types";
+import {
+  resolveIdentityProvenanceWrite,
+  serializeIdentityProvenance,
+  type IdentityProvenanceColumns,
+  type IdentityProvenanceWriteOutcome,
+} from "@/lib/identity-provenance";
+import {
+  CONTACT_ALIASES_MAX,
+  mergeContactAliases,
+} from "@/lib/contact-aliases";
+import { contactIdentities } from "@/lib/db/schema";
+import { eq } from "drizzle-orm";
 import { listContactEmailCandidates } from "@/lib/contacts/email-verification/candidates";
 import {
   recordRunCohort,
@@ -220,6 +232,24 @@ function platformClaimConflict(
   );
 }
 
+/**
+ * Reject a login/auth-wall provenance.sourceUrl before any write. It is valid https, so zod
+ * accepts it; checking it later (after create_contact inserts the contact) left an orphan
+ * contact that a corrected retry then duplicated.
+ */
+function assertProvenanceSourceUrlAllowed(
+  provenance: { sourceUrl?: string } | undefined,
+): void {
+  const url = provenance?.sourceUrl;
+  if (url && isBlockedResearchUrl(url)) {
+    throw new AgentToolError(
+      "VALIDATION_ERROR",
+      "provenance.sourceUrl is a login/auth-wall URL, not a profile page",
+      { field: "provenance.sourceUrl", url },
+    );
+  }
+}
+
 function serializeContactBirthFields(contact: {
   createdSource: string | null;
   createdSourceDetail: string | null;
@@ -267,12 +297,13 @@ function serializeContactIdentityRef(identity: {
   platformUserId: string;
   platformHandle: string | null;
   isPrimary: number | boolean;
-}) {
+} & IdentityProvenanceColumns) {
   return {
     platform: identity.platform,
     platformUserId: identity.platformUserId,
     handle: identity.platformHandle,
     isPrimary: Boolean(identity.isPrimary),
+    provenance: serializeIdentityProvenance(identity),
   };
 }
 
@@ -293,6 +324,7 @@ function serializeContactIdentity(identity: ContactIdentity) {
     followersCount: identity.followersCount,
     isPrimary: Boolean(identity.isPrimary),
     isActive: Boolean(identity.isActive),
+    provenance: serializeIdentityProvenance(identity),
   };
 }
 
@@ -448,6 +480,7 @@ export async function handleGetContact(input: z.infer<typeof getContactSchema>) 
     relationshipGoalUpdatedAt: contact.relationshipGoalUpdatedAt,
     enrichmentScore: contact.enrichmentScore,
     tags: contact.tags,
+    aliases: contact.aliases,
     identities: contact.identities.map(serializeContactIdentity),
     emailCandidates: listContactEmailCandidates(contact.id),
     ...serializeContactBirthFields(contact),
@@ -538,6 +571,7 @@ function findMatchingExistingContact(
 }
 
 export async function handleCreateContact(input: z.infer<typeof createContactSchema>) {
+  assertProvenanceSourceUrlAllowed(input.provenance);
   let suppliedIds: { workflowRunId: string | null; templateId: string | null };
   try {
     suppliedIds = validateWorkflowRunAndTemplateIds({
@@ -653,6 +687,7 @@ function createContactWithResolvedEvidence(
         avatarUrl: rest.avatarUrl,
         workflowRunId: resolvedIds.workflowRunId ?? undefined,
         templateId: resolvedIds.templateId ?? undefined,
+        provenance: rest.provenance,
       }, snowballEvidence);
     }
 
@@ -711,6 +746,9 @@ function createContactWithResolvedEvidence(
       enrichmentScore: updated.enrichmentScore,
       isExisting: true,
       ...(snowballEvidence ? { identityEvidenceReplay: false } : {}),
+      ...(identityResult && rest.provenance
+        ? { identityProvenanceWrite: identityResult.provenanceWrite }
+        : {}),
       message: `Contact "${updated.name}" already exists (${updated.id}); enriched existing record.`,
       ...serializeContactBirthFields(updated),
     };
@@ -747,8 +785,9 @@ function createContactWithResolvedEvidence(
     templateId: resolvedIds.templateId,
   });
 
+  let createdIdentity: ReturnType<typeof upsertContactIdentityWithEvidence> | undefined;
   if (rest.platform && (rest.platformUserId || rest.platformHandle)) {
-    upsertContactIdentityWithEvidence({
+    createdIdentity = upsertContactIdentityWithEvidence({
       contactId: contact.id,
       platform: rest.platform,
       platformUserId: rest.platformUserId ?? rest.platformHandle,
@@ -757,6 +796,7 @@ function createContactWithResolvedEvidence(
       avatarUrl: rest.avatarUrl,
       workflowRunId: resolvedIds.workflowRunId ?? undefined,
       templateId: resolvedIds.templateId ?? undefined,
+      provenance: rest.provenance,
     }, snowballEvidence);
   }
 
@@ -778,6 +818,9 @@ function createContactWithResolvedEvidence(
     relationshipGoalStatus: result.relationshipGoalStatus,
     isExisting: false,
     ...(snowballEvidence ? { identityEvidenceReplay: false } : {}),
+    ...(createdIdentity && rest.provenance
+      ? { identityProvenanceWrite: createdIdentity.provenanceWrite }
+      : {}),
     message: `Contact "${result.name}" created successfully.`,
     ...serializeContactBirthFields(result),
   };
@@ -822,8 +865,19 @@ export async function handleUpdateContact(input: z.infer<typeof updateContactSch
 
 export async function handleEnrichContact(input: z.infer<typeof enrichContactSchema>) {
   const { contactId, ...data } = input;
-  if (!getContactById(contactId)) {
+  const contact = getContactById(contactId);
+  if (!contact) {
     throw new AgentToolError("NOT_FOUND", `Contact not found: ${contactId}`);
+  }
+  if (data.aliases) {
+    const merged = mergeContactAliases(contact.aliases, data.aliases, contact.name);
+    if (merged.aliases.length > CONTACT_ALIASES_MAX) {
+      throw new AgentToolError(
+        "VALIDATION_ERROR",
+        `A contact holds at most ${CONTACT_ALIASES_MAX} aliases; this write would make ${merged.aliases.length}.`,
+        { field: "aliases", existing: contact.aliases.length, adding: merged.added.length },
+      );
+    }
   }
   return enrichContact(contactId, data);
 }
@@ -872,6 +926,7 @@ function upsertContactIdentityWithEvidence(
   input: z.infer<typeof upsertContactIdentitySchema>,
   preclaimedEvidence?: ClaimedSnowballLinkedInEvidence,
 ) {
+  assertProvenanceSourceUrlAllowed(input.provenance);
   const contact = getContactById(input.contactId);
   if (!contact) {
     throw new AgentToolError("NOT_FOUND", `Contact not found: ${input.contactId}`);
@@ -939,11 +994,13 @@ function upsertContactIdentityWithEvidence(
   if (snowballEvidence) {
     const replayIdentity = resolveSnowballEvidenceReplayIdentity(snowballEvidence, input);
     if (replayIdentity) {
+      const replayProvenance = applyIdentityProvenance(replayIdentity, input.provenance);
       return {
-        ...serializeContactIdentity(replayIdentity),
+        ...serializeContactIdentity(replayProvenance.identity),
         contactId: input.contactId,
         promotedCandidateIds: [],
         identityEvidenceReplay: true,
+        provenanceWrite: replayProvenance.outcome,
         message: "Contact identity evidence was already accepted.",
       };
     }
@@ -1091,6 +1148,9 @@ function upsertContactIdentityWithEvidence(
     );
   }
 
+  const provenanceWrite = applyIdentityProvenance(identity, input.provenance);
+  identity = provenanceWrite.identity;
+
   let promotedCandidateIds: string[] = [];
   if (snowballEvidence) {
     try {
@@ -1118,8 +1178,25 @@ function upsertContactIdentityWithEvidence(
     contactId: input.contactId,
     promotedCandidateIds,
     identityEvidenceReplay: false,
-    message: "Contact identity upserted.",
+    provenanceWrite: provenanceWrite.outcome,
+    message: provenanceWrite.outcome === "kept_existing"
+      ? `Contact identity upserted; kept the stored ${identity.provenanceKind} provenance over the weaker ${input.provenance?.kind}.`
+      : "Contact identity upserted.",
   };
+}
+
+/** Apply the #571 downgrade rule and persist provenance on an identity row. */
+function applyIdentityProvenance(
+  identity: ContactIdentity,
+  provenance: z.infer<typeof upsertContactIdentitySchema>["provenance"],
+): { identity: ContactIdentity; outcome: IdentityProvenanceWriteOutcome } {
+  const decision = resolveIdentityProvenanceWrite(identity, provenance);
+  if (!decision.columns) return { identity, outcome: decision.outcome };
+  db.update(contactIdentities)
+    .set({ ...decision.columns, updatedAt: Math.floor(Date.now() / 1000) })
+    .where(eq(contactIdentities.id, identity.id))
+    .run();
+  return { identity: getIdentityById(identity.id) ?? identity, outcome: decision.outcome };
 }
 
 export async function handleUpsertContactIdentity(

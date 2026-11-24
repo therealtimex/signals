@@ -269,7 +269,7 @@ export const AGENT_TOOLS: Record<string, AgentToolDefinition> = {
   get_contact: {
     name: "get_contact",
     description:
-      "Get full details for a single contact by ID, including linked identities and ICP fit fields.",
+      "Get full details for a single contact by ID, including linked identities (each with its provenance: kind, sourceUrl, observedAt, or null when unknown), name aliases, and ICP fit fields.",
     category: "contacts",
     schema: getContactSchema,
     parameters: zodToParameters(getContactSchema),
@@ -287,7 +287,7 @@ export const AGENT_TOOLS: Record<string, AgentToolDefinition> = {
   create_contact: {
     name: "create_contact",
     description:
-      "Create a new contact record. At minimum a name is required. Network Snowball LinkedIn writes require a fresh identityEvidenceToken from attest_snowball_linkedin_identity; Signals derives the identity from that browser evidence before Auto-commit.",
+      "Create a new contact record. At minimum a name is required. Network Snowball LinkedIn writes require a fresh identityEvidenceToken from attest_snowball_linkedin_identity; Signals derives the identity from that browser evidence before Auto-commit. Optional provenance applies to the platform identity, with the same rules as upsert_contact_identity.",
     category: "contacts",
     schema: createContactSchema,
     parameters: zodToParameters(createContactSchema),
@@ -318,7 +318,7 @@ export const AGENT_TOOLS: Record<string, AgentToolDefinition> = {
   enrich_contact: {
     name: "enrich_contact",
     description:
-      "Fill missing contact fields without overwriting existing data, add visible employment observations, and record explicitly self-published email addresses with source evidence. Recalculates enrichment score.",
+      "Fill missing contact fields without overwriting existing data, append name aliases, add visible employment observations, and record explicitly self-published email addresses with source evidence. Recalculates enrichment score.",
     category: "contacts",
     schema: enrichContactSchema,
     parameters: zodToParameters(enrichContactSchema),
@@ -327,7 +327,7 @@ export const AGENT_TOOLS: Record<string, AgentToolDefinition> = {
   upsert_contact_identity: {
     name: "upsert_contact_identity",
     description:
-      "Create or update a platform identity for a contact. Cross-claim conflicts return a reassign error. Network Snowball LinkedIn writes require a fresh identityEvidenceToken from attest_snowball_linkedin_identity.",
+      "Create or update a platform identity for a contact. Cross-claim conflicts return a reassign error. Network Snowball LinkedIn writes require a fresh identityEvidenceToken from attest_snowball_linkedin_identity. Optional provenance {kind: self_declared|agent_verified|inferred, sourceUrl, observedAt} records where the identity came from; a weaker kind never overwrites a stronger stored one (provenanceWrite reports applied, kept_existing or not_provided).",
     category: "contacts",
     schema: upsertContactIdentitySchema,
     parameters: zodToParameters(upsertContactIdentitySchema),

@@ -109,6 +109,7 @@ const contactFixture: ContactWithIdentities = {
   fitRationale: null,
   fitScoreVersion: null,
   fitScoredAt: null,
+  aliases: [],
   identities: [
     {
       id: "id1",
@@ -135,6 +136,9 @@ const contactFixture: ContactWithIdentities = {
       isActive: 1,
       lastSyncedAt: null,
       syncErrors: null,
+      provenanceKind: null,
+      provenanceSourceUrl: null,
+      provenanceObservedAt: null,
       createdAt: 1,
       updatedAt: 1,
     },

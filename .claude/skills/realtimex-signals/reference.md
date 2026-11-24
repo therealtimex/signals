@@ -17,14 +17,14 @@ Invoke body: `{ "tool": "<name>", "input": { ... } }`
 |------|----------|
 | `query_contacts` | Search/filter active CRM contacts (`email` = exact normalized match, `platformUserId` = exact identity match; `tags[]` = all must match, `nicheId` = `belongs_to_niche` member, `fitTier`, `minFitScore`, `sort: "fitScore"` = best fit first). Each row carries ICP fit fields |
 | `resolve_platform_claim` | Is a platform account already claimed, by a contact or an org? Use before creating a contact for an imported handle |
-| `get_contact` | Full record by `contactId`, including ICP fit fields (`fitScore`, `fitTier`, `fitProduct`, `fitConfidence`, `fitRationale`, `fitScoreVersion`, `fitScoredAt`) |
+| `get_contact` | Full record by `contactId`, including ICP fit fields (`fitScore`, `fitTier`, `fitProduct`, `fitConfidence`, `fitRationale`, `fitScoreVersion`, `fitScoredAt`), `aliases[]`, and per-identity `provenance` (`{kind, sourceUrl, observedAt}` or `null` = unknown) |
 | `get_contact_arpp` | Agent-readable ARPP projection by `contactId`; supports `visibility` |
 | `create_contact` | New contact (requires `name`; optional `channels[]`, `employments[]`) |
 | `update_contact` | Overwrite fields on existing contact |
-| `upsert_contact_identity` | Create or update a platform identity for a contact |
+| `upsert_contact_identity` | Create or update a platform identity for a contact; optional `provenance` `{kind: self_declared\|agent_verified\|inferred, sourceUrl?, observedAt?}`. A weaker kind never overwrites a stronger stored one (`provenanceWrite`: `applied` / `kept_existing` / `not_provided`) |
 | `attest_snowball_linkedin_identity` | Verify a LinkedIn identity in the run-bound browser; failures are quarantined automatically |
 | `list_snowball_candidates` | Read quarantined person/company proposals and gate failure reasons |
-| `enrich_contact` | Fill gaps only; needs `contactId` |
+| `enrich_contact` | Fill gaps only; needs `contactId`. `aliases[]` appends other names (deduped case-insensitively, max 50 per contact) |
 | `score_contact_fit` | Write ICP fit for up to 200 contacts per call (`items[]` of `contactId`, `fitScore` 0–100, `fitTier` A/B/C/unknown, optional `fitProduct`, `fitConfidence` 0–1, `fitRationale`, `fitScoreVersion`); one result per row, rescoring overwrites. Use this, not `enrich_contact.metadata`, for fit |
 | `archive_contact` | Archive with `reason` |
 | `find_duplicate_contacts` | Find duplicate contact groups (tiers 1-3) with a suggested primary |
@@ -175,9 +175,25 @@ closed. Never reuse a stale materialization or bypass `materialize_variant`/send
 }
 ```
 
+Identity the subject linked themselves (for example from their Luma profile):
+```json
+{
+  "contactId": "<id>",
+  "platform": "linkedin",
+  "platformUserId": "sasmita-s",
+  "provenance": { "kind": "self_declared", "sourceUrl": "https://lu.ma/user/sas-p" }
+}
+```
+Provenance strength: `self_declared` > `agent_verified` > `inferred` > null (unknown). The same
+or a stronger kind replaces it; leaving `provenance` out never changes it.
+
 **enrich_contact** (fill-gaps — does not overwrite existing fields)
 ```json
 { "contactId": "<id>", "title": "VP Sales", "headline": "Partnerships leader" }
+```
+Record a name difference as an alias (appended, never replaced):
+```json
+{ "contactId": "<id>", "aliases": ["Sasmita S"] }
 ```
 
 **query_contacts**

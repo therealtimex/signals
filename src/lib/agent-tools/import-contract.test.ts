@@ -87,6 +87,53 @@ describe("contact-import agent-tool response contract", () => {
     });
   });
 
+  it("round-trips identity provenance through create_contact, upsert_contact_identity and get_contact", async () => {
+    const created = await invoke("create_contact", {
+      name: "Sas P",
+      platform: "linkedin",
+      platformUserId: "sasmita-s",
+      provenance: { kind: "inferred", observedAt: 1_732_400_000 },
+    });
+    expect(created.response.status).toBe(200);
+    expect(created.body.result).toMatchObject({ isExisting: false, identityProvenanceWrite: "applied" });
+    const contactId = created.body.result.id as string;
+
+    const upgraded = await invoke("upsert_contact_identity", {
+      contactId,
+      platform: "linkedin",
+      platformUserId: "sasmita-s",
+      provenance: { kind: "self_declared", sourceUrl: "https://lu.ma/user/sas-p" },
+    });
+    expect(upgraded.response.status).toBe(200);
+    expect(upgraded.body.result.provenanceWrite).toBe("applied");
+
+    const read = await invoke("get_contact", { contactId });
+    expect(read.body.result.identities).toEqual([
+      expect.objectContaining({
+        platform: "linkedin",
+        platformUserId: "sasmita-s",
+        provenance: {
+          kind: "self_declared",
+          sourceUrl: "https://lu.ma/user/sas-p",
+          observedAt: expect.any(Number),
+        },
+      }),
+    ]);
+  });
+
+  it("rejects provenance without a kind as a 400 machine-readable envelope", async () => {
+    const { response, body } = await invoke("create_contact", {
+      name: "No Kind",
+      platform: "linkedin",
+      platformUserId: "no-kind",
+      provenance: { sourceUrl: "https://lu.ma/user/no-kind" },
+    });
+
+    expect(response.status).toBe(400);
+    expect(body).toMatchObject({ success: false, code: "VALIDATION_ERROR" });
+    expect(listContacts({ search: "No Kind" }).total).toBe(0);
+  });
+
   it("rejects an org-held create before mutation with actionable conflict details", async () => {
     const org = createOrg({ name: "Claim Owner" });
     const identity = createOrgIdentity({
