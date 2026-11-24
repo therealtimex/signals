@@ -180,7 +180,7 @@ fields are null for identities written before #571 or without provenance, which 
 | Field (in `provenance`) | Type | Notes |
 |---|---|---|
 | `kind` | `self_declared` \| `agent_verified` \| `inferred` | Required whenever `provenance` is sent |
-| `sourceUrl` | http(s) URL ≤2,048 | Optional. The page showing the evidence. Login and auth-wall URLs are rejected |
+| `sourceUrl` | http(s) URL ≤2,048 | Optional. The page showing the evidence. Login and auth-wall URLs are rejected with `VALIDATION_ERROR` (`details.field: "provenance.sourceUrl"`) before anything is written |
 | `observedAt` | unix seconds | Optional; defaults to the write time |
 
 - **Kinds.** `self_declared`: the subject linked the account on a profile they control (a Luma

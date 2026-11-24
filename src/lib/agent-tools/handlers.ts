@@ -227,6 +227,24 @@ function platformClaimConflict(
   );
 }
 
+/**
+ * Reject a login/auth-wall provenance.sourceUrl before any write. It is valid https, so zod
+ * accepts it; checking it later (after create_contact inserts the contact) left an orphan
+ * contact that a corrected retry then duplicated.
+ */
+function assertProvenanceSourceUrlAllowed(
+  provenance: { sourceUrl?: string } | undefined,
+): void {
+  const url = provenance?.sourceUrl;
+  if (url && isBlockedResearchUrl(url)) {
+    throw new AgentToolError(
+      "VALIDATION_ERROR",
+      "provenance.sourceUrl is a login/auth-wall URL, not a profile page",
+      { field: "provenance.sourceUrl", url },
+    );
+  }
+}
+
 function serializeContactBirthFields(contact: {
   createdSource: string | null;
   createdSourceDetail: string | null;
@@ -548,6 +566,7 @@ function findMatchingExistingContact(
 }
 
 export async function handleCreateContact(input: z.infer<typeof createContactSchema>) {
+  assertProvenanceSourceUrlAllowed(input.provenance);
   let suppliedIds: { workflowRunId: string | null; templateId: string | null };
   try {
     suppliedIds = validateWorkflowRunAndTemplateIds({
@@ -902,6 +921,7 @@ function upsertContactIdentityWithEvidence(
   input: z.infer<typeof upsertContactIdentitySchema>,
   preclaimedEvidence?: ClaimedSnowballLinkedInEvidence,
 ) {
+  assertProvenanceSourceUrlAllowed(input.provenance);
   const contact = getContactById(input.contactId);
   if (!contact) {
     throw new AgentToolError("NOT_FOUND", `Contact not found: ${input.contactId}`);
@@ -1035,7 +1055,6 @@ function upsertContactIdentityWithEvidence(
   for (const [field, value] of [
     ["platformUrl", platformUrl],
     ["websiteUrl", input.websiteUrl?.trim() || undefined],
-    ["provenance.sourceUrl", input.provenance?.sourceUrl],
   ] as const) {
     if (value && isBlockedResearchUrl(value)) {
       throw new AgentToolError(

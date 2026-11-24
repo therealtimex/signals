@@ -3,7 +3,7 @@ import { NextRequest } from "next/server";
 import { POST } from "@/app/api/agent-tools/invoke/route";
 import { invokeAgentTool } from "@/lib/agent-tools/invoke";
 import { AgentToolError } from "@/lib/agent-tools/types";
-import { createContact } from "@/lib/db/queries/contacts";
+import { createContact, listContacts } from "@/lib/db/queries/contacts";
 import { createIdentity } from "@/lib/db/queries/identities";
 import {
   identityProvenanceRank,
@@ -283,6 +283,65 @@ describe("create_contact provenance (import path)", () => {
 
     expect(second).toMatchObject({ id: first.id, isExisting: true, identityProvenanceWrite: "kept_existing" });
     expect((await identityProvenance(first.id, "sasmita-s"))?.kind).toBe("self_declared");
+  });
+
+  it("rejects a login/auth-wall sourceUrl before creating anything, so a corrected retry creates one contact", async () => {
+    const row = {
+      name: "Wall Row",
+      platform: "linkedin",
+      platformUserId: "wall-row",
+    };
+
+    for (const sourceUrl of [
+      "https://www.linkedin.com/authwall?trk=x",
+      "https://www.linkedin.com/login",
+    ]) {
+      await expect(
+        invokeAgentTool("create_contact", {
+          ...row,
+          provenance: { kind: "self_declared", sourceUrl },
+        }),
+      ).rejects.toMatchObject({
+        code: "VALIDATION_ERROR",
+        details: { field: "provenance.sourceUrl", url: sourceUrl },
+      });
+    }
+    expect(listContacts({ search: "Wall Row" }).total).toBe(0);
+
+    const retried = (await invokeAgentTool("create_contact", {
+      ...row,
+      provenance: { kind: "self_declared", sourceUrl: "https://lu.ma/user/wall" },
+    })) as { id: string; isExisting: boolean };
+    expect(retried.isExisting).toBe(false);
+    expect(listContacts({ search: "Wall Row" }).total).toBe(1);
+    expect(await identityProvenance(retried.id, "wall-row")).toMatchObject({
+      kind: "self_declared",
+      sourceUrl: "https://lu.ma/user/wall",
+    });
+  });
+
+  it("rejects an auth-wall sourceUrl on a matched contact without enriching it", async () => {
+    const first = (await invokeAgentTool("create_contact", {
+      name: "Sas P",
+      platform: "linkedin",
+      platformUserId: "sasmita-s",
+    })) as { id: string };
+
+    await expect(
+      invokeAgentTool("create_contact", {
+        name: "Sas P",
+        title: "Should not be written",
+        platform: "linkedin",
+        platformUserId: "sasmita-s",
+        provenance: { kind: "self_declared", sourceUrl: "https://www.linkedin.com/authwall" },
+      }),
+    ).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+
+    const after = (await invokeAgentTool("get_contact", { contactId: first.id })) as Contact & {
+      title: string | null;
+    };
+    expect(after.title).toBeNull();
+    expect(after.identities[0].provenance).toBeNull();
   });
 
   it("ignores provenance and reports nothing when no platform identity is given", async () => {
