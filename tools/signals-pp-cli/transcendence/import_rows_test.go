@@ -27,7 +27,7 @@ func TestMapContactRowReadsIdentitiesProfileFieldsAndTags(t *testing.T) {
 				"platform": "X", "handle": "@trung_rta", "url": "https://x.com/trung_rta",
 				"provenance": map[string]any{"kind": "self_declared", "sourceUrl": "https://lu.ma/user/trung"},
 			},
-			map[string]any{"platform": "github", "platformUserId": "trungle"},
+			map[string]any{"platform": "Bluesky", "platformUserId": "trungle.bsky.social"},
 		},
 	})
 	if err != nil {
@@ -49,7 +49,7 @@ func TestMapContactRowReadsIdentitiesProfileFieldsAndTags(t *testing.T) {
 			Platform: "x", PlatformHandle: "@trung_rta", ProfileURL: "https://x.com/trung_rta",
 			Provenance: &identityProvenance{Kind: "self_declared", SourceURL: "https://lu.ma/user/trung"},
 		},
-		{Platform: "github", PlatformUserID: "trungle"},
+		{Platform: "bluesky", PlatformUserID: "trungle.bsky.social"},
 	}
 	if !reflect.DeepEqual(row.SecondaryIdentities, want) {
 		t.Fatalf("secondary identities = %+v", row.SecondaryIdentities)
@@ -102,6 +102,12 @@ func TestMapContactRowRejectsInvalidMultiIdentityInput(t *testing.T) {
 		{"tag not a string", map[string]any{"tags": []any{float64(1)}}, "array of strings"},
 		{"tag too long", map[string]any{"tags": []any{strings.Repeat("t", maxRowTagLength+1)}}, "longer than 100"},
 		{"fractional key", map[string]any{"key": 1.5}, "whole number"},
+		{"identity on an unsupported platform", map[string]any{"identities": []any{
+			map[string]any{"platform": "x", "handle": "a"},
+			map[string]any{"platform": "github", "platformUserId": "a"}}},
+			`row "Row": identities[1].platform "github" is not a Signals platform (use one of x, linkedin,`},
+		{"primary on an unsupported platform", map[string]any{"platform": "GitHub", "platform_user_id": "a"},
+			`row "Row": platform "github" is not a Signals platform`},
 		{"provenance twice on the promoted primary", map[string]any{
 			"provenance_kind": "inferred",
 			"identities": []any{map[string]any{
@@ -225,7 +231,7 @@ func TestImport568TwoIdentityRowMatchesAndWritesIdentities(t *testing.T) {
 		"identities": []map[string]any{
 			{"platform": "linkedin", "platformUserId": "trung-le-rta", "provenance": map[string]any{"kind": "self_declared"}},
 			{"platform": "x", "handle": "@trung_rta", "provenance": map[string]any{"kind": "self_declared", "sourceUrl": "https://lu.ma/user/trung"}},
-			{"platform": "github", "platformUserId": "trungle"},
+			{"platform": "bluesky", "platformUserId": "trungle.bsky.social"},
 		},
 	}})
 	cmd := newImportContactsCmd(&rootFlags{})
@@ -244,7 +250,7 @@ func TestImport568TwoIdentityRowMatchesAndWritesIdentities(t *testing.T) {
 	want := []string{
 		"UlrgYWF3 linkedin/trung-le-rta map[kind:self_declared]",
 		"UlrgYWF3 x/trung_rta map[kind:self_declared sourceUrl:https://lu.ma/user/trung]",
-		"UlrgYWF3 github/trungle <nil>",
+		"UlrgYWF3 bluesky/trungle.bsky.social <nil>",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("upserts =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
@@ -255,6 +261,80 @@ func TestImport568TwoIdentityRowMatchesAndWritesIdentities(t *testing.T) {
 	}
 	if entry := summary.Mapping["luma-trung"]; entry.ContactID == nil || *entry.ContactID != "UlrgYWF3" || entry.Outcome != rowOutcomeMatch {
 		t.Fatalf("mapping = %+v", summary.Mapping)
+	}
+}
+
+// Verifier finding 1 (WP5 r1): a handle-only primary on a matched row sent upsert_contact_identity
+// no platformUserId, which the server rejects ("Invalid tool input"), so the row failed. The
+// fake now enforces that rule; the handle becomes the claim key, as create_contact and dedupe
+// already use it.
+func TestImportHandleOnlyPrimaryOnAMatchAttachesTheHandleAsTheClaimKey(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		row  map[string]any
+	}{
+		{"identities[0] handle", map[string]any{
+			"key": "luma-trung", "name": "Trung Le",
+			"identities": []map[string]any{
+				{"platform": "x", "handle": " @trung_new "},
+				{"platform": "linkedin", "platformUserId": "trungdangle"},
+			},
+		}},
+		{"legacy platform_handle column", map[string]any{
+			"key": "luma-trung", "name": "Trung Le", "platform": "x", "platform_handle": "@trung_new",
+			"identities": []map[string]any{{"platform": "linkedin", "platformUserId": "trungdangle"}},
+		}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			f := issue568Store(t)
+			pointCLIAt(t, fakeSignalsServer(t, f))
+			file := writeRowsFile(t, []map[string]any{tt.row})
+			cmd := newImportContactsCmd(&rootFlags{})
+			cmd.SetArgs([]string{"--file", file, "--dedupe"})
+			out, err := runCommandCapturingStdout(t, cmd.Execute)
+			if err != nil {
+				t.Fatalf("import error = %v (%s)", err, out)
+			}
+			var summary importContactsSummary
+			if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &summary); err != nil {
+				t.Fatal(err)
+			}
+			if summary.Failed != 0 || summary.Created != 0 || len(f.creates) != 0 {
+				t.Fatalf("summary = %+v", summary)
+			}
+			if len(f.upserts) != 1 {
+				t.Fatalf("upserts = %v", f.upserts)
+			}
+			upsert := f.upserts[0]
+			if upsert["contactId"] != "UlrgYWF3" || upsert["platform"] != "x" || upsert["platformUserId"] != "trung_new" ||
+				!strings.Contains(fmt.Sprint(upsert["platformHandle"]), "@trung_new") {
+				t.Fatalf("upsert = %v", upsert)
+			}
+			if entry := summary.Mapping["luma-trung"]; entry.ContactID == nil || *entry.ContactID != "UlrgYWF3" || entry.Action != rowActionUpdate {
+				t.Fatalf("mapping = %+v", summary.Mapping)
+			}
+		})
+	}
+}
+
+func TestImportRejectsUnsupportedPlatformBeforeAnyCall(t *testing.T) {
+	f := issue568Store(t)
+	pointCLIAt(t, fakeSignalsServer(t, f))
+	file := writeRowsFile(t, []map[string]any{
+		{"name": "Fine", "platform": "x", "platform_user_id": "fine"},
+		{"name": "Dev", "identities": []map[string]any{
+			{"platform": "linkedin", "platformUserId": "dev"},
+			{"platform": "github", "platformUserId": "dev"},
+		}},
+	})
+	cmd := newImportContactsCmd(&rootFlags{})
+	cmd.SetArgs([]string{"--file", file, "--dedupe"})
+	out, err := runCommandCapturingStdout(t, cmd.Execute)
+	if err == nil || ExitCode(err) != 2 || !strings.Contains(err.Error(), `row "Dev": identities[1].platform "github"`) {
+		t.Fatalf("error = %v (%s), want a usage error naming the row", err, out)
+	}
+	if len(f.calls) != 0 {
+		t.Fatalf("calls = %v, want none", f.calls)
 	}
 }
 

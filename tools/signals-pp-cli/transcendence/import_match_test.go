@@ -91,9 +91,15 @@ func (f *fakeSignals) invoke(tool string, input map[string]any) (map[string]any,
 		}
 		return map[string]any{"id": id}, nil
 	case "upsert_contact_identity":
-		f.upserts = append(f.upserts, input)
 		platform, _ := input["platform"].(string)
 		key, _ := input["platformUserId"].(string)
+		if _, hasEvidence := input["identityEvidenceToken"]; key == "" && !hasEvidence {
+			// The server's rule (handleUpsertContactIdentity).
+			return nil, usageErr(fmt.Errorf(
+				"upsert_contact_identity: platform and platformUserId, or identityEvidenceToken, are required when creating a new identity",
+			))
+		}
+		f.upserts = append(f.upserts, input)
 		contactID, _ := input["contactId"].(string)
 		if claimant, ok := f.claims[claimKey(platform, key)]; ok && claimant["contactId"] != contactID {
 			return nil, apiErr(fmt.Errorf("upsert_contact_identity (CONFLICT): already claimed"))
@@ -353,6 +359,15 @@ func parityRows() []contactRow {
 		{Name: "Brand New Mail", Email: "new@example.com"},
 		{Name: "Mail Attach", Email: "mail@example.com", Platform: "linkedin", PlatformUserID: "attach-me"},
 		{Name: "Attached Later", Platform: "linkedin", PlatformUserID: "attach-me"},
+		// Secondary identities written earlier in the file (verifier finding 3, WP5 r1): one a
+		// created row carries, one a matched row attaches. A dry-run plan that recorded only
+		// primaries would call rows 13 and 15 new.
+		{Name: "Secondary Creator", Platform: "x", PlatformUserID: "sec_creator",
+			SecondaryIdentities: []rowIdentity{{Platform: "linkedin", PlatformUserID: "sec-shared"}}},
+		{Name: "Secondary Repeat", Platform: "linkedin", PlatformUserID: "sec-shared"},
+		{Name: "Known Plus", Platform: "linkedin", PlatformUserID: "known",
+			SecondaryIdentities: []rowIdentity{{Platform: "x", PlatformHandle: "@known_x"}}},
+		{Name: "Known X", Platform: "x", PlatformUserID: "known_x"},
 	}
 }
 
@@ -384,7 +399,7 @@ func TestImportDryRunReportsTheSameClassificationAsARealRun(t *testing.T) {
 	if dryCounts != realCounts {
 		t.Fatalf("dry run counts %+v, real run counts %+v", dryCounts, realCounts)
 	}
-	if want := (counts{Created: 1, Skipped: 4, Enriched: 7, Conflicts: 2}); realCounts != want {
+	if want := (counts{Created: 2, Skipped: 4, Enriched: 11, Conflicts: 2}); realCounts != want {
 		t.Fatalf("real run counts %+v, want %+v", realCounts, want)
 	}
 	if !reflect.DeepEqual(drySummary.Notes, realSummary.Notes) {
@@ -398,11 +413,13 @@ func TestImportDryRunReportsTheSameClassificationAsARealRun(t *testing.T) {
 		rowOutcomeNew, rowOutcomeMatch, rowOutcomeMatch, rowOutcomeMatch,
 		rowOutcomeConflict, rowOutcomeMatch, rowOutcomeConflict,
 		rowOutcomeMatch, rowOutcomeMatch, rowOutcomeMatch, rowOutcomeMatch,
+		rowOutcomeNew, rowOutcomeMatch, rowOutcomeMatch, rowOutcomeMatch,
 	}
 	wantContacts := []string{
 		"contact-new-1", "contact-known", "UlrgYWF3", "contact-mail",
 		"", "contact-gone", "",
 		"contact-new-1", "contact-new-1", "contact-mail", "contact-mail",
+		"contact-new-2", "contact-new-2", "contact-known", "contact-known",
 	}
 	// A dry run names a contact the file will create after the row creating it ("row:1"); the
 	// real run has its ID. Map one onto the other, and nothing else may differ.
@@ -446,6 +463,9 @@ func TestImportDryRunReportsTheSameClassificationAsARealRun(t *testing.T) {
 	}
 	if got := drySummary.Rows[7].ContactID; got != "row:1" {
 		t.Fatalf("dry run names the repeated row's match %q, want row:1", got)
+	}
+	if got := drySummary.Rows[12].ContactID; got != "row:12" {
+		t.Fatalf("dry run names the repeated secondary identity's match %q, want row:12", got)
 	}
 }
 

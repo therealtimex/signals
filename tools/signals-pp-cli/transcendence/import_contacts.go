@@ -531,7 +531,7 @@ func mapContactRow(item map[string]any) (contactRow, error) {
 		Company:               get("company"),
 		Title:                 get("title"),
 		Email:                 normalizeEmail(get("email")),
-		Platform:              get("platform"),
+		Platform:              strings.ToLower(get("platform")),
 		PlatformUserID:        get("platform_user_id", "platformUserId"),
 		PlatformHandle:        get("platform_handle", "platformHandle"),
 		ProfileURL:            get("profile_url", "profileUrl"),
@@ -545,6 +545,9 @@ func mapContactRow(item map[string]any) (contactRow, error) {
 	}
 	if row.Email != "" && !strings.Contains(row.Email, "@") {
 		return contactRow{}, usageErr(fmt.Errorf("invalid email %q", row.Email))
+	}
+	if row.Platform != "" && !isSignalsPlatform(row.Platform) {
+		return contactRow{}, unsupportedPlatformErr(row.Name, "platform", row.Platform)
 	}
 	provenance, err := mapRowProvenance(item, get)
 	if err != nil {
@@ -1226,6 +1229,12 @@ func enrichExistingContact(
 		}
 		if row.PlatformUserID != "" {
 			identity["platformUserId"] = row.PlatformUserID
+		} else if row.IdentityEvidenceToken == "" && row.PlatformHandle != "" {
+			// upsert_contact_identity needs platformUserId to attach a new identity. Derive it
+			// from the handle the way create_contact and dedupe do (trimmed, no "@"), or a
+			// handle-only row fails on every match. Snowball evidence rows are unchanged: the
+			// server takes the account from the evidence.
+			identity["platformUserId"] = strings.TrimPrefix(strings.TrimSpace(row.PlatformHandle), "@")
 		}
 		if row.PlatformHandle != "" {
 			identity["platformHandle"] = row.PlatformHandle

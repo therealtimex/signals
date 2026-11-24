@@ -236,6 +236,15 @@ identity columns, a row can carry:
   columns are the primary identity, and `identities` adds to it. A row without them promotes
   `identities[0]` to primary. The flat `provenance_*` columns describe the primary; giving
   provenance twice for a promoted primary is a usage error.
+- **Platforms and keys.** Every `platform` (primary or in `identities`) must be one of `x`,
+  `linkedin`, `gmail`, `substack`, `instagram`, `facebook`, `threads`, `tiktok`, `youtube`,
+  `bluesky`, `telegram`, `whatsapp`, case-insensitive. Anything else (`github`, a personal site)
+  is a usage error naming the row, checked when the file is read and before any call, so it can't
+  abort a run halfway through. Put a personal site in `website`. An identity given only by `handle`
+  is keyed by the handle without `@`, both in dedupe and when it is attached.
+- **Use `--dedupe` with `identities`.** Without it, rows are written without checking whether
+  any of their identities already belongs to another contact. With it, such a row comes back as a
+  `conflict` before any write.
 - **CSV arrays are JSON-in-cell.** Repeated columns (`identity_1_platform`, …) would need a numbering
   scheme, cap the count at the header, and can't carry the nested `provenance` object. JSON-in-cell
   is the JSON row shape verbatim.

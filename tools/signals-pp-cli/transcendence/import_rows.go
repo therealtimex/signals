@@ -28,6 +28,42 @@ import (
 // are the row's primary identity and identities[] adds to it. A row with no legacy platform
 // promotes identities[0] to primary. The flat provenance_* columns always describe the primary.
 
+// signalsPlatforms mirrors PLATFORMS in src/lib/db/platforms.ts, the enum every identity tool
+// validates against. A row naming another platform is rejected when the file is read, so it
+// fails with the row and the allowed list rather than as an opaque VALIDATION_ERROR from
+// resolve_platform_claim mid-import (or an aborted reconcile). platform-registry-sync.test.ts
+// fails if the two lists drift apart.
+var signalsPlatforms = []string{
+	"x",
+	"linkedin",
+	"gmail",
+	"substack",
+	"instagram",
+	"facebook",
+	"threads",
+	"tiktok",
+	"youtube",
+	"bluesky",
+	"telegram",
+	"whatsapp",
+}
+
+func isSignalsPlatform(platform string) bool {
+	for _, known := range signalsPlatforms {
+		if platform == known {
+			return true
+		}
+	}
+	return false
+}
+
+func unsupportedPlatformErr(rowName, field, platform string) error {
+	return usageErr(fmt.Errorf(
+		"row %q: %s %q is not a Signals platform (use one of %s; put a personal site in website)",
+		rowName, field, platform, strings.Join(signalsPlatforms, ", "),
+	))
+}
+
 const (
 	maxRowIdentities = 20
 	maxRowTags       = 50
@@ -150,6 +186,9 @@ func readRowIdentities(item map[string]any) ([]rowIdentity, error) {
 		if identity.Platform == "" {
 			return nil, usageErr(fmt.Errorf("identities[%d] requires platform", index))
 		}
+		if !isSignalsPlatform(identity.Platform) {
+			return nil, unsupportedPlatformErr(rowNameOf(item), fmt.Sprintf("identities[%d].platform", index), identity.Platform)
+		}
 		if identity.claimKey() == "" {
 			return nil, usageErr(fmt.Errorf("identities[%d] (%s) requires platformUserId or handle", index, identity.Platform))
 		}
@@ -207,4 +246,9 @@ func assignRowKeys(rows []contactRow) error {
 		rows[index].RowKey = key
 	}
 	return nil
+}
+
+func rowNameOf(item map[string]any) string {
+	name, _ := item["name"].(string)
+	return strings.TrimSpace(name)
 }
