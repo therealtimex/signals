@@ -52,7 +52,7 @@ Use `run-signals-pp-cli.sh reconcile --file …` or `import contacts --dedupe --
 - `conflict`: the matches point at different contacts (identity vs identity, or identity vs email), the email alone matches several, or an org holds the account. Import skips it and never creates it; the note lists every match, so the duplicates can be merged first.
 - `new`: nothing matches; import creates it.
 
-An archived owner is a `match` with `action: skip` (restore the contact first).
+An archived owner is a `match` with `action: skip` (restore the contact first). In a preview, a row that repeats an earlier row's identity or email matches `contactId: "row:<n>"`, the contact row `<n>` would create. Conflicts don't fail the run or change the exit code; read `conflicts`.
 
 When a brief provides a specific Local App URL, pin the CLI to that instance:
 

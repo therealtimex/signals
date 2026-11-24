@@ -95,6 +95,8 @@ type importContactsSummary struct {
 	// dry runs alike.
 	Rows        []rowReport               `json:"rows,omitempty"`
 	Attribution *importAttributionSummary `json:"attribution,omitempty"`
+	// plan carries a dry run's planned writes across chunks (see dryRunPlan).
+	plan *dryRunPlan
 }
 
 type importAttributionSummary struct {
@@ -190,7 +192,10 @@ is updated), a conflict (the matches point at different contacts, or an org
 holds the account; skipped, never created) or new (created). The "rows"
 output lists each row's outcome, the matched contact and the identity that
 matched. --dry-run runs the same read-only lookups and reports the same
-classification, writing nothing.
+classification, writing nothing; a row that repeats an earlier row's
+identity or email matches that row, named "row:<n>", as the real run would
+match the contact it creates. Conflicts are skipped, not failed: they do
+not change the exit code, so read "conflicts".
 
 Optional identity provenance per row: CSV columns provenance_kind
 (self_declared | agent_verified | inferred), provenance_source_url and
@@ -596,10 +601,18 @@ func importAttributedContactChunkWithInvoker(
 		chunkContactIDs = append(chunkContactIDs, contactID)
 	}
 
+	lookup := invoke
+	if dryRun && dedupe {
+		if summary.plan == nil {
+			summary.plan = newDryRunPlan()
+		}
+		lookup = summary.plan.invoker(invoke)
+	}
+
 	for _, row := range rows {
 		if dedupe {
 			index := len(summary.Rows) + 1
-			match, err := classifyContactRow(row, invoke)
+			match, err := classifyContactRow(row, lookup)
 			if err != nil {
 				// A failed lookup fails the row in a dry run too: counting it as a create
 				// would promise something the real run might refuse.
@@ -612,6 +625,9 @@ func importAttributedContactChunkWithInvoker(
 			}
 			action := plannedRowAction(match)
 			report := newRowReport(index, row, match, action)
+			if summary.plan != nil {
+				summary.plan.record(index, row, match, action)
+			}
 			switch action {
 			case rowActionSkip:
 				// A conflict, an org-held account, or an archived owner. Never create:

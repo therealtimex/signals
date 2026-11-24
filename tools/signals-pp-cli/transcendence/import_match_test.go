@@ -75,6 +75,14 @@ func (f *fakeSignals) invoke(tool string, input map[string]any) (map[string]any,
 			key, _ := input["platformUserId"].(string)
 			f.contactClaim(platform, key, id, false)
 		}
+		if channels, ok := input["channels"].([]map[string]any); ok {
+			for _, channel := range channels {
+				if channel["channelType"] == "email" {
+					email, _ := channel["value"].(string)
+					f.emails[email] = append(f.emails[email], id)
+				}
+			}
+		}
 		return map[string]any{"id": id}, nil
 	case "upsert_contact_identity":
 		f.upserts = append(f.upserts, input)
@@ -295,7 +303,9 @@ func TestImportSkipsArchivedOwnerFoundBySecondaryIdentity(t *testing.T) {
 }
 
 // parityRows covers every classification: new, a match by primary identity, the #568 match by
-// secondary identity, a match by email, a conflict, an archived owner and an org-held account.
+// secondary identity, a match by email, a conflict, an archived owner and an org-held account,
+// then rows whose outcome depends on an earlier row in the same file: a repeated identity and a
+// repeated email (matching the contact row 1 creates), and an identity a match attached.
 func parityStore(t *testing.T) *fakeSignals {
 	f := issue568Store(t)
 	f.contactClaim("linkedin", "known", "contact-known", false)
@@ -317,6 +327,10 @@ func parityRows() []contactRow {
 			SecondaryIdentities: []rowIdentity{{Platform: "x", PlatformUserID: "jane_x"}}},
 		{Name: "Gone", Platform: "x", PlatformUserID: "gone"},
 		{Name: "Acme", Platform: "x", PlatformUserID: "acme"},
+		{Name: "Brand New Again", Platform: "x", PlatformUserID: "brand_new"},
+		{Name: "Brand New Mail", Email: "new@example.com"},
+		{Name: "Mail Attach", Email: "mail@example.com", Platform: "linkedin", PlatformUserID: "attach-me"},
+		{Name: "Attached Later", Platform: "linkedin", PlatformUserID: "attach-me"},
 	}
 }
 
@@ -348,7 +362,7 @@ func TestImportDryRunReportsTheSameClassificationAsARealRun(t *testing.T) {
 	if dryCounts != realCounts {
 		t.Fatalf("dry run counts %+v, real run counts %+v", dryCounts, realCounts)
 	}
-	if want := (counts{Created: 1, Skipped: 3, Enriched: 4, Conflicts: 2}); realCounts != want {
+	if want := (counts{Created: 1, Skipped: 4, Enriched: 7, Conflicts: 2}); realCounts != want {
 		t.Fatalf("real run counts %+v, want %+v", realCounts, want)
 	}
 	if !reflect.DeepEqual(drySummary.Notes, realSummary.Notes) {
@@ -361,22 +375,58 @@ func TestImportDryRunReportsTheSameClassificationAsARealRun(t *testing.T) {
 	wantOutcomes := []string{
 		rowOutcomeNew, rowOutcomeMatch, rowOutcomeMatch, rowOutcomeMatch,
 		rowOutcomeConflict, rowOutcomeMatch, rowOutcomeConflict,
+		rowOutcomeMatch, rowOutcomeMatch, rowOutcomeMatch, rowOutcomeMatch,
+	}
+	wantContacts := []string{
+		"contact-new-1", "contact-known", "UlrgYWF3", "contact-mail",
+		"", "contact-gone", "",
+		"contact-new-1", "contact-new-1", "contact-mail", "contact-mail",
+	}
+	// A dry run names a contact the file will create after the row creating it ("row:1"); the
+	// real run has its ID. Map one onto the other, and nothing else may differ.
+	plannedIDs := map[string]string{}
+	for i, row := range realSummary.Rows {
+		if row.Action == rowActionCreate {
+			plannedIDs[plannedRowOwner(i+1)] = row.ContactID
+		}
 	}
 	for i := range realSummary.Rows {
 		dry, real := drySummary.Rows[i], realSummary.Rows[i]
-		if real.Outcome != wantOutcomes[i] {
-			t.Fatalf("row %d outcome = %q, want %q", i+1, real.Outcome, wantOutcomes[i])
+		if real.Outcome != wantOutcomes[i] || real.ContactID != wantContacts[i] {
+			t.Fatalf("row %d = %s/%q, want %s/%q", i+1, real.Outcome, real.ContactID, wantOutcomes[i], wantContacts[i])
 		}
 		if real.Action == rowActionCreate {
 			// Only a real run knows the new contact's ID.
-			if dry.ContactID != "" || real.ContactID != "contact-new-1" {
-				t.Fatalf("create row IDs: dry %q, real %q", dry.ContactID, real.ContactID)
+			if dry.ContactID != "" {
+				t.Fatalf("dry create row %d has contactId %q", i+1, dry.ContactID)
 			}
 			real.ContactID = ""
+		}
+		if id, planned := plannedIDs[dry.ContactID]; planned {
+			dry.ContactID = id
+		}
+		if len(dry.MatchedBy) > 0 {
+			dry.MatchedBy = append([]identityClaim(nil), dry.MatchedBy...)
+		}
+		for j := range dry.MatchedBy {
+			if id, planned := plannedIDs[dry.MatchedBy[j].ContactID]; planned {
+				dry.MatchedBy[j].ContactID = id
+			}
+		}
+		if len(dry.EmailMatches) > 0 {
+			dry.EmailMatches = append([]string(nil), dry.EmailMatches...)
+		}
+		for j := range dry.EmailMatches {
+			if id, planned := plannedIDs[dry.EmailMatches[j]]; planned {
+				dry.EmailMatches[j] = id
+			}
 		}
 		if !reflect.DeepEqual(dry, real) {
 			t.Fatalf("row %d differs:\n dry  %+v\n real %+v", i+1, dry, real)
 		}
+	}
+	if got := drySummary.Rows[7].ContactID; got != "row:1" {
+		t.Fatalf("dry run names the repeated row's match %q, want row:1", got)
 	}
 }
 
@@ -536,6 +586,7 @@ func TestReconcileCommandReportsPerRowClassification(t *testing.T) {
 		{"name": "Trung Le", "platform": "x", "platform_user_id": "trung_rta"},
 		{"name": "Jane Doe", "email": "jane@example.com", "platform": "linkedin", "platform_user_id": "jane-doe"},
 		{"name": "Brand New", "platform": "x", "platform_user_id": "brand_new"},
+		{"name": "Brand New Again", "platform": "x", "platform_user_id": "brand_new"},
 	})
 
 	// The global --dry-run must not stop reconcile's read-only lookups.
@@ -552,8 +603,12 @@ func TestReconcileCommandReportsPerRowClassification(t *testing.T) {
 	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &summary); err != nil {
 		t.Fatalf("decode output %q: %v", out, err)
 	}
-	if summary.Total != 3 || summary.WouldCreate != 1 || summary.WouldSkip != 2 || summary.WouldMatch != 1 || summary.Conflicts != 1 {
+	// Row 4 repeats row 3's identity: a real import would match the contact row 3 creates.
+	if summary.Total != 4 || summary.WouldCreate != 1 || summary.WouldSkip != 3 || summary.WouldMatch != 2 || summary.Conflicts != 1 {
 		t.Fatalf("summary = %+v", summary)
+	}
+	if got := summary.Rows[3]; got.Outcome != rowOutcomeMatch || got.ContactID != "row:3" {
+		t.Fatalf("repeated row = %+v, want match on row:3", got)
 	}
 	if summary.Rows[0].ContactID != "UlrgYWF3" || summary.Rows[1].Outcome != rowOutcomeConflict ||
 		!reflect.DeepEqual(summary.Rows[1].EmailMatches, []string{"contact-a"}) {

@@ -83,9 +83,10 @@ func newReconcileCmd(flags *rootFlags) *cobra.Command {
 			// Reconcile only reads, so its lookups always reach Signals, even with the
 			// global --dry-run.
 			c.DryRun = false
-			invoke := func(tool string, input map[string]any) (map[string]any, error) {
+			plan := newDryRunPlan()
+			invoke := plan.invoker(func(tool string, input map[string]any) (map[string]any, error) {
 				return invokeAgentTool(cmd, c, flags, tool, input)
-			}
+			})
 
 			summary := reconcileSummary{
 				Success: true,
@@ -102,6 +103,7 @@ func newReconcileCmd(flags *rootFlags) *cobra.Command {
 				// promises a create that import refuses (archived owner, org claim, or a
 				// conflict across contacts).
 				action := plannedRowAction(match)
+				plan.record(index+1, row, match, action)
 				summary.Rows = append(summary.Rows, newRowReport(index+1, row, match, action))
 				switch action {
 				case rowActionCreate:

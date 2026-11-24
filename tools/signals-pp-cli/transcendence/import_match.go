@@ -299,6 +299,97 @@ func describeConflict(match rowMatch, email string) string {
 	return "matches disagree: " + strings.Join(parts, "; ")
 }
 
+// dryRunPlan stands in for the writes a dry run or reconcile does not make. A real run
+// classifies each row against data that already holds the rows before it: a contact it just
+// created, an identity it just attached. Without the plan, a later row repeating an earlier
+// row's identity or email would preview as `new` while the real run matches it. Lookups through
+// plan.invoker see those planned writes, and a contact the file will create is named
+// "row:<n>", the row that creates it.
+type dryRunPlan struct {
+	claims map[string]string // platform + "\x00" + claim key → owner
+	emails map[string]string // normalized email → owner
+}
+
+func newDryRunPlan() *dryRunPlan {
+	return &dryRunPlan{claims: map[string]string{}, emails: map[string]string{}}
+}
+
+func plannedRowOwner(index int) string {
+	return fmt.Sprintf("row:%d", index)
+}
+
+func plannedClaimKey(platform, key string) string {
+	return platform + "\x00" + key
+}
+
+// record notes what a real run writes for the row: create_contact stores the row's email and
+// primary identity on a new contact; an update attaches the primary identity to the matched
+// contact (enrich_contact does not add the email). Secondary identities are not written yet.
+func (p *dryRunPlan) record(index int, row contactRow, match rowMatch, action string) {
+	var owner string
+	switch action {
+	case rowActionCreate:
+		owner = plannedRowOwner(index)
+		if email := normalizeEmail(row.Email); email != "" {
+			if _, exists := p.emails[email]; !exists {
+				p.emails[email] = owner
+			}
+		}
+	case rowActionUpdate:
+		owner = match.ContactID
+	default:
+		return
+	}
+	for _, identity := range row.identities() {
+		if !identity.primary {
+			continue
+		}
+		key := plannedClaimKey(identity.Platform, identity.claimKey())
+		if _, exists := p.claims[key]; !exists {
+			p.claims[key] = owner
+		}
+	}
+}
+
+// invoker answers lookups as if the planned writes had happened: an unclaimed account the plan
+// assigns reads as claimed by its planned owner, and a planned email joins query_contacts.
+func (p *dryRunPlan) invoker(next agentToolInvoker) agentToolInvoker {
+	return func(tool string, input map[string]any) (map[string]any, error) {
+		result, err := next(tool, input)
+		if err != nil {
+			return result, err
+		}
+		switch tool {
+		case "resolve_platform_claim":
+			platform, _ := input["platform"].(string)
+			key, _ := input["platformUserId"].(string)
+			owner, planned := p.claims[plannedClaimKey(platform, key)]
+			if claimed, _ := result["claimed"].(bool); planned && !claimed {
+				return map[string]any{
+					"claimed": true,
+					"claimant": map[string]any{
+						"kind": "contact", "contactId": owner, "identityId": "planned", "archived": false,
+					},
+				}, nil
+			}
+		case "query_contacts":
+			email, _ := input["email"].(string)
+			owner, planned := p.emails[normalizeEmail(email)]
+			contacts, ok := result["contacts"].([]any)
+			if planned && ok {
+				merged := append(append([]any{}, contacts...), map[string]any{"id": owner})
+				out := map[string]any{}
+				for k, v := range result {
+					out[k] = v
+				}
+				out["contacts"] = merged
+				return out, nil
+			}
+		}
+		return result, nil
+	}
+}
+
 // newImportInvoker routes dedupe lookups to a client that never short-circuits, and every
 // other call to c, which honours --dry-run. A dry run therefore classifies rows against real
 // data while still writing nothing.

@@ -213,9 +213,12 @@ resolution the `upsert_contact_identity` guard enforces), not just the primary o
 | `conflict` | Claimed identities point at two or more contacts, an identity and the email disagree, the email alone matches several contacts, or an org holds one of the accounts | Skips the row and never creates it (`action: skip`); counted in `conflicts` and explained in `notes` |
 
 Each row reports `contactId`, `matchedBy[]` (`platform`, `platformUserId`, `primary`,
-`claimantKind`, `contactId` / `orgId`, `archived`) and `emailMatches[]`. `--dry-run` runs the same
-read-only lookups and writes nothing, so it reports exactly what a real run will do. Merging the
-duplicates a conflict names is left to the merge flow (`reconcile --merge`, or the dedupe panel).
+`claimantKind`, `contactId` / `orgId`, `archived`) and `emailMatches[]`. `--dry-run` and
+`reconcile` run the same read-only lookups and write nothing. They also account for the rows before
+each row: a row that repeats an earlier row's identity or email matches that row, reported as
+`contactId: "row:<n>"`, where a real run reports the ID of the contact row `<n>` created. A conflict
+is skipped, not failed, so it doesn't change the exit code; read `conflicts`. Merging the duplicates
+a conflict names is left to the merge flow (`reconcile --merge`, or the dedupe panel).
 Outside a Network Snowball run, `create_contact` commits the contact, its identity and its fields in
 one transaction, so a failure after the insert leaves nothing behind.
 
