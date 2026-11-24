@@ -30,6 +30,11 @@ import { getOrCreateOrchestratorThread } from "@/lib/rtx/orchestrator-thread";
 import { postOrchestratorDispatchThreadMessage } from "@/lib/rtx/orchestrator-completion-thread";
 import { postWorkflowCompletionThreadMessage } from "@/lib/rtx/workflow-completion-thread";
 import {
+  WATCHDOG_RELEASE_OVERRULED_RESULT_KEY,
+  clearWatchdogFailureMarkers,
+  withoutWatchdogErrors,
+} from "@/lib/rtx/workflow-run-watchdog-markers";
+import {
   formatDeferredTerminalTeardownNote,
   stopRunningRtxBrowserSessions,
 } from "@/lib/rtx/resource-teardown";
@@ -1532,7 +1537,11 @@ export async function handleCompleteWorkflowRun(input: z.infer<typeof completeWo
   }
 
   const completedAt = Math.floor(Date.now() / 1000);
-  const existingResult = parseJsonObject(run.result);
+  // #572: the agent reporting back overrules a watchdog that failed the run as lost or timed out.
+  // Its markers must not survive into the completed result or error list.
+  const storedResult = parseJsonObject(run.result);
+  const existingResult = clearWatchdogFailureMarkers(storedResult, completedAt);
+  const overruledWatchdog = existingResult !== storedResult;
   const runConfig = parseJsonObject(run.config);
   const isContactResearch = isContactWebResearchTemplateConfig(runConfig);
   const isSnowball = isNetworkSnowballTemplateConfig(runConfig);
@@ -1548,9 +1557,12 @@ export async function handleCompleteWorkflowRun(input: z.infer<typeof completeWo
   delete callbackResult[SNOWBALL_IDENTITY_EVIDENCE_RESULT_KEY];
   removeServerOwnedEventResult(callbackResult);
   removeServerOwnedSnowballSourceResult(callbackResult);
+  delete callbackResult[WATCHDOG_RELEASE_OVERRULED_RESULT_KEY];
   let effectiveStatus = input.status;
   let normalizedErrors = uniqueStrings([
-    ...parseSerializedStrings(run.errors),
+    ...(overruledWatchdog
+      ? withoutWatchdogErrors(parseSerializedStrings(run.errors))
+      : parseSerializedStrings(run.errors)),
     ...(input.errors ?? []),
   ]);
 
@@ -1652,7 +1664,7 @@ export async function handleCompleteWorkflowRun(input: z.infer<typeof completeWo
         : {}),
     ...(input.successItems !== undefined ? { successItems: input.successItems } : {}),
     result: resultJson,
-    ...(isContactResearch || isSnowball || input.errors
+    ...(isContactResearch || isSnowball || input.errors || overruledWatchdog
       ? {
           errors: JSON.stringify(normalizedErrors),
           errorItems: normalizedErrors.length,
