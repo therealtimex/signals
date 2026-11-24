@@ -47,6 +47,9 @@ function baseContact(overrides: Partial<ContactDTO> = {}): ContactDTO {
         isActive: 1,
         lastSyncedAt: 1_727_500_000,
         syncErrors: null,
+        provenanceKind: null,
+        provenanceSourceUrl: null,
+        provenanceObservedAt: null,
         createdAt: 1,
         updatedAt: 1,
       },
@@ -86,6 +89,7 @@ function baseContact(overrides: Partial<ContactDTO> = {}): ContactDTO {
     fitRationale: null,
     fitScoreVersion: null,
     fitScoredAt: null,
+    aliases: [],
     ...overrides,
   };
 }

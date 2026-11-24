@@ -11,6 +11,7 @@ import {
   RELATIONSHIP_GOAL_STATUS_ENUM,
 } from "../relationship-goals";
 import { CONTACT_FIT_TIER_ENUM } from "../contact-fit";
+import { IDENTITY_PROVENANCE_KIND_ENUM } from "../identity-provenance";
 
 export const COMPANY_SIZE_ENUM = [
   "1-10",
@@ -190,6 +191,8 @@ export const contacts = sqliteTable("contacts", {
   fitRationale: text("fit_rationale"),
   fitScoreVersion: text("fit_score_version"), // caller's scoring-rubric version
   fitScoredAt: integer("fit_scored_at"), // unix seconds, server-set
+  // Alternative names (#571): JSON string array, case-insensitively deduped. Null = none.
+  aliases: text("aliases"),
   ...timestamps,
 }, (table) => [
   index("idx_contacts_name").on(table.name),
@@ -228,6 +231,10 @@ export const contactIdentities = sqliteTable("contact_identities", {
   isActive: integer("is_active").notNull().default(1),
   lastSyncedAt: integer("last_synced_at"),
   syncErrors: text("sync_errors"),
+  // Provenance (#571): where this identity came from. All null = unknown (pre-#571 rows).
+  provenanceKind: text("provenance_kind", { enum: IDENTITY_PROVENANCE_KIND_ENUM }),
+  provenanceSourceUrl: text("provenance_source_url"),
+  provenanceObservedAt: integer("provenance_observed_at"), // unix seconds
   ...timestamps,
 }, (table) => [
   uniqueIndex("idx_identity_platform_user").on(table.platform, table.platformUserId),
