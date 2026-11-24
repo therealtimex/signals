@@ -524,6 +524,7 @@ export async function handleLogInteraction(input: z.infer<typeof logInteractionS
 
 export async function handleQueryNiches(input: z.infer<typeof queryNichesSchema>) {
   const result = listNiches({
+    id: input.id,
     search: input.search,
     status: input.status,
     page: input.page,

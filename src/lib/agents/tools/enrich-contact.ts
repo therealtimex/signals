@@ -277,9 +277,11 @@ export function enrichContactSync(
 
   // Merge tags additively
   if (data.tags && data.tags.length > 0) {
-    const existingTags: string[] = JSON.parse(contact.tags ?? "[]");
+    const existingTags = parseStoredContactTags(contact.tags);
     const mergedTags = [...new Set([...existingTags, ...data.tags])];
-    if (mergedTags.length > existingTags.length) {
+    // Also rewrite when the stored value was not a JSON array, so legacy tags become one and
+    // query_contacts' `tags` filter (JSON arrays only) can match them.
+    if (mergedTags.length > existingTags.length || !isJsonTagArray(contact.tags)) {
       updates.tags = JSON.stringify(mergedTags);
       fieldsUpdated.push("tags");
     }
@@ -389,4 +391,36 @@ export async function enrichContact(
   workflowRunId?: string,
 ): Promise<EnrichContactResult> {
   return enrichContactSync(contactId, data, workflowRunId);
+}
+
+/**
+ * Stored contact tags: normally a JSON string array, but older writers stored a plain or
+ * comma-separated string. Parse both instead of throwing, so an additive tag merge keeps the
+ * legacy tags (and rewrites them as a JSON array) rather than failing the whole enrichment.
+ */
+export function parseStoredContactTags(raw: string | null | undefined): string[] {
+  if (!raw || !raw.trim()) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed.filter((tag): tag is string => typeof tag === "string" && tag.trim() !== "");
+    }
+    if (typeof parsed === "string") return splitLegacyTags(parsed);
+  } catch {
+    // Not JSON: a legacy plain or comma-separated string.
+  }
+  return splitLegacyTags(raw);
+}
+
+function splitLegacyTags(raw: string): string[] {
+  return [...new Set(raw.split(",").map((tag) => tag.trim()).filter(Boolean))];
+}
+
+function isJsonTagArray(raw: string | null | undefined): boolean {
+  if (!raw) return true;
+  try {
+    return Array.isArray(JSON.parse(raw));
+  } catch {
+    return false;
+  }
 }
