@@ -615,7 +615,11 @@ export async function handleCreateContact(input: z.infer<typeof createContactSch
     throw snowballEvidenceRequiredError();
   }
 
-  return createContactWithResolvedEvidence(input, suppliedIds);
+  // One transaction, like the Snowball branch above: the contact insert, its identity, notes
+  // and enrichment recalculation commit together. A failure after the insert (a rejected
+  // identity, a failed write) rolls the contact back instead of leaving an orphan that a
+  // corrected retry would then duplicate (#568).
+  return db.transaction(() => createContactWithResolvedEvidence(input, suppliedIds));
 }
 
 function createContactWithResolvedEvidence(
