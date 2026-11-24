@@ -420,7 +420,7 @@ export function buildContactWebResearchBriefSection(input: {
     "### Ambiguity and refined search",
     `Baseline refined query: \`${refinedQuery}\``,
     `Baseline refined URL: ${refinedGoogleUrl}`,
-    "If no candidate clears 60, close profile candidates still look like different people, or a verified known profile reveals a likely missing LinkedIn identity, run one refined search and re-triage.",
+    `If no candidate clears 60, close profile candidates${primaryConfirmed ? " (other than the primary identity)" : ""} still look like different people, or a verified known profile reveals a likely missing LinkedIn identity, run one refined search and re-triage.`,
     "Before opening the refined search, replace the baseline's weak/original name with the strongest full display name verified on a known profile and retain its known handle and company. Prefer `\"<verified full name>\" \"<company>\" linkedin`; if the company is absent, use `\"<verified handle>\" linkedin`. The baseline URL is only a fallback when direct-profile evidence adds nothing.",
     primaryConfirmed
       ? `If ambiguity remains about another candidate, do not call upsert_contact_identity for it. The primary identity (${primaryIdentity.identity?.id}) stays confirmed: still mine it, and set ambiguous=true only if it could not be opened and no other candidate was verified.`

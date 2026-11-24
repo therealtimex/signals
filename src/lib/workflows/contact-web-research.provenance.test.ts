@@ -113,6 +113,8 @@ describe("Contact Web Research primary identity provenance (#571)", () => {
       expect(text).toContain(
         "If ambiguity remains about another candidate, do not call upsert_contact_identity for it. The primary identity (identity-linkedin) stays confirmed",
       );
+      // A differing display name on the confirmed primary must not trigger the refined search.
+      expect(text).toContain("close profile candidates (other than the primary identity) still look like different people");
     },
   );
 
@@ -150,6 +152,7 @@ describe("Contact Web Research primary identity provenance (#571)", () => {
     expect(text).not.toContain(SELF_DECLARED_BRANCH);
     expect(text).not.toContain("aliases\": [");
     expect(text).toContain("not proof that its visible person matches the contact.");
+    expect(text).toContain("If no candidate clears 60, close profile candidates still look like different people");
   });
 
   it("keeps the ambiguity rule when there are no identities at all", () => {
@@ -294,6 +297,25 @@ describe("complete_workflow_run accepts the #571 result keys", () => {
     expect(
       completeWorkflowRunSchema.safeParse({ ...base, result: { aliasesAdded: [""] } }).success,
     ).toBe(false);
+  });
+});
+
+describe("seeded Contact Web Research system prompt (#571)", () => {
+  beforeEach(() => {
+    resetCoreTables();
+    seedTemplates();
+  });
+
+  it("scopes the provenance exception to reporting, never to linking an ambiguous candidate", () => {
+    const prompt = getSystemTemplateByName(CONTACT_WEB_RESEARCH_TEMPLATE_NAME)!.systemPrompt;
+    // The "unless" must qualify only the ambiguous=true report: a confirmed primary identity
+    // never licenses linking another, still-ambiguous candidate.
+    expect(prompt).toContain(
+      "If still ambiguous, never link that candidate. Report ambiguous=true, unless the brief's provenance section confirms the primary identity.",
+    );
+    expect(prompt).not.toContain("do not link that candidate and report ambiguous=true, unless");
+    expect(prompt).toContain("The one exception is the primary identity");
+    expect(prompt).toContain("identityProvenanceUsed, aliasesAdded");
   });
 });
 
