@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -42,6 +44,33 @@ type contactRow struct {
 	AvatarURL             string
 	IdentityEvidenceToken string
 	Notes                 string
+	// Provenance of the row's platform identity (#571). Nil when the row carries none.
+	Provenance *identityProvenance
+}
+
+// identityProvenance mirrors the agent-tools `provenance` input: kind is required, sourceUrl
+// and observedAt (unix seconds) are optional. The server owns the downgrade rule.
+type identityProvenance struct {
+	Kind       string
+	SourceURL  string
+	ObservedAt int64
+}
+
+var identityProvenanceKinds = map[string]struct{}{
+	"self_declared":  {},
+	"agent_verified": {},
+	"inferred":       {},
+}
+
+func (p *identityProvenance) payload() map[string]any {
+	out := map[string]any{"kind": p.Kind}
+	if p.SourceURL != "" {
+		out["sourceUrl"] = p.SourceURL
+	}
+	if p.ObservedAt > 0 {
+		out["observedAt"] = p.ObservedAt
+	}
+	return out
 }
 
 type importContactsSummary struct {
@@ -143,7 +172,13 @@ func newImportContactsCmd(flags *rootFlags) *cobra.Command {
 		Use:   "contacts",
 		Short: "Import contacts from staged CSV or JSON",
 		Long: `Read workflow-runs/<runId>/contacts.csv or contacts.json, dedupe, and
-create or enrich contacts via agent-tools invoke.`,
+create or enrich contacts via agent-tools invoke.
+
+Optional identity provenance per row: CSV columns provenance_kind
+(self_declared | agent_verified | inferred), provenance_source_url and
+provenance_observed_at (unix seconds), or a JSON "provenance" object with
+kind, sourceUrl and observedAt. A weaker kind never replaces a stronger one
+already stored on the identity.`,
 		Example: `  signals-pp-cli import contacts --file workflow-runs/run_1/contacts.csv --dedupe`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if filePath == "" {
@@ -411,7 +446,85 @@ func mapContactRow(item map[string]any) (contactRow, error) {
 	if row.Email != "" && !strings.Contains(row.Email, "@") {
 		return contactRow{}, usageErr(fmt.Errorf("invalid email %q", row.Email))
 	}
+	provenance, err := mapRowProvenance(item, get)
+	if err != nil {
+		return contactRow{}, err
+	}
+	row.Provenance = provenance
 	return row, nil
+}
+
+// mapRowProvenance reads either a nested JSON "provenance" object or flat
+// provenance_* columns. Returns nil when the row has no provenance at all.
+func mapRowProvenance(item map[string]any, get func(keys ...string) string) (*identityProvenance, error) {
+	kind := get("provenance_kind", "provenanceKind")
+	sourceURL := get("provenance_source_url", "provenanceSourceUrl")
+	observedAt := item["provenance_observed_at"]
+	if observedAt == nil {
+		observedAt = item["provenanceObservedAt"]
+	}
+	if nested, ok := item["provenance"].(map[string]any); ok {
+		nestedGet := func(keys ...string) string {
+			for _, key := range keys {
+				if s, ok := nested[key].(string); ok {
+					return strings.TrimSpace(s)
+				}
+			}
+			return ""
+		}
+		if v := nestedGet("kind"); v != "" {
+			kind = v
+		}
+		if v := nestedGet("sourceUrl", "source_url"); v != "" {
+			sourceURL = v
+		}
+		if v, ok := nested["observedAt"]; ok {
+			observedAt = v
+		} else if v, ok := nested["observed_at"]; ok {
+			observedAt = v
+		}
+	}
+
+	observed, err := parseObservedAt(observedAt)
+	if err != nil {
+		return nil, err
+	}
+	if kind == "" {
+		if sourceURL != "" || observed != 0 {
+			return nil, usageErr(fmt.Errorf("provenance source URL or observed-at given without provenance_kind"))
+		}
+		return nil, nil
+	}
+	if _, ok := identityProvenanceKinds[kind]; !ok {
+		return nil, usageErr(fmt.Errorf(
+			"invalid provenance_kind %q (use self_declared, agent_verified or inferred)", kind,
+		))
+	}
+	return &identityProvenance{Kind: kind, SourceURL: sourceURL, ObservedAt: observed}, nil
+}
+
+func parseObservedAt(value any) (int64, error) {
+	switch v := value.(type) {
+	case nil:
+		return 0, nil
+	case string:
+		trimmed := strings.TrimSpace(v)
+		if trimmed == "" {
+			return 0, nil
+		}
+		parsed, err := strconv.ParseInt(trimmed, 10, 64)
+		if err != nil || parsed <= 0 {
+			return 0, usageErr(fmt.Errorf("invalid provenance_observed_at %q (unix seconds)", v))
+		}
+		return parsed, nil
+	case float64:
+		if v <= 0 || v != math.Trunc(v) {
+			return 0, usageErr(fmt.Errorf("invalid provenance observedAt %v (unix seconds)", v))
+		}
+		return int64(v), nil
+	default:
+		return 0, usageErr(fmt.Errorf("invalid provenance observedAt %v (unix seconds)", v))
+	}
 }
 
 func importContactChunk(
@@ -910,6 +1023,9 @@ func createContactFromRow(
 	if row.IdentityEvidenceToken != "" {
 		input["identityEvidenceToken"] = row.IdentityEvidenceToken
 	}
+	if row.Provenance != nil && row.Platform != "" {
+		input["provenance"] = row.Provenance.payload()
+	}
 	if workflowRunID != "" {
 		input["workflowRunId"] = workflowRunID
 	}
@@ -977,6 +1093,9 @@ func enrichExistingContact(
 		}
 		if templateID != "" {
 			identity["templateId"] = templateID
+		}
+		if row.Provenance != nil {
+			identity["provenance"] = row.Provenance.payload()
 		}
 		if row.IdentityEvidenceToken != "" {
 			identity["identityEvidenceToken"] = row.IdentityEvidenceToken

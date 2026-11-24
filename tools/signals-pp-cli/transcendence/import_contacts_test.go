@@ -1045,3 +1045,166 @@ func TestImportContactChunkSkipsAmbiguousEmailWithoutMutations(t *testing.T) {
 		t.Fatalf("notes = %#v, want %#v", summary.Notes, wantNotes)
 	}
 }
+
+func TestMapContactRowProvenance(t *testing.T) {
+	flat, err := mapContactRow(map[string]any{
+		"name":                   "Sas P",
+		"platform":               "linkedin",
+		"platform_user_id":       "sasmita-s",
+		"provenance_kind":        "self_declared",
+		"provenance_source_url":  "https://lu.ma/user/sas-p",
+		"provenance_observed_at": "1732400000",
+	})
+	if err != nil {
+		t.Fatalf("flat columns: unexpected error: %v", err)
+	}
+	want := &identityProvenance{Kind: "self_declared", SourceURL: "https://lu.ma/user/sas-p", ObservedAt: 1732400000}
+	if !reflect.DeepEqual(flat.Provenance, want) {
+		t.Fatalf("flat provenance = %#v, want %#v", flat.Provenance, want)
+	}
+
+	nested, err := mapContactRow(map[string]any{
+		"name":     "Sas P",
+		"platform": "linkedin",
+		"provenance": map[string]any{
+			"kind":       "agent_verified",
+			"sourceUrl":  "https://example.com/team",
+			"observedAt": float64(1732400001),
+		},
+	})
+	if err != nil {
+		t.Fatalf("nested object: unexpected error: %v", err)
+	}
+	if !reflect.DeepEqual(nested.Provenance, &identityProvenance{
+		Kind: "agent_verified", SourceURL: "https://example.com/team", ObservedAt: 1732400001,
+	}) {
+		t.Fatalf("nested provenance = %#v", nested.Provenance)
+	}
+
+	none, err := mapContactRow(map[string]any{"name": "No Provenance", "provenance_kind": ""})
+	if err != nil || none.Provenance != nil {
+		t.Fatalf("empty provenance = %#v, err %v; want nil, nil", none.Provenance, err)
+	}
+}
+
+func TestMapContactRowRejectsInvalidProvenance(t *testing.T) {
+	cases := map[string]map[string]any{
+		"unknown kind":          {"name": "A", "provenance_kind": "verified"},
+		"url without kind":      {"name": "A", "provenance_source_url": "https://lu.ma/user/a"},
+		"observed without kind": {"name": "A", "provenance_observed_at": "1732400000"},
+		"non-numeric observed":  {"name": "A", "provenance_kind": "inferred", "provenance_observed_at": "yesterday"},
+		"fractional observed":   {"name": "A", "provenance": map[string]any{"kind": "inferred", "observedAt": 1.5}},
+		"negative observed":     {"name": "A", "provenance_kind": "inferred", "provenance_observed_at": "-5"},
+	}
+	for label, item := range cases {
+		if _, err := mapContactRow(item); err == nil {
+			t.Errorf("%s: expected a usage error", label)
+		}
+	}
+}
+
+func TestReadContactCSVWithProvenanceColumns(t *testing.T) {
+	csvPath := filepath.Join(t.TempDir(), "contacts.csv")
+	csvContent := `name,platform,platform_user_id,profile_url,provenance_kind,provenance_source_url,provenance_observed_at
+Sas P,linkedin,sasmita-s,https://www.linkedin.com/in/sasmita-s,self_declared,https://lu.ma/user/sas-p,1732400000
+No Provenance,linkedin,no-prov,,,,
+`
+	if err := os.WriteFile(csvPath, []byte(csvContent), 0o600); err != nil {
+		t.Fatalf("failed to write test csv: %v", err)
+	}
+	rows, err := readContactCSV(csvPath, 10)
+	if err != nil {
+		t.Fatalf("unexpected readContactCSV error: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 rows, got %d", len(rows))
+	}
+	if rows[0].Provenance == nil || rows[0].Provenance.Kind != "self_declared" ||
+		rows[0].Provenance.SourceURL != "https://lu.ma/user/sas-p" || rows[0].Provenance.ObservedAt != 1732400000 {
+		t.Fatalf("row 0 provenance = %#v", rows[0].Provenance)
+	}
+	if rows[1].Provenance != nil {
+		t.Fatalf("row 1 provenance = %#v, want nil", rows[1].Provenance)
+	}
+}
+
+func TestImportContactChunkForwardsProvenanceToCreateAndExistingUpsert(t *testing.T) {
+	provenance := &identityProvenance{Kind: "self_declared", SourceURL: "https://lu.ma/user/sas-p", ObservedAt: 1732400000}
+	wantPayload := map[string]any{
+		"kind":       "self_declared",
+		"sourceUrl":  "https://lu.ma/user/sas-p",
+		"observedAt": int64(1732400000),
+	}
+
+	t.Run("new contact", func(t *testing.T) {
+		var createInput map[string]any
+		invoke := func(tool string, input map[string]any) (map[string]any, error) {
+			switch tool {
+			case "create_contact":
+				createInput = input
+				return map[string]any{"id": "contact-new"}, nil
+			default:
+				t.Fatalf("unexpected tool call %q", tool)
+				return nil, nil
+			}
+		}
+		summary := importContactsSummary{Success: true, Errors: []string{}, Notes: []string{}}
+		err := importAttributedContactChunkWithInvoker([]contactRow{{
+			Name: "Sas P", Platform: "linkedin", PlatformUserID: "sasmita-s", Provenance: provenance,
+		}}, false, false, "", "", nil, &summary, invoke)
+		if err != nil {
+			t.Fatalf("import error = %v", err)
+		}
+		if !reflect.DeepEqual(createInput["provenance"], wantPayload) {
+			t.Fatalf("create_contact provenance = %#v, want %#v", createInput["provenance"], wantPayload)
+		}
+	})
+
+	t.Run("matched contact", func(t *testing.T) {
+		var upsertInput map[string]any
+		invoke := func(tool string, input map[string]any) (map[string]any, error) {
+			switch tool {
+			case "resolve_platform_claim":
+				return map[string]any{
+					"claimed":  true,
+					"claimant": map[string]any{"kind": "contact", "contactId": "contact-existing", "archived": false},
+				}, nil
+			case "upsert_contact_identity":
+				upsertInput = input
+				return map[string]any{"provenanceWrite": "applied"}, nil
+			case "query_contacts":
+				return map[string]any{"contacts": []any{map[string]any{"id": "contact-existing"}}}, nil
+			default:
+				t.Fatalf("unexpected tool call %q", tool)
+				return nil, nil
+			}
+		}
+		summary := importContactsSummary{Success: true, Errors: []string{}, Notes: []string{}}
+		err := importAttributedContactChunkWithInvoker([]contactRow{{
+			Name: "Sas P", Platform: "linkedin", PlatformUserID: "sasmita-s", Provenance: provenance,
+		}}, true, false, "", "", nil, &summary, invoke)
+		if err != nil {
+			t.Fatalf("import error = %v", err)
+		}
+		if !reflect.DeepEqual(upsertInput["provenance"], wantPayload) {
+			t.Fatalf("upsert_contact_identity provenance = %#v, want %#v", upsertInput["provenance"], wantPayload)
+		}
+	})
+
+	t.Run("rows without provenance send none", func(t *testing.T) {
+		var createInput map[string]any
+		invoke := func(tool string, input map[string]any) (map[string]any, error) {
+			createInput = input
+			return map[string]any{"id": "contact-new"}, nil
+		}
+		summary := importContactsSummary{Success: true, Errors: []string{}, Notes: []string{}}
+		if err := importAttributedContactChunkWithInvoker([]contactRow{{
+			Name: "Plain", Platform: "linkedin", PlatformUserID: "plain",
+		}}, false, false, "", "", nil, &summary, invoke); err != nil {
+			t.Fatalf("import error = %v", err)
+		}
+		if _, ok := createInput["provenance"]; ok {
+			t.Fatalf("create_contact got provenance %#v for a row without one", createInput["provenance"])
+		}
+	})
+}
