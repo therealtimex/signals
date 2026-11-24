@@ -2,7 +2,17 @@ import { listContacts, getContactById, createContact, updateContact, recalcEnric
 import { db } from "@/lib/db/client";
 import { findDuplicateOrgs } from "@/lib/orgs/dedupe/detect";
 import { mergeOrgs, MergeOrgsError } from "@/lib/orgs/dedupe/merge";
-import { createIdentity, getIdentityById, updateIdentity } from "@/lib/db/queries/identities";
+import {
+  createIdentity,
+  getIdentityById,
+  removeIdentityForContact,
+  updateIdentity,
+} from "@/lib/db/queries/identities";
+import {
+  checkIdentityValue,
+  normalizeIdentityValueForCheck,
+  type IdentityValueField,
+} from "@/lib/identity-handle-validation";
 import { resolvePlatformClaim } from "@/lib/db/identity-claims";
 import { getDashboardMetrics } from "@/lib/db/queries/dashboard";
 import { getWorkflowRun, listWorkflowRuns, updateWorkflowRun } from "@/lib/db/queries/workflows";
@@ -70,6 +80,7 @@ import type {
   generatePersonaSchema,
   upsertPersonaSchema,
   upsertContactIdentitySchema,
+  removeContactIdentitySchema,
   attestSnowballLinkedInIdentitySchema,
   listSnowballCandidatesSchema,
 } from "@/lib/agent-tools/schemas";
@@ -656,6 +667,17 @@ function createContactWithResolvedEvidence(
     const platformUserId = (rest.platformUserId ?? rest.platformHandle ?? "")
       .trim()
       .replace(/^@/, "");
+    if (!snowballEvidence) {
+      // Before dedupe, with no in-place exemption: create_contact finds its contact by these
+      // values, so a junk handle another contact already holds must not route this one there.
+      assertIdentityValuesAllowed({
+        platform,
+        platformUserId: rest.platformUserId ?? rest.platformHandle,
+        platformHandle: rest.platformHandle,
+        platformUrl: rest.platformUrl,
+        allowUnusualHandle: rest.allowUnusualHandle,
+      });
+    }
     try {
       validateIdentityAvatarUrl(rest.avatarUrl);
       if (snowballEvidence) {
@@ -692,6 +714,7 @@ function createContactWithResolvedEvidence(
         workflowRunId: resolvedIds.workflowRunId ?? undefined,
         templateId: resolvedIds.templateId ?? undefined,
         provenance: rest.provenance,
+        allowUnusualHandle: rest.allowUnusualHandle,
       }, snowballEvidence);
     }
 
@@ -801,6 +824,7 @@ function createContactWithResolvedEvidence(
       workflowRunId: resolvedIds.workflowRunId ?? undefined,
       templateId: resolvedIds.templateId ?? undefined,
       provenance: rest.provenance,
+      allowUnusualHandle: rest.allowUnusualHandle,
     }, snowballEvidence);
   }
 
@@ -924,6 +948,47 @@ function resolveSnowballEvidenceReplayIdentity(
     );
   }
   return identity;
+}
+
+const AVATAR_LIKE_URL = /pbs\.twimg\.com|media\.licdn\.com|avatars\.githubusercontent\.com|\.(png|jpe?g|webp|gif)(\?.*)?$/i;
+
+/**
+ * Reject account values that fail the per-platform checks in identity-handle-validation.ts
+ * (#569). Only values the write introduces are checked: a value equal to the one already stored
+ * on `inPlace`, the identity being updated, passes, so an identity stored before the checks
+ * existed can still be updated in place (and removed with remove_contact_identity).
+ */
+function assertIdentityValuesAllowed(args: {
+  platform: string;
+  platformUserId?: string;
+  platformHandle?: string | null;
+  platformUrl?: string | null;
+  inPlace?: ContactIdentity;
+  allowUnusualHandle?: boolean;
+}) {
+  const inPlace = args.inPlace?.platform === args.platform ? args.inPlace : undefined;
+  const checks: Array<[IdentityValueField, string | null | undefined, string | null | undefined]> = [
+    ["platformUserId", args.platformUserId, inPlace?.platformUserId],
+    ["platformHandle", args.platformHandle, inPlace?.platformHandle],
+    ["platformUrl", args.platformUrl, inPlace?.platformUrl],
+  ];
+  for (const [field, value, stored] of checks) {
+    if (!value?.trim()) continue;
+    if (field === "platformUrl" && AVATAR_LIKE_URL.test(value)) continue;
+    if (stored && normalizeIdentityValueForCheck(stored) === normalizeIdentityValueForCheck(value)) continue;
+    const violation = checkIdentityValue(args.platform, field, value, {
+      allowUnusualHandle: args.allowUnusualHandle,
+    });
+    if (violation) {
+      throw new AgentToolError("VALIDATION_ERROR", violation.message, {
+        field: violation.field,
+        platform: violation.platform,
+        value: violation.value,
+        rule: violation.rule,
+        heuristic: violation.heuristic,
+      });
+    }
+  }
 }
 
 function upsertContactIdentityWithEvidence(
@@ -1053,6 +1118,25 @@ function upsertContactIdentityWithEvidence(
       avatarUrl = platformUrl;
     }
     platformUrl = undefined;
+  }
+  if (!snowballEvidence && identityPlatform) {
+    // The identity this write updates in place, if any: the addressed one, or this contact's
+    // own claim on the same account.
+    let inPlace = existingIdentity;
+    if (!inPlace && suppliedPlatformUserId) {
+      const claim = resolvePlatformClaim(identityPlatform, suppliedPlatformUserId);
+      if (claim.claimed && claim.claimant.kind === "contact" && claim.claimant.contactId === input.contactId) {
+        inPlace = getIdentityById(claim.claimant.identityId);
+      }
+    }
+    assertIdentityValuesAllowed({
+      platform: identityPlatform,
+      platformUserId: suppliedPlatformUserId,
+      platformHandle: input.platformHandle,
+      platformUrl,
+      inPlace,
+      allowUnusualHandle: input.allowUnusualHandle,
+    });
   }
   if (!platformUrl && identityPlatform && identityHandle) {
     const canonicalUrl = identityProfileHref({
@@ -1214,6 +1298,40 @@ export async function handleUpsertContactIdentity(
     }
     throw error;
   }
+}
+
+export async function handleRemoveContactIdentity(
+  input: z.infer<typeof removeContactIdentitySchema>,
+) {
+  const contact = getContactById(input.contactId);
+  if (!contact) {
+    throw new AgentToolError("NOT_FOUND", `Contact not found: ${input.contactId}`);
+  }
+  if (contact.isSelf) {
+    throw new AgentToolError(
+      "VALIDATION_ERROR",
+      `Contact ${input.contactId} is the self contact. Its identities are the workspace owner's own accounts, which sync and publishing rely on, so agents can't remove them; use the Signals UI.`,
+      { contactId: input.contactId },
+    );
+  }
+  const result = removeIdentityForContact(input.contactId, input.identityId);
+  if (!result) {
+    throw new AgentToolError(
+      "NOT_FOUND",
+      `Identity not found for contact ${input.contactId}: ${input.identityId}`,
+    );
+  }
+  recalcEnrichment(input.contactId);
+  const { removed, promoted } = result;
+  return {
+    contactId: input.contactId,
+    removed: serializeContactIdentity(removed),
+    releasedClaim: { platform: removed.platform, platformUserId: removed.platformUserId },
+    promotedIdentityId: promoted?.id ?? null,
+    message:
+      `Removed ${removed.platform} identity ${removed.platformUserId}; the account is free to claim.` +
+      (promoted ? ` ${promoted.platform}/${promoted.platformUserId} is now primary.` : ""),
+  };
 }
 
 export async function handleArchiveContact(input: z.infer<typeof archiveContactSchema>) {

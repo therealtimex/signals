@@ -65,6 +65,11 @@ type contactRow struct {
 	// (#567). Dedupe checks every one of them (#568), and they are written to the created or
 	// matched contact with upsert_contact_identity.
 	SecondaryIdentities []rowIdentity
+	// RejectedIdentities are the identities dropped because the server would reject their
+	// values (#569); see dropInvalidRowIdentities.
+	RejectedIdentities []identityViolation
+	// AllowUnusualHandle forwards --allow-unusual-handles to the identity writes.
+	AllowUnusualHandle bool
 }
 
 // identityProvenance mirrors the agent-tools `provenance` input: kind is required, sourceUrl
@@ -106,6 +111,9 @@ type importContactsSummary struct {
 	// Conflicts counts rows skipped because their matches disagree (#568). They are a subset
 	// of Skipped and are never created.
 	Conflicts int `json:"conflicts"`
+	// IdentitiesRejected counts identities dropped from rows because the server would reject
+	// their values (#569). Each also has a note and sits on its row's rejectedIdentities.
+	IdentitiesRejected int `json:"identitiesRejected,omitempty"`
 	// Rows has one line per row, in file order, for real and dry runs alike. Without --dedupe
 	// the outcome is "unchecked".
 	Rows []rowReport `json:"rows,omitempty"`
@@ -210,6 +218,7 @@ func newImportContactsCmd(flags *rootFlags) *cobra.Command {
 	var workflowRunID string
 	var templateID string
 	var nicheID string
+	var allowUnusualHandles bool
 
 	cmd := &cobra.Command{
 		Use:   "contacts",
@@ -245,6 +254,12 @@ the import before any row is written.
 The result's "mapping" has one entry per row, keyed by the row's key (else
 its row number): the contact it created or matched, or null when skipped.
 One invocation takes up to 5000 rows and sends them in --batch-size chunks.
+
+An identity whose account value Signals would reject (a LinkedIn URL in the
+X field, invalid syntax, "in", "hi", "notwitter") is dropped from its row
+before dedupe and listed in the row's rejectedIdentities; the rest of the row
+is imported. --allow-unusual-handles keeps very short and placeholder-looking
+values. URLs from another platform and invalid syntax are always dropped.
 
 Optional identity provenance per row: CSV columns provenance_kind
 (self_declared | agent_verified | inferred), provenance_source_url and
@@ -287,6 +302,7 @@ already stored on the identity.`,
 				}
 				return usageErr(err)
 			}
+			dropInvalidRowIdentities(rows, allowUnusualHandles)
 
 			c, err := flags.newClient()
 			if err != nil {
@@ -343,6 +359,7 @@ already stored on the identity.`,
 	cmd.Flags().IntVar(&batchSize, "batch-size", defaultImportBatchSize, "Rows per invoke chunk (max 50)")
 	cmd.Flags().IntVar(&limit, "limit", 0, fmt.Sprintf("Max rows to process (default and hard cap %d)", maxImportRows))
 	cmd.Flags().StringVar(&nicheID, "niche", "", "Add every created or matched contact to this niche (belongs_to_niche)")
+	cmd.Flags().BoolVar(&allowUnusualHandles, "allow-unusual-handles", false, "Keep very short and placeholder-looking handles (x, hi, none) instead of dropping them; URLs from another platform and invalid syntax are still dropped")
 	cmd.Flags().StringVar(&workflowRunID, "workflow-run-id", "", "Attribute imported contacts to this workflow run")
 	cmd.Flags().StringVar(&templateID, "template-id", "", "Template for --workflow-run-id")
 
@@ -703,6 +720,10 @@ func importAttributedContactChunkWithInvoker(
 	for _, row := range rows {
 		index := len(summary.Rows) + 1
 		report := importRow(index, row, dedupe, dryRun, workflowRunID, templateID, summary, attribute, lookup, invoke)
+		for _, rejected := range row.RejectedIdentities {
+			summary.IdentitiesRejected++
+			summary.Notes = append(summary.Notes, rejectedIdentityNote(row, rejected))
+		}
 		summary.Rows = append(summary.Rows, report)
 		summary.addMapping(row, report)
 	}
@@ -1184,6 +1205,9 @@ func createContactFromRow(
 	if row.Provenance != nil && row.Platform != "" {
 		input["provenance"] = row.Provenance.payload()
 	}
+	if row.AllowUnusualHandle && row.Platform != "" {
+		input["allowUnusualHandle"] = true
+	}
 	if workflowRunID != "" {
 		input["workflowRunId"] = workflowRunID
 	}
@@ -1238,6 +1262,9 @@ func enrichExistingContact(
 		}
 		if row.PlatformHandle != "" {
 			identity["platformHandle"] = row.PlatformHandle
+		}
+		if row.AllowUnusualHandle {
+			identity["allowUnusualHandle"] = true
 		}
 		profileURL := row.ProfileURL
 		avatarURL := row.AvatarURL
@@ -1361,6 +1388,9 @@ func writeSecondaryIdentities(
 		}
 		if identity.Provenance != nil {
 			input["provenance"] = identity.Provenance.payload()
+		}
+		if row.AllowUnusualHandle {
+			input["allowUnusualHandle"] = true
 		}
 		if workflowRunID != "" {
 			input["workflowRunId"] = workflowRunID

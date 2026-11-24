@@ -23,6 +23,7 @@ import {
   completeWorkflowRunSchema,
   updateContactSchema,
   upsertContactIdentitySchema,
+  removeContactIdentitySchema,
   getPersonaSchema,
   upsertPersonaSchema,
   getPersonaEvidenceSchema,
@@ -163,6 +164,7 @@ import {
   handleCompleteWorkflowRun,
   handleUpdateContact,
   handleUpsertContactIdentity,
+  handleRemoveContactIdentity,
   handleGetPersona,
   handleGetPersonaEvidence,
   handleGeneratePersona,
@@ -332,6 +334,15 @@ export const AGENT_TOOLS: Record<string, AgentToolDefinition> = {
     schema: upsertContactIdentitySchema,
     parameters: zodToParameters(upsertContactIdentitySchema),
     execute: handleUpsertContactIdentity,
+  },
+  remove_contact_identity: {
+    name: "remove_contact_identity",
+    description:
+      "Remove one platform identity from a contact (#569), e.g. a junk handle like x:in that an import attached. The identity row is deleted, which releases its (platform, platformUserId) claim so another contact can take the account, and drops it from every lookup: resolve_platform_claim, query_contacts {platform, platformUserId}, import dedupe, get_contact and research. Scoped to the contact: identityId must belong to contactId. If the removed identity was primary, the contact's earliest-created remaining active identity becomes primary (promotedIdentityId). The result returns the removed identity, provenance included, as the record of what was there. The self contact is refused.",
+    category: "contacts",
+    schema: removeContactIdentitySchema,
+    parameters: zodToParameters(removeContactIdentitySchema),
+    execute: handleRemoveContactIdentity,
   },
   archive_contact: {
     name: "archive_contact",

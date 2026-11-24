@@ -242,6 +242,9 @@ export const createContactSchema = z.object({
     .describe(
       "Optional provenance for the platform identity created or matched from platform/platformUserId; ignored when no platform identity is given.",
     ),
+  allowUnusualHandle: z.boolean().optional().describe(
+    "Accept a handle that passes the platform's syntax but looks like junk: two characters or fewer, or a placeholder such as notwitter or none (#569). Set it only when the value really is the account. It never accepts a URL from another platform or invalid syntax.",
+  ),
   notes: z.string().optional(),
   funnelStage: funnelStage.optional(),
   relationshipGoal: relationshipGoal.optional(),
@@ -416,10 +419,21 @@ export const upsertContactIdentitySchema = z
       "One-use token returned by attest_snowball_linkedin_identity. Required before a Network Snowball run can write a LinkedIn identity.",
     ),
     provenance: identityProvenanceInputSchema.optional(),
+    allowUnusualHandle: z.boolean().optional().describe(
+      "Accept a handle that passes the platform's syntax but looks like junk: two characters or fewer, or a placeholder such as notwitter or none (#569). Set it only when the value really is the account. It never accepts a URL from another platform or invalid syntax.",
+    ),
   })
   .refine((data) => data.id || data.identityEvidenceToken || (data.platform && data.platformUserId), {
     message: "platform and platformUserId, or identityEvidenceToken, are required when creating a new identity",
   });
+
+export const removeContactIdentitySchema = z.object({
+  contactId: z.string().min(1).describe("The contact the identity belongs to."),
+  identityId: z
+    .string()
+    .min(1)
+    .describe("The identity's id, from get_contact identities[].id. It must belong to contactId."),
+});
 
 export const attestSnowballLinkedInIdentitySchema = z
   .object({
