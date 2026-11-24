@@ -55,6 +55,13 @@ export type ContactDTO = {
   createdSourceDetail: string | null;
   createdWorkflowRunId: string | null;
   createdTemplateId: string | null;
+  fitScore: number | null;
+  fitTier: Contact["fitTier"];
+  fitProduct: string | null;
+  fitConfidence: number | null;
+  fitRationale: string | null;
+  fitScoreVersion: string | null;
+  fitScoredAt: number | null;
 };
 
 function pickPrimaryChannel(
@@ -165,6 +172,13 @@ export function assembleContactDto(
     createdSourceDetail: contact.createdSourceDetail,
     createdWorkflowRunId: contact.createdWorkflowRunId,
     createdTemplateId: contact.createdTemplateId,
+    fitScore: contact.fitScore,
+    fitTier: contact.fitTier,
+    fitProduct: contact.fitProduct,
+    fitConfidence: contact.fitConfidence,
+    fitRationale: contact.fitRationale,
+    fitScoreVersion: contact.fitScoreVersion,
+    fitScoredAt: contact.fitScoredAt,
   };
 }
 
