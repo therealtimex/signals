@@ -118,6 +118,56 @@ describe("remove_contact_identity (#569)", () => {
     expect(listIdentitiesByContact(created.id).map((i) => [i.id, i.isPrimary])).toEqual([[inactive.id, 0]]);
   });
 
+  // Milestone-verify note (#569): upsert_contact_identity {isPrimary: true} never cleared the other
+  // primaries, so legacy contacts can hold two. Removing one must not promote a third.
+  it("does not promote when another active primary remains, and research follows that primary", async () => {
+    const created = await ok("create_contact", { name: "Two Primaries" });
+    const a = await ok("upsert_contact_identity", {
+      contactId: created.id, platform: "bluesky", platformUserId: "two.bsky.social",
+    });
+    db.update(contactIdentities).set({ createdAt: 1 }).where(eq(contactIdentities.id, a.id)).run();
+    const b = await ok("upsert_contact_identity", {
+      contactId: created.id, platform: "linkedin", platformUserId: "two-primaries", isPrimary: true,
+    });
+    db.update(contactIdentities).set({ createdAt: 2 }).where(eq(contactIdentities.id, b.id)).run();
+    const c = await ok("upsert_contact_identity", {
+      contactId: created.id, platform: "x", platformUserId: "two_primaries", isPrimary: true,
+      provenance: { kind: "agent_verified" },
+    });
+    db.update(contactIdentities).set({ createdAt: 3 }).where(eq(contactIdentities.id, c.id)).run();
+    expect(listIdentitiesByContact(created.id).filter((i) => i.isPrimary).map((i) => i.id).sort()).toEqual([b.id, c.id].sort());
+
+    const removed = await ok("remove_contact_identity", { contactId: created.id, identityId: b.id });
+    expect(removed.promotedIdentityId).toBeNull();
+    expect(removed.message).toContain("x/two_primaries is still primary, so nothing was promoted.");
+    const identities = listIdentitiesByContact(created.id);
+    expect(identities.filter((i) => i.isPrimary).map((i) => i.id)).toEqual([c.id]);
+    expect(identities.find((i) => i.id === a.id)?.isPrimary).toBe(0);
+    expect(resolveContactWebResearchPrimaryIdentity({ identities })).toMatchObject({
+      identity: { id: c.id },
+      provenanceUsed: "agent_verified",
+    });
+  });
+
+  it("still promotes when the only other primary is inactive", async () => {
+    const created = await ok("create_contact", { name: "Inactive Primary" });
+    const inactivePrimary = await ok("upsert_contact_identity", {
+      contactId: created.id, platform: "bluesky", platformUserId: "inactive.bsky.social", isPrimary: true, isActive: false,
+    });
+    db.update(contactIdentities).set({ createdAt: 1 }).where(eq(contactIdentities.id, inactivePrimary.id)).run();
+    const primary = await ok("upsert_contact_identity", {
+      contactId: created.id, platform: "linkedin", platformUserId: "inactive-primary", isPrimary: true,
+    });
+    db.update(contactIdentities).set({ createdAt: 2 }).where(eq(contactIdentities.id, primary.id)).run();
+    const x = await ok("upsert_contact_identity", { contactId: created.id, platform: "x", platformUserId: "inactive_prim" });
+    db.update(contactIdentities).set({ createdAt: 3 }).where(eq(contactIdentities.id, x.id)).run();
+
+    const removed = await ok("remove_contact_identity", { contactId: created.id, identityId: primary.id });
+    expect(removed.promotedIdentityId).toBe(x.id);
+    expect(removed.message).not.toContain("still primary");
+    expect(resolveContactWebResearchPrimaryIdentity({ identities: listIdentitiesByContact(created.id) }).identity?.id).toBe(x.id);
+  });
+
   it("is scoped to the identity's contact, refuses the self contact, and 404s an unknown identity", async () => {
     const owner = await ok("create_contact", { name: "Owner", platform: "x", platformUserId: "owner_x" });
     const stranger = await ok("create_contact", { name: "Stranger" });

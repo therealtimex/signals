@@ -321,7 +321,10 @@ is what frees the account for another contact. It also takes the identity out of
 - **Primary.** If the removed identity was primary, the contact's earliest-created remaining
   **active** identity becomes primary (`promotedIdentityId`), so research's primary-identity
   resolution and the profile resolver keep agreeing. An inactive identity is never promoted. With
-  no active identity left, none is primary.
+  no active identity left, none is primary. If another **active** identity is still primary (legacy
+  contacts can hold two, because `upsert_contact_identity {isPrimary: true}` doesn't clear the
+  others), nothing is promoted: `promotedIdentityId` is null and `message` names the remaining
+  primary.
 - **Result.** `{contactId, removed, releasedClaim: {platform, platformUserId}, promotedIdentityId,
   message}`. `removed` is the deleted identity, provenance included: the record of what was there.
 - **Deactivating is not removing.** `isActive: false` still claims the account; it marks an

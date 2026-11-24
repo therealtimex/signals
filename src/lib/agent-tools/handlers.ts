@@ -1322,7 +1322,7 @@ export async function handleRemoveContactIdentity(
     );
   }
   recalcEnrichment(input.contactId);
-  const { removed, promoted } = result;
+  const { removed, promoted, remainingPrimary } = result;
   return {
     contactId: input.contactId,
     removed: serializeContactIdentity(removed),
@@ -1330,7 +1330,10 @@ export async function handleRemoveContactIdentity(
     promotedIdentityId: promoted?.id ?? null,
     message:
       `Removed ${removed.platform} identity ${removed.platformUserId}; the account is free to claim.` +
-      (promoted ? ` ${promoted.platform}/${promoted.platformUserId} is now primary.` : ""),
+      (promoted ? ` ${promoted.platform}/${promoted.platformUserId} is now primary.` : "") +
+      (remainingPrimary
+        ? ` ${remainingPrimary.platform}/${remainingPrimary.platformUserId} is still primary, so nothing was promoted.`
+        : ""),
   };
 }
 
