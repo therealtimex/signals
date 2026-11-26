@@ -99,6 +99,7 @@ import {
   type IdentityProvenanceWriteOutcome,
 } from "@/lib/identity-provenance";
 import {
+  CONTACT_ALIAS_MAX_LENGTH,
   CONTACT_ALIASES_MAX,
   mergeContactAliases,
 } from "@/lib/contact-aliases";
@@ -899,6 +900,15 @@ export async function handleEnrichContact(input: z.infer<typeof enrichContactSch
   }
   if (data.aliases) {
     const merged = mergeContactAliases(contact.aliases, data.aliases, contact.name);
+    // The schema caps the raw string; NFKC normalization can lengthen it (e.g. "\uFDFA" → 18 chars).
+    const tooLong = merged.added.find((alias) => alias.length > CONTACT_ALIAS_MAX_LENGTH);
+    if (tooLong !== undefined) {
+      throw new AgentToolError(
+        "VALIDATION_ERROR",
+        `An alias holds at most ${CONTACT_ALIAS_MAX_LENGTH} characters after normalization; this one has ${tooLong.length}.`,
+        { field: "aliases", value: tooLong },
+      );
+    }
     if (merged.aliases.length > CONTACT_ALIASES_MAX) {
       throw new AgentToolError(
         "VALIDATION_ERROR",

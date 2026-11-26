@@ -336,7 +336,7 @@ is what frees the account for another contact. It also takes the identity out of
 
 **Name aliases** (#571). `get_contact.aliases` is a string array of other names the contact goes by,
 such as "Sas P" on Luma for "Sasmita S" on LinkedIn. Add aliases with `enrich_contact.aliases`
-(1–20 per call, each ≤120 characters). They are appended, never replaced, and deduped
+(1–20 per call, each ≤120 characters after Unicode NFKC and whitespace normalization). They are appended, never replaced, and deduped
 case-insensitively against stored aliases and the contact's own name; the first spelling wins.
 A contact holds at most 50 aliases, and a write that would exceed the cap fails with
 `VALIDATION_ERROR` before anything is written. `fieldsUpdated` includes `aliases` only when one
