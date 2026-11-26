@@ -1182,12 +1182,19 @@ func platformClaimMatch(result map[string]any) (contactMatch, error) {
 	}
 }
 
+// isLikelyAvatarURL mirrors the server's AVATAR_LIKE_URL (src/lib/agent-tools/handlers.ts): an
+// image extension may be followed by a query string, as in "…/photo.jpg?w=200".
 func isLikelyAvatarURL(url string) bool {
 	lower := strings.ToLower(url)
-	return strings.Contains(lower, "pbs.twimg.com") ||
+	if strings.Contains(lower, "pbs.twimg.com") ||
 		strings.Contains(lower, "media.licdn.com") ||
-		strings.Contains(lower, "avatars.githubusercontent.com") ||
-		strings.HasSuffix(lower, ".jpg") ||
+		strings.Contains(lower, "avatars.githubusercontent.com") {
+		return true
+	}
+	if query := strings.Index(lower, "?"); query >= 0 {
+		lower = lower[:query]
+	}
+	return strings.HasSuffix(lower, ".jpg") ||
 		strings.HasSuffix(lower, ".jpeg") ||
 		strings.HasSuffix(lower, ".png") ||
 		strings.HasSuffix(lower, ".webp") ||
