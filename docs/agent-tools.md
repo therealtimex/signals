@@ -360,6 +360,9 @@ and launch links go with it.
   pass `id` to choose. An `achieved` or `missed` goal never matches, so the same name starts a new
   goal. The result says what happened: `created: true | false` and
   `matchedBy: "id" | "natural_key" | null`.
+- **A natural-key match keeps the stored name.** There the name is the key, so a retry spelled
+  differently ("book 10 MEETINGS…") updates the goal without renaming it. Only an update by `id`
+  renames a goal.
 - **Deliberately unlike `upsert_launch`.** Launches don't dedupe: without `id`, `upsert_launch`
   always creates. Goals do, because the call that records progress ("meeting 3 of 10 booked") is
   the one most likely to be retried.

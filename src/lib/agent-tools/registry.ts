@@ -605,7 +605,7 @@ export const AGENT_TOOLS: Record<string, AgentToolDefinition> = {
   upsert_goal: {
     name: "upsert_goal",
     description:
-      "Create or update a goal with the existing goal fields (#565). With id: update it (unknown id → NOT_FOUND). Without id: an open (active or paused) goal with the same name (trimmed, case-insensitive) and goalType is updated instead of creating a second one, so a retry is safe; matchedBy says which happened. Omitted fields keep their stored values. currentValue is the same progress mover as the dashboard's manual ± and does not change status. Optional nicheId links the goal to one niche (targets) and launchId adds a launch link (contributes_to); links don't change how progress is counted, and a missing niche or launch is NOT_FOUND before any write.",
+      "Create or update a goal with the existing goal fields (#565). With id: update it (unknown id → NOT_FOUND). Without id: an open (active or paused) goal with the same name (trimmed, case-insensitive) and goalType is updated instead of creating a second one, so a retry is safe; matchedBy says which happened. That match keeps the stored name (only an update by id renames). Omitted fields keep their stored values. currentValue is the same progress mover as the dashboard's manual ± and does not change status. Optional nicheId links the goal to one niche (targets) and launchId adds a launch link (contributes_to); links don't change how progress is counted, and a missing niche or launch is NOT_FOUND before any write.",
     category: "goals",
     schema: upsertGoalSchema,
     parameters: zodToParameters(upsertGoalSchema),

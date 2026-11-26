@@ -162,8 +162,16 @@ describe("upsert_goal (#565)", () => {
       expect(retry).toMatchObject({ id: first.id, created: false, matchedBy: "natural_key", currentValue: 4 });
       expect(retry.note).toBeUndefined();
       expect(goalRows()).toHaveLength(1);
-      // The matched goal is renamed to the name sent, like any other provided field.
-      expect(goalRows()[0]!.name).toBe("book 10 MEETINGS from hackwithbay 4.0");
+      // The name is the key on a natural-key match, so the stored spelling is kept (lead, r3).
+      expect(retry.name).toBe(customerGoal.name);
+      expect(goalRows()[0]!.name).toBe(customerGoal.name);
+    });
+
+    it("renames only on an update by id", async () => {
+      const goal = await ok("upsert_goal", customerGoal);
+      const renamed = await ok("upsert_goal", { id: goal.id, name: "Book 12 meetings from HackwithBay 4.0" });
+      expect(renamed).toMatchObject({ id: goal.id, matchedBy: "id", name: "Book 12 meetings from HackwithBay 4.0" });
+      expect(goalRows()[0]!.name).toBe("Book 12 meetings from HackwithBay 4.0");
     });
 
     it("matches without targetValue or unit, so a progress-only retry needs no create fields", async () => {

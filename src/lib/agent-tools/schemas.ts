@@ -465,7 +465,9 @@ export const upsertGoalSchema = z
     id: z.string().min(1).optional().describe(
       "Update this goal. Unknown ids are NOT_FOUND. Without id, a goal with the same name (trimmed, case-insensitive) and goalType that is active or paused is updated instead of creating a second one.",
     ),
-    name: z.string().trim().min(1).optional().describe("Required without id."),
+    name: z.string().trim().min(1).optional().describe(
+      "Required without id. With id it renames the goal; on a natural-key match the stored name is kept.",
+    ),
     goalType: goalTypeEnum.optional().describe("Required without id. One of the four existing goal types."),
     targetValue: z.number().int().positive().optional().describe("Required to create a goal."),
     currentValue: z.number().int().min(0).optional().describe(

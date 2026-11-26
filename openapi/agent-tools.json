@@ -2504,7 +2504,7 @@
                           },
                           "name": {
                             "type": "string",
-                            "description": "Required without id."
+                            "description": "Required without id. With id it renames the goal; on a natural-key match the stored name is kept."
                           },
                           "goalType": {
                             "type": "string",

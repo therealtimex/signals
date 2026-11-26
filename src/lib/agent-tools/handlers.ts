@@ -1719,7 +1719,9 @@ export async function handleUpsertGoal(input: z.infer<typeof upsertGoalSchema>) 
     }
 
     const fields = {
-      ...(input.name !== undefined ? { name: input.name } : {}),
+      // On a natural-key match the name is the key: a retry spelled differently must not rename
+      // the stored goal. An update by id may rename.
+      ...(input.name !== undefined && matchedBy !== "natural_key" ? { name: input.name } : {}),
       ...(input.goalType !== undefined ? { goalType: input.goalType } : {}),
       ...(input.targetValue !== undefined ? { targetValue: input.targetValue } : {}),
       ...(input.currentValue !== undefined ? { currentValue: input.currentValue } : {}),
