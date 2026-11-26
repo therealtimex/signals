@@ -203,14 +203,20 @@ export function getLatestWorkflowStepCreatedAt(workflowRunId: string): number | 
 }
 
 /**
- * Most recent runs of one template that were routed to one RTX thread, newest first. Used to
- * judge whether the template's shared thread is still fit to receive a dispatch (#572).
+ * The most recent runs of one template that were handed to one RTX thread, newest handoff first.
+ * Used to judge whether the template's shared thread is still fit to receive a dispatch (#572).
+ *
+ * Only runs that reached dispatch (a terminal lifecycle, or a legacy runtime session id) count, so
+ * runs that failed before dispatch cannot push an older handoff out of the window. They are ordered
+ * by when the handoff began, not when the row was created: dispatch follows an asynchronous
+ * preflight, so an earlier-created run can be handed over after a later one.
  */
-export function listRecentTemplateRunsOnThread(
+export function listRecentDispatchedTemplateRunsOnThread(
   templateId: string,
   threadSlug: string,
   limit = 10,
 ): WorkflowRun[] {
+  const dispatchStartedAtMs = sql`coalesce(json_extract(${workflowRuns.config}, '$.rtxTerminalLifecycle.dispatch.startedAt'), ${workflowRuns.startedAt} * 1000, ${workflowRuns.createdAt} * 1000)`;
   return db
     .select()
     .from(workflowRuns)
@@ -219,9 +225,10 @@ export function listRecentTemplateRunsOnThread(
         eq(workflowRuns.templateId, templateId),
         sql`json_valid(${workflowRuns.config})`,
         sql`json_extract(${workflowRuns.config}, '$.rtxThreadSlug') = ${threadSlug}`,
+        sql`(json_type(${workflowRuns.config}, '$.rtxTerminalLifecycle') = 'object' OR trim(coalesce(json_extract(${workflowRuns.config}, '$.rtxRuntimeSessionId'), '')) <> '')`,
       ),
     )
-    .orderBy(desc(workflowRuns.createdAt), desc(sql`rowid`))
+    .orderBy(desc(dispatchStartedAtMs), desc(workflowRuns.createdAt), desc(sql`rowid`))
     .limit(limit)
     .all();
 }
