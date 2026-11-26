@@ -1,4 +1,4 @@
-import { eq, and, desc, count, SQL, gte, inArray, ne, sql } from "drizzle-orm";
+import { eq, and, or, desc, count, SQL, gte, inArray, ne, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db/client";
 import {
@@ -293,12 +293,28 @@ export function summarizeGoals(): GoalsSummary {
   };
 }
 
+/**
+ * Delete a goal and every graph edge touching it (#565): its `targets` niche link, launches'
+ * `contributes_to` edges and any other edge an agent wrote. `graph_edges` has no foreign keys,
+ * so without this the edges would outlive the goal as `missing_endpoint` integrity issues and
+ * `query_launches` would keep listing the goal. Workflow links and progress rows cascade.
+ */
 export function deleteGoal(id: string): boolean {
-  const existing = db.select().from(goals).where(eq(goals.id, id)).get();
-  if (!existing) return false;
+  return db.transaction(() => {
+    const existing = db.select().from(goals).where(eq(goals.id, id)).get();
+    if (!existing) return false;
 
-  db.delete(goals).where(eq(goals.id, id)).run();
-  return true;
+    db.delete(graphEdges)
+      .where(
+        or(
+          and(eq(graphEdges.srcType, "goal"), eq(graphEdges.srcId, id)),
+          and(eq(graphEdges.dstType, "goal"), eq(graphEdges.dstId, id)),
+        ),
+      )
+      .run();
+    db.delete(goals).where(eq(goals.id, id)).run();
+    return true;
+  });
 }
 
 // ── Goal-Workflow Links ────────────────────────

@@ -3,7 +3,8 @@ import { eq } from "drizzle-orm";
 import { NextRequest } from "next/server";
 import { POST as invokeRoute } from "@/app/api/agent-tools/invoke/route";
 import { POST as dashboardCreate } from "@/app/api/goals/route";
-import { PUT as dashboardUpdate } from "@/app/api/goals/[id]/route";
+import { DELETE as dashboardDelete, PUT as dashboardUpdate } from "@/app/api/goals/[id]/route";
+import { GET as syncHealth } from "@/app/api/analytics/sync-health/route";
 import { db } from "@/lib/db/client";
 import { goalProgress, goals, graphEdges } from "@/lib/db/schema";
 import { linkWorkflowToGoal, updateGoalProgressFromWorkflow } from "@/lib/db/queries/goals";
@@ -319,6 +320,31 @@ describe("upsert_goal (#565)", () => {
       // upsert_goal then treats it as the goal's single niche link.
       await ok("upsert_goal", { id: goal.id, nicheId: null });
       expect(edgeRows()).toHaveLength(0);
+    });
+  });
+
+  describe("deleting a goal", () => {
+    it("removes its graph edges, leaves Sync Health clean, and drops it from query_launches", async () => {
+      const nicheId = await niche();
+      const launchId = await launch();
+      const goal = await ok("upsert_goal", { ...customerGoal, nicheId, launchId });
+      const other = await ok("upsert_goal", { ...customerGoal, name: "Other goal", nicheId, launchId });
+      expect(edgeRows()).toHaveLength(4);
+      expect((await ok("query_launches", {})).launches[0].goalIds.sort()).toEqual([goal.id, other.id].sort());
+
+      const response = await dashboardDelete(new NextRequest(`http://localhost/api/goals/${goal.id}`, { method: "DELETE" }), {
+        params: Promise.resolve({ id: goal.id }),
+      });
+      expect(response.status).toBe(200);
+
+      expect(goalRows().map((g) => g.id)).toEqual([other.id]);
+      // Only the deleted goal's edges go; the other goal keeps its links.
+      expect(edgeRows().every((e) => e.srcId !== goal.id && e.dstId !== goal.id)).toBe(true);
+      expect(edgeRows()).toHaveLength(2);
+      expect((await ok("query_launches", {})).launches[0].goalIds).toEqual([other.id]);
+
+      const health = await (await syncHealth(new NextRequest("http://localhost/api/analytics/sync-health"))).json();
+      expect(health.graphIntegrity.issueCount).toBe(0);
     });
   });
 

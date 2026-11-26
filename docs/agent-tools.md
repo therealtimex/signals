@@ -350,6 +350,8 @@ was added. There's no agent-tool for removing aliases yet.
 `name`, `goalType` (`audience_growth` | `lead_generation` | `content_engagement` |
 `pipeline_progression`), `targetValue`, `currentValue`, `unit`, `platform` (`x` | `linkedin` | null),
 `deadline` (unix seconds) and `status` (`active` | `achieved` | `missed` | `paused`).
+Deleting a goal (`DELETE /api/goals/:id`) also deletes every graph edge touching it, so its niche
+and launch links go with it.
 - **Which goal.** With `id`, that goal is updated; an unknown `id` is `NOT_FOUND` and nothing is
   written. Without `id`, `name` and `goalType` are required, and an open (`active` or `paused`)
   goal with the same `goalType` and the same `name` (trimmed, ignoring case) is updated instead of
