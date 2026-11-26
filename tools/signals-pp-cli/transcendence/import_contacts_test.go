@@ -1005,6 +1005,9 @@ func TestImportContactChunkSkipsAmbiguousEmailWithoutMutations(t *testing.T) {
 	var queryInput map[string]any
 	invoke := func(tool string, input map[string]any) (map[string]any, error) {
 		calls = append(calls, tool)
+		if tool == "resolve_platform_claim" {
+			return map[string]any{"claimed": false}, nil
+		}
 		if tool != "query_contacts" {
 			t.Fatalf("unexpected mutation tool call %q", tool)
 		}
@@ -1028,8 +1031,9 @@ func TestImportContactChunkSkipsAmbiguousEmailWithoutMutations(t *testing.T) {
 		t.Fatalf("importContactChunkWithInvoker() error = %v", err)
 	}
 
-	if !reflect.DeepEqual(calls, []string{"query_contacts"}) {
-		t.Fatalf("tool calls = %#v, want query_contacts only", calls)
+	// Read-only lookups only: the email and then the row's identity (PR #574 C21).
+	if !reflect.DeepEqual(calls, []string{"query_contacts", "resolve_platform_claim"}) {
+		t.Fatalf("tool calls = %#v, want the email and identity lookups only", calls)
 	}
 	if got := queryInput["email"]; got != "shared@example.com" {
 		t.Fatalf("query email = %#v, want normalized email", got)

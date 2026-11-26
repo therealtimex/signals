@@ -696,3 +696,32 @@ func TestImportContactsCommandRerunDedupesAnEmailOnlyRowOverHTTP(t *testing.T) {
 		t.Fatalf("contacts holding the email = %v, want one", got)
 	}
 }
+
+// PR #574 C21: an email that matches several contacts is still a conflict, but every identity
+// is looked up first, so the report lists the identity claimants as well.
+func TestClassifyAmbiguousEmailRowStillReportsEveryIdentityClaimant(t *testing.T) {
+	f := newFakeSignals(t)
+	f.emails["shared@example.com"] = []string{"contact-a", "contact-z"}
+	f.contactClaim("x", "shared_x", "contact-b", false)
+	f.orgClaim("linkedin", "shared-li", "org-1")
+	row := contactRow{
+		Name: "Shared", Email: "shared@example.com", Platform: "x", PlatformUserID: "shared_x",
+		SecondaryIdentities: []rowIdentity{{Platform: "linkedin", PlatformUserID: "shared-li"}},
+	}
+
+	match, err := classifyContactRow(row, f.invoke)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if match.Outcome != rowOutcomeConflict || len(f.writes) != 0 {
+		t.Fatalf("outcome = %s, writes = %v", match.Outcome, f.writes)
+	}
+	if !reflect.DeepEqual(match.EmailMatches, []string{"contact-a", "contact-z"}) || len(match.Claims) != 2 {
+		t.Fatalf("email matches = %v, claims = %+v", match.EmailMatches, match.Claims)
+	}
+	for _, want := range []string{"contact-a, contact-z", "x/shared_x → contact contact-b", "linkedin/shared-li → org org-1"} {
+		if !strings.Contains(match.Reason, want) {
+			t.Errorf("reason %q is missing %q", match.Reason, want)
+		}
+	}
+}
