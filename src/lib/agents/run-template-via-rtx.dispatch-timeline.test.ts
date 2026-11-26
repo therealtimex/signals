@@ -48,7 +48,12 @@ const SHARED = "shared-enrich-thread";
 type Mode = "accept" | "unknown409" | "relay502";
 
 function statefulRtx() {
-  const state = { mode: "accept" as Mode, created: 0, sends: [] as string[] };
+  const state = {
+    mode: "accept" as Mode,
+    created: 0,
+    sends: [] as string[],
+    unexpected: [] as string[],
+  };
   const threads = new Set([SHARED]);
   const impl = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
@@ -114,7 +119,10 @@ function statefulRtx() {
     if (url.includes("/cli/list-browser-sessions")) {
       return new Response(JSON.stringify({ success: true, sessions: [] }), { status: 200 });
     }
-    return new Response(JSON.stringify({ success: true }), { status: 200 });
+    // Anything else is an endpoint this timeline does not expect: fail loudly, as the other RTX
+    // mocks do, so a new or renamed call cannot pass unnoticed.
+    state.unexpected.push(url);
+    return new Response(JSON.stringify({ error: `Unexpected request: ${url}` }), { status: 500 });
   }) as unknown as typeof fetch;
   return { state, impl };
 }
@@ -169,7 +177,11 @@ describe("Contact Web Research dispatch timeline (#572)", () => {
       leaseId: "lease", released: true, alreadyGone: false,
     });
   });
-  afterEach(() => rmSync(storageDir, { recursive: true, force: true }));
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+    rmSync(storageDir, { recursive: true, force: true });
+  });
 
   it("survives an unconfirmed 409, a relay 502 and an accepted-then-silent run", async () => {
     seedTemplates();
@@ -225,6 +237,12 @@ describe("Contact Web Research dispatch timeline (#572)", () => {
     updateWorkflowRun(r4RunId, { status: "running" });
     backdate(r4RunId, 20);
 
+    // The route reads process.env and the global fetch: point both at the same RTX mock, so the
+    // re-run really dispatches (and nothing reaches a RealTimeX this test may be running inside).
+    vi.stubEnv("RTX_APP_ID", env.RTX_APP_ID!);
+    vi.stubEnv("RTX_API_BASE_URL", env.RTX_API_BASE_URL!);
+    vi.stubEnv("STORAGE_DIR", storageDir);
+    vi.stubGlobal("fetch", rtx.impl);
     const ctx = { params: Promise.resolve({ id: r4.contact.id }) };
     const url = `http://127.0.0.1:3000/api/contacts/${r4.contact.id}/web-research`;
     const getBody = await (await GET(new NextRequest(url), ctx)).json();
@@ -232,7 +250,15 @@ describe("Contact Web Research dispatch timeline (#572)", () => {
     const postBody = await postRes.json();
     expect.soft(getBody.status).toBe("failed");
     expect.soft(getBody.errorCode).toBe("dispatch_lost");
-    expect.soft(postRes.status).not.toBe(409);
     expect.soft(getWorkflowRun(r4RunId)?.status).toBe("failed");
+    // The contact is researched again: a new run, dispatched into the replacement thread.
+    expect.soft(postRes.status).toBe(202);
+    expect.soft(postBody.workflowRunId).toEqual(expect.any(String));
+    expect.soft(postBody.workflowRunId).not.toBe(r4RunId);
+    const rerun = getWorkflowRun(postBody.workflowRunId);
+    expect.soft(rerun?.status).toMatch(/^(pending|running)$/);
+    expect.soft(readWorkflowTerminalLifecycle(rerun?.config)?.dispatch.state).toBe("accepted");
+    expect.soft(rtx.state.sends.at(-1)).toBe(getTemplate(template.id)?.rtxThreadSlug);
+    expect(rtx.state.unexpected).toEqual([]);
   });
 });
