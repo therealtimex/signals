@@ -81,12 +81,23 @@ func (f *fakeSignals) invoke(tool string, input map[string]any) (map[string]any,
 			key, _ := input["platformUserId"].(string)
 			f.contactClaim(platform, key, id, false)
 		}
-		if channels, ok := input["channels"].([]map[string]any); ok {
-			for _, channel := range channels {
-				if channel["channelType"] == "email" {
-					email, _ := channel["value"].(string)
-					f.emails[email] = append(f.emails[email], id)
+		// In-process callers pass []map[string]any; over HTTP (fakeSignalsServer) the same
+		// channels decode as []any. Record the email either way.
+		var channels []map[string]any
+		switch raw := input["channels"].(type) {
+		case []map[string]any:
+			channels = raw
+		case []any:
+			for _, item := range raw {
+				if channel, ok := item.(map[string]any); ok {
+					channels = append(channels, channel)
 				}
+			}
+		}
+		for _, channel := range channels {
+			if channel["channelType"] == "email" {
+				email, _ := channel["value"].(string)
+				f.emails[email] = append(f.emails[email], id)
 			}
 		}
 		return map[string]any{"id": id}, nil
@@ -658,5 +669,30 @@ func TestReconcileCommandReportsPerRowClassification(t *testing.T) {
 	if summary.Rows[0].ContactID != "UlrgYWF3" || summary.Rows[1].Outcome != rowOutcomeConflict ||
 		!reflect.DeepEqual(summary.Rows[1].EmailMatches, []string{"contact-a"}) {
 		t.Fatalf("rows = %+v", summary.Rows)
+	}
+}
+
+// PR #574 C15: an end-to-end import over HTTP must record create_contact's email side effect,
+// so a rerun dedupes the email-only row instead of creating a second contact.
+func TestImportContactsCommandRerunDedupesAnEmailOnlyRowOverHTTP(t *testing.T) {
+	f := newFakeSignals(t)
+	pointCLIAt(t, fakeSignalsServer(t, f))
+	file := writeRowsFile(t, []map[string]any{
+		{"name": "Email Only", "email": "email.only@example.com"},
+	})
+
+	for run := 1; run <= 2; run++ {
+		cmd := newImportContactsCmd(&rootFlags{})
+		cmd.SetArgs([]string{"--file", file, "--dedupe"})
+		out, err := runCommandCapturingStdout(t, cmd.Execute)
+		if err != nil {
+			t.Fatalf("run %d: import error = %v (output %s)", run, err, out)
+		}
+	}
+	if len(f.creates) != 1 {
+		t.Fatalf("create_contact calls = %d, want 1 (the rerun matches by email)", len(f.creates))
+	}
+	if got := f.emails["email.only@example.com"]; len(got) != 1 {
+		t.Fatalf("contacts holding the email = %v, want one", got)
 	}
 }
