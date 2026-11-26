@@ -195,8 +195,9 @@ fields are null for identities written before #571 or without provenance, which 
   `self_declared` outranks `agent_verified` because it is first-party ownership evidence, so a
   later verification must not erase the record that the subject linked the account themselves.
 - **Writes.** `upsert_contact_identity.provenance` and `create_contact.provenance` (applied to the
-  identity built from `platform`/`platformUserId`). The response reports `provenanceWrite`
-  (`create_contact`: `identityProvenanceWrite`) as `applied`, `kept_existing` or `not_provided`.
+  identity built from `platform`/`platformUserId`). `upsert_contact_identity` reports
+  `provenanceWrite` as `applied`, `kept_existing` or `not_provided`. `create_contact` returns
+  `identityProvenanceWrite` (`applied` or `kept_existing`) only when `provenance` is supplied.
   `signals-pp-cli import contacts` forwards CSV columns `provenance_kind`,
   `provenance_source_url`, `provenance_observed_at`, or a JSON `provenance` object.
 - **Reads.** Every identity in `get_contact.identities[]` and `query_contacts.contacts[].identities[]`
@@ -301,6 +302,8 @@ value, rule, heuristic}`. The rules are in `src/lib/identity-handle-validation.t
 - **Heuristic rules can be wrong.** `x`, `hi` and `v` are real, valid X handles. Pass
   `allowUnusualHandle: true` when the value really is the account; the error message says so.
   Nothing overrides a hard rule.
+- **`platformUrl` gets `foreign_url` only.** The other rules are about account names, so they
+  don't apply to a URL, and an avatar-like image URL isn't checked at all.
 - **Only new values are checked.** Updating an identity in place (addressed by `id`, or the same
   `platform` + `platformUserId` on the contact that holds it) passes values equal to the stored
   ones, so identities stored before these checks stay readable, updatable and removable. Nothing
