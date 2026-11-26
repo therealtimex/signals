@@ -361,7 +361,10 @@ export function buildContactWebResearchBriefSection(input: {
   const refinedGoogleUrl = buildGoogleSearchUrl(refinedQuery);
   const knownProfileCandidates = resolveContactWebResearchKnownProfileCandidates(contact);
   const primaryIdentity = resolveContactWebResearchPrimaryIdentity(contact);
+  // Only a LinkedIn identity, or the contact's own profile URL, names a LinkedIn profile of this
+  // person; another platform's identity carrying a LinkedIn URL is not offered as one.
   const experienceDetailsLines = knownProfileCandidates.flatMap((candidate) => {
+    if (candidate.platform !== "linkedin" && candidate.source !== "contact") return [];
     const detailsUrl = linkedInExperienceDetailsUrl(candidate.url);
     return detailsUrl ? [`  - ${candidate.url} → ${detailsUrl}`] : [];
   });
