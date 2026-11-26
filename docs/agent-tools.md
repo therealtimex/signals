@@ -293,7 +293,7 @@ value, rule, heuristic}`. The rules are in `src/lib/identity-handle-validation.t
 | Rule | Kind | Rejects |
 |---|---|---|
 | `foreign_url` | hard | A URL on another platform's host, in any field: `linkedin.com/in/…` in an X field, `x.com/…` on a LinkedIn identity |
-| `syntax` | hard | Invalid account syntax, on the platforms whose syntax is fixed: X `^[A-Za-z0-9_]{1,15}$` (`platformUserId` may also be a numeric ID); Instagram and Threads `^[A-Za-z0-9._]{1,30}$`; TikTok `^[A-Za-z0-9._]{1,24}$` (or a numeric ID). An X profile URL in an X field fails here, and the message gives the bare handle to pass instead. Other platforms have no syntax rule, because LinkedIn vanity names, Substack and Bluesky custom domains, YouTube channel IDs and phone numbers vary too much |
+| `syntax` | hard | Invalid account syntax, on the platforms whose syntax is fixed: X `^[A-Za-z0-9_]{1,15}$` (`platformUserId` may also be a numeric ID); Instagram and Threads `^[A-Za-z0-9._]{1,30}$`; TikTok `^[A-Za-z0-9._]{1,24}$` (or a numeric ID). An X profile URL in an X field fails here, and the message gives the bare handle to pass instead. Other platforms have no syntax rule, because LinkedIn vanity names, Substack and Bluesky custom domains, YouTube channel IDs and phone numbers vary too much. A value that is nothing but `@` (`@`, ` @@ `) fails this rule on every platform |
 | `too_short` | heuristic | Two characters or fewer, unless all digits (X's numeric ID `12` is valid): `in`, `x`, `i`, `hi`, `v` |
 | `placeholder` | heuristic | `none`, `null`, `nil`, `n/a`, `nope`, `unknown`, `notwitter`, `nolinkedin`, `noinstagram`, `twitter`, `linkedin`, `instagram`, `facebook`, case-insensitive |
 

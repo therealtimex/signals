@@ -112,10 +112,11 @@ func jsonQuote(value string) string {
 	return string(encoded)
 }
 
-// checkIdentityValue returns nil when the value passes. Empty values pass.
+// checkIdentityValue returns nil when the value passes. Blank values pass; a nonblank value that
+// is nothing but "@" fails syntax on every platform.
 func checkIdentityValue(platform, field, raw string, allowUnusual bool) *identityViolation {
 	value := leadingAts.ReplaceAllString(strings.TrimSpace(raw), "")
-	if value == "" {
+	if value == "" && strings.TrimSpace(raw) == "" {
 		return nil
 	}
 	label := platformLabel(platform)
@@ -127,6 +128,10 @@ func checkIdentityValue(platform, field, raw string, allowUnusual bool) *identit
 			message += "."
 		}
 		return &identityViolation{Platform: platform, Field: field, Value: raw, Rule: rule, Heuristic: heuristic, Message: message}
+	}
+	// Nothing but "@": not an account on any platform, so a hard rule everywhere.
+	if value == "" {
+		return violation("syntax", false, "it has no characters besides @")
 	}
 
 	var urlHost, urlPath, urlPlatform string

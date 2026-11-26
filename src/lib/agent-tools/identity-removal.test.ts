@@ -204,6 +204,8 @@ describe("identity value validation on agent-tools writes (#569)", () => {
     ["a LinkedIn URL in the X field", { platformUserId: "trung_rta", platformHandle: "linkedin.com/in/trung-le-rta" }, "foreign_url"],
     ["a LinkedIn URL as the X account", { platformUserId: "https://www.linkedin.com/in/trung-le-rta" }, "foreign_url"],
     ["a LinkedIn platformUrl on an X identity", { platformUserId: "trung_rta", platformUrl: "https://linkedin.com/in/trung-le-rta" }, "foreign_url"],
+    ["an account that is only @", { platformUserId: "@" }, "syntax"],
+    ["a handle that is only @@ and spaces", { platformUserId: "trung_rta", platformHandle: " @@ " }, "syntax"],
   ];
 
   it.each(junk)("upsert_contact_identity rejects %s", async (_label, values, rule) => {

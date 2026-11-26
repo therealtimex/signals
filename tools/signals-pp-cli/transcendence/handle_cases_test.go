@@ -32,6 +32,11 @@ const sharedHandleCases = `[
   {"platform": "x", "field": "platformHandle", "value": "twitter.com/trung_rta", "rule": "syntax"},
   {"platform": "x", "field": "platformUserId", "value": "a_handle_too_long", "rule": "syntax"},
   {"platform": "x", "field": "platformHandle", "value": "1234567890123456", "rule": "syntax"},
+  {"platform": "x", "field": "platformUserId", "value": "@", "rule": "syntax"},
+  {"platform": "x", "field": "platformHandle", "value": " @@ ", "rule": "syntax"},
+  {"platform": "linkedin", "field": "platformUserId", "value": "@", "rule": "syntax"},
+  {"platform": "linkedin", "field": "platformHandle", "value": "@@", "allowUnusualHandle": true, "rule": "syntax"},
+  {"platform": "gmail", "field": "platformUserId", "value": "  ", "rule": ""},
 
   {"platform": "x", "field": "platformUserId", "value": "x", "allowUnusualHandle": true, "rule": ""},
   {"platform": "x", "field": "platformUserId", "value": "hi", "allowUnusualHandle": true, "rule": ""},
