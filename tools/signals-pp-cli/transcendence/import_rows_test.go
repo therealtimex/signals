@@ -102,6 +102,7 @@ func TestMapContactRowRejectsInvalidMultiIdentityInput(t *testing.T) {
 		{"tag not a string", map[string]any{"tags": []any{float64(1)}}, "array of strings"},
 		{"tag too long", map[string]any{"tags": []any{strings.Repeat("t", maxRowTagLength+1)}}, "longer than 100"},
 		{"fractional key", map[string]any{"key": 1.5}, "whole number"},
+		{"numeric key above 2^53", map[string]any{"key": float64(9007199254740993)}, "quote it as a string"},
 		{"identity on an unsupported platform", map[string]any{"identities": []any{
 			map[string]any{"platform": "x", "handle": "a"},
 			map[string]any{"platform": "github", "platformUserId": "a"}}},
@@ -578,4 +579,27 @@ func mustJSON(t *testing.T, value any) string {
 		t.Fatal(err)
 	}
 	return string(data)
+}
+
+// PR #574 C16: a numeric key past 2^53 would come back rounded in the mapping, so it is rejected
+// while the file is read; the largest exact one and a quoted big key round-trip unchanged.
+func TestReadContactJSONRowKeysRoundTripExactly(t *testing.T) {
+	write := func(body string) string {
+		path := filepath.Join(t.TempDir(), "contacts.json")
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	if _, err := readContactRows(write(`[{"key": 9007199254740993, "name": "Big"}]`), maxImportRows); err == nil ||
+		!strings.Contains(err.Error(), "quote it as a string") {
+		t.Fatalf("unsafe numeric key error = %v", err)
+	}
+	rows, err := readContactRows(write(`[{"key": 9007199254740991, "name": "Max"}, {"key": "9007199254740993", "name": "Quoted"}]`), maxImportRows)
+	if err != nil {
+		t.Fatalf("readContactRows() error = %v", err)
+	}
+	if rows[0].RowKey != "9007199254740991" || rows[1].RowKey != "9007199254740993" {
+		t.Fatalf("keys = %q, %q", rows[0].RowKey, rows[1].RowKey)
+	}
 }

@@ -230,7 +230,7 @@ identity columns, a row can carry:
 
 | Field | JSON | CSV cell |
 |---|---|---|
-| `key` | string or whole number; keys the result's `mapping` | text |
+| `key` | string, or a whole number up to 2^53−1 (quote a larger one); keys the result's `mapping` | text |
 | `bio`, `headline`, `website`, `location` | strings | text |
 | `tags` | string array (≤50, each ≤100 characters) | a JSON array, or a `;`-separated list |
 | `identities` | array (≤20) of `{platform, platformUserId \| handle, url?, provenance?}`; `provenance` is the identity provenance object above | the same JSON array |
