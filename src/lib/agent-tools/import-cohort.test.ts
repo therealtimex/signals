@@ -99,7 +99,7 @@ describe("cohort import contract (#567)", () => {
     expect(rerunId).toBe(contactId);
 
     const contact = await ok("get_contact", { contactId });
-    expect(contact).toMatchObject({ bio: "Builds agents", headline: "Founder", location: "SF" });
+    expect(contact).toMatchObject({ bio: "Builds agents", headline: "Founder", website: "https://builder.dev", location: "SF" });
     expect(JSON.parse(contact.tags)).toEqual(["hackwithbay-4", "builder"]);
     const identities = contact.identities as Array<{ platform: string; platformUserId: string; provenance: { kind: string; sourceUrl: string | null } | null }>;
     expect(identities.map((i) => `${i.platform}/${i.platformUserId}`).sort()).toEqual([
