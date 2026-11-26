@@ -72,8 +72,12 @@ they control, such as their Luma page) or `agent_verified`, the agent skips the 
 that identity, mines it directly, and records each differing display name as an alias with
 `enrich_contact { aliases }` instead of declaring ambiguity. It never writes `self_declared` itself.
 `inferred` and unknown provenance (`null`, every identity stored before migration 0040) keep the
-ambiguity rule above. Other candidates always keep it. The total budget is two Google searches, three post-SERP page visits, two registrable domains, and
-about 90 seconds.
+ambiguity rule above. Other candidates always keep it.
+
+The total budget is two Google searches, three post-SERP page visits, two registrable domains, and
+about 120 seconds, the same as the generated brief and the seeded system prompt. Expanding About,
+Contact info or Experience on the same verified profile, including its `/details/experience/` view,
+is not another page visit.
 
 LinkedIn auth walls/login/checkpoints, Google CAPTCHA/reCAPTCHA pages, Google Accounts login, and
 X login flows are source failures rather than evidence. The agent reports them in `blockedUrls`,
