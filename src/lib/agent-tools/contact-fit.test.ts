@@ -192,20 +192,23 @@ describe("score_contact_fit", () => {
     });
   });
 
-  it("lets a row override the batch-level fitScoreVersion", async () => {
+  it("lets a row override the batch-level fitScoreVersion, and an explicit null clear it", async () => {
     const ada = contact("Ada");
     const bob = contact("Bob");
+    const cy = contact("Cy");
 
     await score({
       fitScoreVersion: "batch-v3",
       items: [
         { contactId: ada.id, fitScore: 70, fitTier: "B" },
         { contactId: bob.id, fitScore: 20, fitTier: "C", fitScoreVersion: "row-v4" },
+        { contactId: cy.id, fitScore: 40, fitTier: "C", fitScoreVersion: null },
       ],
     });
 
     expect((await getContact(ada.id)).fitScoreVersion).toBe("batch-v3");
     expect((await getContact(bob.id)).fitScoreVersion).toBe("row-v4");
+    expect((await getContact(cy.id)).fitScoreVersion).toBeNull();
   });
 
   it("reports an unknown contactId as a not_found row and writes nothing for it", async () => {

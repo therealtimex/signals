@@ -143,7 +143,7 @@ Simulation run tool responses include additive fields (`populationSpec`, `error`
 | `fitProduct` | string ≤120 | Product slug, e.g. from the workspace `PRODUCTS.md`; free-form, not validated |
 | `fitConfidence` | number 0–1 | Same scale as persona `confidence` |
 | `fitRationale` | string ≤2,000 | |
-| `fitScoreVersion` | string ≤64 | Scoring-rubric version. A batch-level `fitScoreVersion` applies to rows that don't set one |
+| `fitScoreVersion` | string ≤64 | Scoring-rubric version. A batch-level `fitScoreVersion` applies to rows that omit it; a row's explicit `null` clears it |
 | `fitScoredAt` | unix seconds | Set by the server; not accepted as input |
 
 - Send `{ "fitScoreVersion"?: string, "items": [ { "contactId", "fitScore", "fitTier", ... } ] }` with
@@ -157,7 +157,8 @@ Simulation run tool responses include additive fields (`populationSpec`, `error`
   - `error`: `invalid_input` (with `issues`), `not_found` or `duplicate_in_batch` (the first row
     for a contact wins).
 - Rescoring overwrites all seven fields. An optional field left out becomes `null`, so a stale
-  rationale never outlives its score.
+  rationale never outlives its score. The exception is `fitScoreVersion`: left out, it takes the
+  batch-level version when the batch sends one.
 - `query_contacts` reads fit back. `fitTier` is an exact match, `minFitScore` is inclusive and never
   matches unscored contacts, and `sort: "fitScore"` puts the best fit first (`order` defaults to
   `desc`). Unscored contacts sort last in either direction, and the self contact is not pinned to
@@ -194,8 +195,9 @@ fields are null for identities written before #571 or without provenance, which 
   `self_declared` outranks `agent_verified` because it is first-party ownership evidence, so a
   later verification must not erase the record that the subject linked the account themselves.
 - **Writes.** `upsert_contact_identity.provenance` and `create_contact.provenance` (applied to the
-  identity built from `platform`/`platformUserId`). The response reports `provenanceWrite`
-  (`create_contact`: `identityProvenanceWrite`) as `applied`, `kept_existing` or `not_provided`.
+  identity built from `platform`/`platformUserId`). `upsert_contact_identity` reports
+  `provenanceWrite` as `applied`, `kept_existing` or `not_provided`. `create_contact` returns
+  `identityProvenanceWrite` (`applied` or `kept_existing`) only when `provenance` is supplied.
   `signals-pp-cli import contacts` forwards CSV columns `provenance_kind`,
   `provenance_source_url`, `provenance_observed_at`, or a JSON `provenance` object.
 - **Reads.** Every identity in `get_contact.identities[]` and `query_contacts.contacts[].identities[]`
@@ -228,7 +230,7 @@ identity columns, a row can carry:
 
 | Field | JSON | CSV cell |
 |---|---|---|
-| `key` | string or whole number; keys the result's `mapping` | text |
+| `key` | string, or a whole number up to 2^53−1 (quote a larger one); keys the result's `mapping` | text |
 | `bio`, `headline`, `website`, `location` | strings | text |
 | `tags` | string array (≤50, each ≤100 characters) | a JSON array, or a `;`-separated list |
 | `identities` | array (≤20) of `{platform, platformUserId \| handle, url?, provenance?}`; `provenance` is the identity provenance object above | the same JSON array |
@@ -293,13 +295,15 @@ value, rule, heuristic}`. The rules are in `src/lib/identity-handle-validation.t
 | Rule | Kind | Rejects |
 |---|---|---|
 | `foreign_url` | hard | A URL on another platform's host, in any field: `linkedin.com/in/…` in an X field, `x.com/…` on a LinkedIn identity |
-| `syntax` | hard | Invalid account syntax, on the platforms whose syntax is fixed: X `^[A-Za-z0-9_]{1,15}$` (`platformUserId` may also be a numeric ID); Instagram and Threads `^[A-Za-z0-9._]{1,30}$`; TikTok `^[A-Za-z0-9._]{1,24}$` (or a numeric ID). An X profile URL in an X field fails here, and the message gives the bare handle to pass instead. Other platforms have no syntax rule, because LinkedIn vanity names, Substack and Bluesky custom domains, YouTube channel IDs and phone numbers vary too much |
+| `syntax` | hard | Invalid account syntax, on the platforms whose syntax is fixed: X `^[A-Za-z0-9_]{1,15}$` (`platformUserId` may also be a numeric ID); Instagram and Threads `^[A-Za-z0-9._]{1,30}$`; TikTok `^[A-Za-z0-9._]{1,24}$` (or a numeric ID). An X profile URL in an X field fails here, and the message gives the bare handle to pass instead. Other platforms have no syntax rule, because LinkedIn vanity names, Substack and Bluesky custom domains, YouTube channel IDs and phone numbers vary too much. A value that is nothing but `@` (`@`, ` @@ `) fails this rule on every platform |
 | `too_short` | heuristic | Two characters or fewer, unless all digits (X's numeric ID `12` is valid): `in`, `x`, `i`, `hi`, `v` |
 | `placeholder` | heuristic | `none`, `null`, `nil`, `n/a`, `nope`, `unknown`, `notwitter`, `nolinkedin`, `noinstagram`, `twitter`, `linkedin`, `instagram`, `facebook`, case-insensitive |
 
 - **Heuristic rules can be wrong.** `x`, `hi` and `v` are real, valid X handles. Pass
   `allowUnusualHandle: true` when the value really is the account; the error message says so.
   Nothing overrides a hard rule.
+- **`platformUrl` gets `foreign_url` only.** The other rules are about account names, so they
+  don't apply to a URL, and an avatar-like image URL isn't checked at all.
 - **Only new values are checked.** Updating an identity in place (addressed by `id`, or the same
   `platform` + `platformUserId` on the contact that holds it) passes values equal to the stored
   ones, so identities stored before these checks stay readable, updatable and removable. Nothing
@@ -321,7 +325,10 @@ is what frees the account for another contact. It also takes the identity out of
 - **Primary.** If the removed identity was primary, the contact's earliest-created remaining
   **active** identity becomes primary (`promotedIdentityId`), so research's primary-identity
   resolution and the profile resolver keep agreeing. An inactive identity is never promoted. With
-  no active identity left, none is primary.
+  no active identity left, none is primary. If another **active** identity is still primary (legacy
+  contacts can hold two, because `upsert_contact_identity {isPrimary: true}` doesn't clear the
+  others), nothing is promoted: `promotedIdentityId` is null and `message` names the remaining
+  primary.
 - **Result.** `{contactId, removed, releasedClaim: {platform, platformUserId}, promotedIdentityId,
   message}`. `removed` is the deleted identity, provenance included: the record of what was there.
 - **Deactivating is not removing.** `isActive: false` still claims the account; it marks an
@@ -332,7 +339,7 @@ is what frees the account for another contact. It also takes the identity out of
 
 **Name aliases** (#571). `get_contact.aliases` is a string array of other names the contact goes by,
 such as "Sas P" on Luma for "Sasmita S" on LinkedIn. Add aliases with `enrich_contact.aliases`
-(1–20 per call, each ≤120 characters). They are appended, never replaced, and deduped
+(1–20 per call, each ≤120 characters after Unicode NFKC and whitespace normalization). They are appended, never replaced, and deduped
 case-insensitively against stored aliases and the contact's own name; the first spelling wins.
 A contact holds at most 50 aliases, and a write that would exceed the cap fails with
 `VALIDATION_ERROR` before anything is written. `fieldsUpdated` includes `aliases` only when one

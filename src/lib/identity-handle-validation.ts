@@ -14,6 +14,7 @@
  *   - `syntax`: the value breaks the platform's account syntax. Only platforms whose syntax is
  *     well defined and stable have one (see STRICT_HANDLE_SYNTAX). Elsewhere (LinkedIn vanity
  *     names, Substack and Bluesky custom domains, phone numbers) only the other rules apply.
+ *     A value that is nothing but `@` fails `syntax` on every platform.
  * - **Heuristic rules** catch what is almost always junk but can be a real account. `x`, `hi`
  *   and `v` are valid X handles. They are skipped with `allowUnusualHandle: true`.
  *   - `too_short`: two characters or fewer, unless all digits (numeric account IDs such as X's
@@ -160,8 +161,8 @@ export function normalizeIdentityValueForCheck(raw: string): string {
 }
 
 /**
- * Check one value. Returns null when it passes. Empty values pass: requiring a value is the
- * schema's job.
+ * Check one value. Returns null when it passes. Blank values pass: requiring a value is the
+ * schema's job. A nonblank value that is nothing but `@` fails `syntax` on every platform.
  */
 export function checkIdentityValue(
   platform: string,
@@ -170,7 +171,7 @@ export function checkIdentityValue(
   options: { allowUnusualHandle?: boolean } = {},
 ): IdentityValueViolation | null {
   const value = normalizeIdentityValueForCheck(raw);
-  if (!value) return null;
+  if (!value && !raw.trim()) return null;
   const label = platformLabel(platform);
   const violation = (rule: IdentityValueRule, heuristic: boolean, why: string): IdentityValueViolation => ({
     platform,
@@ -184,6 +185,8 @@ export function checkIdentityValue(
         ? ". If this really is the account, retry with allowUnusualHandle: true."
         : "."),
   });
+  // Nothing but `@`: not an account on any platform, so a hard rule everywhere.
+  if (!value) return violation("syntax", false, "it has no characters besides @");
 
   const url = parseUrlShape(value);
   const urlPlatform = url ? hostPlatform(url.host) : null;

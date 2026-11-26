@@ -102,6 +102,12 @@ export type RemovedContactIdentity = {
   removed: ContactIdentity;
   /** The identity made primary because the removed one was; null otherwise. */
   promoted: ContactIdentity | null;
+  /**
+   * An active identity that was already primary alongside the removed one (legacy contacts can
+   * hold two, since `upsert_contact_identity {isPrimary: true}` never cleared the others). When
+   * set, nothing is promoted.
+   */
+  remainingPrimary: ContactIdentity | null;
 };
 
 /**
@@ -113,6 +119,8 @@ export type RemovedContactIdentity = {
  * When the removed identity was primary, the contact's earliest-created remaining **active**
  * identity becomes primary, so readers that trust `isPrimary` (research's primary-identity
  * resolution, the profile resolver) keep agreeing. With no active identity left, none is primary.
+ * If another active identity is still primary (a legacy contact with two), nothing is promoted:
+ * promoting would leave the contact with two primaries again.
  *
  * Returns null when the identity doesn't exist or belongs to another contact.
  */
@@ -131,7 +139,24 @@ export function removeIdentityForContact(
     db.delete(contactIdentities).where(eq(contactIdentities.id, identityId)).run();
 
     let promoted: ContactIdentity | null = null;
+    let remainingPrimary: ContactIdentity | null = null;
     if (existing.isPrimary) {
+      remainingPrimary =
+        db
+          .select()
+          .from(contactIdentities)
+          .where(
+            and(
+              eq(contactIdentities.contactId, contactId),
+              eq(contactIdentities.isActive, 1),
+              eq(contactIdentities.isPrimary, 1),
+            ),
+          )
+          .orderBy(asc(contactIdentities.createdAt), asc(contactIdentities.id))
+          .limit(1)
+          .get() ?? null;
+    }
+    if (existing.isPrimary && !remainingPrimary) {
       const next = db
         .select()
         .from(contactIdentities)
@@ -147,7 +172,7 @@ export function removeIdentityForContact(
         promoted = getIdentityById(next.id) ?? null;
       }
     }
-    return { removed: existing, promoted };
+    return { removed: existing, promoted, remainingPrimary };
   });
 }
 

@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf16"
 
 	"github.com/spf13/cobra"
 	"signals-pp-cli/internal/client"
@@ -596,19 +598,46 @@ func mapRowProvenance(item map[string]any, get func(keys ...string) string) (*id
 	if observedAt == nil {
 		observedAt = item["provenanceObservedAt"]
 	}
-	if nested, ok := item["provenance"].(map[string]any); ok {
-		nestedGet := func(keys ...string) string {
-			for _, key := range keys {
-				if s, ok := nested[key].(string); ok {
-					return strings.TrimSpace(s)
-				}
-			}
-			return ""
+	// A malformed provenance value is a usage error, never silently dropped: the row would
+	// import without the provenance it supplied.
+	var nested map[string]any
+	switch v := item["provenance"].(type) {
+	case nil:
+	case map[string]any:
+		nested = v
+	case string:
+		if strings.TrimSpace(v) != "" {
+			return nil, usageErr(fmt.Errorf("provenance must be a JSON object with kind, sourceUrl and observedAt (in CSV, use the provenance_* columns)"))
 		}
-		if v := nestedGet("kind"); v != "" {
+	default:
+		return nil, usageErr(fmt.Errorf("provenance must be a JSON object with kind, sourceUrl and observedAt, not %s", jsonQuote(fmt.Sprint(v))))
+	}
+	if nested != nil {
+		nestedGet := func(keys ...string) (string, error) {
+			for _, key := range keys {
+				raw, present := nested[key]
+				if !present || raw == nil {
+					continue
+				}
+				s, ok := raw.(string)
+				if !ok {
+					return "", usageErr(fmt.Errorf("provenance.%s must be a string", key))
+				}
+				return strings.TrimSpace(s), nil
+			}
+			return "", nil
+		}
+		v, err := nestedGet("kind")
+		if err != nil {
+			return nil, err
+		}
+		if v != "" {
 			kind = v
 		}
-		if v := nestedGet("sourceUrl", "source_url"); v != "" {
+		if v, err = nestedGet("sourceUrl", "source_url"); err != nil {
+			return nil, err
+		}
+		if v != "" {
 			sourceURL = v
 		}
 		if v, ok := nested["observedAt"]; ok {
@@ -633,7 +662,31 @@ func mapRowProvenance(item map[string]any, get func(keys ...string) string) (*id
 			"invalid provenance_kind %q (use self_declared, agent_verified or inferred)", kind,
 		))
 	}
+	if err := checkProvenanceSourceURL(sourceURL); err != nil {
+		return nil, err
+	}
 	return &identityProvenance{Kind: kind, SourceURL: sourceURL, ObservedAt: observed}, nil
+}
+
+// Mirrors the server's identityProvenanceInputSchema (src/lib/agent-tools/schemas.ts) so a row it
+// would reject fails the whole import up front instead of failing that row's write midway.
+const (
+	provenanceSourceURLMaxLength = 2048
+	provenanceObservedAtMax      = 9_999_999_999
+)
+
+func checkProvenanceSourceURL(sourceURL string) error {
+	if sourceURL == "" {
+		return nil
+	}
+	if len(utf16.Encode([]rune(sourceURL))) > provenanceSourceURLMaxLength {
+		return usageErr(fmt.Errorf("provenance source URL is longer than %d characters", provenanceSourceURLMaxLength))
+	}
+	parsed, err := url.Parse(sourceURL)
+	if err != nil || parsed.Host == "" || (!strings.EqualFold(parsed.Scheme, "http") && !strings.EqualFold(parsed.Scheme, "https")) {
+		return usageErr(fmt.Errorf("invalid provenance source URL %q (an http(s) URL)", sourceURL))
+	}
+	return nil
 }
 
 func parseObservedAt(value any) (int64, error) {
@@ -646,13 +699,13 @@ func parseObservedAt(value any) (int64, error) {
 			return 0, nil
 		}
 		parsed, err := strconv.ParseInt(trimmed, 10, 64)
-		if err != nil || parsed <= 0 {
-			return 0, usageErr(fmt.Errorf("invalid provenance_observed_at %q (unix seconds)", v))
+		if err != nil || parsed <= 0 || parsed > provenanceObservedAtMax {
+			return 0, usageErr(fmt.Errorf("invalid provenance_observed_at %q (unix seconds, not milliseconds)", v))
 		}
 		return parsed, nil
 	case float64:
-		if v <= 0 || v != math.Trunc(v) {
-			return 0, usageErr(fmt.Errorf("invalid provenance observedAt %v (unix seconds)", v))
+		if v <= 0 || v != math.Trunc(v) || v > provenanceObservedAtMax {
+			return 0, usageErr(fmt.Errorf("invalid provenance observedAt %v (unix seconds, not milliseconds)", v))
 		}
 		return int64(v), nil
 	default:
@@ -1129,12 +1182,19 @@ func platformClaimMatch(result map[string]any) (contactMatch, error) {
 	}
 }
 
+// isLikelyAvatarURL mirrors the server's AVATAR_LIKE_URL (src/lib/agent-tools/handlers.ts): an
+// image extension may be followed by a query string, as in "…/photo.jpg?w=200".
 func isLikelyAvatarURL(url string) bool {
 	lower := strings.ToLower(url)
-	return strings.Contains(lower, "pbs.twimg.com") ||
+	if strings.Contains(lower, "pbs.twimg.com") ||
 		strings.Contains(lower, "media.licdn.com") ||
-		strings.Contains(lower, "avatars.githubusercontent.com") ||
-		strings.HasSuffix(lower, ".jpg") ||
+		strings.Contains(lower, "avatars.githubusercontent.com") {
+		return true
+	}
+	if query := strings.Index(lower, "?"); query >= 0 {
+		lower = lower[:query]
+	}
+	return strings.HasSuffix(lower, ".jpg") ||
 		strings.HasSuffix(lower, ".jpeg") ||
 		strings.HasSuffix(lower, ".png") ||
 		strings.HasSuffix(lower, ".webp") ||

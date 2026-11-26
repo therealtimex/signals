@@ -193,14 +193,6 @@ func classifyContactRow(row contactRow, invoke agentToolInvoker) (rowMatch, erro
 			return rowMatch{}, err
 		}
 		match.EmailMatches = candidateIDs
-		if len(candidateIDs) > 1 {
-			match.Outcome = rowOutcomeConflict
-			match.Reason = fmt.Sprintf(
-				"email %s matches multiple contacts; candidate contact IDs: %s; merge or disambiguate them before importing this row",
-				email, strings.Join(candidateIDs, ", "),
-			)
-			return match, nil
-		}
 	}
 
 	for _, identity := range row.identities() {
@@ -235,6 +227,21 @@ func classifyContactRow(row contactRow, invoke agentToolInvoker) (rowMatch, erro
 			claim.ClaimantKind = "contact"
 		}
 		match.Claims = append(match.Claims, claim)
+	}
+
+	if len(match.EmailMatches) > 1 {
+		// Still a conflict, but only after every identity was looked up, so the report names
+		// every claimant too.
+		match.Outcome = rowOutcomeConflict
+		match.Reason = fmt.Sprintf(
+			"email %s matches multiple contacts; candidate contact IDs: %s",
+			email, strings.Join(match.EmailMatches, ", "),
+		)
+		if len(match.Claims) > 0 {
+			match.Reason += "; identities: " + strings.Join(describeClaims(match.Claims), "; ")
+		}
+		match.Reason += "; merge or disambiguate them before importing this row"
+		return match, nil
 	}
 
 	owners := map[string]bool{} // contact ID → archived
@@ -295,8 +302,17 @@ func firstClaim(claims []identityClaim, keep func(identityClaim) bool) identityC
 // describeConflict names every match, e.g.
 // "matches disagree: linkedin/jane → contact A; x/jane_x → contact B; email jane@x.com → contact C".
 func describeConflict(match rowMatch, email string) string {
-	parts := make([]string, 0, len(match.Claims)+1)
-	for _, claim := range match.Claims {
+	parts := describeClaims(match.Claims)
+	if len(match.EmailMatches) == 1 {
+		parts = append(parts, fmt.Sprintf("email %s → contact %s", email, match.EmailMatches[0]))
+	}
+	return "matches disagree: " + strings.Join(parts, "; ")
+}
+
+// describeClaims names each identity claim's owner, e.g. "x/jane_x → contact B".
+func describeClaims(claims []identityClaim) []string {
+	parts := make([]string, 0, len(claims)+1)
+	for _, claim := range claims {
 		owner := "contact " + claim.ContactID
 		if claim.OrgID != "" {
 			owner = "org " + claim.OrgID
@@ -305,10 +321,7 @@ func describeConflict(match rowMatch, email string) string {
 		}
 		parts = append(parts, fmt.Sprintf("%s/%s → %s", claim.Platform, claim.PlatformUserID, owner))
 	}
-	if len(match.EmailMatches) == 1 {
-		parts = append(parts, fmt.Sprintf("email %s → contact %s", email, match.EmailMatches[0]))
-	}
-	return "matches disagree: " + strings.Join(parts, "; ")
+	return parts
 }
 
 // dryRunPlan stands in for the writes a dry run or reconcile does not make. A real run

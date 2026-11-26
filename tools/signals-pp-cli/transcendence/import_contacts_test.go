@@ -1005,6 +1005,9 @@ func TestImportContactChunkSkipsAmbiguousEmailWithoutMutations(t *testing.T) {
 	var queryInput map[string]any
 	invoke := func(tool string, input map[string]any) (map[string]any, error) {
 		calls = append(calls, tool)
+		if tool == "resolve_platform_claim" {
+			return map[string]any{"claimed": false}, nil
+		}
 		if tool != "query_contacts" {
 			t.Fatalf("unexpected mutation tool call %q", tool)
 		}
@@ -1028,8 +1031,9 @@ func TestImportContactChunkSkipsAmbiguousEmailWithoutMutations(t *testing.T) {
 		t.Fatalf("importContactChunkWithInvoker() error = %v", err)
 	}
 
-	if !reflect.DeepEqual(calls, []string{"query_contacts"}) {
-		t.Fatalf("tool calls = %#v, want query_contacts only", calls)
+	// Read-only lookups only: the email and then the row's identity (PR #574 C21).
+	if !reflect.DeepEqual(calls, []string{"query_contacts", "resolve_platform_claim"}) {
+		t.Fatalf("tool calls = %#v, want the email and identity lookups only", calls)
 	}
 	if got := queryInput["email"]; got != "shared@example.com" {
 		t.Fatalf("query email = %#v, want normalized email", got)
@@ -1097,10 +1101,51 @@ func TestMapContactRowRejectsInvalidProvenance(t *testing.T) {
 		"non-numeric observed":  {"name": "A", "provenance_kind": "inferred", "provenance_observed_at": "yesterday"},
 		"fractional observed":   {"name": "A", "provenance": map[string]any{"kind": "inferred", "observedAt": 1.5}},
 		"negative observed":     {"name": "A", "provenance_kind": "inferred", "provenance_observed_at": "-5"},
+		// PR #574 C12: the server's bounds, checked before any write.
+		"milliseconds observed": {"name": "A", "provenance_kind": "inferred", "provenance_observed_at": "1732400000000"},
+		"milliseconds nested":   {"name": "A", "provenance": map[string]any{"kind": "inferred", "observedAt": float64(1732400000000)}},
+		"ftp source url":        {"name": "A", "provenance_kind": "inferred", "provenance_source_url": "ftp://lu.ma/user/a"},
+		"schemeless source url": {"name": "A", "provenance_kind": "inferred", "provenance_source_url": "lu.ma/user/a"},
+		"overlong source url":   {"name": "A", "provenance_kind": "inferred", "provenance_source_url": "https://lu.ma/" + strings.Repeat("a", 2040)},
+		// PR #574 C13: a malformed provenance value is rejected, not treated as absent.
+		"string provenance":     {"name": "A", "provenance": "self_declared"},
+		"array provenance":      {"name": "A", "provenance": []any{"self_declared"}},
+		"non-string kind":       {"name": "A", "provenance": map[string]any{"kind": float64(1)}},
+		"non-string source url": {"name": "A", "provenance": map[string]any{"kind": "inferred", "sourceUrl": true}},
+		"non-string flat kind":  {"name": "A", "provenance_kind": "inferred", "provenance": map[string]any{"kind": []any{}}},
+		// PR #574 C17: the same on a secondary identity.
+		"secondary string provenance": {"name": "A", "identities": []any{
+			map[string]any{"platform": "x", "handle": "trung_rta"},
+			map[string]any{"platform": "linkedin", "handle": "trung-le-rta", "provenance": "self_declared"},
+		}},
+		"secondary non-string kind": {"name": "A", "identities": []any{
+			map[string]any{"platform": "x", "handle": "trung_rta"},
+			map[string]any{"platform": "linkedin", "handle": "trung-le-rta", "provenance": map[string]any{"kind": float64(2)}},
+		}},
+		"secondary bad source url": {"name": "A", "identities": []any{
+			map[string]any{"platform": "x", "handle": "trung_rta"},
+			map[string]any{"platform": "linkedin", "handle": "trung-le-rta", "provenance": map[string]any{"kind": "inferred", "sourceUrl": "javascript:alert(1)"}},
+		}},
 	}
 	for label, item := range cases {
 		if _, err := mapContactRow(item); err == nil {
 			t.Errorf("%s: expected a usage error", label)
+		}
+	}
+}
+
+func TestMapContactRowAcceptsProvenanceAtTheServerBounds(t *testing.T) {
+	cases := map[string]map[string]any{
+		"max observed":       {"name": "A", "provenance_kind": "inferred", "provenance_observed_at": "9999999999"},
+		"max-length url":     {"name": "A", "provenance_kind": "inferred", "provenance_source_url": "https://lu.ma/" + strings.Repeat("a", 2048-len("https://lu.ma/"))},
+		"uppercase scheme":   {"name": "A", "provenance_kind": "inferred", "provenance_source_url": "HTTPS://lu.ma/user/a"},
+		"blank csv cell":     {"name": "A", "provenance_kind": "inferred", "provenance": ""},
+		"null nested fields": {"name": "A", "provenance": map[string]any{"kind": "inferred", "sourceUrl": nil}},
+	}
+	for label, item := range cases {
+		row, err := mapContactRow(item)
+		if err != nil || row.Provenance == nil || row.Provenance.Kind != "inferred" {
+			t.Errorf("%s: provenance = %#v, err %v; want kind inferred", label, row.Provenance, err)
 		}
 	}
 }

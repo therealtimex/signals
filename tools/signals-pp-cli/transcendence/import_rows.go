@@ -70,6 +70,11 @@ const (
 	maxRowTagLength  = 100
 )
 
+// maxExactRowKey is the largest whole number a JSON number keeps exactly once decoded to float64
+// (2^53 - 1). A larger numeric key may already be rounded, so the mapping could name a key the
+// caller never sent.
+const maxExactRowKey = 1<<53 - 1
+
 // readRowKey reads the row's optional `key`, a string or a whole number.
 func readRowKey(item map[string]any) (string, error) {
 	switch v := item["key"].(type) {
@@ -80,6 +85,9 @@ func readRowKey(item map[string]any) (string, error) {
 	case float64:
 		if v != math.Trunc(v) || math.IsInf(v, 0) {
 			return "", usageErr(fmt.Errorf("row key %v must be a string or a whole number", v))
+		}
+		if math.Abs(v) > maxExactRowKey {
+			return "", usageErr(fmt.Errorf("row key %s is too large to keep exactly as a number; quote it as a string", strconv.FormatFloat(v, 'f', -1, 64)))
 		}
 		return strconv.FormatFloat(v, 'f', -1, 64), nil
 	default:

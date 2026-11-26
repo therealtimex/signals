@@ -422,4 +422,24 @@ describe("contact aliases", () => {
     expect(after.aliases).toHaveLength(40);
     expect(after.title).toBeNull();
   });
+
+  it("applies the 120-character alias cap after normalization", async () => {
+    const contact = createContact({ name: "Sas P" });
+    // 7 characters pass the schema, but NFKC expands U+FDFA to 18 characters each: 126 in all.
+    const expanding = "\uFDFA".repeat(7);
+    let thrown: unknown;
+    try {
+      await invokeAgentTool("enrich_contact", { contactId: contact.id, title: "Not written", aliases: ["Sasmita S", expanding] });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toMatchObject({ code: "VALIDATION_ERROR" });
+    const after = (await invokeAgentTool("get_contact", { contactId: contact.id })) as Contact & { title: string | null };
+    expect(after.aliases).toEqual([]);
+    expect(after.title).toBeNull();
+
+    await invokeAgentTool("enrich_contact", { contactId: contact.id, aliases: ["\uFDFA".repeat(6)] });
+    const ok = (await invokeAgentTool("get_contact", { contactId: contact.id })) as Contact;
+    expect(ok.aliases[0]).toHaveLength(108);
+  });
 });

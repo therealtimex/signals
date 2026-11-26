@@ -153,7 +153,9 @@ export async function handleScoreContactFit(input: z.infer<typeof scoreContactFi
           fitProduct: item.fitProduct ?? null,
           fitConfidence: item.fitConfidence ?? null,
           fitRationale: item.fitRationale ?? null,
-          fitScoreVersion: item.fitScoreVersion ?? input.fitScoreVersion ?? null,
+          // A row's explicit null clears the version; only an omitted one inherits the batch's.
+          fitScoreVersion:
+            item.fitScoreVersion !== undefined ? item.fitScoreVersion : input.fitScoreVersion ?? null,
           fitScoredAt,
           updatedAt: fitScoredAt,
         })

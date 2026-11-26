@@ -81,12 +81,23 @@ func (f *fakeSignals) invoke(tool string, input map[string]any) (map[string]any,
 			key, _ := input["platformUserId"].(string)
 			f.contactClaim(platform, key, id, false)
 		}
-		if channels, ok := input["channels"].([]map[string]any); ok {
-			for _, channel := range channels {
-				if channel["channelType"] == "email" {
-					email, _ := channel["value"].(string)
-					f.emails[email] = append(f.emails[email], id)
+		// In-process callers pass []map[string]any; over HTTP (fakeSignalsServer) the same
+		// channels decode as []any. Record the email either way.
+		var channels []map[string]any
+		switch raw := input["channels"].(type) {
+		case []map[string]any:
+			channels = raw
+		case []any:
+			for _, item := range raw {
+				if channel, ok := item.(map[string]any); ok {
+					channels = append(channels, channel)
 				}
+			}
+		}
+		for _, channel := range channels {
+			if channel["channelType"] == "email" {
+				email, _ := channel["value"].(string)
+				f.emails[email] = append(f.emails[email], id)
 			}
 		}
 		return map[string]any{"id": id}, nil
@@ -658,5 +669,59 @@ func TestReconcileCommandReportsPerRowClassification(t *testing.T) {
 	if summary.Rows[0].ContactID != "UlrgYWF3" || summary.Rows[1].Outcome != rowOutcomeConflict ||
 		!reflect.DeepEqual(summary.Rows[1].EmailMatches, []string{"contact-a"}) {
 		t.Fatalf("rows = %+v", summary.Rows)
+	}
+}
+
+// PR #574 C15: an end-to-end import over HTTP must record create_contact's email side effect,
+// so a rerun dedupes the email-only row instead of creating a second contact.
+func TestImportContactsCommandRerunDedupesAnEmailOnlyRowOverHTTP(t *testing.T) {
+	f := newFakeSignals(t)
+	pointCLIAt(t, fakeSignalsServer(t, f))
+	file := writeRowsFile(t, []map[string]any{
+		{"name": "Email Only", "email": "email.only@example.com"},
+	})
+
+	for run := 1; run <= 2; run++ {
+		cmd := newImportContactsCmd(&rootFlags{})
+		cmd.SetArgs([]string{"--file", file, "--dedupe"})
+		out, err := runCommandCapturingStdout(t, cmd.Execute)
+		if err != nil {
+			t.Fatalf("run %d: import error = %v (output %s)", run, err, out)
+		}
+	}
+	if len(f.creates) != 1 {
+		t.Fatalf("create_contact calls = %d, want 1 (the rerun matches by email)", len(f.creates))
+	}
+	if got := f.emails["email.only@example.com"]; len(got) != 1 {
+		t.Fatalf("contacts holding the email = %v, want one", got)
+	}
+}
+
+// PR #574 C21: an email that matches several contacts is still a conflict, but every identity
+// is looked up first, so the report lists the identity claimants as well.
+func TestClassifyAmbiguousEmailRowStillReportsEveryIdentityClaimant(t *testing.T) {
+	f := newFakeSignals(t)
+	f.emails["shared@example.com"] = []string{"contact-a", "contact-z"}
+	f.contactClaim("x", "shared_x", "contact-b", false)
+	f.orgClaim("linkedin", "shared-li", "org-1")
+	row := contactRow{
+		Name: "Shared", Email: "shared@example.com", Platform: "x", PlatformUserID: "shared_x",
+		SecondaryIdentities: []rowIdentity{{Platform: "linkedin", PlatformUserID: "shared-li"}},
+	}
+
+	match, err := classifyContactRow(row, f.invoke)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if match.Outcome != rowOutcomeConflict || len(f.writes) != 0 {
+		t.Fatalf("outcome = %s, writes = %v", match.Outcome, f.writes)
+	}
+	if !reflect.DeepEqual(match.EmailMatches, []string{"contact-a", "contact-z"}) || len(match.Claims) != 2 {
+		t.Fatalf("email matches = %v, claims = %+v", match.EmailMatches, match.Claims)
+	}
+	for _, want := range []string{"contact-a, contact-z", "x/shared_x → contact contact-b", "linkedin/shared-li → org org-1"} {
+		if !strings.Contains(match.Reason, want) {
+			t.Errorf("reason %q is missing %q", match.Reason, want)
+		}
 	}
 }

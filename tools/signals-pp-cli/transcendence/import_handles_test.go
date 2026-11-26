@@ -215,3 +215,23 @@ func TestDropInvalidRowIdentitiesKeepsSnowballEvidenceRows(t *testing.T) {
 		t.Fatalf("row = %+v", row)
 	}
 }
+
+// PR #574 C14: the server skips the value checks for an avatar-like platformUrl, including an
+// image URL with a query string, so the CLI must not drop that identity.
+func TestCheckRowIdentitySkipsAnAvatarURLWithAQueryString(t *testing.T) {
+	for _, avatar := range []string{
+		"https://www.instagram.com/static/avatar.png?w=200",
+		"https://www.instagram.com/static/avatar.JPG?w=200&h=200",
+		"https://www.instagram.com/static/avatar.webp",
+	} {
+		identity := rowIdentity{Platform: "x", PlatformUserID: "trung_rta", ProfileURL: avatar}
+		if v := checkRowIdentity(identity, false); v != nil {
+			t.Errorf("%s: violation = %+v, want none (avatar URLs aren't checked)", avatar, v)
+		}
+	}
+	// A page URL on another platform's host is still foreign.
+	page := rowIdentity{Platform: "x", PlatformUserID: "trung_rta", ProfileURL: "https://www.instagram.com/trung.le/?hl=en"}
+	if v := checkRowIdentity(page, false); v == nil || v.Rule != "foreign_url" {
+		t.Errorf("page URL violation = %+v, want foreign_url", v)
+	}
+}
