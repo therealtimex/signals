@@ -446,17 +446,26 @@ describe("Contact Web Research dispatch-liveness watchdog (#572)", () => {
     expect(order).toEqual(["dispatch-liveness", "cleanup"]);
   });
 
-  it("fails lost dispatches from the default maintenance pass with the scheduler off", async () => {
+  // The pass is started from instrumentation independently of the scheduler; that wiring is pinned
+  // by src/instrumentation-entry.test.ts. This test covers the pass's own default sweep, offline:
+  // the default reads process.env and the global fetch, so both point at a local stub.
+  it("fails lost dispatches from the default maintenance pass", async () => {
     const contact = createContact({ name: "Swept" });
     const run = acceptedResearchRun(contact.id, 20);
-    const previous = process.env.SIGNALS_SCHEDULER_ENABLED;
-    process.env.SIGNALS_SCHEDULER_ENABLED = "0";
+    const fetchImpl = sessionsFetch([]);
+    vi.stubEnv("RTX_APP_ID", RTX_ENV.RTX_APP_ID);
+    vi.stubEnv("RTX_API_BASE_URL", RTX_ENV.RTX_API_BASE_URL);
+    vi.stubGlobal("fetch", fetchImpl);
     try {
       await runWorkflowTerminalMaintenancePass({ reconcileCleanups: async () => undefined });
     } finally {
-      if (previous === undefined) delete process.env.SIGNALS_SCHEDULER_ENABLED;
-      else process.env.SIGNALS_SCHEDULER_ENABLED = previous;
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
     }
+    expect(fetchImpl).toHaveBeenCalledWith(
+      expect.stringContaining(`${RTX_ENV.RTX_API_BASE_URL}/cli/list-terminal-sessions`),
+      expect.anything(),
+    );
     expect(getWorkflowRun(run.id)?.status).toBe("failed");
     expect(getContactWebResearchState(contact.id).errorCode).toBe("dispatch_lost");
   });
