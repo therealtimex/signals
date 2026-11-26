@@ -1,4 +1,4 @@
-import { eq, and } from "drizzle-orm";
+import { eq, and, asc } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db/client";
 import { assertPlatformAccountUnclaimed, PlatformAccountConflictError } from "@/lib/db/identity-claims";
@@ -98,15 +98,84 @@ export function updateIdentity(
   return getIdentityById(id);
 }
 
+export type RemovedContactIdentity = {
+  removed: ContactIdentity;
+  /** The identity made primary because the removed one was; null otherwise. */
+  promoted: ContactIdentity | null;
+  /**
+   * An active identity that was already primary alongside the removed one (legacy contacts can
+   * hold two, since `upsert_contact_identity {isPrimary: true}` never cleared the others). When
+   * set, nothing is promoted.
+   */
+  remainingPrimary: ContactIdentity | null;
+};
+
+/**
+ * Delete one of a contact's identities (#569). Deleting the row is what releases its
+ * `(platform, platformUserId)` claim, which `idx_identity_platform_user` holds, and what takes it
+ * out of every lookup (claims, `query_contacts`, import dedupe, `get_contact`, research).
+ * Identity metrics cascade, and channels and unverified-candidate links are set null.
+ *
+ * When the removed identity was primary, the contact's earliest-created remaining **active**
+ * identity becomes primary, so readers that trust `isPrimary` (research's primary-identity
+ * resolution, the profile resolver) keep agreeing. With no active identity left, none is primary.
+ * If another active identity is still primary (a legacy contact with two), nothing is promoted:
+ * promoting would leave the contact with two primaries again.
+ *
+ * Returns null when the identity doesn't exist or belongs to another contact.
+ */
+export function removeIdentityForContact(
+  contactId: string,
+  identityId: string,
+): RemovedContactIdentity | null {
+  return db.transaction(() => {
+    const existing = db
+      .select()
+      .from(contactIdentities)
+      .where(and(eq(contactIdentities.id, identityId), eq(contactIdentities.contactId, contactId)))
+      .get();
+    if (!existing) return null;
+
+    db.delete(contactIdentities).where(eq(contactIdentities.id, identityId)).run();
+
+    let promoted: ContactIdentity | null = null;
+    let remainingPrimary: ContactIdentity | null = null;
+    if (existing.isPrimary) {
+      remainingPrimary =
+        db
+          .select()
+          .from(contactIdentities)
+          .where(
+            and(
+              eq(contactIdentities.contactId, contactId),
+              eq(contactIdentities.isActive, 1),
+              eq(contactIdentities.isPrimary, 1),
+            ),
+          )
+          .orderBy(asc(contactIdentities.createdAt), asc(contactIdentities.id))
+          .limit(1)
+          .get() ?? null;
+    }
+    if (existing.isPrimary && !remainingPrimary) {
+      const next = db
+        .select()
+        .from(contactIdentities)
+        .where(and(eq(contactIdentities.contactId, contactId), eq(contactIdentities.isActive, 1)))
+        .orderBy(asc(contactIdentities.createdAt), asc(contactIdentities.id))
+        .limit(1)
+        .get();
+      if (next) {
+        db.update(contactIdentities)
+          .set({ isPrimary: 1, updatedAt: Math.floor(Date.now() / 1000) })
+          .where(eq(contactIdentities.id, next.id))
+          .run();
+        promoted = getIdentityById(next.id) ?? null;
+      }
+    }
+    return { removed: existing, promoted, remainingPrimary };
+  });
+}
+
 export function deleteIdentityForContact(contactId: string, identityId: string): boolean {
-  const existing = db
-    .select()
-    .from(contactIdentities)
-    .where(and(eq(contactIdentities.id, identityId), eq(contactIdentities.contactId, contactId)))
-    .get();
-
-  if (!existing) return false;
-
-  db.delete(contactIdentities).where(eq(contactIdentities.id, identityId)).run();
-  return true;
+  return removeIdentityForContact(contactId, identityId) !== null;
 }

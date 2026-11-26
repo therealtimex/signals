@@ -46,7 +46,15 @@ skills/realtimex-signals/scripts/run-signals-pp-cli.sh health
 
 Provisioned plugin workspaces do **not** bundle native CLI binaries — always bootstrap via health-pinned `npx` (or `run-signals-pp-cli.sh`). Standalone offline installs may still ship `tools/signals-pp-cli/bin/` in the app artifact.
 
-Use `run-signals-pp-cli.sh reconcile --file …` to preview dedupe without mutating. For `--dedupe --dry-run` imports, reconcile is the accurate preview (dry-run skips dedupe queries).
+Use `run-signals-pp-cli.sh reconcile --file …` or `import contacts --dedupe --dry-run --file …` to preview dedupe without mutating; both run the same read-only lookups and report the same per-row `rows[]` classification (#568). Every platform identity on a row and its email are checked:
+
+- `match`: one existing contact; import updates it (`contactId`, `matchedBy[]` names the identity that matched, `primary: false` for a secondary one).
+- `conflict`: the matches point at different contacts (identity vs identity, or identity vs email), the email alone matches several, or an org holds the account. Import skips it and never creates it; the note lists every match, so the duplicates can be merged first.
+- `new`: nothing matches; import creates it.
+
+A cohort file can carry several identities, profile fields and tags per row: `identities[]` (`{platform, platformUserId | handle, url, provenance}`), `bio`, `headline`, `website`, `location`, `tags[]` and a `key` (#567). In CSV the `identities` cell is that JSON array and `tags` a JSON array or `;` list. Add `--niche <id>` to put every created or matched contact in a niche. The result's `mapping` gives each row key's `contactId` (null when skipped). One call takes up to 5,000 rows, e.g. `import contacts --file cohort.json --dedupe --niche <nicheId>`; preview it with `--dry-run` first. Platforms must be Signals platforms (`x`, `linkedin`, `bluesky`, … not `github`); a site goes in `website`. Junk handles (`in`, `hi`, `notwitter`, a LinkedIn URL in the X field) are dropped from the row before dedupe and listed in `rejectedIdentities[]`; the rest of the row imports (#569). `--allow-unusual-handles` keeps short or placeholder-looking ones (`too_short`, `placeholder`); nothing keeps a `foreign_url` or `syntax` failure. A row's Snowball evidence identity (`identityEvidenceToken`) is not checked, because the server derives that account from the evidence.
+
+An archived owner is a `match` with `action: skip` (restore the contact first). In a preview, a row that repeats an earlier row's identity or email matches `contactId: "row:<n>"`, the contact row `<n>` would create. Conflicts don't fail the run or change the exit code; read `conflicts`.
 
 When a brief provides a specific Local App URL, pin the CLI to that instance:
 
@@ -341,3 +349,7 @@ Ensure the Signals Local App is running (RTX **Settings → Local Apps**). See [
 | `403` / unauthorized | API called off-localhost — set `SIGNALS_AGENT_TOOL_TOKEN` |
 | Empty contacts | Expected on fresh DB — create first contact |
 | Avatar shows broken / `file://` in summary | Re-upload with `scripts/upload-avatar.sh`; do not set local paths on `avatarUrl` |
+
+### Wrong identities (#569)
+
+`upsert_contact_identity` and `create_contact` reject junk account values a write introduces with `VALIDATION_ERROR` (`details.rule`: `foreign_url`, `syntax`, `too_short` or `placeholder`). Only `too_short` and `placeholder` can be overridden, with `allowUnusualHandle: true`, and only when the value really is the account. Values already stored pass when an identity is updated in place, so an identity stored before these checks stays updatable, and a Snowball evidence write (`identityEvidenceToken`) is not checked, because the server derives that account from the evidence. To detach a wrong identity, call `remove_contact_identity {contactId, identityId}` with the `id` from `get_contact` identities. It releases the claim (`resolve_platform_claim` then reports unclaimed) and, if it was primary, promotes the next active identity, unless another active primary remains. Setting `isActive: false` does not release a claim. Never remove identities from the self contact.

@@ -2,7 +2,17 @@ import { listContacts, getContactById, createContact, updateContact, recalcEnric
 import { db } from "@/lib/db/client";
 import { findDuplicateOrgs } from "@/lib/orgs/dedupe/detect";
 import { mergeOrgs, MergeOrgsError } from "@/lib/orgs/dedupe/merge";
-import { createIdentity, getIdentityById, updateIdentity } from "@/lib/db/queries/identities";
+import {
+  createIdentity,
+  getIdentityById,
+  removeIdentityForContact,
+  updateIdentity,
+} from "@/lib/db/queries/identities";
+import {
+  checkIdentityValue,
+  normalizeIdentityValueForCheck,
+  type IdentityValueField,
+} from "@/lib/identity-handle-validation";
 import { resolvePlatformClaim } from "@/lib/db/identity-claims";
 import { getDashboardMetrics } from "@/lib/db/queries/dashboard";
 import { getWorkflowRun, listWorkflowRuns, updateWorkflowRun } from "@/lib/db/queries/workflows";
@@ -29,6 +39,11 @@ import { isRtxEmbedded } from "@/lib/rtx/env";
 import { getOrCreateOrchestratorThread } from "@/lib/rtx/orchestrator-thread";
 import { postOrchestratorDispatchThreadMessage } from "@/lib/rtx/orchestrator-completion-thread";
 import { postWorkflowCompletionThreadMessage } from "@/lib/rtx/workflow-completion-thread";
+import {
+  clearWatchdogFailureMarkers,
+  removeWatchdogMarkersFromCallbackResult,
+  withoutWatchdogErrors,
+} from "@/lib/rtx/workflow-run-watchdog-markers";
 import {
   formatDeferredTerminalTeardownNote,
   stopRunningRtxBrowserSessions,
@@ -65,6 +80,7 @@ import type {
   generatePersonaSchema,
   upsertPersonaSchema,
   upsertContactIdentitySchema,
+  removeContactIdentitySchema,
   attestSnowballLinkedInIdentitySchema,
   listSnowballCandidatesSchema,
 } from "@/lib/agent-tools/schemas";
@@ -76,6 +92,19 @@ import { identityProfileHref } from "@/lib/contact-identity-handle";
 import { validateWorkflowRunAndTemplateIds } from "@/lib/db/creation-provenance-input";
 import { CreatedSourceDetailFilterError } from "@/lib/db/creation-sources";
 import { AgentToolError } from "@/lib/agent-tools/types";
+import {
+  resolveIdentityProvenanceWrite,
+  serializeIdentityProvenance,
+  type IdentityProvenanceColumns,
+  type IdentityProvenanceWriteOutcome,
+} from "@/lib/identity-provenance";
+import {
+  CONTACT_ALIAS_MAX_LENGTH,
+  CONTACT_ALIASES_MAX,
+  mergeContactAliases,
+} from "@/lib/contact-aliases";
+import { contactIdentities } from "@/lib/db/schema";
+import { eq } from "drizzle-orm";
 import { listContactEmailCandidates } from "@/lib/contacts/email-verification/candidates";
 import {
   recordRunCohort,
@@ -215,6 +244,24 @@ function platformClaimConflict(
   );
 }
 
+/**
+ * Reject a login/auth-wall provenance.sourceUrl before any write. It is valid https, so zod
+ * accepts it; checking it later (after create_contact inserts the contact) left an orphan
+ * contact that a corrected retry then duplicated.
+ */
+function assertProvenanceSourceUrlAllowed(
+  provenance: { sourceUrl?: string } | undefined,
+): void {
+  const url = provenance?.sourceUrl;
+  if (url && isBlockedResearchUrl(url)) {
+    throw new AgentToolError(
+      "VALIDATION_ERROR",
+      "provenance.sourceUrl is a login/auth-wall URL, not a profile page",
+      { field: "provenance.sourceUrl", url },
+    );
+  }
+}
+
 function serializeContactBirthFields(contact: {
   createdSource: string | null;
   createdSourceDetail: string | null;
@@ -226,6 +273,26 @@ function serializeContactBirthFields(contact: {
     createdSourceDetail: contact.createdSourceDetail,
     createdWorkflowRunId: contact.createdWorkflowRunId,
     createdTemplateId: contact.createdTemplateId,
+  };
+}
+
+function serializeContactFitFields(contact: {
+  fitScore: number | null;
+  fitTier: string | null;
+  fitProduct: string | null;
+  fitConfidence: number | null;
+  fitRationale: string | null;
+  fitScoreVersion: string | null;
+  fitScoredAt: number | null;
+}) {
+  return {
+    fitScore: contact.fitScore,
+    fitTier: contact.fitTier,
+    fitProduct: contact.fitProduct,
+    fitConfidence: contact.fitConfidence,
+    fitRationale: contact.fitRationale,
+    fitScoreVersion: contact.fitScoreVersion,
+    fitScoredAt: contact.fitScoredAt,
   };
 }
 
@@ -242,12 +309,13 @@ function serializeContactIdentityRef(identity: {
   platformUserId: string;
   platformHandle: string | null;
   isPrimary: number | boolean;
-}) {
+} & IdentityProvenanceColumns) {
   return {
     platform: identity.platform,
     platformUserId: identity.platformUserId,
     handle: identity.platformHandle,
     isPrimary: Boolean(identity.isPrimary),
+    provenance: serializeIdentityProvenance(identity),
   };
 }
 
@@ -268,6 +336,7 @@ function serializeContactIdentity(identity: ContactIdentity) {
     followersCount: identity.followersCount,
     isPrimary: Boolean(identity.isPrimary),
     isActive: Boolean(identity.isActive),
+    provenance: serializeIdentityProvenance(identity),
   };
 }
 
@@ -291,6 +360,10 @@ export async function handleQueryContacts(input: z.infer<typeof queryContactsSch
       createdTemplateId: input.createdTemplateId,
       minEnrichmentScore: input.minEnrichmentScore,
       maxEnrichmentScore: input.maxEnrichmentScore,
+      tags: input.tags,
+      nicheId: input.nicheId,
+      fitTier: input.fitTier,
+      minFitScore: input.minFitScore,
     });
 
     return {
@@ -313,6 +386,7 @@ export async function handleQueryContacts(input: z.infer<typeof queryContactsSch
         resolvedAvatarUrl: c.resolvedAvatarUrl,
         emailCandidates: listContactEmailCandidates(c.id),
         ...serializeContactBirthFields(c),
+        ...serializeContactFitFields(c),
       })),
     };
   } catch (error) {
@@ -418,9 +492,11 @@ export async function handleGetContact(input: z.infer<typeof getContactSchema>) 
     relationshipGoalUpdatedAt: contact.relationshipGoalUpdatedAt,
     enrichmentScore: contact.enrichmentScore,
     tags: contact.tags,
+    aliases: contact.aliases,
     identities: contact.identities.map(serializeContactIdentity),
     emailCandidates: listContactEmailCandidates(contact.id),
     ...serializeContactBirthFields(contact),
+    ...serializeContactFitFields(contact),
   };
 }
 
@@ -507,6 +583,7 @@ function findMatchingExistingContact(
 }
 
 export async function handleCreateContact(input: z.infer<typeof createContactSchema>) {
+  assertProvenanceSourceUrlAllowed(input.provenance);
   let suppliedIds: { workflowRunId: string | null; templateId: string | null };
   try {
     suppliedIds = validateWorkflowRunAndTemplateIds({
@@ -550,7 +627,11 @@ export async function handleCreateContact(input: z.infer<typeof createContactSch
     throw snowballEvidenceRequiredError();
   }
 
-  return createContactWithResolvedEvidence(input, suppliedIds);
+  // One transaction, like the Snowball branch above: the contact insert, its identity, notes
+  // and enrichment recalculation commit together. A failure after the insert (a rejected
+  // identity, a failed write) rolls the contact back instead of leaving an orphan that a
+  // corrected retry would then duplicate (#568).
+  return db.transaction(() => createContactWithResolvedEvidence(input, suppliedIds));
 }
 
 function createContactWithResolvedEvidence(
@@ -587,6 +668,17 @@ function createContactWithResolvedEvidence(
     const platformUserId = (rest.platformUserId ?? rest.platformHandle ?? "")
       .trim()
       .replace(/^@/, "");
+    if (!snowballEvidence) {
+      // Before dedupe, with no in-place exemption: create_contact finds its contact by these
+      // values, so a junk handle another contact already holds must not route this one there.
+      assertIdentityValuesAllowed({
+        platform,
+        platformUserId: rest.platformUserId ?? rest.platformHandle,
+        platformHandle: rest.platformHandle,
+        platformUrl: rest.platformUrl,
+        allowUnusualHandle: rest.allowUnusualHandle,
+      });
+    }
     try {
       validateIdentityAvatarUrl(rest.avatarUrl);
       if (snowballEvidence) {
@@ -622,6 +714,8 @@ function createContactWithResolvedEvidence(
         avatarUrl: rest.avatarUrl,
         workflowRunId: resolvedIds.workflowRunId ?? undefined,
         templateId: resolvedIds.templateId ?? undefined,
+        provenance: rest.provenance,
+        allowUnusualHandle: rest.allowUnusualHandle,
       }, snowballEvidence);
     }
 
@@ -680,6 +774,9 @@ function createContactWithResolvedEvidence(
       enrichmentScore: updated.enrichmentScore,
       isExisting: true,
       ...(snowballEvidence ? { identityEvidenceReplay: false } : {}),
+      ...(identityResult && rest.provenance
+        ? { identityProvenanceWrite: identityResult.provenanceWrite }
+        : {}),
       message: `Contact "${updated.name}" already exists (${updated.id}); enriched existing record.`,
       ...serializeContactBirthFields(updated),
     };
@@ -716,8 +813,9 @@ function createContactWithResolvedEvidence(
     templateId: resolvedIds.templateId,
   });
 
+  let createdIdentity: ReturnType<typeof upsertContactIdentityWithEvidence> | undefined;
   if (rest.platform && (rest.platformUserId || rest.platformHandle)) {
-    upsertContactIdentityWithEvidence({
+    createdIdentity = upsertContactIdentityWithEvidence({
       contactId: contact.id,
       platform: rest.platform,
       platformUserId: rest.platformUserId ?? rest.platformHandle,
@@ -726,6 +824,8 @@ function createContactWithResolvedEvidence(
       avatarUrl: rest.avatarUrl,
       workflowRunId: resolvedIds.workflowRunId ?? undefined,
       templateId: resolvedIds.templateId ?? undefined,
+      provenance: rest.provenance,
+      allowUnusualHandle: rest.allowUnusualHandle,
     }, snowballEvidence);
   }
 
@@ -747,6 +847,9 @@ function createContactWithResolvedEvidence(
     relationshipGoalStatus: result.relationshipGoalStatus,
     isExisting: false,
     ...(snowballEvidence ? { identityEvidenceReplay: false } : {}),
+    ...(createdIdentity && rest.provenance
+      ? { identityProvenanceWrite: createdIdentity.provenanceWrite }
+      : {}),
     message: `Contact "${result.name}" created successfully.`,
     ...serializeContactBirthFields(result),
   };
@@ -791,8 +894,28 @@ export async function handleUpdateContact(input: z.infer<typeof updateContactSch
 
 export async function handleEnrichContact(input: z.infer<typeof enrichContactSchema>) {
   const { contactId, ...data } = input;
-  if (!getContactById(contactId)) {
+  const contact = getContactById(contactId);
+  if (!contact) {
     throw new AgentToolError("NOT_FOUND", `Contact not found: ${contactId}`);
+  }
+  if (data.aliases) {
+    const merged = mergeContactAliases(contact.aliases, data.aliases, contact.name);
+    // The schema caps the raw string; NFKC normalization can lengthen it (e.g. "\uFDFA" → 18 chars).
+    const tooLong = merged.added.find((alias) => alias.length > CONTACT_ALIAS_MAX_LENGTH);
+    if (tooLong !== undefined) {
+      throw new AgentToolError(
+        "VALIDATION_ERROR",
+        `An alias holds at most ${CONTACT_ALIAS_MAX_LENGTH} characters after normalization; this one has ${tooLong.length}.`,
+        { field: "aliases", value: tooLong },
+      );
+    }
+    if (merged.aliases.length > CONTACT_ALIASES_MAX) {
+      throw new AgentToolError(
+        "VALIDATION_ERROR",
+        `A contact holds at most ${CONTACT_ALIASES_MAX} aliases; this write would make ${merged.aliases.length}.`,
+        { field: "aliases", existing: contact.aliases.length, adding: merged.added.length },
+      );
+    }
   }
   return enrichContact(contactId, data);
 }
@@ -837,10 +960,52 @@ function resolveSnowballEvidenceReplayIdentity(
   return identity;
 }
 
+const AVATAR_LIKE_URL = /pbs\.twimg\.com|media\.licdn\.com|avatars\.githubusercontent\.com|\.(png|jpe?g|webp|gif)(\?.*)?$/i;
+
+/**
+ * Reject account values that fail the per-platform checks in identity-handle-validation.ts
+ * (#569). Only values the write introduces are checked: a value equal to the one already stored
+ * on `inPlace`, the identity being updated, passes, so an identity stored before the checks
+ * existed can still be updated in place (and removed with remove_contact_identity).
+ */
+function assertIdentityValuesAllowed(args: {
+  platform: string;
+  platformUserId?: string;
+  platformHandle?: string | null;
+  platformUrl?: string | null;
+  inPlace?: ContactIdentity;
+  allowUnusualHandle?: boolean;
+}) {
+  const inPlace = args.inPlace?.platform === args.platform ? args.inPlace : undefined;
+  const checks: Array<[IdentityValueField, string | null | undefined, string | null | undefined]> = [
+    ["platformUserId", args.platformUserId, inPlace?.platformUserId],
+    ["platformHandle", args.platformHandle, inPlace?.platformHandle],
+    ["platformUrl", args.platformUrl, inPlace?.platformUrl],
+  ];
+  for (const [field, value, stored] of checks) {
+    if (!value?.trim()) continue;
+    if (field === "platformUrl" && AVATAR_LIKE_URL.test(value)) continue;
+    if (stored && normalizeIdentityValueForCheck(stored) === normalizeIdentityValueForCheck(value)) continue;
+    const violation = checkIdentityValue(args.platform, field, value, {
+      allowUnusualHandle: args.allowUnusualHandle,
+    });
+    if (violation) {
+      throw new AgentToolError("VALIDATION_ERROR", violation.message, {
+        field: violation.field,
+        platform: violation.platform,
+        value: violation.value,
+        rule: violation.rule,
+        heuristic: violation.heuristic,
+      });
+    }
+  }
+}
+
 function upsertContactIdentityWithEvidence(
   input: z.infer<typeof upsertContactIdentitySchema>,
   preclaimedEvidence?: ClaimedSnowballLinkedInEvidence,
 ) {
+  assertProvenanceSourceUrlAllowed(input.provenance);
   const contact = getContactById(input.contactId);
   if (!contact) {
     throw new AgentToolError("NOT_FOUND", `Contact not found: ${input.contactId}`);
@@ -908,11 +1073,13 @@ function upsertContactIdentityWithEvidence(
   if (snowballEvidence) {
     const replayIdentity = resolveSnowballEvidenceReplayIdentity(snowballEvidence, input);
     if (replayIdentity) {
+      const replayProvenance = applyIdentityProvenance(replayIdentity, input.provenance);
       return {
-        ...serializeContactIdentity(replayIdentity),
+        ...serializeContactIdentity(replayProvenance.identity),
         contactId: input.contactId,
         promotedCandidateIds: [],
         identityEvidenceReplay: true,
+        provenanceWrite: replayProvenance.outcome,
         message: "Contact identity evidence was already accepted.",
       };
     }
@@ -961,6 +1128,25 @@ function upsertContactIdentityWithEvidence(
       avatarUrl = platformUrl;
     }
     platformUrl = undefined;
+  }
+  if (!snowballEvidence && identityPlatform) {
+    // The identity this write updates in place, if any: the addressed one, or this contact's
+    // own claim on the same account.
+    let inPlace = existingIdentity;
+    if (!inPlace && suppliedPlatformUserId) {
+      const claim = resolvePlatformClaim(identityPlatform, suppliedPlatformUserId);
+      if (claim.claimed && claim.claimant.kind === "contact" && claim.claimant.contactId === input.contactId) {
+        inPlace = getIdentityById(claim.claimant.identityId);
+      }
+    }
+    assertIdentityValuesAllowed({
+      platform: identityPlatform,
+      platformUserId: suppliedPlatformUserId,
+      platformHandle: input.platformHandle,
+      platformUrl,
+      inPlace,
+      allowUnusualHandle: input.allowUnusualHandle,
+    });
   }
   if (!platformUrl && identityPlatform && identityHandle) {
     const canonicalUrl = identityProfileHref({
@@ -1060,6 +1246,9 @@ function upsertContactIdentityWithEvidence(
     );
   }
 
+  const provenanceWrite = applyIdentityProvenance(identity, input.provenance);
+  identity = provenanceWrite.identity;
+
   let promotedCandidateIds: string[] = [];
   if (snowballEvidence) {
     try {
@@ -1087,8 +1276,25 @@ function upsertContactIdentityWithEvidence(
     contactId: input.contactId,
     promotedCandidateIds,
     identityEvidenceReplay: false,
-    message: "Contact identity upserted.",
+    provenanceWrite: provenanceWrite.outcome,
+    message: provenanceWrite.outcome === "kept_existing"
+      ? `Contact identity upserted; kept the stored ${identity.provenanceKind} provenance over the weaker ${input.provenance?.kind}.`
+      : "Contact identity upserted.",
   };
+}
+
+/** Apply the #571 downgrade rule and persist provenance on an identity row. */
+function applyIdentityProvenance(
+  identity: ContactIdentity,
+  provenance: z.infer<typeof upsertContactIdentitySchema>["provenance"],
+): { identity: ContactIdentity; outcome: IdentityProvenanceWriteOutcome } {
+  const decision = resolveIdentityProvenanceWrite(identity, provenance);
+  if (!decision.columns) return { identity, outcome: decision.outcome };
+  db.update(contactIdentities)
+    .set({ ...decision.columns, updatedAt: Math.floor(Date.now() / 1000) })
+    .where(eq(contactIdentities.id, identity.id))
+    .run();
+  return { identity: getIdentityById(identity.id) ?? identity, outcome: decision.outcome };
 }
 
 export async function handleUpsertContactIdentity(
@@ -1102,6 +1308,43 @@ export async function handleUpsertContactIdentity(
     }
     throw error;
   }
+}
+
+export async function handleRemoveContactIdentity(
+  input: z.infer<typeof removeContactIdentitySchema>,
+) {
+  const contact = getContactById(input.contactId);
+  if (!contact) {
+    throw new AgentToolError("NOT_FOUND", `Contact not found: ${input.contactId}`);
+  }
+  if (contact.isSelf) {
+    throw new AgentToolError(
+      "VALIDATION_ERROR",
+      `Contact ${input.contactId} is the self contact. Its identities are the workspace owner's own accounts, which sync and publishing rely on, so agents can't remove them; use the Signals UI.`,
+      { contactId: input.contactId },
+    );
+  }
+  const result = removeIdentityForContact(input.contactId, input.identityId);
+  if (!result) {
+    throw new AgentToolError(
+      "NOT_FOUND",
+      `Identity not found for contact ${input.contactId}: ${input.identityId}`,
+    );
+  }
+  recalcEnrichment(input.contactId);
+  const { removed, promoted, remainingPrimary } = result;
+  return {
+    contactId: input.contactId,
+    removed: serializeContactIdentity(removed),
+    releasedClaim: { platform: removed.platform, platformUserId: removed.platformUserId },
+    promotedIdentityId: promoted?.id ?? null,
+    message:
+      `Removed ${removed.platform} identity ${removed.platformUserId}; the account is free to claim.` +
+      (promoted ? ` ${promoted.platform}/${promoted.platformUserId} is now primary.` : "") +
+      (remainingPrimary
+        ? ` ${remainingPrimary.platform}/${remainingPrimary.platformUserId} is still primary, so nothing was promoted.`
+        : ""),
+  };
 }
 
 export async function handleArchiveContact(input: z.infer<typeof archiveContactSchema>) {
@@ -1532,7 +1775,11 @@ export async function handleCompleteWorkflowRun(input: z.infer<typeof completeWo
   }
 
   const completedAt = Math.floor(Date.now() / 1000);
-  const existingResult = parseJsonObject(run.result);
+  // #572: the agent reporting back overrules a watchdog that failed the run as lost or timed out.
+  // Its markers must not survive into the completed result or error list.
+  const storedResult = parseJsonObject(run.result);
+  const existingResult = clearWatchdogFailureMarkers(storedResult, completedAt);
+  const overruledWatchdog = existingResult !== storedResult;
   const runConfig = parseJsonObject(run.config);
   const isContactResearch = isContactWebResearchTemplateConfig(runConfig);
   const isSnowball = isNetworkSnowballTemplateConfig(runConfig);
@@ -1548,9 +1795,12 @@ export async function handleCompleteWorkflowRun(input: z.infer<typeof completeWo
   delete callbackResult[SNOWBALL_IDENTITY_EVIDENCE_RESULT_KEY];
   removeServerOwnedEventResult(callbackResult);
   removeServerOwnedSnowballSourceResult(callbackResult);
+  removeWatchdogMarkersFromCallbackResult(callbackResult);
   let effectiveStatus = input.status;
   let normalizedErrors = uniqueStrings([
-    ...parseSerializedStrings(run.errors),
+    ...(overruledWatchdog
+      ? withoutWatchdogErrors(parseSerializedStrings(run.errors))
+      : parseSerializedStrings(run.errors)),
     ...(input.errors ?? []),
   ]);
 
@@ -1652,7 +1902,7 @@ export async function handleCompleteWorkflowRun(input: z.infer<typeof completeWo
         : {}),
     ...(input.successItems !== undefined ? { successItems: input.successItems } : {}),
     result: resultJson,
-    ...(isContactResearch || isSnowball || input.errors
+    ...(isContactResearch || isSnowball || input.errors || overruledWatchdog
       ? {
           errors: JSON.stringify(normalizedErrors),
           errorItems: normalizedErrors.length,

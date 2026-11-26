@@ -64,9 +64,20 @@ and a `-80` wrong-person penalty. Only candidates scoring at least 60 may be vis
 is not a selection rule. AI Overview citations are candidate URLs, never evidence until opened.
 
 Ambiguous or sub-threshold results get one refined search and a second triage. Remaining ambiguity
-must complete without `upsert_contact_identity`, with `ambiguous: true` and `partial: true`. The
-total budget is two Google searches, three post-SERP page visits, two registrable domains, and
-about 90 seconds.
+must complete without `upsert_contact_identity`, with `ambiguous: true` and `partial: true`.
+
+The brief branches on the provenance of the primary identity (#571): the active identity marked
+primary, else the first active one. When it is `self_declared` (the person linked it on a profile
+they control, such as their Luma page) or `agent_verified`, the agent skips the same-human check for
+that identity, mines it directly, and records each differing display name as an alias with
+`enrich_contact { aliases }` instead of declaring ambiguity. It never writes `self_declared` itself.
+`inferred` and unknown provenance (`null`, every identity stored before migration 0040) keep the
+ambiguity rule above. Other candidates always keep it.
+
+The total budget is two Google searches, three post-SERP page visits, two registrable domains, and
+about 120 seconds, the same as the generated brief and the seeded system prompt. Expanding About,
+Contact info or Experience on the same verified profile, including its `/details/experience/` view,
+is not another page visit.
 
 LinkedIn auth walls/login/checkpoints, Google CAPTCHA/reCAPTCHA pages, Google Accounts login, and
 X login flows are source failures rather than evidence. The agent reports them in `blockedUrls`,
@@ -82,7 +93,8 @@ Dashboard endpoints:
 | `POST` | `/api/contacts/:id/web-research` | Launch Contact Web Research (`202`), reject duplicate work, or return actionable `RESEARCH_TARGET_UNAVAILABLE` (`409`) |
 
 The completion callback stores `fieldsUpdated`, `unresolvedFields`, `identityLinked`,
-`visitedUrls`, `blockedUrls`, `serpCandidates`, `ambiguous`, `partial`, and `message` under the
+`visitedUrls`, `blockedUrls`, `serpCandidates`, `ambiguous`, `partial`, `identityProvenanceUsed`
+(`self_declared`, `agent_verified`, `inferred` or `unknown`), `aliasesAdded`, and `message` under the
 workflow run result. It stops browser sessions, releases the exact research lease, then emits
 cascades. Only facts from visited, non-blocked pages may be written back.
 

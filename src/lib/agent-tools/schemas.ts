@@ -1,5 +1,16 @@
 import { z } from "zod";
 import { PLATFORMS } from "@/lib/db/platforms";
+import { CONTACT_FIT_TIER_ENUM } from "@/lib/contact-fit";
+import {
+  IDENTITY_PROVENANCE_KIND_ENUM,
+  IDENTITY_PROVENANCE_OBSERVED_AT_MAX,
+  IDENTITY_PROVENANCE_SOURCE_URL_MAX_LENGTH,
+} from "@/lib/identity-provenance";
+import {
+  CONTACT_ALIAS_MAX_LENGTH,
+  CONTACT_ALIASES_MAX,
+  CONTACT_ALIASES_PER_WRITE_MAX,
+} from "@/lib/contact-aliases";
 import {
   RELATIONSHIP_GOAL_ENUM,
   RELATIONSHIP_GOAL_STATUS_ENUM,
@@ -18,6 +29,38 @@ const relationshipGoal = z.enum(RELATIONSHIP_GOAL_ENUM);
 const relationshipGoalStatus = z.enum(RELATIONSHIP_GOAL_STATUS_ENUM);
 
 const platform = z.enum(PLATFORMS as unknown as [string, ...string[]]);
+
+const contactFitTier = z.enum(CONTACT_FIT_TIER_ENUM);
+
+const CONTACT_TAG_MAX_LENGTH = 200;
+
+/** Where an identity came from (#571). kind is required whenever provenance is sent. */
+export const identityProvenanceInputSchema = z
+  .object({
+    kind: z
+      .enum(IDENTITY_PROVENANCE_KIND_ENUM)
+      .describe(
+        "self_declared: the subject linked this account on a profile they control (Luma profile, personal site, X bio). agent_verified: an agent corroborated it (name plus company or role). inferred: weaker match such as a search result. Strength: self_declared > agent_verified > inferred; a weaker kind never overwrites a stronger one already stored.",
+      ),
+    sourceUrl: z
+      .string()
+      .trim()
+      .url()
+      .max(IDENTITY_PROVENANCE_SOURCE_URL_MAX_LENGTH)
+      .refine((value) => /^https?:\/\//i.test(value), { message: "sourceUrl must be http(s)" })
+      .optional()
+      .describe("Page that shows the evidence, e.g. the subject's Luma profile linking this account."),
+    observedAt: z
+      .number()
+      .int()
+      .positive()
+      .max(IDENTITY_PROVENANCE_OBSERVED_AT_MAX, { message: "observedAt is unix seconds, not milliseconds" })
+      .optional()
+      .describe("Unix seconds when the evidence was observed; defaults to the write time."),
+  })
+  .describe(
+    "Optional identity provenance. Omit it to leave the stored provenance unchanged; the same or a stronger kind replaces all three fields.",
+  );
 
 export const channelInputSchema = z.object({
   id: z.string().min(1).optional(),
@@ -50,7 +93,12 @@ export const queryContactsSchema = z.object({
   platformUserId: z.string().min(1).optional(),
   page: z.number().int().positive().optional(),
   pageSize: z.number().int().positive().max(100).optional(),
-  sort: z.enum(["createdAt", "enrichmentScore"]).optional(),
+  sort: z
+    .enum(["createdAt", "enrichmentScore", "fitScore"])
+    .optional()
+    .describe(
+      "fitScore sorts best fit first (order defaults to desc) with unscored contacts last in either direction.",
+    ),
   order: z.enum(["asc", "desc"]).optional(),
   createdSource: z.enum(CREATED_SOURCES).optional(),
   createdSourceDetail: z.string().min(1).optional(),
@@ -58,6 +106,100 @@ export const queryContactsSchema = z.object({
   createdTemplateId: z.string().min(1).optional(),
   minEnrichmentScore: z.number().int().optional(),
   maxEnrichmentScore: z.number().int().optional(),
+  tags: z
+    .array(z.string().trim().min(1).max(CONTACT_TAG_MAX_LENGTH))
+    .min(1)
+    .max(20)
+    .optional()
+    .describe("Contacts carrying every listed tag (exact, case-sensitive match)."),
+  nicheId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe("Contacts linked to this niche by a belongs_to_niche edge."),
+  fitTier: contactFitTier.optional(),
+  minFitScore: z
+    .number()
+    .int()
+    .min(0)
+    .max(100)
+    .optional()
+    .describe("Inclusive lower bound on fitScore; unscored contacts never match."),
+});
+
+export const CONTACT_FIT_BATCH_MAX = 200;
+
+/** One row of score_contact_fit. Every call overwrites all seven fit fields. */
+export const scoreContactFitItemSchema = z.object({
+  contactId: z.string().min(1),
+  fitScore: z.number().int().min(0).max(100).describe("ICP fit, integer 0–100."),
+  fitTier: contactFitTier,
+  fitProduct: z
+    .string()
+    .trim()
+    .min(1)
+    .max(120)
+    .nullable()
+    .optional()
+    .describe(
+      "Product slug the contact fits (e.g. from the workspace PRODUCTS.md); free-form, not validated, up to 120 characters.",
+    ),
+  fitConfidence: z
+    .number()
+    .min(0)
+    .max(1)
+    .nullable()
+    .optional()
+    .describe("Scorer confidence, 0–1 (same scale as persona confidence)."),
+  fitRationale: z
+    .string()
+    .trim()
+    .min(1)
+    .max(2_000)
+    .nullable()
+    .optional()
+    .describe("Why the contact fits, up to 2,000 characters."),
+  fitScoreVersion: z
+    .string()
+    .trim()
+    .min(1)
+    .max(64)
+    .nullable()
+    .optional()
+    .describe(
+      "Scoring-rubric version, up to 64 characters; overrides the batch-level fitScoreVersion for this row. Omitted, the row inherits the batch-level version; null clears it.",
+    ),
+});
+
+const scoreContactFitShape = {
+  fitScoreVersion: z
+    .string()
+    .trim()
+    .min(1)
+    .max(64)
+    .optional()
+    .describe("Default scoring-rubric version for every row that does not set its own."),
+};
+
+/**
+ * Runtime schema: rows are validated one by one in the handler so a bad row is
+ * reported in its own result instead of rejecting the whole batch.
+ */
+export const scoreContactFitSchema = z.object({
+  items: z.array(z.unknown()).min(1).max(CONTACT_FIT_BATCH_MAX),
+  ...scoreContactFitShape,
+});
+
+/** Advertised schema (manifest/OpenAPI): the row shape the handler enforces per row. */
+export const scoreContactFitDocumentedSchema = z.object({
+  items: z
+    .array(scoreContactFitItemSchema)
+    .min(1)
+    .max(CONTACT_FIT_BATCH_MAX)
+    .describe(
+      `1–${CONTACT_FIT_BATCH_MAX} rows. Each row is validated on its own and gets its own result.`,
+    ),
+  ...scoreContactFitShape,
 });
 
 export const resolvePlatformClaimSchema = z.object({
@@ -94,6 +236,14 @@ export const createContactSchema = z.object({
   ),
   identityEvidenceToken: z.string().min(1).optional().describe(
     "One-use token returned by attest_snowball_linkedin_identity. Required before a Network Snowball run can write a LinkedIn identity.",
+  ),
+  provenance: identityProvenanceInputSchema
+    .optional()
+    .describe(
+      "Optional provenance for the platform identity created or matched from platform/platformUserId; ignored when no platform identity is given.",
+    ),
+  allowUnusualHandle: z.boolean().optional().describe(
+    "Accept a handle that passes the platform's syntax but looks like junk: two characters or fewer, or a placeholder such as notwitter or none (#569). Set it only when the value really is the account. It never accepts a URL from another platform or invalid syntax.",
   ),
   notes: z.string().optional(),
   funnelStage: funnelStage.optional(),
@@ -135,6 +285,14 @@ export const enrichContactSchema = z.object({
   website: z.string().optional(),
   bio: z.string().optional(),
   tags: z.array(z.string()).optional(),
+  aliases: z
+    .array(z.string().trim().min(1).max(CONTACT_ALIAS_MAX_LENGTH))
+    .min(1)
+    .max(CONTACT_ALIASES_PER_WRITE_MAX)
+    .optional()
+    .describe(
+      "Other names the contact goes by (e.g. a nickname or the name on another platform). Appended, never replaced; deduped case-insensitively against stored aliases and the contact's name. A contact holds at most 50.",
+    ),
   metadata: z.record(z.unknown()).optional(),
   observedEmails: z
     .array(
@@ -260,10 +418,22 @@ export const upsertContactIdentitySchema = z
     identityEvidenceToken: z.string().min(1).optional().describe(
       "One-use token returned by attest_snowball_linkedin_identity. Required before a Network Snowball run can write a LinkedIn identity.",
     ),
+    provenance: identityProvenanceInputSchema.optional(),
+    allowUnusualHandle: z.boolean().optional().describe(
+      "Accept a handle that passes the platform's syntax but looks like junk: two characters or fewer, or a placeholder such as notwitter or none (#569). Set it only when the value really is the account. It never accepts a URL from another platform or invalid syntax.",
+    ),
   })
   .refine((data) => data.id || data.identityEvidenceToken || (data.platform && data.platformUserId), {
     message: "platform and platformUserId, or identityEvidenceToken, are required when creating a new identity",
   });
+
+export const removeContactIdentitySchema = z.object({
+  contactId: z.string().min(1).describe("The contact the identity belongs to."),
+  identityId: z
+    .string()
+    .min(1)
+    .describe("The identity's id, from get_contact identities[].id. It must belong to contactId."),
+});
 
 export const attestSnowballLinkedInIdentitySchema = z
   .object({
@@ -460,6 +630,17 @@ export const completeWorkflowRunSchema = z.object({
         .optional(),
       ambiguous: z.boolean().optional(),
       partial: z.boolean().optional(),
+      identityProvenanceUsed: z
+        .enum([...IDENTITY_PROVENANCE_KIND_ENUM, "unknown"])
+        .optional()
+        .describe(
+          "Contact Web Research: which identity-provenance branch ran, read from the primary identity. unknown means none was recorded.",
+        ),
+      aliasesAdded: z
+        .array(z.string().min(1).max(CONTACT_ALIAS_MAX_LENGTH))
+        .max(CONTACT_ALIASES_MAX)
+        .optional()
+        .describe("Contact Web Research: names enrich_contact actually added as aliases in this run."),
       message: z.string().optional(),
     })
     .passthrough()

@@ -13,6 +13,8 @@ import {
   queryAnalyticsSchema,
   queryContactsSchema,
   resolvePlatformClaimSchema,
+  scoreContactFitDocumentedSchema,
+  scoreContactFitSchema,
   queryContentSchema,
   queryGoalsSchema,
   queryWorkflowsSchema,
@@ -21,6 +23,7 @@ import {
   completeWorkflowRunSchema,
   updateContactSchema,
   upsertContactIdentitySchema,
+  removeContactIdentitySchema,
   getPersonaSchema,
   upsertPersonaSchema,
   getPersonaEvidenceSchema,
@@ -161,6 +164,7 @@ import {
   handleCompleteWorkflowRun,
   handleUpdateContact,
   handleUpsertContactIdentity,
+  handleRemoveContactIdentity,
   handleGetPersona,
   handleGetPersonaEvidence,
   handleGeneratePersona,
@@ -170,6 +174,7 @@ import {
   handleListSnowballCandidates,
 } from "@/lib/agent-tools/handlers";
 import { handleListMailAccounts } from "@/lib/agent-tools/mail-handlers";
+import { handleScoreContactFit } from "@/lib/agent-tools/contact-fit-handlers";
 import {
   getPlatformTargetSchema,
   handleGetPlatformTarget,
@@ -221,6 +226,9 @@ export const AGENT_TOOLS: Record<string, AgentToolDefinition> = {
       "Search and filter active contacts by name, company, funnel stage, or platform. " +
       "Pass email for an exact normalized email match (including non-primary email " +
       "channels), or platformUserId for an exact platform-identity match. " +
+      "Filter by tags (all must match), nicheId (belongs_to_niche membership), fitTier " +
+      "and minFitScore, and sort by fitScore (best first, unscored last); each contact " +
+      "carries its ICP fit fields. " +
       "To find out whether a platform account is already claimed, use " +
       "resolve_platform_claim instead — this tool excludes archived contacts and " +
       "does not see org-held claims.",
@@ -262,7 +270,8 @@ export const AGENT_TOOLS: Record<string, AgentToolDefinition> = {
   },
   get_contact: {
     name: "get_contact",
-    description: "Get full details for a single contact by ID, including linked identities.",
+    description:
+      "Get full details for a single contact by ID, including linked identities (each with its provenance: kind, sourceUrl, observedAt, or null when unknown), name aliases, and ICP fit fields.",
     category: "contacts",
     schema: getContactSchema,
     parameters: zodToParameters(getContactSchema),
@@ -280,7 +289,7 @@ export const AGENT_TOOLS: Record<string, AgentToolDefinition> = {
   create_contact: {
     name: "create_contact",
     description:
-      "Create a new contact record. At minimum a name is required. Network Snowball LinkedIn writes require a fresh identityEvidenceToken from attest_snowball_linkedin_identity; Signals derives the identity from that browser evidence before Auto-commit.",
+      "Create a new contact record. At minimum a name is required. Network Snowball LinkedIn writes require a fresh identityEvidenceToken from attest_snowball_linkedin_identity; Signals derives the identity from that browser evidence before Auto-commit. Optional provenance applies to the platform identity, with the same rules as upsert_contact_identity.",
     category: "contacts",
     schema: createContactSchema,
     parameters: zodToParameters(createContactSchema),
@@ -294,10 +303,24 @@ export const AGENT_TOOLS: Record<string, AgentToolDefinition> = {
     parameters: zodToParameters(updateContactSchema),
     execute: handleUpdateContact,
   },
+  score_contact_fit: {
+    name: "score_contact_fit",
+    description:
+      "Batch-write ICP fit onto contacts: fitScore (0–100), fitTier (A|B|C|unknown), and " +
+      "optional fitProduct, fitConfidence (0–1), fitRationale and fitScoreVersion; the server " +
+      "sets fitScoredAt. Up to 200 rows per call. Each row reports status ok, skipped (self, " +
+      "archived or merged, platform actor) or error (invalid_input, not_found, " +
+      "duplicate_in_batch) without failing the rest. Rescoring overwrites every fit field. " +
+      "Read the result back with get_contact or query_contacts.",
+    category: "contacts",
+    schema: scoreContactFitSchema,
+    parameters: zodToParameters(scoreContactFitDocumentedSchema),
+    execute: handleScoreContactFit,
+  },
   enrich_contact: {
     name: "enrich_contact",
     description:
-      "Fill missing contact fields without overwriting existing data, add visible employment observations, and record explicitly self-published email addresses with source evidence. Recalculates enrichment score.",
+      "Fill missing contact fields without overwriting existing data, append name aliases, add visible employment observations, and record explicitly self-published email addresses with source evidence. Recalculates enrichment score.",
     category: "contacts",
     schema: enrichContactSchema,
     parameters: zodToParameters(enrichContactSchema),
@@ -306,11 +329,20 @@ export const AGENT_TOOLS: Record<string, AgentToolDefinition> = {
   upsert_contact_identity: {
     name: "upsert_contact_identity",
     description:
-      "Create or update a platform identity for a contact. Cross-claim conflicts return a reassign error. Network Snowball LinkedIn writes require a fresh identityEvidenceToken from attest_snowball_linkedin_identity.",
+      "Create or update a platform identity for a contact. Cross-claim conflicts return a reassign error. Network Snowball LinkedIn writes require a fresh identityEvidenceToken from attest_snowball_linkedin_identity. Optional provenance {kind: self_declared|agent_verified|inferred, sourceUrl, observedAt} records where the identity came from; a weaker kind never overwrites a stronger stored one (provenanceWrite reports applied, kept_existing or not_provided).",
     category: "contacts",
     schema: upsertContactIdentitySchema,
     parameters: zodToParameters(upsertContactIdentitySchema),
     execute: handleUpsertContactIdentity,
+  },
+  remove_contact_identity: {
+    name: "remove_contact_identity",
+    description:
+      "Remove one platform identity from a contact (#569), e.g. a junk handle like x:in that an import attached. The identity row is deleted, which releases its (platform, platformUserId) claim so another contact can take the account, and drops it from every lookup: resolve_platform_claim, query_contacts {platform, platformUserId}, import dedupe, get_contact and research. Scoped to the contact: identityId must belong to contactId. If the removed identity was primary, the contact's earliest-created remaining active identity becomes primary (promotedIdentityId). The result returns the removed identity, provenance included, as the record of what was there. The self contact is refused.",
+    category: "contacts",
+    schema: removeContactIdentitySchema,
+    parameters: zodToParameters(removeContactIdentitySchema),
+    execute: handleRemoveContactIdentity,
   },
   archive_contact: {
     name: "archive_contact",

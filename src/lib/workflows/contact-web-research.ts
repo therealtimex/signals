@@ -1,6 +1,7 @@
 import type { ArppPersonDocument } from "@/lib/arpp/types";
 import { identityProfileHref } from "@/lib/contact-identity-handle";
 import { corporateEmailDomain } from "@/lib/contacts/corporate-domain";
+import { IDENTITY_PROVENANCE_KIND_ENUM } from "@/lib/identity-provenance";
 import type { ContactWithIdentities } from "@/lib/db/types";
 import {
   buildContactWebResearchQuery,
@@ -41,7 +42,31 @@ export type ContactWebResearchBriefContact = Pick<
   | "enrichmentScore"
   | "identities"
   | "email"
->;
+> & {
+  /** Other names the contact already goes by; optional so older callers keep compiling. */
+  aliases?: string[];
+};
+
+/**
+ * Which identity-provenance branch the research brief runs (#571), read from the primary
+ * identity. `unknown` covers a missing primary identity and every identity stored before
+ * provenance existed (provenance null). `unknown` is not `inferred`, but both keep the ordinary
+ * same-human check and ambiguity rule.
+ */
+export const CONTACT_WEB_RESEARCH_IDENTITY_PROVENANCE_USED = [
+  ...IDENTITY_PROVENANCE_KIND_ENUM,
+  "unknown",
+] as const;
+
+export type ContactWebResearchIdentityProvenanceUsed =
+  (typeof CONTACT_WEB_RESEARCH_IDENTITY_PROVENANCE_USED)[number];
+
+type BriefIdentity = ContactWebResearchBriefContact["identities"][number];
+
+export type ContactWebResearchPrimaryIdentity = {
+  identity: BriefIdentity | null;
+  provenanceUsed: ContactWebResearchIdentityProvenanceUsed;
+};
 
 export type ContactWebResearchBriefContext = {
   contact: ContactWebResearchBriefContact;
@@ -244,6 +269,83 @@ export function resolveContactWebResearchKnownProfileCandidates(
   return candidates;
 }
 
+/**
+ * The identity whose provenance decides the research branch: the active identity marked
+ * primary, otherwise the first active identity; none means `unknown`. Inactive identities are
+ * skipped because the brief never sends the agent to them.
+ */
+export function resolveContactWebResearchPrimaryIdentity(
+  contact: Pick<ContactWebResearchBriefContact, "identities">,
+): ContactWebResearchPrimaryIdentity {
+  const active = contact.identities.filter((identity) => identity.isActive);
+  const identity = active.find((candidate) => candidate.isPrimary) ?? active[0] ?? null;
+  const kind = identity?.provenanceKind ?? null;
+  return { identity, provenanceUsed: kind ?? "unknown" };
+}
+
+function isConfirmedProvenance(
+  provenanceUsed: ContactWebResearchIdentityProvenanceUsed,
+): provenanceUsed is "self_declared" | "agent_verified" {
+  return provenanceUsed === "self_declared" || provenanceUsed === "agent_verified";
+}
+
+function buildIdentityProvenanceLines(
+  contact: ContactWebResearchBriefContact,
+  primary: ContactWebResearchPrimaryIdentity,
+): string[] {
+  const reportLine = `Report result.identityProvenanceUsed: "${primary.provenanceUsed}" and result.aliasesAdded with the names enrich_contact actually added (an empty array when none).`;
+  const { identity, provenanceUsed } = primary;
+  if (!identity || !isConfirmedProvenance(provenanceUsed)) {
+    return [
+      `### Primary identity provenance: ${provenanceUsed}`,
+      provenanceUsed === "inferred"
+        ? "The primary identity was matched from weaker signals. Verify it like every other candidate; the same-human check and the ambiguity rule below apply."
+        : "Where the primary identity came from is not recorded. Verify it like every other candidate; the same-human check and the ambiguity rule below apply.",
+      reportLine,
+    ];
+  }
+
+  const url = candidateProfileHref(identity) ?? identity.platformUrl ?? "no profile URL recorded";
+  const source = identity.provenanceSourceUrl
+    ? `; declared on ${identity.provenanceSourceUrl}`
+    : "";
+  const knownAliases = contact.aliases?.length
+    ? `Known aliases (already stored, do not resend): ${contact.aliases.map((alias) => JSON.stringify(alias)).join(", ")}.`
+    : "No aliases are stored yet.";
+  return [
+    `### Primary identity provenance: ${provenanceUsed}`,
+    `Primary identity ID: ${identity.id}; platform: ${identity.platform}; URL: ${url}${source}.`,
+    provenanceUsed === "self_declared"
+      ? "The person linked this account to a profile they control. It is their own account, which is stronger evidence than any name match."
+      : "An agent already verified this account against corroborating evidence. Treat it as confirmed for identity purposes.",
+    "- Skip the name-match and same-human check for this identity. Open it and mine it directly: company, title, headline, About, Contact info and Experience, under the mining gate below.",
+    `- A visible display name that differs from "${contact.name}" (a nickname, initials, another surname) is not ambiguity. Never complete with ambiguous=true because of it.`,
+    '- Record each different display name as an alias, in its own call: enrich_contact { "contactId": "<contact ID>", "aliases": ["<name exactly as shown>"] }. Duplicates are ignored by the server.',
+    `  ${knownAliases}`,
+    "- When writing this identity back with upsert_contact_identity, use its exact identity ID and omit provenance. Never send provenance kind self_declared; a weaker kind is ignored by the server (provenanceWrite: \"kept_existing\").",
+    "- This exception covers only this identity. Every other candidate, known or found by search, still needs the same-human check.",
+    reportLine,
+  ];
+}
+
+/**
+ * LinkedIn's own Experience details view for a `/in/<slug>` profile URL (#571 gap 2): the page
+ * the profile's "Show all experiences" control opens. Null for anything that is not a LinkedIn
+ * member profile.
+ */
+export function linkedInExperienceDetailsUrl(profileUrl: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(profileUrl);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+  if (!/(^|\.)linkedin\.com$/i.test(url.hostname)) return null;
+  const slug = /^\/in\/([^/]+)/i.exec(url.pathname)?.[1];
+  return slug ? `https://www.linkedin.com/in/${slug}/details/experience/` : null;
+}
+
 export function buildContactWebResearchBriefSection(input: {
   workflowRunId: string;
   config: Record<string, unknown>;
@@ -258,6 +360,16 @@ export function buildContactWebResearchBriefSection(input: {
   const googleUrl = buildGoogleSearchUrl(query);
   const refinedGoogleUrl = buildGoogleSearchUrl(refinedQuery);
   const knownProfileCandidates = resolveContactWebResearchKnownProfileCandidates(contact);
+  const primaryIdentity = resolveContactWebResearchPrimaryIdentity(contact);
+  // Only a LinkedIn identity, or the contact's own profile URL, names a LinkedIn profile of this
+  // person; another platform's identity carrying a LinkedIn URL is not offered as one.
+  const experienceDetailsLines = knownProfileCandidates.flatMap((candidate) => {
+    if (candidate.platform !== "linkedin" && candidate.source !== "contact") return [];
+    const detailsUrl = linkedInExperienceDetailsUrl(candidate.url);
+    return detailsUrl ? [`  - ${candidate.url} → ${detailsUrl}`] : [];
+  });
+  const primaryConfirmed =
+    primaryIdentity.identity !== null && isConfirmedProvenance(primaryIdentity.provenanceUsed);
   const knownProfileCandidateLines = knownProfileCandidates.map(
     (candidate, index) =>
       `${index + 1}. Existing identity ID: ${candidate.identityId ?? "not recorded"}; platform: ${candidate.platform}; platform user ID: ${candidate.platformUserId ?? "not recorded"}; handle: ${candidate.platformHandle ?? "not recorded"}; URL (${candidate.source}): ${candidate.url}`,
@@ -294,9 +406,11 @@ export function buildContactWebResearchBriefSection(input: {
     `- On ${researchTarget.platform} itself an auth wall means the verified session was lost: call complete_workflow_run with status "failed" and errors ["auth_state_lost: <url>"].`,
     "- On any other platform record the block, continue with remaining candidates, and set partial=true.",
     "",
+    ...buildIdentityProvenanceLines(contact, primaryIdentity),
+    "",
     "### Known identities first (required before generic search)",
     knownProfileCandidateLines.length > 0
-      ? `Open and verify every candidate below, in order, in the attached ${researchTarget.sessionName} session before Google. A stored or derived URL is a high-confidence seed, not proof that its visible person matches the contact.`
+      ? `Open and verify every candidate below, in order, in the attached ${researchTarget.sessionName} session before Google. A stored or derived URL is a high-confidence seed, not proof that its visible person matches the contact${primaryConfirmed ? ", except the primary identity whose provenance is stated above" : ""}.`
       : "No safe direct profile URL can be derived from the active identities; begin with hop 0a.",
     ...knownProfileCandidateLines,
     "For an existing identity, write verified fields back with upsert_contact_identity using its exact identity ID and contactId. Do not create a second row for the same platform account.",
@@ -308,6 +422,13 @@ export function buildContactWebResearchBriefSection(input: {
     "",
     "### Verified LinkedIn profile mining gate (required before completion)",
     "- On every matching LinkedIn /in/ profile, inspect the visible About text, Contact info when available, and the complete visible Experience section (including the same-profile Show all experiences control and its resulting details view). Existing identity or employment rows do not satisfy this gate.",
+    `- LinkedIn renders Experience lazily, below the fold, so a snapshot taken at the top of the profile does not show it. Before deciding Experience is missing: scroll it into view (agent-browser --session ${researchTarget.sessionName} scrollintoview "#experience", or scroll down 2000 repeated until the page bottom), wait for it to render (wait 2000), then take a fresh snapshot. If the page stays blank, check document.visibilityState as the agent-browser skill describes.`,
+    "- If Experience is still missing, or the Show all experiences control does not render, open the profile's own Experience details view in the same session: https://www.linkedin.com/in/<slug>/details/experience/ with the verified profile's exact slug. Wait for its list, then snapshot. It is the page Show all experiences opens, so it is part of the same profile and does not consume another page visit.",
+    ...(experienceDetailsLines.length > 0
+      ? ["  Experience details views for the known LinkedIn candidates:", ...experienceDetailsLines]
+      : []),
+    "- If the details view redirects to an auth wall, login or checkpoint page, that is an auth-state failure under the rules above, not missing data: record the landed auth-wall URL (not the details URL) in blockedUrls and follow the auth_state_lost rule.",
+    "- Whenever you open the details view, add its URL to visitedUrls. Keep the /in/<slug>/ profile URL itself in verifiedProfileUrls and as the identity platformUrl; the details URL may be the evidenceUrl for roles read from it.",
     "- Mine every visible Experience entry, not only the current role. Call enrich_contact with employmentObservations containing orgName, title, isCurrent, evidenceUrl, and dates as UTC Unix seconds only when the page shows them precisely enough; omit uncertain dates rather than infer them.",
     "- Deduplicate an existing incomplete role by organization plus title; enrich its missing dates/evidence instead of creating a duplicate. Do not delete employment rows that are absent from the visible page.",
     "- Mine only email addresses explicitly self-published by this person in About or Contact info. Call enrich_contact with observedEmails containing the exact address, the LinkedIn profile evidenceUrl, the visible sentence as evidenceText, and sourcePlatform=linkedin. Never guess or derive an address.",
@@ -331,19 +452,21 @@ export function buildContactWebResearchBriefSection(input: {
     "### Ambiguity and refined search",
     `Baseline refined query: \`${refinedQuery}\``,
     `Baseline refined URL: ${refinedGoogleUrl}`,
-    "If no candidate clears 60, close profile candidates still look like different people, or a verified known profile reveals a likely missing LinkedIn identity, run one refined search and re-triage.",
+    `If no candidate clears 60, close profile candidates${primaryConfirmed ? " (other than the primary identity)" : ""} still look like different people, or a verified known profile reveals a likely missing LinkedIn identity, run one refined search and re-triage.`,
     "Before opening the refined search, replace the baseline's weak/original name with the strongest full display name verified on a known profile and retain its known handle and company. Prefer `\"<verified full name>\" \"<company>\" linkedin`; if the company is absent, use `\"<verified handle>\" linkedin`. The baseline URL is only a fallback when direct-profile evidence adds nothing.",
-    "If ambiguity remains, do not call upsert_contact_identity. Complete with ambiguous=true, partial=true, and unresolvedFields including sameAs.",
+    primaryConfirmed
+      ? `If ambiguity remains about another candidate, do not call upsert_contact_identity for it. The primary identity (${primaryIdentity.identity?.id}) stays confirmed: still mine it, and set ambiguous=true only if it could not be opened and no other candidate was verified.`
+      : "If ambiguity remains, do not call upsert_contact_identity. Complete with ambiguous=true, partial=true, and unresolvedFields including sameAs.",
     "",
     "### Hop policy and evidence",
-    "- Max 2 Google searches, 3 page visits after SERP, 2 registrable domains, and about 120 seconds wall clock. Expanding About, Contact info, or Experience on the same verified profile does not consume another page visit.",
+    "- Max 2 Google searches, 3 page visits after SERP, 2 registrable domains, and about 120 seconds wall clock. Expanding About, Contact info, or Experience on the same verified profile, including opening its /details/experience/ view, does not consume another page visit.",
     "- Visit all listed known identity candidates first. After SERP triage, prefer one additional LinkedIn or X profile visit. Use a company /about or /team page only when employment remains empty.",
     "- Write only facts visible on pages you visited. Never overwrite existing non-empty contact fields.",
     "- Linking an identity or filling bio/headline is not a stop condition while a verified LinkedIn profile still has uninspected required sections. Stop after known-identity and missing-LinkedIn discovery plus the verified-profile mining gate are attempted, ambiguity is declared, or the hop budget is exhausted.",
     "",
     "### Tool sequence",
     "1. get_contact → 2. get_contact_arpp (visibility: internal) → 3. RTX Browser triage → 4. upsert_contact_identity → 5. enrich_contact with scalar gaps plus observedEmails/employmentObservations → 6. link_contact_to_org/get_org_aroo only if still needed → 7. log_interaction with visited URLs → 8. complete_workflow_run.",
-    "Pass complete_workflow_run.result with fieldsUpdated, unresolvedFields, identityLinked, verifiedProfileUrls, profileSectionsInspected, emailsObserved, experiencesUpserted, visitedUrls, blockedUrls, serpCandidates (top 5), ambiguous, partial, and message.",
+    "Pass complete_workflow_run.result with fieldsUpdated, unresolvedFields, identityLinked, verifiedProfileUrls, profileSectionsInspected, emailsObserved, experiencesUpserted, visitedUrls, blockedUrls, serpCandidates (top 5), ambiguous, partial, identityProvenanceUsed, aliasesAdded, and message.",
   ].join("\n");
 }
 

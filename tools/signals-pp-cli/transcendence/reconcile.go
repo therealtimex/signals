@@ -12,10 +12,17 @@ import (
 const maxMergeGroups = 500
 
 type reconcileSummary struct {
-	Success   bool `json:"success"`
-	Total     int  `json:"total"`
-	WouldSkip int  `json:"wouldSkip"`
-	WouldCreate int `json:"wouldCreate"`
+	Success     bool `json:"success"`
+	Total       int  `json:"total"`
+	WouldSkip   int  `json:"wouldSkip"`
+	WouldCreate int  `json:"wouldCreate"`
+	// WouldMatch counts rows import would update on an existing contact; Conflicts counts rows
+	// whose matches disagree. Both are subsets of WouldSkip, which keeps meaning "not created".
+	WouldMatch int `json:"wouldMatch"`
+	Conflicts  int `json:"conflicts"`
+	// IdentitiesRejected counts identities dropped as import would drop them (#569).
+	IdentitiesRejected int         `json:"identitiesRejected,omitempty"`
+	Rows               []rowReport `json:"rows"`
 }
 
 // mergeSummary is the --merge counterpart of reconcileSummary. AlreadyMerged is
@@ -45,6 +52,7 @@ func newReconcileCmd(flags *rootFlags) *cobra.Command {
 	var filePath string
 	var merge bool
 	var dryRun bool
+	var allowUnusualHandles bool
 	var minConfidence float64
 
 	cmd := &cobra.Command{
@@ -70,31 +78,50 @@ func newReconcileCmd(flags *rootFlags) *cobra.Command {
 				}
 				return usageErr(err)
 			}
+			// Classify what import would write: the same identities it drops are dropped here.
+			dropInvalidRowIdentities(rows, allowUnusualHandles)
 
 			c, err := flags.newClient()
 			if err != nil {
 				return err
 			}
+			// Reconcile only reads, so its lookups always reach Signals, even with the
+			// global --dry-run.
+			c.DryRun = false
+			plan := newDryRunPlan()
+			invoke := plan.invoker(func(tool string, input map[string]any) (map[string]any, error) {
+				return invokeAgentTool(cmd, c, flags, tool, input)
+			})
 
 			summary := reconcileSummary{
 				Success: true,
 				Total:   len(rows),
+				Rows:    make([]rowReport, 0, len(rows)),
 			}
 
-			for _, row := range rows {
-				existing, err := findExistingContact(cmd, c, flags, row)
+			for index, row := range rows {
+				match, err := classifyContactRow(row, invoke)
 				if err != nil {
 					return classifyAPIError(err, flags)
 				}
-				// Shares findExistingContact with import, so the preview also sees
-				// claim holders import will refuse: an archived contact, or an org
-				// identity holding the platform account. Both count as WouldSkip
-				// because that is exactly what import does with them — the preview
-				// would otherwise promise a create that import refuses.
-				if existing.matched() {
-					summary.WouldSkip++
-				} else {
+				// The same classification and action import uses, so the preview never
+				// promises a create that import refuses (archived owner, org claim, or a
+				// conflict across contacts).
+				action := plannedRowAction(match)
+				plan.record(index+1, row, match, action)
+				summary.Rows = append(summary.Rows, newRowReport(index+1, row, match, action))
+				summary.IdentitiesRejected += len(row.RejectedIdentities)
+				switch action {
+				case rowActionCreate:
 					summary.WouldCreate++
+				case rowActionUpdate:
+					summary.WouldSkip++
+					summary.WouldMatch++
+				default:
+					summary.WouldSkip++
+					if match.Outcome == rowOutcomeConflict {
+						summary.Conflicts++
+					}
 				}
 			}
 
@@ -110,6 +137,7 @@ func newReconcileCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().StringVar(&filePath, "file", "", "Path to contacts.csv/.json, or dedup-candidates.json with --merge")
 	cmd.Flags().BoolVar(&merge, "merge", false, "Merge the duplicate groups staged in --file via merge_contacts")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Preview the merge without mutating Signals")
+	cmd.Flags().BoolVar(&allowUnusualHandles, "allow-unusual-handles", false, "Classify very short and placeholder-looking handles instead of dropping them, as import --allow-unusual-handles does")
 	cmd.Flags().Float64Var(&minConfidence, "min-confidence", 0, "Skip groups below this confidence (0-1, requires --merge)")
 	return cmd
 }

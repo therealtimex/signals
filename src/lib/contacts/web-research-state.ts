@@ -14,6 +14,8 @@ export type ContactWebResearchState = {
   ambiguous: boolean;
   serpCandidates: Array<{ url: string; totalScore: number; reason: string }>;
   message: string | null;
+  /** Machine-readable failure cause when the run failed, e.g. `dispatch_lost` (#572). */
+  errorCode?: string | null;
 };
 
 const IDLE_STATE: ContactWebResearchState = {
@@ -113,6 +115,8 @@ export function getContactWebResearchState(contactId: string): ContactWebResearc
     ambiguous: result.ambiguous === true,
     serpCandidates: parseSerpCandidates(result.serpCandidates),
     message: typeof result.message === "string" ? result.message : null,
+    errorCode:
+      status === "failed" && typeof result.errorCode === "string" ? result.errorCode : null,
   };
 }
 

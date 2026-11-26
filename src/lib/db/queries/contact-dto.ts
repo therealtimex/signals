@@ -3,6 +3,7 @@ import { db } from "@/lib/db/client";
 import { contactChannels, mediaAttachments } from "@/lib/db/schema";
 import type { Contact, ContactChannel, ContactEmployment, ContactIdentity } from "@/lib/db/types";
 import type { CreatedSource } from "@/lib/db/creation-sources";
+import { parseContactAliases } from "@/lib/contact-aliases";
 import {
   hasVerifiedGravatar,
   resolveContactAvatar,
@@ -55,6 +56,14 @@ export type ContactDTO = {
   createdSourceDetail: string | null;
   createdWorkflowRunId: string | null;
   createdTemplateId: string | null;
+  fitScore: number | null;
+  fitTier: Contact["fitTier"];
+  fitProduct: string | null;
+  fitConfidence: number | null;
+  fitRationale: string | null;
+  fitScoreVersion: string | null;
+  fitScoredAt: number | null;
+  aliases: string[];
 };
 
 function pickPrimaryChannel(
@@ -165,6 +174,14 @@ export function assembleContactDto(
     createdSourceDetail: contact.createdSourceDetail,
     createdWorkflowRunId: contact.createdWorkflowRunId,
     createdTemplateId: contact.createdTemplateId,
+    fitScore: contact.fitScore,
+    fitTier: contact.fitTier,
+    fitProduct: contact.fitProduct,
+    fitConfidence: contact.fitConfidence,
+    fitRationale: contact.fitRationale,
+    fitScoreVersion: contact.fitScoreVersion,
+    fitScoredAt: contact.fitScoredAt,
+    aliases: parseContactAliases(contact.aliases),
   };
 }
 

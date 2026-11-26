@@ -17,8 +17,10 @@ const BIN_ROOT = path.join(TOOLS_ROOT, "bin");
 const CLI_PRINTING_PRESS_PACKAGE =
   "github.com/mvanhorn/cli-printing-press/v4/cmd/cli-printing-press@v4.20.1";
 // go1.26.9 fixes GO-2026-6603…6617 (net/http, crypto/tls, mime/multipart), which the
-// generator's govulncheck step reports as reachable from the CLI.
-const MIN_GO_TOOLCHAIN = "go1.26.9";
+// generator's govulncheck step reports as reachable from the CLI. go1.26.10 fixes
+// GO-2026-6809 (crypto/x509) and go1.26.11 fixes GO-2026-6859 (net/http HTTP/1 server
+// crash: MaxBytesReader header race); govulncheck reports both as reachable at go1.26.9.
+const MIN_GO_TOOLCHAIN = "go1.26.11";
 
 if (!process.env.GOTOOLCHAIN) {
   process.env.GOTOOLCHAIN = `${MIN_GO_TOOLCHAIN}+auto`;

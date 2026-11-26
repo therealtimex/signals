@@ -4,7 +4,7 @@ import {
   createTemplate,
   getTemplate,
 } from "@/lib/db/queries/workflow-templates";
-import { getOrCreateTemplateThread } from "@/lib/rtx/template-thread";
+import { getOrCreateTemplateThread, replaceTemplateThread } from "@/lib/rtx/template-thread";
 import { resetCoreTables } from "@/test/db";
 
 const ENV = {
@@ -272,5 +272,66 @@ describe("getOrCreateTemplateThread", () => {
       renameError: "rename failed",
     });
     expect(getTemplate(template.id)?.rtxThreadSlug).toBe("thread-abc");
+  });
+});
+
+describe("replaceTemplateThread (PR #574 review W10)", () => {
+  function createThreadApi() {
+    let created = 0;
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith("/cli/create-thread/signals")) {
+        created += 1;
+        const slug = `replacement-${created}`;
+        // Let the other replacement run while this one is still waiting on RealTimeX.
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        return new Response(JSON.stringify({ thread: { slug } }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ error: `Unexpected request: ${url}` }), { status: 500 });
+    }) as unknown as typeof fetch;
+    return { fetchImpl, created: () => created };
+  }
+
+  it("creates one thread when two runs replace the same dead thread at once", async () => {
+    const template = makeTemplate("dead-thread");
+    const api = createThreadApi();
+    const replace = () =>
+      replaceTemplateThread(
+        {
+          template,
+          workspaceSlug: "signals",
+          threadName: "Contact Enrich Profile",
+          staleThreadSlug: "dead-thread",
+        },
+        ENV,
+        api.fetchImpl,
+      );
+
+    const [first, second] = await Promise.all([replace(), replace()]);
+
+    expect(api.created()).toBe(1);
+    expect(first).toMatchObject({ threadSlug: "replacement-1", resolution: "replaced" });
+    expect(second).toMatchObject({ threadSlug: "replacement-1", resolution: "reused" });
+    expect(getTemplate(template.id)?.rtxThreadSlug).toBe("replacement-1");
+  });
+
+  it("replaces again once the replacement itself is the stale thread", async () => {
+    const template = makeTemplate("dead-thread");
+    const api = createThreadApi();
+    const input = {
+      template,
+      workspaceSlug: "signals",
+      threadName: "Contact Enrich Profile",
+    };
+
+    await replaceTemplateThread({ ...input, staleThreadSlug: "dead-thread" }, ENV, api.fetchImpl);
+    const again = await replaceTemplateThread(
+      { ...input, staleThreadSlug: "replacement-1" },
+      ENV,
+      api.fetchImpl,
+    );
+
+    expect(api.created()).toBe(2);
+    expect(again).toMatchObject({ threadSlug: "replacement-2", resolution: "replaced" });
   });
 });

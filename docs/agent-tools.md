@@ -38,16 +38,18 @@ Then pass `Authorization: Bearer your-secret-token` on each request.
 
 | Tool | Category | Description |
 |------|----------|-------------|
-| `query_contacts` | contacts | Search/filter the default Contacts population (non-archived, non-platform-actor contacts; self included); `email` is an exact normalized match (incl. non-primary channels), `platformUserId` an exact identity match. Results list their identities. Not a claim lookup — use `resolve_platform_claim` |
+| `query_contacts` | contacts | Search/filter the default Contacts population (non-archived, non-platform-actor contacts; self included); `email` is an exact normalized match (incl. non-primary channels), `platformUserId` an exact identity match. Also filters by `tags[]` (all must match), `nicheId` (`belongs_to_niche` membership), `fitTier` and `minFitScore`, and sorts by `fitScore`. Results list their identities and ICP fit fields. Not a claim lookup — use `resolve_platform_claim` |
 | `resolve_platform_claim` | contacts | Is this platform account already claimed, by a contact **or an org** identity? Same resolution `upsert_contact_identity` enforces. Returns `{claimed:false}` or `{claimed:true, claimant:{kind, …, archived}}` |
 | `attest_snowball_linkedin_identity` | platforms | Verify a proposed LinkedIn identity in the run-bound authenticated browser; failed gates automatically enter candidate quarantine |
 | `list_snowball_candidates` | contacts | List failed Snowball person/company proposals without exposing them as canonical graph records |
-| `get_contact` | contacts | Full contact by ID |
+| `get_contact` | contacts | Full contact by ID, including ICP fit fields, `aliases[]`, and each identity's `provenance` |
 | `get_contact_arpp` | contacts | Project a contact as ARPP with internal or public visibility |
-| `create_contact` | contacts | Create a contact (`channels[]`, `employments[]` supported) |
+| `create_contact` | contacts | Create a contact (`channels[]`, `employments[]` supported); optional `provenance` for its platform identity |
 | `update_contact` | contacts | Update contact fields. `channels[]` is a full replace: a channel left out of the list is deleted, so send every channel to keep (or add one with `enrich_contact`'s `email` / `phone`) |
-| `upsert_contact_identity` | contacts | Create or update a platform identity for a contact |
-| `enrich_contact` | contacts | Fill gaps without overwriting |
+| `upsert_contact_identity` | contacts | Create or update a platform identity for a contact; optional `provenance` (`self_declared` / `agent_verified` / `inferred`). Account values are checked per platform; see "Identity values" below |
+| `remove_contact_identity` | contacts | Remove one identity from a contact (`contactId` + `identityId`). Releases its claim and drops it from every lookup; see "Removing an identity" below |
+| `enrich_contact` | contacts | Fill gaps without overwriting; appends name `aliases[]` |
+| `score_contact_fit` | contacts | Batch-write ICP fit (`fitScore`, `fitTier`, `fitProduct`, `fitConfidence`, `fitRationale`, `fitScoreVersion`) for up to 200 contacts, with a result per row |
 | `archive_contact` | contacts | Archive with reason |
 | `find_duplicate_contacts` | contacts | Scan for duplicate contacts. Tier 1 = shared email or platform handle, tier 2 = matching name at the same org, tier 3 = shared employment node plus overlapping interaction threads. Read-only |
 | `merge_contacts` | contacts | Merge duplicates into a surviving primary and archive each secondary with `mergedIntoContactId`. Idempotent; supports `options.dryRun` |
@@ -107,7 +109,7 @@ Then pass `Authorization: Bearer your-secret-token` on each request.
 | `query_graph` | graph | 1-hop graph traversal from a node |
 | `upsert_edge` | graph | Create/update typed graph edge |
 | `log_interaction` | graph | Append interaction event for a contact |
-| `query_niches` | graph | List/search niche clusters with member counts |
+| `query_niches` | graph | List/search niche clusters with member counts; `id` returns one exact niche (or none) |
 | `upsert_niche` | graph | Create or update a niche cluster |
 | `query_launches` | graph | List GTM launches with variant summaries (`variantType`, `predictionConfidence`, `simulatedAt`, `contentItemId` additive fields) and goal links |
 | `upsert_launch` | graph | Create or update a GTM launch |
@@ -130,6 +132,219 @@ Then pass `Authorization: Bearer your-secret-token` on each request.
 
 Simulation run tool responses include additive fields (`populationSpec`, `error`, `workflowRunId`, `createdAt`, `updatedAt`, `transcriptsPrunedAt`) shared with the dashboard REST API (`specs/ui-4.1-rest-api.md`).
 
+**ICP fit scoring** (#570). `score_contact_fit` writes first-class fit fields on contacts;
+`enrichmentScore` keeps measuring profile completeness, not fit. Don't store fit in
+`enrich_contact.metadata`: `get_contact` doesn't return metadata and `query_contacts` can't filter on it.
+
+| Field | Type | Notes |
+|---|---|---|
+| `fitScore` | integer 0–100 | Required on every row |
+| `fitTier` | `A` \| `B` \| `C` \| `unknown` | Required on every row |
+| `fitProduct` | string ≤120 | Product slug, e.g. from the workspace `PRODUCTS.md`; free-form, not validated |
+| `fitConfidence` | number 0–1 | Same scale as persona `confidence` |
+| `fitRationale` | string ≤2,000 | |
+| `fitScoreVersion` | string ≤64 | Scoring-rubric version. A batch-level `fitScoreVersion` applies to rows that omit it; a row's explicit `null` clears it |
+| `fitScoredAt` | unix seconds | Set by the server; not accepted as input |
+
+- Send `{ "fitScoreVersion"?: string, "items": [ { "contactId", "fitScore", "fitTier", ... } ] }` with
+  1–200 rows. A malformed envelope (no `items`, an empty array, more than 200 rows) is a 400
+  `VALIDATION_ERROR` and writes nothing.
+- Each row is validated and resolved on its own. The result is
+  `{ fitScoredAt, summary: { total, ok, skipped, error }, results: [ { index, contactId, status, reason?, message? } ] }`:
+  - `ok`: written.
+  - `skipped`: `self`, `archived` (a merged contact also returns `mergedIntoContactId`; score the
+    survivor) or `platform_actor`. Same contact universe as the enrichment pipeline.
+  - `error`: `invalid_input` (with `issues`), `not_found` or `duplicate_in_batch` (the first row
+    for a contact wins).
+- Rescoring overwrites all seven fields. An optional field left out becomes `null`, so a stale
+  rationale never outlives its score. The exception is `fitScoreVersion`: left out, it takes the
+  batch-level version when the batch sends one.
+- `query_contacts` reads fit back. `fitTier` is an exact match, `minFitScore` is inclusive and never
+  matches unscored contacts, and `sort: "fitScore"` puts the best fit first (`order` defaults to
+  `desc`). Unscored contacts sort last in either direction, and the self contact is not pinned to
+  the top for this sort. `tags` requires every listed tag (exact, case-sensitive). `nicheId`
+  matches contacts with a `belongs_to_niche` edge to that niche. All filters combine with AND.
+
+```bash
+# Score a batch, then list Tier A cohort members in a niche, best first
+curl -s -X POST http://localhost:3010/api/agent-tools/invoke -H 'Content-Type: application/json' \
+  -d '{"tool":"score_contact_fit","input":{"fitScoreVersion":"icp-v1","items":[
+        {"contactId":"<id>","fitScore":87,"fitTier":"A","fitProduct":"realtimex-desktop",
+         "fitConfidence":0.8,"fitRationale":"Agency founder automating client ops"}]}}' | jq '.result.summary'
+curl -s -X POST http://localhost:3010/api/agent-tools/invoke -H 'Content-Type: application/json' \
+  -d '{"tool":"query_contacts","input":{"tags":["hackwithbay-4.0"],"nicheId":"<nicheId>",
+        "fitTier":"A","sort":"fitScore","pageSize":100}}' | jq '.result.contacts[] | {id,name,fitScore,fitTier,fitProduct}'
+```
+
+**Identity provenance** (#571). Each contact identity records where it came from. All three
+fields are null for identities written before #571 or without provenance, which means unknown.
+
+| Field (in `provenance`) | Type | Notes |
+|---|---|---|
+| `kind` | `self_declared` \| `agent_verified` \| `inferred` | Required whenever `provenance` is sent |
+| `sourceUrl` | http(s) URL ≤2,048 | Optional. The page showing the evidence. Login and auth-wall URLs are rejected with `VALIDATION_ERROR` (`details.field: "provenance.sourceUrl"`) before anything is written |
+| `observedAt` | unix seconds | Optional; defaults to the write time |
+
+- **Kinds.** `self_declared`: the subject linked the account on a profile they control (a Luma
+  profile, personal site or X bio). `agent_verified`: an agent corroborated it against name plus
+  company or role. `inferred`: a weaker match, such as a search result or a name match.
+- **Downgrade rule.** Strength is a strict order: `self_declared` > `agent_verified` > `inferred` >
+  null. A write with the same or a stronger kind replaces all three fields: an omitted `sourceUrl`
+  clears it, and an omitted `observedAt` becomes now. A weaker kind leaves the stored provenance
+  alone and still writes the rest of the identity. Leaving `provenance` out never changes it.
+  `self_declared` outranks `agent_verified` because it is first-party ownership evidence, so a
+  later verification must not erase the record that the subject linked the account themselves.
+- **Writes.** `upsert_contact_identity.provenance` and `create_contact.provenance` (applied to the
+  identity built from `platform`/`platformUserId`). `upsert_contact_identity` reports
+  `provenanceWrite` as `applied`, `kept_existing` or `not_provided`. `create_contact` returns
+  `identityProvenanceWrite` (`applied` or `kept_existing`) only when `provenance` is supplied.
+  `signals-pp-cli import contacts` forwards CSV columns `provenance_kind`,
+  `provenance_source_url`, `provenance_observed_at`, or a JSON `provenance` object.
+- **Reads.** Every identity in `get_contact.identities[]` and `query_contacts.contacts[].identities[]`
+  carries `provenance: {kind, sourceUrl, observedAt} | null`. The contacts REST payloads expose
+  the raw columns `provenanceKind`, `provenanceSourceUrl` and `provenanceObservedAt`.
+
+**Import dedupe across every identity** (#568). `signals-pp-cli import contacts --dedupe`,
+`import contacts --dedupe --dry-run` and `reconcile` classify each row by its email
+(`query_contacts.email`) and **every** platform identity on it (`resolve_platform_claim`, the same
+resolution the `upsert_contact_identity` guard enforces), not just the primary one:
+
+| `rows[].outcome` | When | Import does |
+|---|---|---|
+| `new` | Nothing matches | Creates the contact (`action: create`) |
+| `match` | Exactly one existing contact, and every claimed identity and the email agree on it | Updates it and attaches the row's identities, each with its provenance (`action: update`); an archived owner is skipped (`action: skip`) |
+| `conflict` | Claimed identities point at two or more contacts, an identity and the email disagree, the email alone matches several contacts, or an org holds one of the accounts | Skips the row and never creates it (`action: skip`); counted in `conflicts` and explained in `notes` |
+
+Each row reports `contactId`, `matchedBy[]` (`platform`, `platformUserId`, `primary`,
+`claimantKind`, `contactId` / `orgId`, `archived`) and `emailMatches[]`. `--dry-run` and
+`reconcile` run the same read-only lookups and write nothing. They also account for the rows before
+each row: a row that repeats an earlier row's identity or email matches that row, reported as
+`contactId: "row:<n>"`, where a real run reports the ID of the contact row `<n>` created. A conflict
+is skipped, not failed, so it doesn't change the exit code; read `conflicts`. Merging the duplicates
+a conflict names is left to the merge flow (`reconcile --merge`, or the dedupe panel).
+Outside a Network Snowball run, `create_contact` commits the contact, its identity and its fields in
+one transaction, so a failure after the insert leaves nothing behind.
+
+**Cohort import rows** (#567). Besides `name`, `email`, `company`, `title`, `notes` and the primary
+identity columns, a row can carry:
+
+| Field | JSON | CSV cell |
+|---|---|---|
+| `key` | string, or a whole number up to 2^53−1 (quote a larger one); keys the result's `mapping` | text |
+| `bio`, `headline`, `website`, `location` | strings | text |
+| `tags` | string array (≤50, each ≤100 characters) | a JSON array, or a `;`-separated list |
+| `identities` | array (≤20) of `{platform, platformUserId \| handle, url?, provenance?}`; `provenance` is the identity provenance object above | the same JSON array |
+
+- **How identities combine.** The legacy `platform` / `platform_user_id` / `platform_handle`
+  columns are the primary identity, and `identities` adds to it. A row without them promotes
+  `identities[0]` to primary. The flat `provenance_*` columns describe the primary; giving
+  provenance twice for a promoted primary is a usage error.
+- **Junk handles** (#569). Before dedupe, each identity's values get the same checks the server
+  applies (see "Identity values" below). An identity that fails is dropped from the row and listed
+  in the row's `rejectedIdentities[]` (`platform`, `field`, `value`, `rule`, `message`). The summary
+  counts it in `identitiesRejected` and adds a note. The run carries on and the exit code doesn't
+  change.
+  - **A bad secondary** costs the row only that identity. The row's other identities and fields
+    are imported as usual.
+  - **A bad primary** is dropped together with its provenance, and the first valid secondary is
+    promoted, as `identities[0]` is when a row has no legacy columns. If none is left, the row is
+    matched and written by email and name alone.
+  - Dropping happens before dedupe, so a row's junk `x:in` can't match or conflict with a guest who
+    already holds `x:in`.
+  - `--allow-unusual-handles` keeps values that fail only a heuristic rule and forwards
+    `allowUnusualHandle: true` with them. `reconcile` takes the same flag and drops the same
+    identities.
+  - Snowball evidence rows aren't checked: the server derives those accounts.
+- **Platforms and keys.** Every `platform` (primary or in `identities`) must be one of `x`,
+  `linkedin`, `gmail`, `substack`, `instagram`, `facebook`, `threads`, `tiktok`, `youtube`,
+  `bluesky`, `telegram`, `whatsapp`, case-insensitive. Anything else (`github`, a personal site)
+  is a usage error naming the row, checked when the file is read and before any call, so it can't
+  abort a run halfway through. Put a personal site in `website`. An identity given only by `handle`
+  is keyed by the handle without `@`, both in dedupe and when it is attached.
+- **Use `--dedupe` with `identities`.** Without it, rows are written without checking whether
+  any of their identities already belongs to another contact. With it, such a row comes back as a
+  `conflict` before any write.
+- **CSV arrays are JSON-in-cell.** Repeated columns (`identity_1_platform`, …) would need a numbering
+  scheme, cap the count at the header, and can't carry the nested `provenance` object. JSON-in-cell
+  is the JSON row shape verbatim.
+- **Writes.** Dedupe checks every identity (above). On a create or a match, each further identity
+  is attached with `upsert_contact_identity` and its own provenance, so part A's downgrade rule
+  applies. One the contact already holds is left alone unless the row brings provenance for it, and
+  one another contact holds made the row a `conflict` before any write. `create_contact` gets
+  `bio`, `headline`, `website` and `location`; on a match, `enrich_contact` fills only empty ones.
+  `tags` are merged into the contact's JSON tag array. A legacy non-JSON value is kept and rewritten
+  as an array, so `query_contacts { tags, nicheId }` finds the cohort.
+- **`--niche <id>`** adds every created or matched contact to the niche with a `belongs_to_niche`
+  edge (`nicheMembers` counts them). A rerun updates the same edge. A niche that doesn't exist
+  stops the import with exit 3 before any row is written.
+- **`mapping`** has one entry per row, keyed by the row's `key` (else its 1-based row number), with
+  `{contactId, outcome, action}`. `contactId` is null for a skipped row (a conflict or an archived
+  owner) and for a row that failed before reaching a contact. In a dry run, a contact the file will
+  create is `"row:<n>"`. Keys must be unique.
+- **Size.** One invocation takes up to 5,000 rows (a CLI guardrail; the server has no matching
+  limit) and sends them in `--batch-size` chunks of up to 50. Without `--dedupe`, rows report
+  `outcome: "unchecked"`.
+
+**Identity values** (#569). `upsert_contact_identity` and `create_contact` check the
+`platformUserId`, `platformHandle` and `platformUrl` a write introduces, after trimming and
+dropping a leading `@`. A value that fails returns `VALIDATION_ERROR`; nothing is written. The
+message names the platform, the field, the value and the rule. `details` carries `{field, platform,
+value, rule, heuristic}`. The rules are in `src/lib/identity-handle-validation.ts`, and
+`signals-pp-cli` mirrors them, pinned by shared test cases.
+
+| Rule | Kind | Rejects |
+|---|---|---|
+| `foreign_url` | hard | A URL on another platform's host, in any field: `linkedin.com/in/…` in an X field, `x.com/…` on a LinkedIn identity |
+| `syntax` | hard | Invalid account syntax, on the platforms whose syntax is fixed: X `^[A-Za-z0-9_]{1,15}$` (`platformUserId` may also be a numeric ID); Instagram and Threads `^[A-Za-z0-9._]{1,30}$`; TikTok `^[A-Za-z0-9._]{1,24}$` (or a numeric ID). An X profile URL in an X field fails here, and the message gives the bare handle to pass instead. Other platforms have no syntax rule, because LinkedIn vanity names, Substack and Bluesky custom domains, YouTube channel IDs and phone numbers vary too much. A value that is nothing but `@` (`@`, ` @@ `) fails this rule on every platform |
+| `too_short` | heuristic | Two characters or fewer, unless all digits (X's numeric ID `12` is valid): `in`, `x`, `i`, `hi`, `v` |
+| `placeholder` | heuristic | `none`, `null`, `nil`, `n/a`, `nope`, `unknown`, `notwitter`, `nolinkedin`, `noinstagram`, `twitter`, `linkedin`, `instagram`, `facebook`, case-insensitive |
+
+- **Heuristic rules can be wrong.** `x`, `hi` and `v` are real, valid X handles. Pass
+  `allowUnusualHandle: true` when the value really is the account; the error message says so.
+  Nothing overrides a hard rule.
+- **`platformUrl` gets `foreign_url` only.** The other rules are about account names, so they
+  don't apply to a URL, and an avatar-like image URL isn't checked at all.
+- **Only new values are checked.** Updating an identity in place (addressed by `id`, or the same
+  `platform` + `platformUserId` on the contact that holds it) passes values equal to the stored
+  ones, so identities stored before these checks stay readable, updatable and removable. Nothing
+  is migrated or rewritten.
+- **`create_contact` checks before dedupe**, with no in-place exemption. It finds its contact by
+  these values, so a junk handle another contact already holds is rejected rather than routing
+  the new person to that contact.
+- Snowball evidence writes aren't checked: the server derives the account from browser evidence.
+
+**Removing an identity** (#569). `remove_contact_identity {contactId, identityId}` deletes the
+identity row. The unique index on `(platform, platformUserId)` is the claim, so deleting the row
+is what frees the account for another contact. It also takes the identity out of every lookup:
+`resolve_platform_claim`, `query_contacts {platform, platformUserId}`, import dedupe,
+`get_contact` and research.
+- **Scope.** `identityId` must belong to `contactId`, or the result is `NOT_FOUND` and nothing is
+  removed. The self contact is refused (`VALIDATION_ERROR`): its identities are the owner's
+  connected accounts, so remove those in the UI. Org identities are a separate table and this
+  tool can't reach them.
+- **Primary.** If the removed identity was primary, the contact's earliest-created remaining
+  **active** identity becomes primary (`promotedIdentityId`), so research's primary-identity
+  resolution and the profile resolver keep agreeing. An inactive identity is never promoted. With
+  no active identity left, none is primary. If another **active** identity is still primary (legacy
+  contacts can hold two, because `upsert_contact_identity {isPrimary: true}` doesn't clear the
+  others), nothing is promoted: `promotedIdentityId` is null and `message` names the remaining
+  primary.
+- **Result.** `{contactId, removed, releasedClaim: {platform, platformUserId}, promotedIdentityId,
+  message}`. `removed` is the deleted identity, provenance included: the record of what was there.
+- **Deactivating is not removing.** `isActive: false` still claims the account; it marks an
+  account that is still this person's but no longer in use. Use `remove_contact_identity` to
+  release a wrong one.
+- The dashboard's identity delete (`DELETE /api/contacts/:id/identities/:identityId`) uses the
+  same function, so it promotes the same way.
+
+**Name aliases** (#571). `get_contact.aliases` is a string array of other names the contact goes by,
+such as "Sas P" on Luma for "Sasmita S" on LinkedIn. Add aliases with `enrich_contact.aliases`
+(1–20 per call, each ≤120 characters after Unicode NFKC and whitespace normalization). They are appended, never replaced, and deduped
+case-insensitively against stored aliases and the contact's own name; the first spelling wins.
+A contact holds at most 50 aliases, and a write that would exceed the cap fails with
+`VALIDATION_ERROR` before anything is written. `fieldsUpdated` includes `aliases` only when one
+was added. There's no agent-tool for removing aliases yet.
+
 `create_contact` / `update_contact` with a `company` field also dual-write an `orgs` row and `works_at` edge (contacts projection unchanged).
 
 Company profile agents should call `get_org` before research, write cited fields through
@@ -148,7 +363,9 @@ scored candidates and composes existing tools:
 `get_contact`, `get_contact_arpp`, `upsert_contact_identity`, `enrich_contact`,
 `link_contact_to_org`, `log_interaction`, and `complete_workflow_run`. Its structured completion
 result may include `fieldsUpdated`, `unresolvedFields`, `identityLinked`, `visitedUrls`, `blockedUrls`,
-`serpCandidates`, `ambiguous`, `partial`, and `message`. `identityLinked: true` conditionally
+`serpCandidates`, `ambiguous`, `partial`, `identityProvenanceUsed`, `aliasesAdded`, and `message`.
+`identityProvenanceUsed` names the branch the brief ran for the primary identity's provenance
+(`self_declared`, `agent_verified`, `inferred`, or `unknown`). `identityLinked: true` conditionally
 cascades that contact into Contact profile pipeline. Login, auth-wall, and CAPTCHA URLs are never
 identity evidence. `complete_workflow_run` returns a `leaseRelease` outcome for this lane after
 browser teardown and before cascade dispatch.
