@@ -70,6 +70,23 @@ export function clearWatchdogFailureMarkers(
   };
 }
 
+/**
+ * Strip the watchdog's own result keys from what an agent sends to `complete_workflow_run`.
+ *
+ * These keys are server-owned: the shared-thread liveness check reads `errorCode: "dispatch_lost"`
+ * and `timedOut` as a lost dispatch, and the research state shows the error code. A completion
+ * that carried them, overruling a release or not, would mark a healthy thread lost all over again.
+ * Any other `errorCode` is the agent's and is kept.
+ */
+export function removeWatchdogMarkersFromCallbackResult(result: Record<string, unknown>): void {
+  delete result.dispatchLost;
+  delete result.timedOut;
+  delete result.lastHeartbeatAt;
+  delete result.livenessTimeoutMs;
+  delete result[WATCHDOG_RELEASE_OVERRULED_RESULT_KEY];
+  if (result.errorCode === DISPATCH_LOST_ERROR_CODE) delete result.errorCode;
+}
+
 /** Drop the watchdog's own entries from a run's error list once its agent has reported back. */
 export function withoutWatchdogErrors(errors: string[]): string[] {
   return errors.filter((error) => !WATCHDOG_SUMMARIES.has(error));

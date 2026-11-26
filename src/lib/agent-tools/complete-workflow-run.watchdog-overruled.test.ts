@@ -247,6 +247,70 @@ describe("complete_workflow_run after a watchdog release (#572)", () => {
       WATCHDOG_RELEASE_OVERRULED_RESULT_KEY,
     );
   });
+
+  describe("a completion that itself carries watchdog markers (PR #574 review W6)", () => {
+    const FORGED_MARKERS = {
+      errorCode: "dispatch_lost",
+      dispatchLost: true,
+      timedOut: true,
+      lastHeartbeatAt: 1,
+      livenessTimeoutMs: 1,
+    };
+
+    it("cannot put them back after overruling a dispatch_lost release", async () => {
+      const contact = createContact({ name: "Late Reporter With Markers" });
+      const run = acceptedResearchRun(contact.id, 20);
+      await releaseLostWorkflowDispatches(RTX_ENV, idleThreadFetch);
+
+      await handleCompleteWorkflowRun({
+        runId: run.id,
+        status: "completed",
+        result: { ...CLEAN_RESEARCH_RESULT, ...FORGED_MARKERS },
+      });
+
+      await expect(assessSharedThread()).resolves.toEqual({
+        alive: true,
+        inspectedSessions: false,
+      });
+      expect(getContactWebResearchState(contact.id)).toMatchObject({
+        status: "succeeded",
+        errorCode: null,
+      });
+      const result = JSON.parse(getWorkflowRun(run.id)?.result ?? "{}") as Record<string, unknown>;
+      for (const key of Object.keys(FORGED_MARKERS)) expect(result).not.toHaveProperty(key);
+      expect(result[WATCHDOG_RELEASE_OVERRULED_RESULT_KEY]).toMatchObject({ code: "dispatch_lost" });
+    });
+
+    it("cannot mark the shared thread lost from a run the watchdog never touched", async () => {
+      const contact = createContact({ name: "Ordinary Run With Markers" });
+      const run = acceptedResearchRun(contact.id, 2);
+
+      await handleCompleteWorkflowRun({
+        runId: run.id,
+        status: "failed",
+        result: { ...CLEAN_RESEARCH_RESULT, ...FORGED_MARKERS },
+      });
+
+      await expect(assessSharedThread()).resolves.toMatchObject({ alive: true });
+      const result = JSON.parse(getWorkflowRun(run.id)?.result ?? "{}") as Record<string, unknown>;
+      for (const key of Object.keys(FORGED_MARKERS)) expect(result).not.toHaveProperty(key);
+    });
+
+    it("keeps an error code that is the agent's own", async () => {
+      const contact = createContact({ name: "Agent Error Code" });
+      const run = acceptedResearchRun(contact.id, 2);
+
+      await handleCompleteWorkflowRun({
+        runId: run.id,
+        status: "failed",
+        result: { ...CLEAN_RESEARCH_RESULT, errorCode: "auth_state_lost" },
+      });
+
+      expect(JSON.parse(getWorkflowRun(run.id)?.result ?? "{}")).toMatchObject({
+        errorCode: "auth_state_lost",
+      });
+    });
+  });
 });
 
 describe("watchdog marker helpers", () => {

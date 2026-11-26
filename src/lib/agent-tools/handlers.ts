@@ -40,8 +40,8 @@ import { getOrCreateOrchestratorThread } from "@/lib/rtx/orchestrator-thread";
 import { postOrchestratorDispatchThreadMessage } from "@/lib/rtx/orchestrator-completion-thread";
 import { postWorkflowCompletionThreadMessage } from "@/lib/rtx/workflow-completion-thread";
 import {
-  WATCHDOG_RELEASE_OVERRULED_RESULT_KEY,
   clearWatchdogFailureMarkers,
+  removeWatchdogMarkersFromCallbackResult,
   withoutWatchdogErrors,
 } from "@/lib/rtx/workflow-run-watchdog-markers";
 import {
@@ -1782,7 +1782,7 @@ export async function handleCompleteWorkflowRun(input: z.infer<typeof completeWo
   delete callbackResult[SNOWBALL_IDENTITY_EVIDENCE_RESULT_KEY];
   removeServerOwnedEventResult(callbackResult);
   removeServerOwnedSnowballSourceResult(callbackResult);
-  delete callbackResult[WATCHDOG_RELEASE_OVERRULED_RESULT_KEY];
+  removeWatchdogMarkersFromCallbackResult(callbackResult);
   let effectiveStatus = input.status;
   let normalizedErrors = uniqueStrings([
     ...(overruledWatchdog
