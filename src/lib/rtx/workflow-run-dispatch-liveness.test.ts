@@ -331,6 +331,107 @@ describe("Contact Web Research dispatch-liveness watchdog (#572)", () => {
     expect(getWorkflowRun(snowball.id)?.status).toBe("running");
   });
 
+  describe("when RTX cannot list the thread's sessions (PR #574 review)", () => {
+    const failingListings: Array<[string, () => typeof fetch]> = [
+      [
+        "an HTTP 503",
+        () =>
+          vi.fn(async () =>
+            new Response(JSON.stringify({ success: false, error: "unavailable" }), { status: 503 }),
+          ) as unknown as typeof fetch,
+      ],
+      [
+        "a relay error",
+        () =>
+          vi.fn(async () =>
+            new Response(JSON.stringify({ success: true, runtimeRelayError: true }), { status: 200 }),
+          ) as unknown as typeof fetch,
+      ],
+      [
+        "a network error",
+        () =>
+          vi.fn(async () => {
+            throw new TypeError("fetch failed");
+          }) as unknown as typeof fetch,
+      ],
+    ];
+
+    it.each(failingListings)(
+      "holds an expired run on %s instead of failing it as dispatch_lost",
+      async (_label, makeFetch) => {
+        const contact = createContact({ name: "RTX Briefly Down" });
+        const run = acceptedResearchRun(contact.id, 20);
+
+        const sweep = await releaseLostWorkflowDispatches(RTX_ENV, makeFetch());
+        const single = await releaseLostWorkflowDispatch(run.id, RTX_ENV, makeFetch());
+
+        expect(sweep.released).toEqual([]);
+        expect(sweep.skipped).toEqual([
+          { runId: run.id, reason: "terminal_inspection_unavailable" },
+        ]);
+        expect(single).toMatchObject({
+          released: false,
+          reason: "terminal_inspection_unavailable",
+        });
+        expect(getWorkflowRun(run.id)?.status).toBe("running");
+        expect(listWorkflowSteps(run.id)).toEqual([]);
+        expect(getContactWebResearchState(contact.id).status).toBe("pending");
+      },
+    );
+
+    it("still releases the run once the overall terminal-run timeout has passed", async () => {
+      const contact = createContact({ name: "RTX Down For Hours" });
+      const run = acceptedResearchRun(contact.id, 4 * 60 + 5);
+
+      const sweep = await releaseLostWorkflowDispatches(RTX_ENV, failingListings[0][1]());
+
+      expect(sweep.released).toEqual([run.id]);
+      expect(getContactWebResearchState(contact.id)).toMatchObject({
+        status: "failed",
+        errorCode: "dispatch_lost",
+      });
+    });
+
+    it("still releases the run when Signals has no RTX API to ask", async () => {
+      const contact = createContact({ name: "Not Embedded" });
+      const run = acceptedResearchRun(contact.id, 20);
+      const fetchImpl = sessionsFetch([]);
+
+      const sweep = await releaseLostWorkflowDispatches({}, fetchImpl);
+
+      expect(sweep.released).toEqual([run.id]);
+      expect(fetchImpl).not.toHaveBeenCalled();
+    });
+
+    it("gives up on a hung listing at the deadline, so cleanup replay still runs", async () => {
+      const contact = createContact({ name: "RTX Hangs" });
+      const run = acceptedResearchRun(contact.id, 20);
+      const signals: AbortSignal[] = [];
+      // Never settles, and ignores the abort signal, like a wedged relay.
+      const hung = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.signal) signals.push(init.signal);
+        return new Promise<Response>(() => {});
+      }) as unknown as typeof fetch;
+      const env = { ...RTX_ENV, WORKFLOW_DISPATCH_INSPECTION_TIMEOUT_MS: "25" };
+      const order: string[] = [];
+
+      await runWorkflowTerminalMaintenancePass({
+        releaseLostDispatches: async () => {
+          const sweep = await releaseLostWorkflowDispatches(env, hung);
+          order.push(`dispatch-liveness:${sweep.skipped.map((entry) => entry.reason).join(",")}`);
+        },
+        reconcileCleanups: async () => {
+          order.push("cleanup");
+        },
+      });
+
+      expect(order).toEqual(["dispatch-liveness:terminal_inspection_unavailable", "cleanup"]);
+      expect(signals).toHaveLength(1);
+      expect(signals[0].aborted).toBe(true);
+      expect(getWorkflowRun(run.id)?.status).toBe("running");
+    });
+  });
+
   it("runs in the always-on maintenance pass, before cleanup replay, even when it throws", async () => {
     const order: string[] = [];
     await runWorkflowTerminalMaintenancePass({

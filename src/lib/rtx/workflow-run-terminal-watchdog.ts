@@ -47,6 +47,14 @@ export const DEFAULT_WORKFLOW_DISPATCH_LIVENESS_TIMEOUT_MS = 15 * 60 * 1000;
 export const WORKFLOW_DISPATCH_LIVENESS_TIMEOUT_ENV = "WORKFLOW_DISPATCH_LIVENESS_TIMEOUT_MS";
 export { DISPATCH_LOST_ERROR_CODE };
 
+/**
+ * Deadline for the one RTX session listing the liveness check makes per thread. A listing that
+ * hangs counts as unavailable, so the maintenance pass still reaches terminal cleanup and the next
+ * interval retries.
+ */
+export const DEFAULT_WORKFLOW_DISPATCH_INSPECTION_TIMEOUT_MS = 15_000;
+export const WORKFLOW_DISPATCH_INSPECTION_TIMEOUT_ENV = "WORKFLOW_DISPATCH_INSPECTION_TIMEOUT_MS";
+
 const TIMEOUT_SUMMARY = TERMINAL_RUN_TIMEOUT_SUMMARY;
 
 export function resolveWorkflowTerminalRunTimeoutMs(env: EnvLike = process.env): number {
@@ -178,6 +186,13 @@ export function getWorkflowRunHeartbeatAtMs(
   return candidates.length > 0 ? Math.max(...candidates) : 0;
 }
 
+export function resolveWorkflowDispatchInspectionTimeoutMs(env: EnvLike = process.env): number {
+  const parsed = Number.parseInt(env[WORKFLOW_DISPATCH_INSPECTION_TIMEOUT_ENV] ?? "", 10);
+  return Number.isFinite(parsed) && parsed > 0
+    ? parsed
+    : DEFAULT_WORKFLOW_DISPATCH_INSPECTION_TIMEOUT_MS;
+}
+
 export function isWorkflowRunDispatchLivenessExpired(
   run: Pick<WorkflowRun, "status" | "config" | "createdAt" | "startedAt" | "updatedAt">,
   latestStepCreatedAtSec: number | null,
@@ -227,50 +242,88 @@ function readRunTerminalRef(run: Pick<WorkflowRun, "config" | "startedAt">): Run
 
 type ThreadInspectionCache = Map<string, Promise<TerminalRuntimeSessionInspection>>;
 
+/** List one thread's sessions, giving up (as unavailable) once the deadline passes. */
+async function inspectThreadSessionsWithDeadline(
+  ref: RunTerminalRef,
+  env: EnvLike,
+  fetchImpl: typeof fetch,
+): Promise<TerminalRuntimeSessionInspection> {
+  const timeoutMs = resolveWorkflowDispatchInspectionTimeoutMs(env);
+  const controller = new AbortController();
+  const boundedFetch = ((input: RequestInfo | URL, init?: RequestInit) =>
+    fetchImpl(input, { ...init, signal: controller.signal })) as typeof fetch;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<TerminalRuntimeSessionInspection>((resolve) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      resolve({
+        available: false,
+        sessions: [],
+        guardedTerminationVersion: null,
+        unavailableReason: "request_failed",
+        error: `Listing terminal sessions timed out after ${timeoutMs} ms`,
+      });
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([
+      inspectTerminalRuntimeSessions(
+        { workspaceSlug: ref.workspaceSlug, threadSlug: ref.threadSlug, includeClosed: false },
+        env,
+        boundedFetch,
+      ),
+      deadline,
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /**
- * Whether the run's own terminal session is still busy on it — the one RTX-side heartbeat.
+ * What the run's own terminal session is doing — the one RTX-side heartbeat.
  *
  * One read-only `GET /cli/list-terminal-sessions` per thread; nothing is sent to the terminal. A
  * busy session counts for this run only if no newer active run was dispatched into the same
  * session, because a shared thread's session may be busy on someone else's turn.
+ *
+ * `unknown` when RTX was asked and did not answer (an error, a relay failure, the deadline): a
+ * transient outage is not evidence that the terminal is idle. `idle` when Signals has no RTX API
+ * at all, since nothing there can be holding the turn.
  */
-async function isRunTerminalBusyOnRun(
+async function inspectRunTerminalActivity(
   run: WorkflowRun,
   activeRuns: WorkflowRun[],
   cache: ThreadInspectionCache,
   env: EnvLike,
   fetchImpl: typeof fetch,
-): Promise<boolean> {
+): Promise<"busy" | "idle" | "unknown"> {
   const ref = readRunTerminalRef(run);
-  if (!ref) return false;
+  if (!ref) return "idle";
 
+  const ownAliases = new Set(ref.aliases);
   const newerOwner = activeRuns.some((other) => {
     if (other.id === run.id) return false;
     const otherRef = readRunTerminalRef(other);
     return Boolean(
       otherRef &&
         otherRef.dispatchedAtMs > ref.dispatchedAtMs &&
-        otherRef.aliases.some((alias) => ref.aliases.includes(alias)),
+        otherRef.aliases.some((alias) => ownAliases.has(alias)),
     );
   });
-  if (newerOwner) return false;
+  if (newerOwner) return "idle";
 
   const key = `${ref.workspaceSlug}\u0000${ref.threadSlug}`;
   let inspection = cache.get(key);
   if (!inspection) {
-    inspection = inspectTerminalRuntimeSessions(
-      { workspaceSlug: ref.workspaceSlug, threadSlug: ref.threadSlug, includeClosed: false },
-      env,
-      fetchImpl,
-    );
+    inspection = inspectThreadSessionsWithDeadline(ref, env, fetchImpl);
     cache.set(key, inspection);
   }
-  const { available, sessions } = await inspection;
-  if (!available) return false;
+  const { available, sessions, unavailableReason } = await inspection;
+  if (!available) return unavailableReason === "not_configured" ? "idle" : "unknown";
   const session = sessions.find((candidate) =>
-    [candidate.id, ...(candidate.aliases ?? [])].some((alias) => ref.aliases.includes(alias)),
+    [candidate.id, ...(candidate.aliases ?? [])].some((alias) => ownAliases.has(alias)),
   );
-  return isTerminalRuntimeSessionBusy(session);
+  return isTerminalRuntimeSessionBusy(session) ? "busy" : "idle";
 }
 
 export type LostWorkflowDispatchOutcome = {
@@ -282,6 +335,7 @@ export type LostWorkflowDispatchOutcome = {
     | "not_contact_research"
     | "heartbeat_recent"
     | "terminal_busy"
+    | "terminal_inspection_unavailable"
     | "changed_concurrently";
   message?: string;
 };
@@ -298,8 +352,23 @@ async function releaseLostWorkflowDispatchFromSnapshot(
   if (!isWorkflowRunDispatchLivenessExpired(run, latestStepAt, Date.now(), timeoutMs)) {
     return { released: false, runId: run.id, reason: "heartbeat_recent" };
   }
-  if (await isRunTerminalBusyOnRun(run, activeRuns, cache, env, fetchImpl)) {
+  const activity = await inspectRunTerminalActivity(run, activeRuns, cache, env, fetchImpl);
+  if (activity === "busy") {
     return { released: false, runId: run.id, reason: "terminal_busy" };
+  }
+  // RTX could not say whether the terminal is still on this run. Hold it rather than fail a healthy
+  // run during an outage; a re-dispatch could not reach RTX either. The overall terminal-run
+  // timeout still bounds the hold, so an RTX that never answers again cannot pin the contact.
+  if (
+    activity === "unknown" &&
+    !isWorkflowRunDispatchLivenessExpired(
+      run,
+      latestStepAt,
+      Date.now(),
+      Math.max(timeoutMs, resolveWorkflowTerminalRunTimeoutMs(env)),
+    )
+  ) {
+    return { released: false, runId: run.id, reason: "terminal_inspection_unavailable" };
   }
 
   const lastHeartbeatAt = Math.floor(getWorkflowRunHeartbeatAtMs(run, latestStepAt) / 1000);
