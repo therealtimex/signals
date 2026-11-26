@@ -167,7 +167,7 @@ export const scoreContactFitItemSchema = z.object({
     .nullable()
     .optional()
     .describe(
-      "Scoring-rubric version, up to 64 characters; overrides the batch-level fitScoreVersion for this row.",
+      "Scoring-rubric version, up to 64 characters; overrides the batch-level fitScoreVersion for this row. Omitted, the row inherits the batch-level version; null clears it.",
     ),
 });
 

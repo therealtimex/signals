@@ -143,7 +143,7 @@ Simulation run tool responses include additive fields (`populationSpec`, `error`
 | `fitProduct` | string ≤120 | Product slug, e.g. from the workspace `PRODUCTS.md`; free-form, not validated |
 | `fitConfidence` | number 0–1 | Same scale as persona `confidence` |
 | `fitRationale` | string ≤2,000 | |
-| `fitScoreVersion` | string ≤64 | Scoring-rubric version. A batch-level `fitScoreVersion` applies to rows that don't set one |
+| `fitScoreVersion` | string ≤64 | Scoring-rubric version. A batch-level `fitScoreVersion` applies to rows that omit it; a row's explicit `null` clears it |
 | `fitScoredAt` | unix seconds | Set by the server; not accepted as input |
 
 - Send `{ "fitScoreVersion"?: string, "items": [ { "contactId", "fitScore", "fitTier", ... } ] }` with
@@ -157,7 +157,8 @@ Simulation run tool responses include additive fields (`populationSpec`, `error`
   - `error`: `invalid_input` (with `issues`), `not_found` or `duplicate_in_batch` (the first row
     for a contact wins).
 - Rescoring overwrites all seven fields. An optional field left out becomes `null`, so a stale
-  rationale never outlives its score.
+  rationale never outlives its score. The exception is `fitScoreVersion`: left out, it takes the
+  batch-level version when the batch sends one.
 - `query_contacts` reads fit back. `fitTier` is an exact match, `minFitScore` is inclusive and never
   matches unscored contacts, and `sort: "fitScore"` puts the best fit first (`order` defaults to
   `desc`). Unscored contacts sort last in either direction, and the self contact is not pinned to
