@@ -53,7 +53,7 @@ Then pass `Authorization: Bearer your-secret-token` on each request.
 | `archive_contact` | contacts | Archive with reason |
 | `find_duplicate_contacts` | contacts | Scan for duplicate contacts. Tier 1 = shared email or platform handle, tier 2 = matching name at the same org, tier 3 = shared employment node plus overlapping interaction threads. Read-only |
 | `merge_contacts` | contacts | Merge duplicates into a surviving primary and archive each secondary with `mergedIntoContactId`. Idempotent; supports `options.dryRun` |
-| `query_analytics` | analytics | Dashboard metrics; `totalContacts` uses the same default population as `query_contacts` and the Contacts page |
+| `query_analytics` | analytics | Dashboard metrics; `totalContacts` uses the same default population as `query_contacts` and the Contacts page. `goals` gives goal counts by status and each active goal's `progressPct` and `deadline` |
 | `query_workflows` | workflows | List workflow runs |
 | `list_workflow_templates` | workflows | List startable templates |
 | `start_workflow` | workflows | Launch a template through RTX with optional config, system prompt, and fresh-thread override; standalone fallback records a failed run |
@@ -77,7 +77,8 @@ Then pass `Authorization: Bearer your-secret-token` on each request.
 | `retry_personality_projection` | content | Inspect, recover, resume, or explicitly retry a durable host attempt |
 | `rollback_personality_projection` | content | Propose retained historical managed blocks over current unmanaged prose |
 | `unbind_personality_projection` | content | Propose removal of Signals-managed blocks while preserving unmanaged prose |
-| `query_goals` | goals | List goals |
+| `query_goals` | goals | List goals, each with the dashboard's `progressPct` and its links (`nicheIds`, `launchIds`) |
+| `upsert_goal` | goals | Create or update a goal. Retries land on the same goal (natural key), omitted fields are kept, and a goal can link to one niche and any number of launches; see "Goals" below |
 | `create_task` | tasks | Create a follow-up task |
 | `get_persona` | contacts | Get active AI persona for a contact |
 | `upsert_persona` | contacts | Save versioned persona (supersedes prior active) |
@@ -344,6 +345,50 @@ case-insensitively against stored aliases and the contact's own name; the first 
 A contact holds at most 50 aliases, and a write that would exceed the cap fails with
 `VALIDATION_ERROR` before anything is written. `fieldsUpdated` includes `aliases` only when one
 was added. There's no agent-tool for removing aliases yet.
+
+**Goals** (#565). `upsert_goal` writes the same goal fields as the dashboard's goal form:
+`name`, `goalType` (`audience_growth` | `lead_generation` | `content_engagement` |
+`pipeline_progression`), `targetValue`, `currentValue`, `unit`, `platform` (`x` | `linkedin` | null),
+`deadline` (unix seconds) and `status` (`active` | `achieved` | `missed` | `paused`).
+Deleting a goal (`DELETE /api/goals/:id`) also deletes every graph edge touching it, so its niche
+and launch links go with it.
+- **Which goal.** With `id`, that goal is updated; an unknown `id` is `NOT_FOUND` and nothing is
+  written. Without `id`, `name` and `goalType` are required, and an open (`active` or `paused`)
+  goal with the same `goalType` and the same `name` (trimmed, ignoring case) is updated instead of
+  creating a second one. An agent's retry therefore lands on the same goal. If several open goals
+  match (the dashboard can create duplicates), the newest is updated and `note` names the others;
+  pass `id` to choose. An `achieved` or `missed` goal never matches, so the same name starts a new
+  goal. The result says what happened: `created: true | false` and
+  `matchedBy: "id" | "natural_key" | null`.
+- **A natural-key match keeps the stored name.** There the name is the key, so a retry spelled
+  differently ("book 10 MEETINGS…") updates the goal without renaming it. Only an update by `id`
+  renames a goal.
+- **Deliberately unlike `upsert_launch`.** Launches don't dedupe: without `id`, `upsert_launch`
+  always creates. Goals do, because the call that records progress ("meeting 3 of 10 booked") is
+  the one most likely to be retried.
+- **Omitted fields are kept.** An update writes only the fields you send; a field you leave out
+  keeps its stored value, and `null` clears `platform` or `deadline`. This differs from
+  `score_contact_fit`, which overwrites every fit field on each row.
+- **Create needs** `targetValue` and `unit` as well (`VALIDATION_ERROR` naming what's missing).
+- **Validation matches the dashboard:** `targetValue` is a positive integer, `currentValue` an
+  integer ≥ 0, `unit` non-blank. A past `deadline` is allowed.
+- **Progress.** `currentValue` is the same mover as the dashboard's manual ±. Like the dashboard,
+  it never changes `status`: reaching `targetValue` leaves an active goal active and writes no
+  progress snapshot. Linked workflow templates are the other mover, and they do auto-achieve at
+  the target. Send `status: "achieved"` to mark it achieved yourself.
+- **Links are relationships only; they don't change how progress is counted.**
+  - `nicheId` links the goal to the cohort it is about, with a `targets` edge goal → niche. A goal
+    targets **at most one** niche: a different `nicheId` replaces the link, `null` removes it, and
+    leaving it out keeps it.
+  - `launchId` adds a `contributes_to` edge launch → goal, the catalogued launch link. A goal can
+    have **several** launches, so each call adds one, and there's no unlink through this tool.
+  - Re-sending a link is a no-op. A missing niche or launch is `NOT_FOUND` before anything is
+    written, goal fields included.
+- **Reads.** `query_goals` adds `progressPct` and the links, and `query_analytics.goals` gives
+  `{total, byStatus: {active, achieved, missed, paused}, active: [{id, name, goalType,
+  currentValue, targetValue, unit, progressPct, deadline}]}`, with active goals soonest deadline
+  first (no deadline last), up to 50. `progressPct` is the dashboard's figure:
+  `min(100, round(currentValue / targetValue × 100))`.
 
 `create_contact` / `update_contact` with a `company` field also dual-write an `orgs` row and `works_at` edge (contacts projection unchanged).
 

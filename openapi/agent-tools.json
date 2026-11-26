@@ -2493,6 +2493,84 @@
                     "type": "object",
                     "properties": {
                       "tool": {
+                        "const": "upsert_goal"
+                      },
+                      "input": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "description": "Update this goal. Unknown ids are NOT_FOUND. Without id, a goal with the same name (trimmed, case-insensitive) and goalType that is active or paused is updated instead of creating a second one."
+                          },
+                          "name": {
+                            "type": "string",
+                            "description": "Required without id. With id it renames the goal; on a natural-key match the stored name is kept."
+                          },
+                          "goalType": {
+                            "type": "string",
+                            "enum": [
+                              "audience_growth",
+                              "lead_generation",
+                              "content_engagement",
+                              "pipeline_progression"
+                            ],
+                            "description": "Required without id. One of the four existing goal types."
+                          },
+                          "targetValue": {
+                            "type": "number",
+                            "description": "Required to create a goal."
+                          },
+                          "currentValue": {
+                            "type": "number",
+                            "description": "Progress so far, the same value the dashboard's manual ± sets. It does not change status: reaching targetValue leaves an active goal active, as on the dashboard."
+                          },
+                          "unit": {
+                            "type": "string",
+                            "description": "Required to create a goal, e.g. \"meetings\", \"contacts\", \"followers\"."
+                          },
+                          "platform": {
+                            "type": "string",
+                            "enum": [
+                              "x",
+                              "linkedin"
+                            ],
+                            "description": "Null means cross-platform."
+                          },
+                          "deadline": {
+                            "type": "number",
+                            "description": "Unix seconds; null clears it. A past deadline is allowed."
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "active",
+                              "achieved",
+                              "missed",
+                              "paused"
+                            ],
+                            "description": "Defaults to active on create."
+                          },
+                          "nicheId": {
+                            "type": "string",
+                            "description": "Link the goal to this niche (a `targets` edge, goal → niche). A goal targets at most one niche: a different nicheId replaces the link, null removes it. The link does not change how progress is counted."
+                          },
+                          "launchId": {
+                            "type": "string",
+                            "description": "Link a launch to the goal (a `contributes_to` edge, launch → goal). Adds to any existing launch links. The link does not change how progress is counted."
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "tool"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
                         "const": "create_task"
                       },
                       "input": {
@@ -5243,6 +5321,7 @@
                       "rollback_personality_projection",
                       "unbind_personality_projection",
                       "query_goals",
+                      "upsert_goal",
                       "create_task",
                       "get_persona",
                       "upsert_persona",
@@ -5442,6 +5521,6 @@
   ],
   "x-signals-agent-tools": {
     "manifestVersion": "1",
-    "toolCount": 95
+    "toolCount": 96
   }
 }

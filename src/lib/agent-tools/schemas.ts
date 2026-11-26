@@ -458,6 +458,36 @@ export const listSnowballCandidatesSchema = z.object({
   pageSize: z.number().int().positive().max(100).optional(),
 });
 
+const goalTypeEnum = z.enum(["audience_growth", "lead_generation", "content_engagement", "pipeline_progression"]);
+
+export const upsertGoalSchema = z
+  .object({
+    id: z.string().min(1).optional().describe(
+      "Update this goal. Unknown ids are NOT_FOUND. Without id, a goal with the same name (trimmed, case-insensitive) and goalType that is active or paused is updated instead of creating a second one.",
+    ),
+    name: z.string().trim().min(1).optional().describe(
+      "Required without id. With id it renames the goal; on a natural-key match the stored name is kept.",
+    ),
+    goalType: goalTypeEnum.optional().describe("Required without id. One of the four existing goal types."),
+    targetValue: z.number().int().positive().optional().describe("Required to create a goal."),
+    currentValue: z.number().int().min(0).optional().describe(
+      "Progress so far, the same value the dashboard's manual ± sets. It does not change status: reaching targetValue leaves an active goal active, as on the dashboard.",
+    ),
+    unit: z.string().trim().min(1).optional().describe('Required to create a goal, e.g. "meetings", "contacts", "followers".'),
+    platform: z.enum(["x", "linkedin"]).nullable().optional().describe("Null means cross-platform."),
+    deadline: z.number().int().nullable().optional().describe("Unix seconds; null clears it. A past deadline is allowed."),
+    status: z.enum(["active", "achieved", "missed", "paused"]).optional().describe("Defaults to active on create."),
+    nicheId: z.string().min(1).nullable().optional().describe(
+      "Link the goal to this niche (a `targets` edge, goal → niche). A goal targets at most one niche: a different nicheId replaces the link, null removes it. The link does not change how progress is counted.",
+    ),
+    launchId: z.string().min(1).optional().describe(
+      "Link a launch to the goal (a `contributes_to` edge, launch → goal). Adds to any existing launch links. The link does not change how progress is counted.",
+    ),
+  })
+  .refine((data) => data.id || (data.name && data.goalType), {
+    message: "name and goalType are required when no id is given",
+  });
+
 export const queryGoalsSchema = z.object({
   status: z.enum(["active", "achieved", "missed", "paused"]).optional(),
   goalType: z
