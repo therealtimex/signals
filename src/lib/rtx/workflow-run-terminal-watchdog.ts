@@ -48,9 +48,11 @@ export const WORKFLOW_DISPATCH_LIVENESS_TIMEOUT_ENV = "WORKFLOW_DISPATCH_LIVENES
 export { DISPATCH_LOST_ERROR_CODE };
 
 /**
- * Deadline for the one RTX session listing the liveness check makes per thread. A listing that
- * hangs counts as unavailable, so the maintenance pass still reaches terminal cleanup and the next
- * interval retries.
+ * Deadline for each RTX call the dispatch-liveness watchdog awaits: the session listing it makes
+ * per thread, and the completion message it posts when it releases a run. A listing that hangs
+ * counts as unavailable and a post that hangs as not posted, so neither the maintenance pass nor the
+ * web-research route can wait on RTX indefinitely; the pass still reaches terminal cleanup and the
+ * next interval retries.
  */
 export const DEFAULT_WORKFLOW_DISPATCH_INSPECTION_TIMEOUT_MS = 15_000;
 export const WORKFLOW_DISPATCH_INSPECTION_TIMEOUT_ENV = "WORKFLOW_DISPATCH_INSPECTION_TIMEOUT_MS";
@@ -240,41 +242,57 @@ function readRunTerminalRef(run: Pick<WorkflowRun, "config" | "startedAt">): Run
 
 type ThreadInspectionCache = Map<string, Promise<TerminalRuntimeSessionInspection>>;
 
-/** List one thread's sessions, giving up (as unavailable) once the deadline passes. */
-async function inspectThreadSessionsWithDeadline(
-  ref: RunTerminalRef,
+/**
+ * Run one RTX call with the watchdog deadline: the request is aborted and `onTimeout()` answered
+ * once the deadline passes, even if the call ignores the abort signal.
+ */
+async function withRtxDeadline<T>(
+  call: (boundedFetch: typeof fetch) => Promise<T>,
+  onTimeout: (timeoutMs: number) => T,
   env: EnvLike,
   fetchImpl: typeof fetch,
-): Promise<TerminalRuntimeSessionInspection> {
+): Promise<T> {
   const timeoutMs = resolveWorkflowDispatchInspectionTimeoutMs(env);
   const controller = new AbortController();
   const boundedFetch = ((input: RequestInfo | URL, init?: RequestInit) =>
     fetchImpl(input, { ...init, signal: controller.signal })) as typeof fetch;
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const deadline = new Promise<TerminalRuntimeSessionInspection>((resolve) => {
+  const deadline = new Promise<T>((resolve) => {
     timer = setTimeout(() => {
       controller.abort();
-      resolve({
-        available: false,
-        sessions: [],
-        guardedTerminationVersion: null,
-        unavailableReason: "request_failed",
-        error: `Listing terminal sessions timed out after ${timeoutMs} ms`,
-      });
+      resolve(onTimeout(timeoutMs));
     }, timeoutMs);
   });
   try {
-    return await Promise.race([
+    return await Promise.race([call(boundedFetch), deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** List one thread's sessions, giving up (as unavailable) once the deadline passes. */
+function inspectThreadSessionsWithDeadline(
+  ref: RunTerminalRef,
+  env: EnvLike,
+  fetchImpl: typeof fetch,
+): Promise<TerminalRuntimeSessionInspection> {
+  return withRtxDeadline(
+    (boundedFetch) =>
       inspectTerminalRuntimeSessions(
         { workspaceSlug: ref.workspaceSlug, threadSlug: ref.threadSlug, includeClosed: false },
         env,
         boundedFetch,
       ),
-      deadline,
-    ]);
-  } finally {
-    clearTimeout(timer);
-  }
+    (timeoutMs) => ({
+      available: false,
+      sessions: [],
+      guardedTerminationVersion: null,
+      unavailableReason: "request_failed",
+      error: `Listing terminal sessions timed out after ${timeoutMs} ms`,
+    }),
+    env,
+    fetchImpl,
+  );
 }
 
 /**
@@ -416,9 +434,17 @@ async function releaseLostWorkflowDispatchFromSnapshot(
     fetchImpl,
   );
   releaseContactWebResearchTargetFromRunConfig(run.config);
-  const completionThreadMessage = await postWorkflowCompletionThreadMessage(
-    updated,
-    { status: "failed", summary: DISPATCH_LOST_SUMMARY },
+  // Bounded like the listing: a hung RTX must not keep the pass from reaching cleanup, nor the
+  // web-research route from answering. The run is already failed and the contact free by now.
+  const completionThreadMessage = await withRtxDeadline(
+    (boundedFetch) =>
+      postWorkflowCompletionThreadMessage(
+        updated,
+        { status: "failed", summary: DISPATCH_LOST_SUMMARY },
+        env,
+        boundedFetch,
+      ),
+    () => ({ posted: false }),
     env,
     fetchImpl,
   ).catch(() => ({ posted: false }));

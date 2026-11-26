@@ -430,6 +430,62 @@ describe("Contact Web Research dispatch-liveness watchdog (#572)", () => {
       expect(signals[0].aborted).toBe(true);
       expect(getWorkflowRun(run.id)?.status).toBe("running");
     });
+
+    it("still reaches cleanup when every RTX call hangs past the hold, including the release post", async () => {
+      // The real completion post, not the suite's stub: it is the call that used to hang the pass.
+      vi.mocked(workflowCompletionThread.postWorkflowCompletionThreadMessage).mockRestore();
+      const contact = createContact({ name: "RTX Hangs For Hours" });
+      const run = acceptedResearchRun(contact.id, 4 * 60 + 5);
+      const calls: Array<{ path: string; signal?: AbortSignal | null }> = [];
+      const hung = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        calls.push({ path: new URL(String(input)).pathname, signal: init?.signal });
+        return new Promise<Response>(() => {});
+      }) as unknown as typeof fetch;
+      const env = { ...RTX_ENV, WORKFLOW_DISPATCH_INSPECTION_TIMEOUT_MS: "25" };
+      const order: string[] = [];
+
+      const pass = runWorkflowTerminalMaintenancePass({
+        releaseLostDispatches: async () => {
+          const sweep = await releaseLostWorkflowDispatches(env, hung);
+          order.push(`dispatch-liveness:${sweep.released.length}`);
+        },
+        reconcileCleanups: async () => {
+          order.push("cleanup");
+        },
+      });
+      const outcome = await Promise.race([
+        pass.then(() => "settled"),
+        new Promise((resolve) => setTimeout(() => resolve("still-hung-after-3s"), 3_000)),
+      ]);
+
+      expect(outcome).toBe("settled");
+      expect(order).toEqual(["dispatch-liveness:1", "cleanup"]);
+      expect(getContactWebResearchState(contact.id)).toMatchObject({
+        status: "failed",
+        errorCode: "dispatch_lost",
+      });
+      expect(calls.map((call) => call.path)).toEqual([
+        "/cli/list-terminal-sessions",
+        "/cli/send-message/signals/contact-enrich-profile",
+      ]);
+      expect(calls.every((call) => call.signal?.aborted === true)).toBe(true);
+    });
+
+    it("answers the web-research route path when the release post hangs", async () => {
+      vi.mocked(workflowCompletionThread.postWorkflowCompletionThreadMessage).mockRestore();
+      const contact = createContact({ name: "Route While RTX Hangs" });
+      const run = acceptedResearchRun(contact.id, 4 * 60 + 5);
+      const hung = vi.fn(() => new Promise<Response>(() => {})) as unknown as typeof fetch;
+      const env = { ...RTX_ENV, WORKFLOW_DISPATCH_INSPECTION_TIMEOUT_MS: "25" };
+
+      const outcome = await Promise.race([
+        releaseLostWorkflowDispatch(run.id, env, hung),
+        new Promise((resolve) => setTimeout(() => resolve("still-hung-after-3s"), 3_000)),
+      ]);
+
+      expect(outcome).toMatchObject({ released: true, runId: run.id });
+      expect((outcome as { message?: string }).message).not.toContain("posted to thread");
+    });
   });
 
   it("runs in the always-on maintenance pass, before cleanup replay, even when it throws", async () => {
