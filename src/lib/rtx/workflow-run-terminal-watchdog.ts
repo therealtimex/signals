@@ -221,9 +221,7 @@ function readRunTerminalRef(run: Pick<WorkflowRun, "config" | "startedAt">): Run
     ...(lifecycle?.dispatch.session?.aliases ?? []),
     lifecycle?.dispatch.session?.id ?? "",
     legacySessionId,
-  ]
-    .map((alias) => alias.trim())
-    .filter(Boolean);
+  ].flatMap((alias) => (alias.trim() ? [alias.trim()] : []));
   const workspaceSlug =
     lifecycle?.dispatch.routing.workspaceSlug ||
     (typeof config.rtxWorkspaceSlug === "string" ? config.rtxWorkspaceSlug : "");
