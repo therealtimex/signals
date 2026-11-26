@@ -331,6 +331,163 @@ describe("Contact Web Research dispatch-liveness watchdog (#572)", () => {
     expect(getWorkflowRun(snowball.id)?.status).toBe("running");
   });
 
+  describe("when RTX cannot list the thread's sessions (PR #574 review)", () => {
+    const failingListings: Array<[string, () => typeof fetch]> = [
+      [
+        "an HTTP 503",
+        () =>
+          vi.fn(async () =>
+            new Response(JSON.stringify({ success: false, error: "unavailable" }), { status: 503 }),
+          ) as unknown as typeof fetch,
+      ],
+      [
+        "a relay error",
+        () =>
+          vi.fn(async () =>
+            new Response(JSON.stringify({ success: true, runtimeRelayError: true }), { status: 200 }),
+          ) as unknown as typeof fetch,
+      ],
+      [
+        "a network error",
+        () =>
+          vi.fn(async () => {
+            throw new TypeError("fetch failed");
+          }) as unknown as typeof fetch,
+      ],
+    ];
+
+    it.each(failingListings)(
+      "holds an expired run on %s instead of failing it as dispatch_lost",
+      async (_label, makeFetch) => {
+        const contact = createContact({ name: "RTX Briefly Down" });
+        const run = acceptedResearchRun(contact.id, 20);
+
+        const sweep = await releaseLostWorkflowDispatches(RTX_ENV, makeFetch());
+        const single = await releaseLostWorkflowDispatch(run.id, RTX_ENV, makeFetch());
+
+        expect(sweep.released).toEqual([]);
+        expect(sweep.skipped).toEqual([
+          { runId: run.id, reason: "terminal_inspection_unavailable" },
+        ]);
+        expect(single).toMatchObject({
+          released: false,
+          reason: "terminal_inspection_unavailable",
+        });
+        expect(getWorkflowRun(run.id)?.status).toBe("running");
+        expect(listWorkflowSteps(run.id)).toEqual([]);
+        expect(getContactWebResearchState(contact.id).status).toBe("pending");
+      },
+    );
+
+    it("still releases the run once the overall terminal-run timeout has passed", async () => {
+      const contact = createContact({ name: "RTX Down For Hours" });
+      const run = acceptedResearchRun(contact.id, 4 * 60 + 5);
+
+      const sweep = await releaseLostWorkflowDispatches(RTX_ENV, failingListings[0][1]());
+
+      expect(sweep.released).toEqual([run.id]);
+      expect(getContactWebResearchState(contact.id)).toMatchObject({
+        status: "failed",
+        errorCode: "dispatch_lost",
+      });
+    });
+
+    it("still releases the run when Signals has no RTX API to ask", async () => {
+      const contact = createContact({ name: "Not Embedded" });
+      const run = acceptedResearchRun(contact.id, 20);
+      const fetchImpl = sessionsFetch([]);
+
+      const sweep = await releaseLostWorkflowDispatches({}, fetchImpl);
+
+      expect(sweep.released).toEqual([run.id]);
+      expect(fetchImpl).not.toHaveBeenCalled();
+    });
+
+    it("gives up on a hung listing at the deadline, so cleanup replay still runs", async () => {
+      const contact = createContact({ name: "RTX Hangs" });
+      const run = acceptedResearchRun(contact.id, 20);
+      const signals: AbortSignal[] = [];
+      // Never settles, and ignores the abort signal, like a wedged relay.
+      const hung = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.signal) signals.push(init.signal);
+        return new Promise<Response>(() => {});
+      }) as unknown as typeof fetch;
+      const env = { ...RTX_ENV, WORKFLOW_DISPATCH_INSPECTION_TIMEOUT_MS: "25" };
+      const order: string[] = [];
+
+      await runWorkflowTerminalMaintenancePass({
+        releaseLostDispatches: async () => {
+          const sweep = await releaseLostWorkflowDispatches(env, hung);
+          order.push(`dispatch-liveness:${sweep.skipped.map((entry) => entry.reason).join(",")}`);
+        },
+        reconcileCleanups: async () => {
+          order.push("cleanup");
+        },
+      });
+
+      expect(order).toEqual(["dispatch-liveness:terminal_inspection_unavailable", "cleanup"]);
+      expect(signals).toHaveLength(1);
+      expect(signals[0].aborted).toBe(true);
+      expect(getWorkflowRun(run.id)?.status).toBe("running");
+    });
+
+    it("still reaches cleanup when every RTX call hangs past the hold, including the release post", async () => {
+      // The real completion post, not the suite's stub: it is the call that used to hang the pass.
+      vi.mocked(workflowCompletionThread.postWorkflowCompletionThreadMessage).mockRestore();
+      const contact = createContact({ name: "RTX Hangs For Hours" });
+      const run = acceptedResearchRun(contact.id, 4 * 60 + 5);
+      const calls: Array<{ path: string; signal?: AbortSignal | null }> = [];
+      const hung = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        calls.push({ path: new URL(String(input)).pathname, signal: init?.signal });
+        return new Promise<Response>(() => {});
+      }) as unknown as typeof fetch;
+      const env = { ...RTX_ENV, WORKFLOW_DISPATCH_INSPECTION_TIMEOUT_MS: "25" };
+      const order: string[] = [];
+
+      const pass = runWorkflowTerminalMaintenancePass({
+        releaseLostDispatches: async () => {
+          const sweep = await releaseLostWorkflowDispatches(env, hung);
+          order.push(`dispatch-liveness:${sweep.released.length}`);
+        },
+        reconcileCleanups: async () => {
+          order.push("cleanup");
+        },
+      });
+      const outcome = await Promise.race([
+        pass.then(() => "settled"),
+        new Promise((resolve) => setTimeout(() => resolve("still-hung-after-3s"), 3_000)),
+      ]);
+
+      expect(outcome).toBe("settled");
+      expect(order).toEqual(["dispatch-liveness:1", "cleanup"]);
+      expect(getContactWebResearchState(contact.id)).toMatchObject({
+        status: "failed",
+        errorCode: "dispatch_lost",
+      });
+      expect(calls.map((call) => call.path)).toEqual([
+        "/cli/list-terminal-sessions",
+        "/cli/send-message/signals/contact-enrich-profile",
+      ]);
+      expect(calls.every((call) => call.signal?.aborted === true)).toBe(true);
+    });
+
+    it("answers the web-research route path when the release post hangs", async () => {
+      vi.mocked(workflowCompletionThread.postWorkflowCompletionThreadMessage).mockRestore();
+      const contact = createContact({ name: "Route While RTX Hangs" });
+      const run = acceptedResearchRun(contact.id, 4 * 60 + 5);
+      const hung = vi.fn(() => new Promise<Response>(() => {})) as unknown as typeof fetch;
+      const env = { ...RTX_ENV, WORKFLOW_DISPATCH_INSPECTION_TIMEOUT_MS: "25" };
+
+      const outcome = await Promise.race([
+        releaseLostWorkflowDispatch(run.id, env, hung),
+        new Promise((resolve) => setTimeout(() => resolve("still-hung-after-3s"), 3_000)),
+      ]);
+
+      expect(outcome).toMatchObject({ released: true, runId: run.id });
+      expect((outcome as { message?: string }).message).not.toContain("posted to thread");
+    });
+  });
+
   it("runs in the always-on maintenance pass, before cleanup replay, even when it throws", async () => {
     const order: string[] = [];
     await runWorkflowTerminalMaintenancePass({
@@ -345,17 +502,26 @@ describe("Contact Web Research dispatch-liveness watchdog (#572)", () => {
     expect(order).toEqual(["dispatch-liveness", "cleanup"]);
   });
 
-  it("fails lost dispatches from the default maintenance pass with the scheduler off", async () => {
+  // The pass is started from instrumentation independently of the scheduler; that wiring is pinned
+  // by src/instrumentation-entry.test.ts. This test covers the pass's own default sweep, offline:
+  // the default reads process.env and the global fetch, so both point at a local stub.
+  it("fails lost dispatches from the default maintenance pass", async () => {
     const contact = createContact({ name: "Swept" });
     const run = acceptedResearchRun(contact.id, 20);
-    const previous = process.env.SIGNALS_SCHEDULER_ENABLED;
-    process.env.SIGNALS_SCHEDULER_ENABLED = "0";
+    const fetchImpl = sessionsFetch([]);
+    vi.stubEnv("RTX_APP_ID", RTX_ENV.RTX_APP_ID);
+    vi.stubEnv("RTX_API_BASE_URL", RTX_ENV.RTX_API_BASE_URL);
+    vi.stubGlobal("fetch", fetchImpl);
     try {
       await runWorkflowTerminalMaintenancePass({ reconcileCleanups: async () => undefined });
     } finally {
-      if (previous === undefined) delete process.env.SIGNALS_SCHEDULER_ENABLED;
-      else process.env.SIGNALS_SCHEDULER_ENABLED = previous;
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
     }
+    expect(fetchImpl).toHaveBeenCalledWith(
+      expect.stringContaining(`${RTX_ENV.RTX_API_BASE_URL}/cli/list-terminal-sessions`),
+      expect.anything(),
+    );
     expect(getWorkflowRun(run.id)?.status).toBe("failed");
     expect(getContactWebResearchState(contact.id).errorCode).toBe("dispatch_lost");
   });

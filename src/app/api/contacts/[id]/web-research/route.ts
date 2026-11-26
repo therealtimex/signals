@@ -14,13 +14,14 @@ import { notFoundResponse } from "@/lib/api/errors";
 /**
  * Research state, after failing a run that was lost in dispatch (#572). Polling clients and the
  * re-run guard both see `failed`/`dispatch_lost` as soon as the liveness window has passed, without
- * waiting for the background sweep.
+ * waiting for the background sweep. The state is read again after the check whatever it decided:
+ * the check may wait on RTX, and a completion that lands meanwhile must not be answered as pending.
  */
 async function getLiveContactWebResearchState(contactId: string) {
   const state = getContactWebResearchState(contactId);
   if (state.status !== "pending" || !state.workflowRunId) return state;
-  const lost = await releaseLostWorkflowDispatch(state.workflowRunId);
-  return lost.released ? getContactWebResearchState(contactId) : state;
+  await releaseLostWorkflowDispatch(state.workflowRunId);
+  return getContactWebResearchState(contactId);
 }
 
 export async function GET(

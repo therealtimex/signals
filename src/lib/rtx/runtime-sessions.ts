@@ -610,6 +610,11 @@ export type TerminalRuntimeSessionInspection = {
   available: boolean;
   sessions: TerminalRuntimeSessionSnapshot[];
   guardedTerminationVersion: number | null;
+  /**
+   * Why `available` is false: `not_configured` when Signals has no RealTimeX API to ask (not
+   * embedded), `request_failed` when RealTimeX was asked and did not answer usably.
+   */
+  unavailableReason?: "not_configured" | "request_failed";
   error?: string;
 };
 
@@ -750,6 +755,7 @@ export async function inspectTerminalRuntimeSessions(
       available: false,
       sessions: [],
       guardedTerminationVersion: null,
+      unavailableReason: "not_configured",
       error: "RealTimeX API is not configured",
     };
   }
@@ -775,6 +781,7 @@ export async function inspectTerminalRuntimeSessions(
         available: false,
         sessions: [],
         guardedTerminationVersion: null,
+        unavailableReason: "request_failed",
         error:
           typeof body.error === "string"
             ? body.error
@@ -798,6 +805,7 @@ export async function inspectTerminalRuntimeSessions(
       available: false,
       sessions: [],
       guardedTerminationVersion: null,
+      unavailableReason: "request_failed",
       error: error instanceof Error ? error.message : "Failed to list terminal sessions",
     };
   }

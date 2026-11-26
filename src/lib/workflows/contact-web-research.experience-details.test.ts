@@ -147,6 +147,43 @@ describe("Contact Web Research brief: lazily loaded Experience (#571 gap 2)", ()
     );
   });
 
+  it("offers no details view for a non-LinkedIn identity that carries a LinkedIn URL (PR #574 review W12)", () => {
+    const xWithForeignLinkedIn = {
+      ...x,
+      platformUrl: "https://www.linkedin.com/in/someone-else",
+    } as unknown as Identity;
+    const text = brief([xWithForeignLinkedIn]);
+    expect(text).not.toContain(KNOWN_DETAILS_HEADER);
+    expect(text).not.toContain("https://www.linkedin.com/in/someone-else/details/experience/");
+  });
+
+  it("still offers the details view for the contact's own LinkedIn profile URL", () => {
+    const text = buildContactWebResearchBriefSection({
+      workflowRunId: "run-571-exp",
+      config: { ...buildContactWebResearchTemplateConfig(), contactId: "contact-sas" },
+      signalsBaseUrl: "http://127.0.0.1:3010",
+      context: {
+        contact: {
+          id: "contact-sas",
+          name: "Sas P",
+          company: null,
+          title: null,
+          headline: null,
+          location: null,
+          website: null,
+          profileUrl: "https://www.linkedin.com/in/sasmita-s",
+          enrichmentScore: 10,
+          identities: [],
+          email: null,
+        },
+        arppMissing: ["experience"],
+        researchTarget,
+      },
+    });
+    expect(text).toContain(KNOWN_DETAILS_HEADER);
+    expect(text).toContain(`  - https://www.linkedin.com/in/sasmita-s → ${DETAILS}`);
+  });
+
   it("names no LinkedIn details URL for a contact whose only known profile is on X", () => {
     const text = brief([x]);
     expect(text).not.toContain(KNOWN_DETAILS_HEADER);

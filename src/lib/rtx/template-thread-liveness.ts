@@ -1,4 +1,4 @@
-import { listRecentTemplateRunsOnThread } from "@/lib/db/queries/workflows";
+import { listRecentDispatchedTemplateRunsOnThread } from "@/lib/db/queries/workflows";
 import type { WorkflowRun } from "@/lib/db/types";
 import type { EnvLike } from "@/lib/rtx/env";
 import { inspectTerminalRuntimeSessions } from "@/lib/rtx/runtime-sessions";
@@ -62,9 +62,7 @@ function readSessionAliases(run: Pick<WorkflowRun, "config">): string[] {
     ...(lifecycle?.dispatch.session?.aliases ?? []),
     lifecycle?.dispatch.session?.id ?? "",
     legacy,
-  ]
-    .map((alias) => alias.trim())
-    .filter(Boolean);
+  ].flatMap((alias) => (alias.trim() ? [alias.trim()] : []));
 }
 
 function reachedDispatch(run: Pick<WorkflowRun, "config">): boolean {
@@ -91,7 +89,8 @@ export async function assessTemplateThreadLiveness(
   fetchImpl: typeof fetch = fetch,
   nowMs = Date.now(),
 ): Promise<TemplateThreadLiveness> {
-  const runs = listRecentTemplateRunsOnThread(input.templateId, input.threadSlug).filter(
+  // Newest handoff first, and only runs that were handed to the thread.
+  const runs = listRecentDispatchedTemplateRunsOnThread(input.templateId, input.threadSlug).filter(
     (run) => run.id !== input.excludeRunId,
   );
 

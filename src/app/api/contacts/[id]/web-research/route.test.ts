@@ -98,6 +98,71 @@ describe("/api/contacts/[id]/web-research", () => {
         { params: Promise.resolve({ id: contactId }) },
       );
 
+    it("re-reads the state when a completion lands during the liveness check (PR #574 review W5)", async () => {
+      const contact = createContact({ name: "Completes Mid Check" });
+      seedTemplates();
+      const template = getSystemTemplateByName(CONTACT_WEB_RESEARCH_TEMPLATE_NAME)!;
+      const stale = Math.floor(Date.now() / 1000) - 30 * 60;
+      const run = createWorkflowRun({
+        templateId: template.id,
+        workflowType: "enrich",
+        status: "running",
+        trigger: "template",
+        startedAt: stale,
+        config: JSON.stringify({
+          ...buildContactWebResearchTemplateConfig(),
+          contactId: contact.id,
+          rtxWorkspaceSlug: "signals",
+          rtxThreadSlug: "contact-enrich-profile",
+          rtxRuntimeSessionId: "cli-agent:mid-check",
+        }),
+      });
+      db.update(workflowRuns)
+        .set({ createdAt: stale, updatedAt: stale })
+        .where(eq(workflowRuns.id, run.id))
+        .run();
+      // The agent's complete_workflow_run lands while the route waits on RTX, whose listing still
+      // shows the turn busy, so the watchdog releases nothing.
+      const rtxFetch = vi.fn(async (input: RequestInfo | URL) => {
+        if (!String(input).includes("/cli/list-terminal-sessions")) {
+          return new Response(JSON.stringify({ error: `Unexpected request: ${String(input)}` }), {
+            status: 500,
+          });
+        }
+        db.update(workflowRuns)
+          .set({ status: "completed", completedAt: Math.floor(Date.now() / 1000), result: "{}" })
+          .where(eq(workflowRuns.id, run.id))
+          .run();
+        return new Response(
+          JSON.stringify({
+            success: true,
+            sessions: [
+              {
+                id: "cli-agent:mid-check",
+                chatLinkedTurnStateKnown: true,
+                chatLinkedPendingTurn: { id: "turn", state: "capturing" },
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      });
+      vi.stubEnv("RTX_APP_ID", "signals");
+      vi.stubEnv("RTX_API_BASE_URL", "http://127.0.0.1:3999");
+      vi.stubGlobal("fetch", rtxFetch);
+      try {
+        const response = await post(contact.id);
+
+        expect(rtxFetch).toHaveBeenCalledTimes(1);
+        expect(getWorkflowRun(run.id)?.status).toBe("completed");
+        expect(response.status).toBe(202);
+        expect(mockedRunTemplate).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.unstubAllGlobals();
+        vi.unstubAllEnvs();
+      }
+    });
+
     it("fails a lost run inline and dispatches again instead of answering 409", async () => {
       const contact = createContact({ name: "Lost In Dispatch" });
       seedTemplates();

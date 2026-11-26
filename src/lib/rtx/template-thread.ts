@@ -1,4 +1,4 @@
-import { claimTemplateThreadSlug } from "@/lib/db/queries/workflow-templates";
+import { claimTemplateThreadSlug, getTemplate } from "@/lib/db/queries/workflow-templates";
 import type { WorkflowTemplate } from "@/lib/db/types";
 import {
   createRtxPublishThread,
@@ -135,12 +135,17 @@ export async function getOrCreateTemplateThread(
   };
 }
 
+/** Replacements in flight per template; a concurrent caller waits for the one ahead of it. */
+const replacementsInFlight = new Map<string, Promise<unknown>>();
+
 /**
  * Move a template off a dedicated thread that is no longer fit to receive dispatches (#572).
  *
  * The dead thread is left in place for the Human to read; the template pointer moves to a new
- * thread so later runs stop landing in it too. A concurrent replacement wins the pointer swap and
- * this run joins that thread instead of creating a third.
+ * thread so later runs stop landing in it too. Replacements of one template run one at a time, and
+ * a caller whose stale thread was already replaced while it waited joins that thread instead of
+ * creating one that would lose the pointer swap and be left empty in RealTimeX. The swap itself
+ * stays a compare-and-set, so a replacement from another process still converges on one pointer.
  */
 export async function replaceTemplateThread(
   input: {
@@ -152,11 +157,35 @@ export async function replaceTemplateThread(
   env: EnvLike = process.env,
   fetchImpl: typeof fetch = fetch,
 ): Promise<ResolveTemplateThreadResult> {
+  const templateId = input.template.id;
+  const ahead = replacementsInFlight.get(templateId) ?? Promise.resolve();
+  const replacement = ahead
+    .catch(() => undefined)
+    .then(() => replaceTemplateThreadNow(input, env, fetchImpl));
+  replacementsInFlight.set(templateId, replacement);
+  try {
+    return await replacement;
+  } finally {
+    if (replacementsInFlight.get(templateId) === replacement) {
+      replacementsInFlight.delete(templateId);
+    }
+  }
+}
+
+async function replaceTemplateThreadNow(
+  input: Parameters<typeof replaceTemplateThread>[0],
+  env: EnvLike,
+  fetchImpl: typeof fetch,
+): Promise<ResolveTemplateThreadResult> {
   const baseResult = {
     threadName: input.threadName,
     renameAttempted: false,
     renamed: false,
   };
+  const current = getTemplate(input.template.id)?.rtxThreadSlug?.trim() || null;
+  if (current && current !== input.staleThreadSlug) {
+    return { threadSlug: current, resolution: "reused", ...baseResult };
+  }
   const threadSlug = await createRtxPublishThread(
     input.workspaceSlug,
     input.threadName,
